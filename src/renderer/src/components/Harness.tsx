@@ -8,6 +8,7 @@ import {
   ENGINES,
   ENGINE_IDS,
   notInstalledLabel,
+  startsPicked,
   MODELS,
   customModel,
   engineModels,
@@ -150,8 +151,8 @@ const ROUTE = (): Record<NonNullable<EngineStatus['route']>, { label: string; to
 export function HarnessList(): ReactNode {
   const engines = useStore((s) => s.settings.engines)
   const chosen = useStore((s) => s.settings.harnesses)
-  // Unpicked: all that can run. Picking one off keeps the rest as they are.
-  const picked = (e: EngineId): boolean => !engines[e].soon && (chosen ? chosen.includes(e) : true)
+  // Unpicked: the ones ready to run. Picking one off keeps the rest as they are.
+  const picked = (e: EngineId): boolean => (chosen ? chosen.includes(e) : startsPicked(engines[e]))
   const toggle = (e: EngineId): void => {
     const now = ENGINE_IDS.filter(picked)
     updateSettings({ harnesses: now.includes(e) ? now.filter((x) => x !== e) : [...now, e] })

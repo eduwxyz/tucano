@@ -1,12 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { parsePiModels } from '../src/core/engines/detect'
 import { listModels, quietClaude, quietCodex, withChoice } from '../src/core/harness'
+import { startsPicked } from '../src/shared/types'
 import type { EngineId, EngineStatus } from '../src/shared/types'
 
 const ready: EngineStatus = { installed: true, loggedIn: true, route: 'plan' }
 const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, 'opencode-v2': { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' } }
 
 describe('harnesses', () => {
+  it('defaults the pick to the harnesses that can actually run', () => {
+    const ready: EngineStatus = { installed: true, loggedIn: true, route: 'plan' }
+    expect(startsPicked(ready)).toBe(true)
+    // V1 found on a machine whose binary is V2: not installed, with the hint
+    expect(startsPicked({ installed: false, loggedIn: false, account: 'Encontrei o OpenCode V2 — use o harness OpenCode V2' })).toBe(false)
+    // installed, but the person has not logged in yet
+    expect(startsPicked({ installed: true, loggedIn: false })).toBe(false)
+    expect(startsPicked({ ...ready, soon: true })).toBe(false)
+  })
+
   it('runs every ready harness the app supports when none was picked', () => {
     const out = withChoice(engines, undefined)
     expect(out.claude.loggedIn).toBe(true)

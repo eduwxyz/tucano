@@ -279,6 +279,10 @@ export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 // an install command that would replace their working binary.
 export const notInstalledLabel = (st: EngineStatus): string => st.account ?? L('Não instalado', 'Not installed')
 
+// A harness starts picked only when it can actually run: an installed-but-not-signed-in
+// one, or a not-installed one (say, OpenCode V1 where the binary is V2), starts off.
+export const startsPicked = (st: EngineStatus): boolean => !st.soon && st.loggedIn
+
 // Hints and labels read the language when shown (getters), so a list made once still switches.
 const model = (id: string, engine: EngineId, label: string, pt: string, en: string): Model => ({
   id,
