@@ -86,6 +86,7 @@ export function opencodeParser(): Parser {
   let input = 0
   let output = 0
   let cacheRead = 0
+  let cost = 0
   let failed = false
 
   return {
@@ -108,6 +109,7 @@ export function opencodeParser(): Parser {
         cacheRead += num(cache['read'])
         input += num(t['input']) + num(cache['read']) + num(cache['write'])
         output += num(t['output']) + num(t['reasoning'])
+        cost += num(part['cost'])
         out.push({ type: 'progress', tokens: input + output, cacheRead })
       } else if (ev['type'] === 'error' && !failed) {
         failed = true
@@ -119,7 +121,7 @@ export function opencodeParser(): Parser {
     },
     end(code, stderr) {
       if (failed) return []
-      if (code === 0) return [{ type: 'done', text, usage: { inputTokens: input, cacheReadTokens: cacheRead, outputTokens: output } }]
+      if (code === 0) return [{ type: 'done', text, usage: { inputTokens: input, cacheReadTokens: cacheRead, outputTokens: output, ...(cost ? { apiCostUsd: cost } : {}) } }]
       const detail = lastLines(stderr)
       return [{ type: 'error', message: L(`O OpenCode saiu sem resposta (código ${code ?? '?'}).`, `OpenCode exited without a reply (code ${code ?? '?'}).`) + (detail ? `\n${detail}` : '') }]
     }
