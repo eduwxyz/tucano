@@ -273,6 +273,12 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 
+// What a harness card shows in place of "Not installed": the version hint
+// detection leaves for a mismatched OpenCode (V1 found where V2 was picked, or
+// the reverse), so the person is sent to the right harness instead of running
+// an install command that would replace their working binary.
+export const notInstalledLabel = (st: EngineStatus): string => st.account ?? L('Não instalado', 'Not installed')
+
 // Hints and labels read the language when shown (getters), so a list made once still switches.
 const model = (id: string, engine: EngineId, label: string, pt: string, en: string): Model => ({
   id,
