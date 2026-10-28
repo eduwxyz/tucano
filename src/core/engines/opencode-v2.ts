@@ -12,7 +12,9 @@ import { L } from '../../shared/lang'
 // `--pure` had: every turn runs against a private server of its own, so the app's
 // isolated dirs stay self-contained and the run never fights the person's own
 // OpenCode over the shared service's port. The user's provider block passes
-// through as-is: V2 normalizes V1 `provider` maps in memory.
+// through as-is: V2 normalizes V1 `provider` maps in memory. The V1 `tools` block
+// keeps working too: the canary against v2.2.0 confirmed the shell stays denied
+// with `'*': false` and the system prompt arrives through `agents`.
 export function opencodeV2Config(turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, providers: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     $schema: 'https://opencode.ai/config.json',
