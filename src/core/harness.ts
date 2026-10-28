@@ -7,7 +7,7 @@ import { L } from '../shared/lang'
 import type { EngineId, EngineStatus } from '../shared/types'
 
 // The harnesses the app can run agents on; one added later is listed as coming until then.
-export const RUNNABLE: EngineId[] = ['claude', 'codex', 'opencode', 'pi']
+export const RUNNABLE: EngineId[] = ['claude', 'codex', 'opencode', 'opencode-v2', 'pi']
 
 // Off for a harness pointed at a gateway: its own telemetry and error reports
 // would go to Anthropic or OpenAI, around the gateway.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { opencodeStatuses } from '../src/core/engines/detect'
 import { opencodeV2Args, opencodeV2Config } from '../src/core/engines/opencode-v2'
 
 describe('opencode v2', () => {
@@ -21,5 +22,24 @@ describe('opencode v2', () => {
 
   it('runs standalone, without --pure', () => {
     expect(opencodeV2Args({ model: 'acme/gpt-9' })).toEqual(['run', '--standalone', '--format', 'json', '--agent', 'tucano', '-m', 'acme/gpt-9'])
+  })
+})
+
+describe('opencode detection', () => {
+  it('sends the full status to the engine matching the major version', () => {
+    const v2 = opencodeStatuses('opencode v2.2.0', '/bin/opencode', ['acme/gpt-9'])
+    expect(v2.v2).toMatchObject({ installed: true, path: '/bin/opencode', version: '2.2.0', loggedIn: true })
+    expect(v2.v1.installed).toBe(false)
+    expect(v2.v1.account).toContain('V2')
+    const v1 = opencodeStatuses('1.15.0', '/bin/opencode', ['acme/gpt-9'])
+    expect(v1.v1.installed).toBe(true)
+    expect(v1.v2.installed).toBe(false)
+    expect(v1.v2.account).toContain('V1')
+  })
+
+  it('defaults an unparseable version to V1, as the app always did', () => {
+    const s = opencodeStatuses('opencode tomorrow-build', '/bin/opencode', [])
+    expect(s.v1.installed).toBe(true)
+    expect(s.v2.installed).toBe(false)
   })
 })

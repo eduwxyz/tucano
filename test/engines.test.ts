@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { customModel, modelInfo, usable } from '../src/shared/types'
+import { customModel, ENGINES, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
 // Fixtures are real CLI output (Claude Code 2.1.286, Codex 0.153.4), trimmed of local paths.
@@ -225,5 +225,15 @@ describe('Codex exec stream', () => {
     expect(args).toContain('mcp_servers.tucano.url="http://127.0.0.1:1/mcp/abc"')
     expect(args).toContain('mcp_servers.tucano.default_tools_approval_mode="approve"')
     expect(args.at(-1)).toBe('-')
+  })
+})
+
+describe('engine ids', () => {
+  it('parses the v2 prefix before the v1 one', () => {
+    expect(modelInfo('opencode-v2:acme/gpt-9')?.engine).toBe('opencode-v2')
+    expect(modelInfo('opencode-v2:acme/gpt-9')?.label).toBe('acme/gpt-9')
+    expect(modelInfo('opencode:acme/gpt-9')?.engine).toBe('opencode')
+    expect(ENGINES['opencode-v2'].label).toBe('OpenCode V2')
+    expect(ENGINES['opencode-v2'].cli).toBe('opencode')
   })
 })

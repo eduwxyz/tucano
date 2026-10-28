@@ -1,6 +1,9 @@
 import { existsSync } from 'node:fs'
 import { GATEWAY_NAME } from './claude'
-import type { Turn } from './types'
+import { runCli } from './cli'
+import { opencodeHome, opencodeParser, userOpencodeProviders } from './opencode'
+import type { Engine, Turn } from './types'
+import { L } from '../../shared/lang'
 
 // OpenCode 2 kept the `opencode` command, the config dir and OPENCODE_CONFIG_CONTENT,
 // but changed its config to native V2 shapes (agents with system instead of the
@@ -25,4 +28,23 @@ export function opencodeV2Config(turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, 
 
 export function opencodeV2Args(turn: Pick<Turn, 'model' | 'images'>): string[] {
   return ['run', '--standalone', '--format', 'json', '--agent', 'tucano', '-m', turn.model, ...(turn.images ?? []).filter((i) => existsSync(i.path)).flatMap((i) => ['-f', i.path])]
+}
+
+// The same shape as the V1 engine: the JSONL parser is shared because V2's
+// `run --format json` kept the same events (step_start, text, tool_use,
+// step_finish, error) and part shapes; only the config and args differ above.
+export function opencodeV2Engine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
+  return {
+    id: 'opencode-v2',
+    async *run(turn) {
+      const path = bin()
+      if (!path) {
+        yield { type: 'error', message: L('O OpenCode V2 não está instalado. Veja em Configurações.', "OpenCode V2 isn't installed. See Settings.") }
+        return
+      }
+      // Provider keys may live in the user's shell, which an app opened from Finder doesn't get.
+      const env = { ...process.env, ...(await shellEnv()), ...opencodeHome(appDir), OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeV2Config(turn, userOpencodeProviders())) }
+      yield* runCli({ bin: path, args: opencodeV2Args(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })
+    }
+  }
 }

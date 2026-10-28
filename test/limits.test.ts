@@ -37,7 +37,7 @@ let notes: string[]
 let bash: (command: string) => CallToolResult // what the agent's "computer" answers
 
 const runner = (claude: Engine): Runner => {
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), 'opencode-v2': fakeEngine('opencode-v2'), pi: fakeEngine('pi') }
   const computers = { call: async (_a: Agent, _n: string, args: Record<string, unknown>) => ({ result: bash(String(args['command'])) }) }
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), gateway, computers, notify: (title) => notes.push(title) })
 }
@@ -46,7 +46,7 @@ const labels = () => reply().run!.steps.map((s) => s.label)
 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-limits-')), 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, 'opencode-v2': ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   notes = []
   bash = () => textResult('ok')
   db.saveAgent(agent())
@@ -234,7 +234,7 @@ describe('web', () => {
 describe('keeping the Mac awake', () => {
   it('says when replies start and when the last one ends', async () => {
     const busy: boolean[] = []
-    const r = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 5 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), onBusy: (b) => busy.push(b) })
+    const r = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 5 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), 'opencode-v2': fakeEngine('opencode-v2'), pi: fakeEngine('pi') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), onBusy: (b) => busy.push(b) })
     db.saveAgent(agent({ id: 'a2', handle: 'theo', name: 'Theo' }))
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })
     await r.send('c1', '@lia @theo oi')

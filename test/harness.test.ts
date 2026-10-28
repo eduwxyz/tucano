@@ -4,7 +4,7 @@ import { listModels, quietClaude, quietCodex, withChoice } from '../src/core/har
 import type { EngineId, EngineStatus } from '../src/shared/types'
 
 const ready: EngineStatus = { installed: true, loggedIn: true, route: 'plan' }
-const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' } }
+const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, 'opencode-v2': { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' } }
 
 describe('harnesses', () => {
   it('runs every ready harness the app supports when none was picked', () => {
