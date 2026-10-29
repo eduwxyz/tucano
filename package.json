@@ -2,7 +2,8 @@
   "name": "tucano",
   "version": "0.1.2",
   "private": true,
-  "description": "Tucano: your team of AI agents on your Mac, with scopes, approvals and budgets.",
+  "description": "Tucano: your team of AI agents on your computer, with scopes, approvals and budgets.",
+  "homepage": "https://tucano.sh",
   "license": "Apache-2.0",
   "type": "module",
   "main": "out/main/index.js",
@@ -43,6 +44,9 @@
   "build": {
     "appId": "dev.tucano.app",
     "productName": "Tucano",
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "publish": [
       {
         "provider": "github",
@@ -71,6 +75,36 @@
       "extendInfo": {
         "NSAppleEventsUsageDescription": "Tucano opens the Terminal for you when you ask it to."
       }
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "Utility",
+      "icon": "build/icon.png",
+      "executableName": "tucano",
+      "artifactName": "tucano-linux-${arch}.${ext}",
+      "maintainer": "Eduardo da Silva <eduwxyz@users.noreply.github.com>",
+      "synopsis": "A team of AI agents on your computer",
+      "description": "Tucano is a team of AI agents that lives on your computer. You talk to them in channels; they research, write, code and use your tools, and you decide how far each one goes. It runs on the Claude Code, Codex, OpenCode or Pi you already have."
+    },
+    "deb": {
+      "recommends": [
+        "gnome-keyring"
+      ]
     },
     "extraResources": [
       {

@@ -132,10 +132,13 @@ function setTray(): void {
     ])
   )
 }
+// Linux shows a notification with the icon it's given (a Mac uses the app's own).
+const noteIcon = (): { icon?: string } => (process.platform === 'linux' ? { icon: resource('icon.png') } : {})
 function stillOpen(): void {
   if (process.platform !== 'linux' || quitting || toldStillOpen || !Notification.isSupported()) return
   toldStillOpen = true
   new Notification({
+    ...noteIcon(),
     title: L(`O ${NAME} continua aberto`, `${NAME} is still open`),
     body: L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano na barra do sistema ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon in the system bar or open Tucano again.'),
     silent: true
@@ -146,15 +149,16 @@ function stillOpen(): void {
 function handleCore(child: UtilityProcess, msg: CoreRequest): void {
   if (msg.type === 'secret') {
     try {
-      if (!safeStorage.isEncryptionAvailable()) throw new Error(L('O cofre do sistema não está disponível.', "The system's vault isn't available."))
-      // Linux without a keyring falls back to a fixed key: Tucano doesn't keep secrets that way.
-      if (process.platform === 'linux' && ['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend()))
+      // Linux without an open keyring falls back to a fixed key, or to nothing: Tucano keeps no
+      // secret that way, and says what to do.
+      if (process.platform === 'linux' && (!safeStorage.isEncryptionAvailable() || ['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend())))
         throw new Error(
           L(
-            'Este Linux não tem um chaveiro aberto (GNOME Keyring ou KWallet), e o Tucano não guarda senhas sem cifrar. Instale o gnome-keyring (ou use o KWallet), entre de novo na sua sessão e tente outra vez.',
-            "This Linux has no keyring open (GNOME Keyring or KWallet), and Tucano doesn't keep passwords unencrypted. Install gnome-keyring (or use KWallet), log in again and try once more."
+            'Este Linux não tem um chaveiro aberto (GNOME Keyring ou KWallet), e o Tucano não guarda senhas sem cifrar. Abra ou ative o KWallet, ou instale o gnome-keyring, entre de novo na sua sessão e tente outra vez.',
+            "This Linux has no keyring open (GNOME Keyring or KWallet), and Tucano doesn't keep passwords unencrypted. Open or enable KWallet, or install gnome-keyring, log in again and try once more."
           )
         )
+      if (!safeStorage.isEncryptionAvailable()) throw new Error(L('O cofre do sistema não está disponível.', "The system's vault isn't available."))
       const data =
         msg.op === 'encrypt' ? safeStorage.encryptString(msg.data).toString('base64') : safeStorage.decryptString(Buffer.from(msg.data, 'base64'))
       child.postMessage({ type: 'secret-result', id: msg.id, data })
@@ -172,7 +176,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     if (msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
     chirp(msg.kind === 'approval' || msg.kind === 'question' ? 'chama' : 'pronto')
     if (!Notification.isSupported()) return
-    const n = new Notification({ title: msg.title, body: msg.body, silent: true })
+    const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
     n.on('click', () => showWindow(msg.conversationId))
     n.show()
   } else if (msg.type === 'busy') {

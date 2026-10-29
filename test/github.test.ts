@@ -36,6 +36,22 @@ describe('reading the repository', () => {
   })
 })
 
+describe('the proxy key', () => {
+  it("isn't made until GitHub is connected, so opening the app never touches the system's vault", async () => {
+    const store = new Map<string, string>()
+    const sets: string[] = []
+    const secrets = { get: async (k: string) => store.get(k), set: async (k: string, v?: string) => void (sets.push(k), v === undefined ? store.delete(k) : store.set(k, v)) }
+    const fetch = (async () => new Response(JSON.stringify({ login: 'edu' }), { status: 200 })) as typeof globalThis.fetch
+    const gh = new GitHub({ secrets, db: new Db(':memory:'), post: () => {}, changed: () => {}, fetch })
+    await gh.start()
+    expect(sets).toEqual([])
+    expect(gh.agentToken('a1')).toBeUndefined()
+    await gh.setToken('ghp_x')
+    expect(sets).toEqual(['github:token', 'github:proxy-key'])
+    expect(gh.agentToken('a1')).toMatch(/^[0-9a-f]{32}$/)
+  })
+})
+
 describe('the proxy and the PR', () => {
   let db: Db
   let gh: GitHub

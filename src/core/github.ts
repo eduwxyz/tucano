@@ -88,12 +88,9 @@ export class GitHub {
 
   async start(): Promise<void> {
     this.key = (await this.deps.secrets.get(KEY)) ?? undefined
-    if (!this.key) {
-      this.key = randomBytes(24).toString('hex')
-      await this.deps.secrets.set(KEY, this.key)
-    }
     const token = await this.deps.secrets.get(TOKEN)
     if (token) {
+      await this.ensureKey()
       try {
         this.user = await this.whoami(token)
       } catch (e) {
@@ -120,7 +117,16 @@ export class GitHub {
     else this.user = undefined
     this.error = undefined
     await this.deps.secrets.set(TOKEN, t || undefined)
+    if (t) await this.ensureKey()
     this.deps.changed()
+  }
+
+  // The proxy's key, made the first time GitHub is connected: until then nothing needs the
+  // system's vault, so opening the app never asks for it (on Linux, the keyring's prompt).
+  private async ensureKey(): Promise<void> {
+    if (this.key) return
+    this.key = randomBytes(24).toString('hex')
+    await this.deps.secrets.set(KEY, this.key)
   }
 
   private async whoami(token: string): Promise<string> {

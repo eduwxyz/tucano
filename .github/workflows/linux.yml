@@ -1,0 +1,77 @@
+# The Linux installers: a .deb and an AppImage for x64 and ARM64, built on Ubuntu.
+# The Mac build is signed and notarized on a Mac (scripts/release.sh) and creates the
+# release; once it's published, this attaches the Linux files and their update feeds
+# (latest-linux.yml, latest-linux-arm64.yml) to the same release. A pull request
+# that touches the packaging builds them too, without publishing anything.
+name: Linux
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the Linux files to (e.g. v0.2.0)
+        required: true
+  pull_request:
+    paths:
+      - package.json
+      - package-lock.json
+      - build/**
+      - .github/workflows/linux.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      # electron-builder's own fpm (for the .deb) is x64 only.
+      - name: fpm for ARM
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ruby ruby-dev build-essential
+          sudo gem install --no-document fpm
+      - run: npm ci
+      - run: npm run build
+      - name: Build the .deb and the AppImage
+        run: npx electron-builder --linux deb AppImage --${{ matrix.arch }} --publish never --config.directories.output=dist-linux
+        env:
+          USE_SYSTEM_FPM: ${{ matrix.arch == 'arm64' && 'true' || 'false' }}
+      - run: ls -la dist-linux && cat dist-linux/latest-linux*.yml
+      - name: The version is the release's
+        if: env.TAG != ''
+        run: test "v$(node -p "require('./package.json').version")" = "$TAG"
+      - name: Attach to the release
+        if: env.TAG != ''
+        run: gh release upload "$TAG" dist-linux/tucano-linux-*.deb dist-linux/tucano-linux-*.AppImage dist-linux/latest-linux*.yml --clobber
+      - name: Keep the files of a test build
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: tucano-linux-${{ matrix.arch }}
+          path: |
+            dist-linux/tucano-linux-*
+            dist-linux/latest-linux*.yml
+          retention-days: 3
