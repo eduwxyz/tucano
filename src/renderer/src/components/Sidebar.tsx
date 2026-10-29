@@ -18,6 +18,7 @@ import {
 } from '../store'
 import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { GettingStarted } from './Onboarding'
+import { UpdateNote } from './Update'
 import { AgentAvatar, Icon, TucaMark, type IconName } from './ui'
 
 const same = (a: View | null, b: View): boolean => JSON.stringify(a) === JSON.stringify(b)
@@ -195,6 +196,7 @@ export function Sidebar(): ReactNode {
       {s.settings.onboarding?.done && !s.settings.onboarding.checklistHidden && <GettingStarted />}
       <ContextMenu menu={menu} onClose={closeMenu} />
       <div className="sidebar__foot">
+        <UpdateNote />
         <NavItem view={{ kind: 'usage' }} icon="chart" label={L('Uso e limites', 'Usage and limits')} />
         <NavItem view={{ kind: 'connectors' }} icon="plug" label={L('Conectores', 'Connectors')} />
         <NavItem view={{ kind: 'settings' }} icon="gear" label={L('Configurações', 'Settings')} />

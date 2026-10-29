@@ -6,6 +6,7 @@ import { L, langOf, setLang, type Lang } from '../shared/lang'
 import type { BrowserOp } from '../shared/types'
 import { Browsers } from './browser'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
+import { Updates } from './updates'
 
 const NAME = 'Tucano'
 app.setName(NAME)
@@ -203,6 +204,28 @@ function showWindow(conversationId?: string): void {
   else go()
 }
 
+// New versions: the window shows when one is ready, and restarting puts it in.
+const updates = new Updates((state) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update', state)
+})
+ipcMain.handle('update:state', () => updates.get())
+ipcMain.on('update:check', () => updates.check())
+ipcMain.on('update:install', () => {
+  // A reply in progress would be cut off: the person decides.
+  if (awakeBlocker !== null && mainWindow && !mainWindow.isDestroyed()) {
+    const answer = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: [L('Reiniciar agora', 'Restart now'), L('Depois', 'Later')],
+      defaultId: 1,
+      cancelId: 1,
+      message: L('Um agente ainda está trabalhando', 'An agent is still working'),
+      detail: L('Reiniciar agora interrompe o que ele está fazendo. Se esperar, a atualização entra quando você fechar o Tucano.', 'Restarting now stops what it is doing. If you wait, the update goes in when you quit Tucano.')
+    })
+    if (answer !== 0) return
+  }
+  updates.install()
+})
+
 // The Mac's folder picker, for a folder lent to an agent's computer. The core checks the choice.
 ipcMain.handle('pick-folder', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
@@ -307,6 +330,7 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   powerMonitor.on('suspend', () => core?.postMessage({ type: 'power', awake: false }))
   powerMonitor.on('resume', () => core?.postMessage({ type: 'power', awake: true }))
   createWindow()
+  updates.start()
   app.on('activate', () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow()
   })

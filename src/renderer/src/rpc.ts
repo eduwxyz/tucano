@@ -1,8 +1,18 @@
 import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../shared/rpc'
+import type { UpdateState } from '../../shared/types'
 
 declare global {
   interface Window {
-    tucano: { connect: () => void; pickFolder: () => Promise<string | null>; onNavigate: (cb: (conversationId: string) => void) => void; viewing: (conversationId: string | null) => void }
+    tucano: {
+      connect: () => void
+      pickFolder: () => Promise<string | null>
+      onNavigate: (cb: (conversationId: string) => void) => void
+      viewing: (conversationId: string | null) => void
+      updateState: () => Promise<UpdateState>
+      onUpdate: (cb: (state: UpdateState) => void) => void
+      checkUpdates: () => void
+      installUpdate: () => void
+    }
   }
 }
 

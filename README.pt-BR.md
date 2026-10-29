@@ -105,13 +105,15 @@ Prefere o Codex? `npm install -g @openai/codex`. O login é feito dentro do Tuca
 
 **2. Instale o Tucano.** [Baixe o .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), abra e arraste o Tucano pra **Aplicativos**. O app é assinado e notarizado pela Apple, então abre sem aviso.
 
-Ou pelo Terminal, que também serve pra atualizar depois:
+Ou pelo Terminal:
 
 ```bash
 curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh
 ```
 
-Ele baixa a última versão, coloca o Tucano em **Aplicativos** e abre. Pra atualizar, rode o mesmo comando.
+Ele baixa a última versão, coloca o Tucano em **Aplicativos** e abre.
+
+A partir da 0.1.2, o Tucano se atualiza sozinho: baixa a versão nova em segundo plano e mostra **Reiniciar** na barra lateral quando ela está pronta (ou ela entra na próxima vez que você fechar o app). As versões anteriores se atualizam pelo mesmo download ou comando.
 
 **3. A primeira abertura é a configuração.** O Tucano fala português e inglês; escolha na primeira tela, ou depois em **Configurações**. Em seguida, em poucos passos: seu nome; quais harnesses os agentes podem usar (cada um com um **Testar agora** que manda uma pergunta de verdade); os modelos que roteiam os canais e cuidam da memória; o que todo agente deve saber sobre você; suas ferramentas (opcional); suas skills (opcional); e o primeiro agente, de um modelo pronto ou do zero. No fim, um canal `#geral` com o seu agente já trabalhando.
 

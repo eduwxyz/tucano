@@ -15,6 +15,16 @@ export interface Model {
   hint: string
 }
 
+// The app's own updates (src/main/updates.ts): off when run from the code.
+export interface UpdateState {
+  version: string // the one running
+  status: 'off' | 'idle' | 'checking' | 'latest' | 'downloading' | 'ready' | 'error'
+  next?: string // the newer version, while it downloads and once it's ready
+  percent?: number
+  checkedAt?: number
+  error?: string
+}
+
 export interface EngineStatus {
   installed: boolean
   path?: string

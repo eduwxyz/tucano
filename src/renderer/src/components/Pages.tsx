@@ -57,6 +57,7 @@ import {
 import { HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway } from './Harness'
 import { ApprovalCard } from './Conversation'
 import { AgentAvatar, Icon, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { UpdateSettings } from './Update'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
   return (
@@ -1496,6 +1497,12 @@ export function SettingsPage(): ReactNode {
                 </button>
               )}
             </div>
+          </Card>
+        )}
+
+        {pane('geral') && (
+          <Card title={L('Atualizações', 'Updates')}>
+            <UpdateSettings />
           </Card>
         )}
 

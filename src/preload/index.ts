@@ -15,5 +15,12 @@ contextBridge.exposeInMainWorld('tucano', {
     ipcRenderer.on('navigate', (_e, id: unknown) => typeof id === 'string' && cb(id))
   },
   // The conversation on screen: the Mac doesn't notify about the one you're reading.
-  viewing: (conversationId: string | null): void => ipcRenderer.send('viewing', conversationId)
+  viewing: (conversationId: string | null): void => ipcRenderer.send('viewing', conversationId),
+  // The app's own updates.
+  updateState: (): Promise<unknown> => ipcRenderer.invoke('update:state'),
+  onUpdate: (cb: (state: unknown) => void): void => {
+    ipcRenderer.on('update', (_e, state: unknown) => cb(state))
+  },
+  checkUpdates: (): void => ipcRenderer.send('update:check'),
+  installUpdate: (): void => ipcRenderer.send('update:install')
 })

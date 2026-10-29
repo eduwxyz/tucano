@@ -35,6 +35,17 @@ codesign --sign "$IDENTITY" --timestamp "$DMG"
 xcrun notarytool submit "$DMG" --keychain-profile "$APPLE_KEYCHAIN_PROFILE" --wait
 xcrun stapler staple "$DMG"
 
+# latest-mac.yml tells the installed apps about this version (src/main/updates.ts); the
+# .dmg was signed and stapled after it was written, so its entry gets the final hash.
+node -e '
+const fs = require("fs"), crypto = require("crypto")
+const [yml, dmg] = process.argv.slice(1)
+const data = fs.readFileSync(dmg)
+const sha512 = crypto.createHash("sha512").update(data).digest("base64")
+const text = fs.readFileSync(yml, "utf8").replace(/(- url: tucano-mac-arm64\.dmg\n\s+sha512: )\S+(\n\s+size: )\d+/, (_, a, b) => a + sha512 + b + data.length)
+fs.writeFileSync(yml, text)
+' "$OUT/latest-mac.yml" "$DMG"
+
 codesign --verify --deep --strict "$OUT/mac-arm64/Tucano.app"
 spctl --assess --type execute "$OUT/mac-arm64/Tucano.app"
 spctl --assess --type open --context context:primary-signature "$DMG"
@@ -43,5 +54,5 @@ ls -lh "$OUT"/tucano-mac-arm64.*
 
 [ "$1" = "--no-publish" ] && exit 0
 git push origin HEAD
-gh release create "$TAG" "$OUT/tucano-mac-arm64.dmg" "$OUT/tucano-mac-arm64.zip" install.sh \
+gh release create "$TAG" "$OUT/tucano-mac-arm64.dmg" "$OUT/tucano-mac-arm64.zip" "$OUT/tucano-mac-arm64.zip.blockmap" "$OUT/latest-mac.yml" install.sh \
   --target "$(git rev-parse HEAD)" --title "Tucano $VERSION" --notes-file docs/release-notes.md

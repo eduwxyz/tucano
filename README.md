@@ -105,13 +105,15 @@ Prefer Codex? `npm install -g @openai/codex`. You'll sign in from inside Tucano.
 
 **2. Install Tucano.** [Download the .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), open it and drag Tucano into **Applications**. The app is signed and notarized by Apple, so it opens with no warning.
 
-Or from the Terminal, which also updates it later:
+Or from the Terminal:
 
 ```bash
 curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh
 ```
 
-It downloads the latest release, puts Tucano in **Applications** and opens it. Run the same command to update.
+It downloads the latest release, puts Tucano in **Applications** and opens it.
+
+From 0.1.2 on, Tucano updates itself: it downloads a new version in the background and shows **Restart** in the sidebar when it's ready (or it goes in the next time you quit). Earlier versions update with the same download or command.
 
 **3. The first run is the setup.** Tucano speaks English and Portuguese; pick one on the first screen, or later in **Settings**. Then, in a few steps: your name; which harnesses agents may use (each with a **Test now** button that sends a real question); the models that route channels and keep memory; what every agent should know about you; your tools (optional); your skills (optional); and your first agent, from a template or from scratch. It ends in a `#general` channel with your agent already working.
 
