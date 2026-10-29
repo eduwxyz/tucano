@@ -15,6 +15,12 @@ export interface Model {
   hint: string
 }
 
+// The system the app runs on (src/core/platform.ts).
+export type Os = 'mac' | 'linux' | 'windows'
+
+// Shortcuts use ⌘ on a Mac and Ctrl elsewhere, shown the way each system writes them.
+export const shortcut = (os: Os, key: string): string => (os === 'mac' ? `⌘${key}` : `Ctrl+${key}`)
+
 // The app's own updates (src/main/updates.ts): off when run from the code.
 export interface UpdateState {
   version: string // the one running

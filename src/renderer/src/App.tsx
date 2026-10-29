@@ -16,20 +16,26 @@ export function App(): ReactNode {
   const theme = useStore((s) => s.settings.theme)
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
+  const mac = useStore((s) => s.platform === 'mac')
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'pt-BR'
   }, [language])
 
   useEffect(() => {
+    document.documentElement.dataset['os'] = mac ? 'mac' : 'other'
+  }, [mac])
+
+  useEffect(() => {
     if (theme === 'system') delete document.documentElement.dataset['theme']
     else document.documentElement.dataset['theme'] = theme
   }, [theme])
 
-  // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings
+  // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings (Ctrl off a Mac)
   useEffect(() => {
     const keys = (e: KeyboardEvent): void => {
-      if (!e.metaKey || e.ctrlKey || e.altKey || intro) return
+      const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+      if (!mod || e.altKey || intro) return
       const s = getState()
       const channels = s.conversations.filter((c) => c.kind === 'channel')
       if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })
@@ -41,7 +47,7 @@ export function App(): ReactNode {
     }
     window.addEventListener('keydown', keys)
     return () => window.removeEventListener('keydown', keys)
-  }, [intro])
+  }, [intro, mac])
 
   if (!view) return <div className="boot" />
   if (intro) return <Onboarding />

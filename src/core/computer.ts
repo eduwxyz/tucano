@@ -14,6 +14,7 @@ import { PROJECTS_DIR, type Agent, type Artifact, type ArtifactKind, type Comput
 import type { Db } from './db'
 import { textResult, type ToolDef } from './gateway'
 import { MacComputer, macTools } from './mac'
+import { osOf } from './platform'
 
 export const IMAGE = 'node:22-bookworm'
 // Containers of another data directory (tests, a second install) never collide.
@@ -39,7 +40,7 @@ export function checkFolder(path: string, opts: { home?: string; dataDir: string
   const home = realpathSync(opts.home ?? homedir())
   if (!real.startsWith(home + sep)) return L('Só dá pra usar pastas dentro da sua pasta de usuário.', 'Only folders inside your home folder can be used.')
   const top = real.slice(home.length + 1).split(sep)[0]!
-  if (top === 'Library' || top.startsWith('.')) return L('Essa pasta guarda configurações e credenciais do Mac; não dá pra usar.', "That folder holds the Mac's settings and credentials; it can't be used.")
+  if (top === 'Library' || top.startsWith('.')) return L('Essa pasta guarda configurações e credenciais do sistema; não dá pra usar.', "That folder holds the system's settings and credentials; it can't be used.")
   const data = existsSync(opts.dataDir) ? realpathSync(opts.dataDir) : opts.dataDir
   if (data === real || data.startsWith(real + sep) || real.startsWith(data + sep)) return L('Essa pasta tem os dados do próprio Tucano; não dá pra usar.', "That folder holds Tucano's own data; it can't be used.")
   return null
@@ -177,7 +178,27 @@ export const computerTools = (agent: Pick<Agent, 'computerKind'>): ToolDef[] => 
 // ---------- pure helpers (tested on their own) ----------
 
 // Replies the Linux computer and the Mac share.
-export const noDocker = (): string => L('O Docker não está rodando. Abra o Docker Desktop.', "Docker isn't running. Open Docker Desktop.")
+export const noDocker = (): string =>
+  osOf() === 'linux'
+    ? L('O Docker não está rodando. Inicie o serviço (sudo systemctl start docker) ou abra o Docker Desktop.', "Docker isn't running. Start the service (sudo systemctl start docker) or open Docker Desktop.")
+    : L('O Docker não está rodando. Abra o Docker Desktop.', "Docker isn't running. Open Docker Desktop.")
+// On Linux, a user outside the docker group gets "permission denied" on its socket.
+export const noDockerAccess = (): string =>
+  L('Seu usuário não tem acesso ao Docker. Rode sudo usermod -aG docker $USER, saia e entre de novo na sessão.', "Your user has no access to Docker. Run sudo usermod -aG docker $USER, then log out and back in.")
+// What a failed docker call says about Docker itself, if anything.
+export function dockerProblem(stderr: string): string | undefined {
+  if (/permission denied[^\n]*docker\.sock/i.test(stderr)) return noDockerAccess()
+  if (/daemon|connect to the docker/i.test(stderr)) return noDocker()
+  return undefined
+}
+
+// On Linux the container's root writes as the host's root (Docker Desktop and rootless
+// Docker map it to the person instead): after each command, what root created in the
+// folders shared with this computer goes back to the person, so they can open, edit and
+// erase it. Agents still run as root inside, so apt keeps working.
+export function ownedBack(command: string, dirs: string[], uid: number, gid: number): string {
+  return `${command}; s=$?; find ${dirs.map(q).join(' ')} -xdev -uid 0 -exec chown -h ${uid}:${gid} {} + 2>/dev/null; exit $s`
+}
 export const badName = (): string => L('Nome inválido: use letras, números, - ou _.', 'Invalid name: use letters, numbers, - or _.')
 export const portTaken = (port: number, name: string): string => L(`A porta ${port} já é do serviço "${name}". Pare ele ou use outra porta.`, `Port ${port} already belongs to the service "${name}". Stop it or use another port.`)
 export const diedAtStart = (): string => L('O processo terminou logo depois de iniciar.', 'The process ended right after starting.')
@@ -283,7 +304,7 @@ export function hostUrl(url: string, ports: Record<number, number>): string | { 
   if (!['localhost', '127.0.0.1', '0.0.0.0'].includes(u.hostname)) return u.toString()
   const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80))
   const host = ports[port]
-  if (!host) return { error: L(`A porta ${port} do seu computador não está aberta pro Mac. Use uma destas: ${PORTS.join(', ')}.`, `Port ${port} of your computer isn't open to the Mac. Use one of these: ${PORTS.join(', ')}.`) }
+  if (!host) return { error: L(`A porta ${port} do seu computador não está aberta pro computador do usuário. Use uma destas: ${PORTS.join(', ')}.`, `Port ${port} of your computer isn't open to the user's computer. Use one of these: ${PORTS.join(', ')}.`) }
   u.hostname = '127.0.0.1'
   u.port = String(host)
   return u.toString()
@@ -381,8 +402,8 @@ export class Computers {
     if (!agent.computer) return this.set(agent.id, { state: 'off', services: [] })
     const r = await docker(['inspect', '-f', '{{.State.Running}}', this.name(agent.id)], { timeoutMs: 10_000 })
     if (r.code !== 0) {
-      const down = /daemon|connect/i.test(r.stderr)
-      return this.set(agent.id, { state: down ? 'no_docker' : 'stopped', detail: down ? noDocker() : undefined, services: [] })
+      const problem = dockerProblem(r.stderr)
+      return this.set(agent.id, { state: problem ? 'no_docker' : 'stopped', detail: problem, services: [] })
     }
     if (r.stdout.trim() !== 'true') return this.set(agent.id, { state: 'stopped', services: [] })
     await this.readPorts(agent.id)
@@ -446,9 +467,10 @@ export class Computers {
       if (this.infos.get(agentId)?.state !== 'running') this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
       return
     }
-    if (/daemon|connect to the docker/i.test(state.stderr)) {
-      this.set(agentId, { state: 'no_docker', detail: noDocker() })
-      throw new Error(L('O Docker não está rodando no Mac. Peça pro usuário abrir o Docker Desktop.', "Docker isn't running on the Mac. Ask the user to open Docker Desktop."))
+    const problem = dockerProblem(state.stderr)
+    if (problem) {
+      this.set(agentId, { state: 'no_docker', detail: problem })
+      throw new Error(L(`O Docker não está disponível neste computador: ${problem} Peça pro usuário resolver.`, `Docker isn't available on this computer: ${problem} Ask the user to fix it.`))
     }
 
     if (state.code === 0) {
@@ -548,7 +570,11 @@ export class Computers {
   async erase(agentId: string): Promise<void> {
     const mac = this.onMac(agentId)
     if (mac) return this.mac.erase(agentId).then(() => this.mac.refresh(mac))
+    // What a service wrote as root since the last command would stop the folder from going.
+    const owner = this.owners.get(agentId)
+    if (owner) await docker(['exec', this.name(agentId), 'chown', '-R', `${owner.uid}:${owner.gid}`, WORK], { timeoutMs: 120_000 })
     await docker(['rm', '-f', this.name(agentId)], { timeoutMs: 60_000 })
+    this.owners.delete(agentId)
     await docker(['rmi', '-f', this.stateImage(agentId)], { timeoutMs: 60_000 })
     const volumes = await docker(['volume', 'ls', '-q', '--filter', `name=^${this.name(agentId)}-`], { timeoutMs: 15_000 })
     const ids = volumes.stdout.split('\n').filter(Boolean)
@@ -560,14 +586,41 @@ export class Computers {
     this.set(agentId, { state: agent?.computer ? 'stopped' : 'off', services: [] })
   }
 
-  exec(agentId: string, command: string, opts: { timeoutSeconds?: number; signal?: AbortSignal; stdin?: string | Buffer } = {}): Promise<Exec> {
+  async exec(agentId: string, command: string, opts: { timeoutSeconds?: number; signal?: AbortSignal; stdin?: string | Buffer } = {}): Promise<Exec> {
     const t = Math.min(600, Math.max(1, Math.round(opts.timeoutSeconds ?? 120)))
+    const head = ['exec', ...(opts.stdin !== undefined ? ['-i'] : []), '-w', WORK, '-e', 'TERM=dumb', this.name(agentId)]
     // `timeout` runs inside, so the command stops even if the docker client is killed.
-    return docker(['exec', ...(opts.stdin !== undefined ? ['-i'] : []), '-w', WORK, '-e', 'TERM=dumb', this.name(agentId), 'timeout', '-k', '5', String(t), 'bash', '-lc', command], {
-      timeoutMs: (t + 15) * 1000,
-      signal: opts.signal,
-      stdin: opts.stdin
-    })
+    const run = ['timeout', '-k', '5', String(t), 'bash', '-lc', command]
+    const owner = await this.hostOwner(agentId)
+    const args = owner ? [...head, 'bash', '-c', ownedBack(run.map(q).join(' '), this.shared(agentId), owner.uid, owner.gid)] : [...head, ...run]
+    return docker(args, { timeoutMs: (t + 15) * 1000, signal: opts.signal, stdin: opts.stdin })
+  }
+
+  // The folders this computer writes into that are also the person's: /work and what's lent.
+  private shared(agentId: string): string[] {
+    return [WORK, ...(this.deps.db.agent(agentId)?.folders ?? []).filter((f) => !f.readOnly).map((f) => `${PROJECTS_DIR}/${f.name}`)]
+  }
+
+  // Whether files root creates in the container belong to root on this computer
+  // (Docker Engine on Linux), checked once per container. The person to give them back to.
+  private owners = new Map<string, { uid: number; gid: number } | null>()
+  private async hostOwner(agentId: string): Promise<{ uid: number; gid: number } | null> {
+    if (osOf() !== 'linux' || !process.getuid || !process.getgid) return null
+    const known = this.owners.get(agentId)
+    if (known !== undefined) return known
+    const probe = join(this.folder(agentId), `.tucano-owner-${randomUUID()}`)
+    const r = await docker(['exec', this.name(agentId), 'touch', `${WORK}/${basename(probe)}`], { timeoutMs: 15_000 })
+    if (r.code !== 0) return null // not running yet: ask again next time
+    let owner: { uid: number; gid: number } | null = null
+    try {
+      if (statSync(probe).uid === 0) owner = { uid: process.getuid(), gid: process.getgid() }
+    } catch {
+      // not visible here: nothing to give back
+    }
+    rmSync(probe, { force: true })
+    if (owner) await docker(['exec', this.name(agentId), 'rm', '-f', `${WORK}/${basename(probe)}`], { timeoutMs: 15_000 })
+    this.owners.set(agentId, owner)
+    return owner
   }
 
   // ---------- services ----------
@@ -608,7 +661,7 @@ export class Computers {
     const port = Number(args['port'])
     if (!/^[a-z0-9][a-z0-9_-]{0,31}$/i.test(name)) return { result: textResult(badName(), true) }
     if (!command) return { result: textResult(L('Faltou o comando.', 'Missing the command.'), true) }
-    if (!PORTS.includes(port)) return { result: textResult(L(`Porta ${port} não está aberta pro Mac. Use uma destas: ${PORTS.join(', ')}.`, `Port ${port} isn't open to the Mac. Use one of these: ${PORTS.join(', ')}.`), true) }
+    if (!PORTS.includes(port)) return { result: textResult(L(`Porta ${port} não está aberta pro computador do usuário. Use uma destas: ${PORTS.join(', ')}.`, `Port ${port} isn't open to the user's computer. Use one of these: ${PORTS.join(', ')}.`), true) }
     const taken = this.deps.db.services(agentId).find((s) => s.port === port && s.name !== name)
     if (taken) return { result: textResult(portTaken(port, taken.name), true) }
 
@@ -642,7 +695,7 @@ export class Computers {
 
     if (!alive) return { result: textResult(withLog(diedAtStart()), true) }
     if (where === 'loopback')
-      return { result: textResult(withLog(L('Está rodando, mas escuta só em localhost, então o Mac não alcança. Reinicie escutando em 0.0.0.0 (ex.: --host 0.0.0.0).', "It's running, but listens only on localhost, so the Mac can't reach it. Restart it listening on 0.0.0.0 (e.g. --host 0.0.0.0).")), true), service: name }
+      return { result: textResult(withLog(L('Está rodando, mas escuta só em localhost, então o computador do usuário não alcança. Reinicie escutando em 0.0.0.0 (ex.: --host 0.0.0.0).', "It's running, but listens only on localhost, so the user's computer can't reach it. Restart it listening on 0.0.0.0 (e.g. --host 0.0.0.0).")), true), service: name }
     if (!where) return { result: textResult(withLog(notOpenYet(port))), service: name }
     return {
       result: textResult(withLog(

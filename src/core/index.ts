@@ -1,7 +1,7 @@
 // The core runs in an Electron utility process: database, engines and runs
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
@@ -32,6 +32,7 @@ import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
+import { loginShell, onPath, osOf, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -109,7 +110,7 @@ const engineImpls: Record<EngineId, Engine> = fake
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
 const runHelper = (cmd: string): Promise<string | undefined> =>
-  new Promise((resolve) => execFile(process.env['SHELL'] || '/bin/zsh', ['-lc', cmd], { timeout: 30_000 }, (err, out) => resolve(err ? undefined : String(out).trim() || undefined)))
+  new Promise((resolve) => execFile(loginShell(), ['-lc', cmd], { timeout: 30_000 }, (err, out) => resolve(err ? undefined : String(out).trim() || undefined)))
 
 // The MCP servers in the harnesses' own setup, and which are already connectors (same address).
 async function foundMcps(): Promise<FoundMcp[]> {
@@ -471,6 +472,7 @@ const api: Api = {
     browsers: browser.list(),
     routines: db.routines(),
     skills: db.skills(),
+    platform: osOf(),
     packaged: process.env['TUCANO_PACKAGED'] === '1',
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
@@ -751,7 +753,10 @@ const api: Api = {
     const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
     const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
     const cmd = engine === 'codex' ? `HOME=${q(codexHome)} CODEX_HOME=${q(join(codexHome, '.codex'))} ${q(bin)} ${sub}` : `${q(bin)} ${sub}`
-    execFile('osascript', ['-e', 'tell application "Terminal" to activate', '-e', `tell application "Terminal" to do script ${JSON.stringify(cmd)}`])
+    const term = terminalCommand(cmd, osOf(), onPath)
+    // Its own process, so the terminal outlives the app if the person quits it mid-login.
+    if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
+    return { opened: !!term, command: cmd }
   }
 }
 

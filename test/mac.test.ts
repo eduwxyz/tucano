@@ -8,6 +8,7 @@ import { systemPrompt } from '../src/core/context'
 import { artifactKind, Computers, computerTools, linuxTools, stepFor } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { loginEnv, MacComputer, macPath } from '../src/core/mac'
+import { systemName } from '../src/core/platform'
 
 const agent = (extra: Partial<Agent> = {}): Agent => ({
   id: 'prod-0001',
@@ -136,16 +137,16 @@ describe('an agent whose computer is this Mac', () => {
     expect(text(r.result)).toContain(work)
   })
 
-  it('describes the Mac in the tools, the steps and the prompt', () => {
+  it('describes this computer and its system in the tools, the steps and the prompt', () => {
     const me = db.agent('prod-0001')!
     expect(computerTools(me).map((t) => t.name)).toEqual(linuxTools().map((t) => t.name))
-    expect(computerTools(me).find((t) => t.name === 'bash')!.description).toContain('Mac')
+    expect(computerTools(me).find((t) => t.name === 'bash')!.description).toContain(`computador do usuário (${systemName()}`)
     expect(computerTools({ computerKind: 'linux' })).toEqual(linuxTools())
     expect(stepFor('read_file', { path: 'falas.py' }, true).detail).toBe('falas.py')
     expect(stepFor('read_file', { path: 'falas.py' }).detail).toBe('/work/falas.py')
     const conv: Conversation = db.conversation('c1')!
     const prompt = systemPrompt({ agent: me, settings: { workspaceName: 'Edu', context: '' }, conversation: conv, peers: [], hasComputer: true, macFolder: work })
-    expect(prompt).toContain('## Seu computador: o Mac de Edu')
+    expect(prompt).toContain(`## Seu computador: o computador de Edu (${systemName()})`)
     expect(prompt).toContain(`Eles começam em ${work} (sua pasta de trabalho)`)
     expect(prompt).not.toContain('A pasta de trabalho é /work')
     const off = systemPrompt({ agent: me, settings: { workspaceName: 'Edu', context: '' }, conversation: conv, peers: [], offline: ['Linear'] })

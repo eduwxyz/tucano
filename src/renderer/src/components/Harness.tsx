@@ -169,6 +169,8 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
   const [testing, setTesting] = useState(false)
   const [model, setModel] = useState('')
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  // No terminal could be opened: the command, for the person to run.
+  const [manual, setManual] = useState<string | null>(null)
   const ready = st.loggedIn
   const found = st.installed && !!st.route // what its setup says, picked or not
 
@@ -206,14 +208,24 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
           </button>
         )}
         {st.installed && !st.loggedIn && !st.soon && (
-          <button className="btn btn--sm btn--primary" title={L(`Abre o Terminal com: ${ENGINES[engine].login}`, `Opens Terminal with: ${ENGINES[engine].login}`)} onClick={() => loginEngine(engine)}>
+          <button
+            className="btn btn--sm btn--primary"
+            title={L(`Abre um terminal com: ${ENGINES[engine].login}`, `Opens a terminal with: ${ENGINES[engine].login}`)}
+            onClick={() => void loginEngine(engine).then((r) => setManual(r.opened ? null : r.command))}
+          >
             {L('Entrar', 'Sign in')}
           </button>
         )}
       </div>
+      {manual && !st.loggedIn && (
+        <div className="harness__body">
+          <span className="hint">{L('Não achei um terminal pra abrir. Pra entrar, cole no seu terminal:', "Couldn't find a terminal to open. To sign in, paste in your terminal:")}</span>
+          <code className="harness__cmd">{manual}</code>
+        </div>
+      )}
       {!st.installed && (
         <div className="harness__body">
-          <span className="hint">{L('Pra instalar, cole no Terminal:', 'To install, paste in Terminal:')}</span>
+          <span className="hint">{L('Pra instalar, cole no terminal:', 'To install, paste in a terminal:')}</span>
           <code className="harness__cmd">{ENGINES[engine].install}</code>
         </div>
       )}

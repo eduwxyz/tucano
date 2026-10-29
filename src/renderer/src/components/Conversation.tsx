@@ -217,8 +217,8 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
               <span className="msg__author">{name}</span>
             )}
             {agent?.computer && agent.computerKind === 'mac' && (
-              <span className="tag tag--warn" title={L('Os comandos deste agente rodam direto no seu Mac', 'This agent’s commands run right on your Mac')}>
-                {L('no seu Mac', 'on your Mac')}
+              <span className="tag tag--warn" title={L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer')}>
+                {L('no seu computador', 'on your computer')}
               </span>
             )}
             <span className="msg__time">{time(message.at)}</span>

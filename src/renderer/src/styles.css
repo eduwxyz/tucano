@@ -276,6 +276,10 @@ h3 {
   flex: none;
   -webkit-app-region: drag;
 }
+/* Off a Mac the system draws the title bar: no room to keep for the window buttons. */
+:root:not([data-os='mac']) .sidebar__drag {
+  height: 10px;
+}
 .workspace {
   display: flex;
   align-items: center;

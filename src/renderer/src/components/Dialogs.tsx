@@ -3,7 +3,7 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { agentById, archiveAgent, isTeam, openTuca, createChannel, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setTopic, useStore, type State, type View } from '../store'
+import { agentById, archiveAgent, isTeam, openTuca, createChannel, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setTopic, shortcut, useStore, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
@@ -189,7 +189,7 @@ function hits(s: State): Hit[] {
     ...agents.map((a): Hit => ({ key: `dm-${a.id}`, label: a.name, detail: `${L('conversa', 'conversation')}${a.role ? ` · ${a.role}` : ''}`, agent: a.id, go: () => void openDm(a.id) })),
     ...agents.map((a): Hit => ({ key: `agent-${a.id}`, label: L(`${a.name}: configurar`, `${a.name}: settings`), detail: `@${a.handle}`, icon: 'edit', go: () => navigate({ kind: 'agent', id: a.id }) })),
     ...PAGES().map((p): Hit => ({ key: p.label, label: p.label, detail: L('tela', 'page'), icon: p.icon, go: () => navigate(p.view) })),
-    { key: 'new-channel', label: L('Novo canal', 'New channel'), detail: '⌘N', icon: 'plus', go: () => openDialog({ kind: 'new-channel' }) },
+    { key: 'new-channel', label: L('Novo canal', 'New channel'), detail: shortcut(getState().platform, 'N'), icon: 'plus', go: () => openDialog({ kind: 'new-channel' }) },
     { key: 'tuca', label: L('Tuca: montar um agente', 'Tuca: build an agent'), detail: L('conversa', 'conversation'), icon: 'plus', go: openTuca },
     { key: 'new-agent', label: L('Novo agente (formulário)', 'New agent (form)'), detail: L('ação', 'action'), icon: 'plus', go: () => navigate({ kind: 'new-agent' }) }
   ]

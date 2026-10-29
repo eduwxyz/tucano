@@ -32,7 +32,8 @@ import {
   type Report,
   type UsageReport,
   type Trigger,
-  type ImageUpload
+  type ImageUpload,
+  type Os
 } from '../../shared/types'
 import { call, connect } from './rpc'
 
@@ -69,6 +70,7 @@ export interface State {
   browsers: BrowserView[]
   routines: Routine[]
   skills: Skill[]
+  platform: Os
   packaged: boolean
   panel: Panel | null // the side panel next to a conversation
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
@@ -116,6 +118,7 @@ let state: State = {
   browsers: [],
   routines: [],
   skills: [],
+  platform: 'mac',
   packaged: false,
   panel: null,
   dialog: null,
@@ -267,6 +270,7 @@ export async function start(): Promise<void> {
       browsers: snap.browsers,
       routines: snap.routines,
       skills: snap.skills,
+      platform: snap.platform,
       packaged: snap.packaged,
       demoServer: snap.demoServer
     }
@@ -305,7 +309,7 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 }
 
 export const refreshEngines = (): void => void call('refreshEngines')
-export const loginEngine = (engine: keyof Settings['engines']): void => void call('loginEngine', { engine })
+export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
 
 export function saveAgent(agent: Agent, channelIds: string[]): Promise<void> {
   return call('saveAgent', { agent, channelIds })

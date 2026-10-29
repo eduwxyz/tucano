@@ -76,6 +76,14 @@
       {
         "from": "build/sounds",
         "to": "sounds"
+      },
+      {
+        "from": "build/tray.png",
+        "to": "tray.png"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
       }
     ]
   }

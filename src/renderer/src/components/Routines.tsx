@@ -68,7 +68,7 @@ export const webhookUrl = (token: string): string => `http://127.0.0.1:${WEBHOOK
 function describeRoutine(r: Pick<Routine, 'schedule' | 'trigger'>, connectorName?: string): string {
   const t = r.trigger
   if (!t) return describeSchedule(r.schedule)
-  if (t.kind === 'webhook') return L('Quando chamada no Mac', 'When called on the Mac')
+  if (t.kind === 'webhook') return L('Quando chamada neste computador', 'When called on this computer')
   return L(`A cada ${t.everyMinutes} min, quando aparecer algo novo em ${connectorName ?? 'um conector'} · ${t.tool}`, `Every ${t.everyMinutes} min, when something new shows up in ${connectorName ?? 'a connector'} · ${t.tool}`)
 }
 
@@ -688,7 +688,7 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
               [
                 ['clock', L('Num horário', 'At a time')],
                 ['poll', L('Quando aparece algo novo', 'When something new shows up')],
-                ['webhook', L('Quando chamada no Mac', 'When called on the Mac')]
+                ['webhook', L('Quando chamada neste computador', 'When called on this computer')]
               ] as const
             ).map(([k, label]) => (
               <button
@@ -756,7 +756,7 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
           ))}
         {t?.kind === 'webhook' && (
           <p className="hint hint--text">
-            {L('Depois de salvar, a rotina ganha um endereço no seu Mac (só o próprio Mac acessa). Um script, um hook do git ou uma fase de build do Xcode chama com', 'Once saved, the routine gets an address on your Mac (only the Mac itself can reach it). A script, a git hook or an Xcode build phase calls it with')}{' '}
+            {L('Depois de salvar, a rotina ganha um endereço neste computador (só ele mesmo acessa). Um script, um hook do git ou uma fase de build do Xcode chama com', 'Once saved, the routine gets an address on this computer (only the computer itself can reach it). A script, a git hook or an Xcode build phase calls it with')}{' '}
             <code>curl -d "{L('o que aconteceu', 'what happened')}" …</code>{L(', e o texto enviado chega pro agente.', ', and the text sent reaches the agent.')}
           </p>
         )}
@@ -793,7 +793,7 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
                 </button>
               </div>
             </Field>
-            <Field label={L('Horário', 'Time')} hint={draft.schedule.once ? L('No próximo dia marcado em que esse horário ainda não passou.', 'On the next checked day this time hasn’t passed yet.') : L('Hora do seu Mac.', 'Your Mac’s time.')}>
+            <Field label={L('Horário', 'Time')} hint={draft.schedule.once ? L('No próximo dia marcado em que esse horário ainda não passou.', 'On the next checked day this time hasn’t passed yet.') : L('Hora do seu computador.', 'Your computer’s time.')}>
               <input type="time" value={draft.schedule.time} onChange={(e) => set({ schedule: { ...draft.schedule, time: e.target.value } })} />
             </Field>
           </div>
