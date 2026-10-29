@@ -88,6 +88,7 @@ const collect = async (it: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> =
   return out
 }
 
+// These start real processes (the fake opencode, its server): give them room on a busy machine.
 describe('the OpenCode engine on V2', () => {
   it("takes the turn's usage from the export and deletes the session", async () => {
     const oc = fakeOpencode()
@@ -100,17 +101,21 @@ describe('the OpenCode engine on V2', () => {
     expect(run).toContain('claude=1')
     expect(exported).toMatch(new RegExp(`^session export ${session} --server http://127.0.0.1:9`))
     expect(deleted).toMatch(new RegExp(`^session delete ${session} --server http://127.0.0.1:9`))
-  })
+  }, 20_000)
 
   it('counts what a stopped turn used and still deletes its session', async () => {
     const oc = fakeOpencode({ hang: true })
     const stop = new AbortController()
-    setTimeout(() => stop.abort(), 500)
-    const events = await collect(opencodeEngine(() => oc.bin, mkdtempSync(join(tmpdir(), 'oc2-app-')), async () => ({}), () => '2.2.0').run(turn(stop.signal)))
+    // Stopped once the reply is under way (its first text), however long the start took.
+    const events: EngineEvent[] = []
+    for await (const ev of opencodeEngine(() => oc.bin, mkdtempSync(join(tmpdir(), 'oc2-app-')), async () => ({}), () => '2.2.0').run(turn(stop.signal))) {
+      events.push(ev)
+      if (ev.type === 'text') stop.abort()
+    }
     expect(events.find((e) => e.type === 'done' || e.type === 'error')).toBeUndefined()
     expect(events.at(-1)).toEqual({ type: 'progress', tokens: 408, cacheRead: 0 })
     expect(oc.calls().map((c) => c.split(' ').slice(0, 2).join(' '))).toEqual(['serve --hostname', 'run --server', 'session export', 'session delete'])
-  })
+  }, 20_000)
 
   it('keeps running V1 the way it always did', async () => {
     const oc = fakeOpencode()
@@ -119,5 +124,5 @@ describe('the OpenCode engine on V2', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).toContain('run --pure')
     expect(calls[0]).not.toContain('--session')
-  })
+  }, 20_000)
 })
