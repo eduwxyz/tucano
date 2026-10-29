@@ -19,16 +19,18 @@ mkdir -p "$(dirname "$NOTES")"
 SECTION=$(awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" { on = 1; next } /^## \[/ { on = 0 } /^\[[0-9.]+\]: / { on = 0 } on' CHANGELOG.md)
 [ -n "$(echo "$SECTION" | tr -d '[:space:]')" ] || { echo "CHANGELOG.md has no section for $VERSION." >&2; exit 1; }
 cat > "$NOTES" <<NOTES_EOF
-**Tucano is a team of AI agents that lives on your Mac.** You talk to them in channels, like a work chat; they research, write, code and use your company's tools, and you decide how far each one goes. It runs on the Claude Code, Codex, OpenCode or Pi you already have, on your own subscription.
+**Tucano is a team of AI agents that lives on your computer.** You talk to them in channels, like a work chat; they research, write, code and use your company's tools, and you decide how far each one goes. It runs on the Claude Code, Codex, OpenCode or Pi you already have, on your own subscription.
 $SECTION
 
 ## Install
 
-You need a Mac with Apple silicon (M1 or later) and at least one of [Claude Code](https://code.claude.com) or [Codex](https://github.com/openai/codex), installed and signed in.
+You need a Mac with Apple silicon (M1 or later) or a Linux PC (x64 or ARM64), and at least one of [Claude Code](https://code.claude.com) or [Codex](https://github.com/openai/codex), installed and signed in.
 
-**From the .dmg.** Download \`tucano-mac-arm64.dmg\` below, open it and drag Tucano into Applications.
+**On a Mac.** Download \`tucano-mac-arm64.dmg\` below, open it and drag Tucano into Applications.
 
-**From the Terminal.** Installs into Applications and opens it.
+**On Linux.** Ubuntu, Debian and their family: \`tucano-linux-amd64.deb\` (or \`-arm64.deb\`), with \`sudo apt install ./tucano-linux-amd64.deb\`. Other distributions: \`tucano-linux-x86_64.AppImage\` (or \`-arm64.AppImage\`), made executable. The Linux files arrive a few minutes after the release.
+
+**From the Terminal, on either.** Installs Tucano and opens it.
 
 \`\`\`bash
 curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh

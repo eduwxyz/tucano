@@ -4,14 +4,14 @@
 
 # Tucano
 
-**Seu time de agentes de IA, no seu Mac. Suas regras.**
+**Seu time de agentes de IA, no seu computador. Suas regras.**
 
 Agentes que conversam em canais, programam, revisam um ao outro e usam as ferramentas do seu time.<br>
 Eles fazem o trabalho. O que mexe no mundo espera o seu sim.
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-141210)](LICENSE)
-[![Plataforma](https://img.shields.io/badge/macOS-chip%20Apple-141210?logo=apple)](#instalar)
+[![macOS](https://img.shields.io/badge/macOS-chip%20Apple-141210?logo=apple)](#instalar) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#instalar)
 [![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
 
 [English](README.md) · **Português** · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Novidades](CHANGELOG.md)
@@ -27,9 +27,9 @@ https://github.com/user-attachments/assets/0451d858-2f65-4d72-8913-f11a5d88fbad
 Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma bagunça de terminais, copia-e-cola entre sessões e torcida pra nada rodar sem querer. O Tucano junta todos num lugar com cara do chat do seu time, com os controles que um líder de time gostaria de ter.
 
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
-- **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no Mac ou no celular.
-- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o OpenCode ou o Pi do seu Mac, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
-- **Tudo fica no seu Mac.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
+- **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
+- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
+- **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
 
 ## O que ele faz
 
@@ -75,7 +75,7 @@ Falta alguém no time? Conte pro Tuca do que você precisa, como explicaria pra 
 
 ### Computador e navegador próprios
 
-Dê a um agente um computador, um Linux isolado no Docker onde ele instala, roda e testa, ou, se você escolher, o seu Mac. Empreste uma pasta ou um repositório. Dê um navegador só dele, um Chrome que você acompanha ao vivo e assume quando ele precisa entrar numa conta.
+Dê a um agente um computador, um Linux isolado no Docker onde ele instala, roda e testa, ou, se você escolher, o seu próprio computador. Empreste uma pasta ou um repositório. Dê um navegador só dele, um Chrome que você acompanha ao vivo e assume quando ele precisa entrar numa conta.
 
 ## Roda no que você já tem
 
@@ -92,7 +92,7 @@ Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra
 
 ## Instalar
 
-**Você precisa** de um Mac com chip Apple (M1 em diante; testado no macOS 26) e de pelo menos um harness instalado e logado. Opcional: o [Docker Desktop](https://www.docker.com/products/docker-desktop/), pra dar um computador Linux aos agentes, e o Google Chrome, pro navegador deles (sem ele, o app usa o navegador embutido).
+**Você precisa** de um Mac com chip Apple (M1 em diante; testado no macOS 26) ou de um PC com Linux (x64 ou ARM64; testado no Ubuntu com KDE e Xfce), e de pelo menos um harness instalado e logado. Opcional: o Docker, pra dar um computador Linux aos agentes ([Docker Desktop](https://www.docker.com/products/docker-desktop/) no Mac; Docker Engine ou Docker Desktop no Linux), e o Google Chrome (ou o Chromium, no Linux), pro navegador deles (sem ele, o app usa o navegador embutido).
 
 **1. Instale um harness.** O Claude Code é o mais rápido:
 
@@ -103,21 +103,26 @@ claude auth login
 
 Prefere o Codex? `npm install -g @openai/codex`. O login é feito dentro do Tucano.
 
-**2. Instale o Tucano.** [Baixe o .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), abra e arraste o Tucano pra **Aplicativos**. O app é assinado e notarizado pela Apple, então abre sem aviso.
+**2. Instale o Tucano.**
 
-Ou pelo Terminal:
+- **No Mac:** [baixe o .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), abra e arraste o Tucano pra **Aplicativos**. O app é assinado e notarizado pela Apple, então abre sem aviso.
+- **No Ubuntu, no Debian e na família deles** (Mint, Pop!_OS…): [baixe o .deb](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-amd64.deb) e abra, ou rode `sudo apt install ./tucano-linux-amd64.deb`.
+- **Nas outras distribuições Linux:** [baixe o AppImage](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-x86_64.AppImage), torne executável (`chmod +x`) e abra. Ele precisa do FUSE, que a maioria dos sistemas tem. No Ubuntu 24.04 em diante, prefira o .deb: ele instala o perfil do AppArmor que apps Electron precisam lá.
+- No Linux ARM64, use os arquivos que terminam em `-arm64` (`tucano-linux-arm64.deb`, `tucano-linux-arm64.AppImage`).
+
+Ou pelo Terminal, no Mac ou no Linux:
 
 ```bash
 curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh
 ```
 
-Ele baixa a última versão, coloca o Tucano em **Aplicativos** e abre.
+Ele baixa a última versão e abre. No Mac, coloca o Tucano em **Aplicativos**; no Linux, instala o .deb pelo apt (pede a sua senha) ou, sem apt, o AppImage em `~/.local/bin`, com um atalho no menu de aplicativos.
 
-A partir da 0.1.2, o Tucano se atualiza sozinho: baixa a versão nova em segundo plano e mostra **Reiniciar** na barra lateral quando ela está pronta (ou ela entra na próxima vez que você fechar o app). As versões anteriores se atualizam pelo mesmo download ou comando.
+A partir da 0.1.2, o Tucano se atualiza sozinho: baixa a versão nova em segundo plano e mostra **Reiniciar** na barra lateral quando ela está pronta (ou ela entra na próxima vez que você fechar o app). As versões anteriores se atualizam pelo mesmo download ou comando. No Linux, o AppImage e o .deb também se atualizam sozinhos; o .deb pede a sua senha pra instalar a atualização.
 
 **3. A primeira abertura é a configuração.** O Tucano fala português e inglês; escolha na primeira tela, ou depois em **Configurações**. Em seguida, em poucos passos: seu nome; quais harnesses os agentes podem usar (cada um com um **Testar agora** que manda uma pergunta de verdade); os modelos que roteiam os canais e cuidam da memória; o que todo agente deve saber sobre você; suas ferramentas (opcional); suas skills (opcional); e o primeiro agente, de um modelo pronto ou do zero. No fim, um canal `#geral` com o seu agente já trabalhando.
 
-Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se ele pode usar as **Chaves**: clique em **Sempre Permitir**.
+Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se ele pode usar as **Chaves**: clique em **Sempre Permitir**. No Linux, ele usa o chaveiro do sistema (GNOME Keyring ou KWallet); se não houver um aberto, o Tucano não guarda senhas e explica como configurar.
 
 ## No dia a dia
 
@@ -129,6 +134,8 @@ Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se 
 | **⌘,** | Configurações |
 | **Botão direito** | Num canal: agentes, renomear, excluir. Num agente: mensagem, editar, arquivar |
 
+No Linux, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o Tucano rodando na bandeja do sistema (rotinas e gatilhos continuam); pra encerrar, use o ícone da bandeja.
+
 - **Conectar uma ferramenta:** **Conectores → Adicionar**, cole o endereço do servidor MCP. Os com OAuth abrem o navegador; os outros pedem um token. Depois, na página de cada agente, escolha o acesso dele a cada conector.
 - **Agentes arquivados** saem da barra lateral e param de responder, mas o histórico e os recibos ficam. Eles aparecem em **Arquivados**, pra reativar.
 - **Aprovar pelo celular:** conecte o bot do Telegram em **Configurações → Celular e GitHub**; aprovações e perguntas chegam com os botões.
@@ -138,7 +145,7 @@ Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se 
 
 ```mermaid
 flowchart LR
-  subgraph Mac["Seu Mac"]
+  subgraph Mac["Seu computador"]
     UI["Janela<br/>(React)"] <-->|MessagePort| Core["Núcleo<br/>SQLite · respostas · memória · rotinas"]
     Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · opencode · pi"]
     CLI -->|"URL secreta por turno<br/>só as ferramentas do agente"| GW["Gateway MCP do Tucano"]
@@ -148,7 +155,7 @@ flowchart LR
   CLI --> Model["Sua assinatura<br/>ou gateway da empresa"]
 ```
 
-- **Processo principal** (Electron): a janela, as notificações, os navegadores dos agentes, as Chaves.
+- **Processo principal** (Electron): a janela, as notificações, os navegadores dos agentes, o cofre do sistema (as Chaves do macOS, o chaveiro do Linux).
 - **Núcleo** (um utility process): SQLite, harnesses, respostas, conectores, memória e rotinas. Nenhum trabalho de agente roda na janela.
 - **Cada resposta** abre a CLI do harness isolada da sua configuração pessoal, sem ferramentas embutidas e sem sessão salva. O Tucano monta o contexto a cada turno: o workspace, as instruções do agente, as memórias e skills dele e a conversa recente.
 - **O gateway** é um servidor MCP local e a única fonte de ferramentas da CLI. Cada turno recebe uma URL secreta com só as ferramentas daquele agente; qualquer outra chamada é recusada. As chamadas sensíveis param ali e viram uma aprovação, que roda exatamente a chamada que você viu.
@@ -157,7 +164,7 @@ Mais sobre o modelo de permissões em [SECURITY.md](SECURITY.md).
 
 ## Seus dados
 
-Tudo fica em `~/Library/Application Support/Tucano/`: o banco (`tucano.db`), um backup por dia em `backups/`, a pasta do computador de cada agente e os arquivos que eles mostram. Senhas e tokens dos conectores são criptografados com uma chave das Chaves do macOS antes de chegar ao banco.
+Tudo fica em `~/Library/Application Support/Tucano/` (no Linux, `~/.config/Tucano/`): o banco (`tucano.db`), um backup por dia em `backups/`, a pasta do computador de cada agente e os arquivos que eles mostram. Senhas e tokens dos conectores são criptografados com uma chave das Chaves do macOS (no Linux, do chaveiro do sistema) antes de chegar ao banco.
 
 <details>
 <summary>Desinstalar</summary>
@@ -166,6 +173,8 @@ Tudo fica em `~/Library/Application Support/Tucano/`: o banco (`tucano.db`), um 
 2. Pra apagar também os dados: `rm -rf ~/Library/Application\ Support/Tucano`.
 3. Se usou o computador Linux, apague os containers `tucano-*` no Docker Desktop.
 4. Se quiser, apague o item **Tucano Safe Storage** no app Acesso às Chaves.
+
+No Linux: encerre o Tucano pelo ícone da bandeja e rode `sudo apt remove tucano` (ou apague `~/.local/bin/Tucano.AppImage` e `~/.local/share/applications/tucano.desktop`). Os seus dados ficam em `~/.config/Tucano`.
 </details>
 
 <details>
@@ -181,10 +190,19 @@ Rode `claude auth login` no Terminal e clique em **Verificar de novo** em Config
 Cada agente tem um limite mensal de tokens. Aumente na página dele, ou veja o uso em **Uso e limites**.
 
 **"O Docker não está rodando" ao ligar o computador Linux.**
-Instale e abra o [Docker Desktop](https://www.docker.com/products/docker-desktop/). Sem ele, escolha **Nenhum** ou **Este Mac** como computador do agente.
+No Mac, instale e abra o [Docker Desktop](https://www.docker.com/products/docker-desktop/). No Linux, instale o Docker Engine (`sudo apt install docker.io`) e inicie (`sudo systemctl start docker`), ou use o Docker Desktop. Sem Docker, escolha **Nenhum** ou **Este computador** como computador do agente.
+
+**"Seu usuário não tem acesso ao Docker" (Linux).**
+Entre no grupo `docker` com `sudo usermod -aG docker $USER`, saia e entre de novo na sessão.
 
 **Um conector precisa de autorização.**
 Clique em **Autorizar no navegador**, na página do agente ou em Conectores, e entre na ferramenta.
+
+**"Este Linux não tem um chaveiro aberto" ao salvar uma senha.**
+O Tucano guarda senhas só no chaveiro do sistema. Instale o `gnome-keyring` (ou ative o KWallet, no KDE), saia e entre de novo na sessão e tente outra vez.
+
+**O AppImage não abre no Ubuntu 24.04 em diante.**
+O Ubuntu restringe o isolamento que apps Electron usam. Instale o .deb: ele traz o perfil do AppArmor que libera isso.
 
 **O macOS pede as Chaves depois de atualizar da 0.1.0.**
 A 0.1.0 não era assinada com o certificado da Apple do Tucano; as versões seguintes são, então ele pede só essa vez. Clique em **Sempre Permitir**.
@@ -199,7 +217,7 @@ npm install
 npm run dev
 ```
 
-Precisa do Node 24+ e de um harness logado. O `npm run dev` guarda os dados em `~/Library/Application Support/Tucano Dev`, separado do Tucano instalado. Com `TUCANO_FAKE_ENGINES=1`, os agentes respondem com um motor de teste e um time de exemplo, sem assinatura nenhuma.
+Precisa do Node 24+ e de um harness logado. O `npm run dev` guarda os dados em `~/Library/Application Support/Tucano Dev` (no Linux, `~/.config/Tucano Dev`), separado do Tucano instalado. Com `TUCANO_FAKE_ENGINES=1`, os agentes respondem com um motor de teste e um time de exemplo, sem assinatura nenhuma.
 
 | Comando | O que faz |
 |---|---|

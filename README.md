@@ -4,14 +4,14 @@
 
 # Tucano
 
-**Your team of AI agents, on your Mac. Your rules.**
+**Your team of AI agents, on your computer. Your rules.**
 
 Agents that talk in channels, write code, review each other and use your team's tools.<br>
 They do the work. Anything that touches the real world waits for your yes.
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-141210)](LICENSE)
-[![Platform](https://img.shields.io/badge/macOS-Apple%20silicon-141210?logo=apple)](#install)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20silicon-141210?logo=apple)](#install) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#install)
 [![Runs on](https://img.shields.io/badge/runs%20on-Claude%20Code%20·%20Codex%20·%20OpenCode%20·%20Pi-E2541B)](#runs-on-what-you-already-have)
 
 **English** · [Português](README.pt-BR.md) · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Changelog](CHANGELOG.md)
@@ -27,9 +27,9 @@ https://github.com/user-attachments/assets/533e1bf1-b4ca-4f4a-aad4-e015c6b4c421
 Coding agents got good. Working with *several* of them is still a mess of terminals, copy-paste between sessions, and hoping nothing runs that shouldn't. Tucano puts them in one place that feels like your team's chat, and gives you the controls a team lead would want.
 
 - **A team, not a prompt box.** Agents with names, roles, tools and memory. They talk in channels, call each other with `@mentions` and hand work over: one finds the bug, another fixes it, a third reviews it, and you get the result.
-- **Your rules.** Each agent sees only the tools you give it, with *no access*, *read*, or *read and write* per tool. Merges, purchases, posts, emails and deletes become an approval tied to the exact action, on your Mac or your phone.
-- **Runs on what you already have.** Agents think with the Claude Code, Codex, OpenCode or Pi on your Mac, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
-- **Everything stays on your Mac.** Conversations, memory, logins, files. There is no Tucano server.
+- **Your rules.** Each agent sees only the tools you give it, with *no access*, *read*, or *read and write* per tool. Merges, purchases, posts, emails and deletes become an approval tied to the exact action, on your computer or your phone.
+- **Runs on what you already have.** Agents think with the Claude Code, Codex, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
+- **Everything stays on your computer.** Conversations, memory, logins, files. There is no Tucano server.
 
 ## What it does
 
@@ -75,7 +75,7 @@ Missing someone on the team? Tell Tuca what you need, the way you'd explain it t
 
 ### Computers and browsers of their own
 
-Give an agent a computer, an isolated Linux in Docker where it installs, runs and tests, or, if you choose so, your Mac. Lend it a folder or a repository. Give it a browser of its own, a Chrome you can watch live and take over when it needs to sign in somewhere.
+Give an agent a computer, an isolated Linux in Docker where it installs, runs and tests, or, if you choose so, your own computer. Lend it a folder or a repository. Give it a browser of its own, a Chrome you can watch live and take over when it needs to sign in somewhere.
 
 ## Runs on what you already have
 
@@ -92,7 +92,7 @@ Each agent picks its harness and model, so a team can mix them: Opus to fix, GPT
 
 ## Install
 
-**You need** a Mac with Apple silicon (M1 or later; tested on macOS 26) and at least one harness, installed and signed in. Optional: [Docker Desktop](https://www.docker.com/products/docker-desktop/) to give agents a Linux computer, and Google Chrome for their browser (without it, the built-in browser is used).
+**You need** a Mac with Apple silicon (M1 or later; tested on macOS 26) or a Linux PC (x64 or ARM64; tested on Ubuntu with KDE and Xfce), and at least one harness, installed and signed in. Optional: Docker to give agents a Linux computer ([Docker Desktop](https://www.docker.com/products/docker-desktop/) on a Mac; Docker Engine or Docker Desktop on Linux), and Google Chrome (or Chromium, on Linux) for their browser (without it, the built-in browser is used).
 
 **1. Install a harness.** Claude Code is the quickest:
 
@@ -103,21 +103,26 @@ claude auth login
 
 Prefer Codex? `npm install -g @openai/codex`. You'll sign in from inside Tucano.
 
-**2. Install Tucano.** [Download the .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), open it and drag Tucano into **Applications**. The app is signed and notarized by Apple, so it opens with no warning.
+**2. Install Tucano.**
 
-Or from the Terminal:
+- **On a Mac:** [download the .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), open it and drag Tucano into **Applications**. The app is signed and notarized by Apple, so it opens with no warning.
+- **On Ubuntu, Debian and their family** (Mint, Pop!_OS…): [download the .deb](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-amd64.deb) and open it, or run `sudo apt install ./tucano-linux-amd64.deb`.
+- **On other Linux distributions:** [download the AppImage](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-x86_64.AppImage), make it executable (`chmod +x`) and open it. It needs FUSE, which most systems have. On Ubuntu 24.04 and later, prefer the .deb: it installs the AppArmor profile Electron apps need there.
+- On ARM64 Linux, take the files that end in `-arm64` (`tucano-linux-arm64.deb`, `tucano-linux-arm64.AppImage`).
+
+Or from the Terminal, on a Mac or on Linux:
 
 ```bash
 curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh
 ```
 
-It downloads the latest release, puts Tucano in **Applications** and opens it.
+It downloads the latest release and opens it. On a Mac it puts Tucano in **Applications**; on Linux it installs the .deb with apt (it asks for your password) or, without apt, the AppImage in `~/.local/bin` with an entry in the applications menu.
 
-From 0.1.2 on, Tucano updates itself: it downloads a new version in the background and shows **Restart** in the sidebar when it's ready (or it goes in the next time you quit). Earlier versions update with the same download or command.
+From 0.1.2 on, Tucano updates itself: it downloads a new version in the background and shows **Restart** in the sidebar when it's ready (or it goes in the next time you quit). Earlier versions update with the same download or command. On Linux the AppImage and the .deb update themselves too; the .deb asks for your password to put the update in.
 
 **3. The first run is the setup.** Tucano speaks English and Portuguese; pick one on the first screen, or later in **Settings**. Then, in a few steps: your name; which harnesses agents may use (each with a **Test now** button that sends a real question); the models that route channels and keep memory; what every agent should know about you; your tools (optional); your skills (optional); and your first agent, from a template or from scratch. It ends in a `#general` channel with your agent already working.
 
-The first time Tucano saves a connector password, macOS asks whether it may use the **Keychain**: click **Always Allow**.
+The first time Tucano saves a connector password, macOS asks whether it may use the **Keychain**: click **Always Allow**. On Linux it uses the system keyring (GNOME Keyring or KWallet); with none open, Tucano doesn't save passwords, and says how to set one up.
 
 ## Using it
 
@@ -129,6 +134,8 @@ The first time Tucano saves a connector password, macOS asks whether it may use 
 | **⌘,** | Settings |
 | **Right-click** | On a channel: agents, rename, delete. On an agent: message, edit, archive |
 
+On Linux, use **Ctrl** instead of **⌘**. Closing the window keeps Tucano running in the tray (routines and triggers go on); quit it from the tray icon.
+
 - **Connect a tool:** **Connectors → Add**, paste the MCP server's address. OAuth servers open the browser; the others ask for a token. Then, on each agent's page, set its access to each connector.
 - **Archived agents** leave the sidebar and stop answering, but keep their history and receipts. Find them under **Archived** to bring them back.
 - **Approve from your phone:** connect the Telegram bot in **Settings → Phone and GitHub**; approvals and questions arrive with their buttons.
@@ -138,7 +145,7 @@ The first time Tucano saves a connector password, macOS asks whether it may use 
 
 ```mermaid
 flowchart LR
-  subgraph Mac["Your Mac"]
+  subgraph Mac["Your computer"]
     UI["Window<br/>(React)"] <-->|MessagePort| Core["Core process<br/>SQLite · runs · memory · routines"]
     Core -->|"one turn, isolated"| CLI["Harness CLI<br/>claude · codex · opencode · pi"]
     CLI -->|"secret per-turn URL<br/>only this agent's tools"| GW["Tucano MCP gateway"]
@@ -148,7 +155,7 @@ flowchart LR
   CLI --> Model["Your subscription<br/>or company gateway"]
 ```
 
-- **Main process** (Electron): the window, notifications, the agents' browsers, the Keychain.
+- **Main process** (Electron): the window, notifications, the agents' browsers, the system's vault (the macOS Keychain, the Linux keyring).
 - **Core** (a utility process): SQLite, harnesses, runs, connectors, memory and routines. No agent work runs in the window.
 - **Each reply** opens the harness CLI isolated from your personal configuration, with no built-in tools and no saved session. Tucano builds the context every turn: the workspace, the agent's instructions, its memories and skills, and the recent conversation.
 - **The gateway** is a local MCP server and the CLI's only source of tools. Each turn gets a secret URL listing just that agent's tools; any other call is refused. Sensitive calls stop there and become an approval, which runs exactly the call you saw.
@@ -157,7 +164,7 @@ More on the permission model in [SECURITY.md](SECURITY.md).
 
 ## Your data
 
-Everything lives in `~/Library/Application Support/Tucano/`: the database (`tucano.db`), a daily backup in `backups/`, each agent's computer folder and the files agents show you. Connector passwords and tokens are encrypted with a key in the macOS Keychain before they reach the database.
+Everything lives in `~/Library/Application Support/Tucano/` (on Linux, `~/.config/Tucano/`): the database (`tucano.db`), a daily backup in `backups/`, each agent's computer folder and the files agents show you. Connector passwords and tokens are encrypted with a key in the macOS Keychain (on Linux, the system keyring) before they reach the database.
 
 <details>
 <summary>Uninstall</summary>
@@ -166,6 +173,8 @@ Everything lives in `~/Library/Application Support/Tucano/`: the database (`tuca
 2. To delete your data too: `rm -rf ~/Library/Application\ Support/Tucano`.
 3. If you used the Linux computer, delete the `tucano-*` containers in Docker Desktop.
 4. Optionally, delete the **Tucano Safe Storage** item in Keychain Access.
+
+On Linux: quit Tucano from its tray icon, then `sudo apt remove tucano` (or delete `~/.local/bin/Tucano.AppImage` and `~/.local/share/applications/tucano.desktop`). Your data is in `~/.config/Tucano`.
 </details>
 
 <details>
@@ -181,10 +190,19 @@ Run `claude auth login` in the Terminal, then click **Check again** in Settings.
 Each agent has a monthly token limit. Raise it on the agent's page, or see the usage in **Usage and limits**.
 
 **"Docker isn't running" when starting the Linux computer.**
-Install and open [Docker Desktop](https://www.docker.com/products/docker-desktop/). Without it, choose **None** or **This Mac** as the agent's computer.
+On a Mac, install and open [Docker Desktop](https://www.docker.com/products/docker-desktop/). On Linux, install Docker Engine (`sudo apt install docker.io`) and start it (`sudo systemctl start docker`), or use Docker Desktop. Without Docker, choose **None** or **This computer** as the agent's computer.
+
+**"Your user has no access to Docker" (Linux).**
+Add yourself to the `docker` group with `sudo usermod -aG docker $USER`, then log out and back in.
 
 **A connector needs authorization.**
 Click **Authorize in the browser**, on the agent's page or in Connectors, and sign in to the tool.
+
+**"This Linux has no keyring open" when saving a password.**
+Tucano keeps passwords only in the system keyring. Install `gnome-keyring` (or turn on KWallet, on KDE), log out and back in, and try again.
+
+**The AppImage doesn't open on Ubuntu 24.04 or later.**
+Ubuntu restricts the sandbox Electron apps use. Install the .deb instead: it brings the AppArmor profile that allows it.
 
 **macOS asks for the Keychain after updating from 0.1.0.**
 0.1.0 wasn't signed with Tucano's Apple certificate; later versions are, so it asks only this once. Click **Always Allow**.
@@ -199,7 +217,7 @@ npm install
 npm run dev
 ```
 
-You need Node 24+ and one harness signed in. `npm run dev` keeps its own data in `~/Library/Application Support/Tucano Dev`, apart from an installed Tucano. With `TUCANO_FAKE_ENGINES=1`, agents answer with a scripted engine and a sample team, with no subscription at all.
+You need Node 24+ and one harness signed in. `npm run dev` keeps its own data in `~/Library/Application Support/Tucano Dev` (on Linux, `~/.config/Tucano Dev`), apart from an installed Tucano. With `TUCANO_FAKE_ENGINES=1`, agents answer with a scripted engine and a sample team, with no subscription at all.
 
 | Command | What it does |
 |---|---|

@@ -2,6 +2,20 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [Unreleased]
+
+> **Em português:** o Tucano agora roda no Linux, em x64 e ARM64: `.deb` pro Ubuntu e o Debian, AppImage pras outras distribuições, com a mesma atualização automática do Mac. Ao fechar a janela, ele fica na bandeja do sistema e as rotinas continuam rodando. O app passa a dizer "seu computador" em vez de "Mac".
+
+### Added
+
+- **Linux.** A `.deb` (Ubuntu, Debian and their family) and an AppImage (other distributions), for x64 and ARM64, that update themselves like the Mac app. `install.sh` installs on Linux too. On Linux, Sign in opens your desktop's terminal, closing the window keeps Tucano in the tray so routines go on, Open at login works, passwords go to the system keyring (GNOME Keyring or KWallet, never stored without one), Docker computers give the files they write back to you, and the agents' browser uses Google Chrome or Chromium. ([#5](https://github.com/eduwxyz/tucano/pull/5), [#6](https://github.com/eduwxyz/tucano/pull/6))
+- Tests run on macOS and Linux for every pull request. ([#4](https://github.com/eduwxyz/tucano/pull/4))
+
+### Changed
+
+- The app says "this computer" and "your computer" instead of the Mac, on every system. Agents are told their real system (macOS or Linux) and how things install there.
+- A new install no longer touches the system's vault when it first opens: the GitHub proxy key is made when you connect GitHub.
+
 ## [0.1.2] - 2026-10-28
 
 > **Em português:** o Tucano agora se atualiza sozinho. Esta é a última vez que você baixa uma versão nova à mão: daqui pra frente, ela chega em segundo plano e aparece **Reiniciar** na barra lateral. Também passa a rodar agentes no OpenCode 2 e a achar as skills que plugins do Claude Code declaram fora da pasta `skills/`. Obrigado ao Gian e ao Paulo pelas primeiras contribuições!
@@ -37,6 +51,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[Unreleased]: https://github.com/eduwxyz/tucano/compare/v0.1.2...HEAD
 [0.1.2]: https://github.com/eduwxyz/tucano/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/eduwxyz/tucano/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/eduwxyz/tucano/releases/tag/v0.1.0

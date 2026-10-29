@@ -67,9 +67,10 @@ install_mac() {
 }
 
 install_linux() {
+  # The files carry each format's name for the architecture (amd64 .deb, x86_64 AppImage).
   case "$(uname -m)" in
-    x86_64 | amd64) ARCH=x64 ;;
-    aarch64 | arm64) ARCH=arm64 ;;
+    x86_64 | amd64) DEB=amd64 IMG=x86_64 ;;
+    aarch64 | arm64) DEB=arm64 IMG=arm64 ;;
     *) fail "O Tucano roda em Linux x64 ou ARM64, não em $(uname -m)." "Tucano runs on x64 or ARM64 Linux, not on $(uname -m)." ;;
   esac
 
@@ -86,7 +87,7 @@ install_linux() {
 
   if [ -z "${TUCANO_APPIMAGE:-}" ] && command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
     say "Baixando o Tucano (.deb)…" "Downloading Tucano (.deb)…"
-    fetch "${TUCANO_DEB:-$LATEST/tucano-linux-$ARCH.deb}" "$TMP/tucano.deb"
+    fetch "${TUCANO_DEB:-$LATEST/tucano-linux-$DEB.deb}" "$TMP/tucano.deb"
     chmod 644 "$TMP/tucano.deb"
     chmod 755 "$TMP"
     SUDO=
@@ -101,7 +102,7 @@ install_linux() {
     DEST="${TUCANO_DEST:-$HOME/.local/bin}"
     mkdir -p "$DEST"
     APP="$DEST/Tucano.AppImage"
-    case "${TUCANO_APPIMAGE:-}" in "" | 1) SRC="$LATEST/tucano-linux-$ARCH.AppImage" ;; *) SRC="$TUCANO_APPIMAGE" ;; esac
+    case "${TUCANO_APPIMAGE:-}" in "" | 1) SRC="$LATEST/tucano-linux-$IMG.AppImage" ;; *) SRC="$TUCANO_APPIMAGE" ;; esac
     say "Baixando o Tucano (AppImage)…" "Downloading Tucano (AppImage)…"
     fetch "$SRC" "$TMP/Tucano.AppImage"
     chmod +x "$TMP/Tucano.AppImage"

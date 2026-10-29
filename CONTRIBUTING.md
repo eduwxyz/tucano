@@ -4,7 +4,7 @@ Thanks for wanting to help. Tucano is a small codebase on purpose: an Electron a
 
 ## Setup
 
-You need macOS on Apple silicon, Node 24 or later, and at least one harness signed in (`claude auth login` is the quickest).
+You need macOS on Apple silicon or Linux (x64 or ARM64), Node 24 or later, and at least one harness signed in (`claude auth login` is the quickest).
 
 ```bash
 git clone https://github.com/eduwxyz/tucano.git
@@ -41,8 +41,9 @@ For UI changes, attach a screenshot to the pull request. `node scripts/screens.m
 
 ```
 src/
-  main/       Electron main process: the window, notifications, the agents' browsers, the Keychain
+  main/       Electron main process: the window, notifications, the agents' browsers, the system's vault, the Linux tray
   core/       Utility process: SQLite, harnesses, runs, the MCP gateway, connectors, memory, routines
+              (platform.ts holds what differs between macOS and Linux: ask it, don't check the platform)
   renderer/   React UI, talking to the core over a MessagePort
   shared/     Types, the RPC contract and the language helper, used by all three
 test/         Vitest, for the core
@@ -68,6 +69,6 @@ No agent work runs in the window or the main process: everything goes through th
 
 ## Reporting bugs
 
-Open an issue with your macOS version, the Tucano version (**About Tucano**), the harness and model involved, and the steps to reproduce. A screenshot of the conversation, with each step expanded, helps a lot.
+Open an issue with your system and its version (macOS, or the Linux distribution and desktop), the Tucano version (**About Tucano**), the harness and model involved, and the steps to reproduce. A screenshot of the conversation, with each step expanded, helps a lot.
 
 For security issues, see [SECURITY.md](SECURITY.md) instead of opening a public issue.
