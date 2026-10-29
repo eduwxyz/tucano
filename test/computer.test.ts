@@ -100,7 +100,7 @@ const hasDocker = ((): boolean => {
 
 describe.skipIf(!hasDocker)('computer (Docker)', () => {
   const ready = { installed: true, loggedIn: true }
-  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, 'opencode-v2': ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   const agent = (id: string, handle: string, computer: boolean): Agent => ({
     id, name: handle, handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer, archived: false
   })
@@ -201,7 +201,7 @@ describe.skipIf(!hasDocker)('computer (Docker)', () => {
   it('only agents with a computer get the tools', async () => {
     const gateway = new Gateway()
     await gateway.start()
-    const engines: Record<EngineId, Engine> = { claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), 'opencode-v2': fakeEngine('opencode-v2'), pi: fakeEngine('pi') }
+    const engines: Record<EngineId, Engine> = { claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') }
     const runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), gateway, computers })
     await runner.send('d1', 'rode `echo oi do computador`')
     await runner.send('d2', 'rode `echo oi do computador`')

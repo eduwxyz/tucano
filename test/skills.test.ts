@@ -81,7 +81,7 @@ describe('in a reply', () => {
   it('the agent sees its skills in the prompt, reads one, and proposes one', async () => {
     skills.save({ ...recipe, agents: ['a1'] })
     const ready = { installed: true, loggedIn: true }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, 'opencode-v2': ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     gateway = new Gateway()
     await gateway.start()
     const turns: Turn[] = []
@@ -97,7 +97,7 @@ describe('in a reply', () => {
         yield { type: 'done', text: 'feito', usage: { inputTokens: 10, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), 'opencode-v2': fakeEngine('opencode-v2'), pi: fakeEngine('pi') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') }
     const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), gateway, skills })
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     await r.send('d1', 'roda os testes')

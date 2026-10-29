@@ -11,7 +11,7 @@ import { eventItems, Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, 'opencode-v2': ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 const pm: Agent = { id: 'a1', name: 'PM', handle: 'pm', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false }
 const issue = (n: number, title: string) => ({ id: `uuid-${n}`, identifier: `SIM-${n}`, title, description: `detalhes ${n}` })
 
@@ -37,7 +37,7 @@ beforeEach(() => {
   issues = [issue(1, 'Lembrete duplicado')]
   failing = undefined
   const base = fakeEngine('claude', { delayMs: 1 })
-  const engines: Record<EngineId, Engine> = { claude: { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), 'opencode-v2': fakeEngine('opencode-v2'), pi: fakeEngine('pi') }
+  const engines: Record<EngineId, Engine> = { claude: { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') }
   const connectors = {
     list: () => [{ id: 'lin', name: 'Linear' } as Connector],
     call: async () => (failing ? textResult(failing, true) : textResult(JSON.stringify({ issues }))) // the shape Linear's MCP answers with

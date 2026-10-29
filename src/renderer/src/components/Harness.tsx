@@ -7,9 +7,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import {
   ENGINES,
   ENGINE_IDS,
-  notInstalledLabel,
-  startsPicked,
   MODELS,
+  startsPicked,
   customModel,
   engineModels,
   harnessMcps,
@@ -191,7 +190,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
         <div className="grow">
           <strong>{ENGINES[engine].label}</strong>
           <span className="harness__account">
-            {!st.installed ? notInstalledLabel(st) : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
+            {!st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
           </span>
         </div>
         {st.soon ? (

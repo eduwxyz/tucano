@@ -4,7 +4,7 @@ import { L, lang, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'opencode-v2' | 'pi'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -268,19 +268,12 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', site: 'https://opencode.ai' },
-  'opencode-v2': { label: 'OpenCode V2', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 
-// What a harness card shows in place of "Not installed": the version hint
-// detection leaves for a mismatched OpenCode (V1 found where V2 was picked, or
-// the reverse), so the person is sent to the right harness instead of running
-// an install command that would replace their working binary.
-export const notInstalledLabel = (st: EngineStatus): string => st.account ?? L('Não instalado', 'Not installed')
-
-// A harness starts picked only when it can actually run: an installed-but-not-signed-in
-// one, or a not-installed one (say, OpenCode V1 where the binary is V2), starts off.
+// A harness starts picked only when it can actually run: one not installed or not
+// signed in yet starts off.
 export const startsPicked = (st: EngineStatus): boolean => !st.soon && st.loggedIn
 
 // Hints and labels read the language when shown (getters), so a list made once still switches.
@@ -319,7 +312,7 @@ export const usable = (m: Model | undefined): Model | undefined => (m?.id ? m : 
 export const modelInfo = (id: string): Model | undefined => {
   const listed = MODELS.find((m) => m.id === id)
   if (listed) return listed
-  const m = /^(claude|codex|opencode-v2|opencode|pi):(.*)$/s.exec(id)
+  const m = /^(claude|codex|opencode|pi):(.*)$/s.exec(id)
   return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: L('Nome próprio', 'Custom name') } : undefined
 }
 

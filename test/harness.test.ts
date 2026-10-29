@@ -5,14 +5,12 @@ import { startsPicked } from '../src/shared/types'
 import type { EngineId, EngineStatus } from '../src/shared/types'
 
 const ready: EngineStatus = { installed: true, loggedIn: true, route: 'plan' }
-const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, 'opencode-v2': { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' } }
+const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' } }
 
 describe('harnesses', () => {
   it('defaults the pick to the harnesses that can actually run', () => {
-    const ready: EngineStatus = { installed: true, loggedIn: true, route: 'plan' }
     expect(startsPicked(ready)).toBe(true)
-    // V1 found on a machine whose binary is V2: not installed, with the hint
-    expect(startsPicked({ installed: false, loggedIn: false, account: 'Encontrei o OpenCode V2 — use o harness OpenCode V2' })).toBe(false)
+    expect(startsPicked({ installed: false, loggedIn: false })).toBe(false)
     // installed, but the person has not logged in yet
     expect(startsPicked({ installed: true, loggedIn: false })).toBe(false)
     expect(startsPicked({ ...ready, soon: true })).toBe(false)

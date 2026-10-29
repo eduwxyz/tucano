@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
+import { opencodeMajor, runOpencodeV2 } from './opencode-v2'
 import type { Engine, EngineEvent, Turn } from './types'
 import { L } from '../../shared/lang'
 
@@ -22,13 +23,16 @@ export function opencodeHome(appDir: string, userData = join(process.env['XDG_DA
 }
 
 // The providers block of the user's opencode.json(c): where their models come
-// from. The rest (agents, plugins, MCP servers, instructions) stays out.
-export function userOpencodeProviders(dir = join(process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config'), 'opencode')): Record<string, unknown> {
+// from. The rest (agents, plugins, MCP servers, instructions) stays out. V2 also
+// reads its own shape: `providers`, and `policies` on which providers to use.
+export function userOpencodeProviders(dir = join(process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config'), 'opencode'), v2 = false): Record<string, unknown> {
   for (const name of ['opencode.jsonc', 'opencode.json']) {
     try {
       const c = JSON.parse(stripJsonComments(readFileSync(join(dir, name), 'utf8'))) as Record<string, unknown>
       const out: Record<string, unknown> = {}
-      for (const k of ['provider', 'enabled_providers', 'disabled_providers']) if (c[k] !== undefined) out[k] = c[k]
+      for (const k of ['provider', 'enabled_providers', 'disabled_providers', ...(v2 ? ['providers'] : [])]) if (c[k] !== undefined) out[k] = c[k]
+      const policies = v2 && Array.isArray(c['policies']) ? c['policies'].filter((p) => (p as Record<string, unknown> | null)?.['action'] === 'provider.use') : []
+      if (policies.length) out['policies'] = policies
       return out
     } catch {
       // not there, or not readable: next
@@ -128,8 +132,9 @@ export function opencodeParser(): Parser {
   }
 }
 
-// The model is "<provider>/<model>", as `opencode models` lists it.
-export function opencodeEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
+// The model is "<provider>/<model>", as `opencode models` lists it. The installed
+// version picks V1's way or V2's (see opencode-v2.ts), so an upgrade keeps the agents running.
+export function opencodeEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({}), version: () => string | undefined = () => undefined): Engine {
   return {
     id: 'opencode',
     async *run(turn) {
@@ -139,6 +144,10 @@ export function opencodeEngine(bin: () => string | undefined, appDir: string, sh
         return
       }
       // Provider keys may live in the user's shell, which an app opened from Finder doesn't get.
+      if (opencodeMajor(version()) >= 2) {
+        yield* runOpencodeV2(path, turn, appDir, await shellEnv())
+        return
+      }
       const env = { ...process.env, ...(await shellEnv()), ...opencodeHome(appDir), OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(turn, userOpencodeProviders())), OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_AUTOUPDATE: '1' }
       yield* runCli({ bin: path, args: opencodeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })
     }

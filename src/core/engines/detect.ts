@@ -5,6 +5,7 @@ import { L } from '../../shared/lang'
 import type { EngineId, EngineStatus } from '../../shared/types'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
+import { opencodeMajor } from './opencode-v2'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -115,24 +116,15 @@ function listedStatus(path: string, v: string, models: string[], login: string):
   }
 }
 
-// One binary for V1 and V2: the major version picks the engine that gets the
-// full status; the other shows not installed with a hint about the right one.
-export function opencodeStatuses(out: string, path: string, models: string[]): { v1: EngineStatus; v2: EngineStatus } {
-  const v = version(out)
-  const major = v ? parseInt(v, 10) : 1
-  const full = listedStatus(path, out, models, 'opencode auth login')
-  const hint = (found: string, use: string): EngineStatus => ({ installed: false, loggedIn: false, account: L(`Encontrei o OpenCode ${found} — use o harness ${use}`, `Found OpenCode ${found} — use the ${use} harness`) })
-  return major >= 2 ? { v1: hint('V2', 'OpenCode V2'), v2: full } : { v1: full, v2: hint('V1', 'OpenCode') }
-}
-
-export async function detectOpenCode(): Promise<{ opencode: EngineStatus; 'opencode-v2': EngineStatus; models: string[] }> {
-  const none: EngineStatus = { installed: false, loggedIn: false }
+export async function detectOpenCode(): Promise<{ status: EngineStatus; models: string[] }> {
   const path = await which('opencode')
-  if (!path) return { opencode: none, 'opencode-v2': none, models: [] }
-  const [v, list] = await Promise.all([run(path, ['--version']), run(path, ['models'], 30_000)])
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  // V2's commands talk to a background service and start it when it isn't running;
+  // --standalone (V2 only) answers from a private server that ends with the command.
+  const list = await run(path, opencodeMajor(version(v.stdout)) >= 2 ? ['models', '--standalone'] : ['models'], 30_000)
   const models = list.stdout.split('\n').map((l) => l.trim()).filter((l) => /^[\w.-]+\/\S+$/.test(l))
-  const { v1, v2 } = opencodeStatuses(v.stdout, path, models)
-  return { opencode: v1, 'opencode-v2': v2, models }
+  return { status: listedStatus(path, v.stdout, models, 'opencode auth login'), models }
 }
 
 // `pi --list-models` prints a table: provider, model, then the limits.
@@ -154,6 +146,6 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
 }
 
 export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {
-  const [claude, codex, oc, pi] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi()])
-  return { engines: { claude, codex, opencode: oc.opencode, 'opencode-v2': oc['opencode-v2'], pi: pi.status }, listed: { opencode: oc.models, 'opencode-v2': oc.models, pi: pi.models } }
+  const [claude, codex, opencode, pi] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi()])
+  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status }, listed: { opencode: opencode.models, pi: pi.models } }
 }
