@@ -1,0 +1,74 @@
+# The Windows installer: a per-user NSIS .exe for x64, built on Windows and not
+# code-signed (install.ps1 installs it without a SmartScreen warning). The Mac build
+# creates the release (scripts/release.sh); once it's published, this attaches the
+# installer, its blockmap and the update feed (latest.yml) to the same release. A pull
+# request that touches the packaging builds it too, without publishing anything.
+name: Windows
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the Windows files to (e.g. v0.2.0)
+        required: true
+  pull_request:
+    paths:
+      - package.json
+      - package-lock.json
+      - build/**
+      - install.ps1
+      - .github/workflows/windows.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: x64
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Build the installer
+        run: npx electron-builder --win nsis --x64 --publish never --config.directories.output=dist-win
+      - run: ls -la dist-win && cat dist-win/latest.yml
+      # Installs it the way people will (install.ps1 says what went wrong, but never fails
+      # the PowerShell it runs in: its output tells).
+      - name: Install with install.ps1
+        shell: pwsh
+        run: |
+          $env:TUCANO_EXE = (Resolve-Path dist-win/tucano-win-x64.exe).Path
+          $out = ./install.ps1 *>&1 | Out-String
+          $out
+          if ($out -notmatch 'Installed in (.+Tucano\.exe)') { throw 'install.ps1 failed' }
+          if (-not (Test-Path $Matches[1].Trim())) { throw "No $($Matches[1])" }
+      - name: The version is the release's
+        if: env.TAG != ''
+        run: test "v$(node -p "require('./package.json').version")" = "$TAG"
+      - name: Attach to the release
+        if: env.TAG != ''
+        run: gh release upload "$TAG" dist-win/tucano-win-x64.exe dist-win/tucano-win-x64.exe.blockmap dist-win/latest.yml --clobber
+      - name: Keep the files of a test build
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: tucano-win-x64
+          path: |
+            dist-win/tucano-win-x64.exe*
+            dist-win/latest.yml
+          retention-days: 3

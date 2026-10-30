@@ -2,7 +2,7 @@
 
 Tucano was built for macOS. This document covers running it on Windows: what you need, how to run and package it, how it behaves differently from the Mac, and **every change** made to get there, file by file.
 
-Status: **runs on Windows 10/11 (x64)**, in development (`npm run dev`) and as a packaged app (`npm run dist:win`). Typecheck and the full test suite pass on Windows, including the Docker tests. A real agent turn through Claude Code works end to end. The Windows build is **not code-signed**.
+Status: **runs on Windows 10/11 (x64)**, in development (`npm run dev`) and as an installed app, from each release (see [Installing](#installing)). Typecheck and the full test suite pass on Windows, including the Docker tests, and run on Windows for every pull request. A real agent turn through Claude Code works end to end. The Windows build is **not code-signed**.
 
 ## What you need
 
@@ -14,6 +14,26 @@ Status: **runs on Windows 10/11 (x64)**, in development (`npm run dev`) and as a
 | At least one harness, signed in | Claude Code is the quickest: `irm https://claude.ai/install.ps1 \| iex`, then `claude auth login`. Codex, OpenCode and Pi install with npm (`npm install -g @openai/codex`, `npm install -g opencode-ai`, `npm install -g @earendil-works/pi-coding-agent`) |
 | Optional: [Docker Desktop](https://www.docker.com/products/docker-desktop/) | For the isolated Linux computer. The first use pulls `node:22-bookworm` |
 | Optional: Google Chrome | For an agent's browser; it is found in `Program Files`, `Program Files (x86)` or `%LOCALAPPDATA%` |
+
+## Installing
+
+```powershell
+irm https://github.com/eduwxyz/tucano/releases/latest/download/install.ps1 | iex
+```
+
+`install.ps1` downloads the release's `tucano-win-x64.exe` and runs it silently (`/S`): a one-click NSIS installer that puts Tucano in `%LOCALAPPDATA%\Programs\tucano`, for the current user, with no admin rights, and lists it in **Installed apps**. Then it opens the app. An open Tucano is asked to quit first (`Tucano.exe --quit`, which quits it the way its tray menu does); data in `%APPDATA%\Tucano` is never touched, and uninstalling leaves it too.
+
+The installer isn't code-signed, and that's a choice for now. A file downloaded by a browser carries the "from the internet" mark (Mark of the Web), and SmartScreen warns before an unsigned one runs (**More info › Run anyway**), once per version. A file PowerShell downloads doesn't carry it, so the command above never shows the warning. Company PCs may block unsigned apps altogether, by policy.
+
+`install.ps1` is ASCII only: Windows PowerShell 5.1 reads a download with no charset (GitHub serves release files as `application/octet-stream`) as Latin-1, so the Portuguese messages are written with `\u` escapes. Everything runs inside a script block that catches its own errors, since `exit` would close the window `iex` runs in. `TUCANO_EXE` (a URL or a file) installs another build, for testing, and then doesn't open it.
+
+### Updates
+
+Each release carries `latest.yml`, the Windows update feed, next to the installer and its `.blockmap`. The installed app reads it (`src/main/updates.ts`), downloads a new version in the background and shows **Restart**; restarting runs the installer silently and opens the new version (`quitAndInstall(true, true)`). Without a restart, it goes in the next time the app quits. electron-updater checks the installer's signature only when the app was signed (`publisherName`), so an unsigned build updates as a signed one would, and the download carries no Mark of the Web.
+
+### How a release gets the Windows files
+
+`scripts/release.sh` (on the Mac) creates the release with the Mac files, `install.sh` and `install.ps1`. Publishing it starts `.github/workflows/windows.yml` on `windows-latest`, which builds the installer, installs it with `install.ps1` as a check, and attaches `tucano-win-x64.exe`, its blockmap and `latest.yml` to the release, a few minutes after it's out. `workflow_dispatch` with a tag does the same for an existing release. A pull request that touches the packaging or `install.ps1` runs the build and the install check without publishing.
 
 ## Running it
 
@@ -35,7 +55,7 @@ npm run dev
 npm run dist:win
 ```
 
-This builds `dist\tucano-win-x64.exe`, a one-click per-user NSIS installer, with no admin rights needed. `npx electron-builder --win --dir --x64` builds just the unpacked app, in `dist\win-unpacked\Tucano.exe`. Neither is code-signed, so SmartScreen warns on first open. `npm run dist`, `npm run install-app`, `npm run release` and `install.sh` remain macOS-only (Apple signing, notarization, `/Applications`).
+This builds `dist\tucano-win-x64.exe`, the same one-click per-user installer the releases carry. `npx electron-builder --win --dir --x64` builds just the unpacked app, in `dist\win-unpacked\Tucano.exe`. `$env:TUCANO_EXE = 'dist\tucano-win-x64.exe'; .\install.ps1` installs a local build the way people will. `npm run dist`, `npm run install-app` and `npm run release` remain macOS-only (Apple signing, notarization, `/Applications`); releases get the Windows files from GitHub Actions (above).
 
 ## How it behaves differently from the Mac
 
@@ -145,8 +165,9 @@ And on macOS, to check nothing changed there: the same branch on GitHub Actions'
 
 ## Known limitations
 
-- **Not code-signed.** SmartScreen warns on the first open of the installer.
+- **Not code-signed.** The installer opened from a browser download gets a SmartScreen warning, once per version; `install.ps1` and updates don't. Company PCs may block it by policy.
+- **x64 only.** Windows 11 on ARM runs it under emulation.
 - **Two macOS-only dialogs** in `src/main/index.ts` (⌘Q, the macOS Keychain) still name the Mac: they belong to the agent-desk migration, which never runs on Windows.
 - **Without Git for Windows**, agents on *This PC* get `cmd.exe`, and the model is told so. Claude Code itself needs Git Bash on Windows anyway.
 - **WSL isn't used.** Agents' commands on this PC run in Git Bash, not in a WSL distribution. The isolated Linux computer is Docker's.
-- **macOS-only scripts:** `install.sh`, `scripts/dist.sh`, `scripts/install-app.sh` and `scripts/release.sh` stay as they were.
+- **macOS-only scripts:** `scripts/dist.sh`, `scripts/install-app.sh` and `scripts/release.sh`. `install.sh` covers macOS and Linux; on Windows it points to `install.ps1`.

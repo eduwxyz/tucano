@@ -11,7 +11,7 @@ Eles fazem o trabalho. O que mexe no mundo espera o seu sim.
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-141210)](LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-chip%20Apple-141210?logo=apple)](#instalar) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#instalar)
+[![macOS](https://img.shields.io/badge/macOS-chip%20Apple-141210?logo=apple)](#instalar) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#instalar) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#instalar)
 [![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
 
 [English](README.md) · **Português** · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Novidades](CHANGELOG.md)
@@ -92,7 +92,7 @@ Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra
 
 ## Instalar
 
-**Você precisa** de um Mac com chip Apple (M1 em diante; testado no macOS 26) ou de um PC com Linux (x64 ou ARM64; testado no Ubuntu com KDE e Xfce), e de pelo menos um harness instalado e logado. Opcional: o Docker, pra dar um computador Linux aos agentes ([Docker Desktop](https://www.docker.com/products/docker-desktop/) no Mac; Docker Engine ou Docker Desktop no Linux), e o Google Chrome (ou o Chromium, no Linux), pro navegador deles (sem ele, o app usa o navegador embutido).
+**Você precisa** de um Mac com chip Apple (M1 em diante; testado no macOS 26) de um PC com Linux (x64 ou ARM64; testado no Ubuntu com KDE e Xfce) ou de um PC com Windows 10 ou 11 (x64), e de pelo menos um harness instalado e logado. No Windows, também do [Git for Windows](https://git-scm.com/download/win): o Git Bash dele roda os comandos dos agentes no seu PC, e o Claude Code também precisa dele lá. Opcional: o Docker, pra dar um computador Linux aos agentes ([Docker Desktop](https://www.docker.com/products/docker-desktop/) no Mac ou no Windows; Docker Engine ou Docker Desktop no Linux), e o Google Chrome (ou o Chromium, no Linux), pro navegador deles (sem ele, o app usa o navegador embutido).
 
 **1. Instale um harness.** O Claude Code é o mais rápido:
 
@@ -101,7 +101,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 claude auth login
 ```
 
-Prefere o Codex? `npm install -g @openai/codex`. O login é feito dentro do Tucano.
+No Windows, no PowerShell: `irm https://claude.ai/install.ps1 | iex` e depois `claude auth login`. Prefere o Codex? `npm install -g @openai/codex`. O login é feito dentro do Tucano.
 
 **2. Instale o Tucano.**
 
@@ -109,6 +109,13 @@ Prefere o Codex? `npm install -g @openai/codex`. O login é feito dentro do Tuca
 - **No Ubuntu, no Debian e na família deles** (Mint, Pop!_OS…): [baixe o .deb](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-amd64.deb) e abra, ou rode `sudo apt install ./tucano-linux-amd64.deb`.
 - **Nas outras distribuições Linux:** [baixe o AppImage](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-x86_64.AppImage), torne executável (`chmod +x`) e abra. Ele precisa do FUSE, que a maioria dos sistemas tem. No Ubuntu 24.04 em diante, prefira o .deb: ele instala o perfil do AppArmor que apps Electron precisam lá.
 - No Linux ARM64, use os arquivos que terminam em `-arm64` (`tucano-linux-arm64.deb`, `tucano-linux-arm64.AppImage`).
+- **No Windows:** cole isto no PowerShell. Ele instala o Tucano pro seu usuário, sem pedir administrador, e abre:
+
+  ```powershell
+  irm https://github.com/eduwxyz/tucano/releases/latest/download/install.ps1 | iex
+  ```
+
+  Ou [baixe o instalador](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-win-x64.exe) e abra. Ele não tem assinatura de código, então na primeira vez o Windows diz que protegeu o seu computador: clique em **Mais informações** e depois em **Executar assim mesmo**. O comando do PowerShell não passa por esse aviso, porque o Windows não marca como vindo da internet um arquivo que o PowerShell baixou.
 
 Ou pelo Terminal, no Mac ou no Linux:
 
@@ -116,13 +123,13 @@ Ou pelo Terminal, no Mac ou no Linux:
 curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh
 ```
 
-Ele baixa a última versão e abre. No Mac, coloca o Tucano em **Aplicativos**; no Linux, instala o .deb pelo apt (pede a sua senha) ou, sem apt, o AppImage em `~/.local/bin`, com um atalho no menu de aplicativos.
+Ele baixa a última versão e abre. No Mac, coloca o Tucano em **Aplicativos**; no Linux, instala o .deb pelo apt (pede a sua senha) ou, sem apt, o AppImage em `~/.local/bin`, com um atalho no menu de aplicativos. Rodado no Windows (no Git Bash, por exemplo), ele indica o comando do PowerShell acima.
 
-A partir da 0.1.2, o Tucano se atualiza sozinho: baixa a versão nova em segundo plano e mostra **Reiniciar** na barra lateral quando ela está pronta (ou ela entra na próxima vez que você fechar o app). As versões anteriores se atualizam pelo mesmo download ou comando. No Linux, o AppImage e o .deb também se atualizam sozinhos; o .deb pede a sua senha pra instalar a atualização.
+A partir da 0.1.2, o Tucano se atualiza sozinho: baixa a versão nova em segundo plano e mostra **Reiniciar** na barra lateral quando ela está pronta (ou ela entra na próxima vez que você fechar o app). As versões anteriores se atualizam pelo mesmo download ou comando. No Linux, o AppImage e o .deb também se atualizam sozinhos; o .deb pede a sua senha pra instalar a atualização. No Windows também, sem aviso nenhum.
 
 **3. A primeira abertura é a configuração.** O Tucano fala português e inglês; escolha na primeira tela, ou depois em **Configurações**. Em seguida, em poucos passos: seu nome; quais harnesses os agentes podem usar (cada um com um **Testar agora** que manda uma pergunta de verdade); os modelos que roteiam os canais e cuidam da memória; o que todo agente deve saber sobre você; suas ferramentas (opcional); suas skills (opcional); e o primeiro agente, de um modelo pronto ou do zero. No fim, um canal `#geral` com o seu agente já trabalhando.
 
-Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se ele pode usar as **Chaves**: clique em **Sempre Permitir**. No Linux, ele usa o chaveiro do sistema (GNOME Keyring ou KWallet); se não houver um aberto, o Tucano não guarda senhas e explica como configurar.
+Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se ele pode usar as **Chaves**: clique em **Sempre Permitir**. No Linux, ele usa o chaveiro do sistema (GNOME Keyring ou KWallet); se não houver um aberto, o Tucano não guarda senhas e explica como configurar. No Windows não há nada pra permitir: o Windows protege a chave com o login do seu usuário.
 
 ## No dia a dia
 
@@ -155,7 +162,7 @@ flowchart LR
   CLI --> Model["Sua assinatura<br/>ou gateway da empresa"]
 ```
 
-- **Processo principal** (Electron): a janela, as notificações, os navegadores dos agentes, o cofre do sistema (as Chaves do macOS, o chaveiro do Linux).
+- **Processo principal** (Electron): a janela, as notificações, os navegadores dos agentes, o cofre do sistema (as Chaves do macOS, o chaveiro do Linux, a proteção de dados do Windows).
 - **Núcleo** (um utility process): SQLite, harnesses, respostas, conectores, memória e rotinas. Nenhum trabalho de agente roda na janela.
 - **Cada resposta** abre a CLI do harness isolada da sua configuração pessoal, sem ferramentas embutidas e sem sessão salva. O Tucano monta o contexto a cada turno: o workspace, as instruções do agente, as memórias e skills dele e a conversa recente.
 - **O gateway** é um servidor MCP local e a única fonte de ferramentas da CLI. Cada turno recebe uma URL secreta com só as ferramentas daquele agente; qualquer outra chamada é recusada. As chamadas sensíveis param ali e viram uma aprovação, que roda exatamente a chamada que você viu.
@@ -164,7 +171,7 @@ Mais sobre o modelo de permissões em [SECURITY.md](SECURITY.md).
 
 ## Seus dados
 
-Tudo fica em `~/Library/Application Support/Tucano/` (no Linux, `~/.config/Tucano/`): o banco (`tucano.db`), um backup por dia em `backups/`, a pasta do computador de cada agente e os arquivos que eles mostram. Senhas e tokens dos conectores são criptografados com uma chave das Chaves do macOS (no Linux, do chaveiro do sistema) antes de chegar ao banco.
+Tudo fica em `~/Library/Application Support/Tucano/` (no Linux, `~/.config/Tucano/`; no Windows, `%APPDATA%\Tucano`): o banco (`tucano.db`), um backup por dia em `backups/`, a pasta do computador de cada agente e os arquivos que eles mostram. Senhas e tokens dos conectores são criptografados com uma chave das Chaves do macOS (no Linux, do chaveiro do sistema; no Windows, protegida pelo login do seu usuário) antes de chegar ao banco.
 
 <details>
 <summary>Desinstalar</summary>
@@ -175,6 +182,8 @@ Tudo fica em `~/Library/Application Support/Tucano/` (no Linux, `~/.config/Tucan
 4. Se quiser, apague o item **Tucano Safe Storage** no app Acesso às Chaves.
 
 No Linux: encerre o Tucano pelo ícone da bandeja e rode `sudo apt remove tucano` (ou apague `~/.local/bin/Tucano.AppImage` e `~/.local/share/applications/tucano.desktop`). Os seus dados ficam em `~/.config/Tucano`.
+
+No Windows: encerre o Tucano pelo ícone perto do relógio e desinstale em **Configurações › Aplicativos › Aplicativos instalados**. Os seus dados ficam em `%APPDATA%\Tucano`; apague essa pasta pra removê-los também.
 </details>
 
 <details>
@@ -204,6 +213,9 @@ O Tucano guarda senhas só no chaveiro do sistema. Instale o `gnome-keyring` (ou
 **O AppImage não abre no Ubuntu 24.04 em diante.**
 O Ubuntu restringe o isolamento que apps Electron usam. Instale o .deb: ele traz o perfil do AppArmor que libera isso.
 
+**"O Windows protegeu o computador" ao abrir o instalador.**
+O instalador não tem assinatura de código, então o SmartScreen ainda não o conhece. Clique em **Mais informações** e depois em **Executar assim mesmo**, ou instale pelo comando do PowerShell, que não recebe o aviso. Num PC da empresa, a TI pode bloquear apps sem assinatura.
+
 **O macOS pede as Chaves depois de atualizar da 0.1.0.**
 A 0.1.0 não era assinada com o certificado da Apple do Tucano; as versões seguintes são, então ele pede só essa vez. Clique em **Sempre Permitir**.
 </details>
@@ -230,7 +242,7 @@ Precisa do Node 24+ e de um harness logado. O `npm run dev` guarda os dados em `
 | `node scripts/screens.mjs <pasta>` | Abre o build com Playwright num banco temporário e salva screenshots |
 | `npm run dist:win` | No Windows: gera o instalador, `dist/tucano-win-x64.exe` (sem assinatura de código) |
 
-**No Windows?** O Tucano roda no Windows 10/11 também, em desenvolvimento e como instalador. Você vai querer também o Git for Windows, cujo Git Bash roda os comandos dos agentes no seu PC. O [docs/windows.md](docs/windows.md) (em inglês) diz o que precisa, o que muda em relação ao Mac e todas as mudanças feitas pra isso.
+**No Windows?** O desenvolvimento também funciona lá, com o Git for Windows. O [docs/windows.md](docs/windows.md) (em inglês) diz o que precisa, o que muda em relação ao Mac e todas as mudanças feitas pra isso.
 
 Leia o [CONTRIBUTING.md](CONTRIBUTING.md) antes de abrir um pull request (o código, os comentários e os commits são em inglês). O documento de design original está em [docs/spec-mvp.md](docs/spec-mvp.md).
 

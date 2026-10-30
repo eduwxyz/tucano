@@ -1,7 +1,8 @@
 // Updates (the installed app only): Tucano looks for a newer release on GitHub,
 // downloads it in the background and says so; the person restarts when it suits
-// them, or it goes in the next time the app quits. The release carries
-// latest-mac.yml next to the .zip (scripts/release.sh), which is what's read here.
+// them, or it goes in the next time the app quits. The release carries each system's
+// feed: latest-mac.yml next to the .zip (scripts/release.sh), latest-linux*.yml and
+// latest.yml, for Windows, from the workflows that build those installers.
 import { app } from 'electron'
 import electronUpdater from 'electron-updater'
 import type { UpdateState } from '../shared/types'
@@ -49,7 +50,10 @@ export class Updates {
   }
 
   install(): void {
-    if (this.state.status === 'ready') this.updater.quitAndInstall()
+    if (this.state.status !== 'ready') return
+    // On Windows the installer runs without its window, then opens the app again.
+    if (process.platform === 'win32') this.updater.quitAndInstall(true, true)
+    else this.updater.quitAndInstall()
   }
 
   private set(patch: Partial<UpdateState>): void {

@@ -9,6 +9,8 @@
 # On Linux: the .deb with apt (Ubuntu, Debian and their family), else the AppImage
 # in ~/.local/bin with an entry in the applications menu.
 #
+# On Windows: install.ps1, in PowerShell (this says so).
+#
 # For testing a build before it is released (then the app doesn't open):
 # TUCANO_ZIP (Mac), TUCANO_DEB or TUCANO_APPIMAGE (Linux; a URL or a local file)
 # and TUCANO_DEST, another folder. TUCANO_APPIMAGE=1 picks the AppImage over the .deb.
@@ -136,5 +138,6 @@ EOF
 case "$(uname -s)" in
   Darwin) install_mac ;;
   Linux) install_linux ;;
-  *) fail "O Tucano roda no macOS e no Linux. No Windows, ainda não." "Tucano runs on macOS and Linux. Not on Windows yet." ;;
+  MINGW* | MSYS* | CYGWIN*) fail "No Windows, instale pelo PowerShell: irm $LATEST/install.ps1 | iex" "On Windows, install from PowerShell: irm $LATEST/install.ps1 | iex" ;;
+  *) fail "O Tucano roda no macOS, no Linux e no Windows." "Tucano runs on macOS, Linux and Windows." ;;
 esac

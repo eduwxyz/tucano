@@ -355,11 +355,14 @@ function createWindow(): BrowserWindow {
 
 // One app per data folder: two would both run the same routines. Opening it
 // again (Dock, Spotlight, at login) just brings the window back. A test run
-// with its own data folder is a separate app.
+// with its own data folder is a separate app. `Tucano --quit` (install.ps1, before
+// it replaces the app) asks the open one to quit as its tray menu does, and never
+// opens one itself.
 if (process.env['TUCANO_DATA']) app.setPath('userData', process.env['TUCANO_DATA'])
-const primary = app.requestSingleInstanceLock()
+const quitOnly = process.argv.includes('--quit')
+const primary = app.requestSingleInstanceLock() && !quitOnly
 if (!primary) app.quit()
-app.on('second-instance', () => showWindow())
+app.on('second-instance', (_e, argv) => (argv.includes('--quit') ? app.quit() : showWindow()))
 
 // The app's own menu, in the app's language (Electron's would be in English).
 function setMenu(): void {

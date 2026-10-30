@@ -24,7 +24,7 @@ $SECTION
 
 ## Install
 
-You need a Mac with Apple silicon (M1 or later) or a Linux PC (x64 or ARM64), and at least one of [Claude Code](https://code.claude.com) or [Codex](https://github.com/openai/codex), installed and signed in.
+You need a Mac with Apple silicon (M1 or later), a Linux PC (x64 or ARM64) or a Windows 10/11 PC (x64), and at least one of [Claude Code](https://code.claude.com) or [Codex](https://github.com/openai/codex), installed and signed in.
 
 **On a Mac.** Download \`tucano-mac-arm64.dmg\` below, open it and drag Tucano into Applications.
 
@@ -35,6 +35,14 @@ You need a Mac with Apple silicon (M1 or later) or a Linux PC (x64 or ARM64), an
 \`\`\`bash
 curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh
 \`\`\`
+
+**On Windows,** in PowerShell. Installs Tucano for your user, with no admin rights, and opens it:
+
+\`\`\`powershell
+irm https://github.com/eduwxyz/tucano/releases/latest/download/install.ps1 | iex
+\`\`\`
+
+Or download \`tucano-win-x64.exe\` below. It isn't code-signed: if Windows says it protected your PC, click **More info**, then **Run anyway**. The PowerShell command doesn't get that warning. The Windows file arrives a few minutes after the release, with the Linux ones.
 
 From 0.1.2 on, Tucano updates itself. Every version is in [CHANGELOG.md](https://github.com/eduwxyz/tucano/blob/main/CHANGELOG.md).
 NOTES_EOF
@@ -81,5 +89,5 @@ ls -lh "$OUT"/tucano-mac-arm64.*
 
 [ "$1" = "--no-publish" ] && exit 0
 git push origin HEAD
-gh release create "$TAG" "$OUT/tucano-mac-arm64.dmg" "$OUT/tucano-mac-arm64.zip" "$OUT/tucano-mac-arm64.zip.blockmap" "$OUT/latest-mac.yml" install.sh \
+gh release create "$TAG" "$OUT/tucano-mac-arm64.dmg" "$OUT/tucano-mac-arm64.zip" "$OUT/tucano-mac-arm64.zip.blockmap" "$OUT/latest-mac.yml" install.sh install.ps1 \
   --target "$(git rev-parse HEAD)" --title "Tucano $VERSION" --notes-file "$NOTES"

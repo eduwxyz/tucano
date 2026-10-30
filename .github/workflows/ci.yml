@@ -1,5 +1,5 @@
 # Every pull request and every push to main: typecheck, tests and the app's
-# build, on macOS and on Linux, so a change can't break one of them unnoticed.
+# build, on macOS, Linux and Windows, so a change can't break one of them unnoticed.
 name: CI
 
 on:
@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
       # The tests and the build don't run Electron itself.
