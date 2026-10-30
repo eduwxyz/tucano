@@ -6,7 +6,7 @@ Thanks for wanting to help. Tucano is a small codebase on purpose: an Electron a
 
 You need macOS on Apple silicon or Linux (x64 or ARM64), Node 24 or later, and at least one harness signed in (`claude auth login` is the quickest). Windows 10/11 works too, with Git for Windows installed: see [docs/windows.md](docs/windows.md).
 
-For Arch Linux or CachyOS with Niri, see the [validation guide (Portuguese)](docs/arch-linux.md), including the checks still needed for desktop integration.
+For Arch Linux or CachyOS with Niri, see the [validation guide](docs/arch-linux.md), including the checks still needed for desktop integration.
 
 ```bash
 git clone https://github.com/eduwxyz/tucano.git
