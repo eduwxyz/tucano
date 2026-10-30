@@ -2,6 +2,8 @@
 // a session of its own, so its logins stay apart from everything else and last
 // between conversations. The core decides what to do; this file only drives the
 // page and reports back. "Assumir" shows the same window so I can log in.
+// One window per (agent, conversation) — the same person with two tabs, one
+// per thread — while the logins stay in the agent's session.
 import { BrowserWindow, session, type WebContents } from 'electron'
 import { POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
 import type { BrowserOp, BrowserReply as Reply } from '../shared/types'
@@ -25,12 +27,14 @@ const KEYS: Record<string, { code: string; char?: string }> = {
   pageup: { code: 'PageUp' }
 }
 
+const keyOf = (agentId: string, conversationId: string): string => `${agentId}::${conversationId}`
+
 export class Browsers {
-  private wins = new Map<string, BrowserWindow>()
+  private wins = new Map<string, BrowserWindow>() // by view key: one window per (agent, conversation)
   private reopening = new Map<string, Promise<void>>()
   private quitting = false
 
-  constructor(private onShown: (agentId: string, shown: boolean) => void) {}
+  constructor(private onShown: (key: string, shown: boolean) => void) {}
 
   quit(): void {
     this.quitting = true
@@ -42,8 +46,8 @@ export class Browsers {
     return `persist:navegador-${agentId}`
   }
 
-  private win(agentId: string): BrowserWindow {
-    const existing = this.wins.get(agentId)
+  private win(agentId: string, key: string): BrowserWindow {
+    const existing = this.wins.get(key)
     if (existing && !existing.isDestroyed()) return existing
     const ses = session.fromPartition(this.partition(agentId))
     // A plain Chrome, as far as sites can tell: some refuse logins in "embedded" browsers.
@@ -69,41 +73,40 @@ export class Browsers {
       if (this.quitting) return
       e.preventDefault()
       win.hide()
-      this.fresh(agentId, win)
+      this.fresh(key, win)
     })
     win.on('hide', () => {
-      this.onShown(agentId, false)
-      setImmediate(() => this.fresh(agentId, win))
+      this.onShown(key, false)
+      setImmediate(() => this.fresh(key, win))
     })
-    win.on('show', () => this.onShown(agentId, true))
-    this.wins.set(agentId, win)
+    win.on('show', () => this.onShown(key, true))
+    this.wins.set(key, win)
     return win
   }
 
   // A window that was shown and hidden again stops painting (captures fail or
   // hang), so handing it back swaps it for a new hidden one on the same page.
   // The logins live in the session, so they stay.
-  private fresh(agentId: string, old: BrowserWindow): void {
-    if (this.quitting || this.wins.get(agentId) !== old) return
+  private fresh(key: string, old: BrowserWindow): void {
+    if (this.quitting || this.wins.get(key) !== old) return
     const url = old.webContents.getURL()
-    this.wins.delete(agentId) // from now on every action goes to the new window
+    this.wins.delete(key) // from now on every action goes to the new window
     setImmediate(() => old.destroy())
-    this.onShown(agentId, false)
-    const wc = this.win(agentId).webContents
+    this.onShown(key, false)
+    const wc = this.win(key.split('::')[0]!, key).webContents
     const p = /^https?:/.test(url) ? wc.loadURL(url).catch(() => {}).then(() => this.settle(wc)) : Promise.resolve()
-    this.reopening.set(agentId, p)
-    void p.finally(() => this.reopening.get(agentId) === p && this.reopening.delete(agentId))
+    this.reopening.set(key, p)
+    void p.finally(() => this.reopening.get(key) === p && this.reopening.delete(key))
   }
 
-  async run(agentId: string, op: BrowserOp, args: Record<string, unknown> = {}): Promise<Reply> {
-    await this.reopening.get(agentId)
+  async run(agentId: string, conversationId: string, op: BrowserOp, args: Record<string, unknown> = {}): Promise<Reply> {
+    const key = keyOf(agentId, conversationId)
     if (op === 'close' || op === 'clear') {
-      this.wins.get(agentId)?.destroy()
-      this.wins.delete(agentId)
+      for (const [k, w] of [...this.wins]) if (k.split('::')[0] === agentId) (this.wins.delete(k), w.destroy())
       if (op === 'clear') await session.fromPartition(this.partition(agentId)).clearData()
       return { url: '', title: '' }
     }
-    const win = this.win(agentId)
+    const win = this.win(agentId, key)
     const wc = win.webContents
     const iso = <T>(code: string): Promise<T> => wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }]) as Promise<T>
     const here = (): Reply => ({ url: wc.getURL(), title: wc.getTitle(), shown: win.isVisible() })
@@ -120,7 +123,7 @@ export class Browsers {
         return here()
       case 'hide':
         win.hide()
-        this.fresh(agentId, win)
+        this.fresh(key, win)
         return { url: wc.getURL(), title: wc.getTitle(), shown: false }
       case 'open': {
         const url = String(args['url'] ?? '')
@@ -166,9 +169,9 @@ export class Browsers {
         return { ...here(), point: point(at), frame: await this.frame(win) }
       }
       case 'key': {
-        const key = String(args['key'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
-        if (!KEYS[key]) throw new Error(`Tecla desconhecida. Use uma destas: ${Object.keys(KEYS).join(', ')}.`)
-        this.key(wc, key)
+        const key2 = String(args['key'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
+        if (!KEYS[key2]) throw new Error(`Tecla desconhecida. Use uma destas: ${Object.keys(KEYS).join(', ')}.`)
+        this.key(wc, key2)
         await this.settle(wc)
         return { ...here(), frame: await this.frame(win) }
       }

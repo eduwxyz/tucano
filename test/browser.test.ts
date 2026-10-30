@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, BrowserElement, BrowserReply, Settings } from '../src/shared/types'
-import { bareTarget, Browser, browserStep, describePage, findByText, risky, type BrowserHost } from '../src/core/browser'
+import { bareTarget, Browser, browserStep, describePage, findByText, risky, viewKey, type BrowserHost } from '../src/core/browser'
 import { systemPrompt } from '../src/core/context'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
@@ -38,7 +38,7 @@ const ELEMENTS = [el(1, 'campo', 'Destino', { value: '' }), el(2, 'botão', 'Bus
 function fakeHost(): { host: BrowserHost; calls: { op: string; args?: Record<string, unknown> }[]; page: { url: string; title: string; shown: boolean } } {
   const page = { url: '', title: '', shown: false }
   const calls: { op: string; args?: Record<string, unknown> }[] = []
-  const host: BrowserHost = async (_agentId, op, args) => {
+  const host: BrowserHost = async (_agentId, _conversationId, op, args) => {
     calls.push({ op, args })
     const here: BrowserReply = { url: page.url, title: page.title, frame: Buffer.from('jpeg').toString('base64'), w: 1280, h: 800, shown: page.shown }
     if (op === 'open') Object.assign(page, { url: String(args?.['url']), title: 'Studio' })
@@ -51,6 +51,7 @@ function fakeHost(): { host: BrowserHost; calls: { op: string; args?: Record<str
 
 const text = (r: { content: unknown[] }): string => (r.content.find((c) => (c as { type: string }).type === 'text') as { text: string }).text
 const ctx = { conversationId: 'c1', messageId: 'm1' }
+const key = viewKey('lia-0001', 'c1')
 
 describe('finding what the agent names', () => {
   it('takes a number, the exact text, or the only text on screen that contains it', () => {
@@ -106,7 +107,7 @@ describe("an agent's browser", () => {
     expect(fake.calls[0]).toEqual({ op: 'open', args: { url: 'https://studio.youtube.com' } })
     expect(text(r.result)).toContain('Página: Studio')
     expect(text(r.result)).toContain('#2 botão "Buscar"')
-    const view = browser.view('lia-0001')!
+    const view = browser.view('lia-0001', 'c1')!
     expect(view).toMatchObject({ url: 'https://studio.youtube.com', title: 'Studio', shown: false })
     expect(view.frame).toMatch(/^data:image\/jpeg;base64,/)
     expect(view.log.at(-1)).toMatchObject({ label: 'Abriu', detail: 'https://studio.youtube.com' })
@@ -118,9 +119,9 @@ describe("an agent's browser", () => {
     const host = fake.host
     let during: unknown
     browser = new Browser({
-      host: async (id, op, args) => {
-        if (op === 'click') during = browser.view(id)?.doing
-        const r = await host(id, op, args)
+      host: async (id, conv, op, args) => {
+        if (op === 'click') during = browser.view(id, conv)?.doing
+        const r = await host(id, conv, op, args)
         return op === 'click' ? { ...r, point: { x: 0.25, y: 0.5 } } : r
       },
       db,
@@ -128,17 +129,17 @@ describe("an agent's browser", () => {
       emit: (e) => events.push(e),
       me: () => 'Edu'
     })
-    expect(browser.frame('lia-0001', 'x')).toBe(false) // nothing open yet
+    expect(browser.frame(key, 'x')).toBe(false) // nothing open yet
     await browser.call(lia(), 'navegador_abrir', { url: 'https://airbnb.com' }, ctx)
     const out = await browser.call(lia(), 'navegador_clicar', { alvo: '#2' }, ctx)
     expect(during).toEqual({ label: 'Clicando em', detail: 'Buscar' }) // by name, even when it said a number
     expect(out.detail).toBe('Buscar')
-    const view = browser.view('lia-0001')!
+    const view = browser.view('lia-0001', 'c1')!
     expect(view.doing).toBeUndefined()
     expect(view.cursor).toMatchObject({ x: 0.25, y: 0.5 })
-    expect(browser.frame('lia-0001', Buffer.from('novo').toString('base64'))).toBe(true) // just worked: live
+    expect(browser.frame(key, Buffer.from('novo').toString('base64'))).toBe(true) // just worked: live
     await new Promise((r) => setTimeout(r, 150))
-    expect(browser.view('lia-0001')!.frame).toBe(`data:image/jpeg;base64,${Buffer.from('novo').toString('base64')}`)
+    expect(browser.view('lia-0001', 'c1')!.frame).toBe(`data:image/jpeg;base64,${Buffer.from('novo').toString('base64')}`)
   })
 
   it('clicks and types by text, without any model', async () => {
@@ -159,11 +160,11 @@ describe("an agent's browser", () => {
     expect(existsSync(join(dataDir, 'artifacts', r.artifact!.id, r.artifact!.name))).toBe(true)
     expect(fake.calls.some((c) => c.op === 'click')).toBe(false)
 
-    expect(await browser.approved(lia(), r.approval!.args)).toMatchObject({ ok: true })
+    expect(await browser.approved(lia(), r.approval!.args, 'c1')).toMatchObject({ ok: true })
     expect(fake.calls.filter((c) => c.op === 'click').map((c) => c.args)).toEqual([{ ref: 3 }])
 
     fake.page.url = 'https://studio.youtube.com/outro'
-    const moved = await browser.approved(lia(), r.approval!.args)
+    const moved = await browser.approved(lia(), r.approval!.args, 'c1')
     expect(moved.ok).toBe(false)
     expect(moved.text).toContain('A página mudou')
     expect(fake.calls.filter((c) => c.op === 'click')).toHaveLength(1)
@@ -183,15 +184,15 @@ describe("an agent's browser", () => {
   it('while I drive it (Assumir), the agent only reads and waits', async () => {
     await browser.call(lia(), 'navegador_abrir', { url: 'https://studio.youtube.com' }, ctx)
     fake.page.shown = true // the main process shows the window, then tells the core
-    browser.setShown('lia-0001', true)
-    expect(browser.view('lia-0001')?.log.at(-1)?.label).toBe('Edu assumiu')
+    browser.setShown(key, true)
+    expect(browser.view('lia-0001', 'c1')?.log.at(-1)?.label).toBe('Edu assumiu')
     const r = await browser.call(lia(), 'navegador_clicar', { alvo: 'Buscar' }, ctx)
     expect(r.result.isError).toBe(true)
     expect(text(r.result)).toContain('Edu está usando o seu navegador')
     expect((await browser.call(lia(), 'navegador_ler', {}, ctx)).result.isError).toBeFalsy()
     fake.page.shown = false
-    browser.setShown('lia-0001', false)
-    expect(browser.view('lia-0001')?.log.at(-1)?.label).toBe('Edu devolveu')
+    browser.setShown(key, false)
+    expect(browser.view('lia-0001', 'c1')?.log.at(-1)?.label).toBe('Edu devolveu')
   })
 
   it('with Jev on, what the text does not find goes to Jev: first the elements, then the screen', async () => {

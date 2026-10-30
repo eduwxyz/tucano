@@ -17,7 +17,14 @@ import { jevBox, jevElement } from './jev'
 export const NAVEGADOR = 'navegador' // the "connector" of browser click approvals
 export const CLICAR = 'navegador_clicar'
 
-export type BrowserHost = (agentId: string, op: BrowserOp, args?: Record<string, unknown>) => Promise<BrowserReply>
+// A browser tab belongs to a thread: one per (agent, conversation), so two
+// conversations of the same agent drive two tabs of the same Chrome — same
+// logins (the profile is the agent's), separate pages.
+export const viewKey = (agentId: string, conversationId: string): string => `${agentId}::${conversationId}`
+export const agentOf = (key: string): string => key.split('::')[0]!
+export const convOf = (key: string): string => key.split('::')[1] ?? ''
+
+export type BrowserHost = (agentId: string, conversationId: string, op: BrowserOp, args?: Record<string, unknown>) => Promise<BrowserReply>
 
 const KEYS = ['enter', 'escape', 'tab', 'backspace', 'space', 'arrowdown', 'arrowup', 'arrowleft', 'arrowright', 'pagedown', 'pageup']
 // The tools, in the app's language.
@@ -217,7 +224,7 @@ export interface BrowserDeps {
   emit: (e: CoreEvent) => void
   me: () => string
   jev?: { key(): Promise<string | undefined>; on(): boolean; fetch?: typeof fetch } // finds what to click, when chosen
-  onHandback?: (agentId: string) => void // the user handed the browser back; the runner resumes a pending ask_user
+  onHandback?: (agentId: string, conversationId: string) => void // the user handed this thread's browser back; the runner resumes a pending ask_user
 }
 
 type Ctx = { conversationId: string; messageId: string }
@@ -227,7 +234,7 @@ const LOG = 14
 const LIVE_MS = 20_000 // frames stream at full speed while it works, and a little after
 
 export class Browser {
-  private views = new Map<string, BrowserView>()
+  private views = new Map<string, BrowserView>() // by view key: one tab per (agent, conversation)
   private liveUntil = new Map<string, number>()
   private frames = new Map<string, { next?: string; timer?: ReturnType<typeof setTimeout> }>()
 
@@ -237,21 +244,22 @@ export class Browser {
     return [...this.views.values()]
   }
 
-  view(agentId: string): BrowserView | undefined {
-    return this.views.get(agentId)
+  view(agentId: string, conversationId?: string): BrowserView | undefined {
+    if (!conversationId) return [...this.views.values()].filter((v) => v.agentId === agentId).sort((a, b) => b.at - a.at)[0]
+    return this.views.get(viewKey(agentId, conversationId))
   }
 
-  private update(agentId: string, patch: Partial<BrowserView>, log?: { label: string; detail: string }): void {
-    const prev = this.views.get(agentId) ?? { agentId, url: '', title: '', shown: false, log: [], at: 0 }
+  private update(key: string, patch: Partial<BrowserView>, log?: { label: string; detail: string }): void {
+    const prev = this.views.get(key) ?? { agentId: agentOf(key), conversationId: convOf(key), url: '', title: '', shown: false, log: [], at: 0 }
     const next: BrowserView = { ...prev, ...patch, at: Date.now() }
     if (log) next.log = [...prev.log, { ...log, at: Date.now() }].slice(-LOG)
-    this.views.set(agentId, next)
+    this.views.set(key, next)
     this.deps.emit({ type: 'browser', view: next })
   }
 
-  private seen(agentId: string, r: BrowserReply, log?: { label: string; detail: string }): void {
+  private seen(key: string, r: BrowserReply, log?: { label: string; detail: string }): void {
     this.update(
-      agentId,
+      key,
       {
         url: r.url,
         title: r.title,
@@ -263,51 +271,53 @@ export class Browser {
     )
   }
 
-  private live(agentId: string, ms = LIVE_MS): void {
-    this.liveUntil.set(agentId, Date.now() + ms)
+  private live(key: string, ms = LIVE_MS): void {
+    this.liveUntil.set(key, Date.now() + ms)
   }
 
   // A frame of the screen, streamed by Chrome while the page changes. Only while
   // it works or I drive: says Chrome may send the next one right away.
-  frame(agentId: string, jpeg: string): boolean {
-    const view = this.views.get(agentId)
-    if (!view?.url || !(view.shown || view.doing || (this.liveUntil.get(agentId) ?? 0) > Date.now())) return false
-    const f = this.frames.get(agentId) ?? {}
-    this.frames.set(agentId, f)
+  frame(key: string, jpeg: string): boolean {
+    const view = this.views.get(key)
+    if (!view?.url || !(view.shown || view.doing || (this.liveUntil.get(key) ?? 0) > Date.now())) return false
+    const f = this.frames.get(key) ?? {}
+    this.frames.set(key, f)
     f.next = jpeg
     if (!f.timer)
       f.timer = setTimeout(() => {
         f.timer = undefined
-        if (f.next && this.views.get(agentId)?.url) this.update(agentId, { frame: `data:image/jpeg;base64,${f.next}` })
+        if (f.next && this.views.get(key)?.url) this.update(key, { frame: `data:image/jpeg;base64,${f.next}` })
         f.next = undefined
       }, 100)
     return true
   }
 
   // From the main process: I opened the window ("Assumir") or closed it.
-  setShown(agentId: string, shown: boolean): void {
-    if (this.views.get(agentId)?.shown === shown) return
-    this.live(agentId)
-    this.update(agentId, { shown }, { label: shown ? L(`${this.deps.me()} assumiu`, `${this.deps.me()} took over`) : L(`${this.deps.me()} devolveu`, `${this.deps.me()} handed back`), detail: '' })
+  setShown(key: string, shown: boolean): void {
+    if (this.views.get(key)?.shown === shown) return
+    this.live(key)
+    this.update(key, { shown }, { label: shown ? L(`${this.deps.me()} assumiu`, `${this.deps.me()} took over`) : L(`${this.deps.me()} devolveu`, `${this.deps.me()} handed back`), detail: '' })
     if (!shown) {
-      void this.deps.host(agentId, 'frame').then((r) => this.seen(agentId, r), () => {})
-      this.deps.onHandback?.(agentId)
+      void this.deps.host(agentOf(key), convOf(key), 'frame').then((r) => this.seen(key, r), () => {})
+      this.deps.onHandback?.(agentOf(key), convOf(key))
     }
   }
 
-  async action(agent: Agent, action: 'show' | 'hide' | 'clear'): Promise<void> {
+  async action(agent: Agent, action: 'show' | 'hide' | 'clear', conversationId?: string): Promise<void> {
     if (action === 'clear') {
-      await this.deps.host(agent.id, 'clear')
-      this.views.delete(agent.id)
-      this.deps.emit({ type: 'browser', view: { agentId: agent.id, url: '', title: '', shown: false, log: [], at: Date.now() } })
+      await this.deps.host(agent.id, '', 'clear')
+      for (const key of [...this.views.keys()].filter((k) => agentOf(k) === agent.id)) this.views.delete(key)
+      this.deps.emit({ type: 'browser', view: { agentId: agent.id, conversationId: '', url: '', title: '', shown: false, log: [], at: Date.now() } })
       return
     }
-    const r = await this.deps.host(agent.id, action, { title: L(`Navegador de ${agent.name} · feche a janela pra devolver`, `${agent.name}'s browser · close the window to hand it back`) })
-    this.seen(agent.id, r)
+    // The thread you're looking at; if none was said, the agent's latest tab.
+    const key = viewKey(agent.id, conversationId ?? this.view(agent.id)?.conversationId ?? '')
+    const r = await this.deps.host(agent.id, convOf(key), action, { title: L(`Navegador de ${agent.name} · feche a janela pra devolver`, `${agent.name}'s browser · close the window to hand it back`) })
+    this.seen(key, r)
   }
 
   async close(agentId: string): Promise<void> {
-    await this.deps.host(agentId, 'close').catch(() => {})
+    await this.deps.host(agentId, '', 'close').catch(() => {})
   }
 
   // Where the target is: by number or text, else Jev among the elements, else Jev on the screen.
@@ -340,23 +350,23 @@ export class Browser {
   }
 
   // The page with its elements and, for Jev on the screen, a fresh frame.
-  private async page(agentId: string, withFrame: boolean): Promise<BrowserReply> {
-    const snap = await this.deps.host(agentId, 'snapshot')
+  private async page(key: string, withFrame: boolean): Promise<BrowserReply> {
+    const snap = await this.deps.host(agentOf(key), convOf(key), 'snapshot')
     if (!withFrame) return snap
-    const f = await this.deps.host(agentId, 'frame')
+    const f = await this.deps.host(agentOf(key), convOf(key), 'frame')
     return { ...snap, frame: f.frame }
   }
 
   // After an action: the screen for the panel, and the page for the agent.
-  private async after(agentId: string, r: BrowserReply, log: { label: string; detail: string }): Promise<CallToolResult> {
-    this.seen(agentId, r, log)
-    return textResult(describePage(await this.deps.host(agentId, 'snapshot')))
+  private async after(key: string, r: BrowserReply, log: { label: string; detail: string }): Promise<CallToolResult> {
+    this.seen(key, r, log)
+    return textResult(describePage(await this.deps.host(agentOf(key), convOf(key), 'snapshot')))
   }
 
   async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: Ctx): Promise<BrowserOutcome> {
-    const id = agent.id
+    const key = viewKey(agent.id, ctx.conversationId)
     const step = browserStep(name, args)
-    const driving = this.views.get(id)?.shown && !['navegador_ler', 'navegador_ver', 'navegador_esperar'].includes(name)
+    const driving = this.views.get(key)?.shown && !['navegador_ler', 'navegador_ver', 'navegador_esperar'].includes(name)
     if (driving)
       return {
         result: textResult(
@@ -367,26 +377,26 @@ export class Browser {
           true
         )
       }
-    this.update(id, { doing: { label: doing()[name] ?? step.label, detail: step.detail } })
+    this.update(key, { doing: { label: doing()[name] ?? step.label, detail: step.detail } })
     try {
       switch (name) {
         case 'navegador_abrir': {
           let url = String(args['url'] ?? '').trim()
           if (url && !/^[a-z]+:/i.test(url)) url = `https://${url}`
           if (!/^https?:\/\//i.test(url)) return { result: textResult(L('Só endereços http e https.', 'Only http and https addresses.'), true) }
-          return { result: await this.after(id, await this.deps.host(id, 'open', { url }), { ...step, detail: url }) }
+          return { result: await this.after(key, await this.deps.host(agent.id, ctx.conversationId, 'open', { url }), { ...step, detail: url }) }
         }
         case CLICAR: {
           const target = String(args['alvo'] ?? '').trim()
           if (!target) return { result: textResult(L('Faltou o alvo.', 'Missing the target.'), true) }
-          const page = await this.page(id, !!this.deps.jev?.on())
+          const page = await this.page(key, !!this.deps.jev?.on())
           const spot = await this.locate(target, page)
           if ('error' in spot) return { result: textResult(spot.error, true) }
           const label = 'el' in spot ? spot.el.label : target
-          this.update(id, { doing: { label: L('Clicando em', 'Clicking'), detail: label || target } })
+          this.update(key, { doing: { label: L('Clicando em', 'Clicking'), detail: label || target } })
           if (risky(label || target)) {
-            const shot = page.frame ? { frame: page.frame } : await this.deps.host(id, 'frame')
-            const artifact = shot.frame ? this.keep(id, ctx, Buffer.from(shot.frame, 'base64'), L(`Antes de clicar em "${label}"`, `Before clicking "${label}"`), page.url) : undefined
+            const shot = page.frame ? { frame: page.frame } : await this.deps.host(agent.id, ctx.conversationId, 'frame')
+            const artifact = shot.frame ? this.keep(agent.id, ctx, Buffer.from(shot.frame, 'base64'), L(`Antes de clicar em "${label}"`, `Before clicking "${label}"`), page.url) : undefined
             const why = typeof args['motivo'] === 'string' ? args['motivo'].trim() : ''
             const callArgs: Record<string, unknown> = { url: page.url, alvo: label, ...('x' in spot && page.w && page.h ? { x: spot.x / page.w, y: spot.y / page.h } : {}) }
             return {
@@ -395,41 +405,41 @@ export class Browser {
               approval: { args: callArgs, why: why || L(`Clicar em "${label}" em ${page.title || page.url}`, `Click "${label}" on ${page.title || page.url}`), detail: L(`Clicar em "${label}"`, `Click "${label}"`) }
             }
           }
-          const r = await this.deps.host(id, 'click', 'el' in spot ? { ref: spot.ref } : { x: spot.x, y: spot.y })
-          return { result: await this.after(id, r, { ...step, detail: label || target }), detail: label || target }
+          const r = await this.deps.host(agent.id, ctx.conversationId, 'click', 'el' in spot ? { ref: spot.ref } : { x: spot.x, y: spot.y })
+          return { result: await this.after(key, r, { ...step, detail: label || target }), detail: label || target }
         }
         case 'navegador_digitar': {
           const target = String(args['alvo'] ?? '').trim()
           if (!target) return { result: textResult(L('Faltou o alvo.', 'Missing the target.'), true) }
-          const page = await this.page(id, false)
+          const page = await this.page(key, false)
           const fields = (page.elements ?? []).filter((e) => e.role === 'campo' || e.role === 'lista' || /textbox|searchbox|combobox/.test(e.role))
           const spot = await this.locate(target, { ...page, elements: fields.length ? fields : page.elements })
           if ('error' in spot) return { result: textResult(spot.error, true) }
           if (!('el' in spot)) return { result: textResult(L('Achei o lugar só pela imagem; clique nele com navegador_clicar e use o número do campo.', 'I found the spot only in the image; click it with navegador_clicar and use the field number.'), true) }
-          this.update(id, { doing: { label: L('Escrevendo em', 'Typing in'), detail: spot.el.label || target } })
-          const r = await this.deps.host(id, 'type', { ref: spot.ref, text: String(args['texto'] ?? ''), enter: args['enter'] === true })
-          return { result: await this.after(id, r, { ...step, detail: spot.el.label || target }), detail: spot.el.label || target }
+          this.update(key, { doing: { label: L('Escrevendo em', 'Typing in'), detail: spot.el.label || target } })
+          const r = await this.deps.host(agent.id, ctx.conversationId, 'type', { ref: spot.ref, text: String(args['texto'] ?? ''), enter: args['enter'] === true })
+          return { result: await this.after(key, r, { ...step, detail: spot.el.label || target }), detail: spot.el.label || target }
         }
         case 'navegador_tecla': {
-          const key = String(args['tecla'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
-          if (!KEYS.includes(key)) return { result: textResult(L(`Tecla desconhecida. Use uma destas: ${KEYS.join(', ')}.`, `Unknown key. Use one of these: ${KEYS.join(', ')}.`), true) }
-          return { result: await this.after(id, await this.deps.host(id, 'key', { key }), step) }
+          const key2 = String(args['tecla'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
+          if (!KEYS.includes(key2)) return { result: textResult(L(`Tecla desconhecida. Use uma destas: ${KEYS.join(', ')}.`, `Unknown key. Use one of these: ${KEYS.join(', ')}.`), true) }
+          return { result: await this.after(key, await this.deps.host(agent.id, ctx.conversationId, 'key', { key: key2 }), step) }
         }
         case 'navegador_rolar': {
           const dy = args['direcao'] === 'cima' ? -650 : 650
-          return { result: await this.after(id, await this.deps.host(id, 'scroll', { dy }), step) }
+          return { result: await this.after(key, await this.deps.host(agent.id, ctx.conversationId, 'scroll', { dy }), step) }
         }
         case 'navegador_voltar':
-          return { result: await this.after(id, await this.deps.host(id, 'back'), step) }
+          return { result: await this.after(key, await this.deps.host(agent.id, ctx.conversationId, 'back'), step) }
         case 'navegador_esperar': {
           const s = Math.min(20, Math.max(1, Number(args['segundos']) || 3))
           await new Promise((r) => setTimeout(r, s * 1000))
-          return { result: await this.after(id, await this.deps.host(id, 'frame'), step) }
+          return { result: await this.after(key, await this.deps.host(agent.id, ctx.conversationId, 'frame'), step) }
         }
         case 'navegador_ler': {
-          const [t, snap] = [await this.deps.host(id, 'text'), await this.deps.host(id, 'snapshot')]
+          const [t, snap] = [await this.deps.host(agent.id, ctx.conversationId, 'text'), await this.deps.host(agent.id, ctx.conversationId, 'snapshot')]
           if (!t.url || t.url === 'about:blank') return { result: textResult(L('O navegador ainda não abriu nenhuma página. Use navegador_abrir.', "The browser hasn't opened any page yet. Use navegador_abrir."), true) }
-          this.seen(id, t, step)
+          this.seen(key, t, step)
           const text = (t.text ?? '').length > 30_000 ? `${t.text!.slice(0, 30_000)}\n${L('[… texto cortado]', '[… text cut]')}` : t.text || L('(a página não tem texto)', '(the page has no text)')
           return {
             result: textResult(
@@ -441,10 +451,10 @@ export class Browser {
           }
         }
         case 'navegador_ver': {
-          const r = await this.deps.host(id, 'frame')
+          const r = await this.deps.host(agent.id, ctx.conversationId, 'frame')
           if (!r.frame) return { result: textResult(L('Não consegui ver a tela.', "I couldn't see the screen."), true) }
-          this.seen(id, r, step)
-          const artifact = args['mostrar'] === true ? this.keep(id, ctx, Buffer.from(r.frame, 'base64'), r.title || r.url, r.url) : undefined
+          this.seen(key, r, step)
+          const artifact = args['mostrar'] === true ? this.keep(agent.id, ctx, Buffer.from(r.frame, 'base64'), r.title || r.url, r.url) : undefined
           return {
             result: { content: [{ type: 'image', data: r.frame, mimeType: 'image/jpeg' }, { type: 'text', text: L(`Tela de ${r.url}${artifact ? ', mostrada no chat' : ''}.`, `Screen of ${r.url}${artifact ? ', shown in the chat' : ''}.`) }] },
             artifact
@@ -456,33 +466,34 @@ export class Browser {
     } catch (e) {
       return { result: textResult(failed(e), true) }
     } finally {
-      this.live(id)
-      this.update(id, { doing: undefined })
+      this.live(key)
+      this.update(key, { doing: undefined })
     }
   }
 
   // An approved click: only on the same page, on the element with that text (or the same spot).
-  async approved(agent: Agent, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> {
+  async approved(agent: Agent, args: Record<string, unknown>, conversationId: string): Promise<{ ok: boolean; text: string }> {
+    const key = viewKey(agent.id, conversationId)
     const url = String(args['url'] ?? '')
     const target = String(args['alvo'] ?? '')
-    this.update(agent.id, { doing: { label: L('Clicando em', 'Clicking'), detail: target } })
+    this.update(key, { doing: { label: L('Clicando em', 'Clicking'), detail: target } })
     try {
-      const snap = await this.deps.host(agent.id, 'snapshot')
+      const snap = await this.deps.host(agent.id, conversationId, 'snapshot')
       if (!sameUrl(snap.url, url)) return { ok: false, text: L(`A página mudou desde o pedido (agora está em ${snap.url}). Nada foi clicado.`, `The page changed since the request (it's now at ${snap.url}). Nothing was clicked.`) }
       let r: BrowserReply
-      if (typeof args['x'] === 'number' && typeof args['y'] === 'number' && snap.w && snap.h) r = await this.deps.host(agent.id, 'click', { x: args['x'] * snap.w, y: args['y'] * snap.h })
+      if (typeof args['x'] === 'number' && typeof args['y'] === 'number' && snap.w && snap.h) r = await this.deps.host(agent.id, conversationId, 'click', { x: args['x'] * snap.w, y: args['y'] * snap.h })
       else {
         const same = (snap.elements ?? []).filter((e) => norm(e.label) === norm(target))
         const el = same.find((e) => e.inView) ?? same[0]
         if (!el) return { ok: false, text: L(`"${target}" não está mais na página. Nada foi clicado.`, `"${target}" is no longer on the page. Nothing was clicked.`) }
-        r = await this.deps.host(agent.id, 'click', { ref: el.ref })
+        r = await this.deps.host(agent.id, conversationId, 'click', { ref: el.ref })
       }
-      return { ok: true, text: await this.after(agent.id, r, { label: L('Clicou (aprovado)', 'Clicked (approved)'), detail: target }).then((x) => (x.content[0] as { text: string }).text) }
+      return { ok: true, text: await this.after(key, r, { label: L('Clicou (aprovado)', 'Clicked (approved)'), detail: target }).then((x) => (x.content[0] as { text: string }).text) }
     } catch (e) {
       return { ok: false, text: failed(e) }
     } finally {
-      this.live(agent.id)
-      this.update(agent.id, { doing: undefined })
+      this.live(key)
+      this.update(key, { doing: undefined })
     }
   }
 

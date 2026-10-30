@@ -5,9 +5,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
-import { fakeEngine } from '../src/core/engines/fake'
+import { fakeEngine, callTool } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
-import { Gateway } from '../src/core/gateway'
+import { Gateway, textResult } from '../src/core/gateway'
+import type { BrowserOutcome } from '../src/core/browser'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -217,6 +218,110 @@ describe('Runner', () => {
     expect(stopped.text.length).toBeLessThan('uma resposta bem longa que demora pra chegar inteira'.length)
   })
 
+  it('a second trigger in the same thread queues as a follow-up and reads the reply ahead of it', async () => {
+    const r = runner(fakeEngine('claude', { delayMs: 40, reply: () => 'a resposta completa da primeira pergunta, com detalhes' }))
+    await r.send('d1', 'primeira')
+    await r.send('d1', 'segunda') // arrives while the first is still going
+    await new Promise((res) => setTimeout(res, 30))
+    const [first, second] = agentMessages()
+    expect(first!.run?.status).toBe('working')
+    expect(second!.run).toMatchObject({ status: 'queued', queuePos: 1 })
+    expect(events.some((e) => e.type === 'message' && e.message.id === second!.id && e.message.run?.status === 'queued')).toBe(true) // the bubble is born queued, not silent
+
+    await r.idle()
+    expect(db.message(first!.id)?.run?.status).toBe('done')
+    expect(db.message(second!.id)?.run?.status).toBe('done')
+    expect(claude.turns).toHaveLength(2)
+    expect(claude.turns[1]!.prompt).toContain('a resposta completa da primeira pergunta') // the follow-up saw the reply ahead of it
+  })
+
+  it('the same agent in two conversations still runs in parallel', async () => {
+    db.createConversation({ id: 'd2', kind: 'dm', name: 'a1', members: ['a1'] })
+    let open!: () => void
+    const gate = new Promise<void>((ok) => (open = ok))
+    let started = 0
+    const slow: Engine = {
+      id: 'claude',
+      run: () =>
+        (async function* () {
+          started++
+          await gate // the first turn holds until the test says so
+          yield { type: 'done' as const, text: 'ok', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+        })()
+    }
+    const r = runner(slow)
+    await r.send('d1', 'uma')
+    await r.send('d2', 'duas')
+    await new Promise((res) => setTimeout(res, 40))
+    expect(started).toBe(2) // different lanes: neither blocks the other
+    open()
+    await r.idle()
+    expect(agentMessages().every((m) => m.run?.status === 'done')).toBe(true)
+  })
+
+  it('cancelling a queued reply removes the bubble and leaves the rest of the lane in order', async () => {
+    const r = runner(fakeEngine('claude', { delayMs: 40, reply: () => 'resposta sequencial longa o bastante' }))
+    await r.send('d1', 'um')
+    await r.send('d1', 'dois')
+    await r.send('d1', 'três')
+    const [first, second, third] = agentMessages()
+    expect(second!.run).toMatchObject({ status: 'queued', queuePos: 1 })
+    expect(third!.run).toMatchObject({ status: 'queued', queuePos: 2 })
+
+    r.cancelQueued(second!.id)
+    await r.idle()
+    expect(db.message(second!.id)).toBeUndefined() // gone, not a tombstone stuck on the thread forever
+    expect(events.some((e) => e.type === 'message_removed' && e.id === second!.id && e.conversationId === 'd1')).toBe(true)
+    expect(db.message(first!.id)?.run?.status).toBe('done')
+    expect(db.message(third!.id)?.run?.status).toBe('done')
+    expect(claude.turns).toHaveLength(2) // the cancelled one never started
+  })
+
+  it('a reply the app closed before it started leaves a note explaining why', async () => {
+    const r = runner(fakeEngine('claude', { delayMs: 40, reply: () => 'resposta sequencial longa o bastante' }))
+    await r.send('d1', 'um')
+    await r.send('d1', 'dois')
+    const [first, second] = agentMessages()
+
+    r.cancelQueued(second!.id, 'app')
+    await r.idle()
+    expect(db.message(second!.id)?.run?.status).toBe('stopped') // the app died: the note stays so the thread explains itself
+    expect(db.message(second!.id)?.text).toContain('app foi fechado')
+    expect(db.message(first!.id)?.run?.status).toBe('done')
+  })
+
+  it('"Mandar agora" stops the running reply and takes the lane next', async () => {
+    const r = runner(fakeEngine('claude', { delayMs: 40, reply: () => 'trabalho longo que vai ser interrompido no meio' }))
+    await r.send('d1', 'um')
+    await r.send('d1', 'dois')
+    await new Promise((res) => setTimeout(res, 30))
+    const [first, second] = agentMessages()
+    expect(first!.run?.status).toBe('working')
+
+    r.jump(second!.id)
+    await r.idle()
+    expect(db.message(first!.id)?.run?.status).toBe('stopped') // the partial stays
+    expect(db.message(second!.id)?.run?.status).toBe('done')
+    expect(claude.turns).toHaveLength(2)
+  })
+
+  it('"Parar" drops what is queued behind the run it stops', async () => {
+    const r = runner(fakeEngine('claude', { delayMs: 40, reply: () => 'trabalho longo que vai ser interrompido' }))
+    await r.send('d1', 'um')
+    await r.send('d1', 'dois')
+    await r.send('d1', 'três')
+    await new Promise((res) => setTimeout(res, 30))
+    const [first, second, third] = agentMessages()
+    expect(first!.run?.status).toBe('working')
+
+    r.stop(first!.id)
+    await r.idle()
+    expect(db.message(first!.id)?.run?.status).toBe('stopped')
+    expect(db.message(second!.id)).toBeUndefined() // dropped with the lane: no tombstone either
+    expect(db.message(third!.id)).toBeUndefined()
+    expect(claude.turns).toHaveLength(1) // nothing queued started
+  })
+
   it('fails fast when the engine is not logged in, without starting it', async () => {
     settings.engines.claude = { installed: true, loggedIn: false }
     const r = runner()
@@ -243,6 +348,13 @@ describe('Runner', () => {
 })
 
 describe('Db', () => {
+  it('removes a message for good', () => {
+    db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'oi', at: 1 })
+    expect(db.message('m1')).toBeDefined()
+    db.deleteMessage('m1')
+    expect(db.message('m1')).toBeUndefined()
+  })
+
   it('marks runs left working as interrupted on startup', () => {
     db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'meio', at: 1, run: { status: 'working', steps: [{ id: 's', label: 'Pensando', status: 'running' }] } })
     expect(db.interruptStaleRuns()).toBe(1)
@@ -293,6 +405,52 @@ describe('ask_user through the gateway', () => {
     expect(claude.turns[1]?.prompt).toContain('pergunta enviada a Edu pela ferramenta ask_user: Pra quando você precisa disso?')
     expect(db.messages().some((m) => m.text.startsWith('Chamei'))).toBe(false)
   })
+
+  it('the same agent in two conversations drives two tabs at once', async () => {
+    db.saveAgent(agent('a1', 'lia', { browser: true }))
+    db.createConversation({ id: 'd2', kind: 'dm', name: 'a1', members: ['a1'] })
+    const order: string[] = []
+    let both!: () => void
+    const arrived = new Promise<void>((ok) => (both = ok))
+    const seen = new Set<string>()
+    // Each thread's call runs right away and only ends once the other started:
+    // two tabs, no waiting, no stolen page.
+    const browserEngine: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        await callTool(turn.mcpUrl!, 'navegador_abrir', { url: 'https://exemplo.test' })
+        yield { type: 'done' as const, text: 'ok', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+      }
+    }
+    const fakeBrowser = {
+      call: async (_agent: unknown, _name: string, _args: Record<string, unknown>, ctx: { conversationId: string }): Promise<BrowserOutcome> => {
+        order.push(`start:${ctx.conversationId}`)
+        seen.add(ctx.conversationId)
+        if (seen.size === 2) both()
+        await Promise.race([arrived, new Promise((res) => setTimeout(res, 2000))])
+        order.push(`end:${ctx.conversationId}`)
+        return { result: textResult('página aberta') }
+      },
+      approved: async () => ({ ok: true, text: '' })
+    }
+    claude = counted(browserEngine)
+    const r = new Runner({
+      db,
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') },
+      settings: async () => settings,
+      emit: (e) => events.push(e),
+      workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
+      gateway,
+      browser: fakeBrowser
+    })
+    await r.send('d1', 'abre a página')
+    await r.send('d2', 'abre também')
+    await r.idle()
+    expect(claude.turns).toHaveLength(2) // both runs are alive: the lanes are different
+    expect(order.filter((o) => o.startsWith('start')).sort()).toEqual(['start:d1', 'start:d2']) // neither call waited for the other
+    expect(order.filter((o) => o.startsWith('end')).sort()).toEqual(['end:d1', 'end:d2'])
+    expect(agentMessages().every((m) => m.run?.status === 'done')).toBe(true)
+  })
 })
 
 describe('browser handback', () => {
@@ -324,7 +482,7 @@ describe('browser handback', () => {
     expect(asked?.run?.status).toBe('waiting_input')
 
     // No new human message: the handback itself is the answer.
-    await r.handedBack('a1')
+    await r.handedBack('a1', 'c1')
     await r.idle()
 
     expect(db.message(asked!.id)?.run?.status).toBe('done')
@@ -335,13 +493,28 @@ describe('browser handback', () => {
     expect(events.some((e) => e.type === 'message' && (e as { message?: Message }).message?.author.kind === 'agent')).toBe(true)
   })
 
+  it('handing one thread’s browser back resumes only that thread', async () => {
+    const r = runnerWithGateway()
+    db.saveAgent(agent('a1', 'lia', { browser: true }))
+    db.createConversation({ id: 'd2', kind: 'dm', name: 'a1', members: ['a1'] })
+    const ask = (convId: string): Message => ({ id: `ask-${convId}`, conversationId: convId, author: { kind: 'agent', id: 'a1' }, text: 'Preciso de algo?', at: Date.now(), run: { status: 'waiting_input', depth: 1, steps: [] } })
+    db.saveMessage(ask('c1'))
+    db.saveMessage(ask('d2'))
+    await r.handedBack('a1', 'd2')
+    await r.idle()
+    expect(db.message('ask-d2')?.run?.status).toBe('done') // the handed-back thread went on
+    expect(db.message('ask-c1')?.run?.status).toBe('waiting_input') // the other thread wasn't touched
+    expect(db.messages().some((m) => m.conversationId === 'd2' && m.author.kind === 'agent' && m.id !== 'ask-d2')).toBe(true)
+    expect(db.messages().filter((m) => m.conversationId === 'c1' && m.author.kind === 'agent')).toHaveLength(1)
+  })
+
   it('leaves the question pending while the agents are paused', async () => {
     const r = runnerWithGateway()
     await r.send('c1', '@lia me pergunta o que faltar')
     await r.idle()
     const [asked] = agentMessages()
     r.setPaused(true)
-    await r.handedBack('a1')
+    await r.handedBack('a1', 'c1')
     await r.idle()
     expect(db.message(asked!.id)?.run?.status).toBe('waiting_input')
     expect(agentMessages()).toHaveLength(1)
@@ -349,10 +522,10 @@ describe('browser handback', () => {
 
   it('does nothing when nothing is pending or the agent is gone', async () => {
     const r = runnerWithGateway()
-    await r.handedBack('a1')
+    await r.handedBack('a1', 'c1')
     await r.idle()
     expect(claude.turns).toHaveLength(0)
-    await r.handedBack('ghost')
+    await r.handedBack('ghost', 'c1')
     await r.idle()
     expect(claude.turns).toHaveLength(0)
   })

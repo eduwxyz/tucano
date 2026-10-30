@@ -106,14 +106,14 @@ const logIcon = (label: string): IconName => LOG_ICON[label] ?? (/assumiu|devolv
 const clock = (at: number): string => new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
 // Live while the agent is answering with it, or while I drive it.
-function useLive(agentId: string): boolean {
+function useLive(agentId: string, conversationId?: string): boolean {
   const working = useStore((s) => s.messages.some((m) => m.author.kind === 'agent' && m.author.id === agentId && m.run?.status === 'working'))
-  const view = useStore((s) => browserOf(s, agentId))
+  const view = useStore((s) => browserOf(s, agentId, conversationId))
   return working || !!view?.doing || !!view?.shown
 }
 
-function LiveBadge({ agentId }: { agentId: string }): ReactNode {
-  return useLive(agentId) ? (
+function LiveBadge({ agentId, conversationId }: { agentId: string; conversationId?: string }): ReactNode {
+  return useLive(agentId, conversationId) ? (
     <span className="live-badge">
       <i />
       {L('ao vivo', 'live')}
@@ -144,8 +144,8 @@ function UrlBar({ url }: { url: string }): ReactNode {
 }
 
 // The screen: what Chrome streams, with the agent's cursor where it last clicked or typed.
-function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => void }): ReactNode {
-  const view = useStore((s) => browserOf(s, agentId))
+function BrowserScreen({ agentId, conversationId, onOpen }: { agentId: string; conversationId?: string; onOpen?: () => void }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId, conversationId))
   const agent = useStore((s) => agentById(s, agentId))
   const live = useLive(agentId)
   if (!view?.frame)
@@ -186,8 +186,8 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
   )
 }
 
-function BrowserLog({ agentId, max }: { agentId: string; max?: number }): ReactNode {
-  const view = useStore((s) => browserOf(s, agentId))
+function BrowserLog({ agentId, conversationId, max }: { agentId: string; conversationId?: string; max?: number }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId, conversationId))
   if (!view) return null
   const log = [...view.log].reverse().slice(0, max)
   return (
@@ -221,8 +221,8 @@ function BrowserLog({ agentId, max }: { agentId: string; max?: number }): ReactN
   )
 }
 
-function TakeOver({ agentId }: { agentId: string }): ReactNode {
-  const view = useStore((s) => browserOf(s, agentId))
+function TakeOver({ agentId, conversationId }: { agentId: string; conversationId?: string }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId, conversationId))
   if (!view?.url) return null
   return (
     <button
@@ -230,7 +230,7 @@ function TakeOver({ agentId }: { agentId: string }): ReactNode {
       title={view.shown ? L('Fecha a janela e devolve o navegador', 'Closes the window and hands the browser back') : L('Abre o navegador numa janela pra você usar (login, código, captcha)', 'Opens the browser in a window for you to use (login, code, captcha)')}
       onClick={(e) => {
         e.stopPropagation()
-        browserAction(agentId, view.shown ? 'hide' : 'show')
+        browserAction(agentId, view.shown ? 'hide' : 'show', conversationId)
       }}
     >
       <Icon name="hand" size={13} />
@@ -241,11 +241,11 @@ function TakeOver({ agentId }: { agentId: string }): ReactNode {
 
 // In the chat, on the agent's latest message that used it: the browser live,
 // with what it did. Older messages get a small card.
-export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }): ReactNode {
-  const view = useStore((s) => browserOf(s, agentId))
+export function BrowserCard({ agentId, conversationId, big }: { agentId: string; conversationId?: string; big?: boolean }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId, conversationId))
   const name = useStore((s) => agentById(s, agentId)?.name ?? L('agente', 'agent'))
   const open = useStore((s) => s.panel?.kind === 'browser' && s.panel.agentId === agentId)
-  const show = (): void => openPanel({ kind: 'browser', agentId })
+  const show = (): void => openPanel({ kind: 'browser', agentId, conversationId })
   const status = view?.shown ? L('você está no controle', 'you’re in control') : view?.doing ? `${view.doing.label.toLowerCase()} ${view.doing.detail}` : view?.log.at(-1)?.label.toLowerCase() ?? L('parado', 'idle')
 
   if (big)
@@ -257,9 +257,9 @@ export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }
             <strong>{L(`Navegador de ${name}`, `${name}'s browser`)}</strong>
             <span className="muted"> · {status}</span>
           </span>
-          <LiveBadge agentId={agentId} />
+          <LiveBadge agentId={agentId} conversationId={conversationId} />
           <span className="grow" />
-          <TakeOver agentId={agentId} />
+          <TakeOver agentId={agentId} conversationId={conversationId} />
           <button className="icon-btn" title={L('Abrir ao lado', 'Open on the side')} onClick={show}>
             <Icon name="expand" size={14} />
           </button>
@@ -267,9 +267,9 @@ export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }
         <div className="browser-live__body">
           <div className="browser-live__screen">
             <UrlBar url={view?.url ?? ''} />
-            <BrowserScreen agentId={agentId} onOpen={show} />
+            <BrowserScreen agentId={agentId} conversationId={conversationId} onOpen={show} />
           </div>
-          <BrowserLog agentId={agentId} max={7} />
+          <BrowserLog agentId={agentId} conversationId={conversationId} max={7} />
         </div>
       </div>
     )
@@ -292,8 +292,8 @@ export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }
   )
 }
 
-function BrowserPanel({ agentId }: { agentId: string }): ReactNode {
-  const view = useStore((s) => browserOf(s, agentId))
+function BrowserPanel({ agentId, conversationId }: { agentId: string; conversationId?: string }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId, conversationId))
   return (
     <div className="browser-view">
       <div className="browser-window">
@@ -305,11 +305,11 @@ function BrowserPanel({ agentId }: { agentId: string }): ReactNode {
           </span>
           <UrlBar url={view?.url ?? ''} />
         </div>
-        <BrowserScreen agentId={agentId} />
+        <BrowserScreen agentId={agentId} conversationId={conversationId} />
       </div>
       <section className="browser-activity">
         <h4>{L('O que fez', 'What it did')}</h4>
-        <BrowserLog agentId={agentId} />
+        <BrowserLog agentId={agentId} conversationId={conversationId} />
       </section>
     </div>
   )
@@ -321,7 +321,7 @@ export function SidePanel(): ReactNode {
   const service = useStore((s) =>
     s.panel?.kind === 'service' ? computerOf(s, s.panel.agentId)?.services.find((x) => x.name === (s.panel as { name: string }).name) : undefined
   )
-  const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId) : undefined))
+  const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId, s.panel.conversationId) : undefined))
   const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
   const [reload, setReload] = useState(0)
   if (!panel) return null
@@ -333,9 +333,9 @@ export function SidePanel(): ReactNode {
         <Icon name={panel.kind === 'service' || panel.kind === 'browser' ? 'globe' : 'edit'} size={14} />
         <strong className="side-panel__title">{title}</strong>
         {service?.url && <code className="side-panel__url">{service.url}</code>}
-        {panel.kind === 'browser' && <LiveBadge agentId={panel.agentId} />}
+        {panel.kind === 'browser' && <LiveBadge agentId={panel.agentId} conversationId={panel.conversationId} />}
         <span className="grow" />
-        {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} />}
+        {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} conversationId={panel.conversationId} />}
         {service?.url && (
           <>
             <button className="icon-btn" title={L('Recarregar', 'Reload')} onClick={() => setReload((n) => n + 1)}>
@@ -360,7 +360,7 @@ export function SidePanel(): ReactNode {
             <p className="empty">{L('Esse serviço não está rodando.', 'This service isn’t running.')}</p>
           ))}
         {panel.kind === 'artifact' && !artifact && <p className="empty">{L('Arquivo não encontrado.', 'File not found.')}</p>}
-        {panel.kind === 'browser' && <BrowserPanel agentId={panel.agentId} />}
+        {panel.kind === 'browser' && <BrowserPanel agentId={panel.agentId} conversationId={panel.conversationId} />}
       </div>
     </aside>
   )

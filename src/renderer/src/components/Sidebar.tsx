@@ -220,11 +220,12 @@ function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: 
 function DmItem({ id, name, color }: { id: string; name: string; color: Parameters<typeof AgentAvatar>[0]['agent']['color'] }): ReactNode {
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'working'))
+  const queued = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'queued'))
   return (
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={{ name, color }} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
-      {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
+      {working ? <span className="pulse" title={L('Trabalhando', 'Working')} /> : queued ? <span className="dot dot--warn" title={L('Na fila', 'Queued')} /> : null}
     </button>
   )
 }
@@ -233,13 +234,14 @@ function AgentItem({ id }: { id: string }): ReactNode {
   const agent = useStore((s) => agentById(s, id))
   const active = useStore((s) => s.view?.kind === 'agent' && s.view.id === id)
   const working = useStore((s) => s.messages.some((m) => m.author.kind === 'agent' && m.author.id === id && m.run?.status === 'working'))
+  const queued = useStore((s) => s.messages.some((m) => m.author.kind === 'agent' && m.author.id === id && m.run?.status === 'queued'))
   if (!agent) return null
   const pct = agent.limit > 0 ? agent.used / agent.limit : 1
   return (
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'agent', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{agent.name}</span>
-      {working ? <span className="pulse" title={L('Trabalhando', 'Working')} /> : <span className="nav-item__meta">{agent.role}</span>}
+      {working ? <span className="pulse" title={L('Trabalhando', 'Working')} /> : queued ? <span className="dot dot--warn" title={L('Na fila', 'Queued')} /> : <span className="nav-item__meta">{agent.role}</span>}
       {agent.computer && agent.computerKind === 'mac' && (
         <span className="nav-item__mac" title={L('Roda no seu computador', 'Runs on your computer')}>
           <Icon name="laptop" size={13} />

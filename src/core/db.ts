@@ -465,6 +465,11 @@ export class Db {
     return r && this.toMessage(r)
   }
 
+  // A queued reply that was cancelled never happened: the bubble goes for good.
+  deleteMessage(id: string): void {
+    this.db.prepare('DELETE FROM messages WHERE id = ?').run(id)
+  }
+
   saveMessage(m: Message): void {
     this.db
       .prepare(

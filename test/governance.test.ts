@@ -231,6 +231,32 @@ describe('approvals', () => {
     expect(tasks().map((t) => t.id)).toEqual([1, 3])
   })
 
+  it('a pending approval holds the lane: the next trigger in the thread queues until you decide', async () => {
+    db.saveAgent(agent('read_write'))
+    // Only the first run asks (the thread keeps saying "apaga" in its history, so scope it to before the second message).
+    const r = runner((turn) =>
+      turn.prompt.includes('apaga a tarefa 2') && !turn.prompt.includes('tudo certo') && !turn.prompt.includes('aprovou') && !turn.prompt.includes('recusou')
+        ? { tool: 'tarefas__delete_task', args: { id: 2, _motivo: 'está duplicada' } }
+        : null
+    )
+    await r.send('d1', 'apaga a tarefa 2')
+    await r.idle()
+    expect(db.approvals()[0]).toMatchObject({ state: 'pending' })
+
+    // You send another message before deciding: it joins the lane, it doesn't run.
+    await r.send('d1', 'tudo certo por aí?')
+    await new Promise((res) => setTimeout(res, 30))
+    const [, second] = db.messages().filter((m) => m.author.kind === 'agent')
+    expect(second?.run).toMatchObject({ status: 'queued', queuePos: 1 })
+
+    await r.decide(db.approvals()[0]!.id, 'approved')
+    await r.idle()
+    const replies = db.messages().filter((m) => m.author.kind === 'agent')
+    expect(replies).toHaveLength(3) // the trigger, the queued one, the approval's follow-up
+    expect(replies.every((m) => m.run?.status === 'done')).toBe(true) // all ran, one at a time
+    expect(db.approvals()[0]?.outcome).toBe('Executou.')
+  })
+
   it('does not run an approved call if the grant was removed meanwhile', async () => {
     db.saveAgent(agent('read_write'))
     const r = runner(askDelete)

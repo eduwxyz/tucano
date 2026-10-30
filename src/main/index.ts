@@ -44,7 +44,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'tucano', privileges: { standard
 let core: UtilityProcess | null = null
 
 // Agents' browsers (spec §24); the core is told when I take one over or hand it back.
-const browsers = new Browsers((agentId, shown) => core?.postMessage({ type: 'browser-shown', agentId, shown }))
+const browsers = new Browsers((key, shown) => core?.postMessage({ type: 'browser-shown', key, shown }))
 
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
@@ -70,7 +70,7 @@ type CoreRequest =
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
   | { type: 'screenshot'; id: string; url: string; width: number; height: number; fullPage: boolean }
-  | { type: 'browser'; id: string; agentId: string; op: BrowserOp; args?: Record<string, unknown> }
+  | { type: 'browser'; id: string; agentId: string; conversationId?: string; op: BrowserOp; args?: Record<string, unknown> }
 
 // The conversation open in the window, so a notification about it can stay quiet.
 let viewing: string | null = null
@@ -199,7 +199,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     // Only the installed app: in dev this would register the bare Electron binary.
     if (app.isPackaged) openAtLogin(msg.open)
   } else if (msg.type === 'browser') {
-    browsers.run(msg.agentId, msg.op, msg.args).then(
+    browsers.run(msg.agentId, msg.conversationId ?? '', msg.op, msg.args).then(
       (data) => child.postMessage({ type: 'browser-result', id: msg.id, data }),
       (e: unknown) => child.postMessage({ type: 'browser-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
     )

@@ -24,6 +24,8 @@ export interface Api {
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[] }): void
   stopRun(p: { messageId: string }): void
+  jumpRun(p: { messageId: string }): void // a queued reply skips ahead of its lane's queue
+  cancelRun(p: { messageId: string }): void // a queued reply leaves the queue
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
@@ -58,7 +60,7 @@ export interface Api {
   summarizeNow(p: { conversationId: string }): void
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
-  browserAction(p: { agentId: string; action: 'show' | 'hide' | 'clear' }): void // show: I take over the agent's browser; clear: logins and history go
+  browserAction(p: { agentId: string; conversationId?: string; action: 'show' | 'hide' | 'clear' }): void // show: I take over the thread's browser; clear: logins and history go
   lendFolder(p: { agentId: string; path: string }): void // throws why it can't, for the page
   folderAction(p: { agentId: string; name: string; action: 'read_only' | 'read_write' | 'return' }): void
   openExternal(p: { url: string }): void
@@ -94,6 +96,7 @@ export type Result<M extends Method> = Awaited<ReturnType<Api[M]>>
 
 export type CoreEvent =
   | { type: 'message'; message: Message }
+  | { type: 'message_removed'; id: string; conversationId: string } // a cancelled queued reply leaves no trace
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
   | { type: 'agent'; agent: Agent }
   | { type: 'conversation'; conversation: Conversation }

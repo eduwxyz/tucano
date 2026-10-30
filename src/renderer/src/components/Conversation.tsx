@@ -23,6 +23,8 @@ import {
   countedTokens,
   sendMessage,
   stopRun,
+  jumpRun,
+  cancelRun,
   summarizeNow,
   useStore,
   SUMMARY_MAX_AFTER,
@@ -257,7 +259,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
           </div>
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
-        {agent && message.run?.browser && <BrowserCard agentId={agent.id} big={liveBrowser} />}
+        {agent && message.run?.browser && <BrowserCard agentId={agent.id} conversationId={message.conversationId} big={liveBrowser} />}
         {message.run?.status === 'stopped' && <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>}
         {message.run?.status === 'interrupted' && <div className="note">{L('Interrompido: o app fechou no meio da resposta.', 'Interrupted: the app closed in the middle of the reply.')}</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
@@ -486,6 +488,23 @@ function RunSteps({ message }: { message: Message }): ReactNode {
   const [open, setOpen] = useState(false)
   const working = run.status === 'working'
   const now = useNow(working)
+
+  // Waiting in its lane: amber and still, with its place in the queue and the
+  // two things you can do with it before it starts.
+  if (run.status === 'queued') {
+    return (
+      <div className="steps is-queued">
+        <span className="steps__dot" />
+        <span>{run.queuePos ? L(`Na fila · ${run.queuePos}º`, `Queued · #${run.queuePos}`) : L('Na fila · esperando vaga', 'Queued · waiting for a slot')}</span>
+        <button className="icon-btn icon-btn--sm" title={L('Mandar agora (para a resposta atual)', 'Run now (stops the current reply)')} onClick={() => jumpRun(message.id)}>
+          <Icon name="zap" size={13} />
+        </button>
+        <button className="icon-btn icon-btn--sm" title={L('Cancelar', 'Cancel')} onClick={() => cancelRun(message.id)}>
+          <Icon name="x" size={13} />
+        </button>
+      </div>
+    )
+  }
 
   if (run.steps.length === 0 && !working) return null
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
@@ -774,6 +793,13 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
   const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
+  // The lane of this conversation: whoever is working on it (or queued), so the
+  // hint says before you send that your message joins the queue.
+  const busyName = useStore((s) => {
+    const m = s.messages.findLast((x) => x.conversationId === conversationId && x.author.kind === 'agent' && (x.run?.status === 'working' || x.run?.status === 'queued'))
+    return m ? agentById(s, (m.author as { id: string }).id)?.name : undefined
+  })
+  const busyWorking = useStore((s) => s.messages.some((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
   const asker = useStore((s) => {
     const q = s.messages.findLast((m) => m.conversationId === conversationId && m.run?.status === 'waiting_input')
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
@@ -892,6 +918,11 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
     setMention(null)
   }
 
+  const queueHint = busyName
+    ? busyWorking
+      ? L(`${busyName} está trabalhando — sua mensagem entra na fila`, `${busyName} is working — your message joins the queue`)
+      : L(`${busyName} tem resposta na fila — a sua entra atrás`, `${busyName} has a reply queued — yours joins it`)
+    : undefined
   return (
     <div className="composer-wrap">
       {dragging && (
@@ -986,8 +1017,8 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
               e.target.value = ''
             }}
           />
-          <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : isDm ? L('O agente sempre responde na DM', 'The agent always replies in a DM') : L('@ chama um agente · sem menção, o router decide', '@ calls an agent · without a mention, the router decides'))}
+          <span className={`composer__hint ${note || queueHint ? 'composer__hint--warn' : ''}`}>
+            {note || queueHint || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : isDm ? L('O agente sempre responde na DM', 'The agent always replies in a DM') : L('@ chama um agente · sem menção, o router decide', '@ calls an agent · without a mention, the router decides'))}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((m) => stopRun(m.id))}>
