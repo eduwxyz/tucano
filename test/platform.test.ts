@@ -52,6 +52,29 @@ describe('a terminal for the person', () => {
     expect(terminalCommand(cmd, 'linux', (b) => b === 'gnome-terminal' || b === 'x-terminal-emulator')?.bin).toBe('gnome-terminal')
   })
 
+  it('opens Ghostty with the login command and keeps the shell open', () => {
+    const command = "'/opt/CLI tools/claude' auth login"
+    expect(terminalCommand(command, 'linux', (b) => b === 'ghostty')).toEqual({
+      bin: 'ghostty',
+      args: ['-e', 'sh', '-c', `${command}; exec "\${SHELL:-/bin/sh}"`]
+    })
+  })
+
+  it.each([
+    ['kitty', []],
+    ['alacritty', ['-e']]
+  ] as const)('opens %s with the login command and keeps the shell open', (bin, prefix) => {
+    const command = "'/opt/CLI tools/claude' auth login"
+    expect(terminalCommand(command, 'linux', (b) => b === bin)).toEqual({
+      bin,
+      args: [...prefix, 'sh', '-c', `${command}; exec "\${SHELL:-/bin/sh}"`]
+    })
+  })
+
+  it.each(['ghostty', 'kitty', 'alacritty'])('prefers the desktop terminal when %s is also installed', (bin) => {
+    expect(terminalCommand(cmd, 'linux', (b) => b === 'gnome-terminal' || b === bin)?.bin).toBe('gnome-terminal')
+  })
+
   it('says when there is no terminal to open', () => {
     expect(terminalCommand(cmd, 'linux', () => false)).toBeUndefined()
     // Windows opens its console from a script of its own (loginEngine).

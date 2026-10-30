@@ -58,6 +58,7 @@ const LINUX_TERMINALS: [string, (run: string[]) => string[]][] = [
   ['xfce4-terminal', (run) => ['-x', ...run]],
   ['x-terminal-emulator', (run) => ['-e', ...run]],
   ['tilix', (run) => ['-e', ...run]],
+  ['ghostty', (run) => ['-e', ...run]],
   ['kitty', (run) => run],
   ['alacritty', (run) => ['-e', ...run]],
   ['wezterm', (run) => ['start', '--', ...run]],
