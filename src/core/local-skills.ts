@@ -3,7 +3,7 @@
 // (~/.codex/skills). The app reads them, never runs them: the user links one to
 // agents, and an agent reads it with ler_skill, straight from the file, so an
 // edit in Claude Code counts from the next read.
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, type Dirent } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, relative, sep } from 'node:path'
 import { L } from '../shared/lang'
@@ -13,10 +13,22 @@ const TEXT = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.toml', 
 const SCRIPT = new Set(['.py', '.sh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.go', '.swift'])
 const MAX_FILE = 60_000
 
+// A skill folder can be a symlink: the skills CLI keeps the recipe in ~/.agents/skills
+// and links it into ~/.claude/skills. isDirectory() is false for a link, so the stat decides.
+const isDir = (path: string, e: Dirent): boolean => {
+  if (e.isDirectory()) return true
+  if (!e.isSymbolicLink()) return false
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 const dirs = (d: string): string[] => {
   try {
     return readdirSync(d, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
+      .filter((e) => isDir(join(d, e.name), e))
       .map((e) => join(d, e.name))
   } catch {
     return []

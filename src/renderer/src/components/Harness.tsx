@@ -78,10 +78,12 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
   const other = value !== 'jev' && !!engine && (typing || (!!m?.id && m.engine === engine && !inList && !loading))
   const name = m && m.engine === engine && !MODELS.some((x) => x.id === value) ? m.id : ''
 
+  // A harness's own card passes just that harness: it's already chosen there, so no select.
+  const fixed = engines?.length === 1 && !jev
   if (!engine && !jev) return <p className="hint hint--warn">{L('Nenhum harness pronto. Veja em Configurações → Modelos.', 'No harness ready. See Settings → Models.')}</p>
   return (
     <div className="model-picker">
-      {(choices.length > 1 || jev) && (
+      {!fixed && (
         <select
           value={value === 'jev' ? 'jev' : engine}
           onChange={(e) => {

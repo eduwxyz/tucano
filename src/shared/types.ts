@@ -431,6 +431,11 @@ export const SUMMARY_WINDOW = 30 // messages kept verbatim after a consolidation
 export const SUMMARY_MAX_AFTER = 50 // more than this after the summary triggers one
 export const STALE_DAYS = 60
 
+// Code in a message, a fenced block or inline code, is quoted content: a @handle there neither
+// calls the agent (mentioned() in the core) nor is bolded on screen (the message view). A fence
+// closes on the same run of backticks or tildes it opened with, so a ```` block can show a ``` one.
+export const CODE_SPANS = /(`{3,}|~{3,})[\s\S]*?(?:\1|$)|`[^`\n]*`/g
+
 // How much of each memory scope goes in every prompt, in characters. The most
 // recently confirmed fill it; the older ones past it aren't lost: agents search
 // them with buscar_memorias, offered only while some memory is past the budget.

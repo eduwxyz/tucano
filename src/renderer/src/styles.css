@@ -824,6 +824,19 @@ h3 {
   background: none;
   padding: 0;
 }
+.md-code {
+  position: relative;
+  margin: 1em 0;
+}
+.md-code pre {
+  margin: 0;
+}
+.md-code__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--code-bg);
+}
 .md table {
   border-collapse: collapse;
   margin: 6px 0 8px;

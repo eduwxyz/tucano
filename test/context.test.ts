@@ -33,6 +33,21 @@ describe('mentioned', () => {
   it('does not match emails', () => {
     expect(mentioned('manda pra eu@lia.com', [lia])).toEqual([])
   })
+
+  it('ignores handles inside fenced code blocks and inline code', () => {
+    const text = 'veja:\n```\nchame a @lia pra revisar\n```\ne inline `chame a @lia aqui` fim'
+    expect(mentioned(text, [lia])).toEqual([])
+  })
+
+  it('still finds handles around code, and an unterminated fence stops the scan', () => {
+    expect(mentioned('```\ncódigo\n```\nfala com @lia', [lia]).map((a) => a.id)).toEqual(['a1'])
+    expect(mentioned('bloco:\n```\n@lia sem fechar', [lia])).toEqual([])
+  })
+
+  it('ignores a fenced block shown inside a longer fence', () => {
+    expect(mentioned('````\n```\n@lia revisa\n```\n````\nfala com @lia', [lia]).map((a) => a.id)).toEqual(['a1'])
+    expect(mentioned('````md\n```\n@lia revisa\n```\n````', [lia])).toEqual([])
+  })
 })
 
 describe('systemPrompt', () => {

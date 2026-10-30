@@ -56,7 +56,7 @@ import {
 } from '../store'
 import { HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway } from './Harness'
 import { ApprovalCard } from './Conversation'
-import { AgentAvatar, Icon, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { AgentAvatar, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
@@ -535,12 +535,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   </select>
                 </Field>
                 <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you.`)}>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     step={0.5}
                     value={draft.limit / 1_000_000}
-                    onChange={(e) => patch({ limit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
+                    onChange={(n) => patch({ limit: Math.max(0, Math.round(n * 1_000_000)) })}
                     className="input--short"
                   />
                 </Field>
@@ -1612,29 +1611,26 @@ export function SettingsPage(): ReactNode {
           <Card title={L('Limites', 'Limits')}>
             <div className="grid2">
               <Field label={L('Limite padrão por agente (milhões de tokens/mês)', 'Default limit per agent (millions of tokens/month)')}>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   step={0.5}
                   value={settings.defaultLimit / 1_000_000}
-                  onChange={(e) => updateSettings({ defaultLimit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
+                  onChange={(n) => updateSettings({ defaultLimit: Math.max(0, Math.round(n * 1_000_000)) })}
                 />
               </Field>
               <Field label={L('Teto por resposta (% do limite do mês)', 'Ceiling per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa e você decide se continua.', 'When it hits it, the agent pauses and you decide whether it continues.')}>
-                <input
-                  type="number"
+                <NumberInput
                   min={1}
                   max={100}
                   value={settings.runBudgetPct ?? RUN_BUDGET_PCT}
-                  onChange={(e) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(Number(e.target.value)))) })}
+                  onChange={(n) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(n))) })}
                 />
               </Field>
               <Field label={L('Travado depois de (minutos sem sinal)', 'Stalled after (minutes without a sign)')} hint={L('Sem texto nem ferramenta terminando. Trabalho longo que anda não é cortado.', 'No text and no tool finishing. Long work that’s moving isn’t cut off.')}>
-                <input
-                  type="number"
+                <NumberInput
                   min={5}
                   value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
-                  onChange={(e) => updateSettings({ runStallMinutes: Math.max(5, Math.round(Number(e.target.value))) })}
+                  onChange={(n) => updateSettings({ runStallMinutes: Math.max(5, Math.round(n)) })}
                 />
               </Field>
               <Field label={L('Expiração de aprovações', 'Approvals expire after')}>

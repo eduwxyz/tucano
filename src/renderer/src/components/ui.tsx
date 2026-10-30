@@ -1,5 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
-import type { ReactNode } from 'react'
+import { useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import type { Agent } from '../store'
 
 const PATHS: Record<string, ReactNode> = {
@@ -19,6 +19,12 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   check: <path d="m5 12 5 5L20 7" />,
+  copy: (
+    <>
+      <rect x="8" y="8" width="14" height="14" rx="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </>
+  ),
   x: <path d="M6 6l12 12M18 6 6 18" />,
   chevron: <path d="m9 6 6 6-6 6" />,
   shield: <path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z" />,
@@ -259,5 +265,26 @@ export function UsageBar({ used, limit }: { used: number; limit: number }): Reac
     <span className={`budget budget--${tone}`} role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
       <span className="budget__fill" style={{ width: `${pct}%` }} />
     </span>
+  )
+}
+
+// A number field that holds the text while you type it: on its own, an emptied
+// input hands back '' and Number('') is 0, so the field refills with 0 and you
+// can't type over it. The number goes out on every keystroke that parses.
+export function NumberInput({ value, onChange, ...rest }: { value: number; onChange: (n: number) => void } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>): ReactNode {
+  const [text, setText] = useState<string | null>(null)
+  return (
+    <input
+      type="number"
+      {...rest}
+      value={text ?? String(value)}
+      onFocus={() => setText(String(value))}
+      onBlur={() => setText(null)}
+      onChange={(e) => {
+        setText(e.target.value)
+        const n = Number(e.target.value)
+        if (e.target.value.trim() !== '' && Number.isFinite(n)) onChange(n)
+      }}
+    />
   )
 }

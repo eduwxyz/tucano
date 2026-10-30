@@ -53,6 +53,8 @@ function MembersDialog({ id, name, members, onClose }: { id: string; name: strin
   const [error, setError] = useState<string | null>(null)
   const toggle = (a: string): void => setPicked(picked.includes(a) ? picked.filter((x) => x !== a) : [...picked, a])
   const changed = picked.length !== members.length || picked.some((a) => !members.includes(a))
+  // Archived agents can't be shown, so they don't show up in the count either (they stay picked: saving keeps them in the channel).
+  const inRoom = picked.filter((a) => agents.some((x) => x.id === a))
   return (
     <Modal title={L(`Agentes em #${name}`, `Agents in #${name}`)} onClose={onClose}>
       <p className="muted small modal__lead">{L('Quem está no canal lê a conversa e pode responder. Sem @menção, o router escolhe entre eles.', 'Whoever is in the channel reads the conversation and can reply. Without an @mention, the router picks among them.')}</p>
@@ -77,7 +79,7 @@ function MembersDialog({ id, name, members, onClose }: { id: string; name: strin
       {error && <p className="field__error">{error}</p>}
       <footer className="modal__foot">
         <span className="muted small">
-          {picked.length} {picked.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}
+          {inRoom.length} {inRoom.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}
         </span>
         <button className="btn btn--ghost btn--sm" onClick={onClose}>
           {L('Cancelar', 'Cancel')}

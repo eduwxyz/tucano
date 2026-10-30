@@ -159,6 +159,15 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
   })
 
+  it('does not hand the turn for a handle quoted inside a code block', async () => {
+    // The reply shows a prompt in a fenced block that mentions the other agent (the case that made an agent answer twice).
+    const quoted = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? 'O prompt é este:\n```\n@theo, pode ajudar aqui?\n```' : 'ok') })
+    const r = runner(quoted)
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => (m.author as { id: string }).id)).toEqual(['a1'])
+  })
+
   it('retries a failed reply in place', async () => {
     let fail = true
     const flaky: Engine = {

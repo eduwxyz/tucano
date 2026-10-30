@@ -46,6 +46,15 @@ describe('local skills', () => {
     expect(video.scripts).toBe(true)
   })
 
+  it('finds a skill whose folder is a symlink, as the skills CLI leaves it, and skips a broken one', () => {
+    put(join(home, '.agents/skills/grill-me/SKILL.md'), '---\nname: grill-me\ndescription: Entrevista sem piedade\n---\nChame grilling.')
+    symlinkSync(join(home, '.agents/skills/grill-me'), join(home, '.claude/skills/grill-me'))
+    symlinkSync(join(home, '.agents/skills/gone'), join(home, '.claude/skills/gone'), 'dir')
+    const found = findLocalSkills(home)
+    expect(found.filter((k) => k.origin === 'Claude Code').map((k) => k.name).sort()).toEqual(['grill-me', 'video'])
+    expect(found.find((k) => k.name === 'grill-me')?.source).toBe(join(home, '.claude/skills/grill-me/SKILL.md'))
+  })
+
   it('reads a linked file only inside the skill folder, following links', () => {
     const source = join(home, '.claude/skills/video/SKILL.md')
     expect(readLinked(source)).toBe('# Vídeos\nLeia estilo.md antes.')
