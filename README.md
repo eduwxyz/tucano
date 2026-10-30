@@ -92,7 +92,7 @@ Each agent picks its harness and model, so a team can mix them: Opus to fix, GPT
 
 ## Install
 
-**You need** a Mac with Apple silicon (M1 or later; tested on macOS 26) a Linux PC (x64 or ARM64; tested on Ubuntu with KDE and Xfce) or a Windows 10 or 11 PC (x64), and at least one harness, installed and signed in. On Windows, also [Git for Windows](https://git-scm.com/download/win): its Git Bash runs agents' commands on your PC, and Claude Code needs it there too. Optional: Docker to give agents a Linux computer ([Docker Desktop](https://www.docker.com/products/docker-desktop/) on a Mac or Windows; Docker Engine or Docker Desktop on Linux), and Google Chrome (or Chromium, on Linux) for their browser (without it, the built-in browser is used).
+**You need** a Mac with Apple silicon (M1 or later; tested on macOS 26) a Linux PC (x64 or ARM64; tested on Ubuntu with KDE and Xfce) or a Windows 10 or 11 PC (x64), and at least one harness, installed and signed in. For Windows execution, install [Git for Windows](https://git-scm.com/download/win): its Git Bash runs agents' commands, and Claude Code on Windows needs it too. Optional: WSL 2 to run all supported harnesses and local agent commands inside a selected Linux distribution; choose it in **Settings → General → Agent execution**. The Tucano app and its data stay on Windows. You can also use Docker to give agents a Linux computer ([Docker Desktop](https://www.docker.com/products/docker-desktop/) on a Mac or Windows; Docker Engine or Docker Desktop on Linux), and Google Chrome (or Chromium, on Linux) for their browser (without it, the built-in browser is used).
 
 **1. Install a harness.** Claude Code is the quickest:
 

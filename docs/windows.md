@@ -2,7 +2,7 @@
 
 Tucano was built for macOS. This document covers running it on Windows: what you need, how to run and package it, how it behaves differently from the Mac, and **every change** made to get there, file by file.
 
-Status: **runs on Windows 10/11 (x64)**, in development (`npm run dev`) and as an installed app, from each release (see [Installing](#installing)). Typecheck and the full test suite pass on Windows, including the Docker tests, and run on Windows for every pull request. A real agent turn through Claude Code works end to end. The Windows build is **not code-signed**.
+Status: runs on Windows 10/11 (x64), in development (`npm run dev`) and as an installed app, from each release (see [Installing](#installing)). Typecheck and the full test suite pass on Windows, including the Docker tests, and run on Windows for every pull request. A real agent turn through Claude Code works end to end. The Windows build is **not code-signed**. WSL 2 is an optional execution target; its end-to-end integration still needs validation on a Windows + WSL 2 machine.
 
 ## What you need
 
@@ -10,10 +10,30 @@ Status: **runs on Windows 10/11 (x64)**, in development (`npm run dev`) and as a
 |---|---|
 | Windows 10 or 11, x64 | Tested on Windows 10 Home 22H2 (19045) |
 | [Node.js](https://nodejs.org) 24+ | For `npm install` and the tests |
-| [Git for Windows](https://git-scm.com/download/win) | Its **Git Bash** is the shell agents' commands run in when an agent's computer is *This PC* (Claude Code on Windows needs it too). Without it, those commands fall back to `cmd.exe` |
+| [Git for Windows](https://git-scm.com/download/win) | For Windows execution, its **Git Bash** runs local agent commands (Claude Code on Windows needs it too). Without it, those commands fall back to `cmd.exe`; WSL execution uses the selected distro's Bash instead |
 | At least one harness, signed in | Claude Code is the quickest: `irm https://claude.ai/install.ps1 \| iex`, then `claude auth login`. Codex, OpenCode and Pi install with npm (`npm install -g @openai/codex`, `npm install -g opencode-ai`, `npm install -g @earendil-works/pi-coding-agent`) |
+| Optional: [Windows Terminal](https://aka.ms/terminal) | Opens the interactive harness sign-in flow for WSL; without it, Tucano shows the command to run yourself |
 | Optional: [Docker Desktop](https://www.docker.com/products/docker-desktop/) | For the isolated Linux computer. The first use pulls `node:22-bookworm` |
 | Optional: Google Chrome | For an agent's browser; it is found in `Program Files`, `Program Files (x86)` or `%LOCALAPPDATA%` |
+| Optional: WSL 2 | Runs all five supported harnesses and the “this computer” tools in one selected Linux distribution; WSL 1 is not supported |
+
+## Running agents in WSL 2
+
+Tucano remains a Windows app: its window, database, tray, and Windows-protected secrets stay on Windows. In **Settings → General → Agent execution**, choose **WSL 2** and a distribution. Tucano preselects WSL's default WSL 2 distribution when enabling it; you can choose another installed WSL 2 distro later. Windows remains the default until you opt in.
+
+To install Ubuntu from an elevated PowerShell, run `wsl --install -d Ubuntu`, restart if Windows asks, then check `wsl --list --verbose`. The distro's **VERSION** must be `2`; upgrade an existing distro with `wsl --set-version <name> 2`.
+
+Install the harnesses **inside that distribution**, and sign in there. Claude Code, Codex, Gemini CLI, OpenCode (v1 and v2), and Pi are detected and launched in WSL; changing the selected distro triggers a fresh harness check, and each distro has its own installations and logins. When Windows Terminal is installed, the app's login button opens it in the chosen distro. Codex and OpenCode keep Tucano's isolated app data separate from the user's project/config files. A selected distro that is missing or no longer WSL 2 is reported as unavailable; Tucano does not silently fall back to Windows.
+
+All local agent commands, services, and file tools use the selected distro. Local stdio MCP connectors added while WSL is selected also run in that distro; existing Windows stdio connectors keep running on Windows. A Windows project such as `C:\Users\you\code\app` is available there as `/mnt/c/Users/you/code/app`. A project in the distro's Linux filesystem can be addressed from Windows through `\\wsl.localhost\<distro>\home\you\code\app`, or by its Linux path in an agent tool. Tucano's own app data remains under `%APPDATA%\Tucano`.
+
+The WSL 2 default NAT route is used for the MCP gateway: Tucano binds to the Windows address visible to that distro, rather than exposing the gateway on every network interface. Windows-to-WSL service access uses WSL 2's localhost forwarding. If agent tools cannot connect, confirm that the distro is WSL 2, its networking is enabled, and Windows Terminal is installed for sign-in flows. The distribution may be stopped; WSL starts it when needed.
+
+The regular Windows path still runs commands in Git Bash (or `cmd.exe` without Git for Windows). Selecting WSL changes only the agent execution target, not Windows shortcuts, notifications, Chrome, or the isolated Docker computer.
+
+### WSL 2 release smoke test
+
+Before calling WSL support validated, use a Windows 11 machine with a WSL 2 distro and install/sign in to **Claude Code, Codex, Gemini CLI, OpenCode, and Pi inside that distro**. In Tucano, check each harness and send a test reply; then run an agent turn that calls a Tucano MCP tool. Repeat with a Windows-drive project and a project under the distro's `/home`, verify file read/write and `show_file`, start and stop a local service, and cancel a long-running command. Also import and call a local stdio MCP server from WSL, then switch back to Windows and confirm Windows execution still works.
 
 ## Installing
 

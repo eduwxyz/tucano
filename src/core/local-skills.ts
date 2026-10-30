@@ -138,9 +138,9 @@ function pluginSkills(claude: string): LocalSkill[] {
   })
 }
 
-export function findLocalSkills(home = homedir()): LocalSkill[] {
-  const claude = process.env['CLAUDE_CONFIG_DIR'] || join(home, '.claude')
-  const codex = process.env['CODEX_HOME'] || join(home, '.codex')
+export function findLocalSkills(home = homedir(), dirs?: { claude?: string; codex?: string }): LocalSkill[] {
+  const claude = dirs?.claude || process.env['CLAUDE_CONFIG_DIR'] || join(home, '.claude')
+  const codex = dirs?.codex || process.env['CODEX_HOME'] || join(home, '.codex')
   return [...inDirs(join(claude, 'skills'), 'Claude Code'), ...pluginSkills(claude), ...inDirs(join(codex, 'skills'), 'Codex')]
 }
 

@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Os, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport } from './types'
+import type { Os, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, WslDistribution } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -34,13 +34,14 @@ export interface Api {
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
   openDm(p: { agentId: string }): string
-  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with his conversation; fresh starts a new session
+  ensureTuca(p: { modelId?: string; fresh?: boolean; allowUnlisted?: boolean }): Promise<{ agentId: string; conversationId: string }> // the agent behind the builder screen, with his conversation; fresh starts a new session
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
+  wslDistributions(): Promise<WslDistribution[]>
   loginEngine(p: { engine: EngineId }): { opened: boolean; command: string } // not opened: no terminal to open, the person runs the command
-  installEngine(p: { engine: EngineId }): { opened: boolean; command: string; needsNode?: boolean } // needsNode: an npm install with no npm here
+  installEngine(p: { engine: EngineId }): Promise<{ opened: boolean; command: string; needsNode?: boolean }> // needsNode: an npm install with no npm here
   addConnector(p: { input: ConnectorInput }): Promise<string>
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
@@ -70,8 +71,8 @@ export interface Api {
   engineModels(p: { engine: EngineId }): Promise<{ models: string[]; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
   testEngine(p: { model: string }): Promise<{ ok: boolean; message: string }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
-  localSkills(): LocalSkill[] // the skills of the user's Claude Code, its plugins and Codex
-  linkSkill(p: { source: string; agents: string[] }): Skill
+  localSkills(): Promise<LocalSkill[]> // the skills of the user's Claude Code, its plugins and Codex
+  linkSkill(p: { source: string; agents: string[] }): Promise<Skill>
   decideSkill(p: { id: string; approve: boolean }): void
   restoreSkill(p: { skillId: string; versionId: number }): void
   archiveSkill(p: { id: string; archived: boolean }): void

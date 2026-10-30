@@ -23,6 +23,7 @@ import {
   removeConnector,
   updateTool,
   updateSettings,
+  wslDistributions,
   setJevKey,
   browserAction,
   setTelegramToken,
@@ -52,6 +53,7 @@ import {
   type MemoryMode,
   type Skill,
   type ToolClass,
+  type WslDistribution,
   isTeam,
   reachable
 } from '../store'
@@ -1465,6 +1467,29 @@ export function JevKey({ saved, hint }: { saved: boolean; hint?: string }): Reac
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
   const packaged = useStore((s) => s.packaged)
+  const platform = useStore((s) => s.platform)
+  const [distros, setDistros] = useState<WslDistribution[]>([])
+  const [wslError, setWslError] = useState('')
+  const [checkingTarget, setCheckingTarget] = useState(false)
+  const selectedDistro = settings.executionTarget?.kind === 'wsl' ? settings.executionTarget.distro : ''
+  const wslIssue = settings.executionTarget?.kind === 'wsl' && Object.values(settings.engines).every((engine) => !engine.installed) ? Object.values(settings.engines).find((engine) => engine.warning)?.warning : undefined
+  const changeExecutionTarget = (executionTarget: NonNullable<typeof settings.executionTarget>): void => {
+    setCheckingTarget(true)
+    void updateSettings({ executionTarget })
+      .catch((error: unknown) => setWslError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setCheckingTarget(false))
+  }
+  useEffect(() => {
+    if (platform !== 'windows') return
+    let current = true
+    void wslDistributions().then(
+      (found) => current && setDistros(found),
+      (error: unknown) => current && setWslError(error instanceof Error ? error.message : String(error))
+    )
+    return () => {
+      current = false
+    }
+  }, [platform])
   // At work, Jev and Telegram stay: the person decides, told what leaves the gateway.
   const work = onGateway(settings)
   const tabs = SETTINGS_TABS()
@@ -1497,6 +1522,40 @@ export function SettingsPage(): ReactNode {
                 </button>
               )}
             </div>
+          </Card>
+        )}
+
+        {pane('geral') && platform === 'windows' && (
+          <Card title={L('Onde os agentes rodam', 'Agent execution')} lead={L('Escolha onde todos os harnesses e os comandos do seu computador rodam. O app e seus dados continuam no Windows.', 'Choose where all harnesses and your-computer commands run. The app and its data stay on Windows.')}>
+            <Field label={L('Ambiente', 'Environment')}>
+              <select
+                value={settings.executionTarget?.kind ?? 'windows'}
+                onChange={(e) => {
+                  if (e.target.value === 'windows') return changeExecutionTarget({ kind: 'windows' })
+                  const current = selectedDistro || undefined
+                  const distro = distros.find((d) => d.version === 2 && d.name === current) ?? distros.find((d) => d.version === 2 && d.isDefault) ?? distros.find((d) => d.version === 2)
+                  if (distro) changeExecutionTarget({ kind: 'wsl', distro: distro.name })
+                }}
+              >
+                <option value="windows">Windows</option>
+                <option value="wsl" disabled={!distros.some((d) => d.version === 2) && settings.executionTarget?.kind !== 'wsl'}>WSL 2</option>
+              </select>
+            </Field>
+            {settings.executionTarget?.kind === 'wsl' && (
+              <Field label={L('Distribuição', 'Distribution')}>
+                <select
+                  value={distros.some((d) => d.version === 2 && d.name === selectedDistro) ? selectedDistro : ''}
+                  onChange={(e) => e.target.value && changeExecutionTarget({ kind: 'wsl', distro: e.target.value })}
+                >
+                  <option value="">{L('Escolha uma distribuição WSL 2', 'Choose a WSL 2 distribution')}</option>
+                  {distros.filter((d) => d.version === 2).map((d) => <option key={d.name} value={d.name}>{d.name}{d.isDefault ? L(' · padrão', ' · default') : ''}</option>)}
+                </select>
+              </Field>
+            )}
+            {wslError && <p className="hint">{wslError}</p>}
+            {checkingTarget && <p className="hint">{L('Verificando os harnesses nessa distribuição…', 'Checking for harnesses in this distribution…')}</p>}
+            {wslIssue && <p className="hint hint--warn">{wslIssue}</p>}
+            {!wslError && !distros.some((d) => d.version === 2) && <p className="hint">{L('Não encontrei uma distribuição WSL 2. Instale ou atualize uma distribuição e abra o Tucano de novo.', 'No WSL 2 distribution was found. Install or upgrade a distribution, then reopen Tucano.')}</p>}
           </Card>
         )}
 

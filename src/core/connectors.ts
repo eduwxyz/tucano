@@ -15,6 +15,7 @@ import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '
 import type { Db } from './db'
 import { classify } from './policy'
 import type { Secrets } from './secrets'
+import { activeWslDistro, wslLaunchSpec } from './wsl'
 
 const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
@@ -88,7 +89,8 @@ export class ConnectorManager {
       const command = input.command?.trim()
       if (!command) throw new Error(L('Informe o comando.', 'Enter the command.'))
       const env = input.env ?? {}
-      this.deps.db.saveConnector({ id, name, kind: 'stdio', command, args: input.args ?? [], envKeys: Object.keys(env), auth: 'none' })
+      const executionTarget = input.executionTarget ?? (activeWslDistro() ? { kind: 'wsl' as const, distro: activeWslDistro()! } : undefined)
+      this.deps.db.saveConnector({ id, name, kind: 'stdio', command, args: input.args ?? [], envKeys: Object.keys(env), auth: 'none', executionTarget })
       if (Object.keys(env).length) await this.deps.secrets.setJson(key(id, 'env'), env)
     }
     this.emitConnector(id)
@@ -164,7 +166,11 @@ export class ConnectorManager {
       transport = http
     } else {
       const env = (await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}
-      transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
+      const hostEnv = getDefaultEnvironment()
+      if (c.executionTarget?.kind === 'wsl') {
+        const spec = wslLaunchSpec({ distro: c.executionTarget.distro, bin: c.command!, args: c.args ?? [], env: { ...hostEnv, ...env } })
+        transport = new StdioClientTransport({ command: spec.file, args: spec.args, env: hostEnv, stderr: 'ignore' })
+      } else transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...hostEnv, ...env }, stderr: 'ignore' })
     }
 
     try {

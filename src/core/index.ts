@@ -14,7 +14,7 @@ import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { Db } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
 import { codexEngine, userCodexProvider } from './engines/codex'
-import { opencodeEngine } from './engines/opencode'
+import { opencodeEngine, userOpencodeProviders } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
 import { adoptLoginShellPath, detectEngines } from './engines/detect'
@@ -34,6 +34,7 @@ import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
 import { findOnPath, isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
+import { activeWslDistro, listWslDistributions, setExecutionProblem, setExecutionTarget, windowsPathToWsl, wslCanConnect, wslExecutable, wslHasCommand, wslHome, wslHostAddress, wslLoginEnv, wslPathToWindows } from './wsl'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -41,7 +42,7 @@ import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
-import { agentFromDraft, availableModels, tucaAgent, tucaHello } from './tuca'
+import { agentFromDraft, availableModels, selectTucaModel, tucaAgent, tucaHello } from './tuca'
 import { seed } from './seed'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
@@ -74,25 +75,120 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
   defaultLimit: 2_000_000,
   approvalTtlHours: 24,
   theme: 'system',
-  language: langOf(process.env['TUCANO_LOCALE'])
+  language: langOf(process.env['TUCANO_LOCALE']),
+  executionTarget: { kind: 'windows' }
 }
+
+const savedTarget = db.getSettings(DEFAULTS).executionTarget
+setExecutionTarget(isWin && savedTarget?.kind === 'wsl' ? savedTarget : { kind: 'windows' })
+
+const wslHomePath = (): string | undefined => {
+  const distro = activeWslDistro()
+  return distro ? wslPathToWindows(wslHome(distro), distro) : undefined
+}
+const wslUserPath = (value: string | undefined, fallback: string, distro: string, home: string): string => {
+  if (!value) return fallback
+  if (value === '~') return home
+  if (value.startsWith('~/')) return join(home, value.slice(2))
+  if (value.startsWith('/')) return wslPathToWindows(value, distro)
+  if (/^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')) return value
+  return join(home, value)
+}
+async function wslUserPaths(): Promise<{ home: string; claude: string; codex: string; gemini: string; opencodeConfig: string; opencodeData: string } | undefined> {
+  const distro = activeWslDistro()
+  if (!distro) return undefined
+  const home = wslHomePath()!
+  const env = await loginEnv()
+  return {
+    home,
+    claude: wslUserPath(env['CLAUDE_CONFIG_DIR'], join(home, '.claude'), distro, home),
+    codex: wslUserPath(env['CODEX_HOME'], join(home, '.codex'), distro, home),
+    gemini: wslUserPath(env['GEMINI_CLI_HOME'], join(home, '.gemini'), distro, home),
+    opencodeConfig: join(wslUserPath(env['XDG_CONFIG_HOME'], join(home, '.config'), distro, home), 'opencode'),
+    opencodeData: join(wslUserPath(env['XDG_DATA_HOME'], join(home, '.local', 'share'), distro, home), 'opencode')
+  }
+}
+const claudeProvider = async () => {
+  const paths = await wslUserPaths()
+  return userProvider(paths?.claude)
+}
+const codexProvider = async () => {
+  const paths = await wslUserPaths()
+  return userCodexProvider(paths?.codex)
+}
+const openCodeProviders = async (v2 = false) => {
+  const paths = await wslUserPaths()
+  return userOpencodeProviders(paths?.opencodeConfig, v2)
+}
+const openCodeUserData = async (): Promise<string | undefined> => {
+  const paths = await wslUserPaths()
+  return paths?.opencodeData
+}
+let wslGatewayProblem: string | undefined
 
 const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
 let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine }
 // The models OpenCode and Pi list (what the person has logins for), from the last check.
 let listed: Partial<Record<EngineId, string[]>> = {}
+let detectGeneration = 0
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 async function detect(): Promise<void> {
+  const generation = ++detectGeneration
+  const distro = activeWslDistro()
+  if (distro) {
+    const installed = await listWslDistributions()
+    if (generation !== detectGeneration) return
+    if (!installed.some((d) => d.name.toLowerCase() === distro.toLowerCase() && d.version === 2)) {
+      const warning = L(`A distribuição ${distro} não está disponível como WSL 2.`, `The ${distro} distribution is not available as WSL 2.`)
+      setExecutionProblem(warning)
+      const unavailable: EngineStatus = { installed: false, loggedIn: false, warning }
+      engines = { claude: unavailable, codex: unavailable, opencode: unavailable, pi: unavailable, gemini: unavailable }
+      listed = {}
+      gatewayLists.clear()
+      emit({ type: 'settings', settings: settings() })
+      return
+    }
+    if (wslGatewayProblem) {
+      setExecutionProblem(wslGatewayProblem)
+      const unavailable: EngineStatus = { installed: false, loggedIn: false, warning: wslGatewayProblem }
+      engines = { claude: unavailable, codex: unavailable, opencode: unavailable, pi: unavailable, gemini: unavailable }
+      listed = {}
+      gatewayLists.clear()
+      emit({ type: 'settings', settings: settings() })
+      return
+    }
+    setExecutionProblem(undefined)
+  }
   if (fake) {
     engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
-  } else ({ engines, listed } = await detectEngines(codexHome))
+  } else {
+    const result = await detectEngines(codexHome)
+    if (generation !== detectGeneration) return
+    engines = result.engines
+    listed = result.listed
+  }
   gatewayLists.clear()
   emit({ type: 'settings', settings: settings() })
 }
 const gateway = new Gateway()
-const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
+async function exposeWslGateway(distro: string): Promise<void> {
+  await gateway.exposeToWsl(wslHostAddress(distro))
+  const { host, port } = gateway.agentTarget()
+  if (!(await wslCanConnect(distro, host, port))) throw new Error(L('A distribuição não consegue alcançar o gateway local do Tucano. Confira a rede do WSL 2.', 'The distribution cannot reach Tucano’s local gateway. Check WSL 2 networking.'))
+}
+async function startGateway(): Promise<void> {
+  await gateway.start()
+  const distro = activeWslDistro()
+  if (!distro) return
+  try {
+    await exposeWslGateway(distro)
+  } catch (error) {
+    wslGatewayProblem = L(`Não consegui abrir o gateway do Tucano para o WSL: ${error instanceof Error ? error.message : String(error)}`, `Couldn't expose Tucano's gateway to WSL: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+const ready = startGateway().then(() => (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect))
 
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
@@ -105,42 +201,77 @@ const githubInfo = (): Settings['github'] => githubRef?.info()
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }
   : {
-      claude: claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())),
-      codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())),
-      opencode: opencodeEngine(() => engines.opencode.path, join(dataDir, 'opencode-home'), loginEnv, () => engines.opencode.version),
+      claude: claudeEngine(() => engines.claude.path, async () => quietClaude(await claudeProvider())),
+      codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(await codexProvider())),
+      opencode: opencodeEngine(
+        () => engines.opencode.path,
+        join(dataDir, 'opencode-home'),
+        loginEnv,
+        () => engines.opencode.version,
+        openCodeProviders,
+        openCodeUserData,
+        () => !!activeWslDistro()
+      ),
       pi: piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv),
-      gemini: geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv)
+      gemini: geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv, async () => (await wslUserPaths())?.gemini)
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
 // Windows has no login shell: the same shell agents' commands use (Git Bash, or cmd.exe).
 const runHelper = (cmd: string): Promise<string | undefined> => {
   const sh = isWin ? shellCommand(cmd) : { file: loginShell(), args: ['-lc', cmd], verbatim: false, env: process.env }
-  return new Promise((resolve) => execFile(sh.file, sh.args, { timeout: 30_000, env: sh.env, windowsHide: true, windowsVerbatimArguments: sh.verbatim }, (err, out) => resolve(err ? undefined : String(out).trim() || undefined)))
+  return new Promise((resolve) =>
+    execFile(sh.file, sh.args, { timeout: 30_000, env: sh.env, windowsHide: true, windowsVerbatimArguments: sh.verbatim }, (err, out) => {
+      if ('cleanup' in sh) sh.cleanup?.()
+      resolve(err ? undefined : String(out).trim() || undefined)
+    })
+  )
 }
 
 // The MCP servers in the harnesses' own setup, and which are already connectors (same address).
 async function foundMcps(): Promise<FoundMcp[]> {
   const env = { ...process.env, ...(await loginEnv()) }
   const have = new Set(connectors.list().map((c) => (c.kind === 'remote' ? `url:${(c.url ?? '').replace(/\/+$/, '')}` : `cmd:${[c.command, ...(c.args ?? [])].join(' ')}`)))
-  return harnessMcps({}, env).map((m) => ({ ...m, added: have.has(m.key) }))
+  const paths = await wslUserPaths()
+  const dirs = paths ? { claude: join(paths.home, '.claude.json'), codex: paths.codex, opencode: paths.opencodeConfig } : {}
+  const distro = activeWslDistro()
+  return harnessMcps(dirs, env).map((m) => ({
+    ...m,
+    ...(distro && m.kind === 'stdio' ? { input: { ...m.input, executionTarget: { kind: 'wsl' as const, distro } } } : {}),
+    added: have.has(m.key)
+  }))
 }
 
 // Where a harness on a gateway sends its requests, and with which key, as its own config says.
 async function gatewayTarget(engine: EngineId): Promise<{ baseUrl: string; key?: string } | undefined> {
   if (engine === 'claude') {
-    const c = userProvider()
+    const c = await claudeProvider()
     const baseUrl = c.env['ANTHROPIC_BASE_URL']
     if (!baseUrl) return undefined
     return { baseUrl, key: c.env['ANTHROPIC_AUTH_TOKEN'] || c.env['ANTHROPIC_API_KEY'] || (c.apiKeyHelper ? await runHelper(c.apiKeyHelper) : undefined) }
   }
   if (engine !== 'codex') return undefined
-  const x = userCodexProvider()
+  const x = await codexProvider()
   if (!x.baseUrl) return undefined
   const shell = await loginEnv()
   return { baseUrl: x.baseUrl, key: x.envNames.filter((n) => n !== 'OPENAI_BASE_URL').map((n) => shell[n]).find(Boolean) }
 }
 const gatewayLists = new Map<EngineId, Promise<{ models: string[]; error?: string }>>()
+
+async function gatewayModelList(engine: EngineId): Promise<{ models: string[]; error?: string }> {
+  if (listed[engine]) return { models: listed[engine]! }
+  if (engines[engine].route !== 'gateway') return { models: [] }
+  if (!gatewayLists.has(engine))
+    gatewayLists.set(
+      engine,
+      (async () => {
+        const target = await gatewayTarget(engine)
+        if (!target) return { models: [], error: L('Sem endereço do gateway.', 'No gateway address.') }
+        return { models: await listModels(engine, target.baseUrl, target.key) }
+      })().catch((e: unknown) => ({ models: [], error: e instanceof Error ? e.message : String(e) }))
+    )
+  return gatewayLists.get(engine)!
+}
 
 // ---------- ports ----------
 
@@ -324,9 +455,11 @@ const runner = new Runner({
 })
 runner.setPaused(!!settings().paused)
 // Installs from before the Tuca get him at the first start after the introduction.
-void ready.then(() => {
-  if (settings().onboarding?.done) ensureTuca()
-})
+void ready
+  .then(async () => {
+    if (settings().onboarding?.done) await ensureTuca()
+  })
+  .catch((error: unknown) => console.error('[tuca]', error))
 
 telegram = new Telegram({
   secrets,
@@ -411,22 +544,45 @@ const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
 // even when archived. His model: the one given, else a plan's, else the router's
 // or the memory's, which the introduction made sure work.
 // `fresh` starts a new session: the builder screen opens with only his hello.
-function ensureTuca(modelId?: string, fresh = false): { agentId: string; conversationId: string } {
+async function ensureTuca(modelId?: string, fresh = false, allowUnlisted = false): Promise<{ agentId: string; conversationId: string }> {
   const s = settings()
-  const works = (id: string): boolean => {
-    const m = modelInfo(id)
-    return !!m?.id && s.engines[m.engine].loggedIn
-  }
   let tuca = db.agents().find((a) => a.kind === 'tuca')
-  // A harness turned off since: the model given now, if it works.
-  if (tuca && !works(tuca.modelId) && modelId && works(modelId)) {
-    tuca = { ...tuca, modelId }
+  const preferred = tuca ? [modelId, tuca.modelId, s.routerModel, s.memoryModel] : [modelId, s.routerModel, s.memoryModel]
+  const initial = selectTucaModel(preferred.filter((id): id is string => !!id), s, listed, {})
+  const preferredGateway = preferred.some((id) => {
+    const engine = id ? modelInfo(id)?.engine : undefined
+    return !!engine && s.engines[engine].route === 'gateway'
+  })
+  let selected = allowUnlisted && modelId && modelInfo(modelId)?.id && s.engines[modelInfo(modelId)!.engine].loggedIn ? modelId : initial
+  let gatewayErrors: string[] = []
+  if ((!selected || preferredGateway) && !allowUnlisted) {
+    const gateways = (['claude', 'codex'] as const).filter((engine) => s.engines[engine].loggedIn && s.engines[engine].route === 'gateway')
+    const results = await Promise.all(gateways.map(async (engine) => [engine, await gatewayModelList(engine)] as const))
+    const gatewayModels: Partial<Record<EngineId, string[]>> = {}
+    for (const [engine, result] of results) {
+      gatewayModels[engine] = result.models
+      if (result.error) gatewayErrors.push(result.error)
+    }
+    selected = selectTucaModel(preferred.filter((id): id is string => !!id), s, listed, gatewayModels)
+  }
+  const hasReadyEngine = Object.values(s.engines).some((engine) => engine.loggedIn)
+  if (!selected && hasReadyEngine) {
+    const detail = gatewayErrors[0]
+    throw new Error(
+      L(
+        `Não encontrei um modelo de conversa disponível para o Tuca${detail ? `: ${detail}` : '.'} Escolha um modelo que esse harness oferece em Configurações → Modelos.`,
+        `I couldn't find a conversation model available to Tuca${detail ? `: ${detail}` : '.'} Choose a model offered by that harness in Settings → Models.`
+      )
+    )
+  }
+  const chosenModel = selected ?? tuca?.modelId ?? modelId ?? 'sonnet'
+  if (tuca && tuca.modelId !== chosenModel) {
+    tuca = { ...tuca, modelId: chosenModel }
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
   }
   if (!tuca) {
-    const model = [modelId, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
-    tuca = tucaAgent(model ?? 'sonnet', db.agents().map((a) => a.handle), s.defaultLimit)
+    tuca = tucaAgent(chosenModel, db.agents().map((a) => a.handle), s.defaultLimit)
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
   }
@@ -488,6 +644,8 @@ const api: Api = {
     packaged: process.env['TUCANO_PACKAGED'] === '1',
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
+
+  wslDistributions: async () => (isWin ? listWslDistributions() : []),
 
   sendMessage: ({ conversationId, text, images }) => {
     void runner.send(conversationId, text, images)
@@ -577,7 +735,7 @@ const api: Api = {
     return id
   },
 
-  ensureTuca: ({ modelId, fresh }) => ensureTuca(modelId, fresh),
+  ensureTuca: ({ modelId, fresh, allowUnlisted }) => ensureTuca(modelId, fresh, allowUnlisted),
   createFromDraft: ({ messageId }) => {
     const d = db.message(messageId)?.run?.agentDraft
     if (!d) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
@@ -602,9 +760,13 @@ const api: Api = {
   },
 
   saveSkill: ({ skill }) => skills.save(skill),
-  localSkills: () => findLocalSkills(),
-  linkSkill: ({ source, agents }) => {
-    if (!findLocalSkills().some((k) => k.source === source)) throw new Error(L('Essa skill não está mais no seu Claude Code nem no Codex.', "That skill is no longer in your Claude Code or Codex."))
+  localSkills: async () => {
+    const paths = await wslUserPaths()
+    return findLocalSkills(paths?.home, paths ? { claude: paths.claude, codex: paths.codex } : undefined)
+  },
+  linkSkill: async ({ source, agents }) => {
+    const paths = await wslUserPaths()
+    if (!findLocalSkills(paths?.home, paths ? { claude: paths.claude, codex: paths.codex } : undefined).some((k) => k.source === source)) throw new Error(L('Essa skill não está mais no seu Claude Code nem no Codex.', "That skill is no longer in your Claude Code or Codex."))
     return skills.link(source, agents)
   },
   decideSkill: ({ id, approve }) => void skills.decide(id, approve),
@@ -646,20 +808,7 @@ const api: Api = {
 
   // The models a harness offers, besides the app's list for a plan: what OpenCode
   // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
-  engineModels: async ({ engine }) => {
-    if (listed[engine]) return { models: listed[engine]! }
-    if (engines[engine].route !== 'gateway') return { models: [] }
-    if (!gatewayLists.has(engine))
-      gatewayLists.set(
-        engine,
-        (async () => {
-          const t = await gatewayTarget(engine)
-          if (!t) return { models: [], error: L('Sem endereço do gateway.', 'No gateway address.') }
-          return { models: await listModels(engine, t.baseUrl, t.key) }
-        })().catch((e: unknown) => ({ models: [], error: e instanceof Error ? e.message : String(e) }))
-      )
-    return gatewayLists.get(engine)!
-  },
+  engineModels: ({ engine }) => gatewayModelList(engine),
 
   // A real question through the chosen engine and model: what fails here would fail every reply.
   testEngine: async ({ model }) => {
@@ -682,13 +831,32 @@ const api: Api = {
     return { ok: true, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
   },
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, ...patch } }) => {
+  updateSettings: async ({ patch: { jevKey: _computed, telegram: _phone, ...patch } }) => {
+    if (patch.executionTarget) {
+      if (patch.executionTarget.kind === 'wsl') {
+        const distro = patch.executionTarget.distro.trim()
+        const installed = await listWslDistributions()
+        if (!installed.some((d) => d.name.toLowerCase() === distro.toLowerCase() && d.version === 2)) throw new Error(L('Escolha uma distribuição WSL 2 instalada.', 'Choose an installed WSL 2 distribution.'))
+        setExecutionTarget({ kind: 'wsl', distro })
+        try {
+          await exposeWslGateway(distro)
+          wslGatewayProblem = undefined
+        } catch (error) {
+          wslGatewayProblem = L(`Não consegui abrir o gateway do Tucano para o WSL: ${error instanceof Error ? error.message : String(error)}`, `Couldn't expose Tucano's gateway to WSL: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      } else {
+        wslGatewayProblem = undefined
+        setExecutionTarget({ kind: 'windows' })
+        gateway.useWindowsHost()
+      }
+    }
     db.setSettings(patch)
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
-    if (patch.onboarding?.done) void ready.then(() => ensureTuca()) // skipping the introduction still gets the Tuca
+    if (patch.onboarding?.done) void ready.then(() => ensureTuca()).catch((error: unknown) => console.error('[tuca]', error)) // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
-    emit({ type: 'settings', settings: settings() })
+    if (patch.executionTarget) await detect()
+    else emit({ type: 'settings', settings: settings() })
   },
 
   // Validation errors come back to the form; connecting continues in the background.
@@ -765,7 +933,14 @@ const api: Api = {
   runRoutine: ({ id }) => routines.runNow(id),
 
   refreshEngines: () => {
-    void detect()
+    const distro = activeWslDistro()
+    if (!distro) return void detect()
+    void exposeWslGateway(distro)
+      .then(() => (wslGatewayProblem = undefined))
+      .catch((error: unknown) => {
+        wslGatewayProblem = L(`Não consegui abrir o gateway do Tucano para o WSL: ${error instanceof Error ? error.message : String(error)}`, `Couldn't expose Tucano's gateway to WSL: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      .then(detect)
   },
 
   // Login always happens in the CLI's own flow; the app never sees credentials.
@@ -773,6 +948,18 @@ const api: Api = {
   loginEngine: ({ engine }) => {
     const bin = engines[engine].path ?? ENGINES[engine].cli
     const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
+    const distro = activeWslDistro()
+    if (isWin && distro) {
+      const home = wslHome(distro)
+      const env = engine === 'codex' ? [`HOME=${windowsPathToWsl(codexHome, distro)}`, `CODEX_HOME=${windowsPathToWsl(join(codexHome, '.codex'), distro)}`] : []
+      const subArgs = sub ? sub.split(' ') : []
+      const args = ['--distribution', distro, '--cd', home, '--exec', 'bash', '-lc', 'exec env "$@"', 'tucano-login', ...env, bin, ...subArgs]
+      const quote = (value: string): string => `'${value.replace(/'/g, "''")}'`
+      const command = [`& ${quote(wslExecutable())}`, '--distribution', quote(distro), '--cd', quote(home), '--exec', 'bash', '-lc', quote('exec env "$@"'), quote('tucano-login'), ...env.map(quote), quote(bin), ...subArgs.map(quote)].join(' ')
+      if (!onPath('wt')) return { opened: false, command }
+      spawn('wt.exe', ['-w', '0', 'new-tab', '--', wslExecutable(), ...args], { detached: true, stdio: 'ignore', windowsHide: true }).on('error', () => {}).unref()
+      return { opened: true, command }
+    }
     if (isWin) {
       // A new console window running a small script: cmd's quoting can't be trusted with paths otherwise.
       const script = join(dataDir, 'login.cmd')
@@ -791,11 +978,22 @@ const api: Api = {
 
   // The harness's own installer, in a terminal the person sees: its progress, its
   // questions and its errors stay theirs. Detection picks the CLI up once it lands.
-  installEngine: ({ engine }) => {
-    const command = (isWin && ENGINES[engine].windows) || ENGINES[engine].install
+  installEngine: async ({ engine }) => {
+    const distro = activeWslDistro()
+    const windowsExecution = isWin && !distro
+    const command = (windowsExecution && ENGINES[engine].windows) || ENGINES[engine].install
     // An npm package needs Node.js first; without it the command would only fail.
-    if (/^npm\s/.test(command) && !findOnPath('npm')) return { opened: false, command, needsNode: true }
-    if (isWin) {
+    if (/^npm\s/.test(command) && !(distro ? await wslHasCommand(distro, 'npm') : findOnPath('npm'))) return { opened: false, command, needsNode: true }
+    if (isWin && distro) {
+      const home = wslHome(distro)
+      const args = ['--distribution', distro, '--cd', home, '--exec', 'bash', '-lc', command]
+      const quote = (value: string): string => `'${value.replace(/'/g, "''")}'`
+      const manual = [`& ${quote(wslExecutable())}`, '--distribution', quote(distro), '--cd', quote(home), '--exec', 'bash', '-lc', quote(command)].join(' ')
+      if (!onPath('wt')) return { opened: false, command: manual }
+      spawn('wt.exe', ['-w', '0', 'new-tab', '--', wslExecutable(), ...args], { detached: true, stdio: 'ignore', windowsHide: true }).on('error', () => {}).unref()
+      return { opened: true, command: manual }
+    }
+    if (windowsExecution) {
       // A PowerShell window running a small script: the install commands are PowerShell.
       const script = join(dataDir, 'install.ps1')
       writeFileSync(script, `${command}\r\n`)

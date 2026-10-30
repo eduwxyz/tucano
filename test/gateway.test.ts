@@ -46,4 +46,16 @@ describe('Gateway', () => {
     s.close()
     await expect(connect(s.url)).rejects.toThrow()
   })
+
+  it('exposes agent sessions on a second loopback interface when WSL needs another host address', async () => {
+    await gateway.exposeToWsl('127.0.0.2')
+    const session = gateway.open({ tools: [tool('ask_user')], call: async () => textResult('ok') })
+    expect(new URL(session.url).hostname).toBe('127.0.0.2')
+    const client = await connect(session.url)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['ask_user'])
+    await client.close()
+
+    gateway.useWindowsHost()
+    expect(new URL(gateway.open({ tools: [], call: async () => textResult('ok') }).url).hostname).toBe('127.0.0.1')
+  })
 })

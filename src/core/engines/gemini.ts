@@ -139,7 +139,12 @@ export function geminiEnv(home: string, base: NodeJS.ProcessEnv = {}): NodeJS.Pr
 
 // The model is "<provider>/<model>" as the picker lists it; the CLI wants the
 // model id alone. The home carries the gateway and the system prompt.
-export function geminiEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
+export function geminiEngine(
+  bin: () => string | undefined,
+  appDir: string,
+  shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({}),
+  userHome?: () => Promise<string | undefined>
+): Engine {
   return {
     id: 'gemini',
     async *run(turn) {
@@ -149,7 +154,7 @@ export function geminiEngine(bin: () => string | undefined, appDir: string, shel
         return
       }
       const model = turn.model.includes('/') ? turn.model.slice(turn.model.indexOf('/') + 1) : turn.model
-      const home = geminiHome(appDir, turn)
+      const home = geminiHome(appDir, turn, await userHome?.())
       // Provider keys may live in the person's shell (an SSO helper prints the
       // token), which an app opened from Finder doesn't get.
       const env = geminiEnv(home, { ...process.env, ...(await shellEnv()) })

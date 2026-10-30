@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { isWin, killTree, spawnable } from '../platform'
+import { isWin, killTree, spawnable, trackWslStderr } from '../platform'
+import { forgetWslProcess } from '../wsl'
 import type { EngineEvent } from './types'
 
 // A parser turns the CLI's JSONL stdout into engine events. It is pure so it
@@ -19,25 +20,40 @@ export async function* runCli(opts: {
   parser: Parser
   env?: NodeJS.ProcessEnv
 }): AsyncIterable<EngineEvent> {
-  const s = spawnable(opts.bin, opts.args)
-  const child = spawn(s.file, s.args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+  const s = spawnable(opts.bin, opts.args, { cwd: opts.cwd, env: opts.env ?? process.env })
+  const child = spawn(s.file, s.args, { cwd: s.wsl ? undefined : opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: s.wsl ? process.env : opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
   // A CLI that ignores SIGTERM (stuck on the network, say) gets SIGKILL, so a stop always ends the turn.
   // On Windows the CLI may sit behind cmd.exe (an npm shim): only killing the tree reaches it.
   const kill = (): void => {
-    if (isWin && child.pid) return killTree(child.pid)
+    if (isWin && child.pid) {
+      killTree(child.pid, 'SIGTERM')
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) killTree(child.pid!, 'SIGKILL')
+      }, 5_000).unref()
+      return
+    }
     child.kill('SIGTERM')
-    setTimeout(() => child.exitCode === null && child.signalCode === null && child.kill('SIGKILL'), 5_000).unref()
+    setTimeout(() => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      if (isWin && child.pid) killTree(child.pid, 'SIGKILL')
+      else child.kill('SIGKILL')
+    }, 5_000).unref()
   }
   opts.signal.addEventListener('abort', kill, { once: true })
 
   let stderr = ''
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', (chunk: string) => {
-    stderr = (stderr + chunk).slice(-8000)
+    stderr = trackWslStderr(child.pid, s, stderr + chunk).slice(-8000)
   })
   const exited = new Promise<number | null>((resolve) => {
-    child.on('close', (code) => resolve(code))
+    child.on('close', (code) => {
+      if (child.pid) forgetWslProcess(child.pid)
+      s.cleanup?.()
+      resolve(code)
+    })
     child.on('error', (err) => {
+      s.cleanup?.()
       stderr += `\n${err.message}`
       resolve(-1)
     })

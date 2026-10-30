@@ -8,6 +8,7 @@ import { homedir, userInfo } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 
 import type { Os } from '../shared/types'
+import { activeWslDistro, rememberWslProcess, terminateWslProcess, wslLaunchSpec, wslPidFromStderr, type SpawnSpec, type WslProcessOptions } from './wsl'
 
 export type { Os }
 
@@ -170,7 +171,9 @@ function shimTarget(shim: string): { file: string; args: string[] } | undefined 
 // for it (the script parses them a second time, hence the double escaping);
 // cmd.exe ends a command at a line break, which would drop every argument after
 // it (an engine's isolation flags), so a multi-line argument is refused there.
-export function spawnable(bin: string, args: string[]): { file: string; args: string[]; verbatim: boolean } {
+export function spawnable(bin: string, args: string[], opts: Pick<WslProcessOptions, 'cwd' | 'env'> = {}): SpawnSpec {
+  const distro = activeWslDistro()
+  if (distro) return wslLaunchSpec({ distro, bin, args, ...opts })
   if (!isWin || !/\.(cmd|bat)$/i.test(bin)) return { file: bin, args, verbatim: false }
   const direct = shimTarget(bin)
   if (direct) return { file: direct.file, args: [...direct.args, ...args], verbatim: false }
@@ -183,6 +186,11 @@ export function spawnable(bin: string, args: string[]): { file: string; args: st
 // Windows has no groups and no signals: taskkill takes the whole tree.
 export function killTree(pid: number, signal: NodeJS.Signals = 'SIGTERM'): void {
   if (isWin) {
+    const tracked = terminateWslProcess(pid, signal === 'SIGKILL' ? 'KILL' : 'TERM')
+    if (tracked) {
+      if (signal === 'SIGKILL') void killWindowsTree(pid)
+      return
+    }
     void killWindowsTree(pid)
     return
   }
@@ -242,7 +250,12 @@ function withPath(env: NodeJS.ProcessEnv, dirs: string[]): NodeJS.ProcessEnv {
 // Windows, Git's bash, or cmd.exe when Git isn't installed. Git's bash runs without
 // its launcher, so a stop knows the shell's own pid; the env is what the launcher
 // would set (the MSYS system and its tools first on PATH).
-export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.env): { file: string; args: string[]; verbatim: boolean; kind: 'bash' | 'cmd'; env: NodeJS.ProcessEnv } {
+export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.env, cwd?: string): SpawnSpec & { kind: 'bash' | 'cmd' | 'wsl'; env: NodeJS.ProcessEnv } {
+  const distro = activeWslDistro()
+  if (distro) {
+    const wsl = wslLaunchSpec({ distro, bin: '/bin/bash', args: ['-lc', command], cwd, env })
+    return { ...wsl, kind: 'wsl', env: process.env }
+  }
   if (!isWin) return { file: '/bin/bash', args: ['-c', command], verbatim: false, kind: 'bash', env }
   const root = gitRoot()
   if (root) {
@@ -251,4 +264,12 @@ export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.e
     return { file: join(root, 'usr', 'bin', 'bash.exe'), args: ['-c', command], verbatim: false, kind: 'bash', env: shellEnv }
   }
   return { file: process.env['ComSpec'] || 'cmd.exe', args: ['/d', '/s', '/c', `"${command}"`], verbatim: true, kind: 'cmd', env }
+}
+
+export function trackWslStderr(pid: number | undefined, spec: SpawnSpec, stderr: string): string {
+  if (!pid || !spec.wsl) return stderr
+  const linuxPid = wslPidFromStderr(stderr)
+  if (!linuxPid) return stderr
+  rememberWslProcess(pid, spec.wsl.distro, linuxPid)
+  return stderr.replace(/(?:^|\n)TUCANO_WSL_PID=\d+\r?(?:\n|$)/, '\n')
 }
