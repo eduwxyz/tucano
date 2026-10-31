@@ -4,6 +4,7 @@ import type { Agent } from '../store'
 
 const PATHS: Record<string, ReactNode> = {
   hash: <path d="M5 9h14M5 15h14M10 4 8 20M16 4l-2 16" />,
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   at: (
     <>
       <circle cx="12" cy="12" r="4" />

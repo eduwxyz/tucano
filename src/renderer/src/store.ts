@@ -56,6 +56,7 @@ export type View =
 
 export interface State {
   ready: boolean
+  navOpen: boolean // on a phone, the sidebar slid in over the view
   view: View | null
   me: { name: string; initials: string }
   settings: Settings
@@ -93,6 +94,7 @@ const initials = (name: string): string =>
 
 let state: State = {
   ready: false,
+  navOpen: false,
   view: null,
   me: { name: 'Eu', initials: 'EU' },
   settings: {
@@ -295,10 +297,13 @@ export function conversationTitle(s: State, c: Conversation): string {
 
 // ---------- actions ----------
 
+export const setNav = (navOpen: boolean): void => set((s) => ({ ...s, navOpen }))
+
 export const navigate = (view: View): void =>
   set((s) => ({
     ...s,
     view,
+    navOpen: false,
     panel: s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? s.panel : null,
     conversations:
       view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
@@ -413,7 +418,7 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 }
 
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
-export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog }))
+export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog, navOpen: dialog ? false : s.navOpen }))
 export const setTab = (page: string, tab: string): void => set((s) => ({ ...s, tabs: { ...s.tabs, [page]: tab } }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
   void call('computerAction', { agentId, action })
