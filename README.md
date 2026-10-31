@@ -28,7 +28,7 @@ Coding agents got good. Working with *several* of them is still a mess of termin
 
 - **A team, not a prompt box.** Agents with names, roles, tools and memory. They talk in channels, call each other with `@mentions` and hand work over: one finds the bug, another fixes it, a third reviews it, and you get the result.
 - **Your rules.** Each agent sees only the tools you give it, with *no access*, *read*, or *read and write* per tool. Merges, purchases, posts, emails and deletes become an approval tied to the exact action, on your computer or your phone.
-- **Runs on what you already have.** Agents think with the Claude Code, Codex, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
+- **Runs on what you already have.** Agents think with the Claude Code, Codex, Gemini CLI, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
 - **Everything stays on your computer.** Conversations, memory, logins, files. There is no Tucano server.
 
 ## What it does

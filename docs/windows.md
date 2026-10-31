@@ -11,7 +11,7 @@ Status: runs on Windows 10/11 (x64), in development (`npm run dev`) and as an in
 | Windows 10 or 11, x64 | Tested on Windows 10 Home 22H2 (19045) |
 | [Node.js](https://nodejs.org) 24+ | For `npm install` and the tests |
 | [Git for Windows](https://git-scm.com/download/win) | For Windows execution, its **Git Bash** runs local agent commands (Claude Code on Windows needs it too). Without it, those commands fall back to `cmd.exe`; WSL execution uses the selected distro's Bash instead |
-| At least one harness, signed in | Claude Code is the quickest: `irm https://claude.ai/install.ps1 \| iex`, then `claude auth login`. Codex, OpenCode and Pi install with npm (`npm install -g @openai/codex`, `npm install -g opencode-ai`, `npm install -g @earendil-works/pi-coding-agent`) |
+| At least one harness, signed in | Claude Code is the quickest: `irm https://claude.ai/install.ps1 \| iex`, then `claude auth login`. Codex, Gemini CLI, OpenCode and Pi install with npm (`npm install -g @openai/codex`, `npm install -g @google/gemini-cli`, `npm install -g opencode-ai`, `npm install -g @earendil-works/pi-coding-agent`) |
 | Optional: [Windows Terminal](https://aka.ms/terminal) | Opens the interactive harness sign-in flow for WSL; without it, Tucano shows the command to run yourself |
 | Optional: [Docker Desktop](https://www.docker.com/products/docker-desktop/) | For the isolated Linux computer. The first use pulls `node:22-bookworm` |
 | Optional: Google Chrome | For an agent's browser; it is found in `Program Files`, `Program Files (x86)` or `%LOCALAPPDATA%` |
@@ -27,13 +27,13 @@ Install the harnesses **inside that distribution**, and sign in there. Claude Co
 
 All local agent commands, services, and file tools use the selected distro. Local stdio MCP connectors added while WSL is selected also run in that distro; existing Windows stdio connectors keep running on Windows. A Windows project such as `C:\Users\you\code\app` is available there as `/mnt/c/Users/you/code/app`. A project in the distro's Linux filesystem can be addressed from Windows through `\\wsl.localhost\<distro>\home\you\code\app`, or by its Linux path in an agent tool. Tucano's own app data remains under `%APPDATA%\Tucano`.
 
-The WSL 2 default NAT route is used for the MCP gateway: Tucano binds to the Windows address visible to that distro, rather than exposing the gateway on every network interface. Windows-to-WSL service access uses WSL 2's localhost forwarding. If agent tools cannot connect, confirm that the distro is WSL 2, its networking is enabled, and Windows Terminal is installed for sign-in flows. The distribution may be stopped; WSL starts it when needed.
+Tucano first checks whether the distro can reach its gateway through `127.0.0.1` (available with mirrored networking). If not, it falls back to a second listener bound only to the Windows vEthernet address visible to that distro; it never binds the gateway to every interface. The fallback can trigger a Windows Firewall prompt on first use—allow access only on private networks. Windows-to-WSL service access uses WSL 2's localhost forwarding. If agent tools cannot connect, confirm that the distro is WSL 2 and its networking is enabled. The distribution may be stopped; WSL starts it when needed.
 
 The regular Windows path still runs commands in Git Bash (or `cmd.exe` without Git for Windows). Selecting WSL changes only the agent execution target, not Windows shortcuts, notifications, Chrome, or the isolated Docker computer.
 
 ### WSL 2 release smoke test
 
-Before calling WSL support validated, use a Windows 11 machine with a WSL 2 distro and install/sign in to **Claude Code, Codex, Gemini CLI, OpenCode, and Pi inside that distro**. In Tucano, check each harness and send a test reply; then run an agent turn that calls a Tucano MCP tool. Repeat with a Windows-drive project and a project under the distro's `/home`, verify file read/write and `show_file`, start and stop a local service, and cancel a long-running command. Also import and call a local stdio MCP server from WSL, then switch back to Windows and confirm Windows execution still works.
+Before calling WSL support validated, use a Windows 11 machine with a WSL 2 distro and install/sign in to **Claude Code, Codex, Gemini CLI, OpenCode, and Pi inside that distro**. Check each harness and send a test reply; run Claude Code and Codex turns that call tools through the gateway; and import and call a local stdio MCP server. Exercise both a Windows-drive project and a project under the distro's `/home`, file read/write and `show_file`, and a prompt long enough to exercise the private temporary-file path. Stop a turn mid-run and confirm no process is left running in the distro. Switch back to Windows and confirm Windows harnesses and Windows-targeted connectors still work.
 
 ## Installing
 

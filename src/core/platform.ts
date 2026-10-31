@@ -171,7 +171,7 @@ function shimTarget(shim: string): { file: string; args: string[] } | undefined 
 // for it (the script parses them a second time, hence the double escaping);
 // cmd.exe ends a command at a line break, which would drop every argument after
 // it (an engine's isolation flags), so a multi-line argument is refused there.
-export function spawnable(bin: string, args: string[], opts: Pick<WslProcessOptions, 'cwd' | 'env'> = {}): SpawnSpec {
+export function spawnable(bin: string, args: string[], opts: Pick<WslProcessOptions, 'cwd' | 'env' | 'forwardEnv'> = {}): SpawnSpec {
   const distro = activeWslDistro()
   if (distro) return wslLaunchSpec({ distro, bin, args, ...opts })
   if (!isWin || !/\.(cmd|bat)$/i.test(bin)) return { file: bin, args, verbatim: false }
@@ -254,7 +254,7 @@ export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.e
   const distro = activeWslDistro()
   if (distro) {
     const wsl = wslLaunchSpec({ distro, bin: '/bin/bash', args: ['-lc', command], cwd, env })
-    return { ...wsl, kind: 'wsl', env: process.env }
+    return { ...wsl, kind: 'wsl', env: wsl.hostEnv ?? process.env }
   }
   if (!isWin) return { file: '/bin/bash', args: ['-c', command], verbatim: false, kind: 'bash', env }
   const root = gitRoot()

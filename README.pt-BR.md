@@ -28,7 +28,7 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
 - **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
-- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
+- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Gemini CLI, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
 - **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
 
 ## O que ele faz

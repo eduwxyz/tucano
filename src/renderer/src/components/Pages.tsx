@@ -913,6 +913,8 @@ const STATUS = (): Record<Connector['status'], { label: string; tone: string }> 
 })
 
 const address = (c: Connector): string => (c.kind === 'remote' ? (c.url ?? '') : [c.command, ...(c.args ?? [])].join(' '))
+const connectorRuntime = (c: Connector): string =>
+  c.executionTarget?.kind === 'wsl' ? L(`WSL 2 · ${c.executionTarget.distro}`, `WSL 2 · ${c.executionTarget.distro}`) : L('Este computador', 'This computer')
 
 export function ConnectorsPage(): ReactNode {
   const connectors = useStore((s) => s.connectors)
@@ -962,6 +964,7 @@ export function ConnectorsPage(): ReactNode {
                 <span className="grow">
                   <strong>{c.name}</strong>
                   <span className="muted small mono truncate">{address(c)}</span>
+                  {c.kind === 'stdio' && <span className="muted small">{connectorRuntime(c)}</span>}
                 </span>
                 {fresh > 0 && <span className="tag tag--warn">{L(`${fresh} nova${fresh === 1 ? '' : 's'}`, `${fresh} new`)}</span>}
                 <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
@@ -980,7 +983,7 @@ export function ConnectorsPage(): ReactNode {
                 <div className="tools">
                   {c.kind === 'stdio' && (
                     <p className="warn-box">
-                      <Icon name="terminal" size={14} /> {L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}
+                      <Icon name="terminal" size={14} /> {L(`Conector local · ${connectorRuntime(c)}. Roda como seu usuário.`, `Local connector · ${connectorRuntime(c)}. Runs as your user.`)}
                     </p>
                   )}
                   {c.error && <p className="note note--error">{c.error}</p>}

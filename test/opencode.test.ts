@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { opencodeArgs, opencodeConfig, opencodeParser, stripJsonComments, userOpencodeProviders } from '../src/core/engines/opencode'
+import { opencodeProviderEnvNames } from '../src/core/engines/provider-env'
 
 // Lines recorded from `opencode run --format json` (1.15), trimmed.
 const STEP = '{"type":"step_finish","part":{"type":"step-finish","reason":"tool-calls","tokens":{"total":222,"input":204,"output":18,"reasoning":0,"cache":{"write":0,"read":0}}}}'
@@ -56,6 +57,10 @@ describe('opencode', () => {
     writeFileSync(join(dir, 'opencode.jsonc'), '{\n  // a comment\n  "provider": { "acme": { "options": { "baseURL": "https://llm.acme.com/v1" } } },\n  "mcp": { "x": {} },\n  "instructions": ["a.md"],\n}\n')
     expect(userOpencodeProviders(dir)).toEqual({ provider: { acme: { options: { baseURL: 'https://llm.acme.com/v1' } } } })
     expect(stripJsonComments('{"url": "http://x//y" /* c */}')).toBe('{"url": "http://x//y" }')
+  })
+
+  it('extracts only explicit provider environment names', () => {
+    expect(opencodeProviderEnvNames({ provider: { acme: { env: ['ACME_TOKEN'], options: { apiKey: '${CUSTOM_API_KEY}' } } } })).toEqual(['ACME_TOKEN', 'CUSTOM_API_KEY'])
   })
 
   it("takes V2's providers shape too, for V2 only, and only the policies about providers", () => {

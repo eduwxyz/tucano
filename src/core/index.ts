@@ -42,7 +42,7 @@ import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
-import { agentFromDraft, availableModels, selectTucaModel, tucaAgent, tucaHello } from './tuca'
+import { agentFromDraft, availableModels, tucaAgent, tucaHello } from './tuca'
 import { seed } from './seed'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
@@ -174,9 +174,16 @@ async function detect(): Promise<void> {
 }
 const gateway = new Gateway()
 async function exposeWslGateway(distro: string): Promise<void> {
-  await gateway.exposeToWsl(wslHostAddress(distro))
-  const { host, port } = gateway.agentTarget()
-  if (!(await wslCanConnect(distro, host, port))) throw new Error(L('A distribuição não consegue alcançar o gateway local do Tucano. Confira a rede do WSL 2.', 'The distribution cannot reach Tucano’s local gateway. Check WSL 2 networking.'))
+  await gateway.exposeToWsl()
+  const target = gateway.agentTarget()
+  if (await wslCanConnect(distro, target.host, target.port)) return
+
+  const fallback = wslHostAddress(distro)
+  const unreachable = (): Error => new Error(L('A distribuição não consegue alcançar o gateway local do Tucano. Confira a rede do WSL 2.', 'The distribution cannot reach Tucano’s local gateway. Check WSL 2 networking.'))
+  if (!fallback || fallback === target.host) throw unreachable()
+  await gateway.exposeToWsl(fallback)
+  const fallbackTarget = gateway.agentTarget()
+  if (!(await wslCanConnect(distro, fallbackTarget.host, fallbackTarget.port))) throw unreachable()
 }
 async function startGateway(): Promise<void> {
   await gateway.start()
@@ -257,21 +264,6 @@ async function gatewayTarget(engine: EngineId): Promise<{ baseUrl: string; key?:
   return { baseUrl: x.baseUrl, key: x.envNames.filter((n) => n !== 'OPENAI_BASE_URL').map((n) => shell[n]).find(Boolean) }
 }
 const gatewayLists = new Map<EngineId, Promise<{ models: string[]; error?: string }>>()
-
-async function gatewayModelList(engine: EngineId): Promise<{ models: string[]; error?: string }> {
-  if (listed[engine]) return { models: listed[engine]! }
-  if (engines[engine].route !== 'gateway') return { models: [] }
-  if (!gatewayLists.has(engine))
-    gatewayLists.set(
-      engine,
-      (async () => {
-        const target = await gatewayTarget(engine)
-        if (!target) return { models: [], error: L('Sem endereço do gateway.', 'No gateway address.') }
-        return { models: await listModels(engine, target.baseUrl, target.key) }
-      })().catch((e: unknown) => ({ models: [], error: e instanceof Error ? e.message : String(e) }))
-    )
-  return gatewayLists.get(engine)!
-}
 
 // ---------- ports ----------
 
@@ -455,11 +447,9 @@ const runner = new Runner({
 })
 runner.setPaused(!!settings().paused)
 // Installs from before the Tuca get him at the first start after the introduction.
-void ready
-  .then(async () => {
-    if (settings().onboarding?.done) await ensureTuca()
-  })
-  .catch((error: unknown) => console.error('[tuca]', error))
+void ready.then(() => {
+  if (settings().onboarding?.done) ensureTuca()
+})
 
 telegram = new Telegram({
   secrets,
@@ -544,45 +534,22 @@ const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
 // even when archived. His model: the one given, else a plan's, else the router's
 // or the memory's, which the introduction made sure work.
 // `fresh` starts a new session: the builder screen opens with only his hello.
-async function ensureTuca(modelId?: string, fresh = false, allowUnlisted = false): Promise<{ agentId: string; conversationId: string }> {
+function ensureTuca(modelId?: string, fresh = false): { agentId: string; conversationId: string } {
   const s = settings()
+  const works = (id: string): boolean => {
+    const m = modelInfo(id)
+    return !!m?.id && s.engines[m.engine].loggedIn
+  }
   let tuca = db.agents().find((a) => a.kind === 'tuca')
-  const preferred = tuca ? [modelId, tuca.modelId, s.routerModel, s.memoryModel] : [modelId, s.routerModel, s.memoryModel]
-  const initial = selectTucaModel(preferred.filter((id): id is string => !!id), s, listed, {})
-  const preferredGateway = preferred.some((id) => {
-    const engine = id ? modelInfo(id)?.engine : undefined
-    return !!engine && s.engines[engine].route === 'gateway'
-  })
-  let selected = allowUnlisted && modelId && modelInfo(modelId)?.id && s.engines[modelInfo(modelId)!.engine].loggedIn ? modelId : initial
-  let gatewayErrors: string[] = []
-  if ((!selected || preferredGateway) && !allowUnlisted) {
-    const gateways = (['claude', 'codex'] as const).filter((engine) => s.engines[engine].loggedIn && s.engines[engine].route === 'gateway')
-    const results = await Promise.all(gateways.map(async (engine) => [engine, await gatewayModelList(engine)] as const))
-    const gatewayModels: Partial<Record<EngineId, string[]>> = {}
-    for (const [engine, result] of results) {
-      gatewayModels[engine] = result.models
-      if (result.error) gatewayErrors.push(result.error)
-    }
-    selected = selectTucaModel(preferred.filter((id): id is string => !!id), s, listed, gatewayModels)
-  }
-  const hasReadyEngine = Object.values(s.engines).some((engine) => engine.loggedIn)
-  if (!selected && hasReadyEngine) {
-    const detail = gatewayErrors[0]
-    throw new Error(
-      L(
-        `Não encontrei um modelo de conversa disponível para o Tuca${detail ? `: ${detail}` : '.'} Escolha um modelo que esse harness oferece em Configurações → Modelos.`,
-        `I couldn't find a conversation model available to Tuca${detail ? `: ${detail}` : '.'} Choose a model offered by that harness in Settings → Models.`
-      )
-    )
-  }
-  const chosenModel = selected ?? tuca?.modelId ?? modelId ?? 'sonnet'
-  if (tuca && tuca.modelId !== chosenModel) {
-    tuca = { ...tuca, modelId: chosenModel }
+  // A harness turned off since: the model given now, if it works.
+  if (tuca && !works(tuca.modelId) && modelId && works(modelId)) {
+    tuca = { ...tuca, modelId }
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
   }
   if (!tuca) {
-    tuca = tucaAgent(chosenModel, db.agents().map((a) => a.handle), s.defaultLimit)
+    const model = [modelId, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
+    tuca = tucaAgent(model ?? 'sonnet', db.agents().map((a) => a.handle), s.defaultLimit)
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
   }
@@ -735,7 +702,7 @@ const api: Api = {
     return id
   },
 
-  ensureTuca: ({ modelId, fresh, allowUnlisted }) => ensureTuca(modelId, fresh, allowUnlisted),
+  ensureTuca: ({ modelId, fresh }) => ensureTuca(modelId, fresh),
   createFromDraft: ({ messageId }) => {
     const d = db.message(messageId)?.run?.agentDraft
     if (!d) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
@@ -806,9 +773,22 @@ const api: Api = {
     emit({ type: 'settings', settings: settings() })
   },
 
-  // The models a harness offers, besides the app's list for a plan: what OpenCode
-  // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
-  engineModels: ({ engine }) => gatewayModelList(engine),
+  // The models a harness offers, besides the app's list for a plan: what Gemini CLI,
+  // OpenCode and Pi list, or what the gateway in Claude Code's or Codex's config lists.
+  engineModels: async ({ engine }) => {
+    if (listed[engine]) return { models: listed[engine]! }
+    if (engines[engine].route !== 'gateway') return { models: [] }
+    if (!gatewayLists.has(engine))
+      gatewayLists.set(
+        engine,
+        (async () => {
+          const t = await gatewayTarget(engine)
+          if (!t) return { models: [], error: L('Sem endereço do gateway.', 'No gateway address.') }
+          return { models: await listModels(engine, t.baseUrl, t.key) }
+        })().catch((e: unknown) => ({ models: [], error: e instanceof Error ? e.message : String(e) }))
+      )
+    return gatewayLists.get(engine)!
+  },
 
   // A real question through the chosen engine and model: what fails here would fail every reply.
   testEngine: async ({ model }) => {
@@ -853,7 +833,7 @@ const api: Api = {
     db.setSettings(patch)
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
-    if (patch.onboarding?.done) void ready.then(() => ensureTuca()).catch((error: unknown) => console.error('[tuca]', error)) // skipping the introduction still gets the Tuca
+    if (patch.onboarding?.done) void ready.then(() => ensureTuca()) // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
     if (patch.executionTarget) await detect()
     else emit({ type: 'settings', settings: settings() })

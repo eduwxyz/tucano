@@ -182,7 +182,7 @@ export function codexEngine(
       const p = await provider()
       const shell = await shellEnv() // read once per launch
       const keys = Object.fromEntries(p.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
-      yield* runCli({ bin: path, args: codexArgs(turn, p.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: { ...codexEnv(home), ...keys, ...p.env } })
+      yield* runCli({ bin: path, args: codexArgs(turn, p.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: { ...codexEnv(home), ...keys, ...p.env }, forwardEnv: [...p.envNames, ...Object.keys(p.env ?? {})] })
     }
   }
 }

@@ -153,6 +153,7 @@ export class ConnectorManager {
       { listChanged: { tools: { onChanged: () => void this.refreshTools(id).catch(() => {}) } } }
     )
     let transport: Transport
+    let cleanup: (() => void) | undefined
     if (c.kind === 'remote') {
       const headers: Record<string, string> = {}
       if (c.auth === 'token') {
@@ -168,14 +169,16 @@ export class ConnectorManager {
       const env = (await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}
       const hostEnv = getDefaultEnvironment()
       if (c.executionTarget?.kind === 'wsl') {
-        const spec = wslLaunchSpec({ distro: c.executionTarget.distro, bin: c.command!, args: c.args ?? [], env: { ...hostEnv, ...env } })
-        transport = new StdioClientTransport({ command: spec.file, args: spec.args, env: hostEnv, stderr: 'ignore' })
+        const spec = wslLaunchSpec({ distro: c.executionTarget.distro, bin: c.command!, args: c.args ?? [], env: { ...hostEnv, ...env }, forwardEnv: Object.keys(env) })
+        cleanup = spec.cleanup
+        transport = new StdioClientTransport({ command: spec.file, args: spec.args, env: Object.fromEntries(Object.entries(spec.hostEnv ?? hostEnv).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), stderr: 'ignore' })
       } else transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...hostEnv, ...env }, stderr: 'ignore' })
     }
 
     try {
       await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS })
     } catch (e) {
+      cleanup?.()
       if (e instanceof UnauthorizedError || (e instanceof Error && /unauthorized|401/i.test(e.message))) {
         this.setStatus(id, 'needs_auth', interactive ? L('Conclua a autorização no navegador.', 'Finish the authorization in the browser.') : L('Precisa autorizar.', 'Needs authorization.'))
       } else if (e instanceof Error && /dynamic client registration/i.test(e.message)) {
@@ -202,6 +205,7 @@ export class ConnectorManager {
     l.transport = transport
     l.failures = 0
     transport.onclose = () => {
+      cleanup?.()
       if (this.live.get(id)?.client === client) {
         l.client = undefined
         this.setStatus(id, 'disconnected')

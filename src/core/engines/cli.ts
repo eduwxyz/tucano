@@ -19,9 +19,10 @@ export async function* runCli(opts: {
   signal: AbortSignal
   parser: Parser
   env?: NodeJS.ProcessEnv
+  forwardEnv?: string[]
 }): AsyncIterable<EngineEvent> {
-  const s = spawnable(opts.bin, opts.args, { cwd: opts.cwd, env: opts.env ?? process.env })
-  const child = spawn(s.file, s.args, { cwd: s.wsl ? undefined : opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: s.wsl ? process.env : opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+  const s = spawnable(opts.bin, opts.args, { cwd: opts.cwd, env: opts.env ?? process.env, forwardEnv: opts.forwardEnv })
+  const child = spawn(s.file, s.args, { cwd: s.wsl ? undefined : opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: s.hostEnv ?? opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
   // A CLI that ignores SIGTERM (stuck on the network, say) gets SIGKILL, so a stop always ends the turn.
   // On Windows the CLI may sit behind cmd.exe (an npm shim): only killing the tree reaches it.
   const kill = (): void => {

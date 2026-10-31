@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import { opencodeMajor, runOpencodeV2 } from './opencode-v2'
+import { opencodeProviderEnvNames } from './provider-env'
 import type { Engine, EngineEvent, Turn } from './types'
 import { L } from '../../shared/lang'
 
@@ -161,12 +162,15 @@ export function opencodeEngine(
       }
       // Provider keys may live in the user's shell, which an app opened from Finder doesn't get.
       if (opencodeMajor(version()) >= 2) {
-        yield* runOpencodeV2(path, turn, appDir, await shellEnv(), await providers(true), await userData?.())
+        const providerConfig = await providers(true)
+        yield* runOpencodeV2(path, turn, appDir, await shellEnv(), providerConfig, await userData?.())
         return
       }
       const copy = typeof copyAuth === 'function' ? copyAuth() : copyAuth
-      const env = { ...process.env, ...(await shellEnv()), ...opencodeHome(appDir, await userData?.(), copy), OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(turn, await providers())), OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_AUTOUPDATE: '1' }
-      yield* runCli({ bin: path, args: opencodeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })
+      const providerConfig = await providers()
+      const home = opencodeHome(appDir, await userData?.(), copy)
+      const env = { ...process.env, ...(await shellEnv()), ...home, OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(turn, providerConfig)), OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_AUTOUPDATE: '1' }
+      yield* runCli({ bin: path, args: opencodeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env, forwardEnv: [...Object.keys(home), 'OPENCODE_CONFIG_CONTENT', 'OPENCODE_DISABLE_CLAUDE_CODE', 'OPENCODE_DISABLE_AUTOUPDATE', ...opencodeProviderEnvNames(providerConfig)] })
     }
   }
 }

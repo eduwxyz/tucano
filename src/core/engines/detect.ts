@@ -14,8 +14,8 @@ import { activeWslDistro, setExecutionProblem, wslHome, wslLoginEnv, wslPathToWi
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const s = spawnable(bin, args)
-    execFile(s.file, s.args, { timeout, env: s.wsl ? process.env : env, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (err, stdout, stderr) => {
+    const s = spawnable(bin, args, { env })
+    execFile(s.file, s.args, { timeout, env: s.hostEnv ?? env, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (err, stdout, stderr) => {
       s.cleanup?.()
       const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
       resolve({ code, stdout: String(stdout), stderr: String(stderr) })

@@ -367,7 +367,7 @@ export async function createChannel(name: string): Promise<void> {
 }
 
 // The Tuca and his DM, made if missing.
-export const ensureTuca = (modelId?: string, fresh = false, allowUnlisted = false): Promise<{ agentId: string; conversationId: string }> => call('ensureTuca', { modelId, fresh, allowUnlisted })
+export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: string; conversationId: string }> => call('ensureTuca', { modelId, fresh })
 // The agent a Tuca card proposed, created with a DM of its own.
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.

@@ -8,7 +8,7 @@ import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
-import { agentFromDraft, draftFrom, freeHandle, selectTucaModel, tucaAgent } from '../src/core/tuca'
+import { agentFromDraft, draftFrom, freeHandle, tucaAgent } from '../src/core/tuca'
 
 const linear: Connector = { id: 'c-lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth', status: 'connected', tools: [] }
 const ctx = { usable: (id: string) => id === 'sonnet', fallbackModel: 'sonnet', connectors: [linear] }
@@ -55,13 +55,6 @@ describe('the Tuca in a conversation', () => {
 
   afterEach(async () => {
     await gateway.stop()
-  })
-
-  it('uses an exact chat model from a gateway instead of a plan alias', () => {
-    const unavailable = { installed: false, loggedIn: false }
-    const gatewaySettings: Settings = { ...settings, engines: { claude: { ...ready, route: 'gateway' }, codex: unavailable, opencode: unavailable, pi: unavailable, gemini: unavailable } }
-    expect(selectTucaModel(['sonnet'], gatewaySettings, {}, { claude: ['text-embedding-3-large', 'qwen3.8-flash', 'whisper-1'] })).toBe('claude:qwen3.8-flash')
-    expect(selectTucaModel(['sonnet'], gatewaySettings, {}, { claude: [] })).toBeUndefined()
   })
 
   it('proposes an agent as a card, and nothing is created', async () => {

@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
+import { opencodeProviderEnvNames } from './provider-env'
 import { num, parseJson, runCli } from './cli'
 import { opencodeParser, userOpencodeProviders } from './opencode'
 import type { EngineEvent, Turn, Usage } from './types'
@@ -71,15 +72,15 @@ export function sessionUsage(exported: string): Usage | undefined {
   }
 }
 
-const cli = (bin: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): Promise<string> => {
-  const s = spawnable(bin, args, { env, cwd })
-  return new Promise((resolve) => execFile(s.file, s.args, { env: s.wsl ? process.env : env, cwd: s.wsl ? undefined : cwd, timeout: 20_000, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (_err, stdout) => (s.cleanup?.(), resolve(String(stdout)))))
+const cli = (bin: string, args: string[], env: NodeJS.ProcessEnv, cwd: string, forwardEnv: string[]): Promise<string> => {
+  const s = spawnable(bin, args, { env, cwd, forwardEnv })
+  return new Promise((resolve) => execFile(s.file, s.args, { env: s.hostEnv ?? env, cwd: s.wsl ? undefined : cwd, timeout: 20_000, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (_err, stdout) => (s.cleanup?.(), resolve(String(stdout)))))
 }
 
 // `opencode serve` on a free local port, with a password of the turn's own.
-async function startServer(bin: string, env: NodeJS.ProcessEnv, cwd: string): Promise<{ url?: string; stop: () => Promise<void> }> {
-  const s = spawnable(bin, ['serve', '--hostname', '127.0.0.1', '--port', '0'], { env, cwd })
-  const child = spawn(s.file, s.args, { env: s.wsl ? process.env : env, cwd: s.wsl ? undefined : cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: s.verbatim })
+async function startServer(bin: string, env: NodeJS.ProcessEnv, cwd: string, forwardEnv: string[]): Promise<{ url?: string; stop: () => Promise<void> }> {
+  const s = spawnable(bin, ['serve', '--hostname', '127.0.0.1', '--port', '0'], { env, cwd, forwardEnv })
+  const child = spawn(s.file, s.args, { env: s.hostEnv ?? env, cwd: s.wsl ? undefined : cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: s.verbatim })
   const exited = new Promise<void>((resolve) => child.on('close', () => (s.cleanup?.(), child.pid && forgetWslProcess(child.pid), resolve())))
   // With the app's MCP connection open it can linger on SIGTERM; the turn waits for it to end.
   const stop = async (): Promise<void> => {
@@ -155,8 +156,9 @@ export async function* runOpencodeV2(path: string, turn: Turn, appDir: string, s
     }
   }
   const env = { ...process.env, ...shellEnv, ...isolated, PWD: cwd, OPENCODE_SERVER_PASSWORD: password, OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeV2Config(turn, providers)) }
+  const forwardEnv = [...Object.keys(isolated), 'OPENCODE_SERVER_PASSWORD', 'OPENCODE_CONFIG_CONTENT', ...opencodeProviderEnvNames(providers)]
   const session = `ses_tucano${randomUUID().replaceAll('-', '')}`
-  const server = await startServer(path, env, turn.cwd)
+  const server = await startServer(path, env, turn.cwd, forwardEnv)
   try {
     if (!server.url) {
       yield { type: 'error', message: L('O OpenCode não abriu o servidor dele para a resposta.', "OpenCode didn't start its server for the reply.") }
@@ -165,18 +167,18 @@ export async function* runOpencodeV2(path: string, turn: Turn, appDir: string, s
     if (turn.mcpUrl) await mcpReady(server.url, password, cwd, turn.signal)
     if (turn.signal.aborted) return
     let done: Extract<EngineEvent, { type: 'done' }> | undefined
-    for await (const ev of runCli({ bin: path, args: opencodeV2Args(turn, session, server.url), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })) {
+    for await (const ev of runCli({ bin: path, args: opencodeV2Args(turn, session, server.url), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env, forwardEnv })) {
       if (ev.type === 'done') done = ev
       // Stopped, V2 reports the dropped connection to its server: not the turn's error.
       else if (!(ev.type === 'error' && turn.signal.aborted)) yield ev
     }
-    const usage = sessionUsage(await cli(path, ['session', 'export', session, '--server', server.url], env, turn.cwd))
+    const usage = sessionUsage(await cli(path, ['session', 'export', session, '--server', server.url], env, turn.cwd, forwardEnv))
     if (done) yield usage ? { ...done, usage } : done
     // Stopped mid-turn: what it used so far still counts against the limit.
     else if (usage) yield { type: 'progress', tokens: usage.inputTokens + usage.outputTokens, cacheRead: usage.cacheReadTokens }
   } finally {
     // The turn is the app's, not the person's: it leaves nothing in their OpenCode history.
-    if (server.url) await cli(path, ['session', 'delete', session, '--server', server.url], env, turn.cwd)
+    if (server.url) await cli(path, ['session', 'delete', session, '--server', server.url], env, turn.cwd, forwardEnv)
     await server.stop()
   }
 }

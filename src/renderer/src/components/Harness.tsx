@@ -1,4 +1,4 @@
-// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi), each used
+// The harnesses agents run on (Claude Code, Codex, Gemini CLI, OpenCode, Pi), each used
 // as the person set it up: their plan, their company's gateway or the
 // providers they have logins for. Here they pick which ones the agents use,
 // test them, and pick models from what each harness offers.
@@ -43,7 +43,7 @@ export interface ModelOption {
 // A model list asked once per harness and route (and again after "Verificar de novo").
 const lists = new Map<string, Promise<{ models: string[]; error?: string }>>()
 
-// What a harness offers: the app's list on a plan; what OpenCode or Pi list; what the gateway lists.
+// What a harness offers: the app's list on a plan; what Gemini CLI, OpenCode or Pi list; what the gateway lists.
 export function useEngineModels(engine: EngineId | undefined): { options: ModelOption[]; loading: boolean; error?: string } {
   const st = useStore((s) => (engine ? s.settings.engines[engine] : undefined))
   const plan = !!engine && (engine === 'claude' || engine === 'codex') && st?.route !== 'gateway'

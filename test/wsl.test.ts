@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { executionTarget, mapWslArgument, parseWslDistributions, setExecutionTarget, wslPathToWindows, windowsPathToWsl, wslProcessSpec } from '../src/core/wsl'
+import { executionTarget, mapWslArgument, parseWslDistributions, setExecutionTarget, windowsPathToWsl, wslLaunchScript, wslPathToWindows, wslProcessSpec } from '../src/core/wsl'
 import { shellCommand, spawnable } from '../src/core/platform'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -45,7 +45,7 @@ describe('Windows and WSL paths', () => {
 })
 
 describe('WSL process arguments', () => {
-  it('preserves argv, maps cwd and path-valued environment, and omits Windows-only environment', () => {
+  it('preserves argv, forwards only allowlisted variables through WSLENV, and omits Windows-only environment', () => {
     const spec = wslProcessSpec(
       {
         distro: 'Ubuntu',
@@ -55,23 +55,51 @@ describe('WSL process arguments', () => {
         env: {
           CODEX_HOME: 'C:\\Users\\Ana\\AppData\\Roaming\\Tucano\\codex-home\\.codex',
           TUCANO_MCP_URL: 'http://127.0.0.1:5000/mcp/token',
+          ANTHROPIC_API_KEY: 'provider-secret',
+          CUSTOM_CONNECTOR_TOKEN: 'connector-secret',
+          SHOULD_NOT_FORWARD: 'not-allowed',
+          NODE_OPTIONS: '--require=C:\\host\\inject.js',
+          WSLENV: 'SHOULD_NOT_FORWARD/u',
           Path: 'C:\\Windows\\System32',
           SystemRoot: 'C:\\Windows'
-        }
+        },
+        forwardEnv: ['CUSTOM_CONNECTOR_TOKEN', 'NODE_OPTIONS']
       },
       'C:\\Windows\\System32\\wsl.exe'
     )
 
     expect(spec.file).toBe('C:\\Windows\\System32\\wsl.exe')
     expect(spec.args.slice(0, 6)).toEqual(['--distribution', 'Ubuntu', '--cd', '/mnt/c/Users/Ana/AppData/Roaming/Tucano/computers/a/work', '--exec', 'bash'])
-    expect(spec.args).toContain('CODEX_HOME=/mnt/c/Users/Ana/AppData/Roaming/Tucano/codex-home/.codex')
-    expect(spec.args).toContain('PWD=/mnt/c/Users/Ana/AppData/Roaming/Tucano/computers/a/work')
-    expect(spec.args).toContain('TUCANO_MCP_URL=http://127.0.0.1:5000/mcp/token')
+    expect(spec.hostEnv?.['CODEX_HOME']).toBe('C:\\Users\\Ana\\AppData\\Roaming\\Tucano\\codex-home\\.codex')
+    expect(spec.hostEnv?.['WSLENV']).toContain('CODEX_HOME/pu')
+    expect(spec.hostEnv?.['WSLENV']).toContain('TUCANO_MCP_URL/u')
+    expect(spec.hostEnv?.['WSLENV']).toContain('CUSTOM_CONNECTOR_TOKEN/u')
+    expect(spec.hostEnv?.['ANTHROPIC_API_KEY']).toBe('provider-secret')
+    expect(spec.hostEnv?.['CUSTOM_CONNECTOR_TOKEN']).toBe('connector-secret')
+    expect(spec.hostEnv?.['SHOULD_NOT_FORWARD']).toBeUndefined()
+    expect(spec.hostEnv?.['NODE_OPTIONS']).toBeUndefined()
+    expect(spec.hostEnv?.['WSLENV']).not.toContain('SHOULD_NOT_FORWARD')
+    expect(spec.args.join(' ')).not.toContain('provider-secret')
+    expect(spec.args.join(' ')).not.toContain('connector-secret')
     expect(spec.args).not.toContain('Path=C:\\Windows\\System32')
     expect(spec.args).not.toContain('SystemRoot=C:\\Windows')
     expect(spec.args).toContain('--system-prompt')
     expect(spec.args).toContain('line one\nline two & %PATH%')
     expect(spec.args).toContain('--image=/mnt/c/work/shot.png')
+  })
+
+  it('puts long arguments and forwarded environment in a quoted private launch script', () => {
+    const script = wslLaunchScript({
+      distro: 'Ubuntu',
+      bin: '/home/ana/.local/bin/claude',
+      args: ['--system-prompt', "don't expose this prompt"],
+      env: { ANTHROPIC_API_KEY: 'secret-value', CODEX_HOME: 'C:\\Users\\Ana\\.codex' }
+    })
+    expect(script).toContain(`export 'ANTHROPIC_API_KEY=secret-value'`)
+    expect(script).toContain(`export 'CODEX_HOME=/mnt/c/Users/Ana/.codex'`)
+    expect(script).toContain("'don'\\''t expose this prompt'")
+    expect(script).toContain(`trap 'rm -f -- "$0"' EXIT`)
+    expect(script).toContain(`rm -f -- "$0"`)
   })
 
   it('routes the shared platform launcher and shell through the selected distro', () => {

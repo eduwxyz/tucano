@@ -34,7 +34,7 @@ export interface Api {
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
   openDm(p: { agentId: string }): string
-  ensureTuca(p: { modelId?: string; fresh?: boolean; allowUnlisted?: boolean }): Promise<{ agentId: string; conversationId: string }> // the agent behind the builder screen, with his conversation; fresh starts a new session
+  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with his conversation; fresh starts a new session
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
@@ -68,7 +68,7 @@ export interface Api {
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
-  engineModels(p: { engine: EngineId }): Promise<{ models: string[]; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
+  engineModels(p: { engine: EngineId }): Promise<{ models: string[]; error?: string }> // a harness's own list (Gemini CLI, OpenCode, Pi, a gateway)
   testEngine(p: { model: string }): Promise<{ ok: boolean; message: string }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
   localSkills(): Promise<LocalSkill[]> // the skills of the user's Claude Code, its plugins and Codex

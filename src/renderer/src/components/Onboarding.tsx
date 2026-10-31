@@ -353,7 +353,7 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
         <p className="onb__lead">{L('Você conversa com eles em canais, como num chat do trabalho. Eles pesquisam, escrevem, programam e usam as suas ferramentas, e você decide até onde cada um vai.', 'You talk to them in channels, like a work chat. They research, write, code and use your tools, and you decide how far each one goes.')}</p>
         <ul className="onb__points">
           <Point icon="zap" title={L('No harness que você já usa', 'On the harness you already use')}>
-            {L('Claude Code, Codex, OpenCode ou Pi, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, OpenCode or Pi, the way you set them up: on your plan, your company’s gateway or your providers.')}
+            {L('Claude Code, Codex, Gemini CLI, OpenCode ou Pi, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, Gemini CLI, OpenCode or Pi, the way you set them up: on your plan, your company’s gateway or your providers.')}
           </Point>
           <Point icon="shield" title={L('Você no controle', 'You’re in control')}>
             {L('Cada agente só usa o que você liberar. Comprar, publicar, enviar e apagar sempre esperam o seu ok.', 'Each agent only uses what you allow. Buying, publishing, sending and deleting always wait for your OK.')}
@@ -785,7 +785,7 @@ function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: str
         const channels = getState().conversations.filter((c) => c.kind === 'channel' && c.members.includes(tuca.id)).map((c) => c.id)
         await saveAgent({ ...tuca, modelId: value }, channels)
       }
-      setConv((await ensureTuca(value, true, true)).conversationId)
+      setConv((await ensureTuca(value, true)).conversationId)
     } catch (e) {
       setModelError(e instanceof Error ? e.message : String(e))
     } finally {

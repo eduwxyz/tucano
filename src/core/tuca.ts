@@ -4,7 +4,7 @@
 // person creates it. He has no connectors, no web and no computer of his own.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { ENGINES, MODELS, modelInfo, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type EngineId, type GrantLevel, type Settings } from '../shared/types'
+import { ENGINES, MODELS, modelInfo, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
 import type { ToolDef } from './gateway'
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
@@ -69,50 +69,11 @@ export const PROPOR_AGENTE: ToolDef = {
   }
 }
 
-// The models agents can run on now: the listed ones of a ready plan, and what provider-based harnesses list.
+// The models agents can run on now: the listed ones of a ready plan, and what OpenCode and Pi list.
 export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Record<string, string[]>> = {}): { id: string; label: string }[] {
   const plan = MODELS.filter((m) => s.engines[m.engine].loggedIn && s.engines[m.engine].route !== 'gateway').map((m) => ({ id: m.id, label: `${ENGINES[m.engine].label} · ${m.label}` }))
-  const own = (['opencode', 'pi', 'gemini'] as const).flatMap((e) => (s.engines[e].loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
+  const own = (['opencode', 'pi'] as const).flatMap((e) => (s.engines[e].loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
   return [...plan, ...own]
-}
-
-const nonChatModel = /(?:embed|whisper|transcrib|moderation|rerank|speech|audio|tts|image|dall-e)/i
-
-// A gateway's built-in aliases (like `sonnet`) aren't necessarily valid there:
-// it expects the exact model id returned by its own models endpoint.
-export function selectTucaModel(
-  preferred: string[],
-  settings: Pick<Settings, 'engines'>,
-  listed: Partial<Record<string, string[]>>,
-  gatewayModels: Partial<Record<EngineId, string[]>>
-): string | undefined {
-  const usable = (id: string): boolean => {
-    const model = modelInfo(id)
-    if (!model?.id || !settings.engines[model.engine].loggedIn) return false
-    if (settings.engines[model.engine].route !== 'gateway') return true
-    return gatewayModels[model.engine]?.includes(model.id) === true && !nonChatModel.test(model.id)
-  }
-
-  const selected = preferred.find(usable)
-  if (selected) return selected
-
-  const preferredGateways = [...new Set(preferred.map((id) => modelInfo(id)?.engine).filter((engine): engine is EngineId => !!engine && settings.engines[engine].route === 'gateway'))]
-  for (const engine of preferredGateways) {
-    if (settings.engines[engine].route !== 'gateway') continue
-    const model = gatewayModels[engine]?.find((name) => !nonChatModel.test(name))
-    if (model) return `${engine}:${model}`
-  }
-
-  const regular = availableModels(settings, listed).map((model) => model.id).find(usable)
-  if (regular) return regular
-
-  const gateways = (['claude', 'codex'] as const).filter((engine) => settings.engines[engine].route === 'gateway')
-  for (const engine of gateways) {
-    if (settings.engines[engine].route !== 'gateway') continue
-    const model = gatewayModels[engine]?.find((name) => !nonChatModel.test(name))
-    if (model) return `${engine}:${model}`
-  }
-  return undefined
 }
 
 // What the Tuca sees of the workspace in his prompt.
