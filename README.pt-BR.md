@@ -125,6 +125,8 @@ curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh
 
 Ele baixa a última versão e abre. No Mac, coloca o Tucano em **Aplicativos**; no Linux, instala o .deb pelo apt (pede a sua senha) ou, sem apt, o AppImage em `~/.local/bin`, com um atalho no menu de aplicativos. Rodado no Windows (no Git Bash, por exemplo), ele indica o comando do PowerShell acima.
 
+**Num servidor** (uma VPS, pras rotinas continuarem rodando com o seu computador dormindo): o Tucano também roda sem janela, e você usa pelo navegador. Veja [docs/server.md](docs/server.md) (em inglês). É experimental.
+
 A partir da 0.1.2, o Tucano se atualiza sozinho: baixa a versão nova em segundo plano e mostra **Reiniciar** na barra lateral quando ela está pronta (ou ela entra na próxima vez que você fechar o app). As versões anteriores se atualizam pelo mesmo download ou comando. No Linux, o AppImage e o .deb também se atualizam sozinhos; o .deb pede a sua senha pra instalar a atualização. No Windows também, sem aviso nenhum.
 
 **3. A primeira abertura é a configuração.** O Tucano fala português e inglês; escolha na primeira tela, ou depois em **Configurações**. Em seguida, em poucos passos: seu nome; quais harnesses os agentes podem usar (cada um com um **Testar agora** que manda uma pergunta de verdade); os modelos que roteiam os canais e cuidam da memória; o que todo agente deve saber sobre você; suas ferramentas (opcional); suas skills (opcional); e o primeiro agente, de um modelo pronto ou do zero. No fim, um canal `#geral` com o seu agente já trabalhando.

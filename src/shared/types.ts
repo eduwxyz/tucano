@@ -496,7 +496,9 @@ export const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // what the models take per image
 export const MAX_IMAGES_PER_MESSAGE = 10
 
-export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string => `tucano://artifact/${a.id}/${encodeURIComponent(a.name)}`
+// In a browser (Tucano as a server) the server itself serves them, under /artifact.
+export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string =>
+  `${(globalThis as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? './artifact/' : 'tucano://artifact/'}${a.id}/${encodeURIComponent(a.name)}`
 
 // ---------- routines (spec §14) ----------
 
