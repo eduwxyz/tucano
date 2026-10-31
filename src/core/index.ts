@@ -33,7 +33,7 @@ import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
-import { isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
+import { findOnPath, isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -771,6 +771,24 @@ const api: Api = {
     // Its own process, so the terminal outlives the app if the person quits it mid-login.
     if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
     return { opened: !!term, command: cmd }
+  },
+
+  // The harness's own installer, in a terminal the person sees: its progress, its
+  // questions and its errors stay theirs. Detection picks the CLI up once it lands.
+  installEngine: ({ engine }) => {
+    const command = (isWin && ENGINES[engine].windows) || ENGINES[engine].install
+    // An npm package needs Node.js first; without it the command would only fail.
+    if (/^npm\s/.test(command) && !findOnPath('npm')) return { opened: false, command, needsNode: true }
+    if (isWin) {
+      // A PowerShell window running a small script: the install commands are PowerShell.
+      const script = join(dataDir, 'install.ps1')
+      writeFileSync(script, `${command}\r\n`)
+      spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'powershell.exe', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+      return { opened: true, command }
+    }
+    const term = terminalCommand(command, osOf(), onPath)
+    if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
+    return { opened: !!term, command }
   }
 }
 

@@ -310,6 +310,7 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 
 export const refreshEngines = (): void => void call('refreshEngines')
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
+export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
 
 export function saveAgent(agent: Agent, channelIds: string[]): Promise<void> {
   return call('saveAgent', { agent, channelIds })

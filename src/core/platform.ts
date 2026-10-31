@@ -137,7 +137,7 @@ function cmdArg(arg: string, twice: boolean): string {
 }
 
 // The program on PATH with this name, as cmd.exe would find it.
-function findOnPath(cmd: string): string | undefined {
+export function findOnPath(cmd: string): string | undefined {
   for (const dir of pathDirs()) for (const name of executableNames(cmd)) if (existsSync(join(dir, name))) return join(dir, name)
   return undefined
 }

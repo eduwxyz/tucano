@@ -40,6 +40,7 @@ export interface Api {
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
   loginEngine(p: { engine: EngineId }): { opened: boolean; command: string } // not opened: no terminal to open, the person runs the command
+  installEngine(p: { engine: EngineId }): { opened: boolean; command: string; needsNode?: boolean } // needsNode: an npm install with no npm here
   addConnector(p: { input: ConnectorInput }): Promise<string>
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
