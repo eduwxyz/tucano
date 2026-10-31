@@ -7,6 +7,7 @@ import {
   MODELS,
   modelInfo,
   type EngineId,
+  type BrowserInput,
   type Agent,
   type Approval,
   type Artifact,
@@ -418,6 +419,10 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void call('computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void call('browserAction', { agentId, action })
+// Tucano as a server: the page is in a browser and the agent's has no window, so I
+// drive it from its picture in the panel.
+export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
+export const browserInput = (agentId: string, input: BrowserInput): void => void call('browserInput', { agentId, input }).catch(() => {})
 // In a browser (Tucano as a server) the page opens it itself: the server has no screen.
 export const openExternal = (url: string): void =>
   (window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? void window.open(url, '_blank', 'noopener') : void call('openExternal', { url })

@@ -2061,6 +2061,14 @@ h3 {
 .screen--button {
   cursor: zoom-in;
 }
+.screen--driven {
+  cursor: pointer;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.screen--driven:focus-visible {
+  outline-width: 3px;
+}
 .screen__frame {
   display: block;
   width: 100%;

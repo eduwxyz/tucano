@@ -203,7 +203,11 @@ export interface Settings {
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
-export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear'
+export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
+
+// What I do on the agent's browser from the panel, when it has no window of its own
+// (Tucano as a server): x and y are fractions of the screen.
+export type BrowserInput = { kind: 'click'; x: number; y: number } | { kind: 'text'; text: string } | { kind: 'key'; key: string } | { kind: 'scroll'; dy: number }
 
 export interface BrowserElement {
   ref: number // its number in the last snapshot of the page

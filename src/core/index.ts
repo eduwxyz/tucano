@@ -229,7 +229,8 @@ const chrome =
         join(dataDir, 'navegador'),
         (agentId, shown) => browser.setShown(agentId, shown),
         undefined,
-        (agentId, jpeg) => browser.frame(agentId, jpeg)
+        (agentId, jpeg) => browser.frame(agentId, jpeg),
+        serverMode
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -728,6 +729,12 @@ const api: Api = {
     void run().catch((e: unknown) => console.error('[computer]', e))
   },
   stopService: ({ agentId, name }) => void computers.stopService(agentId, name),
+  // Driving a taken-over browser from the panel (Tucano as a server: no window to open).
+  browserInput: async ({ agentId, input }) => {
+    if (!serverMode || !chrome) throw new Error(L('Só no Tucano em servidor.', 'Only on Tucano as a server.'))
+    await chrome.run(agentId, 'input', input)
+  },
+
   browserAction: ({ agentId, action }) => {
     const agent = db.agent(agentId)
     if (agent) void browser.action(agent, action).catch((e: unknown) => console.error('[navegador]', e))

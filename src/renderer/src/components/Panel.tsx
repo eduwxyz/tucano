@@ -4,7 +4,7 @@ import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { agentById, artifactUrl, browserAction, browserOf, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { agentById, artifactUrl, browserAction, browserInput, browserOf, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, type IconName } from './ui'
 
@@ -156,6 +156,9 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
       </div>
     )
   const c = view.cursor
+  // Taken over on a server: the picture is the browser. Clicks land where I click,
+  // keys and pastes go to the page, the wheel scrolls it.
+  if (view.shown && windowless() && !onOpen) return <DrivenScreen agentId={agentId} frame={view.frame} title={view.title} />
   return (
     <div className={`screen ${onOpen ? 'screen--button' : ''}`} onClick={onOpen} role={onOpen ? 'button' : undefined}>
       <img className="screen__frame" src={view.frame} alt={view.title} draggable={false} />
@@ -182,6 +185,41 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
           {L('Você está no controle. Feche a janela do Chrome ou clique em Devolver.', 'You’re in control. Close the Chrome window or click Hand back.')}
         </span>
       )}
+    </div>
+  )
+}
+
+const PAGE_KEYS = new Set(['Enter', 'Escape', 'Tab', 'Backspace', 'Delete', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'PageDown', 'PageUp', 'Home', 'End'])
+
+function DrivenScreen({ agentId, frame, title }: { agentId: string; frame: string; title: string }): ReactNode {
+  return (
+    <div
+      className="screen screen--driven"
+      tabIndex={0}
+      onClick={(e) => {
+        const r = (e.currentTarget.querySelector('img') ?? e.currentTarget).getBoundingClientRect()
+        e.currentTarget.focus()
+        browserInput(agentId, { kind: 'click', x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height })
+      }}
+      onKeyDown={(e) => {
+        if (e.metaKey || e.ctrlKey) return // paste and the app's own shortcuts
+        if (e.key.length === 1) browserInput(agentId, { kind: 'text', text: e.key })
+        else if (PAGE_KEYS.has(e.key)) browserInput(agentId, { kind: 'key', key: e.key === ' ' ? 'space' : e.key })
+        else return
+        e.preventDefault()
+      }}
+      onPaste={(e) => {
+        const text = e.clipboardData.getData('text')
+        if (text) browserInput(agentId, { kind: 'text', text })
+        e.preventDefault()
+      }}
+      onWheel={(e) => browserInput(agentId, { kind: 'scroll', dy: e.deltaY })}
+    >
+      <img className="screen__frame" src={frame} alt={title} draggable={false} />
+      <span className="screen__status screen__status--you">
+        <Icon name="hand" size={13} />
+        {L('Você está no controle: clique e digite na tela. Clique em Devolver ao terminar.', 'You’re in control: click and type on the screen. Click Hand back when you’re done.')}
+      </span>
     </div>
   )
 }
@@ -227,7 +265,7 @@ function TakeOver({ agentId }: { agentId: string }): ReactNode {
   return (
     <button
       className={`btn btn--sm ${view.shown ? 'btn--primary' : 'btn--ghost'}`}
-      title={view.shown ? L('Fecha a janela e devolve o navegador', 'Closes the window and hands the browser back') : L('Abre o navegador numa janela pra você usar (login, código, captcha)', 'Opens the browser in a window for you to use (login, code, captcha)')}
+      title={view.shown ? L('Devolve o navegador ao agente', 'Hands the browser back to the agent') : windowless() ? L('Você usa o navegador aqui mesmo, na tela (login, código, captcha)', 'You use the browser right here, on the screen (login, code, captcha)') : L('Abre o navegador numa janela pra você usar (login, código, captcha)', 'Opens the browser in a window for you to use (login, code, captcha)')}
       onClick={(e) => {
         e.stopPropagation()
         browserAction(agentId, view.shown ? 'hide' : 'show')
