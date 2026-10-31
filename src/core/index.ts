@@ -19,6 +19,7 @@ import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
 import { adoptLoginShellPath, detectEngines } from './engines/detect'
 import { fakeEngine } from './engines/fake'
+import { DesktopApps, macApps, SELF } from './apps'
 import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
@@ -202,12 +203,61 @@ process.parentPort.on('message', (e) => {
     else p?.resolve(r.data as BrowserReply)
     return
   }
+  if (r?.type === 'icons-result') {
+    iconWaits.get(r.id)?.((r.data ?? {}) as Record<string, string>)
+    iconWaits.delete(r.id)
+    return
+  }
   if (r?.type !== 'screenshot-result') return
   const p = shots.get(r.id)
   shots.delete(r.id)
   if (r.error !== undefined) p?.reject(new Error(r.error))
   else p?.resolve(Buffer.from(String(r.data ?? ''), 'base64'))
 })
+// The apps' icons come from the main process (Electron's), a few seconds at most.
+const iconWaits = new Map<string, (icons: Record<string, string>) => void>()
+const appIcons = (paths: string[]): Promise<Record<string, string>> =>
+  paths.length === 0 || serverMode || fake
+    ? Promise.resolve({})
+    : new Promise((resolve) => {
+        const id = randomUUID()
+        iconWaits.set(id, resolve)
+        process.parentPort.postMessage({ type: 'icons', id, paths })
+        setTimeout(() => iconWaits.has(id) && (iconWaits.delete(id), resolve({})), 8_000).unref()
+      })
+
+// The person's installed apps, with their icons, kept in the data folder: the apps picker
+// shows them at once, even right after a restart, and a refresh runs behind it when they
+// may have changed. Made once a few seconds after start, so even the first look is instant.
+type ShelfApp = { name: string; bundleId?: string; path?: string; icon?: string }
+const shelfFile = join(dataDir, 'apps.json')
+let shelf: { at: number; list: ShelfApp[] } | undefined = (() => {
+  try {
+    return JSON.parse(readFileSync(shelfFile, 'utf8')) as { at: number; list: ShelfApp[] }
+  } catch {
+    return undefined
+  }
+})()
+let restocking: Promise<ShelfApp[]> | undefined
+const restock = (): Promise<ShelfApp[]> =>
+  (restocking ??= (async () => {
+    const found = (await macApps().catch(() => [])).filter((a) => !SELF.test(a.bundleId ?? ''))
+    const known = new Map((shelf?.list ?? []).filter((a) => a.path && a.icon).map((a) => [a.path!, a.icon!]))
+    const icons = await appIcons(found.filter((a) => !known.has(a.path)).map((a) => a.path))
+    const list = found.map((a) => ({ ...a, ...((known.get(a.path) ?? icons[a.path]) ? { icon: known.get(a.path) ?? icons[a.path] } : {}) })).sort((a, b) => a.name.localeCompare(b.name))
+    shelf = { at: Date.now(), list }
+    try {
+      writeFileSync(shelfFile, JSON.stringify(shelf))
+    } catch {}
+    return list
+  })().finally(() => (restocking = undefined)))
+const shelfNow = async (): Promise<ShelfApp[]> => {
+  if (!shelf) return restock()
+  if (Date.now() - shelf.at > 5 * 60_000) void restock()
+  return shelf.list
+}
+if (!serverMode && !fake && process.platform === 'darwin') setTimeout(() => void restock(), 4_000).unref()
+
 // On a server there's no Electron: the agents' Chrome takes the picture instead.
 const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
 const electronShoot: Shooter = (opts) =>
@@ -238,6 +288,9 @@ const chrome =
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
+// The person's own apps, through agent-desktop (none on a server: no screen there).
+const desktopApps = new DesktopApps()
+
 const browser = new Browser({
   host,
   db,
@@ -309,6 +362,7 @@ const runner = new Runner({
   memory,
   computers,
   browser,
+  ...(serverMode ? {} : { apps: desktopApps }),
   routines,
   skills,
   models: () => availableModels(settings(), listed),
@@ -791,21 +845,36 @@ const api: Api = {
 
   // The harness's own installer, in a terminal the person sees: its progress, its
   // questions and its errors stay theirs. Detection picks the CLI up once it lands.
-  installEngine: ({ engine }) => {
-    const command = (isWin && ENGINES[engine].windows) || ENGINES[engine].install
-    // An npm package needs Node.js first; without it the command would only fail.
-    if (/^npm\s/.test(command) && !findOnPath('npm')) return { opened: false, command, needsNode: true }
-    if (isWin) {
-      // A PowerShell window running a small script: the install commands are PowerShell.
-      const script = join(dataDir, 'install.ps1')
-      writeFileSync(script, `${command}\r\n`)
-      spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'powershell.exe', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
-      return { opened: true, command }
-    }
-    const term = terminalCommand(command, osOf(), onPath)
-    if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
-    return { opened: !!term, command }
+  installEngine: ({ engine }) => installer((isWin && ENGINES[engine].windows) || ENGINES[engine].install),
+
+  // The person's apps (agent-desktop): whether it's there and allowed, and what's open.
+  desktopStatus: async () => (serverMode ? { installed: false, server: true } : desktopApps.status()),
+  // The installed apps come from a shelf kept on disk (instant, refreshed behind); the open
+  // ones are asked each time, apart, so the list never waits for them.
+  installedApps: async () => (serverMode ? [] : shelfNow()),
+  openApps: async () => (serverMode ? [] : desktopApps.foreground().catch(() => [])),
+  installDesktop: () => installer('npm install -g agent-desktop'),
+  desktopPermissions: () => {
+    // Opens the system's privacy settings at Accessibility (agent-desktop knows where).
+    void desktopApps.guide()
   }
+}
+
+// An installer in a terminal the person sees: its progress, its questions and its
+// errors stay theirs. Detection picks the program up once it lands.
+function installer(command: string): { opened: boolean; command: string; needsNode?: boolean } {
+  // An npm package needs Node.js first; without it the command would only fail.
+  if (/^npm\s/.test(command) && !findOnPath('npm')) return { opened: false, command, needsNode: true }
+  if (isWin) {
+    // A PowerShell window running a small script: the install commands are PowerShell.
+    const script = join(dataDir, 'install.ps1')
+    writeFileSync(script, `${command}\r\n`)
+    spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'powershell.exe', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+    return { opened: true, command }
+  }
+  const term = terminalCommand(command, osOf(), onPath)
+  if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
+  return { opened: !!term, command }
 }
 
 function handle(port: MessagePortMain, req: Request): void {

@@ -628,6 +628,24 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('quer abrir uma', 'wants to open a')} <strong>pull request</strong> {L('em', 'in')} {String(approval.args['repo'])}
           </>
+        ) : approval.connectorId === 'apps' ? (
+          <>
+            {agent?.name ?? L('Agente', 'Agent')}{' '}
+            {typeof approval.args['texto'] === 'string' ? (
+              <>
+                {L('quer confirmar', 'wants to confirm')} <strong>“{approval.args['texto']}”</strong>
+              </>
+            ) : typeof approval.args['tecla'] === 'string' ? (
+              <>
+                {L('quer apertar', 'wants to press')} <strong>{approval.args['tecla']}</strong>
+              </>
+            ) : (
+              <>
+                {L('quer clicar em', 'wants to click')} <strong>{String(approval.args['alvo'] ?? '')}</strong>
+              </>
+            )}{' '}
+            {L('no', 'in')} {String(approval.args['app'] ?? '')}
+          </>
         ) : approval.connectorId === 'navegador' ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('quer clicar em', 'wants to click')} <strong>{String(approval.args['alvo'] || L('um ponto da tela', 'a spot on the screen'))}</strong> {L('em', 'on')} {String(approval.args['url']).replace(/^https?:\/\//, '').slice(0, 60)}
@@ -698,7 +716,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
                 {L('Aprovar', 'Approve')}
               </button>
-              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && (
+              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (
                 <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa ${approval.tool} no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses ${approval.tool} in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
