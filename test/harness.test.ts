@@ -22,6 +22,8 @@ describe('harnesses', () => {
     expect(out.codex.loggedIn).toBe(true)
     expect(out.opencode.loggedIn).toBe(true)
     expect(out.pi.loggedIn).toBe(true)
+    expect(out.gemini).toMatchObject({ loggedIn: true })
+    expect(out.gemini.soon).toBeUndefined()
   })
 
   it('turns off the harnesses the person left out', () => {
