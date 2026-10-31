@@ -123,10 +123,12 @@ function body(req: IncomingMessage): Promise<string> {
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
-  // The link with ?token= signs this browser in, then drops it from the address bar.
+  // The link with ?token= signs this browser in, then drops it from the address bar. Lax, not
+  // Strict: the link is often clicked from elsewhere (a chat), and a Strict cookie wouldn't ride
+  // the redirect that follows. Lax still keeps it off other sites' POSTs to /rpc.
   if (sameToken(url.searchParams.get('token') ?? undefined)) {
     const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
-    return void res.writeHead(302, { 'set-cookie': `tucano=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000${secure}`, location: '/' }).end()
+    return void res.writeHead(302, { 'set-cookie': `tucano=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`, location: '/' }).end()
   }
   if (!sameToken(cookieToken(req))) {
     return void res
