@@ -239,7 +239,7 @@ function AgentItem({ id }: { id: string }): ReactNode {
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'agent', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{agent.name}</span>
-      {working ? <span className="pulse" title={L('Trabalhando', 'Working')} /> : <span className="nav-item__meta">{agent.role}</span>}
+      {working ? <span className="pulse" title={L('Trabalhando', 'Working')} /> : <span className="nav-item__meta nav-item__role" title={agent.role}>{agent.role}</span>}
       {agent.computer && agent.computerKind === 'mac' && (
         <span className="nav-item__mac" title={L('Roda no seu computador', 'Runs on your computer')}>
           <Icon name="laptop" size={13} />
