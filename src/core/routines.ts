@@ -13,6 +13,8 @@ import type { RoutineEvent } from './runs'
 export const TICK_MS = 30_000
 export const LATE_GRACE_MS = 12 * 3_600_000 // a run missed by more than this is skipped
 const LATE_AFTER_MS = 2 * 60_000 // later than this is "atrasada" in the conversation
+// A reply that fails is tried again in place, after these waits; then it stays failed.
+export const RETRY_WAITS_MS = [60_000, 5 * 60_000]
 export const MAX_AGENT_ROUTINES = 10 // active ones per agent, so an agent can't schedule itself without end
 
 const DAY_KEYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab']
@@ -75,12 +77,16 @@ const MAX_EVENT_CHARS = 6_000
 
 export interface RoutineDeps {
   db: Db
-  runner: { runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> }
+  runner: {
+    runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined>
+    retryRoutine?(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined>
+  }
   connectors?: { call(id: string, tool: string, args: Record<string, unknown>): Promise<CallToolResult>; list(): Connector[] }
   blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
   emit: (e: CoreEvent) => void
   notify?: (title: string, body: string, conversationId: string) => void
   now?: () => number
+  wait?: (ms: number) => Promise<void> // between tries (tests skip it)
 }
 
 export class Routines {
@@ -310,14 +316,32 @@ export class Routines {
     this.deps.emit({ type: 'routine', routine: r })
   }
 
+  private runWithRetries(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> {
+    const { runner, db, emit } = this.deps
+    return retrying(
+      () => runner.runRoutine(r, when),
+      runner.retryRoutine && ((messageId) => runner.retryRoutine!(db.routine(r.id) ?? r, when, messageId)),
+      {
+        db,
+        emit,
+        wait: this.deps.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms).unref())),
+        // Turning the routine off (or deleting it) stops the tries. One that was already
+        // off when it fired (a one-off, or "Rodar agora") still gets them.
+        enabled: () => {
+          const now = db.routine(r.id)
+          return !!now && (!r.enabled || now.enabled)
+        }
+      }
+    )
+  }
+
   // One run of a routine at a time: if the last one is still going, this one skips.
   // `more`: a connector check left new items, so check again when this run ends.
   private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
     this.running.add(id)
-    const run = this.deps.runner
-      .runRoutine(r, when)
+    const run = this.runWithRetries(r, when)
       .then((reply) => {
         if (!reply) return
         const latest = this.deps.db.routine(id)
@@ -333,6 +357,44 @@ export class Routines {
       })
     this.runs.add(run)
   }
+}
+
+// Runs a routine, and a reply that failed again in place up to RETRY_WAITS_MS.length times.
+// Waiting, the reply says when the next try is; after the last one it says how many there were.
+// It stops trying when the person already did something about it: retried it, or turned the routine off.
+export async function retrying(
+  first: () => Promise<Message | undefined>,
+  again: ((messageId: string) => Promise<Message | undefined>) | undefined,
+  deps: { db: Db; emit: (e: CoreEvent) => void; wait: (ms: number) => Promise<void>; enabled: () => boolean }
+): Promise<Message | undefined> {
+  let reply = await first()
+  if (!again) return reply
+  const tries = RETRY_WAITS_MS.length + 1
+  const note = (m: Message, error: string): Message => {
+    const saved: Message = { ...m, run: { ...m.run!, error } }
+    deps.db.saveMessage(saved)
+    deps.emit({ type: 'message', message: saved })
+    return saved
+  }
+  const plain = (e: string | undefined): string => (e ?? L('Falhou', 'Failed')).replace(/[.\s]+$/, '')
+  for (let i = 0; i < RETRY_WAITS_MS.length && reply?.run?.status === 'failed'; i++) {
+    const wait = RETRY_WAITS_MS[i]!
+    const base = reply.run.error ?? ''
+    const min = Math.round(wait / 60_000)
+    note(reply, `${plain(base)}. ${L(`Tento de novo em ${min} min (tentativa ${i + 2} de ${tries}).`, `Trying again in ${min} min (try ${i + 2} of ${tries}).`)}`)
+    await deps.wait(wait)
+    const now = deps.db.message(reply.id)
+    if (now?.run?.status !== 'failed' || !deps.enabled()) {
+      // Someone acted on it meanwhile: the note about the next try goes.
+      return now?.run?.status === 'failed' ? note(now, base) : (now ?? reply)
+    }
+    const next = await again(reply.id)
+    if (!next) return deps.db.message(reply.id) ?? reply
+    reply = next
+    if (reply.run?.status === 'failed' && i === RETRY_WAITS_MS.length - 1)
+      reply = note(reply, `${plain(reply.run.error)}. ${L(`Tentei ${tries} vezes.`, `Tried ${tries} times.`)}`)
+  }
+  return reply
 }
 
 const agentName = (db: Db, id: string): string => db.agent(id)?.name ?? L('Agente', 'Agent')

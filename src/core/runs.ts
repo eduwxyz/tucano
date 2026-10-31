@@ -258,8 +258,38 @@ export class Runner {
     db.saveMessage(ask)
     emit({ type: 'message', message: ask })
 
+    return new Promise((resolve) =>
+      this.enqueue(() =>
+        this.execute(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true }).then(resolve, (e: unknown) => {
+          resolve(undefined)
+          throw e
+        })
+      )
+    )
+  }
+
+  // A routine's reply that failed, run again in place with the same request.
+  async retryRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined> {
+    const { db } = this.deps
+    const msg = db.message(messageId)
+    const conv = db.conversation(r.conversationId)
+    const agent = db.agent(r.agentId)
+    if (!msg?.run || msg.run.status !== 'failed' || !conv || !agent || agent.archived) return undefined
+    const me = (await this.deps.settings()).workspaceName
+    return new Promise((resolve) =>
+      this.enqueue(() =>
+        this.execute(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true }).then(resolve, (e: unknown) => {
+          resolve(undefined)
+          throw e
+        })
+      )
+    )
+  }
+
+  private routineTask(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, me: string): string {
+    const { event } = when
     const hm = new Date(when.scheduledAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
-    const task = [
+    return [
       event
         ? L(
             `Esta é a rotina "${r.name}", que ${me} criou pra rodar quando acontece um evento: ${event.source}. Aconteceu agora: ${event.title}.`,
@@ -281,14 +311,6 @@ export class Runner {
     ]
       .filter(Boolean)
       .join(' ')
-    return new Promise((resolve) =>
-      this.enqueue(() =>
-        this.execute(agent, conv, { depth: 1, task, work: event ? workIn(event.title) : undefined, routine: true }).then(resolve, (e: unknown) => {
-          resolve(undefined)
-          throw e
-        })
-      )
-    )
   }
 
   // Resolves when nothing is routing, running or queued (tests and shutdown).
