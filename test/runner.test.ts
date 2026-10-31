@@ -27,10 +27,10 @@ let events: CoreEvent[]
 let claude: ReturnType<typeof counted>
 let settings: Settings
 
-function runner(engine: Engine = fakeEngine('claude', { delayMs: 1 })): Runner {
+function runner(engine: Engine = fakeEngine('claude', { delayMs: 1 }), dataDir?: string): Runner {
   claude = counted(engine)
   const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }
-  return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')) })
+  return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir })
 }
 
 const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
@@ -46,6 +46,145 @@ beforeEach(() => {
 })
 
 describe('Runner', () => {
+  it('keeps only the selected excerpt in a reply and passes it to the responding agent', async () => {
+    db.saveMessage({ id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'An introduction.\n\n**Deploy** after review.\n\nA separate conclusion.', at: 100 })
+    const r = runner()
+    await r.send('c1', 'Explain this part.', [], { reply: { messageId: 'quoted', quote: 'Deploy after review.' } })
+    await r.idle()
+    const saved = db.messages().find((m) => m.reply)!
+    expect(saved.reply).toMatchObject({ messageId: 'quoted', author: 'lia', text: 'Deploy after review.', excerpt: true })
+    expect(saved.text).toBe('Explain this part.')
+    expect(claude.turns[0]?.prompt).toContain('> Deploy after review.')
+    expect(claude.turns).toHaveLength(1)
+  })
+
+  it('rejects empty or excessive excerpts and excerpts without an original message', async () => {
+    db.saveMessage({ id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Original text.', at: 100 })
+    const r = runner()
+    for (const quote of ['', '   ', 'a'.repeat(32_001)]) {
+      await expect(r.send('c1', 'A reply.', [], { reply: { messageId: 'quoted', quote } })).rejects.toThrow()
+    }
+    await expect(r.send('c1', 'A reply.', [], { reply: { messageId: '', quote: 'Text.' } })).rejects.toThrow()
+    expect(db.messages().filter((m) => m.author.kind === 'me')).toEqual([])
+  })
+
+  it('quotes an older message and directs the reply to its author in the same channel', async () => {
+    const source: Message = { id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'The deployment needs a review.', at: 100, run: { status: 'done', steps: [] } }
+    db.saveMessage(source)
+    for (let i = 0; i < 50; i++) db.saveMessage({ id: `filler-${i}`, conversationId: 'c1', author: { kind: 'me' }, text: 'Later context.', at: 101 + i })
+    const r = runner()
+    await r.send('c1', 'Review it now.', [], { reply: { messageId: source.id } })
+    await r.idle()
+    const reply = db.messages().find((m) => m.reply)!
+    expect(reply.reply).toEqual({ messageId: source.id, author: 'lia', agentId: 'a1', text: source.text, at: 100 })
+    expect(claude.turns).toHaveLength(1)
+    expect(claude.turns[0]?.prompt).toContain('[Em resposta a lia:]')
+    expect(claude.turns[0]?.prompt).toContain(`> ${source.text}`)
+    expect(db.message(source.id)).toMatchObject(source)
+  })
+
+  it('rejects replies to missing messages, other conversations, system messages or active runs', async () => {
+    const r = runner()
+    const source: Message = { id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Still thinking.', at: 100, run: { status: 'working', steps: [] } }
+    db.saveMessage(source)
+    await expect(r.send('d1', 'A reply.', [], { reply: { messageId: source.id } })).rejects.toThrow()
+    await expect(r.send('c1', 'A reply.', [], { reply: { messageId: 'missing' } })).rejects.toThrow()
+    await expect(r.send('c1', 'A reply.', [], { reply: { messageId: source.id } })).rejects.toThrow()
+    db.saveMessage({ id: 'system', conversationId: 'c1', author: { kind: 'system' }, text: 'System notice.', at: 100 })
+    await expect(r.send('c1', 'A reply.', [], { reply: { messageId: 'system' } })).rejects.toThrow()
+    expect(db.messages().filter((m) => m.author.kind === 'me')).toEqual([])
+  })
+
+  it('keeps another agent’s pending question open when replying to a particular agent', async () => {
+    db.saveMessage({ id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Ready.', at: 100 })
+    db.saveMessage({ id: 'question', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: 'Which environment?', at: 101, run: { status: 'waiting_input', steps: [], question: 'Which environment?' } })
+    const r = runner()
+    r.setPaused(true)
+    await r.send('c1', 'A reply for Lia.', [], { reply: { messageId: 'quoted' } })
+    expect(db.message('question')?.run?.status).toBe('waiting_input')
+  })
+
+  it('forwards a channel message with its origin, without copying the agent run', async () => {
+    const source: Message = { id: 'original', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: '**The deployment is ready.**', at: 123, run: { status: 'done', steps: [] } }
+    db.saveMessage(source)
+    db.createConversation({ id: 'c2', kind: 'channel', name: 'launch', members: ['a1'] })
+    const r = runner()
+    await r.forward(source.id, 'c2')
+    await r.idle()
+
+    const forwarded = db.messages().find((m) => m.conversationId === 'c2' && m.author.kind === 'me')!
+    expect(forwarded).toMatchObject({ text: source.text, forwarded: { messageId: 'original', conversationId: 'c1', conversationName: 'engenharia', conversationKind: 'channel', author: 'theo', agentId: 'a2', at: 123 } })
+    expect(forwarded.id).not.toBe(source.id)
+    expect(forwarded.run).toBeUndefined()
+    expect(db.message(source.id)).toMatchObject(source)
+    expect(claude.turns[0]?.prompt).toContain('[Encaminhada de theo em #engenharia]')
+    expect(claude.turns[0]?.prompt).toContain(source.text)
+
+    // Forwarding again keeps the original attribution even after a rename.
+    db.createConversation({ id: 'c3', kind: 'channel', name: 'release', members: [] })
+    db.saveAgent(agent('a2', 'new-name'))
+    await r.forward(forwarded.id, 'c3')
+    expect(db.messages().find((m) => m.conversationId === 'c3' && m.author.kind === 'me')?.forwarded).toEqual(forwarded.forwarded)
+  })
+
+  it('rejects forwarding to the same conversation, missing conversations and unfinished or empty messages', async () => {
+    const source: Message = { id: 'original', conversationId: 'c1', author: { kind: 'me' }, text: 'hello', at: 123 }
+    db.saveMessage(source)
+    const r = runner()
+    for (const destination of ['c1', 'missing']) await expect(r.forward(source.id, destination)).rejects.toThrow()
+    await expect(r.forward('missing', 'c1')).rejects.toThrow()
+    db.createConversation({ id: 'c2', kind: 'channel', name: 'launch', members: [] })
+    db.saveMessage({ ...source, text: '' })
+    await expect(r.forward(source.id, 'c2')).rejects.toThrow()
+    db.saveMessage({ ...source, run: { status: 'working', steps: [] } })
+    await expect(r.forward(source.id, 'c2')).rejects.toThrow()
+    expect(db.messages().filter((m) => m.conversationId === 'c2')).toEqual([])
+  })
+
+  it('forwards to an agent DM and forwards DM messages to channels or another DM', async () => {
+    db.saveMessage({ id: 'original', conversationId: 'c1', author: { kind: 'me' }, text: 'Review this deployment.', at: 123 })
+    const r = runner()
+    await r.forward('original', 'd1')
+    await r.idle()
+    expect(db.messages().some((m) => m.conversationId === 'd1' && m.author.kind === 'agent')).toBe(true)
+    const reply = db.messages().find((m) => m.conversationId === 'd1' && m.author.kind === 'agent')!
+    db.createConversation({ id: 'd2', kind: 'dm', name: 'a2', members: ['a2'] })
+    await r.forward(reply.id, 'd2')
+    await r.forward(reply.id, 'c1')
+    await r.idle()
+    for (const id of ['d2', 'c1']) {
+      expect(db.messages().find((m) => m.conversationId === id && m.forwarded?.messageId === reply.id)?.forwarded).toMatchObject({ conversationName: 'lia', conversationKind: 'dm', author: 'lia', agentId: 'a1' })
+    }
+    await expect(r.forward(reply.id, 'd1')).rejects.toThrow()
+    db.saveAgent({ ...db.agent('a2')!, archived: true })
+    await expect(r.forward(reply.id, 'd2')).rejects.toThrow()
+  })
+
+  it('does not consume a pending question when forwarding a message', async () => {
+    db.saveMessage({ id: 'original', conversationId: 'c1', author: { kind: 'me' }, text: 'A quote, not an answer.', at: 123 })
+    db.saveMessage({ id: 'question', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'Which environment?', at: 124, run: { status: 'waiting_input', steps: [], question: 'Which environment?' } })
+    const r = runner()
+    r.setPaused(true)
+    await r.forward('original', 'd1')
+    expect(db.message('question')?.run?.status).toBe('waiting_input')
+  })
+
+  it('copies forwarded image attachments so deleting the source does not lose them', async () => {
+    const data = mkdtempSync(join(tmpdir(), 'ad-data-'))
+    const r = runner(undefined, data)
+    r.setPaused(true)
+    await r.send('c1', '', [{ name: 'test.png', mime: 'image/png', data: Buffer.from('image-content').toString('base64') }])
+    const source = db.messages().find((m) => m.author.kind === 'me')!
+    db.createConversation({ id: 'c2', kind: 'channel', name: 'launch', members: [] })
+    await r.forward(source.id, 'c2')
+    const copy = db.artifacts().find((a) => a.conversationId === 'c2')!
+    expect(copy.id).not.toBe(db.artifacts().find((a) => a.conversationId === 'c1')?.id)
+    expect(copy).toMatchObject({ name: 'test.png', agentId: '', kind: 'image' })
+    db.deleteConversation('c1')
+    expect(readFileSync(join(data, 'artifacts', copy.id, copy.name), 'utf8')).toBe('image-content')
+    expect(db.message(copy.messageId)?.forwarded?.conversationName).toBe('engenharia')
+  })
+
   it('answers in a DM, streams deltas and records a receipt that matches the agent usage', async () => {
     const r = runner()
     await r.send('d1', 'oi')
@@ -65,8 +204,7 @@ describe('Runner', () => {
 
   it('keeps the images I attach and shows them to the agent with my message', async () => {
     const data = mkdtempSync(join(tmpdir(), 'ad-data-'))
-    claude = counted(fakeEngine('claude', { delayMs: 1 }))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
+    const r = runner(undefined, data)
     const png = Buffer.from('fake-png').toString('base64')
     await r.send('d1', '', [{ name: 'Tela do checkout.png', mime: 'image/png', data: png }, { name: 'virus.exe', mime: 'application/x-msdownload', data: png }])
     await r.idle()

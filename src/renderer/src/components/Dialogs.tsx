@@ -3,7 +3,7 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { agentById, archiveAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setTopic, shortcut, useStore, type State, type View } from '../store'
+import { agentById, archiveAgent, isTeam, openTuca, createChannel, dmWith, finishConnectorAuth, forwardMessage, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setTopic, shortcut, useStore, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
@@ -12,6 +12,8 @@ export function Dialogs(): ReactNode {
   const dialog = useStore((s) => s.dialog)
   const conv = useStore((s) => (s.dialog && 'id' in s.dialog ? s.conversations.find((c) => c.id === (s.dialog as { id: string }).id) : undefined))
   const close = (): void => openDialog(null)
+  if (dialog?.kind === 'agent-card') return <AgentDialog id={dialog.id} onClose={close} />
+  if (dialog?.kind === 'forward') return <ForwardDialog key={dialog.messageId} messageId={dialog.messageId} onClose={close} />
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
@@ -22,6 +24,89 @@ export function Dialogs(): ReactNode {
   if (dialog.kind === 'rename')
     return <TextDialog title={L(`Renomear #${conv.name}`, `Rename #${conv.name}`)} label={L('Nome', 'Name')} value={conv.name} hint={L('Minúsculas e hífens: “Lançamento do App” vira lancamento-do-app.', 'Lowercase and hyphens: “App Launch” becomes app-launch.')} prefix="#" onSave={(v) => renameChannel(conv.id, v)} onClose={close} />
   return <TextDialog title={L(`Tema de #${conv.name}`, `Topic of #${conv.name}`)} label={L('Tema', 'Topic')} value={conv.topic ?? ''} hint={L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')} onSave={(v) => setTopic(conv.id, v)} onClose={close} allowEmpty />
+}
+
+function AgentDialog({ id, onClose }: { id: string; onClose: () => void }): ReactNode {
+  const agent = useStore((s) => agentById(s, id))
+  if (!agent) return null
+  return (
+    <Modal title={agent.name} onClose={onClose}>
+      <div className="row row--center agent-dialog__identity">
+        <AgentAvatar agent={agent} size={44} />
+        <div className="grow">
+          <strong>@{agent.handle}</strong>
+          {agent.role && <p className="muted small">{agent.role}</p>}
+        </div>
+      </div>
+      <footer className="modal__foot">
+        <span className="grow" />
+        <button className="btn btn--primary btn--sm" onClick={() => { onClose(); navigate({ kind: 'agent', id }) }}>
+          {L('Ver agente', 'View agent')}
+        </button>
+      </footer>
+    </Modal>
+  )
+}
+
+function ForwardDialog({ messageId, onClose }: { messageId: string; onClose: () => void }): ReactNode {
+  const source = useStore((s) => s.messages.find((m) => m.id === messageId))
+  const attachments = useStore((s) => s.artifacts.filter((a) => a.messageId === messageId).length)
+  const channels = useStore((s) => s.conversations.filter((c) => c.kind === 'channel' && c.id !== source?.conversationId))
+  const agents = useStore((s) => {
+    const from = s.conversations.find((c) => c.id === source?.conversationId)
+    return s.agents.filter((a) => isTeam(a) && !(from?.kind === 'dm' && from.name === a.id))
+  })
+  const [destination, setDestination] = useState('')
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const pickedChannel = channels.find((c) => destination === `channel:${c.id}`)
+  const pickedAgent = agents.find((a) => destination === `agent:${a.id}`)
+  const target = pickedChannel ?? pickedAgent
+  const available = channels.length + agents.length > 0
+  const send = async (): Promise<void> => {
+    if (sending || !source || !target) return
+    setSending(true)
+    setError(null)
+    try {
+      const conversationId = pickedChannel ? target.id : await dmWith(target.id)
+      await forwardMessage(messageId, conversationId)
+      onClose()
+      navigate({ kind: 'conversation', id: conversationId })
+    } catch (e) {
+      setError(message(e))
+    } finally {
+      setSending(false)
+    }
+  }
+  return (
+    <Modal title={L('Encaminhar mensagem', 'Forward message')} onClose={() => !sending && onClose()}>
+      <p className="muted small modal__lead">{L('Encaminhe para um canal ou para a DM de um agente, com o conteúdo, os anexos e a origem. Os agentes do destino poderão responder.', 'Forward to a channel or an agent’s DM with the content, attachments and origin. Agents in the destination can reply.')}</p>
+      {source?.text && <blockquote className="forward-preview">{source.text}</blockquote>}
+      {attachments > 0 && <p className="muted small modal__lead">{L(`${attachments} anexo${attachments === 1 ? '' : 's'}`, `${attachments} attachment${attachments === 1 ? '' : 's'}`)}</p>}
+      <label className="field">
+        <span className="field__label">{L('Enviar para', 'Send to')}</span>
+        <select autoFocus value={destination} disabled={sending || !available} onChange={(e) => setDestination(e.target.value)}>
+          <option value="">{L('Escolha um canal ou agente', 'Choose a channel or agent')}</option>
+          {channels.length > 0 && <optgroup label={L('Canais', 'Channels')}>
+            {channels.map((c) => <option key={c.id} value={`channel:${c.id}`}>#{c.name}</option>)}
+          </optgroup>}
+          {agents.length > 0 && <optgroup label={L('Mensagens diretas', 'Direct messages')}>
+            {agents.map((a) => <option key={a.id} value={`agent:${a.id}`}>{L(`DM com ${a.name}`, `DM with ${a.name}`)}</option>)}
+          </optgroup>}
+        </select>
+      </label>
+      {!available && <p className="hint">{L('Crie outro canal ou adicione um agente para encaminhar esta mensagem.', 'Create another channel or add an agent to forward this message.')}</p>}
+      {!source && <p className="field__error">{L('A mensagem não existe mais.', 'The message no longer exists.')}</p>}
+      {error && <p className="field__error">{error}</p>}
+      <footer className="modal__foot">
+        <span className="grow" />
+        <button className="btn btn--ghost btn--sm" disabled={sending} onClick={onClose}>{L('Cancelar', 'Cancel')}</button>
+        <button className="btn btn--primary btn--sm" disabled={sending || !source || !target} onClick={() => void send()}>
+          {sending ? L('Encaminhando…', 'Forwarding…') : L('Encaminhar', 'Forward')}
+        </button>
+      </footer>
+    </Modal>
+  )
 }
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }): ReactNode {

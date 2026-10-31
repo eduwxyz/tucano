@@ -141,7 +141,9 @@ The first time Tucano saves a connector password, macOS asks whether it may use 
 | **⌘N** | New channel |
 | **⌘1 … ⌘9** | Channels, in sidebar order |
 | **⌘,** | Settings |
-| **Right-click** | On a channel: agents, rename, delete. On an agent: message, edit, archive |
+| **Right-click** | On a channel: agents, rename, delete. On an agent: message, edit, archive. On a message: reply, forward, copy |
+
+To reply to part of a message, select the text and right-click → **Reply to selection**. Replies stay in the same channel or DM, with a quote that links to the original. **Forward message** sends a copy, including attachments and author attribution, to another channel or an agent's DM.
 
 On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps Tucano running in the tray, by the clock (routines and triggers go on); quit it from the tray icon.
 

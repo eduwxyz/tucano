@@ -489,9 +489,9 @@ const api: Api = {
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
 
-  sendMessage: ({ conversationId, text, images }) => {
-    void runner.send(conversationId, text, images)
-  },
+  sendMessage: ({ conversationId, text, images, reply }) => runner.send(conversationId, text, images, { reply }),
+
+  forwardMessage: ({ messageId, conversationId }) => runner.forward(messageId, conversationId),
 
   stopRun: ({ messageId }) => runner.stop(messageId),
 

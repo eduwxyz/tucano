@@ -754,6 +754,76 @@ h3 {
 .msg__body {
   min-width: 0;
 }
+.msg__text {
+  min-width: 0;
+  max-width: 100%;
+}
+.msg__forwarded {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-bottom: 5px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border-left: 2px solid var(--border-strong);
+  text-align: left;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.reply-quote span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--text-3);
+}
+.composer__reply {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+.composer__reply .reply-quote {
+  flex: 1;
+  margin: 0;
+}
+.forward-preview {
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-2);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.agent-dialog__identity {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.agent-dialog__identity .grow {
+  min-width: 0;
+}
+.agent-dialog__identity p {
+  margin: 3px 0 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
 /* My messages: a bubble on the right, no avatar or name. */
 .msg--me {
   grid-template-columns: 1fr;

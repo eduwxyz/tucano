@@ -218,6 +218,18 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN kind TEXT;
+  `,
+  `
+  ALTER TABLE messages ADD COLUMN forwarded TEXT;
+  `,
+  `
+  UPDATE messages SET forwarded = json_remove(json_set(forwarded,
+    '$.conversationName', json_extract(forwarded, '$.channel'),
+    '$.conversationKind', 'channel'), '$.channel')
+  WHERE forwarded IS NOT NULL AND json_type(forwarded, '$.channel') IS NOT NULL;
+  `,
+  `
+  ALTER TABLE messages ADD COLUMN reply TEXT;
   `
 ]
 
@@ -436,7 +448,9 @@ export class Db {
       text: str(r['text']),
       at: Number(r['at']),
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
-      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined
+      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
+      forwarded: r['forwarded'] ? (JSON.parse(str(r['forwarded'])) as Message['forwarded']) : undefined,
+      reply: r['reply'] ? (JSON.parse(str(r['reply'])) as Message['reply']) : undefined
     }
   }
 
@@ -468,7 +482,7 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, forwarded, reply) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
       .run(
@@ -479,7 +493,9 @@ export class Db {
         m.text,
         m.at,
         m.run ? JSON.stringify(m.run) : null,
-        m.routine ? JSON.stringify(m.routine) : null
+        m.routine ? JSON.stringify(m.routine) : null,
+        m.forwarded ? JSON.stringify(m.forwarded) : null,
+        m.reply ? JSON.stringify(m.reply) : null
       )
   }
 

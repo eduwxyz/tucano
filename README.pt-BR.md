@@ -141,7 +141,9 @@ Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se 
 | **⌘N** | Novo canal |
 | **⌘1 … ⌘9** | Os canais, na ordem da barra lateral |
 | **⌘,** | Configurações |
-| **Botão direito** | Num canal: agentes, renomear, excluir. Num agente: mensagem, editar, arquivar |
+| **Botão direito** | Num canal: agentes, renomear, excluir. Num agente: mensagem, editar, arquivar. Numa mensagem: responder, encaminhar, copiar |
+
+Para responder a parte de uma mensagem, selecione o texto e clique com o botão direito → **Responder ao trecho**. A resposta fica no mesmo canal ou DM, com uma citação que leva à mensagem original. **Encaminhar mensagem** envia uma cópia, incluindo anexos e o nome do autor, para outro canal ou para a DM de um agente.
 
 No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o Tucano rodando na bandeja do sistema, perto do relógio (rotinas e gatilhos continuam); pra encerrar, use o ícone da bandeja.
 

@@ -1,6 +1,7 @@
 import { L } from '../../../shared/lang'
 import { CODE_SPANS } from '../../../shared/types'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -22,6 +23,7 @@ import {
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
+  setReplyTo,
   stopRun,
   summarizeNow,
   useStore,
@@ -41,6 +43,7 @@ import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal } from './Tuca'
+import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
@@ -183,6 +186,8 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
 }
 
 function MessageRow({ message, grouped }: { message: Message; grouped: boolean }): ReactNode {
+  const [menu, setMenu] = useState<MenuState>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
   const me = useStore((s) => s.me)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
@@ -208,8 +213,30 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
   if (message.author.kind === 'routine') return <RoutineMessage message={message} />
 
   const name = agent ? agent.name : me.name
+  const canOpenMenu = message.run?.status !== 'working' && Boolean(message.text.trim() || attached.length > 0 || message.run?.artifactIds?.length)
+  const openMenu = (e: React.MouseEvent<HTMLElement>): void => {
+    if (!canOpenMenu || (e.target as HTMLElement).closest('a, button, input, textarea, select, [role="menu"]')) return
+    const quote = selectedQuote(e.currentTarget)
+    // A selection spanning messages belongs to the browser's native copy menu.
+    if (window.getSelection()?.toString().trim() && !quote) return
+    e.preventDefault()
+    const copyText = quote ?? e.currentTarget.querySelector<HTMLElement>('.msg__text')?.innerText ?? message.text
+    const items: MenuItem[] = []
+    if (quote) items.push({ label: L('Responder ao trecho', 'Reply to selection'), icon: 'reply', onClick: () => startReply(message, quote) })
+    items.push(
+      { label: L('Responder mensagem', 'Reply to message'), icon: 'reply', onClick: () => startReply(message) },
+      { label: L('Encaminhar mensagem', 'Forward message'), icon: 'forward', onClick: () => openDialog({ kind: 'forward', messageId: message.id }) },
+      'separator',
+      { label: quote ? L('Copiar trecho', 'Copy selection') : L('Copiar texto', 'Copy text'), icon: 'copy', onClick: () => void navigator.clipboard.writeText(copyText) }
+    )
+    setMenu({ x: e.clientX, y: e.clientY, items })
+  }
+
   return (
-    <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''}`}>
+    <article
+      className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''}`}
+      onContextMenu={openMenu}
+    >
       <div className="msg__gutter">
         {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={me.initials} size={34} />)}
       </div>
@@ -232,8 +259,10 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
           </div>
         )}
         {message.run && <RunSteps message={message} />}
+        {message.forwarded && <ForwardedFrom forwarded={message.forwarded} />}
+        {message.reply && <ReplyQuote reply={message.reply} conversationId={message.conversationId} />}
         {message.text ? (
-          <div className="md">
+          <div className="md msg__text">
             <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>{highlightMentions(message.text)}</Markdown>
           </div>
         ) : null}
@@ -276,7 +305,48 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         )}
         {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
       </div>
+      {menu && createPortal(<ContextMenu menu={menu} onClose={closeMenu} />, document.body)}
     </article>
+  )
+}
+
+function selectedQuote(message: HTMLElement | null): string | undefined {
+  const selection = window.getSelection()
+  const text = message?.querySelector('.msg__text')
+  if (!selection || selection.isCollapsed || !text || !selection.anchorNode || !selection.focusNode) return
+  if (!text.contains(selection.anchorNode) || !text.contains(selection.focusNode)) return
+  return selection.toString().trim() || undefined
+}
+
+function startReply(message: Message, quote?: string): void {
+  setReplyTo(message.conversationId, { messageId: message.id, quote })
+  window.getSelection()?.removeAllRanges()
+}
+
+function ReplyQuote({ reply, conversationId }: { reply: NonNullable<Message['reply']>; conversationId: string }): ReactNode {
+  const exists = useStore((s) => s.messages.some((m) => m.id === reply.messageId))
+  return (
+    <button className="reply-quote" disabled={!exists} onClick={() => navigate({ kind: 'conversation', id: conversationId, message: reply.messageId })}>
+      <strong>{reply.excerpt ? L(`Trecho de ${reply.author}`, `Excerpt from ${reply.author}`) : L(`Em resposta a ${reply.author}`, `In reply to ${reply.author}`)}</strong>
+      <span>{reply.text || L('Anexo', 'Attachment')}</span>
+    </button>
+  )
+}
+
+function ForwardedFrom({ forwarded }: { forwarded: NonNullable<Message['forwarded']> }): ReactNode {
+  const original = useStore((s) => s.messages.find((m) => m.id === forwarded.messageId))
+  const agent = useStore((s) => {
+    const id = forwarded.agentId ?? (original?.author.kind === 'agent' ? original.author.id : undefined)
+    return id ? agentById(s, id) : undefined
+  })
+  return (
+    <div className="msg__forwarded">
+      <Icon name="forward" size={13} />
+      <span>
+        {L('Encaminhada de ', 'Forwarded from ')}
+        {agent ? <button className="link" onClick={() => openDialog({ kind: 'agent-card', id: agent.id })}>{forwarded.author}</button> : forwarded.author}
+      </span>
+    </div>
   )
 }
 
@@ -766,11 +836,20 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const [text, setText] = useState(() => drafts.get(conversationId)?.text ?? '')
   const [images, setImages] = useState<Attached[]>(() => drafts.get(conversationId)?.images ?? [])
   const [note, setNote] = useState('')
+  const [sending, setSending] = useState(false)
+  const replyTarget = useStore((s) => s.replyTo[conversationId])
+  const replyId = replyTarget?.messageId
+  const reply = useStore((s) => s.messages.find((m) => m.id === replyId))
+  const replyAuthor = useStore((s) => reply?.forwarded?.author ?? (reply?.author.kind === 'agent' ? agentById(s, reply.author.id)?.name ?? L('Agente removido', 'Removed agent') : s.me.name))
+  const replyLabel = !reply ? L('Mensagem removida', 'Removed message') : replyTarget?.quote
+    ? L(`Respondendo ao trecho de ${replyAuthor}`, `Replying to an excerpt from ${replyAuthor}`)
+    : L(`Respondendo a ${replyAuthor}`, `Replying to ${replyAuthor}`)
   const [dragging, setDragging] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
   const [active, setActive] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => { if (replyId) ref.current?.focus() }, [replyId, replyTarget?.quote])
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
   const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
@@ -783,11 +862,14 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
   const live = useRef({ text, images })
   live.current = { text, images }
+  const currentConversation = useRef(conversationId)
+  currentConversation.current = conversationId
   useEffect(() => {
     const draft = drafts.get(conversationId)
     setText(draft?.text ?? '')
     setImages(draft?.images ?? [])
     setNote('')
+    setSending(false)
     ref.current?.focus()
     return () => {
       const { text, images } = live.current
@@ -878,18 +960,26 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
     })
   }
 
-  const submit = (): void => {
-    if (!text.trim() && images.length === 0) return
-    sendMessage(
-      conversationId,
-      text,
-      images.map(({ name, mime, data }) => ({ name, mime, data }))
-    )
-    drafts.delete(conversationId)
-    setText('')
-    setImages([])
-    setNote('')
-    setMention(null)
+  const submit = async (): Promise<void> => {
+    if (sending || (!text.trim() && images.length === 0)) return
+    setSending(true)
+    try {
+      await sendMessage(conversationId, text, images.map(({ name, mime, data }) => ({ name, mime, data })), replyTarget)
+      drafts.delete(conversationId)
+      setReplyTo(conversationId)
+      if (currentConversation.current !== conversationId) return
+      setText('')
+      setImages([])
+      setNote('')
+      setMention(null)
+    } catch (e) {
+      if (currentConversation.current === conversationId) setNote(e instanceof Error ? e.message : String(e))
+    } finally {
+      if (currentConversation.current === conversationId) {
+        setSending(false)
+        ref.current?.focus()
+      }
+    }
   }
 
   return (
@@ -931,6 +1021,15 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
         </div>
       )}
       <div className="composer">
+        {replyId && (
+          <div className="composer__reply">
+            <div className="reply-quote">
+              <strong>{replyLabel}</strong>
+              <span>{replyTarget?.quote ?? (reply?.text || L('Anexo', 'Attachment'))}</span>
+            </div>
+            <button className="icon-btn icon-btn--sm" title={L('Cancelar resposta', 'Cancel reply')} aria-label={L('Cancelar resposta', 'Cancel reply')} disabled={sending} onClick={() => setReplyTo(conversationId)}><Icon name="x" size={14} /></button>
+          </div>
+        )}
         {images.length > 0 && (
           <div className="composer__images">
             {images.map((img, i) => (
@@ -947,7 +1046,8 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
           ref={ref}
           rows={1}
           value={text}
-          placeholder={asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
+          disabled={sending}
+          placeholder={reply ? L(`Responder a ${replyAuthor}`, `Reply to ${replyAuthor}`) : asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
           onChange={(e) => {
             setText(e.target.value)
             updateMention(e.target.value, e.target.selectionStart)
@@ -967,7 +1067,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
-              submit()
+              void submit()
             }
           }}
         />
@@ -994,7 +1094,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
             </button>
           ) : null}
-          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={submit} title={L('Enviar (Enter)', 'Send (Enter)')}>
+          <button className="btn btn--primary btn--sm btn--icon" disabled={sending || (!text.trim() && images.length === 0)} onClick={() => void submit()} title={L('Enviar (Enter)', 'Send (Enter)')}>
             <Icon name="send" size={14} />
           </button>
         </div>

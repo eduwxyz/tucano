@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Os, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport } from './types'
+import type { Os, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, ReplyTarget, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -22,7 +22,8 @@ export interface Snapshot {
 export interface Api {
   snapshot(): Snapshot
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
-  sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[] }): void
+  sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; reply?: ReplyTarget }): Promise<void>
+  forwardMessage(p: { messageId: string; conversationId: string }): Promise<void>
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on

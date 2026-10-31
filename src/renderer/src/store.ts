@@ -23,6 +23,7 @@ import {
   type Memory,
   type MemoryScope,
   type Message,
+  type ReplyTarget,
   type Model,
   type Routine,
   type RoutineInput,
@@ -77,10 +78,11 @@ export interface State {
   panel: Panel | null // the side panel next to a conversation
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
+  replyTo: Record<string, ReplyTarget | undefined> // selected message per conversation, kept with its draft
   demoServer?: { command: string; args: string[] }
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'rename' | 'topic' | 'agent-card'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string } | { kind: 'forward'; messageId: string }
 
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
 
@@ -125,7 +127,8 @@ let state: State = {
   packaged: false,
   panel: null,
   dialog: null,
-  tabs: {}
+  tabs: {},
+  replyTo: {}
 }
 
 // ---------- store plumbing ----------
@@ -389,11 +392,13 @@ export const setChannelMembers = (id: string, agentIds: string[]): Promise<void>
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
 
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = []): void => {
-  if (text.trim() || images.length) void call('sendMessage', { conversationId, text, ...(images.length ? { images } : {}) })
-}
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], reply?: ReplyTarget): Promise<void> =>
+  call('sendMessage', { conversationId, text, images, reply })
+
+export const setReplyTo = (conversationId: string, reply?: ReplyTarget): void => set((s) => ({ ...s, replyTo: { ...s.replyTo, [conversationId]: reply } }))
 
 export const stopRun = (messageId: string): void => void call('stopRun', { messageId })
+export const forwardMessage = (messageId: string, conversationId: string): Promise<void> => call('forwardMessage', { messageId, conversationId })
 export const retryRun = (messageId: string): void => void call('retryRun', { messageId })
 export const continueRun = (messageId: string): void => void call('continueRun', { messageId })
 
