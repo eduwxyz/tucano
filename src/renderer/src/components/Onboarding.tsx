@@ -13,7 +13,6 @@ import {
   addConnector,
   authorizeConnector,
   customModel,
-  engineModels,
   getState,
   dmWith,
   linkSkill,
@@ -211,8 +210,10 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   }
   const close = (): void => (build ? leave() : updateSettings({ onboarding: { done: true } }))
 
+  // On the builder screen the Tuca starts on his own model; in the introduction he waits
+  // for the person to pick one (MeetTuca).
   useEffect(() => {
-    if (step !== 'agent' || tucaConv.id || tucaConv.error) return
+    if (!build || step !== 'agent' || tucaConv.id || tucaConv.error) return
     ensureTuca(agent.modelId, true)
       .then((r) => setTucaConv({ id: r.conversationId }))
       .catch((e: unknown) => setTucaConv({ error: e instanceof Error ? e.message : String(e) }))
@@ -687,79 +688,54 @@ function You({ name, context, setContext, onBack, onNext }: { name: string; cont
 // ---------- 4. the agent ----------
 
 // The first agent, made with the Tuca: he asks, proposes a card, "Usar esse agente" fills it in.
+// His model is the person's choice: in the introduction nothing is picked for them, and
+// he only starts once they pick; on the builder screen it's the one picked before.
+// Changing it starts a new session with him on that model.
 function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: string; error?: string }; onUse: (d: AgentDraft, messageId: string) => void; onManual: () => void; onBack?: () => void }): ReactNode {
   const build = useContext(BuildMode)
   const [conv, setConv] = useState(session.id)
-  const [selectedModel, setSelectedModel] = useState('sonnet')
-  const [applyingModel, setApplyingModel] = useState(false)
-  const [modelError, setModelError] = useState('')
-  const selectionId = useRef(0)
-  const applyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => setConv(session.id), [session.id])
-  const error = session.error ?? ''
   const tuca = useStore((s) => s.agents.find((a) => a.kind === 'tuca'))
+  const [model, setModel] = useState(build ? (tuca?.modelId ?? '') : '')
+  const [applying, setApplying] = useState(false)
+  const [modelError, setModelError] = useState('')
+  const typed = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => setConv(session.id), [session.id])
   useEffect(() => {
-    if (tuca?.modelId && !applyTimer.current && !applyingModel) setSelectedModel(tuca.modelId)
-  }, [tuca?.modelId, applyingModel])
-  useEffect(() => () => clearTimeout(applyTimer.current), [])
+    if (build && !model && tuca?.modelId) setModel(tuca.modelId)
+  }, [build, model, tuca?.modelId])
+  useEffect(() => () => clearTimeout(typed.current), [])
+  const error = session.error ?? ''
   const messages = useStore((s) => (conv ? s.messages.filter((m) => m.conversationId === conv) : []))
   const latest = [...messages].reverse().find((m) => m.run?.agentDraft && !m.run.agentDraft.state)?.run?.agentDraft
 
-  async function applyModel(value: string): Promise<void> {
-    if (!modelInfo(value)?.id || value === tuca?.modelId) return
-    if (!tuca) {
-      setModelError(L('O Tuca ainda não está pronto.', 'Tuca is not ready yet.'))
-      return
-    }
-    setApplyingModel(true)
+  async function start(value: string): Promise<void> {
+    if (conv && value === tuca?.modelId) return
+    setApplying(true)
     setModelError('')
     try {
-      const channels = getState().conversations.filter((c) => c.kind === 'channel' && c.members.includes(tuca.id)).map((c) => c.id)
-      await saveAgent({ ...tuca, modelId: value }, channels)
-      const next = await ensureTuca(undefined, true)
-      setConv(next.conversationId)
+      // He's made with the chosen model; once he exists, it's saved on him and a new session starts.
+      if (tuca) {
+        const channels = getState().conversations.filter((c) => c.kind === 'channel' && c.members.includes(tuca.id)).map((c) => c.id)
+        await saveAgent({ ...tuca, modelId: value }, channels)
+      }
+      setConv((await ensureTuca(value, true)).conversationId)
     } catch (e) {
       setModelError(e instanceof Error ? e.message : String(e))
     } finally {
-      setApplyingModel(false)
+      setApplying(false)
     }
   }
 
-  function changeModel(value: string): void {
-    selectionId.current++
-    const id = selectionId.current
-    clearTimeout(applyTimer.current)
-    applyTimer.current = undefined
-    setSelectedModel(value)
+  // A model from the list starts him right away; a name being typed waits for a pause.
+  // A harness alone (no model yet) waits for the model.
+  function pick(value: string): void {
+    setModel(value)
     setModelError('')
-
-    const model = modelInfo(value)
-    if (model?.id) {
-      applyTimer.current = setTimeout(() => {
-        applyTimer.current = undefined
-        if (id === selectionId.current) void applyModel(value)
-      }, 700)
-      return
-    }
-    if (!model) return
-
-    setApplyingModel(true)
-    void engineModels(model.engine)
-      .then(async ({ models, error }) => {
-        if (id !== selectionId.current) return
-        const name = models.find((item) => !/(?:embed|whisper|transcrib|moderation|rerank|speech|audio|tts|image|dall-e)/i.test(item))
-        if (!name) {
-          setModelError(error ?? L('Esse harness não listou um modelo de conversa.', 'This harness did not list a conversation model.'))
-          return
-        }
-        const next = customModel(model.engine, name)
-        setSelectedModel(next)
-        await applyModel(next)
-      })
-      .catch((e: unknown) => setModelError(e instanceof Error ? e.message : String(e)))
-      .finally(() => {
-        if (id === selectionId.current) setApplyingModel(false)
-      })
+    clearTimeout(typed.current)
+    const m = modelInfo(value)
+    if (!m?.id) return
+    if (MODELS.some((x) => x.id === value)) return void start(value)
+    typed.current = setTimeout(() => void start(value), 900)
   }
 
   return (
@@ -772,6 +748,18 @@ function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: str
             ? L('Ele faz duas ou três perguntas e propõe um agente. Nada é criado sem você.', 'It asks two or three questions and proposes an agent. Nothing is created without you.')
             : L('O Tuca monta os agentes do seu time. Ele faz duas ou três perguntas e propõe um; nada é criado sem você. Depois ele fica na barra lateral pra montar os próximos.', 'Tuca builds your team’s agents. It asks two or three questions and proposes one; nothing is created without you. Then it stays in the sidebar to build the next ones.')}
         </p>
+        <div className="onb__field onb__field--tuca-model">
+          <span>{L('Modelo do Tuca', 'Tuca’s model')}</span>
+          <ModelPicker value={model} onChange={pick} />
+          <span className="hint">
+            {applying
+              ? L('Chamando o Tuca com esse modelo…', 'Calling Tuca with this model…')
+              : conv
+                ? L('Trocar o modelo começa uma conversa nova com ele.', 'Changing the model starts a new conversation with him.')
+                : L('Escolha com qual modelo o Tuca conversa com você e monta os agentes.', 'Pick the model Tuca uses to talk with you and build the agents.')}
+          </span>
+          {modelError && <p className="hint hint--warn">{modelError}</p>}
+        </div>
         <div className="onb-tuca">
           {conv && tuca ? (
             <UseDraft.Provider value={onUse}>
@@ -779,7 +767,7 @@ function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: str
               <Composer conversationId={conv} members={[tuca]} placeholder={L('Ex.: quero alguém pra triar os tickets de suporte toda manhã', 'E.g. I want someone to triage the support tickets every morning')} />
             </UseDraft.Provider>
           ) : (
-            <p className="muted onb-tuca__wait">{error || L('Chamando o Tuca…', 'Calling Tuca…')}</p>
+            <p className="muted onb-tuca__wait">{error || (applying || build ? L('Chamando o Tuca…', 'Calling Tuca…') : L('Escolha o modelo do Tuca acima pra começar.', 'Pick Tuca’s model above to start.'))}</p>
           )}
         </div>
         <div className="onb__nav">
@@ -806,12 +794,6 @@ function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: str
             <p className="muted small">{L('A proposta dele aparece aqui: nome, o que faz, modelo e o que pode acessar.', 'Its proposal shows up here: name, what it does, model and what it can access.')}</p>
           </div>
         )}
-        <div className="onb__field onb__field--tuca-model">
-          <span>{L('Modelo do Tuca', 'Tuca model')}</span>
-          <ModelPicker value={selectedModel} onChange={changeModel} />
-          <span className="hint">{applyingModel ? L('Trocando o modelo e reiniciando a conversa…', 'Changing the model and restarting the conversation…') : L('Ao escolher um modelo ou provedor, o Tuca reinicia a conversa com ele.', 'Choosing a model or provider restarts Tuca’s conversation with it.')}</span>
-          {modelError && <p className="hint hint--warn">{modelError}</p>}
-        </div>
       </aside>
     </div>
   )
