@@ -13,6 +13,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { homedir } from 'node:os'
 import { extname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { Forwarder, isPrivate } from './forward'
 import { vault } from './vault'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
@@ -99,11 +100,34 @@ function file(res: ServerResponse, path: string, headers: Record<string, string>
 const sameToken = (t: string | undefined): boolean => !!t && t.length === token.length && timingSafeEqual(Buffer.from(t), Buffer.from(token))
 const cookieToken = (req: IncomingMessage): string | undefined => /(?:^|;\s*)tucano=([^;]+)/.exec(req.headers.cookie ?? '')?.[1]
 
+// The pages agents serve (a dashboard, an API) listen on the server's own
+// loopback. On a private address (Tailscale, a home network) each running one
+// is passed through on the same port at the server's address, so the preview
+// panel can show it. Never on a public address: those pages have no token.
+const privateHost = isPrivate(host)
+const forwarder = new Forwarder(host)
+const forwardServices = (ports: Set<number>): void => {
+  if (privateHost) forwarder.set(new Set([...ports].filter((p) => p !== port)))
+}
+const servicePorts = new Map<string, number[]>() // by agent
+const loopbackPort = (url?: string): number | undefined => (url ? Number(/^http:\/\/127\.0\.0\.1:(\d+)/.exec(url)?.[1]) || undefined : undefined)
+type Computer = { agentId: string; services: { url?: string; running: boolean }[] }
+function sawComputers(list: Computer[]): void {
+  for (const c of list) servicePorts.set(c.agentId, c.services.filter((s) => s.running).flatMap((s) => loopbackPort(s.url) ?? []))
+  forwardServices(new Set([...servicePorts.values()].flat()))
+}
+// The server's own connection to the core, to follow the services.
+const watcher = new Port((msg) => {
+  const m = msg as { id?: number; result?: { computers?: Computer[] }; event?: { type: string; computer?: Computer } }
+  if (m.id === 1 && m.result?.computers) sawComputers(m.result.computers)
+  else if (m.event?.type === 'computer' && m.event.computer) sawComputers([m.event.computer])
+})
+
 // The desktop page, told it's in a browser: the bridge script first, and its
 // policy letting it frame the agents' pages from this server.
 function index(): string {
   return readFileSync(join(page, 'index.html'), 'utf8')
-    .replace('frame-src tucano:', "frame-src 'self' tucano:")
+    .replace('frame-src tucano:', `frame-src 'self' tucano:${privateHost ? ` http://${host}:*` : ''}`)
     .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1" />\n    <script src="./tucano-web.js"></script>\n    <title>')
 }
 
@@ -224,6 +248,8 @@ process.env['TUCANO_PACKAGED'] = '1'
 process.env['TUCANO_SERVER'] = '1'
 ;(process as unknown as { parentPort: Port }).parentPort = parent
 await import(pathToFileURL(join(import.meta.dirname, 'core.js')).href)
+toCore(null, [watcher])
+watcher.emit('message', { data: { id: 1, method: 'snapshot' } })
 
 server.listen(port, host, () => {
   const shown = host === '0.0.0.0' || host === '::' ? 'localhost' : host

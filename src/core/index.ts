@@ -208,7 +208,9 @@ process.parentPort.on('message', (e) => {
   if (r.error !== undefined) p?.reject(new Error(r.error))
   else p?.resolve(Buffer.from(String(r.data ?? ''), 'base64'))
 })
-const shoot: Shooter = (opts) =>
+// On a server there's no Electron: the agents' Chrome takes the picture instead.
+const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
+const electronShoot: Shooter = (opts) =>
   new Promise((resolve, reject) => {
     const id = randomUUID()
     shots.set(id, { resolve, reject })

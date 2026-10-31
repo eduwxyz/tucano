@@ -4,7 +4,7 @@ import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { agentById, artifactUrl, browserAction, browserInput, browserOf, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { agentById, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, type IconName } from './ui'
 
@@ -370,7 +370,7 @@ export function SidePanel(): ReactNode {
       <header className="side-panel__head">
         <Icon name={panel.kind === 'service' || panel.kind === 'browser' ? 'globe' : 'edit'} size={14} />
         <strong className="side-panel__title">{title}</strong>
-        {service?.url && <code className="side-panel__url">{service.url}</code>}
+        {service?.url && <code className="side-panel__url">{reachable(service.url)}</code>}
         {panel.kind === 'browser' && <LiveBadge agentId={panel.agentId} />}
         <span className="grow" />
         {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} />}
@@ -379,7 +379,7 @@ export function SidePanel(): ReactNode {
             <button className="icon-btn" title={L('Recarregar', 'Reload')} onClick={() => setReload((n) => n + 1)}>
               <Icon name="clock" size={14} />
             </button>
-            <button className="btn btn--sm btn--ghost" onClick={() => openExternal(service.url!)}>
+            <button className="btn btn--sm btn--ghost" onClick={() => openExternal(reachable(service.url!))}>
               {L('Abrir no navegador', 'Open in the browser')}
             </button>
           </>
@@ -393,7 +393,7 @@ export function SidePanel(): ReactNode {
         {panel.kind === 'service' &&
           (service?.running && service.url ? (
             // Same origin is the service's own (127.0.0.1:port), not the app's.
-            <iframe key={reload} src={service.url} sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals" title={service.name} />
+            <iframe key={reload} src={reachable(service.url)} sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals" title={service.name} />
           ) : (
             <p className="empty">{L('Esse serviço não está rodando.', 'This service isn’t running.')}</p>
           ))}

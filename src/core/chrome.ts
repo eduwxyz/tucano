@@ -437,6 +437,36 @@ export class ChromeBrowsers {
     await tab.cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', ...p, button: 'left', clickCount: 1 })
   }
 
+  // A picture of a page (a service an agent started), where there's no Electron
+  // to take it (Tucano as a server): a throwaway headless Chrome of its own, no
+  // cookies from anything else, sized as asked, the whole page when asked.
+  async shot(o: { url: string; width: number; height: number; fullPage: boolean }): Promise<Buffer> {
+    if (!/^https?:\/\//.test(o.url)) throw new Error(L('só http e https', 'only http and https'))
+    const id = `.shot-${process.pid}-${Date.now()}`
+    const tab = await this.launch(id, false)
+    try {
+      const size = (height: number): Promise<unknown> => tab.cmd('Emulation.setDeviceMetricsOverride', { width: o.width, height, deviceScaleFactor: 1, mobile: false })
+      await size(o.height)
+      await Promise.race([tab.cmd('Page.navigate', { url: o.url }), wait(30_000).then(() => Promise.reject(new Error(L('a página não carregou em 30 s', "the page didn't load in 30 s"))))])
+      await this.settle(tab)
+      await wait(800) // fonts, charts and client-side rendering
+      if (o.fullPage) {
+        const h = await tab.run<number>('Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)').catch(() => 0)
+        if (h > o.height) {
+          await size(Math.min(h, 6000))
+          await wait(600)
+        }
+      }
+      const r = (await tab.cmd('Page.captureScreenshot', { format: 'png' })) as { data?: string }
+      if (!r.data) throw new Error(L('o Chrome não devolveu a imagem', "Chrome returned no image"))
+      return Buffer.from(r.data, 'base64')
+    } finally {
+      tab.close()
+      await gone(tab.proc)
+      rmSync(this.profile(id), { recursive: true, force: true })
+    }
+  }
+
   // What I do from the panel: a click where I clicked on the picture, what I
   // typed, a key, the wheel.
   private async input(tab: Tab, i: BrowserInput): Promise<void> {

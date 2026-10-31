@@ -48,4 +48,15 @@ describe.skipIf(!hasChrome())('a windowless browser driven from the panel', () =
     expect(shown).toEqual([true, false])
     await expect(chrome.run('a', 'input', { kind: 'key', key: 'Enter' })).rejects.toThrow()
   }, 60_000)
+
+  it('takes a picture of a page, sized as asked and whole when asked', async () => {
+    const size = (png: Buffer): { w: number; h: number } => ({ w: png.readUInt32BE(16), h: png.readUInt32BE(20) })
+    const shot = await chrome.shot({ url, width: 800, height: 600, fullPage: false })
+    expect(shot.subarray(1, 4).toString()).toBe('PNG')
+    expect(size(shot)).toEqual({ w: 800, h: 600 })
+    const whole = size(await chrome.shot({ url, width: 800, height: 600, fullPage: true }))
+    expect(whole.w).toBe(800)
+    expect(whole.h).toBeGreaterThan(4000)
+    await expect(chrome.shot({ url: 'file:///etc/hosts', width: 800, height: 600, fullPage: false })).rejects.toThrow()
+  }, 60_000)
 })

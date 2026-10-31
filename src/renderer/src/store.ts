@@ -422,6 +422,9 @@ export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
 export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
+// A page an agent serves, as this browser reaches it: on a server, at the server's
+// address (it passes running services through on a private network).
+export const reachable = (url: string): string => (windowless() ? url.replace(/^http:\/\/127\.0\.0\.1:/, `http://${location.hostname}:`) : url)
 export const browserInput = (agentId: string, input: BrowserInput): void => void call('browserInput', { agentId, input }).catch(() => {})
 // In a browser (Tucano as a server) the page opens it itself: the server has no screen.
 export const openExternal = (url: string): void =>
