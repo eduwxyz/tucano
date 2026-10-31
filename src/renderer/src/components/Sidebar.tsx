@@ -163,7 +163,7 @@ export function Sidebar(): ReactNode {
             if (!agent) return null
             return (
               <div key={c.id} onContextMenu={(e) => open(e, dmMenu(c.id, agent.id, agent.name))}>
-                <DmItem id={c.id} name={agent.name} color={agent.color} />
+                <DmItem id={c.id} name={agent.name} color={agent.color} unread={c.unread} />
               </div>
             )
           })}
@@ -208,23 +208,26 @@ export function Sidebar(): ReactNode {
 
 function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: number }): ReactNode {
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
+  const working = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'working'))
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
       <span className="nav-item__label">{name}</span>
+      {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
       {unread ? <span className="badge badge--soft">{unread}</span> : null}
     </button>
   )
 }
 
-function DmItem({ id, name, color }: { id: string; name: string; color: Parameters<typeof AgentAvatar>[0]['agent']['color'] }): ReactNode {
+function DmItem({ id, name, color, unread }: { id: string; name: string; color: Parameters<typeof AgentAvatar>[0]['agent']['color']; unread?: number }): ReactNode {
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'working'))
   return (
-    <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
+    <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={{ name, color }} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
       {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
+      {unread ? <span className="badge badge--soft">{unread}</span> : null}
     </button>
   )
 }
@@ -232,14 +235,15 @@ function DmItem({ id, name, color }: { id: string; name: string; color: Paramete
 function AgentItem({ id }: { id: string }): ReactNode {
   const agent = useStore((s) => agentById(s, id))
   const active = useStore((s) => s.view?.kind === 'agent' && s.view.id === id)
-  const working = useStore((s) => s.messages.some((m) => m.author.kind === 'agent' && m.author.id === id && m.run?.status === 'working'))
+  // The agent list is configuration: working shows on the thread (DM, channel),
+  // never here — an agent busy in a channel would glow next to an idle DM.
   if (!agent) return null
   const pct = agent.limit > 0 ? agent.used / agent.limit : 1
   return (
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'agent', id })}>
-      <AgentAvatar agent={agent} size={18} busy={working} />
+      <AgentAvatar agent={agent} size={18} />
       <span className="nav-item__label">{agent.name}</span>
-      {working ? <span className="pulse" title={L('Trabalhando', 'Working')} /> : <span className="nav-item__meta">{agent.role}</span>}
+      <span className="nav-item__meta">{agent.role}</span>
       {agent.computer && agent.computerKind === 'mac' && (
         <span className="nav-item__mac" title={L('Roda no seu computador', 'Runs on your computer')}>
           <Icon name="laptop" size={13} />

@@ -3,7 +3,7 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { agentById, archiveAgent, isTeam, openTuca, createChannel, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setTopic, shortcut, useStore, type State, type View } from '../store'
+import { agentById, archiveAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setTopic, shortcut, useStore, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
@@ -14,6 +14,7 @@ export function Dialogs(): ReactNode {
   const close = (): void => openDialog(null)
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
+  if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
   if (dialog?.kind === 'new-channel')
     return <TextDialog title={L('Novo canal', 'New channel')} label={L('Nome', 'Name')} value="" hint={L('Minúsculas e hífens: “Squad Pagamentos” vira squad-pagamentos. Depois você escolhe os agentes.', 'Lowercase and hyphens: “Payments Squad” becomes payments-squad. You pick the agents next.')} prefix="#" onSave={(v) => createChannel(v)} onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
@@ -117,6 +118,63 @@ function TextDialog(p: { title: string; label: string; value: string; hint: stri
         </button>
         <button className="btn btn--primary btn--sm" disabled={!p.allowEmpty && !value.trim()} onClick={save}>
           {L('Salvar', 'Save')}
+        </button>
+      </footer>
+    </Modal>
+  )
+}
+
+// Signing a connector in on a server: the authorization page opens here, and its
+// last stop (the server's loopback, which this browser can't reach) is pasted back.
+function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: () => void }): ReactNode {
+  const name = useStore((s) => s.connectors.find((c) => c.id === id)?.name ?? L('o conector', 'the connector'))
+  // Connected some other way (the callback reached the server after all): nothing left to paste.
+  const connected = useStore((s) => s.connectors.find((c) => c.id === id)?.status === 'connected')
+  useEffect(() => {
+    if (connected) onClose()
+  }, [connected, onClose])
+  const [pasted, setPasted] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const finish = (): void => {
+    if (!pasted.trim() || busy) return
+    setBusy(true)
+    setError(null)
+    finishConnectorAuth(pasted).then(
+      (ok) => (ok ? onClose() : (setError(L('Esse pedido de autorização expirou. Feche e clique em Conectar de novo.', 'This authorization request expired. Close this and click Connect again.')), setBusy(false))),
+      (e: unknown) => (setError(message(e)), setBusy(false))
+    )
+  }
+  return (
+    <Modal title={L(`Conectar ${name}`, `Connect ${name}`)} onClose={onClose}>
+      <p className="small modal__lead">
+        {L('1. Abra a página de autorização e permita o acesso.', '1. Open the authorization page and allow access.')}
+      </p>
+      <p>
+        <a className="btn btn--primary btn--sm" href={url} target="_blank" rel="noopener noreferrer">
+          {L('Abrir a página de autorização', 'Open the authorization page')}
+        </a>
+      </p>
+      <label className="field">
+        <span className="field__label">{L('2. Cole aqui o endereço em que ela terminou', '2. Paste the address it ended on')}</span>
+        <span className="row row--center modal__input">
+          <input autoFocus className="grow" placeholder="http://127.0.0.1:…/oauth/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && finish()} />
+        </span>
+        <span className="hint">
+          {L(
+            'Depois de permitir, o navegador vai pra um endereço que começa com http://127.0.0.1 e mostra que a página não abre. É normal: o Tucano está no servidor. Copie o endereço inteiro da barra e cole aqui.',
+            'After you allow it, the browser goes to an address starting with http://127.0.0.1 and says the page can’t be reached. That’s expected: Tucano is on the server. Copy the whole address from the bar and paste it here.'
+          )}
+        </span>
+      </label>
+      {error && <p className="field__error">{error}</p>}
+      <footer className="modal__foot">
+        <span className="grow" />
+        <button className="btn btn--ghost btn--sm" onClick={onClose}>
+          {L('Cancelar', 'Cancel')}
+        </button>
+        <button className="btn btn--primary btn--sm" disabled={!pasted.trim() || busy} onClick={finish}>
+          {L('Concluir', 'Finish')}
         </button>
       </footer>
     </Modal>

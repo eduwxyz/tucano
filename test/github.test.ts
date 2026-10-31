@@ -121,7 +121,7 @@ describe('the proxy and the PR', () => {
 
   it('abrir_pr becomes an approval; approved, the app opens the PR with the cost of the issue', async () => {
     const ready = { installed: true, loggedIn: true }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     const gateway = new Gateway()
     await gateway.start()
     const claude: Engine = {
@@ -131,7 +131,7 @@ describe('the proxy and the PR', () => {
         yield { type: 'done', text: 'ok', usage: { inputTokens: 1000, cacheReadTokens: 0, outputTokens: 10 } }
       }
     }
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, github: gh, computers: { call: async () => ({ result: { content: [] } }) } })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, github: gh, computers: { call: async () => ({ result: { content: [] } }) } })
     await r.send('c1', '@staff corrige a OAB-66')
     await r.idle()
     const [ap] = db.approvals()

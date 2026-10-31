@@ -7,6 +7,7 @@ import {
   MODELS,
   modelInfo,
   type EngineId,
+  type BrowserInput,
   type Agent,
   type Approval,
   type Artifact,
@@ -55,6 +56,7 @@ export type View =
 
 export interface State {
   ready: boolean
+  navOpen: boolean // on a phone, the sidebar slid in over the view
   view: View | null
   me: { name: string; initials: string }
   settings: Settings
@@ -78,7 +80,7 @@ export interface State {
   demoServer?: { command: string; args: string[] }
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' }
+export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
 
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
 
@@ -92,12 +94,13 @@ const initials = (name: string): string =>
 
 let state: State = {
   ready: false,
+  navOpen: false,
   view: null,
   me: { name: 'Eu', initials: 'EU' },
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -183,8 +186,18 @@ function apply(e: CoreEvent): void {
       case 'message': {
         const known = s.messages.some((m) => m.id === e.message.id)
         const viewing = s.view?.kind === 'conversation' && s.view.id === e.message.conversationId
+        const fromAgent = e.message.author.kind === 'agent' || e.message.author.kind === 'routine'
+        // A reply that lands while you're elsewhere is new content too: the end of
+        // the run, or it stopping for your turn (a question, an approval — the
+        // states the core notifies). Counted once: if the badge already counts
+        // this conversation, the run's start is already in it.
+        const finished =
+          known && fromAgent && !viewing && e.message.run !== undefined
+          && ['done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(e.message.run.status)
+          && s.messages.find((m) => m.id === e.message.id)?.run?.status !== e.message.run.status
+          && (s.conversations.find((c) => c.id === e.message.conversationId)?.unread ?? 0) === 0
         const conversations =
-          !known && !viewing && (e.message.author.kind === 'agent' || e.message.author.kind === 'routine')
+          fromAgent && !viewing && (!known || finished)
             ? s.conversations.map((c) => (c.id === e.message.conversationId ? { ...c, unread: (c.unread ?? 0) + 1 } : c))
             : s.conversations
         return { ...s, conversations, messages: upsert(s.messages, e.message) }
@@ -294,10 +307,13 @@ export function conversationTitle(s: State, c: Conversation): string {
 
 // ---------- actions ----------
 
+export const setNav = (navOpen: boolean): void => set((s) => ({ ...s, navOpen }))
+
 export const navigate = (view: View): void =>
   set((s) => ({
     ...s,
     view,
+    navOpen: false,
     panel: s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? s.panel : null,
     conversations:
       view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
@@ -310,6 +326,7 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 
 export const refreshEngines = (): void => void call('refreshEngines')
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
+export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
 
 export function saveAgent(agent: Agent, channelIds: string[]): Promise<void> {
   return call('saveAgent', { agent, channelIds })
@@ -368,7 +385,10 @@ export const updateTool = (connectorId: string, name: string, patch: Partial<Pic
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
 export const removeConnector = (id: string): void => void call('removeConnector', { id })
 export const reconnectConnector = (id: string): void => void call('reconnectConnector', { id })
-export const authorizeConnector = (id: string): void => void call('authorizeConnector', { id })
+// On a server the authorization page comes back to be opened here, then pasted back.
+export const authorizeConnector = (id: string): void =>
+  void call('authorizeConnector', { id }).then((r) => r.url && openDialog({ kind: 'oauth', id, url: r.url }))
+export const finishConnectorAuth = (url: string): Promise<boolean> => call('finishConnectorAuth', { url })
 export const harnessMcps = (): Promise<HarnessMcp[]> => call('harnessMcps')
 export const importHarnessMcp = (key: string): Promise<string> => call('importHarnessMcp', { key })
 
@@ -408,13 +428,22 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 }
 
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
-export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog }))
+export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog, navOpen: dialog ? false : s.navOpen }))
 export const setTab = (page: string, tab: string): void => set((s) => ({ ...s, tabs: { ...s.tabs, [page]: tab } }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
   void call('computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void call('browserAction', { agentId, action })
-export const openExternal = (url: string): void => void call('openExternal', { url })
+// Tucano as a server: the page is in a browser and the agent's has no window, so I
+// drive it from its picture in the panel.
+export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
+// A page an agent serves, as this browser reaches it: on a server, at the server's
+// address (it passes running services through on a private network).
+export const reachable = (url: string): string => (windowless() ? url.replace(/^http:\/\/127\.0\.0\.1:/, `http://${location.hostname}:`) : url)
+export const browserInput = (agentId: string, input: BrowserInput): void => void call('browserInput', { agentId, input }).catch(() => {})
+// In a browser (Tucano as a server) the page opens it itself: the server has no screen.
+export const openExternal = (url: string): void =>
+  (window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? void window.open(url, '_blank', 'noopener') : void call('openExternal', { url })
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })

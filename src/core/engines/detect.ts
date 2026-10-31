@@ -1,12 +1,15 @@
 import { execFile } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
 import type { EngineId, EngineStatus } from '../../shared/types'
-import { executableNames, isWin, pathDirs, spawnable } from '../platform'
+import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
+import { geminiModels } from './gemini'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -20,13 +23,17 @@ function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessE
 
 // Apps opened from Finder get a minimal PATH. Borrow the one from the user's
 // login shell so `claude` and `codex` are found where the terminal finds them.
-// Windows hands every app the user's full PATH already.
+// Windows hands every app the user's full PATH already. Either way, the folders
+// the CLIs install themselves into are added when the installer left them out.
 export async function adoptLoginShellPath(): Promise<void> {
-  if (isWin) return
-  const shell = process.env['SHELL'] || '/bin/zsh'
-  const { code, stdout } = await run(shell, ['-ilc', 'printf "__PATH__%s" "$PATH"'], 10_000)
-  const path = stdout.split('__PATH__').pop()?.trim()
-  if (code === 0 && path) process.env['PATH'] = path
+  if (!isWin) {
+    const shell = process.env['SHELL'] || '/bin/zsh'
+    const { code, stdout } = await run(shell, ['-ilc', 'printf "__PATH__%s" "$PATH"'], 10_000)
+    const path = stdout.split('__PATH__').pop()?.trim()
+    if (code === 0 && path) process.env['PATH'] = path
+  }
+  // (process.env is case-insensitive on Windows, so PATH is also Path there.)
+  process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
 }
 
 async function which(cmd: string): Promise<string | undefined> {
@@ -150,7 +157,31 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
   return { status: listedStatus(path, v.stdout, models, 'pi (e /login)'), models }
 }
 
+// Gemini CLI. Its model list isn't offered by an offline command, so the known
+// current models are used; "signed in" is whether a login is in place — the
+// OAuth credentials in the home, or an API key / Vertex in the environment.
+export async function detectGemini(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('gemini')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  const home = process.env['GEMINI_CLI_HOME'] || join(homedir(), '.gemini')
+  const signedIn = existsSync(join(home, 'oauth_creds.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
+  const models = geminiModels()
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: signedIn,
+      ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com gemini', 'Not signed in: sign in with gemini') })
+    },
+    models: signedIn ? models : []
+  }
+}
+
 export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {
-  const [claude, codex, opencode, pi] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi()])
-  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status }, listed: { opencode: opencode.models, pi: pi.models } }
+  // A CLI installed while the app is open may have created its folder just now.
+  process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
+  const [claude, codex, opencode, pi, gemini] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini()])
+  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status }, listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models } }
 }

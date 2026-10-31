@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { L } from '../shared/lang'
 import { findChrome, userAgentPlatform } from './platform'
 import { POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
-import type { BrowserOp, BrowserReply } from '../shared/types'
+import type { BrowserInput, BrowserOp, BrowserReply } from '../shared/types'
 
 // Google Chrome on this computer, where it usually is on each system (see platform.ts).
 export const CHROME = findChrome()
@@ -48,7 +48,10 @@ const KEYS: Record<string, { key: string; code: string; vk: number; text?: strin
   arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', vk: 37 },
   arrowright: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 },
   pagedown: { key: 'PageDown', code: 'PageDown', vk: 34 },
-  pageup: { key: 'PageUp', code: 'PageUp', vk: 33 }
+  pageup: { key: 'PageUp', code: 'PageUp', vk: 33 },
+  delete: { key: 'Delete', code: 'Delete', vk: 46 },
+  home: { key: 'Home', code: 'Home', vk: 36 },
+  end: { key: 'End', code: 'End', vk: 35 }
 }
 
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }
@@ -65,6 +68,7 @@ class Tab {
   url = ''
   private world: number | undefined // our isolated world in the tab's main frame
   closedAll?: () => void // every tab is gone (I closed the window)
+  remote = false // I'm driving it from the panel (no window: Tucano as a server)
 
   constructor(
     readonly proc: ChildProcess,
@@ -199,7 +203,10 @@ export class ChromeBrowsers {
     private dir: string, // profiles live in <dir>/<agentId>
     private onShown: (agentId: string, shown: boolean) => void,
     private bin: string = CHROME ?? '',
-    private onFrame?: OnFrame
+    private onFrame?: OnFrame,
+    // No screen to open a window on (Tucano as a server): taking over keeps it
+    // headless and I drive it from the panel, through 'input'.
+    private windowless = false
   ) {
     process.on('exit', () => this.quit())
   }
@@ -310,6 +317,26 @@ export class ChromeBrowsers {
       }
       return { url: '', title: '' }
     }
+    if (op === 'show' && this.windowless) {
+      const tab = await this.tab(agentId)
+      tab.remote = true
+      this.onShown(agentId, true)
+      return { url: tab.url, title: '', shown: true }
+    }
+    if (op === 'hide' && this.windowless) {
+      const t = this.tabs.get(agentId)
+      if (t?.remote) {
+        t.remote = false
+        this.onShown(agentId, false)
+      }
+      return { url: t?.url ?? '', title: '', shown: false }
+    }
+    if (op === 'input') {
+      const t = this.tabs.get(agentId)
+      if (!t?.remote) throw new Error(L('Assuma o navegador antes de usar.', 'Take the browser over before using it.'))
+      await this.input(t, args as BrowserInput)
+      return { url: t.url, title: '', shown: true }
+    }
     if (op === 'show') {
       const current = this.tabs.get(agentId) ?? (await this.starting.get(agentId))
       if (current?.headed) return { url: current.url, title: '', shown: true }
@@ -335,7 +362,7 @@ export class ChromeBrowsers {
         .run<{ url: string; title: string; w: number; h: number }>('({ url: location.href, title: document.title, w: innerWidth, h: innerHeight })')
         .catch(() => ({ url: tab.url, title: '', w: 0, h: 0 }))
       const point = at && w && h ? { x: at.x / w, y: at.y / h } : undefined
-      return { ...info, shown: tab.headed, ...(point ? { point } : {}), ...(frame ? { frame: await this.frame(tab) } : {}) }
+      return { ...info, shown: tab.headed || tab.remote, ...(point ? { point } : {}), ...(frame ? { frame: await this.frame(tab) } : {}) }
     }
 
     switch (op) {
@@ -348,7 +375,7 @@ export class ChromeBrowsers {
         return here(true)
       }
       case 'snapshot':
-        return { ...(await tab.run<BrowserReply>(SNAPSHOT)), shown: tab.headed }
+        return { ...(await tab.run<BrowserReply>(SNAPSHOT)), shown: tab.headed || tab.remote }
       case 'click': {
         const at = typeof args['ref'] === 'number' ? await tab.run<{ x: number; y: number } | null>(POINT(args['ref'], false)) : { x: Number(args['x']), y: Number(args['y']) }
         if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) throw new Error(L('Esse elemento não está mais na página. Leia a página de novo.', 'That element is no longer on the page. Read the page again.'))
@@ -408,6 +435,63 @@ export class ChromeBrowsers {
     await tab.cmd('Input.dispatchMouseEvent', { type: 'mouseMoved', ...p })
     await tab.cmd('Input.dispatchMouseEvent', { type: 'mousePressed', ...p, button: 'left', clickCount: 1 })
     await tab.cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', ...p, button: 'left', clickCount: 1 })
+  }
+
+  // A picture of a page (a service an agent started), where there's no Electron
+  // to take it (Tucano as a server): a throwaway headless Chrome of its own, no
+  // cookies from anything else, sized as asked, the whole page when asked.
+  async shot(o: { url: string; width: number; height: number; fullPage: boolean }): Promise<Buffer> {
+    if (!/^https?:\/\//.test(o.url)) throw new Error(L('só http e https', 'only http and https'))
+    const id = `.shot-${process.pid}-${Date.now()}`
+    const tab = await this.launch(id, false)
+    try {
+      const size = (height: number): Promise<unknown> => tab.cmd('Emulation.setDeviceMetricsOverride', { width: o.width, height, deviceScaleFactor: 1, mobile: false })
+      await size(o.height)
+      await Promise.race([tab.cmd('Page.navigate', { url: o.url }), wait(30_000).then(() => Promise.reject(new Error(L('a página não carregou em 30 s', "the page didn't load in 30 s"))))])
+      await this.settle(tab)
+      await wait(800) // fonts, charts and client-side rendering
+      if (o.fullPage) {
+        const h = await tab.run<number>('Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)').catch(() => 0)
+        if (h > o.height) {
+          await size(Math.min(h, 6000))
+          await wait(600)
+        }
+      }
+      const r = (await tab.cmd('Page.captureScreenshot', { format: 'png' })) as { data?: string }
+      if (!r.data) throw new Error(L('o Chrome não devolveu a imagem', "Chrome returned no image"))
+      return Buffer.from(r.data, 'base64')
+    } finally {
+      tab.close()
+      await gone(tab.proc)
+      // Windows lets go of a closed Chrome's files a moment late; a leftover is only a temp folder.
+      try {
+        rmSync(this.profile(id), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+      } catch {}
+    }
+  }
+
+  // What I do from the panel: a click where I clicked on the picture, what I
+  // typed, a key, the wheel.
+  private async input(tab: Tab, i: BrowserInput): Promise<void> {
+    if (i.kind === 'click') {
+      const { w, h } = await tab.run<{ w: number; h: number }>('({ w: innerWidth, h: innerHeight })')
+      const x = Math.min(Math.max(Number(i.x), 0), 1)
+      const y = Math.min(Math.max(Number(i.y), 0), 1)
+      return this.click(tab, x * w, y * h)
+    }
+    if (i.kind === 'text') {
+      if (i.text) await tab.cmd('Input.insertText', { text: String(i.text).slice(0, 10_000) })
+      return
+    }
+    if (i.kind === 'key') {
+      const name = String(i.key).toLowerCase()
+      if (KEYS[name]) await this.key(tab, name)
+      return
+    }
+    if (i.kind === 'scroll') {
+      const { w, h } = await tab.run<{ w: number; h: number }>('({ w: innerWidth, h: innerHeight })').catch(() => ({ w: W, h: H }))
+      await tab.cmd('Input.dispatchMouseEvent', { type: 'mouseWheel', x: w / 2, y: h / 2, deltaX: 0, deltaY: Math.max(-3000, Math.min(3000, Number(i.dy) || 0)) })
+    }
   }
 
   private async key(tab: Tab, name: string): Promise<void> {

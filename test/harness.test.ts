@@ -5,7 +5,7 @@ import { startsPicked } from '../src/shared/types'
 import type { EngineId, EngineStatus } from '../src/shared/types'
 
 const ready: EngineStatus = { installed: true, loggedIn: true, route: 'plan' }
-const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' } }
+const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' }, gemini: { ...ready, route: 'providers' } }
 
 describe('harnesses', () => {
   it('defaults the pick to the harnesses that can actually run', () => {
@@ -22,6 +22,8 @@ describe('harnesses', () => {
     expect(out.codex.loggedIn).toBe(true)
     expect(out.opencode.loggedIn).toBe(true)
     expect(out.pi.loggedIn).toBe(true)
+    expect(out.gemini).toMatchObject({ loggedIn: true })
+    expect(out.gemini.soon).toBeUndefined()
   })
 
   it('turns off the harnesses the person left out', () => {

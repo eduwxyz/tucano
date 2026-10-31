@@ -64,7 +64,7 @@ describe('in a channel', () => {
   let settings: Settings
   const engines = (): Record<EngineId, Engine> => {
     const base = fakeEngine('claude', { delayMs: 1 })
-    return { claude: { id: 'claude', run: (t) => (t.model === 'haiku' && routerTurns++, base.run(t)) }, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') }
+    return { claude: { id: 'claude', run: (t) => (t.model === 'haiku' && routerTurns++, base.run(t)) }, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }
   }
   const runner = (f: typeof fetch, key: string | undefined): Runner =>
     new Runner({ db, engines: engines(), settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), jev: { key: async () => key, fetch: f } })
@@ -73,7 +73,7 @@ describe('in a channel', () => {
   beforeEach(() => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-jev-')), 'test.db'))
     routerTurns = 0
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready }, routerModel: 'jev', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready }, routerModel: 'jev', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(lia)
     db.saveAgent(nina)
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })

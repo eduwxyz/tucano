@@ -1,0 +1,7 @@
+{"type":"init","timestamp":"2026-10-31T12:00:00.000Z","session_id":"s-1","model":"gemini-2.5-pro"}
+{"type":"message","timestamp":"2026-10-31T12:00:00.100Z","role":"user","content":"qual o preço do dólar hoje?"}
+{"type":"message","timestamp":"2026-10-31T12:00:00.400Z","role":"assistant","content":"Deixa eu buscar. ","delta":true}
+{"type":"tool_use","timestamp":"2026-10-31T12:00:00.500Z","tool_name":"google_web_search","tool_id":"t1","parameters":{"query":"preço do dólar hoje"}}
+{"type":"tool_result","timestamp":"2026-10-31T12:00:01.200Z","tool_id":"t1","status":"success","output":"R$ 5,10"}
+{"type":"message","timestamp":"2026-10-31T12:00:01.400Z","role":"assistant","content":"O dólar está R$ 5,10.","delta":true}
+{"type":"result","timestamp":"2026-10-31T12:00:01.500Z","status":"success","stats":{"total_tokens":1234,"input_tokens":1000,"output_tokens":200,"cached":34,"input":966,"duration_ms":1200,"tool_calls":1,"models":{"gemini-2.5-pro":{"total_tokens":1234,"input_tokens":1000,"output_tokens":200,"cached":34,"input":966}}}}

@@ -43,6 +43,8 @@ const key = (id: string, what: string): string => `connector:${id}:${what}`
 export class ConnectorManager {
   private live = new Map<string, Live>()
   private oauthStates = new Map<string, { connectorId: string; transport: StreamableHTTPClientTransport }>()
+  private authUrls = new Map<string, string>() // a connector's last authorization page
+  private doneStates = new Set<string>() // finished already (the callback got there first): not an expired one
 
   constructor(private deps: ConnectorDeps) {}
 
@@ -245,15 +247,35 @@ export class ConnectorManager {
 
   // ---------- OAuth ----------
 
-  authorize(id: string): Promise<void> {
-    return this.connect(id, true)
+  // The authorization page's address comes back too: on a server there's no
+  // browser to open it in, so the page the person is using opens it.
+  async authorize(id: string): Promise<string | undefined> {
+    this.authUrls.delete(id)
+    await this.connect(id, true).catch(() => {})
+    return this.authUrls.get(id)
+  }
+
+  // On a server the authorization page sends the person's browser to the
+  // callback on the server's own loopback, which it can't reach; the address
+  // it was sent to carries the code, and the person pastes it here.
+  async finishOAuthFromUrl(pasted: string): Promise<boolean> {
+    let url: URL
+    try {
+      url = new URL(pasted.trim())
+    } catch {
+      throw new Error(L('Isso não parece um endereço. Copie o endereço inteiro da barra do navegador.', "That doesn't look like an address. Copy the whole address from the browser's bar."))
+    }
+    const code = url.searchParams.get('code')
+    if (!code) throw new Error(L(`Autorização não concluída: ${url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? 'o endereço não tem o código'}.`, `Authorization not completed: ${url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? 'the address has no code'}.`))
+    return this.finishOAuth(url.searchParams.get('state') ?? '', code)
   }
 
   // Called by the local HTTP server when the browser comes back from the authorization page.
   async finishOAuth(state: string, code: string): Promise<boolean> {
     const pending = this.oauthStates.get(state)
-    if (!pending) return false
+    if (!pending) return this.doneStates.has(state)
     this.oauthStates.delete(state)
+    this.doneStates.add(state)
     await pending.transport.finishAuth(code)
     await this.connect(pending.connectorId)
     return true
@@ -294,6 +316,7 @@ export class ConnectorManager {
       redirectToAuthorization: (url) => {
         if (!interactive) return // never pop a browser on a background reconnect
         this.oauthStates.set(state || url.searchParams.get('state') || '', { connectorId: id, transport: transport() })
+        this.authUrls.set(id, url.toString())
         this.deps.openUrl(url.toString())
       },
       invalidateCredentials: async (scope) => {

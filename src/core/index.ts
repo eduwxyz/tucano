@@ -16,6 +16,7 @@ import { claudeEngine, userProvider } from './engines/claude'
 import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
+import { geminiAppDir, geminiEngine } from './engines/gemini'
 import { adoptLoginShellPath, detectEngines } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import type { Engine } from './engines/types'
@@ -32,7 +33,7 @@ import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
-import { isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
+import { findOnPath, isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -45,6 +46,8 @@ import { seed } from './seed'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
+// Run by the server (src/server): no window, and the screens are in a browser elsewhere.
+const serverMode = process.env['TUCANO_SERVER'] === '1'
 mkdirSync(dataDir, { recursive: true })
 
 const db = new Db(join(dataDir, 'tucano.db'))
@@ -75,14 +78,14 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
 }
 
 const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
-let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine }
+let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine }
 // The models OpenCode and Pi list (what the person has logins for), from the last check.
 let listed: Partial<Record<EngineId, string[]>> = {}
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 async function detect(): Promise<void> {
   if (fake) {
-    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false } }
+    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
   } else ({ engines, listed } = await detectEngines(codexHome))
   gatewayLists.clear()
@@ -100,12 +103,13 @@ const settings = (): Settings => {
 const githubInfo = (): Settings['github'] => githubRef?.info()
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }
   : {
       claude: claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())),
       codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())),
       opencode: opencodeEngine(() => engines.opencode.path, join(dataDir, 'opencode-home'), loginEnv, () => engines.opencode.version),
-      pi: piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv)
+      pi: piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv),
+      gemini: geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv)
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
@@ -204,7 +208,9 @@ process.parentPort.on('message', (e) => {
   if (r.error !== undefined) p?.reject(new Error(r.error))
   else p?.resolve(Buffer.from(String(r.data ?? ''), 'base64'))
 })
-const shoot: Shooter = (opts) =>
+// On a server there's no Electron: the agents' Chrome takes the picture instead.
+const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
+const electronShoot: Shooter = (opts) =>
   new Promise((resolve, reject) => {
     const id = randomUUID()
     shots.set(id, { resolve, reject })
@@ -225,7 +231,8 @@ const chrome =
         join(dataDir, 'navegador'),
         (agentId, shown) => browser.setShown(agentId, shown),
         undefined,
-        (agentId, jpeg) => browser.frame(agentId, jpeg)
+        (agentId, jpeg) => browser.frame(agentId, jpeg),
+        serverMode
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -244,7 +251,8 @@ const connectors = new ConnectorManager({
   db,
   secrets,
   emit,
-  openUrl: (url) => toMain({ type: 'open', url }),
+  // On a server there's nothing to open it in: authorizeConnector hands it to the page.
+  openUrl: (url) => serverMode || toMain({ type: 'open', url }),
   oauthCallbackUrl: () => gateway.url('/oauth/callback')
 })
 gateway.route('/oauth/callback', async (url) => {
@@ -688,7 +696,11 @@ const api: Api = {
 
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
-  authorizeConnector: ({ id }) => void connectors.authorize(id),
+  authorizeConnector: async ({ id }) => {
+    const url = await connectors.authorize(id)
+    return serverMode && url ? { url } : {}
+  },
+  finishConnectorAuth: ({ url }) => connectors.finishOAuthFromUrl(url),
   harnessMcps: async () => (await foundMcps()).map(publicMcp),
   importHarnessMcp: async ({ key }) => {
     const m = (await foundMcps()).find((x) => x.key === key)
@@ -719,6 +731,12 @@ const api: Api = {
     void run().catch((e: unknown) => console.error('[computer]', e))
   },
   stopService: ({ agentId, name }) => void computers.stopService(agentId, name),
+  // Driving a taken-over browser from the panel (Tucano as a server: no window to open).
+  browserInput: async ({ agentId, input }) => {
+    if (!serverMode || !chrome) throw new Error(L('Só no Tucano em servidor.', 'Only on Tucano as a server.'))
+    await chrome.run(agentId, 'input', input)
+  },
+
   browserAction: ({ agentId, action }) => {
     const agent = db.agent(agentId)
     if (agent) void browser.action(agent, action).catch((e: unknown) => console.error('[navegador]', e))
@@ -769,6 +787,24 @@ const api: Api = {
     // Its own process, so the terminal outlives the app if the person quits it mid-login.
     if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
     return { opened: !!term, command: cmd }
+  },
+
+  // The harness's own installer, in a terminal the person sees: its progress, its
+  // questions and its errors stay theirs. Detection picks the CLI up once it lands.
+  installEngine: ({ engine }) => {
+    const command = (isWin && ENGINES[engine].windows) || ENGINES[engine].install
+    // An npm package needs Node.js first; without it the command would only fail.
+    if (/^npm\s/.test(command) && !findOnPath('npm')) return { opened: false, command, needsNode: true }
+    if (isWin) {
+      // A PowerShell window running a small script: the install commands are PowerShell.
+      const script = join(dataDir, 'install.ps1')
+      writeFileSync(script, `${command}\r\n`)
+      spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'powershell.exe', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+      return { opened: true, command }
+    }
+    const term = terminalCommand(command, osOf(), onPath)
+    if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
+    return { opened: !!term, command }
   }
 }
 

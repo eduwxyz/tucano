@@ -186,6 +186,8 @@ export class Browsers {
         return { ...here(), text: wc.getURL() === '' ? '' : await iso<string>(TEXT) }
       case 'frame':
         return { ...here(), frame: await this.frame(win) }
+      case 'input': // only Chrome on a server takes input from the panel; a window here is used directly
+        throw new Error('input is for a windowless browser')
     }
   }
 

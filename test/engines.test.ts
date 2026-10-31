@@ -5,10 +5,12 @@ import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
+import { geminiArgs, geminiEnv, geminiHome, geminiParser } from '../src/core/engines/gemini'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
-// Fixtures are real CLI output (Claude Code 2.1.286, Codex 0.153.4), trimmed of local paths.
+// Fixtures are real CLI output (Claude Code 2.1.286, Codex 0.153.4), or the exact
+// event shape taken from the CLI's own writer (Gemini CLI 0.66), trimmed of local paths.
 const fixture = (name: string): string[] => readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8').split('\n')
 
 function feed(parser: Parser, lines: string[], exit = 0, stderr = ''): EngineEvent[] {
@@ -225,5 +227,78 @@ describe('Codex exec stream', () => {
     expect(args).toContain('mcp_servers.tucano.url="http://127.0.0.1:1/mcp/abc"')
     expect(args).toContain('mcp_servers.tucano.default_tools_approval_mode="approve"')
     expect(args.at(-1)).toBe('-')
+  })
+})
+
+
+describe('Gemini stream', () => {
+  it('streams the assistant deltas as the answer and reports the usage from the result', () => {
+    const events = feed(geminiParser(), fixture('gemini-stream.jsonl'))
+    expect(text(events)).toBe('Deixa eu buscar. O dólar está R$ 5,10.')
+    const done = events.find((e) => e.type === 'done')
+    expect(done).toMatchObject({ type: 'done', text: 'Deixa eu buscar. O dólar está R$ 5,10.', usage: { inputTokens: 1000, cacheReadTokens: 34, outputTokens: 200 } })
+  })
+
+  it("reports the model's web search, and only that built-in", () => {
+    const web = feed(geminiParser(), fixture('gemini-stream.jsonl')).filter((e) => e.type === 'web')
+    expect(web).toEqual([{ type: 'web', action: 'search', detail: 'preço do dólar hoje' }])
+  })
+
+  it('turns an error result into an error event, and a warning is not fatal', () => {
+    const warn = '{"type":"error","severity":"warning","message":"a slow tool"}'
+    const bad = '{"type":"result","status":"error","error":{"type":"AuthError","message":"not signed in"}}'
+    const events = feed(geminiParser(), [warn, bad])
+    expect(events).toEqual([{ type: 'error', message: 'not signed in' }])
+  })
+
+  it('reports an error when the process exits without a result', () => {
+    const events = feed(geminiParser(), ['{"type":"init","session_id":"s","model":"gemini-2.5-pro"}'], 1, 'boom\nquota exceeded')
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: 'error' })
+    expect((events[0] as { message: string }).message).toContain('quota exceeded')
+  })
+
+  it('ignores the user echo and unknown lines', () => {
+    const echo = '{"type":"message","role":"user","content":"oi"}'
+    const unknown = '{"type":"something_new"}'
+    expect(feed(geminiParser(), [echo, unknown, 'not json'], 0)).toHaveLength(1) // only the "no result" error
+  })
+})
+
+describe('Gemini config', () => {
+  it('runs headless with stream-json, auto-approving tools (the gateway decides), the model alone', () => {
+    const args = geminiArgs({ model: 'gemini-2.5-pro' })
+    expect(args).toEqual(['-p', '', '--output-format', 'stream-json', '--approval-mode', 'yolo', '-m', 'gemini-2.5-pro'])
+  })
+
+  it('gives each turn a fresh home with the gateway as its only MCP server and no built-in tools', () => {
+    const userHome = mkdtempSync(join(tmpdir(), 'gu-'))
+    writeFileSync(join(userHome, 'oauth_creds.json'), '{}')
+    const appDir = mkdtempSync(join(tmpdir(), 'gh-'))
+    const home = geminiHome(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }, userHome)
+    expect(home.startsWith(appDir)).toBe(true)
+    const s = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')) as Record<string, unknown>
+    expect(s['mcpServers']).toEqual({ tucano: { httpUrl: 'http://127.0.0.1:1/mcp/x' } })
+    expect(s['coreTools']).toEqual([]) // no built-in tools, no web
+    expect((s['experimental'] as Record<string, unknown>)['skills']).toEqual({ enabled: false })
+    expect((s['privacy'] as Record<string, unknown>)['usageStatisticsEnabled']).toBe(false)
+    // the agent's instructions are the system prompt, and the login is brought in
+    expect(readFileSync(join(home, 'system.md'), 'utf8')).toBe('You are Iris.')
+    expect(geminiEnv(home, { PATH: '/x' })).toEqual({ PATH: '/x', GEMINI_CLI_HOME: home, GEMINI_SYSTEM_MD: join(home, 'system.md') })
+  })
+
+  it('turns on only the web search when the agent has the web', () => {
+    const home = geminiHome(mkdtempSync(join(tmpdir(), 'gh2-')), { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'gu2-')))
+    const s = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')) as Record<string, unknown>
+    expect(s['coreTools']).toEqual(['google_web_search'])
+    expect(s['mcpServers']).toBeUndefined()
+  })
+
+  it('gives a different home each turn', () => {
+    const appDir = mkdtempSync(join(tmpdir(), 'gh3-'))
+    const userHome = mkdtempSync(join(tmpdir(), 'gu3-'))
+    const a = geminiHome(appDir, { system: 'a', mcpUrl: undefined, web: false }, userHome)
+    const b = geminiHome(appDir, { system: 'b', mcpUrl: undefined, web: false }, userHome)
+    expect(a).not.toBe(b)
   })
 })

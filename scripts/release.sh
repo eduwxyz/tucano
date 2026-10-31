@@ -19,7 +19,7 @@ mkdir -p "$(dirname "$NOTES")"
 SECTION=$(awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" { on = 1; next } /^## \[/ { on = 0 } /^\[[0-9.]+\]: / { on = 0 } on' CHANGELOG.md)
 [ -n "$(echo "$SECTION" | tr -d '[:space:]')" ] || { echo "CHANGELOG.md has no section for $VERSION." >&2; exit 1; }
 cat > "$NOTES" <<NOTES_EOF
-**Tucano is a team of AI agents that lives on your computer.** You talk to them in channels, like a work chat; they research, write, code and use your company's tools, and you decide how far each one goes. It runs on the Claude Code, Codex, OpenCode or Pi you already have, on your own subscription.
+**Tucano is a team of AI agents that lives on your computer.** You talk to them in channels, like a work chat; they research, write, code and use your company's tools, and you decide how far each one goes. It runs on the Claude Code, Codex, OpenCode, Pi or Gemini CLI you already have, on your own subscription.
 $SECTION
 
 ## Install

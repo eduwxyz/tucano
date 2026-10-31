@@ -116,6 +116,17 @@ export function executableNames(cmd: string): string[] {
 
 export const pathDirs = (): string[] => (process.env['PATH'] ?? process.env['Path'] ?? '').split(delimiter).filter(Boolean)
 
+// Where the CLIs' own installers put them, even when they didn't manage to add
+// the folder to PATH (Claude Code's native installer on Windows says so and moves
+// on). Each one that exists and isn't on the PATH yet is appended to it.
+export function withInstallDirs(path: string, os: Os = osOf(), home = homedir(), env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = existsSync): string {
+  const dirs = [join(home, '.local', 'bin'), ...(os === 'windows' ? [env['APPDATA'] && join(env['APPDATA'], 'npm')] : [])].filter((d): d is string => !!d)
+  const have = path.split(delimiter).filter(Boolean)
+  const same = (a: string, b: string): boolean => (os === 'windows' ? a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase() : a.replace(/\/+$/, '') === b.replace(/\/+$/, ''))
+  const missing = dirs.filter((d) => exists(d) && !have.some((h) => same(h, d)))
+  return [...have, ...missing].join(delimiter)
+}
+
 // cmd.exe's special characters, escaped with ^ (the approach of cross-spawn).
 const META = /([()\][%!^"`<>&|;, *?])/g
 
@@ -126,7 +137,7 @@ function cmdArg(arg: string, twice: boolean): string {
 }
 
 // The program on PATH with this name, as cmd.exe would find it.
-function findOnPath(cmd: string): string | undefined {
+export function findOnPath(cmd: string): string | undefined {
   for (const dir of pathDirs()) for (const name of executableNames(cmd)) if (existsSync(join(dir, name))) return join(dir, name)
   return undefined
 }

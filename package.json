@@ -1,6 +1,6 @@
 {
   "name": "tucano",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "private": true,
   "description": "Tucano: your team of AI agents on your computer, with scopes, approvals and budgets.",
   "homepage": "https://tucano.sh",
@@ -11,6 +11,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "server": "node out/main/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "dist": "sh scripts/dist.sh",
