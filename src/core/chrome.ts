@@ -463,7 +463,10 @@ export class ChromeBrowsers {
     } finally {
       tab.close()
       await gone(tab.proc)
-      rmSync(this.profile(id), { recursive: true, force: true })
+      // Windows lets go of a closed Chrome's files a moment late; a leftover is only a temp folder.
+      try {
+        rmSync(this.profile(id), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+      } catch {}
     }
   }
 
