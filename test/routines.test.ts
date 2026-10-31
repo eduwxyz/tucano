@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
-import { describeSchedule, nextRun, type Agent, type EngineId, type Routine, type Settings } from '../src/shared/types'
+import { describeSchedule, nextRun, type Agent, type EngineId, type Message, type Routine, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
-import { LATE_GRACE_MS, MAX_AGENT_ROUTINES, outcome, Routines } from '../src/core/routines'
+import { LATE_GRACE_MS, MAX_AGENT_ROUTINES, outcome, retrying, Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
 
 const at = (y: number, mo: number, d: number, h = 0, mi = 0): number => new Date(y, mo - 1, d, h, mi).getTime()
@@ -249,5 +249,120 @@ describe('quiet hours', () => {
     expect(inQuietHours({ from: '22:00', to: '07:00' }, at(7))).toBe(false)
     expect(inQuietHours({ from: '12:00', to: '13:00' }, at(12, 30))).toBe(true)
     expect(inQuietHours(undefined, at(3))).toBe(false)
+  })
+})
+
+// A reply that fails is tried again in place, up to twice, and then stays failed.
+describe('routine retries', () => {
+  const ready = { installed: true, loggedIn: true }
+  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false }
+
+  let db: Db
+  let gateway: Gateway
+  let runner: Runner
+  let routines: Routines
+  let clock: number
+  let failures: number // how many turns fail before one works
+  let turns: number
+  let waits: number[]
+  let notes: string[]
+  let onWait: () => void
+
+  beforeEach(async () => {
+    db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-retry-')), 'test.db'))
+    db.saveAgent(lia)
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'geral', members: ['a1'] })
+    clock = at(2026, 10, 19, 8, 0)
+    turns = 0
+    waits = []
+    notes = []
+    onWait = () => {}
+    const flaky: Engine = {
+      id: 'claude',
+      async *run() {
+        turns++
+        if (turns <= failures) yield { type: 'error', message: `o provedor caiu (${turns})` }
+        else yield { type: 'done', text: 'Feito.', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+      }
+    }
+    const engines: Record<EngineId, Engine> = { claude: flaky, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }
+    gateway = new Gateway()
+    await gateway.start()
+    routines = new Routines({
+      db,
+      runner: { runRoutine: (r, when) => runner.runRoutine(r, when), retryRoutine: (r, when, id) => runner.retryRoutine(r, when, id) },
+      emit: () => {},
+      now: () => clock,
+      wait: async (ms) => (waits.push(ms), onWait()),
+      notify: (_title, body) => notes.push(body)
+    })
+    runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-retry-w-')), gateway, routines })
+  })
+
+  afterEach(async () => {
+    await gateway.stop()
+  })
+
+  const fire = async (): Promise<Routine> => {
+    const r = routines.save({ name: 'Bom dia', agentId: 'a1', conversationId: 'c1', prompt: 'Resume o Linear.', schedule: { days: WEEKDAYS, time: '09:00' }, enabled: true })
+    clock = at(2026, 10, 19, 9, 0) + 10_000
+    routines.tick()
+    await routines.idle()
+    await runner.idle()
+    return r
+  }
+  const replies = () => db.messages().filter((m) => m.author.kind === 'agent')
+
+  it('a failure is tried again in the same reply, and the notice comes once, when it worked', async () => {
+    failures = 2
+    await fire()
+    expect(turns).toBe(3)
+    expect(waits).toEqual([60_000, 300_000])
+    expect(replies()).toHaveLength(1)
+    expect(replies()[0]!.run).toMatchObject({ status: 'done' })
+    expect(notes).toEqual(['Feito.'])
+  })
+
+  it('after the third failure it stops, says it tried three times, and notifies once', async () => {
+    failures = 99
+    await fire()
+    expect(turns).toBe(3)
+    const [reply] = replies()
+    expect(replies()).toHaveLength(1)
+    expect(reply!.run).toMatchObject({ status: 'failed' })
+    expect(reply!.run!.error).toBe('o provedor caiu (3). Tentei 3 vezes.')
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toBe('Falhou: o provedor caiu (3). Tentei 3 vezes.')
+  })
+
+  it('waiting, the reply says when the next try is', async () => {
+    failures = 1
+    const seen: string[] = []
+    onWait = () => void seen.push(replies()[0]?.run?.error ?? '')
+    await fire()
+    expect(seen).toEqual(['o provedor caiu (1). Tento de novo em 1 min (tentativa 2 de 3).'])
+  })
+
+  it('turning the routine off while it waits stops the tries, and the note about the next one goes', async () => {
+    failures = 99
+    onWait = () => {
+      const r = db.routines()[0]!
+      routines.save({ id: r.id, name: r.name, agentId: r.agentId, conversationId: r.conversationId, prompt: r.prompt, schedule: r.schedule, enabled: false })
+    }
+    await fire()
+    expect(turns).toBe(1)
+    expect(replies()[0]!.run).toMatchObject({ status: 'failed', error: expect.not.stringMatching(/Tento de novo/) })
+  })
+
+  it('only a failure is tried again: a limit, an approval, a question or a stop are not', async () => {
+    for (const status of ['limit_reached', 'waiting_approval', 'waiting_input', 'stopped', 'done'] as const) {
+      const reply = { id: 'm1', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: '', at: 0, run: { status, steps: [] } } as unknown as Message
+      let again = 0
+      const out = await retrying(async () => reply, async () => (again++, reply), { db, emit: () => {}, wait: async (ms) => void waits.push(ms), enabled: () => true })
+      expect(out).toBe(reply)
+      expect(again).toBe(0)
+    }
+    expect(waits).toEqual([])
   })
 })

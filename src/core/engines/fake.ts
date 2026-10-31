@@ -77,6 +77,11 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
         reply = 'Anotado.'
+      } else if (turn.mcpUrl && /pergunte em (\d+) ?s/i.test(last)) {
+        // "pergunte em 3 s": asks after a delay, so a test can leave the thread while it's still working.
+        await new Promise((r) => setTimeout(r, Number(/pergunte em (\d+) ?s/i.exec(last)![1]) * 1000))
+        await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
+        reply = 'Te mandei uma pergunta.'
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'

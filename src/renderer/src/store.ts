@@ -189,8 +189,18 @@ function apply(e: CoreEvent): void {
       case 'message': {
         const known = s.messages.some((m) => m.id === e.message.id)
         const viewing = s.view?.kind === 'conversation' && s.view.id === e.message.conversationId
+        const fromAgent = e.message.author.kind === 'agent' || e.message.author.kind === 'routine'
+        // A reply that lands while you're elsewhere is new content too: the end of
+        // the run, or it stopping for your turn (a question, an approval — the
+        // states the core notifies). Counted once: if the badge already counts
+        // this conversation, the run's start is already in it.
+        const finished =
+          known && fromAgent && !viewing && e.message.run !== undefined
+          && ['done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(e.message.run.status)
+          && s.messages.find((m) => m.id === e.message.id)?.run?.status !== e.message.run.status
+          && (s.conversations.find((c) => c.id === e.message.conversationId)?.unread ?? 0) === 0
         const conversations =
-          !known && !viewing && (e.message.author.kind === 'agent' || e.message.author.kind === 'routine')
+          fromAgent && !viewing && (!known || finished)
             ? s.conversations.map((c) => (c.id === e.message.conversationId ? { ...c, unread: (c.unread ?? 0) + 1 } : c))
             : s.conversations
         return { ...s, conversations, messages: upsert(s.messages, e.message) }

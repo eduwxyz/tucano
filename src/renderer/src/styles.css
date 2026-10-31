@@ -2865,6 +2865,9 @@ table.csv th {
   top: 12px;
   padding-top: 36px;
 }
+.onb__field--tuca-model {
+  margin-bottom: 14px;
+}
 /* the language, first thing on the first step */
 .lang-picker {
   align-self: flex-start;
