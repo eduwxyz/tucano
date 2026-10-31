@@ -1,10 +1,10 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { dockerProblem, ownedBack } from '../src/core/computer'
-import { autostartEntry, autostartFile, chromeCandidates, executableNames, fallbackPath, findChrome, gitRoot, loginShell, onPath, osOf, shellCommand, spawnable, systemName, terminalCommand, userAgentPlatform } from '../src/core/platform'
+import { autostartEntry, autostartFile, chromeCandidates, executableNames, fallbackPath, findChrome, gitRoot, loginShell, onPath, osOf, shellCommand, spawnable, systemName, terminalCommand, userAgentPlatform, withInstallDirs } from '../src/core/platform'
 import { shortcut } from '../src/shared/types'
 
 const win = process.platform === 'win32'
@@ -218,5 +218,26 @@ describe('the shell for an agent on this computer', () => {
     expect(sh.file.toLowerCase()).toMatch(/\\usr\\bin\\bash\.exe$/)
     expect(sh.env['PATH']!.split(';').slice(-1)[0]).toBe('C:\\Windows')
     expect(execFileSync(sh.file, sh.args, { env: sh.env, encoding: 'utf8' }).trim()).toMatch(/^(UCRT64|MINGW64)$/)
+  })
+})
+
+describe('folders the CLIs install into', () => {
+  const home = join('/h', 'eduar')
+  const local = join(home, '.local', 'bin')
+  const npm = join('/h', 'eduar', 'AppData', 'Roaming', 'npm')
+  const env = { APPDATA: join('/h', 'eduar', 'AppData', 'Roaming') }
+
+  it('adds ~/.local/bin when the installer left it off the PATH (Claude Code on Windows)', () => {
+    expect(withInstallDirs(['/a', '/b'].join(delimiter), 'windows', home, env, (p) => p === local)).toBe(['/a', '/b', local].join(delimiter))
+  })
+
+  it('adds the npm global folder on Windows, and only folders that exist', () => {
+    expect(withInstallDirs('/a', 'windows', home, env, (p) => p === npm)).toBe(['/a', npm].join(delimiter))
+    expect(withInstallDirs('/a', 'windows', home, env, () => false)).toBe('/a')
+  })
+
+  it("doesn't repeat a folder already there, whatever its case or trailing slash on Windows", () => {
+    expect(withInstallDirs([local.toUpperCase() + '/'].join(delimiter), 'windows', home, env, (p) => p === local)).toBe(local.toUpperCase() + '/')
+    expect(withInstallDirs(local, 'mac', home, env, () => true)).toBe(local)
   })
 })
