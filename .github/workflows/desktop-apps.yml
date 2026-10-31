@@ -1,0 +1,54 @@
+# The apps feature (agents using the person's desktop apps) end to end on a real Windows
+# and Linux desktop: scripts/desktop-e2e.ts opens a text editor, reads it, writes into it
+# and reads it back, through agent-desktop, the way an agent does. The Mac is tested by hand
+# (GitHub's Macs can't grant the Accessibility permission).
+name: Desktop apps
+
+on:
+  pull_request:
+    paths: ['src/core/apps*.ts', 'scripts/desktop-e2e.ts', '.github/workflows/desktop-apps.yml']
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install -g agent-desktop@1.0.2
+
+      - name: Linux desktop (virtual screen, accessibility bus, a window manager, a text editor)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends at-spi2-core dbus-x11 xvfb openbox gedit
+
+      - name: End to end (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cat > "$RUNNER_TEMP/session.sh" <<'SCRIPT'
+          set -eu
+          unset NO_AT_BRIDGE GTK_A11Y AT_SPI_BUS_ADDRESS
+          export GSETTINGS_BACKEND=keyfile XDG_CONFIG_HOME="$(mktemp -d)" XDG_CURRENT_DESKTOP=GNOME
+          mkdir -p "$XDG_CONFIG_HOME/glib-2.0/settings"
+          printf '[org/gnome/desktop/interface]\ntoolkit-accessibility=true\n' > "$XDG_CONFIG_HOME/glib-2.0/settings/keyfile"
+          openbox & sleep 1
+          npx -y tsx scripts/desktop-e2e.ts
+          SCRIPT
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' bash "$RUNNER_TEMP/session.sh"
+
+      - name: End to end (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: npx -y tsx scripts/desktop-e2e.ts

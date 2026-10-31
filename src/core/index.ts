@@ -20,6 +20,7 @@ import { geminiAppDir, geminiEngine } from './engines/gemini'
 import { adoptLoginShellPath, detectEngines } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import { DesktopApps, macApps, SELF } from './apps'
+import { linuxApps, windowsApps, type SystemApp } from './apps-os'
 import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
@@ -229,7 +230,14 @@ const appIcons = (paths: string[]): Promise<Record<string, string>> =>
 // The person's installed apps, with their icons, kept in the data folder: the apps picker
 // shows them at once, even right after a restart, and a refresh runs behind it when they
 // may have changed. Made once a few seconds after start, so even the first look is instant.
-type ShelfApp = { name: string; bundleId?: string; path?: string; icon?: string }
+// bundleId: a Mac app's bundle id, a Windows app's AppUserModelID, a Linux desktop id.
+type ShelfApp = { name: string; bundleId?: string; path?: string; icon?: string; exe?: string; exec?: string[]; chromium?: boolean }
+// Each system's own list: the Mac's Applications folders, Windows' Start menu, Linux's application menu.
+const systemApps = async (): Promise<ShelfApp[]> => {
+  if (process.platform === 'darwin') return (await macApps().catch(() => [])).filter((a) => !SELF.test(a.bundleId ?? ''))
+  const list: SystemApp[] = process.platform === 'win32' ? await windowsApps().catch(() => []) : linuxApps()
+  return list.map(({ id, ...a }) => ({ ...a, ...(id ? { bundleId: id } : {}) }))
+}
 const shelfFile = join(dataDir, 'apps.json')
 let shelf: { at: number; list: ShelfApp[] } | undefined = (() => {
   try {
@@ -241,10 +249,17 @@ let shelf: { at: number; list: ShelfApp[] } | undefined = (() => {
 let restocking: Promise<ShelfApp[]> | undefined
 const restock = (): Promise<ShelfApp[]> =>
   (restocking ??= (async () => {
-    const found = (await macApps().catch(() => [])).filter((a) => !SELF.test(a.bundleId ?? ''))
+    const found = await systemApps()
+    // The icons the system draws from a program (a Mac bundle, a Windows .exe) come from the
+    // main process, once; Store apps and Linux's bring theirs.
     const known = new Map((shelf?.list ?? []).filter((a) => a.path && a.icon).map((a) => [a.path!, a.icon!]))
-    const icons = await appIcons(found.filter((a) => !known.has(a.path)).map((a) => a.path))
-    const list = found.map((a) => ({ ...a, ...((known.get(a.path) ?? icons[a.path]) ? { icon: known.get(a.path) ?? icons[a.path] } : {}) })).sort((a, b) => a.name.localeCompare(b.name))
+    const icons = await appIcons(found.filter((a) => a.path && !a.icon && !known.has(a.path)).map((a) => a.path!))
+    const list = found
+      .map((a) => {
+        const icon = a.icon ?? (a.path ? (known.get(a.path) ?? icons[a.path]) : undefined)
+        return { ...a, ...(icon ? { icon } : {}) }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
     shelf = { at: Date.now(), list }
     try {
       writeFileSync(shelfFile, JSON.stringify(shelf))
@@ -256,7 +271,7 @@ const shelfNow = async (): Promise<ShelfApp[]> => {
   if (Date.now() - shelf.at > 5 * 60_000) void restock()
   return shelf.list
 }
-if (!serverMode && !fake && process.platform === 'darwin') setTimeout(() => void restock(), 4_000).unref()
+if (!serverMode && !fake) setTimeout(() => void restock(), 4_000).unref()
 
 // On a server there's no Electron: the agents' Chrome takes the picture instead.
 const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
@@ -289,7 +304,10 @@ const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op
 
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
 // The person's own apps, through agent-desktop (none on a server: no screen there).
-const desktopApps = new DesktopApps()
+// Off a Mac it needs the installed apps to know each one's program.
+const desktopApps = new DesktopApps(undefined, {
+  installed: async () => (await shelfNow()).map(({ bundleId, ...a }) => ({ ...a, ...(bundleId ? { id: bundleId } : {}) }))
+})
 
 const browser = new Browser({
   host,

@@ -328,7 +328,7 @@ export const refreshEngines = (): void => void call('refreshEngines')
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
 // The person's own apps, through agent-desktop.
-export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; server?: boolean }> => call('desktopStatus')
+export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> => call('desktopStatus')
 export type InstalledApp = { name: string; bundleId?: string; path?: string; running?: boolean; icon?: string }
 export const installedApps = (): Promise<InstalledApp[]> => call('installedApps')
 export const openApps = (): Promise<{ name: string; bundleId?: string }[]> => call('openApps')

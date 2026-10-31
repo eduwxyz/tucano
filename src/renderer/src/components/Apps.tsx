@@ -3,7 +3,7 @@
 // picked from the ones on the computer, with their icons, the open ones first.
 import { L } from '../../../shared/lang'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { desktopPermissions, desktopStatus, installDesktop, installedApps, openApps, openExternal, type AgentApp, type InstalledApp } from '../store'
+import { desktopPermissions, desktopStatus, installDesktop, installedApps, openApps, openExternal, useStore, type AgentApp, type InstalledApp } from '../store'
 import { Icon } from './ui'
 
 type Status = Awaited<ReturnType<typeof desktopStatus>>
@@ -20,6 +20,7 @@ export function AppsCard({ apps, onChange }: { apps: AgentApp[]; onChange: (apps
   const [open, setOpen] = useState<{ name: string; bundleId?: string }[]>([])
   const [picking, setPicking] = useState(false)
   const [hint, setHint] = useState('')
+  const os = useStore((s) => s.platform)
   const check = (): void => void desktopStatus().then(setStatus, () => setStatus({ installed: false }))
   useEffect(check, [])
   // The installed apps at once (kept by the core); the open ones a moment later, merged in.
@@ -72,13 +73,22 @@ export function AppsCard({ apps, onChange }: { apps: AgentApp[]; onChange: (apps
           )}
         </p>
       )}
-      {status?.installed && status.accessibility && status.accessibility !== 'granted' && (
+      {status?.installed && status.accessibility && !['granted', 'not_required'].includes(status.accessibility) && (
         <div className="apps-setup">
           <Icon name="lock" size={16} />
-          <span className="grow">{L('Falta a permissão de Acessibilidade: libere o Tucano em Ajustes → Privacidade e Segurança → Acessibilidade.', 'The Accessibility permission is missing: allow Tucano in Settings → Privacy & Security → Accessibility.')}</span>
-          <button className="btn btn--sm btn--primary" onClick={desktopPermissions}>
-            {L('Abrir Ajustes', 'Open Settings')}
-          </button>
+          <span className="grow">
+            {os === 'mac'
+              ? L('Falta a permissão de Acessibilidade: libere o Tucano em Ajustes → Privacidade e Segurança → Acessibilidade.', 'The Accessibility permission is missing: allow Tucano in Settings → Privacy & Security → Accessibility.')
+              : os === 'linux'
+                ? L('O serviço de acessibilidade do Linux (AT-SPI) não respondeu: sem ele não dá pra ler os apps.', "Linux's accessibility service (AT-SPI) didn't answer: without it the apps can't be read.")
+                : L('O Windows não deixou ler os apps agora.', "Windows didn't let the apps be read just now.")}
+            {os !== 'mac' && status.suggestion && <small className="apps-setup__how">{status.suggestion}</small>}
+          </span>
+          {os === 'mac' && (
+            <button className="btn btn--sm btn--primary" onClick={desktopPermissions}>
+              {L('Abrir Ajustes', 'Open Settings')}
+            </button>
+          )}
           <button className="btn btn--sm btn--ghost" onClick={check}>
             {L('Verificar de novo', 'Check again')}
           </button>

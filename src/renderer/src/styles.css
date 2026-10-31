@@ -6445,3 +6445,5 @@ kbd {
 .app-tile__name { font-size: 12px; line-height: 1.2; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .app-picker .app-picker__head input,
 .app-picker .app-picker__head input:focus { border: 0; box-shadow: none; outline: none; background: transparent; padding: 4px 0; }
+
+.apps-setup__how { display: block; margin-top: 4px; color: var(--text-2); font-size: 12px; }

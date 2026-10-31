@@ -15,6 +15,7 @@ import type { Agent, AgentApp } from '../shared/types'
 import { textResult, type ToolDef } from './gateway'
 import { norm, risky } from './browser'
 import { findOnPath, spawnable } from './platform'
+import { appOfWindow, startApp, windowsOpen, type SystemApp } from './apps-os'
 
 export const APPS = 'apps' // the "connector" of app click approvals
 export const APP_TOOL_NAMES = new Set(['apps_listar', 'app_abrir', 'app_ver', 'app_menu', 'app_clicar', 'app_escrever', 'app_tecla'])
@@ -34,6 +35,7 @@ export type Envelope = {
     suggestion?: string
     disposition?: { retry?: string }
     recovery?: { retry_after_ms?: number }
+    details?: { kind?: string }
   }
 }
 export type Cli = (args: string[], timeoutMs?: number) => Promise<Envelope>
@@ -212,7 +214,14 @@ const ROLE: Record<string, string> = {
   popupbutton: L('menu', 'menu'),
   combobox: L('lista', 'list'),
   slider: L('controle', 'slider'),
-  statictext: L('texto', 'text')
+  statictext: L('texto', 'text'),
+  // Windows' and Linux's names for the same things.
+  option: L('item', 'item'),
+  listitem: L('item', 'item'),
+  menubutton: L('botão de menu', 'menu button'),
+  document: L('documento', 'document'),
+  listbox: L('lista', 'list'),
+  menu: 'menu'
 }
 const clean = (s: unknown): string =>
   String(s ?? '')
@@ -228,7 +237,7 @@ export function itemize(tree: Node | undefined, max = MAX_LINES): { items: Item[
   let more = 0
   const visit = (n: Node, depth: number): void => {
     const role = String(n.role ?? '')
-    const name = clean(n.name) || (role === 'row' ? inner(n) : '')
+    const name = clean(n.name) || (['row', 'option', 'listitem', 'cell'].includes(role) ? inner(n) : '')
     const value = typeof n.value === 'string' || typeof n.value === 'number' ? clean(n.value) : ''
     if (n.ref_id) {
       const item: Item = {
@@ -298,6 +307,13 @@ export function grantOf(agent: Pick<Agent, 'apps'>, app: string): AgentApp | und
 // Desktop apps name the act of scheduling by what it makes ("Novo Evento"), not by a verb.
 const CREATES = /\b(nov[oa]|criar|crie|new|create)\s+(evento|event|reuniao|meeting|compromisso|appointment)\b/
 export const riskyClick = (name: string): boolean => risky(name) || CREATES.test(norm(name))
+
+// A shortcut as the system takes it: off a Mac, ⌘ is Ctrl (agent-desktop reads "cmd" as the
+// Windows or Super key) and ⌥ is Alt.
+export const keyFor = (combo: string, platform: NodeJS.Platform = process.platform): string => {
+  const c = combo.replace(/\s+/g, '').toLowerCase()
+  return platform === 'darwin' ? c : c.replace(/\b(cmd|command|meta)\+/g, 'ctrl+').replace(/\boption\+/g, 'alt+')
+}
 
 export const riskyKey = (combo: string): boolean => {
   const c = combo.replace(/\s+/g, '').toLowerCase()
@@ -445,27 +461,81 @@ export class DesktopApps {
   private permits = new Map<string, { key: string; until: number }[]>() // approved actions, each good once
   private written = new Map<string, { app: string; text: string; creates?: boolean }>() // the last thing each agent wrote, and where
 
-  constructor(private cli: Cli = agentDesktop()) {}
+  private targets = new Map<string, { name: string; at: number }>() // an app's name for agent-desktop, a minute at a time
+  private platform: NodeJS.Platform
+  private installed: () => Promise<SystemApp[]>
+
+  constructor(
+    private cli: Cli = agentDesktop(),
+    opts: { platform?: NodeJS.Platform; installed?: () => Promise<SystemApp[]> } = {}
+  ) {
+    this.platform = opts.platform ?? process.platform
+    this.installed = opts.installed ?? (async () => [])
+  }
+
+  private async installedApp(app: string): Promise<SystemApp | undefined> {
+    return (await this.installed().catch(() => [])).find((a) => norm(a.name) === norm(app))
+  }
+
+  // Windows and Linux: an app already open comes forward; one that isn't starts the way the
+  // system's menu starts it.
+  private async openOther(app: string, ia: SystemApp): Promise<boolean> {
+    const open = (await this.foreground().catch(() => [])).some((a) => norm(a.name) === norm(app))
+    if (open) {
+      await run(this.cli, ['focus-window', '--app', await this.target(app, true)])
+      return true
+    }
+    return startApp(ia, this.platform)
+  }
+
+  // The name agent-desktop knows an app by. On a Mac, the one the person sees ("Notas");
+  // on Windows and Linux, its program's ("notepad", "gnome-text-editor"), found through
+  // the open windows and the installed apps.
+  async target(app: string, fresh = false): Promise<string> {
+    if (this.platform === 'darwin') return app
+    const known = this.targets.get(norm(app))
+    if (!fresh && known && Date.now() - known.at < 60_000) return known.name
+    const ia = await this.installedApp(app)
+    let name: string | undefined
+    if (this.platform === 'win32') {
+      const all = await this.installed().catch(() => [])
+      const w = (await windowsOpen().catch(() => [])).find((x) => norm(appOfWindow(x, all)?.name ?? x.desc ?? x.name) === norm(app) || norm(x.name) === norm(app))
+      name = w?.name ?? (ia?.exe && !ia.id?.includes('!') ? (ia.exe.split('\\').pop() ?? '').replace(/\.exe$/i, '') : undefined)
+    } else {
+      const r = await this.cli(['list-apps'], 20_000)
+      const apps = ((r.data?.['apps'] ?? []) as { name?: string; bundle_id?: string }[]).filter((a) => a.name)
+      const prog = ia?.exec?.[0]?.split('/').pop()
+      const byId = ia?.id ? apps.find((a) => a.bundle_id === `${ia.id}.desktop` || a.bundle_id === ia.id) : undefined
+      name = (byId ?? apps.find((a) => (prog && a.name === prog) || norm(a.name!) === norm(app)))?.name
+      if (!name && ia) name = prog && !/^(flatpak|env|snap|sh|bash)$/.test(prog) ? prog : ia.id
+    }
+    const out = name || app
+    this.targets.set(norm(app), { name: out, at: Date.now() })
+    return out
+  }
 
   async status(): Promise<{
     installed: boolean
     version?: string
     accessibility?: string
+    suggestion?: string
   }> {
     const v = await this.cli(['version'], 15_000)
     if (!v.ok) return { installed: false }
     const p = await this.cli(['permissions'], 15_000)
-    const acc = (p.data?.['accessibility'] as { state?: string } | undefined)?.state
+    const a = p.data?.['accessibility'] as { state?: string; suggestion?: string } | undefined
     return {
       installed: true,
       version: String(v.data?.['version'] ?? ''),
-      ...(acc ? { accessibility: acc } : {})
+      ...(a?.state ? { accessibility: a.state } : {}),
+      ...(a?.suggestion ? { suggestion: a.suggestion } : {})
     }
   }
 
   // The system's privacy settings, at Accessibility.
   async guide(): Promise<void> {
-    await this.cli(['permissions', '--guide'], 30_000)
+    // Only a Mac has a settings page for it: Windows asks nothing, Linux needs its bus running.
+    if (this.platform === 'darwin') await this.cli(['permissions', '--guide'], 30_000)
   }
 
   // The apps open right now, by name, for the person to pick from.
@@ -477,26 +547,50 @@ export class DesktopApps {
   // The apps with windows right now (helpers and background services aren't apps to the person).
   // On a Mac the system answers at once (lsappinfo); agent-desktop's inventory can take seconds.
   async foreground(): Promise<{ name: string; bundleId?: string }[]> {
-    if (process.platform === 'darwin') {
+    if (this.platform === 'darwin') {
       const mac = await macOpenApps().catch(() => [])
       if (mac.length) return mac
     }
+    const all = await this.installed().catch(() => [])
+    const mine = (n: string): boolean => /^(tucano|electron)(\.exe)?$/i.test(n)
+    const once = (list: { name: string; bundleId?: string }[]): { name: string; bundleId?: string }[] => list.filter((a, i) => a.name && !mine(a.name) && list.findIndex((b) => b.name === a.name) === i)
+    // Windows: the system's own list of windows answers at once; each by the name in the Start menu.
+    if (this.platform === 'win32') {
+      const wins = await windowsOpen().catch(() => [])
+      if (wins.length)
+        return once(wins.filter((w) => !mine(w.name)).map((w) => {
+          const a = appOfWindow(w, all)
+          return a ? { name: a.name, ...(a.id ? { bundleId: a.id } : {}) } : { name: w.desc || w.name }
+        }))
+    }
     const r = await run(this.cli, ['list-apps'])
     const apps = (r.data?.['apps'] ?? []) as { name?: string; bundle_id?: string; presentation?: string }[]
-    return apps.filter((a) => a.presentation === 'foreground' && clean(a.name)).map((a) => ({ name: clean(a.name), ...(a.bundle_id ? { bundleId: a.bundle_id } : {}) }))
+    // Linux: a program by its menu entry's name ("Editor de texto", not gnome-text-editor).
+    const shown = (a: { name?: string; bundle_id?: string }): { name: string; bundleId?: string } => {
+      const id = a.bundle_id?.replace(/\.desktop$/, '')
+      const entry = all.find((x) => (id && x.id === id) || x.exec?.[0]?.split('/').pop() === a.name)
+      return entry ? { name: entry.name, ...(entry.id ? { bundleId: entry.id } : {}) } : { name: clean(a.name), ...(a.bundle_id ? { bundleId: a.bundle_id } : {}) }
+    }
+    return once(apps.filter((a) => a.presentation === 'foreground' && clean(a.name)).map(shown))
   }
 
   // An app with several windows (a popover left open, a second document): its main one,
   // the biggest, unless a surface (a menu, a popover) was asked for.
   private async snapshot(app: string, extra: string[]): Promise<Envelope> {
-    const r = await run(this.cli, ['snapshot', '--app', app, '-i', '--compact', ...extra])
+    let who = await this.target(app)
+    let r = await run(this.cli, ['snapshot', '--app', who, '-i', '--compact', ...extra])
+    // Opened or closed since: look for it again.
+    if (!r.ok && this.platform !== 'darwin' && /APP_NOT_FOUND|WINDOW_NOT_FOUND/.test(r.error?.code ?? '')) {
+      who = await this.target(app, true)
+      r = await run(this.cli, ['snapshot', '--app', who, '-i', '--compact', ...extra])
+    }
     if (r.ok || r.error?.code !== 'AMBIGUOUS_TARGET' || extra.includes('--surface')) return r
-    const w = await this.cli(['list-windows', '--app', app], 15_000)
+    const w = await this.cli(['list-windows', '--app', who], 15_000)
     type Win = { id?: string; bounds?: { width?: number; height?: number }; size?: { width?: number; height?: number } }
     const list = (Array.isArray(w.data) ? w.data : ((w.data?.['windows'] as unknown[]) ?? [])) as Win[]
     const area = (x: Win): number => (x.bounds?.width ?? x.size?.width ?? 0) * (x.bounds?.height ?? x.size?.height ?? 0)
     const main = [...list].sort((a, b) => area(b) - area(a))[0]
-    return main?.id ? run(this.cli, ['snapshot', '--app', app, '-i', '--compact', '--window-id', main.id, ...extra]) : r
+    return main?.id ? run(this.cli, ['snapshot', '--app', who, '-i', '--compact', '--window-id', main.id, ...extra]) : r
   }
 
   private async read(agentId: string, app: string, extra: string[] = []): Promise<CallToolResult> {
@@ -548,17 +642,25 @@ export class DesktopApps {
         // On a Mac, apps made with Chromium (Spotify, Slack, Discord…) show their screen to
         // accessibility only when started with it on; the flag does nothing to the others.
         // `open -a` also brings an app already open to the front, under its own (localized) name.
-        const opened = process.platform === 'darwin' && (await openMac(app))
-        const r: Envelope = opened ? { ok: true } : await run(this.cli, ['launch', app, '--activate', '--timeout', '25000'], { tries: 2 })
+        // On Windows and Linux, the way the Start menu or the application menu would start it.
+        const ia = this.platform === 'darwin' ? undefined : await this.installedApp(app)
+        const opened = this.platform === 'darwin' ? await openMac(app) : !!ia && (await this.openOther(app, ia))
+        const by = this.platform === 'win32' ? (ia?.exe && !ia.id?.includes('!') ? ia.exe : app) : this.platform === 'linux' ? (ia?.id ?? app) : app
+        const extra = this.platform === 'linux' && ia?.chromium ? ['--arg=--force-renderer-accessibility'] : []
+        const r: Envelope = opened ? { ok: true } : await run(this.cli, ['launch', by, ...extra, '--activate', '--timeout', '25000'], { tries: 2 })
         if (!r.ok && r.error?.code !== 'TIMEOUT')
           return {
             result: textResult(L(`Não abriu o ${app}: ${failure(r)}`, `${app} didn't open: ${failure(r)}`), true)
           }
         // A slow app: the window may come after the launch gave up waiting.
         for (let i = 0; i < 10; i++) {
-          const w = await this.cli(['list-windows', '--app', app], 15_000)
+          const w = await this.cli(['list-windows', '--app', await this.target(app, i > 0 || this.platform !== 'darwin')], 15_000)
           const list = Array.isArray(w.data) ? w.data : ((w.data?.['windows'] as unknown[] | undefined) ?? [])
-          if (w.ok && list.length > 0) return { result: await this.read(id, app) }
+          if (w.ok && list.length > 0) {
+            // Chromium's screen on Windows fills in over a few seconds after it opens.
+            if (this.platform === 'win32' && ia?.chromium && i > 0) await wait(4_000)
+            return { result: await this.read(id, app) }
+          }
           await wait(1_500)
         }
         return {
@@ -573,7 +675,8 @@ export class DesktopApps {
         return { result: await this.read(id, app, ['--root', it.ref]) }
       }
       case 'app_menu':
-        return { result: await this.read(id, app, ['--surface', 'menubar']) }
+        // Windows and Linux keep the menu bar inside the window: it's in the window's list.
+        return { result: await this.read(id, app, this.platform === 'darwin' ? ['--surface', 'menubar'] : []) }
       case 'app_clicar': {
         const it = this.item(id, app, String(args['alvo'] ?? ''))
         if ('error' in it) return { result: textResult(it.error, true) }
@@ -596,6 +699,8 @@ export class DesktopApps {
         if (texto) this.written.delete(id)
         // A right click opens the element's own menu: read that menu next.
         if (args['botao_direito'] === true) {
+          if (this.platform === 'win32')
+            return { result: textResult(L(`No Windows, o clique direito mexeria no mouse de verdade. Use os botões e menus da janela (app_menu) ou selecione "${label}" com um clique e use o comando do menu.`, `On Windows, a right click would move the real mouse. Use the window's buttons and menus (app_menu), or select "${label}" with a click and use the menu's command.`), true) }
           const r = await run(this.cli, ['right-click', it.ref])
           if (!r.ok && r.error?.disposition?.retry !== 'safe' && !/UNRESPONSIVE|uncertain/i.test(`${r.error?.code} ${JSON.stringify(r.error?.disposition ?? {})}`))
             return { result: textResult(L(`O clique direito em "${label}" não foi: ${failure(r)}`, `The right click on "${label}" didn't go through: ${failure(r)}`), true) }
@@ -620,12 +725,18 @@ export class DesktopApps {
         if ('error' in it) return { result: textResult(it.error, true) }
         const text = String(args['texto'] ?? '')
         let r: Envelope
-        if (args['teclando'] === true) {
+        if (args['teclando'] === true && this.platform === 'darwin') {
           await run(this.cli, ['focus', it.ref])
           r = await typeKeys(this.cli, app, text)
+        } else if (args['teclando'] === true && this.platform === 'linux') {
+          // Linux types into the field itself, with no keyboard of its own.
+          r = await run(this.cli, ['type', it.ref, text])
+          if (!r.ok) r = await run(this.cli, ['set-value', it.ref, text])
         } else {
           r = await run(this.cli, ['set-value', it.ref, text])
-          if (!r.ok) r = await run(this.cli, ['type', it.ref, text])
+          // Windows: the value landed and the app shows it its own way (a field that formats).
+          if (!r.ok && r.error?.details?.kind === 'post_action_verification') r = { ok: true }
+          if (!r.ok && this.platform !== 'win32') r = await run(this.cli, ['type', it.ref, text])
         }
         if (r.ok) this.written.set(id, { app, text, creates: CREATES.test(norm(it.name)) })
         if (!r.ok)
@@ -638,9 +749,7 @@ export class DesktopApps {
         }
       }
       case 'app_tecla': {
-        const combo = String(args['tecla'] ?? '')
-          .trim()
-          .toLowerCase()
+        const combo = keyFor(String(args['tecla'] ?? '').trim(), this.platform)
         if (!combo)
           return {
             result: textResult(L('Faltou a tecla.', 'Missing the key.'), true)
@@ -656,7 +765,13 @@ export class DesktopApps {
             approval: { args: { app, tecla: combo, ...(texto ? { texto } : {}) }, why, detail: what }
           }
         }
-        const r = await run(this.cli, ['press', combo, '--app', app])
+        const who = await this.target(app)
+        let r = await run(this.cli, ['press', combo, '--app', who])
+        // Off a Mac a key goes to the window in front: bring the app's forward, once.
+        if (!r.ok && this.platform !== 'darwin') {
+          await run(this.cli, ['focus-window', '--app', who])
+          r = await run(this.cli, ['press', combo, '--app', who])
+        }
         if (!r.ok)
           return {
             result: textResult(L(`A tecla não foi: ${failure(r)}`, `The key didn't go through: ${failure(r)}`), true)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appTools, DesktopApps, grantOf, itemize, parseLsappinfo, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
+import { appTools, DesktopApps, grantOf, itemize, keyFor, parseLsappinfo, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
 import type { Agent } from '../src/shared/types'
 
 // A Notes window as agent-desktop describes it.
@@ -94,7 +94,7 @@ describe('what an agent may do with an app', () => {
 
   it('refuses an app it was not given, and changes on an app it may only read', async () => {
     const { cli, calls } = fakeCli()
-    const apps = new DesktopApps(cli)
+    const apps = new DesktopApps(cli, { platform: 'darwin' })
     const reader = agent([{ name: 'Notas', level: 'read' }])
     expect((await apps.call(reader, 'app_ver', { app: 'Mail' })).result.isError).toBe(true)
     await apps.call(reader, 'app_ver', { app: 'Notas' })
@@ -104,7 +104,7 @@ describe('what an agent may do with an app', () => {
 
   it('clicks and writes by number or text, then reads the window again', async () => {
     const { cli, calls } = fakeCli()
-    const apps = new DesktopApps(cli)
+    const apps = new DesktopApps(cli, { platform: 'darwin' })
     const nina = agent([{ name: 'Notas', level: 'read_write' }])
     await apps.call(nina, 'app_ver', { app: 'Notas' })
     const click = await apps.call(nina, 'app_clicar', { app: 'Notas', alvo: 'Nova Nota' })
@@ -117,7 +117,7 @@ describe('what an agent may do with an app', () => {
 
   it('right-clicks to open an item\'s own menu, and says when only a right click works', async () => {
     const { cli, calls } = fakeCli()
-    const apps = new DesktopApps(cli)
+    const apps = new DesktopApps(cli, { platform: 'darwin' })
     const nina = agent([{ name: 'Notas', level: 'read_write' }])
     await apps.call(nina, 'app_ver', { app: 'Notas' })
     expect((await apps.call(nina, 'app_clicar', { app: 'Notas', alvo: '#5' })).result.isError).toBe(true)
@@ -130,7 +130,7 @@ describe('what an agent may do with an app', () => {
 
   it('asks before a click that deletes or a key that sends, and does it once approved', async () => {
     const { cli, calls } = fakeCli()
-    const apps = new DesktopApps(cli)
+    const apps = new DesktopApps(cli, { platform: 'darwin' })
     const nina = agent([{ name: 'Notas', level: 'read_write' }])
     await apps.call(nina, 'app_ver', { app: 'Notas' })
     const del = await apps.call(nina, 'app_clicar', { app: 'Notas', alvo: '#2', motivo: 'limpar' })
@@ -184,7 +184,7 @@ describe('the open apps on a Mac', () => {
 describe('confirming and typing', () => {
   it('a Return right after writing asks to confirm what was written, and the permit then lets it through', async () => {
     const { cli, calls } = fakeCli()
-    const apps = new DesktopApps(cli)
+    const apps = new DesktopApps(cli, { platform: 'darwin' })
     const nina = agent([{ name: 'Notas', level: 'read_write' }])
     await apps.call(nina, 'app_ver', { app: 'Notas' })
     await apps.call(nina, 'app_escrever', { app: 'Notas', alvo: '#3', texto: 'Reunião com o cliente amanhã às 15h' })
@@ -212,7 +212,7 @@ describe('an app with several windows', () => {
       if (a[0] === 'snapshot' && !a.includes('--window-id')) return { ok: false, error: { code: 'AMBIGUOUS_TARGET', disposition: { retry: 'never' } } }
       return { ok: true, data: { tree: { role: 'window', children: [{ role: 'button', name: 'Adicionar Evento', ref_id: '@s1:e1' }] } } }
     }
-    const apps = new DesktopApps(cli)
+    const apps = new DesktopApps(cli, { platform: 'darwin' })
     const out = await apps.call(agent([{ name: 'Calendário', level: 'read' }]), 'app_ver', { app: 'Calendário' })
     expect(JSON.stringify(out.result)).toContain('Adicionar Evento')
     expect(calls.at(-1)).toContain('w-main')
@@ -224,7 +224,7 @@ describe('an app with several windows', () => {
       calls.push(a)
       return { ok: true, data: { snapshot_id: 's1', tree: { role: 'window', children: [{ role: 'textfield', name: 'Novo Evento', ref_id: '@s1:e1' }, { role: 'button', name: 'Adicionar Evento', ref_id: '@s1:e2' }] } } }
     }
-    const apps = new DesktopApps(cli)
+    const apps = new DesktopApps(cli, { platform: 'darwin' })
     const nina = agent([{ name: 'Calendário', level: 'read_write' }])
     await apps.call(nina, 'app_ver', { app: 'Calendário' })
     await apps.call(nina, 'app_escrever', { app: 'Calendário', alvo: 'Novo Evento', texto: 'Reunião com o cliente amanhã às 15h' })
@@ -236,5 +236,63 @@ describe('an app with several windows', () => {
     expect(calls.filter((c) => c[0] === 'click')).toHaveLength(1)
     // Only that click: the next one is an ordinary click again.
     expect((await apps.call(nina, 'app_clicar', { app: 'Calendário', alvo: 'Adicionar Evento' })).approval).toBeUndefined()
+  })
+})
+
+describe('on Windows and Linux', () => {
+  const tree = { snapshot_id: 's1', tree: { role: 'window', children: [{ role: 'textfield', name: 'Editor de texto', ref_id: '@s1:e1' }, { role: 'menuitem', name: 'Excluir', ref_id: '@s1:e2' }] } }
+  const fake = (apps: Record<string, unknown>[] = []): { cli: Cli; calls: string[][] } => {
+    const calls: string[][] = []
+    const cli: Cli = async (a) => (calls.push(a), a[0] === 'list-apps' ? { ok: true, data: { apps } } : { ok: true, data: tree })
+    return { cli, calls }
+  }
+
+  it('turns ⌘ into Ctrl and ⌥ into Alt off a Mac', () => {
+    expect(keyFor('cmd+n', 'win32')).toBe('ctrl+n')
+    expect(keyFor('Command + Shift + Z', 'linux')).toBe('ctrl+shift+z')
+    expect(keyFor('option+f', 'linux')).toBe('alt+f')
+    expect(keyFor('cmd+n', 'darwin')).toBe('cmd+n')
+  })
+
+  it("finds a Linux app's program through its menu entry, and reads it by that name", async () => {
+    const { cli, calls } = fake([{ name: 'gnome-text-editor', bundle_id: 'org.gnome.TextEditor.desktop', presentation: 'foreground' }])
+    const apps = new DesktopApps(cli, { platform: 'linux', installed: async () => [{ name: 'Editor de texto', id: 'org.gnome.TextEditor', exec: ['gnome-text-editor'] }] })
+    expect(await apps.target('Editor de texto')).toBe('gnome-text-editor')
+    expect(await apps.foreground()).toEqual([{ name: 'Editor de texto', bundleId: 'org.gnome.TextEditor' }])
+    await apps.call(agent([{ name: 'Editor de texto', level: 'read' }]), 'app_menu', { app: 'Editor de texto' })
+    // The menu bar is part of the window there: no menubar surface.
+    expect(calls.at(-1)).toEqual(['snapshot', '--app', 'gnome-text-editor', '-i', '--compact'])
+  })
+
+  it('sends shortcuts with Ctrl, and asks first for one that deletes', async () => {
+    const { cli, calls } = fake([{ name: 'gnome-text-editor', bundle_id: 'org.gnome.TextEditor.desktop' }])
+    const apps = new DesktopApps(cli, { platform: 'linux', installed: async () => [{ name: 'Editor de texto', id: 'org.gnome.TextEditor', exec: ['gnome-text-editor'] }] })
+    const nina = agent([{ name: 'Editor de texto', level: 'read_write' }])
+    await apps.call(nina, 'app_tecla', { app: 'Editor de texto', tecla: 'cmd+n' })
+    expect(calls.find((c) => c[0] === 'press')).toEqual(['press', 'ctrl+n', '--app', 'gnome-text-editor'])
+    expect((await apps.call(nina, 'app_tecla', { app: 'Editor de texto', tecla: 'cmd+backspace' })).approval).toBeDefined()
+  })
+
+  it("doesn't right-click on Windows (it would move the mouse) and says what to do instead", async () => {
+    const { cli, calls } = fake()
+    const apps = new DesktopApps(cli, { platform: 'win32', installed: async () => [] })
+    const nina = agent([{ name: 'Notepad', level: 'read_write' }])
+    apps.target = async () => 'notepad'
+    await apps.call(nina, 'app_ver', { app: 'Notepad' })
+    const out = await apps.call(nina, 'app_clicar', { app: 'Notepad', alvo: 'Editor de texto', botao_direito: true })
+    expect(out.result.isError).toBe(true)
+    expect(JSON.stringify(out.result)).toContain('app_menu')
+    expect(calls.some((c) => c[0] === 'right-click')).toBe(false)
+  })
+
+  it('writes on Windows by setting the value, never by keystrokes that take the keyboard', async () => {
+    const { cli, calls } = fake()
+    const apps = new DesktopApps(cli, { platform: 'win32', installed: async () => [] })
+    apps.target = async () => 'notepad'
+    const nina = agent([{ name: 'Notepad', level: 'read_write' }])
+    await apps.call(nina, 'app_ver', { app: 'Notepad' })
+    await apps.call(nina, 'app_escrever', { app: 'Notepad', alvo: '#1', texto: 'oi', teclando: true })
+    expect(calls.some((c) => c[0] === 'focus' || c[0] === 'type' || c[0] === 'press')).toBe(false)
+    expect(calls.find((c) => c[0] === 'set-value')).toEqual(['set-value', '@s1:e1', 'oi'])
   })
 })
