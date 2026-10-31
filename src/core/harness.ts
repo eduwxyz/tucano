@@ -1,4 +1,4 @@
-// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi). Each one is
+// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi, Hermes). Each one is
 // used as the person set it up: their plan, their company's gateway or their
 // providers. The app only reads that setup, to show it and to list models.
 import type { Provider } from './engines/claude'
@@ -7,7 +7,7 @@ import { L } from '../shared/lang'
 import type { EngineId, EngineStatus } from '../shared/types'
 
 // The harnesses the app can run agents on; one added later is listed as coming until then.
-export const RUNNABLE: EngineId[] = ['claude', 'codex', 'opencode', 'pi', 'gemini']
+export const RUNNABLE: EngineId[] = ['claude', 'codex', 'opencode', 'pi', 'gemini', 'hermes']
 
 // Off for a harness pointed at a gateway: its own telemetry and error reports
 // would go to Anthropic or OpenAI, around the gateway.

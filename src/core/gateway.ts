@@ -26,7 +26,12 @@ export const textResult = (text: string, isError = false): CallToolResult => ({ 
 export class Gateway {
   private http: HttpServer | null = null
   private port = 0
-  private sessions = new Map<string, Session>()
+  // One registration per agent, alive across turns: the CLI's gateway daemon
+  // connects its MCP session once and caches the transport, so a per-turn URL
+  // would leave later turns calling a revoked token (verified on 0.22.5).
+  // The turn swaps `tools` and `call` in place before each run.
+  private agents = new Map<string, { tools: ToolDef[]; call: Session['call'] }>()
+  private tokens = new Map<string, string>() // agentKey -> URL token
   private routes = new Map<string, (url: URL) => Promise<string>>()
 
   async start(): Promise<void> {
@@ -55,11 +60,26 @@ export class Gateway {
     return `http://127.0.0.1:${this.port}${path}`
   }
 
-  // Returns the URL to hand to the CLI, and a function that revokes it.
-  open(session: Session): { url: string; close: () => void } {
-    const token = randomBytes(24).toString('hex')
-    this.sessions.set(token, session)
-    return { url: `http://127.0.0.1:${this.port}/mcp/${token}`, close: () => this.sessions.delete(token) }
+  // The agent's stable MCP URL, registering it on first use. The turn calls
+  // agentTurn() right before running, so the tools of THIS turn are what the
+  // CLI lists and the only calls that pass.
+  agentUrl(agentKey: string): string {
+    let token = this.tokens.get(agentKey)
+    if (!token) {
+      token = randomBytes(24).toString('hex')
+      this.tokens.set(agentKey, token)
+    }
+    return `http://127.0.0.1:${this.port}/mcp/${token}`
+  }
+
+  agentTurn(agentKey: string, session: Session): void {
+    this.agents.set(agentKey, session)
+  }
+
+  agentForget(agentKey: string): void {
+    const token = this.tokens.get(agentKey)
+    if (token) this.tokens.delete(agentKey)
+    this.agents.delete(agentKey)
   }
 
   private async handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> {
@@ -73,20 +93,22 @@ export class Gateway {
     }
 
     const token = /^\/mcp\/([a-f0-9]{48})$/.exec(req.url ?? '')?.[1]
-    const session = token ? this.sessions.get(token) : undefined
-    if (!session) {
+    const agentKey = [...this.tokens.entries()].find(([, t]) => t === token)?.[0]
+    const agent = agentKey ? this.agents.get(agentKey) : undefined
+    if (!agent) {
       res.writeHead(404).end()
       return
     }
 
-    // Stateless: a fresh MCP server per request, bound to this session's tools.
+    // Stateless: a fresh MCP server per request, bound to this agent's current
+    // turn tools (agentTurn swapped them in before the run started).
     const server = new Server({ name: 'tucano', version: '0.1.0' }, { capabilities: { tools: {} } })
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: session.tools }))
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: agent.tools }))
     server.setRequestHandler(CallToolRequestSchema, async (r) => {
       const name = r.params.name
       // Defense in depth: a tool that was not listed for this turn never runs.
-      if (!session.tools.some((t) => t.name === name)) return textResult(L(`Ferramenta não permitida: ${name}`, `Tool not allowed: ${name}`), true)
-      return session.call(name, (r.params.arguments ?? {}) as Record<string, unknown>)
+      if (!agent.tools.some((t) => t.name === name)) return textResult(L(`Ferramenta não permitida: ${name}`, `Tool not allowed: ${name}`), true)
+      return agent.call(name, (r.params.arguments ?? {}) as Record<string, unknown>)
     })
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     res.on('close', () => {

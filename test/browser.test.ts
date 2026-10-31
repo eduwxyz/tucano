@@ -245,7 +245,7 @@ describe('the runner with a browser', () => {
     const fake = fakeHost()
     const browser = new Browser({ host: fake.host, db, dataDir, emit: () => {}, me: () => 'Edu' })
     const ready = { installed: true, loggedIn: true }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, hermes: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     const gateway = new Gateway()
     await gateway.start()
     const results: unknown[] = []
@@ -259,7 +259,7 @@ describe('the runner with a browser', () => {
         yield { type: 'done', text: 'ok', usage: { inputTokens: 1000, cacheReadTokens: 0, outputTokens: 10 } }
       }
     }
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
 
     await r.send('c1', '@theo abre o studio')
     await r.idle()
@@ -292,7 +292,7 @@ describe('the runner with a browser', () => {
     db.createConversation({ id: 'c1', kind: 'channel', name: 'conteudo', members: ['lia-0001'] })
     const browser = new Browser({ host: fakeHost().host, db, dataDir, emit: () => {}, me: () => 'Edu' })
     const ready = { installed: true, loggedIn: true }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, hermes: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     const gateway = new Gateway()
     await gateway.start()
     const claude: Engine = {
@@ -310,7 +310,7 @@ describe('the runner with a browser', () => {
         yield { type: 'done', text: 'O CTR foi 1,6%.', usage: { inputTokens: 1000, cacheReadTokens: 0, outputTokens: 10 } }
       }
     }
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
     const reply = async (text: string) => {
       await r.send('c1', text)
       await r.idle()

@@ -221,7 +221,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   }, [step])
 
   // The first harness that works sets the model; a template keeps it. Off a plan
-  // (a gateway, OpenCode, Pi) the person picks from what the harness lists.
+  // (a gateway, OpenCode, Pi, Hermes) the person picks from what the harness lists.
   useEffect(() => {
     const m = modelInfo(agent.modelId)
     if (m && ready.includes(m.engine)) return
@@ -348,7 +348,7 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
         <p className="onb__lead">{L('Você conversa com eles em canais, como num chat do trabalho. Eles pesquisam, escrevem, programam e usam as suas ferramentas, e você decide até onde cada um vai.', 'You talk to them in channels, like a work chat. They research, write, code and use your tools, and you decide how far each one goes.')}</p>
         <ul className="onb__points">
           <Point icon="zap" title={L('No harness que você já usa', 'On the harness you already use')}>
-            {L('Claude Code, Codex, OpenCode ou Pi, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, OpenCode or Pi, the way you set them up: on your plan, your company’s gateway or your providers.')}
+            {L('Claude Code, Codex, OpenCode, Pi ou Hermes, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, OpenCode, Pi or Hermes, the way you set them up: on your plan, your company’s gateway or your providers.')}
           </Point>
           <Point icon="shield" title={L('Você no controle', 'You’re in control')}>
             {L('Cada agente só usa o que você liberar. Comprar, publicar, enviar e apagar sempre esperam o seu ok.', 'Each agent only uses what you allow. Buying, publishing, sending and deleting always wait for your OK.')}
@@ -462,10 +462,10 @@ function Harnesses({ ready, onBack, onNext }: { ready: boolean; onBack: () => vo
                 <b>{L('Plano:', 'Plan:')}</b> {L('o login do Claude ou do ChatGPT. Sem chave e sem cobrança por uso.', 'your Claude or ChatGPT login. No key and no pay-per-use.')}
               </li>
               <li>
-                <b>Gateway:</b> {L('o proxy da empresa (ou um provedor) que está no settings.json do Claude Code ou no config.toml do Codex. Os agentes usam o mesmo, e a telemetria fica desligada.', 'your company’s proxy (or a provider) in Claude Code’s settings.json or Codex’s config.toml. The agents use the same one, and telemetry stays off.')}
+                <b>Gateway:</b> {L('o proxy da empresa (ou um provedor) que está no settings.json do Claude Code, no config.toml do Codex ou no config.yaml do Hermes. Os agentes usam o mesmo, e a telemetria fica desligada.', 'your company’s proxy (or a provider) in Claude Code’s settings.json, Codex’s config.toml, or Hermes’s config.yaml. The agents use the same one, and telemetry stays off.')}
               </li>
               <li>
-                <b>{L('Provedores:', 'Providers:')}</b> {L('os logins do OpenCode e do Pi, com os modelos de cada um.', 'your OpenCode and Pi logins, with each one’s models.')}
+                <b>{L('Provedores:', 'Providers:')}</b> {L('os logins do OpenCode, do Pi e do Hermes, com os modelos de cada um.', 'your OpenCode, Pi and Hermes logins, with each one’s models.')}
               </li>
             </ul>
           </div>

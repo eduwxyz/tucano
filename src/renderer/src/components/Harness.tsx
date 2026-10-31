@@ -1,4 +1,4 @@
-// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi), each used
+// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi, Hermes), each used
 // as the person set it up: their plan, their company's gateway or the
 // providers they have logins for. Here they pick which ones the agents use,
 // test them, and pick models from what each harness offers.
@@ -43,7 +43,7 @@ export interface ModelOption {
 // A model list asked once per harness and route (and again after "Verificar de novo").
 const lists = new Map<string, Promise<{ models: string[]; error?: string }>>()
 
-// What a harness offers: the app's list on a plan; what OpenCode or Pi list; what the gateway lists.
+// What a harness offers: the app's list on a plan; what OpenCode, Pi or Hermes list; what the gateway lists.
 export function useEngineModels(engine: EngineId | undefined): { options: ModelOption[]; loading: boolean; error?: string } {
   const st = useStore((s) => (engine ? s.settings.engines[engine] : undefined))
   const plan = !!engine && (engine === 'claude' || engine === 'codex') && st?.route !== 'gateway'
@@ -252,6 +252,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
         <div className="harness__body">
           <span className="hint">{windows ? L('Ou cole no PowerShell:', 'Or paste in PowerShell:') : L('Ou cole no terminal:', 'Or paste in a terminal:')}</span>
           <code className="harness__cmd">{(windows && ENGINES[engine].windows) || ENGINES[engine].install}</code>
+          {ENGINES[engine].min && <span className="hint">{L(`Precisa da ${ENGINES[engine].min} ou mais nova.`, `Needs ${ENGINES[engine].min} or newer.`)}</span>}
         </div>
       )}
       {st.warning && <p className="hint hint--warn harness__body">{st.warning}</p>}

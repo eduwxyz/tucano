@@ -112,6 +112,7 @@ describe('Claude Code stream', () => {
     expect(modelInfo('opus')?.label).toBe('Opus')
     expect(modelInfo(customModel('codex', ' gpt-4.1-empresa '))).toMatchObject({ id: 'gpt-4.1-empresa', engine: 'codex' })
     expect(modelInfo('claude:us.anthropic.claude-sonnet-4-5:0')).toMatchObject({ id: 'us.anthropic.claude-sonnet-4-5:0', engine: 'claude' })
+    expect(modelInfo('hermes:acme/deepseek-v4-flash-official')).toMatchObject({ id: 'acme/deepseek-v4-flash-official', engine: 'hermes' })
     expect(modelInfo('claude:')?.id).toBe('')
     expect(modelInfo('qualquer')).toBeUndefined()
     // the router and the memory fall back to the default while the name is empty

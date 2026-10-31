@@ -4,7 +4,7 @@ import { L, lang, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'hermes' | 'gemini'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -285,12 +285,15 @@ export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number;
   Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
 
 // `windows`: the install command for PowerShell, where the POSIX one doesn't run.
-export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; site: string }> = {
+// `min`: the oldest version the app can drive — install hints say it, and an older
+// one gets a warning instead of failing every turn.
+export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; min?: string; site: string }> = {
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', windows: 'irm https://claude.ai/install.ps1 | iex', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
-  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' }
+  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 
@@ -334,7 +337,7 @@ export const usable = (m: Model | undefined): Model | undefined => (m?.id ? m : 
 export const modelInfo = (id: string): Model | undefined => {
   const listed = MODELS.find((m) => m.id === id)
   if (listed) return listed
-  const m = /^(claude|codex|opencode|pi):(.*)$/s.exec(id)
+  const m = /^(claude|codex|opencode|pi|hermes):(.*)$/s.exec(id)
   return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: L('Nome próprio', 'Custom name') } : undefined
 }
 
@@ -376,7 +379,7 @@ export interface ConnectorInput {
 }
 
 // An MCP server found in a harness's own setup (Claude Code, Codex,
-// OpenCode), to add as a connector. Names only: its secrets stay in the core.
+// OpenCode, Hermes), to add as a connector. Names only: its secrets stay in the core.
 export interface HarnessMcp {
   key: string // the same server in two harnesses has one key
   name: string

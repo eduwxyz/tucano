@@ -936,7 +936,8 @@ export class Runner {
         }
       }
 
-    const session = this.deps.gateway?.open({
+    const agentKey = agent.id
+    this.deps.gateway?.agentTurn(agentKey, {
       tools: toolDefs,
       call: async (name, args) => {
         if (overBudget) {
@@ -1012,8 +1013,9 @@ export class Runner {
         blocks,
         images,
         cwd,
+        agentKey: agent.id,
         signal: control.ctl.signal,
-        mcpUrl: session?.url,
+        mcpUrl: this.deps.gateway?.agentUrl(agentKey),
         web: agent.web !== false
       })
       for await (const ev of events) {
@@ -1048,7 +1050,6 @@ export class Runner {
     } finally {
       clearInterval(stall)
       flush()
-      session?.close()
       this.controllers.delete(msg.id)
     }
 

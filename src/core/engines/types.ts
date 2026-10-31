@@ -8,6 +8,7 @@ export interface Turn {
   blocks?: string[] // the same prompt in pieces (one per message), so an engine that caches by block reuses the conversation
   images?: TurnImage[] // images attached to messages of the conversation, the newest ones
   cwd: string // an empty per-agent directory; the CLI gets no project files
+  agentKey?: string // stable per-agent identity (the agent's own directory name), so an engine that keeps per-agent state can
   signal: AbortSignal
   mcpUrl?: string // the app's gateway for this turn: the only tools the CLI gets, besides the web ones
   web?: boolean // the CLI's own web search and page reading

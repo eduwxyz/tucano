@@ -69,10 +69,10 @@ export const PROPOR_AGENTE: ToolDef = {
   }
 }
 
-// The models agents can run on now: the listed ones of a ready plan, and what OpenCode and Pi list.
+// The models agents can run on now: the listed ones of a ready plan, and what OpenCode, Pi and Hermes list.
 export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Record<string, string[]>> = {}): { id: string; label: string }[] {
   const plan = MODELS.filter((m) => s.engines[m.engine].loggedIn && s.engines[m.engine].route !== 'gateway').map((m) => ({ id: m.id, label: `${ENGINES[m.engine].label} · ${m.label}` }))
-  const own = (['opencode', 'pi'] as const).flatMap((e) => (s.engines[e].loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
+  const own = (['opencode', 'pi', 'hermes'] as const).flatMap((e) => (s.engines[e].loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
   return [...plan, ...own]
 }
 

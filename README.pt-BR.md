@@ -28,7 +28,7 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
 - **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
-- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
+- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o OpenCode, o Pi ou o Hermes do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
 - **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
 
 ## O que ele faz
@@ -85,6 +85,7 @@ Dê a um agente um computador, um Linux isolado no Docker onde ele instala, roda
 | [Codex](https://github.com/openai/codex) | ChatGPT Plus, Pro ou Business | Roda com um home próprio, pra não carregar suas skills, `AGENTS.md` e plugins; você entra uma vez dentro do Tucano |
 | [OpenCode](https://opencode.ai) | Os provedores que você configurou | Usa os modelos em que você tem login |
 | [Pi](https://pi.dev) | Os provedores que você configurou | Usa os modelos em que você tem login |
+| [Hermes](https://hermes-agent.nousresearch.com) | Os provedores no seu `~/.hermes/config.yaml` | Roda com um home próprio do Hermes, pra não carregar suas skills, MCP servers e memórias; usa os logins dos seus provedores |
 
 Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra corrigir, GPT pra revisar, Haiku pra rotear.
 
@@ -156,7 +157,7 @@ No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o
 flowchart LR
   subgraph Mac["Seu computador"]
     UI["Janela<br/>(React)"] <-->|MessagePort| Core["Núcleo<br/>SQLite · respostas · memória · rotinas"]
-    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · opencode · pi"]
+    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · opencode · pi · hermes"]
     CLI -->|"URL secreta por turno<br/>só as ferramentas do agente"| GW["Gateway MCP do Tucano"]
     GW --> Tools["Conectores (MCP)<br/>computador · navegador · memória"]
     GW -.->|"ação de escrita"| OK{{"Sua aprovação"}}
