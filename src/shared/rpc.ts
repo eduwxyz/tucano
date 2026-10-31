@@ -44,7 +44,8 @@ export interface Api {
   addConnector(p: { input: ConnectorInput }): Promise<string>
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
-  authorizeConnector(p: { id: string }): void
+  authorizeConnector(p: { id: string }): Promise<{ url?: string }> // url: on a server, the page to open in the person's browser
+  finishConnectorAuth(p: { url: string }): Promise<boolean> // on a server: the address the authorization page ended on
   harnessMcps(): Promise<HarnessMcp[]> // the MCP servers set up in Claude Code, Codex and OpenCode
   importHarnessMcp(p: { key: string }): Promise<string> // adds one as a connector; its secrets never pass through the screen
   updateTool(p: { connectorId: string; name: string; patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>> }): void

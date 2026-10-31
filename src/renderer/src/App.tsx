@@ -50,8 +50,21 @@ export function App(): ReactNode {
   }, [intro, mac])
 
   if (!view) return <div className="boot" />
-  if (intro) return <Onboarding />
-  if (view.kind === 'tuca') return <Onboarding build from={view.from} />
+  // Dialogs too: connecting a tool from the introduction may open one (on a server).
+  if (intro)
+    return (
+      <>
+        <Onboarding />
+        <Dialogs />
+      </>
+    )
+  if (view.kind === 'tuca')
+    return (
+      <>
+        <Onboarding build from={view.from} />
+        <Dialogs />
+      </>
+    )
 
   return (
     <div className="app">

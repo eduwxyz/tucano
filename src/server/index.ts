@@ -221,6 +221,7 @@ const WEB = `(() => {
 
 process.env['TUCANO_DATA'] = dataDir
 process.env['TUCANO_PACKAGED'] = '1'
+process.env['TUCANO_SERVER'] = '1'
 ;(process as unknown as { parentPort: Port }).parentPort = parent
 await import(pathToFileURL(join(import.meta.dirname, 'core.js')).href)
 

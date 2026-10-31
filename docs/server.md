@@ -98,6 +98,7 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 
 ## How it differs from the desktop app
 
+- **Connectors that sign in with OAuth** (an **Authorize in the browser** button): Tucano opens the authorization page in your browser. When you allow access, the page ends on an address starting with `http://127.0.0.1` that doesn't load, because that address is the server's own. Copy the whole address from the address bar and paste it into Tucano.
 - **Secrets** (connector keys, Telegram, GitHub) are encrypted with AES-256-GCM. The key is in `server.key` in the data folder, and only your user can read that file. A desktop app keeps that key in the system's keychain instead. Back the key up together with the data folder: the secrets can't be read without it.
 - **Notifications:** connect Telegram (**Settings › Phone and GitHub**) to get approvals, questions and results on your phone. The browser doesn't pop up notifications.
 - **Agents' browsers** need Chromium or Chrome on the server, and run without a window. Taking over a browser opens a window on the server's screen, which a server doesn't have. So for now, an agent can't hand a login over to you on a server.

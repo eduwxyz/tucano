@@ -46,6 +46,8 @@ import { seed } from './seed'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
+// Run by the server (src/server): no window, and the screens are in a browser elsewhere.
+const serverMode = process.env['TUCANO_SERVER'] === '1'
 mkdirSync(dataDir, { recursive: true })
 
 const db = new Db(join(dataDir, 'tucano.db'))
@@ -246,7 +248,8 @@ const connectors = new ConnectorManager({
   db,
   secrets,
   emit,
-  openUrl: (url) => toMain({ type: 'open', url }),
+  // On a server there's nothing to open it in: authorizeConnector hands it to the page.
+  openUrl: (url) => serverMode || toMain({ type: 'open', url }),
   oauthCallbackUrl: () => gateway.url('/oauth/callback')
 })
 gateway.route('/oauth/callback', async (url) => {
@@ -690,7 +693,11 @@ const api: Api = {
 
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
-  authorizeConnector: ({ id }) => void connectors.authorize(id),
+  authorizeConnector: async ({ id }) => {
+    const url = await connectors.authorize(id)
+    return serverMode && url ? { url } : {}
+  },
+  finishConnectorAuth: ({ url }) => connectors.finishOAuthFromUrl(url),
   harnessMcps: async () => (await foundMcps()).map(publicMcp),
   importHarnessMcp: async ({ key }) => {
     const m = (await foundMcps()).find((x) => x.key === key)
