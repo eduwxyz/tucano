@@ -30,6 +30,7 @@ import {
   settleDraft,
   updateSettings,
   useStore,
+  wslDistributions,
   type Agent,
   type AgentColor,
   type AgentDraft,
@@ -37,6 +38,7 @@ import {
   type GrantLevel,
   type LocalSkill,
   type State,
+  type WslDistribution,
   type View,
   isTeam
 } from '../store'
@@ -208,7 +210,10 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
     const channel = getState().conversations.find((c) => c.kind === 'channel')
     navigate(from ?? (channel ? { kind: 'conversation', id: channel.id } : { kind: 'approvals' }))
   }
-  const close = (): void => (build ? leave() : updateSettings({ onboarding: { done: true } }))
+  const close = (): void => {
+    if (build) leave()
+    else void updateSettings({ onboarding: { done: true } })
+  }
 
   // On the builder screen the Tuca starts on his own model; in the introduction he waits
   // for the person to pick one (MeetTuca).
@@ -348,7 +353,7 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
         <p className="onb__lead">{L('Você conversa com eles em canais, como num chat do trabalho. Eles pesquisam, escrevem, programam e usam as suas ferramentas, e você decide até onde cada um vai.', 'You talk to them in channels, like a work chat. They research, write, code and use your tools, and you decide how far each one goes.')}</p>
         <ul className="onb__points">
           <Point icon="zap" title={L('No harness que você já usa', 'On the harness you already use')}>
-            {L('Claude Code, Codex, OpenCode ou Pi, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, OpenCode or Pi, the way you set them up: on your plan, your company’s gateway or your providers.')}
+            {L('Claude Code, Codex, Gemini CLI, OpenCode ou Pi, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, Gemini CLI, OpenCode or Pi, the way you set them up: on your plan, your company’s gateway or your providers.')}
           </Point>
           <Point icon="shield" title={L('Você no controle', 'You’re in control')}>
             {L('Cada agente só usa o que você liberar. Comprar, publicar, enviar e apagar sempre esperam o seu ok.', 'Each agent only uses what you allow. Buying, publishing, sending and deleting always wait for your OK.')}
@@ -429,6 +434,33 @@ function ChatPreview({ me }: { me: string }): ReactNode {
 
 function Harnesses({ ready, onBack, onNext }: { ready: boolean; onBack: () => void; onNext: () => void }): ReactNode {
   // Logging in happens in the Terminal; keep checking until one is ready.
+  const platform = useStore((s) => s.platform)
+  const settings = useStore((s) => s.settings)
+  const [distros, setDistros] = useState<WslDistribution[]>([])
+  const [wslError, setWslError] = useState('')
+  const [checkingTarget, setCheckingTarget] = useState(false)
+  const target = settings.executionTarget ?? { kind: 'windows' as const }
+  const selectedDistro = target.kind === 'wsl' ? target.distro : ''
+  const changeTarget = (executionTarget: NonNullable<typeof settings.executionTarget>): void => {
+    setCheckingTarget(true)
+    setWslError('')
+    void updateSettings({ executionTarget })
+      .catch((error: unknown) => setWslError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setCheckingTarget(false))
+  }
+
+  useEffect(() => {
+    if (platform !== 'windows') return
+    let current = true
+    void wslDistributions().then(
+      (found) => current && setDistros(found),
+      (error: unknown) => current && setWslError(error instanceof Error ? error.message : String(error))
+    )
+    return () => {
+      current = false
+    }
+  }, [platform])
+
   useEffect(() => {
     refreshEngines()
     if (ready) return
@@ -442,6 +474,41 @@ function Harnesses({ ready, onBack, onNext }: { ready: boolean; onBack: () => vo
         <span className="onb__kicker">{L('Passo 1 · Os harnesses', 'Step 1 · The harnesses')}</span>
         <h1>{L('Quais harnesses seus agentes vão usar?', 'Which harnesses will your agents use?')}</h1>
         <p className="onb__lead">{L('Os agentes rodam nos programas que já estão no seu computador, do jeito que você configurou cada um. O Tucano só lê essa configuração: nunca vê nem guarda as suas senhas e chaves.', 'The agents run on the programs already on your computer, the way you set up each one. Tucano only reads that setup: it never sees or stores your passwords and keys.')}</p>
+        {platform === 'windows' && (
+          <>
+            <label className="onb__field">
+              <span>{L('Onde os agentes rodam', 'Agent execution')}</span>
+              <select
+                value={target.kind}
+                onChange={(e) => {
+                  if (e.target.value === 'windows') return changeTarget({ kind: 'windows' })
+                  const currentDistro = selectedDistro || undefined
+                  const distro = distros.find((d) => d.version === 2 && d.name === currentDistro) ?? distros.find((d) => d.version === 2 && d.isDefault) ?? distros.find((d) => d.version === 2)
+                  if (distro) changeTarget({ kind: 'wsl', distro: distro.name })
+                }}
+              >
+                <option value="windows">Windows</option>
+                <option value="wsl" disabled={!distros.some((d) => d.version === 2) && target.kind !== 'wsl'}>WSL 2</option>
+              </select>
+              <span className="hint">{target.kind === 'wsl' ? L('Instale e faça login nos harnesses dentro dessa distribuição.', 'Install and sign in to the harnesses inside this distribution.') : L('Windows é o padrão. Você também pode usar uma distribuição WSL 2.', 'Windows is the default. You can also use a WSL 2 distribution.')}</span>
+            </label>
+            {target.kind === 'wsl' && (
+              <label className="onb__field">
+                <span>{L('Distribuição WSL 2', 'WSL 2 distribution')}</span>
+                <select
+                  value={distros.some((d) => d.version === 2 && d.name === selectedDistro) ? selectedDistro : ''}
+                  onChange={(e) => e.target.value && changeTarget({ kind: 'wsl', distro: e.target.value })}
+                >
+                  <option value="">{L('Escolha uma distribuição', 'Choose a distribution')}</option>
+                  {distros.filter((d) => d.version === 2).map((d) => <option key={d.name} value={d.name}>{d.name}{d.isDefault ? L(' · padrão', ' · default') : ''}</option>)}
+                </select>
+              </label>
+            )}
+            {wslError && <p className="hint hint--warn">{wslError}</p>}
+            {checkingTarget && <p className="hint">{L('Verificando os harnesses nessa distribuição…', 'Checking for harnesses in this distribution…')}</p>}
+            {!wslError && !distros.some((d) => d.version === 2) && target.kind !== 'wsl' && <p className="hint">{L('Não encontrei uma distribuição WSL 2 instalada.', 'No installed WSL 2 distribution was found.')}</p>}
+          </>
+        )}
         <HarnessList />
         {!ready && (
           <p className="onb__wait">

@@ -1,13 +1,15 @@
 import { execFile, spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
+import { opencodeProviderEnvNames } from './provider-env'
 import { num, parseJson, runCli } from './cli'
 import { opencodeParser, userOpencodeProviders } from './opencode'
 import type { EngineEvent, Turn, Usage } from './types'
 import { L } from '../../shared/lang'
-import { isWin, killTree, spawnable } from '../platform'
+import { isWin, killTree, spawnable, trackWslStderr } from '../platform'
+import { activeWslDistro, forgetWslProcess, windowsPathToWsl } from '../wsl'
 
 // OpenCode 2 kept the `opencode` command and OPENCODE_CONFIG_CONTENT, but changed
 // the config to native V2 shapes (agents with system instead of the singular agent
@@ -70,23 +72,23 @@ export function sessionUsage(exported: string): Usage | undefined {
   }
 }
 
-const cli = (bin: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): Promise<string> => {
-  const s = spawnable(bin, args)
-  return new Promise((resolve) => execFile(s.file, s.args, { env, cwd, timeout: 20_000, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (_err, stdout) => resolve(String(stdout))))
+const cli = (bin: string, args: string[], env: NodeJS.ProcessEnv, cwd: string, forwardEnv: string[]): Promise<string> => {
+  const s = spawnable(bin, args, { env, cwd, forwardEnv })
+  return new Promise((resolve) => execFile(s.file, s.args, { env: s.hostEnv ?? env, cwd: s.wsl ? undefined : cwd, timeout: 20_000, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (_err, stdout) => (s.cleanup?.(), resolve(String(stdout)))))
 }
 
 // `opencode serve` on a free local port, with a password of the turn's own.
-async function startServer(bin: string, env: NodeJS.ProcessEnv, cwd: string): Promise<{ url?: string; stop: () => Promise<void> }> {
-  const s = spawnable(bin, ['serve', '--hostname', '127.0.0.1', '--port', '0'])
-  const child = spawn(s.file, s.args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: s.verbatim })
-  const exited = new Promise<void>((resolve) => child.on('close', () => resolve()))
+async function startServer(bin: string, env: NodeJS.ProcessEnv, cwd: string, forwardEnv: string[]): Promise<{ url?: string; stop: () => Promise<void> }> {
+  const s = spawnable(bin, ['serve', '--hostname', '127.0.0.1', '--port', '0'], { env, cwd, forwardEnv })
+  const child = spawn(s.file, s.args, { env: s.hostEnv ?? env, cwd: s.wsl ? undefined : cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: s.verbatim })
+  const exited = new Promise<void>((resolve) => child.on('close', () => (s.cleanup?.(), child.pid && forgetWslProcess(child.pid), resolve())))
   // With the app's MCP connection open it can linger on SIGTERM; the turn waits for it to end.
   const stop = async (): Promise<void> => {
     if (child.exitCode !== null || child.signalCode !== null) return
     // On Windows the server may sit behind cmd.exe or a node wrapper: only killing the tree reaches it.
     if (isWin && child.pid) killTree(child.pid)
     else child.kill('SIGTERM')
-    const kill = setTimeout(() => child.kill('SIGKILL'), 2_000)
+    const kill = setTimeout(() => (isWin && child.pid ? killTree(child.pid, 'SIGKILL') : child.kill('SIGKILL')), 2_000)
     await exited
     clearTimeout(kill)
   }
@@ -101,13 +103,20 @@ async function startServer(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pr
       resolve(u)
     }
     const read = (chunk: Buffer): void => {
-      out = (out + chunk.toString()).slice(-4000)
+      const text = trackWslStderr(child.pid, s, chunk.toString())
+      out = (out + text).slice(-4000)
       const m = /listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(out)
       if (m) done(m[1])
     }
     const timer = setTimeout(() => done(undefined), 20_000)
+    let stderrSeen = ''
     child.stdout.on('data', read)
-    child.stderr.on('data', read)
+    child.stderr.on('data', (chunk: Buffer) => {
+      const combined = stderrSeen + chunk.toString()
+      trackWslStderr(child.pid, s, combined)
+      stderrSeen = combined.slice(-8000)
+      read(chunk)
+    })
     child.on('close', () => done(undefined))
   })
   return { url, stop }
@@ -134,31 +143,42 @@ async function mcpReady(server: string, password: string, cwd: string, signal: A
   }
 }
 
-export async function* runOpencodeV2(path: string, turn: Turn, appDir: string, shellEnv: NodeJS.ProcessEnv): AsyncIterable<EngineEvent> {
+export async function* runOpencodeV2(path: string, turn: Turn, appDir: string, shellEnv: NodeJS.ProcessEnv, providers = userOpencodeProviders(undefined, true), userData?: string): AsyncIterable<EngineEvent> {
   const password = randomBytes(24).toString('hex')
-  const env = { ...process.env, ...shellEnv, ...opencodeV2Env(appDir), PWD: turn.cwd, OPENCODE_SERVER_PASSWORD: password, OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeV2Config(turn, userOpencodeProviders(undefined, true))) }
+  const distro = activeWslDistro()
+  const cwd = distro ? windowsPathToWsl(turn.cwd, distro) : turn.cwd
+  const isolated = opencodeV2Env(appDir)
+  if (userData && existsSync(join(userData, 'auth.json'))) {
+    try {
+      copyFileSync(join(userData, 'auth.json'), join(isolated.XDG_STATE_HOME!, 'opencode', 'auth.json'))
+    } catch {
+      // The provider settings can still work without copying an optional login file.
+    }
+  }
+  const env = { ...process.env, ...shellEnv, ...isolated, PWD: cwd, OPENCODE_SERVER_PASSWORD: password, OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeV2Config(turn, providers)) }
+  const forwardEnv = [...Object.keys(isolated), 'OPENCODE_SERVER_PASSWORD', 'OPENCODE_CONFIG_CONTENT', ...opencodeProviderEnvNames(providers)]
   const session = `ses_tucano${randomUUID().replaceAll('-', '')}`
-  const server = await startServer(path, env, turn.cwd)
+  const server = await startServer(path, env, turn.cwd, forwardEnv)
   try {
     if (!server.url) {
       yield { type: 'error', message: L('O OpenCode não abriu o servidor dele para a resposta.', "OpenCode didn't start its server for the reply.") }
       return
     }
-    if (turn.mcpUrl) await mcpReady(server.url, password, turn.cwd, turn.signal)
+    if (turn.mcpUrl) await mcpReady(server.url, password, cwd, turn.signal)
     if (turn.signal.aborted) return
     let done: Extract<EngineEvent, { type: 'done' }> | undefined
-    for await (const ev of runCli({ bin: path, args: opencodeV2Args(turn, session, server.url), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })) {
+    for await (const ev of runCli({ bin: path, args: opencodeV2Args(turn, session, server.url), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env, forwardEnv })) {
       if (ev.type === 'done') done = ev
       // Stopped, V2 reports the dropped connection to its server: not the turn's error.
       else if (!(ev.type === 'error' && turn.signal.aborted)) yield ev
     }
-    const usage = sessionUsage(await cli(path, ['session', 'export', session, '--server', server.url], env, turn.cwd))
+    const usage = sessionUsage(await cli(path, ['session', 'export', session, '--server', server.url], env, turn.cwd, forwardEnv))
     if (done) yield usage ? { ...done, usage } : done
     // Stopped mid-turn: what it used so far still counts against the limit.
     else if (usage) yield { type: 'progress', tokens: usage.inputTokens + usage.outputTokens, cacheRead: usage.cacheReadTokens }
   } finally {
     // The turn is the app's, not the person's: it leaves nothing in their OpenCode history.
-    if (server.url) await cli(path, ['session', 'delete', session, '--server', server.url], env, turn.cwd)
+    if (server.url) await cli(path, ['session', 'delete', session, '--server', server.url], env, turn.cwd, forwardEnv)
     await server.stop()
   }
 }

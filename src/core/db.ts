@@ -218,6 +218,9 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN kind TEXT;
+  `,
+  `
+  ALTER TABLE connectors ADD COLUMN execution_target TEXT;
   `
 ]
 
@@ -558,20 +561,21 @@ export class Db {
       url: r['url'] ? str(r['url']) : undefined,
       command: r['command'] ? str(r['command']) : undefined,
       args: JSON.parse(str(r['args']) || '[]') as string[],
+      executionTarget: r['execution_target'] ? JSON.parse(str(r['execution_target'])) : undefined,
       envKeys: JSON.parse(str(r['env_keys']) || '[]') as string[],
       auth: str(r['auth']) as ConnectorAuth,
       tools: this.tools(id).map(({ inputSchema: _, ...t }) => t)
     }
   }
 
-  saveConnector(c: { id: string; name: string; kind: Connector['kind']; url?: string; command?: string; args?: string[]; envKeys?: string[]; auth: ConnectorAuth }): void {
+  saveConnector(c: { id: string; name: string; kind: Connector['kind']; url?: string; command?: string; args?: string[]; envKeys?: string[]; auth: ConnectorAuth; executionTarget?: Connector['executionTarget'] }): void {
     this.db
       .prepare(
-        `INSERT INTO connectors (id, name, kind, url, command, args, env_keys, auth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO connectors (id, name, kind, url, command, args, env_keys, auth, execution_target, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, url = excluded.url, command = excluded.command,
-           args = excluded.args, env_keys = excluded.env_keys, auth = excluded.auth`
+           args = excluded.args, env_keys = excluded.env_keys, auth = excluded.auth, execution_target = excluded.execution_target`
       )
-      .run(c.id, c.name, c.kind, c.url ?? null, c.command ?? null, JSON.stringify(c.args ?? []), JSON.stringify(c.envKeys ?? []), c.auth, Date.now())
+      .run(c.id, c.name, c.kind, c.url ?? null, c.command ?? null, JSON.stringify(c.args ?? []), JSON.stringify(c.envKeys ?? []), c.auth, c.executionTarget ? JSON.stringify(c.executionTarget) : null, Date.now())
   }
 
   removeConnector(id: string): void {

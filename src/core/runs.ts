@@ -1001,7 +1001,7 @@ export class Runner {
           hasComputer: !!computers,
           browser: !!browser,
           offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
-          macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
+          macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwdForPrompt(agent) : undefined,
           web: agent.web !== false,
           routines: routines?.forAgent(agent.id),
           skills: skills && mySkills,

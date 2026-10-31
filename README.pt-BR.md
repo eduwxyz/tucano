@@ -28,7 +28,7 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
 - **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
-- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
+- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Gemini CLI, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
 - **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
 
 ## O que ele faz
@@ -92,7 +92,7 @@ Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra
 
 ## Instalar
 
-**Você precisa** de um Mac com chip Apple (M1 em diante; testado no macOS 26) de um PC com Linux (x64 ou ARM64; testado no Ubuntu com KDE e Xfce) ou de um PC com Windows 10 ou 11 (x64), e de pelo menos um harness instalado e logado. No Windows, também do [Git for Windows](https://git-scm.com/download/win): o Git Bash dele roda os comandos dos agentes no seu PC, e o Claude Code também precisa dele lá. Opcional: o Docker, pra dar um computador Linux aos agentes ([Docker Desktop](https://www.docker.com/products/docker-desktop/) no Mac ou no Windows; Docker Engine ou Docker Desktop no Linux), e o Google Chrome (ou o Chromium, no Linux), pro navegador deles (sem ele, o app usa o navegador embutido).
+**Você precisa** de um Mac com chip Apple (M1 em diante; testado no macOS 26), de um PC com Linux (x64 ou ARM64; testado no Ubuntu com KDE e Xfce) ou de um PC com Windows 10 ou 11 (x64), e de pelo menos um harness instalado e logado. Para executar no Windows, instale o [Git for Windows](https://git-scm.com/download/win): o Git Bash dele roda os comandos dos agentes, e o Claude Code no Windows também precisa dele. Opcional: WSL 2 pra rodar todos os harnesses compatíveis e os comandos locais dos agentes numa distribuição Linux escolhida; selecione em **Configurações → Geral → Execução dos agentes**. O app e os dados do Tucano continuam no Windows. Você também pode usar Docker pra dar um computador Linux aos agentes ([Docker Desktop](https://www.docker.com/products/docker-desktop/) no Mac ou no Windows; Docker Engine ou Docker Desktop no Linux) e Google Chrome (ou Chromium, no Linux) pro navegador deles (sem ele, o app usa o navegador embutido).
 
 **1. Instale um harness.** O Claude Code é o mais rápido:
 

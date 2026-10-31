@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { createServer } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Gateway, textResult, type ToolDef } from '../src/core/gateway'
 
@@ -11,6 +12,14 @@ async function connect(url: string): Promise<Client> {
   return client
 }
 
+async function canBind(host: string): Promise<boolean> {
+  const probe = createServer()
+  return new Promise((resolve) => {
+    probe.once('error', () => resolve(false))
+    probe.listen(0, host, () => probe.close(() => resolve(true)))
+  })
+}
+
 let gateway: Gateway
 beforeEach(async () => {
   gateway = new Gateway()
@@ -19,6 +28,11 @@ beforeEach(async () => {
 afterEach(() => gateway.stop())
 
 describe('Gateway', () => {
+  it('uses loopback for agent sessions unless WSL needs another host address', async () => {
+    await gateway.exposeToWsl()
+    expect(gateway.agentTarget()).toMatchObject({ host: '127.0.0.1' })
+  })
+
   it('lists only the tools of the session behind the URL', async () => {
     const a = gateway.open({ tools: [tool('ask_user')], call: async () => textResult('ok') })
     const b = gateway.open({ tools: [tool('list_issues'), tool('create_issue')], call: async () => textResult('ok') })
@@ -45,5 +59,18 @@ describe('Gateway', () => {
     expect((await fetch(`${base}${'0'.repeat(48)}`, { method: 'POST' })).status).toBe(404)
     s.close()
     await expect(connect(s.url)).rejects.toThrow()
+  })
+
+  it('exposes agent sessions on a second loopback interface when WSL needs another host address', async ({ skip }) => {
+    if (!(await canBind('127.0.0.2'))) return skip()
+    await gateway.exposeToWsl('127.0.0.2')
+    const session = gateway.open({ tools: [tool('ask_user')], call: async () => textResult('ok') })
+    expect(new URL(session.url).hostname).toBe('127.0.0.2')
+    const client = await connect(session.url)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['ask_user'])
+    await client.close()
+
+    gateway.useWindowsHost()
+    expect(new URL(gateway.open({ tools: [], call: async () => textResult('ok') }).url).hostname).toBe('127.0.0.1')
   })
 })

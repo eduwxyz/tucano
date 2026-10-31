@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import { opencodeMajor, runOpencodeV2 } from './opencode-v2'
+import { opencodeProviderEnvNames } from './provider-env'
 import type { Engine, EngineEvent, Turn } from './types'
 import { L } from '../../shared/lang'
 
@@ -14,11 +15,19 @@ import { L } from '../../shared/lang'
 // providers in their opencode.json (a company gateway, a custom endpoint).
 // The cache (the model catalog, provider packages) stays the user's: the same
 // models `opencode models` lists, without downloading them again.
-export function opencodeHome(appDir: string, userData = join(process.env['XDG_DATA_HOME'] || join(homedir(), '.local', 'share'), 'opencode')): Record<string, string> {
+export function opencodeHome(appDir: string, userData = join(process.env['XDG_DATA_HOME'] || join(homedir(), '.local', 'share'), 'opencode'), copyAuth = false): Record<string, string> {
   const dirs = { XDG_CONFIG_HOME: join(appDir, 'config'), XDG_DATA_HOME: join(appDir, 'data'), XDG_STATE_HOME: join(appDir, 'state') }
   for (const d of Object.values(dirs)) mkdirSync(join(d, 'opencode'), { recursive: true })
   const auth = join(dirs.XDG_DATA_HOME, 'opencode', 'auth.json')
-  if (!existsSync(auth) && existsSync(join(userData, 'auth.json'))) symlinkSync(join(userData, 'auth.json'), auth)
+  if (existsSync(join(userData, 'auth.json'))) {
+    if (copyAuth) {
+      try {
+        copyFileSync(join(userData, 'auth.json'), auth)
+      } catch {
+        // The app can still use provider settings without an OpenCode login file.
+      }
+    } else if (!existsSync(auth)) symlinkSync(join(userData, 'auth.json'), auth)
+  }
   return dirs
 }
 
@@ -134,7 +143,15 @@ export function opencodeParser(): Parser {
 
 // The model is "<provider>/<model>", as `opencode models` lists it. The installed
 // version picks V1's way or V2's (see opencode-v2.ts), so an upgrade keeps the agents running.
-export function opencodeEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({}), version: () => string | undefined = () => undefined): Engine {
+export function opencodeEngine(
+  bin: () => string | undefined,
+  appDir: string,
+  shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({}),
+  version: () => string | undefined = () => undefined,
+  providers: (v2?: boolean) => Record<string, unknown> | Promise<Record<string, unknown>> = (v2) => userOpencodeProviders(undefined, v2),
+  userData?: () => string | undefined | Promise<string | undefined>,
+  copyAuth: boolean | (() => boolean) = false
+): Engine {
   return {
     id: 'opencode',
     async *run(turn) {
@@ -145,11 +162,15 @@ export function opencodeEngine(bin: () => string | undefined, appDir: string, sh
       }
       // Provider keys may live in the user's shell, which an app opened from Finder doesn't get.
       if (opencodeMajor(version()) >= 2) {
-        yield* runOpencodeV2(path, turn, appDir, await shellEnv())
+        const providerConfig = await providers(true)
+        yield* runOpencodeV2(path, turn, appDir, await shellEnv(), providerConfig, await userData?.())
         return
       }
-      const env = { ...process.env, ...(await shellEnv()), ...opencodeHome(appDir), OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(turn, userOpencodeProviders())), OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_AUTOUPDATE: '1' }
-      yield* runCli({ bin: path, args: opencodeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })
+      const copy = typeof copyAuth === 'function' ? copyAuth() : copyAuth
+      const providerConfig = await providers()
+      const home = opencodeHome(appDir, await userData?.(), copy)
+      const env = { ...process.env, ...(await shellEnv()), ...home, OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(turn, providerConfig)), OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_AUTOUPDATE: '1' }
+      yield* runCli({ bin: path, args: opencodeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env, forwardEnv: [...Object.keys(home), 'OPENCODE_CONFIG_CONTENT', 'OPENCODE_DISABLE_CLAUDE_CODE', 'OPENCODE_DISABLE_AUTOUPDATE', ...opencodeProviderEnvNames(providerConfig)] })
     }
   }
 }

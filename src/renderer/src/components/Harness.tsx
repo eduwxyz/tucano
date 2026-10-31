@@ -1,4 +1,4 @@
-// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi), each used
+// The harnesses agents run on (Claude Code, Codex, Gemini CLI, OpenCode, Pi), each used
 // as the person set it up: their plan, their company's gateway or the
 // providers they have logins for. Here they pick which ones the agents use,
 // test them, and pick models from what each harness offers.
@@ -43,7 +43,7 @@ export interface ModelOption {
 // A model list asked once per harness and route (and again after "Verificar de novo").
 const lists = new Map<string, Promise<{ models: string[]; error?: string }>>()
 
-// What a harness offers: the app's list on a plan; what OpenCode or Pi list; what the gateway lists.
+// What a harness offers: the app's list on a plan; what Gemini CLI, OpenCode or Pi list; what the gateway lists.
 export function useEngineModels(engine: EngineId | undefined): { options: ModelOption[]; loading: boolean; error?: string } {
   const st = useStore((s) => (engine ? s.settings.engines[engine] : undefined))
   const plan = !!engine && (engine === 'claude' || engine === 'codex') && st?.route !== 'gateway'
@@ -178,6 +178,8 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
   // The install: started in a terminal, or blocked on Node.js for an npm package.
   const [install, setInstall] = useState<'started' | 'node' | null>(null)
   const windows = useStore((s) => s.platform === 'windows')
+  const wsl = useStore((s) => s.settings.executionTarget?.kind === 'wsl')
+  const windowsExecution = windows && !wsl
   const ready = st.loggedIn
   const found = st.installed && !!st.route // what its setup says, picked or not
 
@@ -242,16 +244,15 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
       {!st.installed && install === 'started' && <p className="hint harness__body">{L('Instalando no terminal que abriu. Quando terminar, ele aparece aqui sozinho.', 'Installing in the terminal that opened. Once it finishes, it shows up here on its own.')}</p>}
       {!st.installed && install === 'node' && (
         <p className="hint hint--warn harness__body">
-          {L(`O ${ENGINES[engine].label} precisa do Node.js. Instale o Node.js e depois clique em Instalar de novo.`, `${ENGINES[engine].label} needs Node.js. Install Node.js, then click Install again.`)}{' '}
-          <button className="btn btn--ghost btn--sm" onClick={() => openExternal('https://nodejs.org/')}>
-            {L('Baixar o Node.js', 'Get Node.js')}
-          </button>
+          {wsl
+            ? L(`O ${ENGINES[engine].label} precisa do Node.js dentro do WSL. Instale-o nessa distribuição e clique em Instalar de novo.`, `${ENGINES[engine].label} needs Node.js inside WSL. Install it in this distribution, then click Install again.`)
+            : <>{L(`O ${ENGINES[engine].label} precisa do Node.js. Instale o Node.js e depois clique em Instalar de novo.`, `${ENGINES[engine].label} needs Node.js. Install Node.js, then click Install again.`)}{' '}<button className="btn btn--ghost btn--sm" onClick={() => openExternal('https://nodejs.org/')}>{L('Baixar o Node.js', 'Get Node.js')}</button></>}
         </p>
       )}
       {!st.installed && (
         <div className="harness__body">
-          <span className="hint">{windows ? L('Ou cole no PowerShell:', 'Or paste in PowerShell:') : L('Ou cole no terminal:', 'Or paste in a terminal:')}</span>
-          <code className="harness__cmd">{(windows && ENGINES[engine].windows) || ENGINES[engine].install}</code>
+          <span className="hint">{windowsExecution ? L('Pra instalar, cole no PowerShell:', 'To install, paste in PowerShell:') : L('Pra instalar, cole no terminal:', 'To install, paste in a terminal:')}</span>
+          <code className="harness__cmd">{(windowsExecution && ENGINES[engine].windows) || ENGINES[engine].install}</code>
         </div>
       )}
       {st.warning && <p className="hint hint--warn harness__body">{st.warning}</p>}

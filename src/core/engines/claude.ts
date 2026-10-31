@@ -178,7 +178,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       }
       // The gateway's token goes in the environment, never in the arguments (other processes can read those).
       const p = await provider()
-      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, ...p.env, MCP_TOOL_TIMEOUT: '900000' } })
+      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, ...p.env, MCP_TOOL_TIMEOUT: '900000' }, forwardEnv: Object.keys(p.env) })
     }
   }
 }

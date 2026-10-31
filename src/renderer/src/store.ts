@@ -34,7 +34,8 @@ import {
   type UsageReport,
   type Trigger,
   type ImageUpload,
-  type Os
+  type Os,
+  type WslDistribution
 } from '../../shared/types'
 import { call, connect } from './rpc'
 
@@ -319,9 +320,13 @@ export const navigate = (view: View): void =>
       view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
   }))
 
-export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void {
+export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): Promise<void> {
+  const previousTarget = state.settings.executionTarget
   set((s) => withSettings(s, { ...s.settings, ...patch })) // optimistic, so typing stays instant
-  void call('updateSettings', { patch })
+  return call('updateSettings', { patch }).catch((error: unknown) => {
+    if (patch.executionTarget) set((s) => withSettings(s, { ...s.settings, executionTarget: previousTarget }))
+    throw error
+  })
 }
 
 export const refreshEngines = (): void => void call('refreshEngines')
@@ -447,6 +452,7 @@ export const openExternal = (url: string): void =>
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
+export const wslDistributions = (): Promise<WslDistribution[]> => call('wslDistributions')
 export const engineModels = (engine: EngineId): Promise<{ models: string[]; error?: string }> => call('engineModels', { engine })
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })

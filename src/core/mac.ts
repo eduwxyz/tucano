@@ -8,13 +8,14 @@ import { randomUUID } from 'node:crypto'
 import { copyFileSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync, closeSync, unlinkSync } from 'node:fs'
 import { connect } from 'node:net'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, normalize } from 'node:path'
+import { basename, dirname, isAbsolute, join, normalize, posix, win32 } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { Agent, Artifact, ComputerInfo, Service } from '../shared/types'
 import type { Db } from './db'
-import { fallbackPath, isWin, killTree, loginShell, osOf, shellCommand, systemName } from './platform'
+import { fallbackPath, isWin, killTree, loginShell, osOf, shellCommand, systemName, trackWslStderr } from './platform'
+import { activeWslDistro, forgetWslProcess, rememberWslProcess, windowsPathToWsl, wslHome, wslLoginEnv, wslPathToWindows, wslPidFromStderr } from './wsl'
 import { textResult, type ToolDef } from './gateway'
 import { artifactKind, badName, edited, manyMatches, clipOutput, diedAtStart, emptyOld, fileText, formatExec, isBinary, linuxTools, noService, noShots, notInFile, notOpenYet, portTaken, seenImage, shown, tooBig, type Shooter, type ToolOutcome } from './computer'
 
@@ -23,20 +24,22 @@ const MAX_SHOW_BYTES = 50 * 1024 * 1024
 const RESERVED_PORTS = [47_717, 47_718] // the app's own webhook and git proxy
 
 // What the agent is told about this computer: the system, and what is usually installed.
-const installed = (): string => ({ mac: 'Homebrew, Python, Node…', linux: 'apt, Python, Node…', windows: 'Python, Node, git…' })[osOf()]
+const installed = (): string => (activeWslDistro() ? 'apt, Python, Node…' : ({ mac: 'Homebrew, Python, Node…', linux: 'apt, Python, Node…', windows: 'Python, Node, git…' })[osOf()])
 
 // On Windows, which shell the bash tool opens, so the model writes the right syntax.
 const windowsShell = (): string =>
   !isWin
     ? ''
+    : activeWslDistro()
+      ? L(` Roda no WSL 2 (${activeWslDistro()}): sintaxe bash; caminhos do Windows como /mnt/c/Users.`, ` It runs in WSL 2 (${activeWslDistro()}): bash syntax; Windows paths like /mnt/c/Users.`)
     : shellCommand('').kind === 'bash'
       ? L(' Roda no Git Bash: sintaxe bash, caminhos como /c/Users ou C:/Users.', ' It runs in Git Bash: bash syntax, paths like /c/Users or C:/Users.')
       : L(' Roda no cmd.exe: sintaxe do cmd, não bash.', ' It runs in cmd.exe: cmd syntax, not bash.')
 
 const macDescriptions = (): Record<string, string> => ({
   bash: L(
-    `Roda um comando no computador do usuário (${systemName()}, como o próprio usuário, com o que ele tem instalado: ${installed()}), por padrão na sua pasta de trabalho.${windowsShell()} Pra servidores que ficam rodando, use start_service.`,
-    `Runs a command on the user's computer (${systemName()}, as the user, with what they have installed: ${installed()}), by default in your working folder.${windowsShell()} For servers that keep running, use start_service.`
+    `Roda um comando no computador do usuário (${activeWslDistro() ? `Linux · WSL 2 (${activeWslDistro()})` : systemName()}, como o próprio usuário, com o que ele tem instalado: ${installed()}), por padrão na sua pasta de trabalho.${windowsShell()} Pra servidores que ficam rodando, use start_service.`,
+    `Runs a command on the user's computer (${activeWslDistro() ? `Linux · WSL 2 (${activeWslDistro()})` : systemName()}, as the user, with what they have installed: ${installed()}), by default in your working folder.${windowsShell()} For servers that keep running, use start_service.`
   ),
   read_file: L('Lê um arquivo de texto deste computador.', 'Reads a text file from this computer.'),
   write_file: L('Cria ou sobrescreve um arquivo neste computador, criando as pastas que faltarem.', 'Creates or overwrites a file on this computer, creating any missing folders.'),
@@ -57,6 +60,9 @@ const macDescriptions = (): Record<string, string> => ({
 // The same tools, described for this computer (a function: computer.ts and this file import each other).
 export const macTools = (): ToolDef[] => {
   const descriptions = macDescriptions()
+  const pathDescription = activeWslDistro()
+    ? L('Caminho Linux (/home/… ou /mnt/c/…), Windows (C:\\…) ou relativo à pasta de trabalho.', 'Linux path (/home/… or /mnt/c/…), Windows path (C:\\…) or relative to the working folder.')
+    : L('Caminho absoluto, com ~, ou relativo à pasta de trabalho.', 'Absolute path, with ~, or relative to the working folder.')
   return linuxTools().map((t) => {
     const description = descriptions[t.name] ?? t.description
     const props = (t.inputSchema as { properties?: Record<string, { description?: string }> }).properties ?? {}
@@ -64,7 +70,7 @@ export const macTools = (): ToolDef[] => {
       Object.entries(props).map(([k, v]) => [
         k,
         k === 'path'
-          ? { ...v, description: L('Caminho absoluto, com ~, ou relativo à pasta de trabalho.', 'Absolute path, with ~, or relative to the working folder.') }
+          ? { ...v, description: pathDescription }
           : k === 'command' && t.name === 'start_service'
             ? { ...v, description: L('Comando, rodado na pasta de trabalho.', 'Command, run in the working folder.') }
             : v
@@ -77,6 +83,13 @@ export const macTools = (): ToolDef[] => {
 // A path as the agent writes it, on this computer.
 export function macPath(p: string, cwd: string): string {
   const s = p.trim()
+  const distro = activeWslDistro()
+  if (distro) {
+    if (s === '~' || s.startsWith('~/') || s.startsWith('~\\')) return wslPathToWindows(posix.join(wslHome(distro), s.slice(2).replace(/\\/g, '/')), distro)
+    if (s.startsWith('/')) return wslPathToWindows(s, distro)
+    if (/^[A-Za-z]:[\\/]/.test(s) || /^\\\\wsl(?:\.localhost|\$)\\/i.test(s)) return win32.normalize(s)
+    return win32.normalize(win32.join(cwd, s))
+  }
   if (s === '~' || s.startsWith('~/') || (isWin && s.startsWith('~\\'))) return normalize(join(homedir(), s.slice(1)))
   return normalize(isAbsolute(s) ? s : join(cwd, s))
 }
@@ -88,6 +101,8 @@ type Exec = { code: number; stdout: string; stderr: string }
 // nothing of the app's process goes along.
 let envOnce: Promise<NodeJS.ProcessEnv> | undefined
 export function loginEnv(): Promise<NodeJS.ProcessEnv> {
+  const distro = activeWslDistro()
+  if (isWin && distro) return wslLoginEnv(distro)
   // Windows has no login shell to ask: every app already gets the user's full
   // environment (PATH included, spelled Path there). What the app itself added stays out.
   if (isWin) envOnce ??= Promise.resolve({ HOME: homedir(), ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(TUCANO_|ELECTRON_|VITE_)/i.test(k) && k !== 'NODE_OPTIONS')) })
@@ -126,25 +141,27 @@ function run(command: string, opts: { cwd: string; env: NodeJS.ProcessEnv; timeo
   return new Promise((resolve) => {
     // Its own process group, so a timeout or a stop takes the children with it.
     // (On Windows, detached would open a console window; taskkill finds the tree anyway.)
-    const sh = shellCommand(command, { ...opts.env, TERM: 'dumb' })
-    const child = spawn(sh.file, sh.args, { cwd: opts.cwd, env: sh.env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: sh.verbatim, stdio: ['ignore', 'pipe', 'pipe'] })
+    const sh = shellCommand(command, { ...opts.env, TERM: 'dumb' }, opts.cwd)
+    const child = spawn(sh.file, sh.args, { cwd: sh.wsl ? undefined : opts.cwd, env: sh.env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: sh.verbatim, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     let timedOut = false
     child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout = (stdout + d).slice(-2_000_000)))
-    child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr = (stderr + d).slice(-200_000)))
+    child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr = trackWslStderr(child.pid, sh, stderr + d).slice(-200_000)))
     const killGroup = (sig: NodeJS.Signals): void => {
       if (child.pid) killTree(child.pid, sig)
     }
     const stop = (): void => {
       killGroup('SIGTERM')
-      if (!isWin) setTimeout(() => killGroup('SIGKILL'), 5000).unref() // taskkill is already forceful
+      setTimeout(() => killGroup('SIGKILL'), 5000).unref()
     }
     const timer = setTimeout(() => ((timedOut = true), stop()), opts.timeoutSeconds * 1000)
     opts.signal?.addEventListener('abort', stop, { once: true })
     child.on('error', (e) => (stderr += e.message))
     child.on('close', (code) => {
       clearTimeout(timer)
+      if (child.pid) forgetWslProcess(child.pid)
+      sh.cleanup?.()
       opts.signal?.removeEventListener('abort', stop)
       resolve({ code: timedOut ? 124 : (code ?? -1), stdout, stderr })
     })
@@ -193,6 +210,12 @@ export class MacComputer {
     return own
   }
 
+  cwdForPrompt(agent: Agent): string {
+    const distro = activeWslDistro()
+    const cwd = this.cwd(agent)
+    return distro ? windowsPathToWsl(cwd, distro) : cwd
+  }
+
   private pidFile(agentId: string, name: string): string {
     return join(this.folder(agentId), '.run', `${name}.pid`)
   }
@@ -226,6 +249,12 @@ export class MacComputer {
     const pid = this.pid(agentId, name)
     let stopped = true
     if (pid && alive(pid)) {
+      try {
+        const saved = JSON.parse(readFileSync(`${this.pidFile(agentId, name)}.wsl`, 'utf8')) as { distro?: string; linuxPid?: number }
+        if (saved.distro && saved.linuxPid) rememberWslProcess(pid, saved.distro, saved.linuxPid)
+      } catch {
+        // A Windows-hosted service has no WSL process record.
+      }
       if (isWin) killTree(pid)
       else
         try {
@@ -237,6 +266,7 @@ export class MacComputer {
       if (alive(pid)) killTree(pid, 'SIGKILL')
     }
     rmSync(this.pidFile(agentId, name), { force: true })
+    rmSync(`${this.pidFile(agentId, name)}.wsl`, { force: true })
     this.deps.db.removeServices(agentId, name)
     const agent = this.deps.db.agent(agentId)
     if (agent) this.refresh(agent)
@@ -274,16 +304,28 @@ export class MacComputer {
     mkdirSync(dirname(this.pidFile(agent.id, name)), { recursive: true })
     const log = join(logs, `${name}.log`)
     const fd = openSync(log, 'w')
-    const sh = shellCommand(command, { ...(await this.env()), TERM: 'dumb' })
-    const child = spawn(sh.file, sh.args, { cwd, env: sh.env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: sh.verbatim, stdio: ['ignore', fd, fd] })
+    const sh = shellCommand(command, { ...(await this.env()), TERM: 'dumb' }, cwd)
+    const child = spawn(sh.file, sh.args, { cwd: sh.wsl ? undefined : cwd, env: sh.env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: sh.verbatim, stdio: ['ignore', fd, fd] })
     closeSync(fd)
     child.unref()
+    child.on('close', () => {
+      if (child.pid) forgetWslProcess(child.pid)
+      sh.cleanup?.()
+    })
     if (!child.pid) return { result: textResult(L('Não consegui iniciar o processo.', "I couldn't start the process."), true) }
     writeFileSync(this.pidFile(agent.id, name), String(child.pid))
     this.deps.db.saveService(agent.id, { name, command, port, startedAt: Date.now() })
 
     let open = false
     for (let i = 0; i < 60 && !signal?.aborted && alive(child.pid); i++) {
+      if (sh.wsl) {
+        try {
+          const linuxPid = wslPidFromStderr(readFileSync(log, 'utf8').slice(0, 1000))
+          if (linuxPid) writeFileSync(`${this.pidFile(agent.id, name)}.wsl`, JSON.stringify({ distro: sh.wsl.distro, linuxPid }))
+        } catch {
+          // The command may not have written its startup marker yet.
+        }
+      }
       if ((open = await portOpen(port))) break
       await new Promise((r) => setTimeout(r, 1000))
     }

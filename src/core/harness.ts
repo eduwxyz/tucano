@@ -1,4 +1,4 @@
-// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi). Each one is
+// The harnesses agents run on (Claude Code, Codex, Gemini CLI, OpenCode, Pi). Each one is
 // used as the person set it up: their plan, their company's gateway or their
 // providers. The app only reads that setup, to show it and to list models.
 import type { Provider } from './engines/claude'

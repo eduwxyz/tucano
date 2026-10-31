@@ -9,6 +9,7 @@ import { artifactKind, Computers, computerTools, linuxTools, stepFor } from '../
 import { Db } from '../src/core/db'
 import { loginEnv, MacComputer, macPath } from '../src/core/mac'
 import { systemName } from '../src/core/platform'
+import { executionTarget, setExecutionTarget } from '../src/core/wsl'
 
 const agent = (extra: Partial<Agent> = {}): Agent => ({
   id: 'prod-0001',
@@ -55,6 +56,19 @@ describe('paths on the Mac', () => {
     expect(macPath('~/x/y.txt', w)).toBe(join(homedir(), 'x/y.txt'))
     expect(macPath(hosts, w)).toBe(hosts)
     expect(macPath('a/../b.txt', w)).toBe(join(w, 'b.txt'))
+  })
+
+  it('resolves WSL-native paths to the selected distro UNC path', () => {
+    const previous = executionTarget()
+    try {
+      setExecutionTarget({ kind: 'wsl', distro: 'Ubuntu' })
+      const cwd = 'C:\\Users\\Ana\\Tucano\\work'
+      expect(macPath('/home/ana/project/file.txt', cwd)).toBe('\\\\wsl.localhost\\Ubuntu\\home\\ana\\project\\file.txt')
+      expect(macPath('C:\\code\\project\\README.md', cwd)).toBe('C:\\code\\project\\README.md')
+      expect(macPath('../project', cwd)).toBe('C:\\Users\\Ana\\Tucano\\project')
+    } finally {
+      setExecutionTarget(previous)
+    }
   })
 })
 
