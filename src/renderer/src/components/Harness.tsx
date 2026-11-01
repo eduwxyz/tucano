@@ -250,8 +250,9 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
       )}
       {!st.installed && (
         <div className="harness__body">
+          {/* npm.cmd: PowerShell blocks npm's .ps1 on a fresh Windows (scripts disabled). */}
           <span className="hint">{windows ? L('Ou cole no PowerShell:', 'Or paste in PowerShell:') : L('Ou cole no terminal:', 'Or paste in a terminal:')}</span>
-          <code className="harness__cmd">{(windows && ENGINES[engine].windows) || ENGINES[engine].install}</code>
+          <code className="harness__cmd">{windows ? (ENGINES[engine].windows ?? ENGINES[engine].install).replace(/^npm /, 'npm.cmd ') : ENGINES[engine].install}</code>
         </div>
       )}
       {st.warning && <p className="hint hint--warn harness__body">{st.warning}</p>}
