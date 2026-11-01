@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, symlinkSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
 import { num, parseJson, runCli } from './cli'
@@ -37,12 +38,21 @@ export function opencodeV2Args(turn: Pick<Turn, 'model' | 'images'>, session: st
 
 // V2 keeps its logins in its database, in the data dir, so the data dir stays the
 // person's (V1 linked auth.json instead). What would change the agent's behavior stays
-// out: the config dir (AGENTS.md, plugins, agents, MCP servers) and the state are the
+// out: the config dir (AGENTS.md, agents, MCP servers) and the state are the
 // app's own, and Claude Code's files and the project's config aren't read.
-export function opencodeV2Env(appDir: string): Record<string, string> {
+export function opencodeV2Env(appDir: string, userConfig = join(process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config'), 'opencode')): Record<string, string> {
   const config = join(appDir, 'v2', 'config')
   const state = join(appDir, 'v2', 'state')
   for (const d of [config, state]) mkdirSync(join(d, 'opencode'), { recursive: true })
+  const antigravity = join(userConfig, 'antigravity-accounts.json')
+  const destAntigravity = join(config, 'opencode', 'antigravity-accounts.json')
+  if (existsSync(antigravity) && !existsSync(destAntigravity)) {
+    try {
+      symlinkSync(antigravity, destAntigravity)
+    } catch {
+      // not writable or symlink failed: continue
+    }
+  }
   return {
     XDG_CONFIG_HOME: config,
     OPENCODE_CONFIG_DIR: join(config, 'opencode'),

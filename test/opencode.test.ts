@@ -58,12 +58,13 @@ describe('opencode', () => {
     expect(stripJsonComments('{"url": "http://x//y" /* c */}')).toBe('{"url": "http://x//y" }')
   })
 
-  it("takes V2's providers shape too, for V2 only, and only the policies about providers", () => {
+  it("takes V2's providers and plugins, for V2 only, and only the policies about providers", () => {
     const dir = mkdtempSync(join(tmpdir(), 'oc-'))
     const providers = { empresa: { package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'https://llm.acme.com/v1' } } }
+    const plugins = ['opencode-antigravity-auth@2.1.2']
     const policies = [{ action: 'provider.use', resource: 'empresa', effect: 'allow' }, { action: 'tool.use', resource: 'shell', effect: 'allow' }]
-    writeFileSync(join(dir, 'opencode.json'), JSON.stringify({ provider: { acme: {} }, providers, policies, mcp: { servers: {} } }))
-    expect(userOpencodeProviders(dir, true)).toEqual({ provider: { acme: {} }, providers, policies: [policies[0]] })
+    writeFileSync(join(dir, 'opencode.json'), JSON.stringify({ provider: { acme: {} }, providers, plugins, policies, mcp: { servers: {} } }))
+    expect(userOpencodeProviders(dir, true)).toEqual({ provider: { acme: {} }, providers, plugins, policies: [policies[0]] })
     expect(userOpencodeProviders(dir)).toEqual({ provider: { acme: {} } })
   })
 })

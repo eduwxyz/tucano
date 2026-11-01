@@ -23,14 +23,15 @@ export function opencodeHome(appDir: string, userData = join(process.env['XDG_DA
 }
 
 // The providers block of the user's opencode.json(c): where their models come
-// from. The rest (agents, plugins, MCP servers, instructions) stays out. V2 also
-// reads its own shape: `providers`, and `policies` on which providers to use.
+// from. The rest (agents, MCP servers, instructions) stays out. V2 also
+// reads its own shape: `providers`, `plugins` (which can register models and auth),
+// and `policies` on which providers to use.
 export function userOpencodeProviders(dir = join(process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config'), 'opencode'), v2 = false): Record<string, unknown> {
   for (const name of ['opencode.jsonc', 'opencode.json']) {
     try {
       const c = JSON.parse(stripJsonComments(readFileSync(join(dir, name), 'utf8'))) as Record<string, unknown>
       const out: Record<string, unknown> = {}
-      for (const k of ['provider', 'enabled_providers', 'disabled_providers', ...(v2 ? ['providers'] : [])]) if (c[k] !== undefined) out[k] = c[k]
+      for (const k of ['provider', 'enabled_providers', 'disabled_providers', ...(v2 ? ['providers', 'plugins'] : [])]) if (c[k] !== undefined) out[k] = c[k]
       const policies = v2 && Array.isArray(c['policies']) ? c['policies'].filter((p) => (p as Record<string, unknown> | null)?.['action'] === 'provider.use') : []
       if (policies.length) out['policies'] = policies
       return out
