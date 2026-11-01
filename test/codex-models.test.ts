@@ -21,6 +21,11 @@ describe("Codex's own catalog", () => {
     ])
   })
 
+  it('keeps priority 0 at the top, and one with no priority last', () => {
+    const list = parseCodexCatalog(JSON.stringify([{ slug: 'none' }, { slug: 'second', priority: 1 }, { slug: 'first', priority: 0 }]))
+    expect(list.map((m) => m.slug)).toEqual(['first', 'second', 'none'])
+  })
+
   it('takes a bare list (the cache file) and bad output without breaking', () => {
     expect(parseCodexCatalog(JSON.stringify([{ slug: 'x' }]))).toEqual([{ slug: 'x', label: 'x' }])
     expect(parseCodexCatalog('')).toEqual([])
