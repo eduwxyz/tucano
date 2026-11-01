@@ -37,7 +37,8 @@ import {
   type UsageReport,
   type Trigger,
   type ImageUpload,
-  type Os
+  type Os,
+  type LocalInfo
 } from '../../shared/types'
 import { call, connect } from './rpc'
 
@@ -66,7 +67,7 @@ export interface State {
   models: Model[]
   agents: Agent[]
   connectors: Connector[]
-  lightbox: { items: { url: string; title: string }[]; index: number } | null
+  lightbox: { items: { url: string; title: string; video?: boolean }[]; index: number } | null
   conversations: Conversation[]
   messages: Message[]
   approvals: Approval[]
@@ -444,8 +445,10 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
   void saveAgent({ ...agent, ...patch }, channelIds)
 }
 
+export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
+export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
-export const openLightbox = (items: { url: string; title: string }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
+export const openLightbox = (items: { url: string; title: string; video?: boolean }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
 export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>
   set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
