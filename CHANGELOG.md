@@ -2,6 +2,36 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [0.2.4] - 2026-11-01
+
+> **Em português:** o Codex mostra os modelos que a sua conta tem, os mais novos primeiro (como o GPT-6-Astra), em vez de três fixos. E no Windows o login dos harnesses ficou mais confiável: funciona com acento no nome do usuário (como `C:\Users\Glaúcia`), e um login ou instalação feito no terminal aparece sozinho no Tucano, sem clicar em "Verificar de novo".
+
+### Changed
+
+- **Codex lists your account's models**, newest first and by their names (GPT-6-Astra, GPT-5.6-Sol…), from Codex's own catalog, instead of a fixed three; Tuca proposes agents from the same list. Agents already on a GPT-5.6 model keep it. ([#33](https://github.com/eduwxyz/tucano/pull/33))
+
+### Fixed
+
+- On Windows, **signing in to a harness works from a user folder with accents** (`C:\Users\Glaúcia`); the sign-in console broke on them. ([#34](https://github.com/eduwxyz/tucano/pull/34))
+- A sign-in or an install finished in the terminal **shows up by itself**, on any screen; before, outside onboarding, it waited for **Check again**. ([#34](https://github.com/eduwxyz/tucano/pull/34))
+- On Windows, the install command to paste uses `npm.cmd`, which PowerShell runs even where scripts are disabled. ([#34](https://github.com/eduwxyz/tucano/pull/34))
+
+## [0.2.3] - 2026-10-31
+
+> **Em português:** o Tucano agora dá pra usar no celular, abrindo o app de um servidor seu pelo navegador. Uma rotina que falha tenta de novo sozinha, duas vezes, antes de desistir. Os canais mostram quando um agente está trabalhando, e uma resposta que chega enquanto você está fora marca o canal como não lido. Você escolhe o modelo do Tuca, e um papel longo não esconde mais o nome do agente na barra lateral. Obrigado ao Gian, ao Andrey e ao Marcelo!
+
+### Added
+
+- **Use Tucano on a phone.** Opened from a phone (Tucano on a server), the sidebar becomes a drawer behind a ☰ button, the view takes the full width and side panels cover the screen; the conversation, agent page, report, routines and onboarding fit a narrow screen, and inputs don't make iOS zoom. The desktop is unchanged. ([#28](https://github.com/eduwxyz/tucano/pull/28))
+- **A failed routine tries again**, twice, after 1 and then 5 minutes, before giving up; the reply says when the next try is, and you're notified once, with the final outcome. Only failures are retried (not a reached limit, an approval or a question), and retrying by hand or turning the routine off stops the tries. ([#30](https://github.com/eduwxyz/tucano/pull/30))
+- **Choose Tuca's model** on the screen where you talk to Tuca, in onboarding and when building a new agent. Changing it starts a fresh conversation, and the choice is kept for the next ones. Thanks [@anota-ai-andrey](https://github.com/anota-ai-andrey)! ([#23](https://github.com/eduwxyz/tucano/pull/23))
+- **Channels show when an agent is working** in them, with the same pulse as DMs. Thanks [@GianCdM](https://github.com/GianCdM)! ([#21](https://github.com/eduwxyz/tucano/pull/21))
+
+### Fixed
+
+- A reply that finishes **while you're away** from a conversation now marks it unread, even if you were watching when it started. Thanks [@GianCdM](https://github.com/GianCdM)! ([#21](https://github.com/eduwxyz/tucano/pull/21))
+- A **long agent role** no longer pushes the agent's name out of the sidebar: it's cut with an ellipsis and shows in full on hover. Thanks [@marcelogrcia](https://github.com/marcelogrcia)! ([#29](https://github.com/eduwxyz/tucano/pull/29))
+
 ## [0.2.2] - 2026-10-31
 
 > **Em português:** o Tucano agora roda num servidor seu, como uma VPS, e você usa pelo navegador, do computador ou do celular. As rotinas continuam rodando com o seu computador desligado. Os agentes também passam a rodar no Gemini CLI. E instalar um harness ficou mais fácil: um botão **Instalar** abre o terminal já com o comando, e no Windows o Tucano acha o Claude Code mesmo quando o instalador não o pôs no PATH.
@@ -86,6 +116,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.4]: https://github.com/eduwxyz/tucano/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/eduwxyz/tucano/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/eduwxyz/tucano/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/eduwxyz/tucano/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/eduwxyz/tucano/compare/v0.1.2...v0.2.0

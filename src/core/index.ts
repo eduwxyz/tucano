@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { Db } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
@@ -17,7 +17,7 @@ import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
-import { adoptLoginShellPath, detectEngines } from './engines/detect'
+import { adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import { DesktopApps, macApps, SELF } from './apps'
 import { linuxApps, windowsApps, type SystemApp } from './apps-os'
@@ -35,7 +35,7 @@ import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
-import { findOnPath, isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
+import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -83,16 +83,32 @@ const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
 let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine }
 // The models OpenCode and Pi list (what the person has logins for), from the last check.
 let listed: Partial<Record<EngineId, string[]>> = {}
+// Codex's own catalog for this login (names and what each model is for), from the last check.
+let codexCatalog: CodexModel[] = []
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 async function detect(): Promise<void> {
   if (fake) {
     engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
-  } else ({ engines, listed } = await detectEngines(codexHome))
+  } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
+  rememberModels(codexCatalog.map((m) => ({ id: m.slug, engine: 'codex', label: m.label, hint: m.description ?? '' })))
   gatewayLists.clear()
   emit({ type: 'settings', settings: settings() })
 }
+// After a sign-in or an install in a terminal, the harness is checked again every few
+// seconds until it shows up (for 10 minutes at most): it appears with no "Check again".
+let watching: ReturnType<typeof setInterval> | undefined
+function watchEngine(engine: EngineId, done: (s: EngineStatus) => boolean): void {
+  if (watching) clearInterval(watching)
+  const until = Date.now() + 10 * 60_000
+  watching = setInterval(() => {
+    if (done(engines[engine]) || Date.now() > until) return void clearInterval(watching)
+    void detect()
+  }, 4_000)
+  watching.unref()
+}
+
 const gateway = new Gateway()
 const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
 
@@ -719,6 +735,8 @@ const api: Api = {
   // The models a harness offers, besides the app's list for a plan: what OpenCode
   // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
   engineModels: async ({ engine }) => {
+    if (engine === 'codex' && codexCatalog.length)
+      return { models: codexCatalog.map((m) => m.slug), labels: Object.fromEntries(codexCatalog.map((m) => [m.slug, { label: m.label, ...(m.description ? { hint: m.description } : {}) }])) }
     if (listed[engine]) return { models: listed[engine]! }
     if (engines[engine].route !== 'gateway') return { models: [] }
     if (!gatewayLists.has(engine))
@@ -845,12 +863,11 @@ const api: Api = {
   loginEngine: ({ engine }) => {
     const bin = engines[engine].path ?? ENGINES[engine].cli
     const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
+    // The sign-in happens in a terminal: check again until it lands, wherever the person is.
+    watchEngine(engine, (s) => s.loggedIn)
     if (isWin) {
-      // A new console window running a small script: cmd's quoting can't be trusted with paths otherwise.
-      const script = join(dataDir, 'login.cmd')
-      const env = engine === 'codex' ? `set "HOME=${codexHome}"\r\nset "CODEX_HOME=${join(codexHome, '.codex')}"\r\n` : ''
-      writeFileSync(script, `@echo off\r\n${env}call "${bin}" ${sub}\r\n`)
-      spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'cmd.exe', '/k', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+      // A new console window running a small script, its paths in the environment.
+      openWindowsConsole(join(dataDir, 'login.cmd'), [`call "%TUCANO_CLI%" ${sub}`], { TUCANO_CLI: bin, ...(engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {}) })
       return { opened: true, command: `"${bin}" ${sub}` }
     }
     const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
@@ -863,7 +880,12 @@ const api: Api = {
 
   // The harness's own installer, in a terminal the person sees: its progress, its
   // questions and its errors stay theirs. Detection picks the CLI up once it lands.
-  installEngine: ({ engine }) => installer((isWin && ENGINES[engine].windows) || ENGINES[engine].install),
+  installEngine: ({ engine }) => {
+    const r = installer((isWin && ENGINES[engine].windows) || ENGINES[engine].install)
+    // It installs in a terminal: check again until it lands, wherever the person is.
+    if (r.opened) watchEngine(engine, (st) => st.installed)
+    return r
+  },
 
   // The person's apps (agent-desktop): whether it's there and allowed, and what's open.
   desktopStatus: async () => (serverMode ? { installed: false, server: true } : desktopApps.status()),
@@ -871,7 +893,7 @@ const api: Api = {
   // ones are asked each time, apart, so the list never waits for them.
   installedApps: async () => (serverMode ? [] : shelfNow()),
   openApps: async () => (serverMode ? [] : desktopApps.foreground().catch(() => [])),
-  installDesktop: () => installer('npm install -g agent-desktop'),
+  installDesktop: () => installer('npm install -g agent-desktop@1.0.2'), // the version the apps feature is tested with
   desktopPermissions: () => {
     // Opens the system's privacy settings at Accessibility (agent-desktop knows where).
     void desktopApps.guide()

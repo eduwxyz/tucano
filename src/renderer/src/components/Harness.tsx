@@ -9,6 +9,7 @@ import {
   ENGINE_IDS,
   MODELS,
   startsPicked,
+  codexValue,
   customModel,
   engineModels,
   harnessMcps,
@@ -17,6 +18,7 @@ import {
   loginEngine,
   modelInfo,
   openExternal,
+  rememberModels,
   testEngine,
   updateSettings,
   useStore,
@@ -41,26 +43,39 @@ export interface ModelOption {
 }
 
 // A model list asked once per harness and route (and again after "Verificar de novo").
-const lists = new Map<string, Promise<{ models: string[]; error?: string }>>()
+type Listed = { models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }
+const lists = new Map<string, Promise<Listed>>()
 
-// What a harness offers: the app's list on a plan; what OpenCode or Pi list; what the gateway lists.
+// What a harness offers: the app's list on Claude's plan; Codex's own catalog (newest first);
+// what OpenCode or Pi list; what the gateway lists.
 export function useEngineModels(engine: EngineId | undefined): { options: ModelOption[]; loading: boolean; error?: string } {
   const st = useStore((s) => (engine ? s.settings.engines[engine] : undefined))
   const plan = !!engine && (engine === 'claude' || engine === 'codex') && st?.route !== 'gateway'
-  const id = engine && st?.installed && !plan ? `${engine}|${st.route}|${st.gateway ?? ''}|${st.account ?? ''}` : ''
-  const [got, setGot] = useState<{ id: string; models: string[]; error?: string } | null>(null)
+  const fixed = plan && engine === 'claude'
+  const id = engine && st?.installed && !fixed ? `${engine}|${st.route}|${st.gateway ?? ''}|${st.account ?? ''}` : ''
+  const [got, setGot] = useState<({ id: string } & Listed) | null>(null)
   useEffect(() => {
     if (!id || !engine) return
     if (!lists.has(id)) lists.set(id, engineModels(engine).catch((e: unknown) => ({ models: [], error: String(e) })))
     let live = true
-    void lists.get(id)!.then((r) => live && setGot({ id, ...r }))
+    void lists.get(id)!.then((r) => {
+      // Codex's names, for wherever a model shows (an agent's page, a card).
+      if (engine === 'codex' && r.labels) rememberModels(Object.entries(r.labels).map(([slug, l]) => ({ id: slug, engine, label: l.label, hint: l.hint ?? '' })))
+      if (live) setGot({ id, ...r })
+    })
     return () => {
       live = false
     }
   }, [id, engine])
   if (!engine) return { options: [], loading: false }
-  if (plan) return { options: MODELS.filter((m) => m.engine === engine).map((m) => ({ value: m.id, label: m.label, hint: m.hint })), loading: false }
   const mine = got?.id === id ? got : undefined
+  const app = (): ModelOption[] => MODELS.filter((m) => m.engine === engine).map((m) => ({ value: m.id, label: m.label, hint: m.hint }))
+  if (fixed) return { options: app(), loading: false }
+  // Codex on a plan or a key: its catalog, the app's own list until it comes (or if it can't).
+  if (plan)
+    return mine?.models.length
+      ? { options: mine.models.map((slug) => ({ value: codexValue(slug), label: mine.labels?.[slug]?.label ?? slug, hint: L('', mine.labels?.[slug]?.hint ?? '') || undefined })), loading: false }
+      : { options: app(), loading: false }
   return { options: (mine?.models ?? []).map((m) => ({ value: customModel(engine, m), label: m })), loading: !!id && !mine, error: mine?.error }
 }
 
@@ -250,8 +265,9 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
       )}
       {!st.installed && (
         <div className="harness__body">
+          {/* npm.cmd: PowerShell blocks npm's .ps1 on a fresh Windows (scripts disabled). */}
           <span className="hint">{windows ? L('Ou cole no PowerShell:', 'Or paste in PowerShell:') : L('Ou cole no terminal:', 'Or paste in a terminal:')}</span>
-          <code className="harness__cmd">{(windows && ENGINES[engine].windows) || ENGINES[engine].install}</code>
+          <code className="harness__cmd">{windows ? (ENGINES[engine].windows ?? ENGINES[engine].install).replace(/^npm /, 'npm.cmd ') : ENGINES[engine].install}</code>
         </div>
       )}
       {st.warning && <p className="hint hint--warn harness__body">{st.warning}</p>}
