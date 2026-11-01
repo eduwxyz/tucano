@@ -201,6 +201,15 @@ describe('confirming and typing', () => {
     expect((await typeKeys(cli, 'Spotify', 'Lofi 24, ok.')).ok).toBe(true)
     expect(keys).toEqual(['shift+l', 'o', 'f', 'i', 'space', '2', '4', 'comma', 'space', 'o', 'k', 'period'])
   })
+
+  it('types nothing and says so when a character has no key', async () => {
+    const keys: string[] = []
+    const cli: Cli = async (a) => (keys.push(a[1]!), { ok: true })
+    const refused = await typeKeys(cli, 'Spotify', 'Olá joão@x')
+    expect(refused.ok).toBe(false)
+    expect(refused.error?.message).toMatch(/á ã @/)
+    expect(keys).toEqual([])
+  })
 })
 
 describe('an app with several windows', () => {

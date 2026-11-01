@@ -59,14 +59,16 @@ async function bundleOf(app: string): Promise<string | undefined> {
   return (await macOpenApps().catch(() => [])).find(same)?.bundleId ?? (await macApps().catch(() => [])).find(same)?.bundleId
 }
 
-// Types text key by key into the app's focused field. Letters, digits, spaces and common
-// punctuation; anything else goes as a pasted value at the end, which most fields take.
+// Types text key by key into the app's focused field: letters, digits, spaces and common
+// punctuation. With anything else it types nothing and says so, or the field would get part of it.
 const KEYNAME: Record<string, string> = { ' ': 'space', ',': 'comma', '.': 'period', '/': 'slash', ';': 'semicolon', "'": 'quote', '-': 'minus', '=': 'equal' }
+const keyOf = (ch: string): string | undefined => (/^[a-z0-9]$/.test(ch) ? ch : /^[A-Z]$/.test(ch) ? `shift+${ch.toLowerCase()}` : KEYNAME[ch])
+
 export async function typeKeys(cli: Cli, app: string, text: string): Promise<Envelope> {
+  const missing = [...new Set([...text].filter((ch) => !keyOf(ch)))]
+  if (missing.length) return { ok: false, error: { message: L(`Não dá pra digitar ${missing.join(' ')} tecla por tecla. Escreva no campo sem digitar.`, `${missing.join(' ')} can't be typed key by key. Write in the field without typing.`) } }
   for (const ch of text) {
-    const key = /^[a-z0-9]$/.test(ch) ? ch : /^[A-Z]$/.test(ch) ? `shift+${ch.toLowerCase()}` : KEYNAME[ch]
-    if (!key) continue
-    const r = await cli(['press', key, '--app', app], 10_000)
+    const r = await cli(['press', keyOf(ch)!, '--app', app], 10_000)
     if (!r.ok) return r
   }
   return { ok: true }
