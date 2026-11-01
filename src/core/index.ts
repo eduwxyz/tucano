@@ -1,6 +1,8 @@
 // The core runs in an Electron utility process: database, engines and runs
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
+import { voiceRefusal } from '../shared/voice'
+import { Transcriber, voiceStatus } from './transcribe'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
@@ -364,6 +366,7 @@ const chrome =
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
+const transcriber = new Transcriber()
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
 // The person's own apps, through agent-desktop (none on a server: no screen there).
 // Off a Mac it needs the installed apps to know each one's program.
@@ -818,7 +821,17 @@ const api: Api = {
     return { ok: true, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
   },
 
+  voiceStatus: async () => voiceStatus(settings().voice, await loginEnv()),
+  transcribe: async ({ id, audio }) => {
+    const voice = settings().voice
+    const env = await loginEnv()
+    return { text: await transcriber.transcribe(id, audio, voiceStatus(voice, env), voice?.detect ? undefined : settings().language) }
+  },
+  cancelTranscribe: ({ id }) => transcriber.cancel(id),
+
   updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...patch } }) => {
+    const why = voiceRefusal(patch.voice)
+    if (why) throw new Error(why)
     db.setSettings(patch)
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })

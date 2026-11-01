@@ -37,7 +37,8 @@ import {
   type UsageReport,
   type Trigger,
   type ImageUpload,
-  type Os
+  type Os,
+  type VoiceStatus
 } from '../../shared/types'
 import { call, connect } from './rpc'
 
@@ -330,6 +331,9 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 }
 
 export const refreshEngines = (): void => void call('refreshEngines')
+export const voiceStatus = (): Promise<VoiceStatus> => call('voiceStatus')
+export const transcribe = async (id: string, audio: string): Promise<string> => (await call('transcribe', { id, audio })).text
+export const cancelTranscribe = (id: string): Promise<void> => call('cancelTranscribe', { id })
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
 // More logins of Claude Code and Codex, each signed into in a terminal.
 export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })

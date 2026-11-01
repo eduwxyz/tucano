@@ -12,6 +12,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,
+  mic: <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM5 11a7 7 0 0 0 14 0M12 18v3" />,
   image: (
     <>
       <rect x="3" y="4" width="18" height="16" rx="2" />

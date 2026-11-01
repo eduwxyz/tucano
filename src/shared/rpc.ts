@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport } from './types'
+import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, VoiceStatus } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -39,6 +39,9 @@ export interface Api {
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
+  voiceStatus(): Promise<VoiceStatus>
+  transcribe(p: { id: string; audio: string }): Promise<{ text: string }> // a WAV in base64; turned into text on this machine
+  cancelTranscribe(p: { id: string }): void
   loginEngine(p: { engine: EngineId }): { opened: boolean; command: string } // not opened: no terminal to open, the person runs the command
   addAccount(p: { engine: AccountEngine; name: string }): Account
   loginAccount(p: { id: string }): { opened: boolean; command: string }

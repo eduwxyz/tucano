@@ -56,8 +56,12 @@ import {
   type Skill,
   type ToolClass,
   isTeam,
-  reachable
+  reachable,
+  voiceStatus,
+  type VoiceSettings,
+  type VoiceStatus
 } from '../store'
+import { voiceRefusal } from '../../../shared/voice'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
@@ -1604,6 +1608,41 @@ export function JevKey({ saved, hint }: { saved: boolean; hint?: string }): Reac
   )
 }
 
+function VoiceCard(): ReactNode {
+  const voice = useStore((s) => s.settings.voice)
+  const platform = useStore((s) => s.platform)
+  const [status, setStatus] = useState<VoiceStatus | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => void voiceStatus().then(setStatus), [voice])
+  const save = (patch: VoiceSettings): void => {
+    const next = { ...voice, ...patch }
+    const why = voiceRefusal(next)
+    setError(why ?? '')
+    if (!why) updateSettings({ voice: next })
+  }
+  return (
+    <Card title={L('Ditado', 'Dictation')} lead={L('Segure o microfone no campo de mensagem para falar. O áudio vira texto neste computador com o whisper-cli, e o texto fica no campo para você revisar antes de enviar.', 'Hold the microphone in the message field to speak. The audio becomes text on this computer with whisper-cli, and the text stays in the field for you to review before sending.')}>
+      {status && (
+        <p className={`small ${status.ready ? 'muted' : ''}`}>
+          {status.ready ? L(`Pronto: ${status.model?.split(/[\\/]/).pop()}`, `Ready: ${status.model?.split(/[\\/]/).pop()}`) : L('Ainda não está pronto. Falta:', 'Not ready yet. Missing:')}
+        </p>
+      )}
+      {status && !status.bin && (platform === 'mac' ? <p className="small"><code>brew install whisper-cpp</code></p> : <p className="small">{L('Instale o whisper.cpp pelo gerenciador de pacotes do sistema, ou compile a partir de github.com/ggml-org/whisper.cpp.', 'Install whisper.cpp from your system’s package manager, or build it from github.com/ggml-org/whisper.cpp.')}</p>)}
+      {status && !status.model && platform !== 'windows' && <p className="small"><code>{'mkdir -p ~/.cache/whisper-cpp && curl -L -o ~/.cache/whisper-cpp/ggml-large-v3-turbo.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin'}</code></p>}
+      <Field label={L('Caminho do whisper-cli', 'Path to whisper-cli')} hint={status?.bin && !voice?.bin ? L(`Encontrado: ${status.bin}`, `Found: ${status.bin}`) : L('Opcional: sem isso, o app procura sozinho.', 'Optional: without it, the app looks by itself.')}>
+        <input defaultValue={voice?.bin ?? ''} placeholder="/opt/homebrew/bin/whisper-cli" onBlur={(e) => save({ bin: e.target.value.trim() || undefined })} />
+      </Field>
+      <Field label={L('Caminho do modelo', 'Path to the model')} hint={status?.model && !voice?.model ? L(`Encontrado: ${status.model}`, `Found: ${status.model}`) : L('Opcional: sem isso, o app procura sozinho.', 'Optional: without it, the app looks by itself.')} error={error}>
+        <input defaultValue={voice?.model ?? ''} placeholder="/caminho/para/ggml-large-v3-turbo.bin" onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
+      </Field>
+      <label className="row row--center small">
+        <input type="checkbox" checked={!!voice?.detect} onChange={(e) => save({ detect: e.target.checked })} />
+        {L('Detectar o idioma, em vez de usar o do app', 'Detect the language, instead of using the app’s')}
+      </label>
+    </Card>
+  )
+}
+
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
   const packaged = useStore((s) => s.packaged)
@@ -1641,6 +1680,8 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
+
+        {pane('geral') && <VoiceCard />}
 
         {pane('geral') && (
           <Card title={L('Notificações', 'Notifications')}>

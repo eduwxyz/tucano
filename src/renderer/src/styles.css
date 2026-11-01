@@ -6621,3 +6621,13 @@ kbd {
 .swatch--custom.is-active {
   overflow: visible;
 }
+
+/* Dictation */
+.voice-btn {
+  touch-action: none;
+}
+.voice-btn.is-recording,
+.voice-btn.is-recording:hover {
+  color: #fff;
+  background: var(--danger);
+}

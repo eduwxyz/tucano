@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, session, type MediaAccessPermissionRequest, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
@@ -426,6 +426,13 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
     app.exit(0)
   })
 } else if (primary) app.whenReady().then(() => {
+  // Dictation: audio, for the app's own page. A service open in the side panel or anything else asks in vain.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, done, details) => {
+    if (permission !== 'media') return done(true)
+    const media = details as MediaAccessPermissionRequest
+    const own = !!BrowserWindow.fromWebContents(contents) && (media.requestingUrl ?? '').startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'file://')
+    done(own && !!media.mediaTypes?.length && media.mediaTypes.every((t) => t === 'audio'))
+  })
   setMenu()
   protocol.handle('tucano', serveArtifact)
   core = startCore()
