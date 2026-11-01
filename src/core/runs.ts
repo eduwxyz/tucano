@@ -8,6 +8,7 @@ import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, E
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
+import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { ABRIR_PR, GITHUB, type GitHub } from './github'
@@ -64,6 +65,7 @@ export interface RunnerDeps {
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
+  apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done') => void
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
@@ -501,6 +503,7 @@ export class Runner {
     const builds = !!this.deps.gateway && agent.kind === 'tuca'
     const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
+    const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
     const skills = this.deps.gateway ? this.deps.skills : undefined
     const mySkills = skills?.forAgent(agent.id) ?? []
@@ -562,7 +565,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
@@ -619,6 +622,7 @@ export class Runner {
       ...(builds ? [PROPOR_AGENTE] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
+      ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
@@ -796,6 +800,59 @@ export class Runner {
             artifactIds: artifactIds.length ? [...artifactIds] : undefined,
             steps: [...close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {}), thinking()]
           }
+          stepStarted = Date.now()
+          save()
+          return clip(out.result)
+        }
+
+        // The person's own apps: each action a step; a click that sends, pays or deletes, an approval.
+        if (apps && APP_TOOL_NAMES.has(name)) {
+          const current = db.agent(agent.id)
+          if (!current?.apps?.length) return textResult(L('Seus apps foram desligados.', 'Your apps were turned off.'), true)
+          const t0 = Date.now()
+          const { label, detail } = appStep(name, args)
+          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          flush()
+          msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
+          save()
+          const out = await apps.call(current, name, args)
+          const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
+          if (out.approval) {
+            if (question || approval) {
+              msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
+              save()
+              return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+            }
+            approval = {
+              id: randomUUID(),
+              hash: approvalHash(APPS, name, out.approval.args),
+              agentId: agent.id,
+              conversationId: conv.id,
+              messageId: msg.id,
+              connectorId: APPS,
+              connectorName: L('Apps do computador', 'Computer apps'),
+              tool: name,
+              args: out.approval.args,
+              why: out.approval.why,
+              highRisk: false,
+              state: 'pending',
+              createdAt: Date.now(),
+              expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+            }
+            db.createApproval(approval)
+            emit({ type: 'approval', approval })
+            msg.run = { ...msg.run!, approvalId: approval.id, steps: [...close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }), thinking()] }
+            stepStarted = Date.now()
+            save()
+            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval')
+            return textResult(
+              L(
+                `Pedido de aprovação criado. A ação ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
+                `Approval request created. The action has NOT happened yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
+              )
+            )
+          }
+          msg.run = { ...msg.run!, steps: [...close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {}), thinking()] }
           stepStarted = Date.now()
           save()
           return clip(out.result)
@@ -1000,6 +1057,7 @@ export class Runner {
           canRemember,
           hasComputer: !!computers,
           browser: !!browser,
+          apps: apps ? agent.apps : undefined,
           offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
           macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
           web: agent.web !== false,
@@ -1130,7 +1188,7 @@ export class Runner {
     const ap = db.approval(id)
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason)) return
     const owner = db.agent(ap.agentId)
-    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
+    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), `${ap.connectorId}:${ap.tool}`] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
     }
@@ -1143,6 +1201,7 @@ export class Runner {
     const ran = L('Executou.', 'Ran.')
 
     let outcome: string
+    let ok = false // whether the approved thing went through
     let task: string
     if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
       if (decision === 'approved') {
@@ -1154,6 +1213,7 @@ export class Runner {
             `\n\n---\nMade by ${agent?.name ?? 'an agent'} in Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens in ${cost.replies} repl${cost.replies > 1 ? 'ies' : 'y'} so far` : ''}.`
           )
           const pr = await this.deps.github!.openPr({ ...ap.args, body: `${String(ap.args['body'] ?? '')}${footer}` })
+          ok = true
           outcome = L(`Abriu a PR #${pr.number}.`, `Opened PR #${pr.number}.`)
           task = L(`${me} aprovou, e o app abriu a PR #${pr.number}: ${pr.url}\n\nAvise ${me} com o link em uma frase.`, `${me} approved, and the app opened PR #${pr.number}: ${pr.url}\n\nTell ${me} with the link in one sentence.`)
         } catch (e) {
@@ -1171,11 +1231,37 @@ export class Runner {
           `${me} ${decision === 'refused' ? `turned down the PR${reason ? `: "${reason}"` : ''}` : "didn't answer the PR request"}. Nothing was opened. Reply with that in mind.`
         )
       }
+    } else if (ap.connectorId === APPS) {
+      // A click or key in one of the person's apps: made on the same app, on the same element.
+      const onde = typeof ap.args['onde'] === 'string' ? ap.args['onde'] : ''
+      const where = onde === 'menu de contexto' ? L(', no menu que abre com o clique direito (app_clicar com botao_direito)', ', in the menu a right click opens (app_clicar with botao_direito)') : onde === 'barra de menus' ? L(', na barra de menus (app_menu)', ', in the menu bar (app_menu)') : ''
+      const what = typeof ap.args['texto'] === 'string' ? L(`confirmar "${ap.args['texto']}" no ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `clique em "${String(ap.args['alvo'] ?? '')}"`})`, `confirming "${ap.args['texto']}" in ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `click on "${String(ap.args['alvo'] ?? '')}"`})`) : typeof ap.args['tecla'] === 'string' ? L(`apertar ${ap.args['tecla']} no ${String(ap.args['app'])}`, `pressing ${ap.args['tecla']} in ${String(ap.args['app'])}`) : L(`clicar em "${String(ap.args['alvo'] ?? '')}" no ${String(ap.args['app'])}${where}`, `clicking "${String(ap.args['alvo'] ?? '')}" in ${String(ap.args['app'])}${where}`)
+      if (decision === 'approved' && agent?.apps?.length && this.deps.apps) {
+        const r = await this.deps.apps.approved(agent, ap.args)
+        ok = r.ok
+        outcome = r.ok ? L('Liberado: o agente faz agora.', 'Allowed: the agent does it now.') : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
+        task = r.ok
+          ? L(
+              `${me} aprovou ${what}. Faça agora: leia o app de novo, deixe a tela como estava quando você pediu (selecione o item, se precisar) e faça exatamente essa ação, pelo mesmo caminho; desta vez ela passa sem pedir, uma vez só, nos próximos 30 minutos. Depois confira o resultado e conte a ${me}.`,
+              `${me} approved ${what}. Do it now: read the app again, set the screen as it was when you asked (select the item, if needed) and do exactly that action, the same way; this time it goes through without asking, once, within the next 30 minutes. Then check the result and tell ${me}.`
+            )
+          : L(`${me} aprovou ${what}, mas não deu: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but it couldn't be done: ${r.text} Tell ${me} in one sentence.`)
+      } else if (decision === 'approved') {
+        outcome = L('Não executou: esse agente não tem mais esse app.', "Didn't run: this agent no longer has that app.")
+        task = L(`${me} aprovou ${what}, mas você não tem mais esse app. Avise ${me} em uma frase.`, `${me} approved ${what}, but you no longer have that app. Tell ${me} in one sentence.`)
+      } else {
+        outcome = decision === 'refused' ? L('Nada foi feito.', 'Nothing was done.') : expired
+        task = L(
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi feito. Responda considerando isso.`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was done. Reply with that in mind.`
+        )
+      }
     } else if (ap.connectorId === NAVEGADOR) {
       // A click in the agent's browser: made only on the same page, on the same button.
       const what = L(`clicar em "${String(ap.args['alvo'] ?? '')}"`, `clicking "${String(ap.args['alvo'] ?? '')}"`)
       if (decision === 'approved' && agent?.browser && this.deps.browser) {
         const r = await this.deps.browser.approved(agent, ap.args)
+        ok = r.ok
         outcome = r.ok ? ran : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
         task = r.ok
           ? L(`${me} aprovou ${what}, e o app clicou. A página agora:\n${r.text}\n\nContinue a partir daqui e conte o resultado a ${me}.`, `${me} approved ${what}, and the app clicked. The page now:\n${r.text}\n\nGo on from here and tell ${me} the result.`)
@@ -1198,6 +1284,7 @@ export class Runner {
         const fresh = db.agent(agent.id)!
         db.saveAgent({ ...fresh, grants: { ...fresh.grants, [ap.connectorId]: nivel } })
         emit({ type: 'agent', agent: db.agent(agent.id)! })
+        ok = true
         outcome = L(`Acesso liberado: ${label}.`, `Access granted: ${label}.`)
         task = L(
           `${me} liberou o seu acesso ao ${ap.connectorName} (${label}). As ferramentas dele já estão com você. Continue de onde parou.`,
@@ -1222,6 +1309,7 @@ export class Runner {
       } else {
         try {
           const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
+          ok = !r.isError
           outcome = r.isError ? L('Executou, com erro.', 'Ran, with an error.') : ran
           task = L(
             `${me} aprovou o seu pedido ${call}. O app executou exatamente essa chamada${r.isError ? ' e ela devolveu um erro' : ''}. Resultado:\n${resultText(r)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
@@ -1253,7 +1341,7 @@ export class Runner {
         run: {
           ...msg.run,
           status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
-          steps: [...msg.run.steps, { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && outcome.startsWith(ran) ? 'done' : 'error' }]
+          steps: [...msg.run.steps, { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' }]
         }
       })
     }

@@ -56,6 +56,7 @@ import {
   reachable
 } from '../store'
 import { HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway } from './Harness'
+import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
 import { AgentAvatar, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
@@ -458,6 +459,15 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   </button>
                 </div>
               )}
+            </Card>
+          )}
+
+          {pane('ferramentas') && (
+            <Card
+              title={L('Apps do computador', 'Computer apps')}
+              lead={`${L('Os seus apps (Notas, Calendário, Mail…) que ele pode usar como uma pessoa, sem mexer no seu mouse. Em cada um, só ler ou também mexer; clique que envia, paga, publica ou apaga pede sua aprovação.', 'Your apps (Notes, Calendar, Mail…) it may use like a person, without moving your mouse. For each, read only or also change things; a click that sends, pays, publishes or deletes asks for your approval.')}${isNew ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
+            >
+              <AppsCard apps={draft.apps ?? []} onChange={(apps) => (isNew ? patch({ apps }) : (setDraft((d) => ({ ...d, apps })), patchAgent(draft.id, { apps })))} />
             </Card>
           )}
 

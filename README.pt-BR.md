@@ -77,6 +77,10 @@ Falta alguém no time? Conte pro Tuca do que você precisa, como explicaria pra 
 
 Dê a um agente um computador, um Linux isolado no Docker onde ele instala, roda e testa, ou, se você escolher, o seu próprio computador. Empreste uma pasta ou um repositório. Dê um navegador só dele, um Chrome que você acompanha ao vivo e assume quando ele precisa entrar numa conta.
 
+
+### Os seus apps
+
+Dê a um agente os apps do seu computador, como Notas, Calendário ou Spotify, cada um em *só ler* ou *ler e mexer*. Ele lê a janela como as tecnologias assistivas leem, e clica e escreve nela sem mexer no seu mouse. O que envia, paga, publica, agenda ou apaga espera a sua aprovação. Funciona no macOS, no Windows e no Linux, pelo [agent-desktop](https://github.com/vercel-labs/agent-desktop), open source da Vercel Labs.
 ## Roda no que você já tem
 
 | Harness | Entra com | Observações |
@@ -251,3 +255,5 @@ Leia o [CONTRIBUTING.md](CONTRIBUTING.md) antes de abrir um pull request (o cód
 ## Licença
 
 [Apache-2.0](LICENSE). O Tucano não é afiliado à Anthropic, à OpenAI nem a nenhuma das ferramentas a que ele se conecta.
+
+Os apps do computador rodam sobre o [agent-desktop](https://github.com/vercel-labs/agent-desktop), da Vercel Labs (Apache-2.0), instalado à parte. Obrigado!

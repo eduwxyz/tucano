@@ -66,10 +66,17 @@ export interface Agent {
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
+  apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
+}
+
+// One of the person's apps given to an agent, by the name the system shows.
+export interface AgentApp {
+  name: string
+  level: 'read' | 'read_write'
 }
 
 // A folder of the Mac mounted in an agent's computer at /projetos/<name>.
