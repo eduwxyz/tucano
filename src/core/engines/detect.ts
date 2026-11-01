@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
@@ -110,6 +110,42 @@ export async function detectCodex(home: string): Promise<EngineStatus> {
   }
 }
 
+// The models Codex offers this login, newest first, from its own catalog: `codex debug models`
+// (its cache when that command isn't there). Hidden ones (internal, retired) are left out.
+export interface CodexModel {
+  slug: string
+  label: string
+  description?: string
+}
+
+export function parseCodexCatalog(json: string): CodexModel[] {
+  try {
+    const d = JSON.parse(json) as { models?: unknown } | unknown[]
+    const list = (Array.isArray(d) ? d : Array.isArray(d.models) ? d.models : []) as { slug?: unknown; display_name?: unknown; description?: unknown; visibility?: unknown; priority?: unknown }[]
+    return list
+      .filter((m) => typeof m.slug === 'string' && m.slug && (m.visibility === undefined || m.visibility === 'list'))
+      .sort((a, b) => (Number(a.priority) || 999) - (Number(b.priority) || 999))
+      .map((m) => ({
+        slug: m.slug as string,
+        label: typeof m.display_name === 'string' && m.display_name ? m.display_name : (m.slug as string),
+        ...(typeof m.description === 'string' && m.description ? { description: m.description } : {})
+      }))
+  } catch {
+    return []
+  }
+}
+
+export async function codexModels(path: string, home: string): Promise<CodexModel[]> {
+  const r = await run(path, ['debug', 'models'], 15_000, codexEnv(home))
+  const list = r.code === 0 ? parseCodexCatalog(r.stdout) : []
+  if (list.length) return list
+  try {
+    return parseCodexCatalog(readFileSync(join(home, '.codex', 'models_cache.json'), 'utf8'))
+  } catch {
+    return []
+  }
+}
+
 // OpenCode and Pi keep their own logins and providers; what they list is what
 // the person can use, so the list is the status. Their models go to `listed`.
 const providerName = (id: string): string => ({ openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter', google: 'Google', opencode: 'OpenCode', 'opencode-go': 'OpenCode Go', 'openai-codex': 'ChatGPT', 'github-copilot': 'Copilot' })[id] ?? id
@@ -179,9 +215,17 @@ export async function detectGemini(): Promise<{ status: EngineStatus; models: st
   }
 }
 
-export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {
+export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
+  // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
+  const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
   const [claude, codex, opencode, pi, gemini] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini()])
-  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status }, listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models } }
+  // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
+  const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
+  return {
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status },
+    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    codexCatalog
+  }
 }

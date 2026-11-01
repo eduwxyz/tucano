@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { Db } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
@@ -17,7 +17,7 @@ import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
-import { adoptLoginShellPath, detectEngines } from './engines/detect'
+import { adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
@@ -81,13 +81,16 @@ const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
 let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine }
 // The models OpenCode and Pi list (what the person has logins for), from the last check.
 let listed: Partial<Record<EngineId, string[]>> = {}
+// Codex's own catalog for this login (names and what each model is for), from the last check.
+let codexCatalog: CodexModel[] = []
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 async function detect(): Promise<void> {
   if (fake) {
     engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
-  } else ({ engines, listed } = await detectEngines(codexHome))
+  } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
+  rememberModels(codexCatalog.map((m) => ({ id: m.slug, engine: 'codex', label: m.label, hint: m.description ?? '' })))
   gatewayLists.clear()
   emit({ type: 'settings', settings: settings() })
 }
@@ -647,6 +650,8 @@ const api: Api = {
   // The models a harness offers, besides the app's list for a plan: what OpenCode
   // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
   engineModels: async ({ engine }) => {
+    if (engine === 'codex' && codexCatalog.length)
+      return { models: codexCatalog.map((m) => m.slug), labels: Object.fromEntries(codexCatalog.map((m) => [m.slug, { label: m.label, ...(m.description ? { hint: m.description } : {}) }])) }
     if (listed[engine]) return { models: listed[engine]! }
     if (engines[engine].route !== 'gateway') return { models: [] }
     if (!gatewayLists.has(engine))

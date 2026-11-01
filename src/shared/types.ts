@@ -331,9 +331,20 @@ export const customModel = (engine: EngineId, name: string): string => `${engine
 // A model to run with: a custom one with no name yet falls back to the default.
 export const usable = (m: Model | undefined): Model | undefined => (m?.id ? m : undefined)
 
+// Models a harness lists on its own (Codex's catalog), known once it's read: their names
+// show everywhere (an agent's page, Tuca's list), not just in the picker.
+const found = new Map<string, Model>()
+export const rememberModels = (list: Model[]): void => {
+  for (const m of list) found.set(customModel(m.engine, m.id), m)
+}
+// A Codex model as an agent keeps it: the app's own ids stay as they were, the rest go by name.
+export const codexValue = (slug: string): string => (MODELS.some((m) => m.id === slug) ? slug : customModel('codex', slug))
+
 export const modelInfo = (id: string): Model | undefined => {
   const listed = MODELS.find((m) => m.id === id)
   if (listed) return listed
+  const known = found.get(id)
+  if (known) return known
   const m = /^(claude|codex|opencode|pi):(.*)$/s.exec(id)
   return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: L('Nome próprio', 'Custom name') } : undefined
 }
