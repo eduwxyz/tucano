@@ -77,6 +77,10 @@ Missing someone on the team? Tell Tuca what you need, the way you'd explain it t
 
 Give an agent a computer, an isolated Linux in Docker where it installs, runs and tests, or, if you choose so, your own computer. Lend it a folder or a repository. Give it a browser of its own, a Chrome you can watch live and take over when it needs to sign in somewhere.
 
+### Your own apps
+
+Give an agent the apps on your computer, such as Notes, Calendar or Spotify, each one *read only* or *read and use*. It reads a window the way assistive technologies do and clicks and writes in it, without touching your mouse. Anything that sends, pays, publishes, schedules or deletes waits for your approval. It works on macOS, Windows and Linux, through [agent-desktop](https://github.com/vercel-labs/agent-desktop), open source from Vercel Labs.
+
 ## Runs on what you already have
 
 | Harness | Sign in with | Notes |
@@ -251,3 +255,5 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. The origi
 ## License
 
 [Apache-2.0](LICENSE). Tucano is not affiliated with Anthropic, OpenAI or any of the tools it connects to.
+
+The apps feature runs on [agent-desktop](https://github.com/vercel-labs/agent-desktop) by Vercel Labs (Apache-2.0), installed separately. Thank you!
