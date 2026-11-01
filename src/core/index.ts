@@ -33,7 +33,7 @@ import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
-import { findOnPath, isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
+import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -94,6 +94,19 @@ async function detect(): Promise<void> {
   gatewayLists.clear()
   emit({ type: 'settings', settings: settings() })
 }
+// After a sign-in or an install in a terminal, the harness is checked again every few
+// seconds until it shows up (for 10 minutes at most): it appears with no "Check again".
+let watching: ReturnType<typeof setInterval> | undefined
+function watchEngine(engine: EngineId, done: (s: EngineStatus) => boolean): void {
+  if (watching) clearInterval(watching)
+  const until = Date.now() + 10 * 60_000
+  watching = setInterval(() => {
+    if (done(engines[engine]) || Date.now() > until) return void clearInterval(watching)
+    void detect()
+  }, 4_000)
+  watching.unref()
+}
+
 const gateway = new Gateway()
 const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
 
@@ -778,12 +791,11 @@ const api: Api = {
   loginEngine: ({ engine }) => {
     const bin = engines[engine].path ?? ENGINES[engine].cli
     const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
+    // The sign-in happens in a terminal: check again until it lands, wherever the person is.
+    watchEngine(engine, (s) => s.loggedIn)
     if (isWin) {
-      // A new console window running a small script: cmd's quoting can't be trusted with paths otherwise.
-      const script = join(dataDir, 'login.cmd')
-      const env = engine === 'codex' ? `set "HOME=${codexHome}"\r\nset "CODEX_HOME=${join(codexHome, '.codex')}"\r\n` : ''
-      writeFileSync(script, `@echo off\r\n${env}call "${bin}" ${sub}\r\n`)
-      spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'cmd.exe', '/k', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+      // A new console window running a small script, its paths in the environment.
+      openWindowsConsole(join(dataDir, 'login.cmd'), [`call "%TUCANO_CLI%" ${sub}`], { TUCANO_CLI: bin, ...(engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {}) })
       return { opened: true, command: `"${bin}" ${sub}` }
     }
     const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
@@ -800,6 +812,7 @@ const api: Api = {
     const command = (isWin && ENGINES[engine].windows) || ENGINES[engine].install
     // An npm package needs Node.js first; without it the command would only fail.
     if (/^npm\s/.test(command) && !findOnPath('npm')) return { opened: false, command, needsNode: true }
+    watchEngine(engine, (s) => s.installed)
     if (isWin) {
       // A PowerShell window running a small script: the install commands are PowerShell.
       const script = join(dataDir, 'install.ps1')

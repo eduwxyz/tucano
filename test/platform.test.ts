@@ -1,10 +1,10 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { dockerProblem, ownedBack } from '../src/core/computer'
-import { autostartEntry, autostartFile, chromeCandidates, executableNames, fallbackPath, findChrome, gitRoot, loginShell, onPath, osOf, shellCommand, spawnable, systemName, terminalCommand, userAgentPlatform, withInstallDirs } from '../src/core/platform'
+import { autostartEntry, autostartFile, chromeCandidates, executableNames, fallbackPath, findChrome, gitRoot, loginShell, onPath, openWindowsConsole, osOf, shellCommand, spawnable, systemName, terminalCommand, userAgentPlatform, withInstallDirs } from '../src/core/platform'
 import { shortcut } from '../src/shared/types'
 
 const win = process.platform === 'win32'
@@ -241,3 +241,16 @@ describe('folders the CLIs install into', () => {
     expect(withInstallDirs(local, 'mac', home, env, () => true)).toBe(local)
   })
 })
+
+// A sign-in console on Windows, from a user folder with accents (C:\Users\Glaúcia): cmd reads
+// the script in its own code page, so the paths go in the environment, not in the script.
+it.skipIf(process.platform !== 'win32')('opens a sign-in console that works from a folder with accents', async () => {
+  const dir = join(mkdtempSync(join(tmpdir(), 'tucano-')), 'Glaúcia Ação')
+  mkdirSync(dir, { recursive: true })
+  const marker = join(dir, 'ran.txt')
+  openWindowsConsole(join(dir, 'login.cmd'), ['echo %TUCANO_HOME%> "%TUCANO_MARK%"', 'exit'], { TUCANO_HOME: dir, TUCANO_MARK: marker })
+  for (let i = 0; i < 40 && !existsSync(marker); i++) await new Promise((r) => setTimeout(r, 250))
+  expect(existsSync(marker)).toBe(true)
+  // The console wrote the folder in its code page; the folder itself was found, accents and all.
+  expect(readFileSync(marker, 'latin1').trim().length).toBeGreaterThan(0)
+}, 20_000)

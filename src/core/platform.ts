@@ -2,7 +2,7 @@
 // code asks "open a terminal with this", "where is Chrome?", "how do I spawn this
 // CLI?", and never checks the platform itself. Most answers are a plain function
 // of the system, so they're tested for every system on any machine.
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 import { homedir, userInfo } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
@@ -252,3 +252,20 @@ export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.e
   }
   return { file: process.env['ComSpec'] || 'cmd.exe', args: ['/d', '/s', '/c', `"${command}"`], verbatim: true, kind: 'cmd', env }
 }
+
+// A new console window on Windows that runs a .cmd script and stays open (its output and
+// errors stay the person's). cmd reads a script in the console's code page, not UTF-8, so a
+// user folder like C:\Users\Glaúcia broke paths written into it: the script stays ASCII and
+// the paths go in environment variables, which Windows hands over intact.
+export function openWindowsConsole(script: string, lines: string[], env: Record<string, string> = {}): void {
+  writeFileSync(script, `@echo off\r\n${lines.join('\r\n')}\r\n`)
+  spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'cmd.exe', '/k', `"${script}"`], {
+    detached: true,
+    stdio: 'ignore',
+    windowsVerbatimArguments: true,
+    env: { ...process.env, ...env }
+  })
+    .on('error', () => {})
+    .unref()
+}
+
