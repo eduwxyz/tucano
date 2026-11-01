@@ -6652,3 +6652,21 @@ kbd {
 .swatch--custom.is-active {
   overflow: visible;
 }
+
+/* Channel groups */
+.channel-group__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.channel-group__name {
+  width: calc(100% - 16px);
+  margin: 4px 8px;
+  font-size: 12px;
+}
+.channel-drop {
+  height: 6px;
+}
