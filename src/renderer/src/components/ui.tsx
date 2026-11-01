@@ -1,5 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
-import { useState, type InputHTMLAttributes, type ReactNode } from 'react'
+import { useState, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react'
 import type { Agent } from '../store'
 
 const PATHS: Record<string, ReactNode> = {
@@ -175,14 +175,18 @@ export function SleepingToucan({ size = 120 }: { size?: number }): ReactNode {
 }
 
 // busy: the eyes read, left to right, while the agent works. Otherwise they blink now and then.
-export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind'>>; size?: number; busy?: boolean }): ReactNode {
+export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'avatar'>>; size?: number; busy?: boolean }): ReactNode {
   if (agent.kind === 'tuca') return <TucaMark size={size} />
   return (
-    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42 }}>
-      <span className="avatar__eyes" aria-hidden>
-        <i />
-        <i />
-      </span>
+    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...(agent.customColor ? ({ '--agent': agent.customColor } as CSSProperties) : {}) }}>
+      {agent.avatar ? (
+        <img className="avatar__photo" src={agent.avatar} alt="" />
+      ) : (
+        <span className="avatar__eyes" aria-hidden>
+          <i />
+          <i />
+        </span>
+      )}
       <span className="sr-only">{agent.name}</span>
     </span>
   )

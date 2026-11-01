@@ -55,6 +55,8 @@ export interface Agent {
   handle: string
   role: string
   color: AgentColor
+  customColor?: string // a color of the person's own (#rrggbb), over `color`
+  avatar?: string // a small picture (data URL), over the face
   instructions: string
   modelId: string
   effort: Effort

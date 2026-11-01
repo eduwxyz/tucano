@@ -1,7 +1,7 @@
 // What agents make on their computers, in the chat: artifact cards and
 // service cards inside messages, and the side panel that opens them.
 import { L, locale } from '../../../shared/lang'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode, type CSSProperties } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { agentById, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
@@ -163,7 +163,7 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
     <div className={`screen ${onOpen ? 'screen--button' : ''}`} onClick={onOpen} role={onOpen ? 'button' : undefined}>
       <img className="screen__frame" src={view.frame} alt={view.title} draggable={false} />
       {c && !view.shown && agent && (
-        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
+        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ ...(agent.customColor ? ({ '--agent': agent.customColor } as CSSProperties) : {}), left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
           <i key={c.at} className="screen__ripple" />
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
             <path d="m4 2 16 8-7 2-3 7L4 2Z" />

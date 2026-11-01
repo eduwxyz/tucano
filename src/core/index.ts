@@ -1,6 +1,7 @@
 // The core runs in an Electron utility process: database, engines and runs
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
+import { cleanLook } from './agent-look'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
@@ -590,7 +591,7 @@ const api: Api = {
   saveAgent: ({ agent, channelIds }) => {
     const before = db.agent(agent.id)
     // Archived changes only through archiveAgent, which also stops what the agent was doing.
-    const clean: Agent = { ...agent, name: agent.name.trim(), handle: agent.handle.trim().toLowerCase(), archived: before?.archived ?? false }
+    const clean: Agent = { ...cleanLook(agent), name: agent.name.trim(), handle: agent.handle.trim().toLowerCase(), archived: before?.archived ?? false }
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
