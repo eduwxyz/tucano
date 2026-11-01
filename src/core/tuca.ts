@@ -4,7 +4,7 @@
 // person creates it. He has no connectors, no web and no computer of his own.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { ENGINES, MODELS, modelInfo, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
+import { codexValue, ENGINES, MODELS, modelInfo, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
 import type { ToolDef } from './gateway'
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
@@ -71,7 +71,11 @@ export const PROPOR_AGENTE: ToolDef = {
 
 // The models agents can run on now: the listed ones of a ready plan, and what OpenCode and Pi list.
 export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Record<string, string[]>> = {}): { id: string; label: string }[] {
-  const plan = MODELS.filter((m) => s.engines[m.engine].loggedIn && s.engines[m.engine].route !== 'gateway').map((m) => ({ id: m.id, label: `${ENGINES[m.engine].label} · ${m.label}` }))
+  // Codex's own catalog when there is one (newest first); the app's list otherwise.
+  const codex = listed['codex']?.length ? listed['codex'].map((slug) => modelInfo(codexValue(slug)) ?? { id: slug, engine: 'codex' as const, label: slug, hint: '' }) : undefined
+  const plan = [...MODELS.filter((m) => m.engine !== 'codex' || !codex), ...(codex ?? []).map((m) => ({ ...m, id: codexValue(m.id) }))]
+    .filter((m) => s.engines[m.engine].loggedIn && s.engines[m.engine].route !== 'gateway')
+    .map((m) => ({ id: m.id, label: `${ENGINES[m.engine].label} · ${m.label}` }))
   const own = (['opencode', 'pi'] as const).flatMap((e) => (s.engines[e].loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
   return [...plan, ...own]
 }
