@@ -845,6 +845,9 @@ h3 {
   background: var(--code-bg);
 }
 .md table {
+  display: block; /* a wide table scrolls by itself, with its words whole */
+  overflow-x: auto;
+  overflow-wrap: normal;
   border-collapse: collapse;
   margin: 6px 0 8px;
   font-size: 13px;
@@ -869,6 +872,11 @@ h3 {
 }
 .md a {
   color: var(--accent);
+}
+/* A long link or word breaks instead of pushing the message out of the conversation. */
+.md {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .system-line {
   display: flex;
