@@ -352,8 +352,10 @@ export const modelInfo = (id: string): Model | undefined => {
   if (listed) return listed
   const known = found.get(id)
   if (known) return known
-  const m = /^(claude|codex|opencode|pi):(.*)$/s.exec(id)
-  return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: L('Nome próprio', 'Custom name') } : undefined
+  const engine = ENGINE_IDS.find((e) => id.startsWith(`${e}:`))
+  if (!engine) return undefined
+  const name = id.slice(engine.length + 1).trim()
+  return { id: name, engine, label: name, hint: L('Nome próprio', 'Custom name') }
 }
 
 export interface ConnectorTool {
