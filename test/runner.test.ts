@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
-import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
+import { customModel, type Agent, type EngineId, type Message, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
@@ -354,6 +354,19 @@ describe('browser handback', () => {
     expect(claude.turns).toHaveLength(0)
     await r.handedBack('ghost')
     await r.idle()
+    expect(claude.turns).toHaveLength(0)
+  })
+})
+
+describe('an agent on Gemini', () => {
+  it('runs on Gemini, not on Claude', async () => {
+    db.saveAgent(agent('a9', 'gi', { modelId: customModel('gemini', 'gemini/gemini-2.5-flash') }))
+    db.createConversation({ id: 'd9', kind: 'dm', name: 'a9', members: ['a9'] })
+    const gemini = counted(fakeEngine('gemini'))
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-gemini-')) })
+    await r.send('d9', 'oi')
+    await r.idle()
+    expect(gemini.turns.map((t) => t.model)).toEqual(['gemini/gemini-2.5-flash'])
     expect(claude.turns).toHaveLength(0)
   })
 })
