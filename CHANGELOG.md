@@ -2,6 +2,18 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [0.2.5] - 2026-11-01
+
+> **Em português:** os agentes agora usam os apps do seu computador, como Notas, Calendário e Spotify, no Mac, no Windows e no Linux. Você escolhe quais apps cada agente usa e se ele só lê ou também mexe. Ele lê a janela pela acessibilidade do sistema e clica e escreve sem mexer no seu mouse, e o que envia, paga, publica, agenda ou apaga espera a sua aprovação. Feito sobre o agent-desktop, open source da Vercel Labs. Obrigado!
+
+### Added
+
+- **Your own apps.** On an agent's **Tools** tab, **Desktop apps** gives it apps on your computer, each **read only** or **read and use**, picked from your system's own list, with their icons, open ones first. The agent opens an app, reads its window as a numbered list, and clicks, writes and presses keys in it, without moving your mouse. A click or key that sends, pays, publishes, schedules or deletes, and Return right after writing, asks for your approval, showing what it would confirm; an approval lets that one action through. On macOS (it needs the Accessibility permission), Windows (Start menu and Store apps) and Linux (the application menu, through AT-SPI). It runs on [agent-desktop](https://github.com/vercel-labs/agent-desktop) by Vercel Labs, which Tucano installs for you. ([#31](https://github.com/eduwxyz/tucano/pull/31))
+
+### Fixed
+
+- An approved step no longer shows as **failed** in a reply's steps. ([#31](https://github.com/eduwxyz/tucano/pull/31))
+
 ## [0.2.4] - 2026-11-01
 
 > **Em português:** o Codex mostra os modelos que a sua conta tem, os mais novos primeiro (como o GPT-6-Astra), em vez de três fixos. E no Windows o login dos harnesses ficou mais confiável: funciona com acento no nome do usuário (como `C:\Users\Glaúcia`), e um login ou instalação feito no terminal aparece sozinho no Tucano, sem clicar em "Verificar de novo".
@@ -116,6 +128,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.5]: https://github.com/eduwxyz/tucano/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/eduwxyz/tucano/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/eduwxyz/tucano/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/eduwxyz/tucano/compare/v0.2.1...v0.2.2
