@@ -45,3 +45,14 @@ describe("Codex's own catalog", () => {
     expect(availableModels(s).map((m) => m.id)).toEqual(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'])
   })
 })
+
+describe("Tuca's list of models", () => {
+  it('includes the Gemini models when the Gemini CLI is signed in', () => {
+    const off = { installed: false, loggedIn: false }
+    const s = { engines: { claude: off, codex: off, opencode: off, pi: off, gemini: { installed: true, loggedIn: true, route: 'providers' } } } as unknown as Pick<Settings, 'engines'>
+    expect(availableModels(s, { gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'] })).toEqual([
+      { id: 'gemini:gemini-2.5-pro', label: 'Gemini CLI · gemini-2.5-pro' },
+      { id: 'gemini:gemini-2.5-flash', label: 'Gemini CLI · gemini-2.5-flash' }
+    ])
+  })
+})
