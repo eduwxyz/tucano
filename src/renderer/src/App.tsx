@@ -3,6 +3,7 @@ import { L } from '../../shared/lang'
 import { getState, navigate, openDialog, setNav, useStore } from './store'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/Conversation'
+import { Lightbox } from './components/Lightbox'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage } from './components/Pages'
 import { UsagePage } from './components/Usage'
 import { MemoryPage } from './components/Memory'
@@ -91,6 +92,7 @@ export function App(): ReactNode {
         {view.kind === 'settings' && <SettingsPage />}
       </main>
       <Dialogs />
+      <Lightbox />
     </div>
   )
 }
