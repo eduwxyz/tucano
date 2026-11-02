@@ -134,3 +134,60 @@ describe('eventItems', () => {
     expect(eventItems('3 issues abertas')).toEqual([expect.objectContaining({ whole: true, title: 'a resposta mudou' })])
   })
 })
+
+describe('trying a failed routine run again by hand', () => {
+  const failingOnce = (): void => {
+    let failing = true
+    const base = fakeEngine('claude', { delayMs: 1 })
+    const claude: Engine = {
+      id: 'claude',
+      async *run(t: Turn) {
+        turns.push(t)
+        if (failing) {
+          failing = false
+          yield { type: 'error', message: 'o provedor caiu' }
+        } else yield* base.run(t)
+      }
+    }
+    runner = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')) })
+  }
+  const failedReply = () => db.messages().find((m) => m.author.kind === 'agent')!
+
+  it('keeps the event, and forgets it once the reply is done', async () => {
+    failingOnce()
+    const r = create({ kind: 'webhook', token: '' })
+    routines.webhook((db.routine(r.id)!.trigger as { token: string }).token, 'Build falhou: DADO-DO-EVENTO')
+    await settle()
+    const failed = failedReply()
+    expect(failed.run!.status).toBe('failed')
+    turns = []
+    runner.retry(failed.id)
+    await settle()
+    expect(turns[0]!.prompt).toContain('DADO-DO-EVENTO')
+    expect(db.message(failed.id)!.run).toMatchObject({ status: 'done' })
+    expect(db.message(failed.id)!.run!.task).toBeUndefined()
+  })
+
+  it('a paused run goes on with its event too', async () => {
+    const r = create({ kind: 'webhook', token: '' })
+    routines.webhook((db.routine(r.id)!.trigger as { token: string }).token, 'Build falhou: DADO-DO-EVENTO')
+    await settle()
+    const reply = failedReply()
+    db.saveMessage({ ...reply, run: { ...reply.run!, status: 'paused', task: 'tarefa com DADO-DO-EVENTO' } })
+    turns = []
+    await runner.continue(reply.id)
+    await settle()
+    expect(turns[0]!.prompt).toContain('DADO-DO-EVENTO')
+  })
+
+  it('keeps a scheduled routine’s instructions too', async () => {
+    failingOnce()
+    const r = routines.save({ name: 'Bom dia', agentId: 'a1', conversationId: 'c1', prompt: 'Resuma o dia.', schedule: { days: [0, 1, 2, 3, 4, 5, 6], time: '09:00' }, enabled: true })
+    routines.runNow(r.id)
+    await settle()
+    turns = []
+    runner.retry(failedReply().id)
+    await settle()
+    expect(turns[0]!.prompt).toContain('Esta é a rotina "Bom dia"')
+  })
+})
