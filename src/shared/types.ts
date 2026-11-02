@@ -207,6 +207,7 @@ export interface Settings {
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
   onboarding?: { done: boolean; checklistHidden?: boolean }
+  folded?: string[] // the ids of what I folded in the sidebar
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).

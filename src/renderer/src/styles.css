@@ -324,6 +324,35 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.section__head .badge {
+  margin-right: 4px;
+}
+.fold-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: left;
+}
+.fold-toggle:hover {
+  color: var(--text-2);
+}
+.fold-toggle svg {
+  flex-shrink: 0;
+  transition: transform 0.15s var(--ease);
+}
+.fold-toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+/* What's folded goes, except where you are: the row you're in never disappears from under you. */
+.is-folded .nav-item:not(.is-active) {
+  display: none;
+}
 .nav-item {
   width: 100%;
   display: flex;
@@ -6271,6 +6300,9 @@ kbd {
   display: none;
 }
 @media (max-width: 760px) {
+  .fold-toggle {
+    min-height: 36px;
+  }
   .app {
     grid-template-columns: minmax(0, 1fr);
     height: 100dvh;
