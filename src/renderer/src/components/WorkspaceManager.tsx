@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { suggestWorkspaceCopyName, type WorkspaceSummary } from '../../../shared/workspaces'
+import { suggestWorkspaceCopyName, sortWorkspaces, type WorkspaceSummary } from '../../../shared/workspaces'
 import { updateSettings, useStore } from '../store'
 import { Modal } from './Modal'
 import { Icon } from './ui'
@@ -8,6 +8,8 @@ import { useWorkspaceList } from './Workspaces'
 
 export function WorkspaceManager({ onClose }: { onClose: () => void }): ReactNode {
   const { list, error: loadError } = useWorkspaceList()
+  const selectedId = list?.selected
+  const workspaces = sortWorkspaces(list?.workspaces)
   const onboarding = useStore((s) => s.settings.onboarding)
   const [confirm, setConfirm] = useState<WorkspaceSummary | null>(null)
   const [copyName, setCopyName] = useState('')
@@ -57,14 +59,17 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }): ReactNod
     <p className="muted small modal__lead">{L('Cada workspace tem seus próprios agentes, conversas, memórias e configurações.', 'Each workspace has its own agents, conversations, memories and settings.')}</p>
     <div className="workspace-manager__list">
       {!list && !loadError && <p className="muted small">{L('Carregando…', 'Loading…')}</p>}
-      {list?.workspaces.map((w) => {
-        const selected = w.id === list.selected
+      {workspaces.map((w) => {
+        const selected = w.id === selectedId
         const switchTitle = selected ? L(`Workspace atual: ${w.name}`, `Current workspace: ${w.name}`) : L(`Trocar para ${w.name}`, `Switch to ${w.name}`)
         const duplicateTitle = L(`Duplicar ${w.name}`, `Duplicate ${w.name}`)
         const pauseTitle = w.paused ? L(`Retomar as rotinas de ${w.name}`, `Resume ${w.name}'s routines`) : L(`Pausar as rotinas de ${w.name}`, `Pause ${w.name}'s routines`)
         const deleteTitle = w.isDefault ? L('O workspace padrão não pode ser excluído.', 'The default workspace cannot be deleted.') : L(`Excluir ${w.name}`, `Delete ${w.name}`)
         return <div className="workspace-manager__row" key={w.id}>
-          <div className="workspace-manager__name" title={w.name}><span>{w.name}</span></div>
+          <div className="workspace-manager__name">
+            <span>{w.name}</span>
+            <span className="workspace-manager__id" title={w.id}>{w.id.slice(-7)}</span>
+          </div>
           <div className="row">
             <button className="icon-btn workspace-manager__switch" disabled={busy || selected} aria-pressed={selected} title={switchTitle} aria-label={switchTitle} onClick={() => void perform(() => api.switch(w.id))}><Icon name="check" size={16} /></button>
             <button className="icon-btn workspace-manager__pause" disabled={busy || w.status !== 'ready'} aria-pressed={w.paused} title={pauseTitle} aria-label={pauseTitle} onClick={() => void perform(() => api.setPaused(!w.paused, w.id))}><Icon name={w.paused ? 'play' : 'pause'} size={16} /></button>

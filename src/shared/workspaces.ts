@@ -29,6 +29,20 @@ export interface WorkspaceList {
   workspaces: WorkspaceSummary[]
 }
 
+// UUIDv7: bytes 0-5 (48 bits) = Unix timestamp in milliseconds.
+export function workspaceCreatedAt(id: string): number {
+  return parseInt(id.slice(0, 12), 16)
+}
+
+export function sortWorkspaces(workspaces: WorkspaceSummary[] | undefined | null): WorkspaceSummary[] {
+  if (!workspaces) return []
+  return [...workspaces].sort((a, b) => {
+    const nameCmp = a.name.localeCompare(b.name)
+    if (nameCmp !== 0) return nameCmp
+    return workspaceCreatedAt(a.id) - workspaceCreatedAt(b.id)
+  })
+}
+
 export function suggestWorkspaceCopyName(name: string, existing: string[]): string {
   const taken = new Set(existing)
   for (let count = 2; ; count++) {

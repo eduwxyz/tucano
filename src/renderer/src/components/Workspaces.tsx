@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import type { WorkspaceList } from '../../../shared/workspaces'
+import { sortWorkspaces, type WorkspaceList } from '../../../shared/workspaces'
 import { openDialog, useStore } from '../store'
 import { Icon } from './ui'
 
@@ -21,6 +21,8 @@ export function useWorkspaceList(): { list: WorkspaceList | null; error: string 
 export function WorkspaceSelector(): ReactNode {
   const name = useStore((s) => s.settings.workspaceName)
   const { list, error: loadError } = useWorkspaceList()
+  const selectedId = list?.selected
+  const workspaces = sortWorkspaces(list?.workspaces)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -62,8 +64,8 @@ export function WorkspaceSelector(): ReactNode {
             <button className="icon-btn icon-btn--sm" role="menuitem" disabled={busy} title={L('Gerenciar workspaces', 'Manage workspaces')} aria-label={L('Gerenciar workspaces', 'Manage workspaces')} onClick={() => { setOpen(false); openDialog({ kind: 'workspaces' }) }}><Icon name="gear" size={14} /></button>
           </div>
         </div>
-        {list?.workspaces.map((w) => <button key={w.id} className="menu__item" role="menuitemradio" aria-checked={w.id === list.selected} disabled={busy} onClick={() => void perform(() => api.switch(w.id))}>
-          <span className="workspace-picker__check" aria-hidden="true">{w.id === list.selected && <Icon name="check" size={14} />}</span>
+        {workspaces.map((w) => <button key={w.id} className="menu__item" role="menuitemradio" aria-checked={w.id === selectedId} disabled={busy} onClick={() => void perform(() => api.switch(w.id))}>
+          <span className="workspace-picker__check" aria-hidden="true">{w.id === selectedId && <Icon name="check" size={14} />}</span>
           <span className="grow">{w.name}</span>
           {w.status === 'failed' ? <span className="muted small">{L('Tentar de novo', 'Retry')}</span> : <>
             {!!w.approvals && <span className="badge" title={L('Aprovações', 'Approvals')}>{w.approvals}</span>}

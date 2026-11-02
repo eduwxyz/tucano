@@ -315,8 +315,9 @@ h3 {
 .workspace-manager__list { min-height: 0; max-height: 50vh; overflow-y: auto; }
 .workspace-manager__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
 .workspace-manager__row + .workspace-manager__row { border-top: 1px solid var(--border); }
-.workspace-manager__name { display: flex; align-items: center; gap: 8px; min-width: 0; text-align: left; }
-.workspace-manager__name > span:last-child { overflow-wrap: anywhere; }
+.workspace-manager__name { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; text-align: left; }
+.workspace-manager__name > span:first-child { overflow-wrap: anywhere; font-weight: 600; }
+.workspace-manager__id { font-size: 11px; color: var(--text-3); }
 .workspace-manager__row > .row { flex-shrink: 0; }
 .workspace-manager__switch[aria-pressed='true'] { background: var(--ok-soft); color: var(--ok); }
 .workspace-manager__pause[aria-pressed='true'] { background: var(--warn-soft); color: var(--warn); }
