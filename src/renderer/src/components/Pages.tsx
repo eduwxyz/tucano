@@ -1511,6 +1511,19 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('geral') && (
+          <Card title={L('Notificações', 'Notifications')}>
+            <div className="key-row">
+              <Icon name="volume" />
+              <div className="grow">
+                <strong>{L('Sons', 'Sounds')}</strong>
+                <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', 'The chirp when an agent needs you and when it’s done. Off, notifications still show up, silently.')}</p>
+              </div>
+              <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
+            </div>
+          </Card>
+        )}
+
+        {pane('geral') && (
           <Card title={L('Atualizações', 'Updates')}>
             <UpdateSettings />
           </Card>

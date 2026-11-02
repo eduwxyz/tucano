@@ -188,7 +188,7 @@ function toPhone(e: CoreEvent): void {
 
 // Desktop notification, and the same on the phone.
 const notifyAll = (title: string, body: string, conversationId?: string): void => {
-  toMain({ type: 'notify', title, body, conversationId })
+  toMain({ type: 'notify', title, body, conversationId, sound: settings().sounds !== false })
   void telegram?.notice(title, body)
 }
 
@@ -196,7 +196,7 @@ const notifyAll = (title: string, body: string, conversationId?: string): void =
 type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done' }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -401,7 +401,7 @@ const runner = new Runner({
   skills,
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
-  notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind }) : notifyAll(title, body, conversationId)),
+  notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId)),
   jev: { key: () => secrets.get(JEV_SECRET) },
   github,
   onBusy: (busy) => toMain({ type: 'busy', busy }),
