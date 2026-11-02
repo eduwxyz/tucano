@@ -5,6 +5,8 @@ import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { agentById, archiveAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setTopic, shortcut, useStore, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
+import { WorkspaceManager } from './WorkspaceManager'
+import { Modal } from './Modal'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
 
@@ -12,6 +14,7 @@ export function Dialogs(): ReactNode {
   const dialog = useStore((s) => s.dialog)
   const conv = useStore((s) => (s.dialog && 'id' in s.dialog ? s.conversations.find((c) => c.id === (s.dialog as { id: string }).id) : undefined))
   const close = (): void => openDialog(null)
+  if (dialog?.kind === 'workspaces') return <WorkspaceManager onClose={close} />
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
@@ -22,29 +25,6 @@ export function Dialogs(): ReactNode {
   if (dialog.kind === 'rename')
     return <TextDialog title={L(`Renomear #${conv.name}`, `Rename #${conv.name}`)} label={L('Nome', 'Name')} value={conv.name} hint={L('Minúsculas e hífens: “Lançamento do App” vira lancamento-do-app.', 'Lowercase and hyphens: “App Launch” becomes app-launch.')} prefix="#" onSave={(v) => renameChannel(conv.id, v)} onClose={close} />
   return <TextDialog title={L(`Tema de #${conv.name}`, `Topic of #${conv.name}`)} label={L('Tema', 'Topic')} value={conv.topic ?? ''} hint={L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')} onSave={(v) => setTopic(conv.id, v)} onClose={close} allowEmpty />
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }): ReactNode {
-  useEffect(() => {
-    const esc = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', esc)
-    return () => window.removeEventListener('keydown', esc)
-  }, [onClose])
-  return (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal__card" role="dialog" aria-label={title}>
-        <header className="modal__head">
-          <strong>{title}</strong>
-          <button className="icon-btn icon-btn--sm" title={L('Fechar', 'Close')} onClick={onClose}>
-            <Icon name="x" size={14} />
-          </button>
-        </header>
-        {children}
-      </div>
-    </div>
-  )
 }
 
 // Who is in the channel: a row per agent, on or off, saved together.

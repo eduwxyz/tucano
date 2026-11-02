@@ -1,9 +1,19 @@
 import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../shared/rpc'
 import type { UpdateState } from '../../shared/types'
+import type { WorkspaceList } from '../../shared/workspaces'
 
 declare global {
   interface Window {
     tucano: {
+      workspaces?: {
+        list: () => Promise<WorkspaceList>
+        create: () => Promise<void>
+        delete: (id?: string) => Promise<void>
+        duplicate: (id: string, name?: string) => Promise<string>
+        setPaused: (paused: boolean, id?: string) => Promise<void>
+        switch: (id: string) => Promise<void>
+        subscribe: (cb: (list: WorkspaceList) => void) => () => void
+      }
       connect: () => void
       pickFolder: () => Promise<string | null>
       onNavigate: (cb: (conversationId: string) => void) => void

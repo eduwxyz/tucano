@@ -126,12 +126,14 @@ export class Runner {
   private routing = 0
   private controllers = new Map<string, Control>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
+  private pumps = 0 // in-flight queue drains, for tests to wait on
   private idleWaiters: (() => void)[] = []
 
   constructor(private deps: RunnerDeps) {}
 
   setPaused(paused: boolean): void {
     this.paused = paused
+    if (!paused) this.pump() // resumed: any queued work that was blocked can go on
   }
 
   // Saves the human message and decides who answers it: mentioned agents
@@ -204,6 +206,7 @@ export class Runner {
   retry(messageId: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
+    if (this.paused) return // nobody starts working while paused
     if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status)) return
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
@@ -217,6 +220,7 @@ export class Runner {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (msg?.run?.status !== 'paused' || msg.author.kind !== 'agent') return
+    if (this.paused) return // nobody starts working while paused
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
@@ -243,6 +247,7 @@ export class Runner {
   // Resolves with the agent's reply once that run ends, or undefined when it can't run.
   async runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> {
     const { db, emit } = this.deps
+    if (this.paused) return undefined // routines don't run while paused
     const conv = db.conversation(r.conversationId)
     const agent = db.agent(r.agentId)
     if (!conv || !agent || agent.archived) return undefined
@@ -272,6 +277,7 @@ export class Runner {
 
   // A routine's reply that failed, run again in place with the same request.
   async retryRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined> {
+    if (this.paused) return undefined // routines don't run while paused
     const { db } = this.deps
     const msg = db.message(messageId)
     const conv = db.conversation(r.conversationId)
@@ -316,9 +322,16 @@ export class Runner {
   }
 
   // Resolves when nothing is routing, running or queued (tests and shutdown).
+  // Waits through pauses too, since nothing starts while paused.
   idle(): Promise<void> {
-    if (this.isIdle()) return Promise.resolve()
-    return new Promise((r) => this.idleWaiters.push(r))
+    if (this.isIdle() && this.pumps === 0) return Promise.resolve()
+    return new Promise((resolve) => {
+      const wait = () => {
+        if (this.isIdle() && this.pumps === 0) return resolve()
+        setTimeout(wait, 10).unref()
+      }
+      wait()
+    })
   }
 
   private isIdle(): boolean {
@@ -355,6 +368,7 @@ export class Runner {
 
   private async routeAndRun(conv: Conversation, members: Agent[]): Promise<void> {
     const { db, engines } = this.deps
+    if (this.paused) return // nobody starts working while paused
     this.routing++
     const note = this.post(conv.id, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
@@ -409,6 +423,7 @@ export class Runner {
 
   private pump(): void {
     while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
+      if (this.paused) return // paused: nothing new starts, queued work waits
       const job = this.queue.shift()!
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()

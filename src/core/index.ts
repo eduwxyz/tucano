@@ -44,12 +44,16 @@ import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello } from './tuca'
-import { seed } from './seed'
+import { initializeWorkspace } from './seed'
+import { workspacePorts } from './ports'
+import { isTheme } from '../shared/workspaces'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
 // Run by the server (src/server): no window, and the screens are in a browser elsewhere.
 const serverMode = process.env['TUCANO_SERVER'] === '1'
+const runtimePorts = workspacePorts()
+const defaultWorkspace = process.env['TUCANO_DEFAULT_WORKSPACE'] !== '0'
 mkdirSync(dataDir, { recursive: true })
 
 const db = new Db(join(dataDir, 'tucano.db'))
@@ -57,12 +61,9 @@ const codexHome = join(dataDir, 'codex-home')
 mkdirSync(join(codexHome, '.codex'), { recursive: true })
 // Until the settings are read, the language of a new install: the Mac's.
 setLang(langOf(process.env['TUCANO_LOCALE']))
-// A new install starts empty and the introduction creates the first agent; the
-// fake engines (tests, screenshots) and TUCANO_SEED=1 get the sample team.
-if (db.created) {
-  if (process.env['TUCANO_SEED'] === '1' || (fake && process.env['TUCANO_SEED'] !== '0')) seed(db)
-  else db.setSettings({ onboarding: { done: false } })
-}
+initializeWorkspace(db)
+const appTheme = process.env['TUCANO_THEME']
+if (!serverMode && isTheme(appTheme)) db.setSettings({ theme: appTheme })
 const interrupted = db.interruptStaleRuns()
 if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)
 
@@ -163,10 +164,22 @@ const gatewayLists = new Map<EngineId, Promise<{ models: string[]; error?: strin
 // ---------- ports ----------
 
 const ports = new Set<MessagePortMain>()
+let viewing: string | null = null
+let closing = false
+function workspaceSummary(): void {
+  const current = db.getSettings(DEFAULTS)
+  process.parentPort.postMessage({ type: 'workspace-summary', name: current.workspaceName, paused: !!current.paused, unread: db.conversations().reduce((n, c) => n + (c.unread ?? 0), 0), approvals: db.approvals().filter((a) => a.state === 'pending').length })
+}
 function emit(event: CoreEvent): void {
+  if (event.type === 'message') db.recordActivity(event.message, viewing)
   const wire: Wire = { event }
   for (const p of ports) p.postMessage(wire)
   toPhone(event)
+  if (event.type === 'message') {
+    const conversation = db.conversation(event.message.conversationId)
+    if (conversation) for (const p of ports) p.postMessage({ event: { type: 'conversation', conversation } })
+  }
+  if (['message', 'conversation', 'conversation_removed', 'approval', 'settings'].includes(event.type)) workspaceSummary()
 }
 
 // The phone gets each new approval and question as it happens (spec §19).
@@ -194,6 +207,8 @@ const notifyAll = (title: string, body: string, conversationId?: string): void =
 
 // Asks the main process to do what only it can: open the browser or a folder, show a notification.
 type ToMain =
+  | { type: 'theme'; theme: Settings['theme']; initial?: boolean }
+  | { type: 'ready' }
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
   | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done' }
@@ -204,13 +219,65 @@ const toMain = (msg: ToMain): void =>
   process.parentPort.postMessage(msg)
 // The menu is the main process's: it follows the language picked here.
 toMain({ type: 'lang', lang: db.getSettings(DEFAULTS).language })
+if (!serverMode && defaultWorkspace) toMain({ type: 'theme', theme: db.getSettings(DEFAULTS).theme, initial: true })
 
 // Screenshots use Electron's Chromium, which lives in the main process.
 const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error) => void }>()
 // Agents' browsers too (spec §24).
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown } | undefined
+  if (r?.type === 'workspace-pause') {
+    try {
+      if (closing || typeof r.paused !== 'boolean') throw new Error('Workspace cannot change pause state right now')
+      api.updateSettings({ patch: { paused: r.paused } })
+      process.parentPort.postMessage({ type: 'workspace-paused' })
+    } catch (error) {
+      process.parentPort.postMessage({ type: 'workspace-paused', error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+  if (r?.type === 'workspace-theme' && isTheme(r.theme)) {
+    db.setSettings({ theme: r.theme })
+    emit({ type: 'settings', settings: settings() })
+    return
+  }
+  if (r?.type === 'duplicate-workspace') {
+    try {
+      if (closing || !r.targetDir || !r.name) throw new Error('Workspace cannot be duplicated right now')
+      mkdirSync(r.targetDir, { recursive: true, mode: 0o700 })
+      db.duplicateTo(join(r.targetDir, 'tucano.db'), r.name)
+      process.parentPort.postMessage({ type: 'workspace-duplicated' })
+    } catch (error) {
+      process.parentPort.postMessage({ type: 'workspace-duplicated', error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+  if (r?.type === 'delete-workspace') {
+    if (closing) return
+    closing = true
+    routines.stop()
+    telegram?.stop()
+    hooks.close()
+    github.stop()
+    runner.setPaused(true)
+    for (const m of db.messages()) runner.stop(m.id)
+    void (async () => {
+      await runner.idle()
+      await memory.idle()
+      const agents = db.agents()
+      for (const a of agents) if (a.computer) await computers.erase(a.id)
+      chrome?.quit()
+      process.parentPort.postMessage({ type: 'workspace-cleaned', agentIds: agents.map((a) => a.id) })
+    })().catch((e: unknown) => process.parentPort.postMessage({ type: 'workspace-cleaned', error: e instanceof Error ? e.message : String(e) }))
+    return
+  }
+  if (r?.type === 'viewing') {
+    viewing = typeof r.conversationId === 'string' ? r.conversationId : null
+    if (viewing) { db.markRead(viewing); emitConversations([viewing]) }
+    workspaceSummary()
+    return
+  }
   if (r?.type === 'power') return routines.setAwake(r.awake === true)
   if (r?.type === 'browser-shown') return browser.setShown(r.agentId ?? '', r.shown === true)
   if (r?.type === 'browser-result') {
@@ -416,7 +483,7 @@ void ready.then(() => {
   if (settings().onboarding?.done) ensureTuca()
 })
 
-telegram = new Telegram({
+if (defaultWorkspace) telegram = new Telegram({
   secrets,
   decide: (id, decision, reason) => runner.decide(id, decision, reason),
   approval: (id) => db.approval(id),
@@ -443,7 +510,7 @@ const hooks = createServer((req, res) => {
       .end(r === 'ok' ? L('Rotina disparada.\n', 'Routine fired.\n') : r === 'busy' ? L('A rotina ainda está rodando.\n', 'The routine is still running.\n') : L('Nenhuma rotina ligada com esse endereço.\n', 'No routine on with that address.\n'))
   })
 })
-hooks.on('error', (e) => console.error(`[gatilhos] porta ${WEBHOOK_PORT}:`, e.message))
+hooks.on('error', (e) => console.error(`[gatilhos] porta ${runtimePorts.webhook}:`, e.message))
 
 
 void ready.then(async () => {
@@ -452,15 +519,22 @@ void ready.then(async () => {
   for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
-  routines.start()
   // Nothing here waits on the keychain: the first use after an update can be a
   // macOS prompt that stays open until someone answers it.
   void github.start().catch((e: unknown) => console.error('[github]', e))
   if (!fake) {
-    hooks.listen(WEBHOOK_PORT, '127.0.0.1')
-    github.listen()
+    await new Promise<void>((resolve, reject) => {
+      hooks.once('error', reject)
+      hooks.listen(runtimePorts.webhook, '127.0.0.1', () => { hooks.removeListener('error', reject); resolve() })
+    })
+    await new Promise<void>((resolve, reject) => {
+      const proxy = github.listen()
+      proxy.once('error', reject)
+      proxy.once('listening', () => { proxy.removeListener('error', reject); resolve() })
+    })
     void telegram?.start()
   }
+  routines.start()
   // A copy of the database once a day, the last 7 kept.
   const daily = (): void => {
     try {
@@ -471,6 +545,11 @@ void ready.then(async () => {
   }
   daily()
   setInterval(daily, 3_600_000).unref()
+  toMain({ type: 'ready' })
+  workspaceSummary()
+}).catch((e: unknown) => {
+  console.error('[core] startup failed', e)
+  process.exit(1)
 })
 toMain({ type: 'login_item', open: !!settings().openAtLogin })
 
@@ -547,6 +626,10 @@ function settleDraft(messageId: string, agentId?: string): void {
 
 
 const api: Api = {
+  markRead: ({ conversationId }) => {
+    db.markRead(conversationId)
+    emitConversations([conversationId])
+  },
   // The page loads from file://, which can't fetch tucano:// (CORS); text comes through the core instead.
   artifactText: ({ id }) => {
     const a = db.artifacts().find((x) => x.id === id)
@@ -560,6 +643,8 @@ const api: Api = {
   },
 
   snapshot: () => ({
+    webhookPort: runtimePorts.webhook,
+    defaultWorkspace,
     settings: settings(),
     agents: db.agents(),
     conversations: db.conversations(),
@@ -703,7 +788,10 @@ const api: Api = {
 
   checkTrigger: ({ trigger }) => routines.preview(trigger),
 
-  setTelegramToken: ({ token }) => telegram!.setToken(token),
+  setTelegramToken: ({ token }) => {
+    if (!telegram) throw new Error(L('O Telegram fica no workspace padrão.', 'Telegram belongs to the default workspace.'))
+    return telegram.setToken(token)
+  },
   setGithubToken: ({ token }) => github.setToken(token),
   exportTeam: () => exportTeam(db),
   importTeam: ({ text }) => {
@@ -714,7 +802,7 @@ const api: Api = {
     for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
     return r
   },
-  backupNow: () => backup(db, backups),
+  backupNow: () => backup(db, backups, db.getSettings(DEFAULTS).workspaceName),
   openBackups: () => {
     mkdirSync(backups, { recursive: true })
     toMain({ type: 'open_path', path: backups })
@@ -773,7 +861,9 @@ const api: Api = {
   },
 
   updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, ...patch } }) => {
+    if (patch.theme !== undefined && !isTheme(patch.theme)) throw new Error('Invalid theme')
     db.setSettings(patch)
+    if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
     if (patch.onboarding?.done) void ready.then(() => ensureTuca()) // skipping the introduction still gets the Tuca
@@ -921,6 +1011,7 @@ function handle(port: MessagePortMain, req: Request): void {
   const reply = (r: Omit<Extract<Wire, { id: number }>, 'id'>): void => port.postMessage({ id: req.id, ...r } satisfies Wire)
   const fn = api[req.method as Method] as ((p: unknown) => unknown) | undefined
   if (!fn) return reply({ error: `unknown method ${req.method}` })
+  if (closing) return reply({ error: L('Este workspace está sendo excluído.', 'This workspace is being deleted.') })
   Promise.resolve()
     .then(() => fn(req.params))
     .then(

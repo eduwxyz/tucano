@@ -211,6 +211,7 @@ export class Routines {
   // the rest wait for the next check, which comes right after that run.
   private async check(r: Routine): Promise<void> {
     if (r.trigger?.kind !== 'poll' || this.checking.has(r.id) || this.running.has(r.id)) return
+    if (this.deps.blocked?.()) return
     this.checking.add(r.id)
     const t = r.trigger
     try {
@@ -233,6 +234,7 @@ export class Routines {
 
   // A call to http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>, from something on this Mac.
   webhook(token: string, body: string): 'ok' | 'unknown' | 'busy' {
+    if (this.deps.blocked?.()) return 'busy'
     const r = this.deps.db.routines().find((x) => x.trigger?.kind === 'webhook' && x.trigger.token === token)
     if (!r || !r.enabled) return 'unknown'
     if (this.running.has(r.id)) return 'busy'
@@ -298,6 +300,7 @@ export class Routines {
   }
 
   runNow(id: string): void {
+    if (this.deps.blocked?.()) return
     this.fire(id, { scheduledAt: this.now(), late: false })
   }
 
@@ -338,6 +341,7 @@ export class Routines {
   // One run of a routine at a time: if the last one is still going, this one skips.
   // `more`: a connector check left new items, so check again when this run ends.
   private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
+    if (this.deps.blocked?.()) return
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
     this.running.add(id)

@@ -287,6 +287,7 @@ h3 {
   padding: 0 12px 10px 14px;
 }
 .workspace__logo {
+  flex-shrink: 0;
   width: 26px;
   height: 26px;
   border-radius: 7px;
@@ -300,7 +301,36 @@ h3 {
 .workspace__name {
   font-weight: 600;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.workspace-picker { position: relative; flex: 1; min-width: 0; }
+.workspace-picker__check { display: flex; align-items: center; width: 14px; flex-shrink: 0; }
+.workspace-picker__head { display: flex; align-items: center; justify-content: space-between; padding: 2px 8px 5px; }
+.workspace-picker__actions { display: flex; align-items: center; gap: 4px; }
+.modal__card.workspace-manager { width: min(600px, calc(100vw - 32px)); }
+.workspace-manager__body { min-height: 0; overflow-y: auto; padding-bottom: 12px; }
+.workspace-manager__list { min-height: 0; max-height: 50vh; overflow-y: auto; }
+.workspace-manager__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
+.workspace-manager__row + .workspace-manager__row { border-top: 1px solid var(--border); }
+.workspace-manager__name { display: flex; align-items: center; gap: 8px; min-width: 0; text-align: left; }
+.workspace-manager__name > span:last-child { overflow-wrap: anywhere; }
+.workspace-manager__row > .row { flex-shrink: 0; }
+.workspace-manager__switch[aria-pressed='true'] { background: var(--ok-soft); color: var(--ok); }
+.workspace-manager__pause[aria-pressed='true'] { background: var(--warn-soft); color: var(--warn); }
+.workspace-manager__row .workspace-manager__delete { color: var(--danger); }
+.workspace-manager__row .workspace-manager__delete:hover { background: var(--danger-soft); }
+.workspace-manager__row .workspace-manager__delete:disabled { color: var(--text-3); background: transparent; cursor: not-allowed; }
+.workspace-danger .card { border-color: var(--danger); }
+.workspace-danger .card__head h2 { color: var(--danger); }
+.workspace-danger__section + .workspace-danger__section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+.workspace-danger__section h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.workspace-picker__button, .workspace-picker__label { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.workspace-picker__button { width: 100%; padding: 4px; margin: -4px; box-sizing: content-box; border: 1px solid transparent; border-radius: 7px; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.workspace-picker__button:hover, .workspace-picker__button:focus-visible { border-color: var(--border); }
+.workspace-picker__menu { position: absolute; top: calc(100% + 8px); left: 0; width: 260px; max-width: calc(100vw - 32px); max-height: 60vh; overflow-y: auto; padding: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); box-shadow: 0 8px 28px #0002; z-index: 50; }
 .sidebar__scroll {
   flex: 1;
   overflow-y: auto;
@@ -628,6 +658,17 @@ h3 {
   background: var(--danger);
   border-color: var(--danger);
   color: #fff;
+}
+.btn--danger:hover {
+  background: var(--danger);
+}
+.btn--danger:not(:disabled):hover {
+  background: color-mix(in srgb, var(--danger) 88%, #000);
+  border-color: color-mix(in srgb, var(--danger) 88%, #000);
+}
+.btn--danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
 }
 .btn--ghost {
   border-color: transparent;
@@ -3965,6 +4006,9 @@ table.csv th {
   place-items: center;
   background: rgba(10, 10, 12, 0.35);
 }
+.modal__card, .form-modal {
+  animation: cal-pop 0.18s var(--ease);
+}
 .modal__card {
   width: min(460px, calc(100vw - 32px));
   max-height: calc(100vh - 80px);
@@ -3983,6 +4027,7 @@ table.csv th {
   margin-bottom: 6px;
   font-size: 15px;
 }
+.modal__actions { display: flex; align-items: center; gap: 8px; }
 .modal__lead {
   margin: 0 0 12px;
 }
@@ -5627,7 +5672,6 @@ kbd {
   overflow-y: auto;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  animation: cal-pop 0.18s var(--ease);
 }
 .form-modal .card {
   margin: 0;

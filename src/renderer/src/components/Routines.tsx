@@ -23,6 +23,7 @@ import {
 } from '../store'
 import { Card, Field, Sheet, Toggle } from './Pages'
 import { AgentAvatar, Icon, shiftWeek, startOfWeek, weekRange } from './ui'
+import { Modal } from './Modal'
 
 const DAYS = (): string[] => (lang() === 'en' ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'])
 const DAY_NAMES = (): string[] => (lang() === 'en' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'])
@@ -62,7 +63,7 @@ const LAST = (): Partial<Record<RunStatus, { label: string; tone: string }>> => 
   interrupted: { label: L('interrompida', 'interrupted'), tone: '' }
 })
 
-export const webhookUrl = (token: string): string => `http://127.0.0.1:${WEBHOOK_PORT}/gatilho/${token}`
+export const webhookUrl = (token: string, port = WEBHOOK_PORT): string => `http://127.0.0.1:${port}/gatilho/${token}`
 
 // "Todo dia às 9h", "A cada 5 min, quando aparecer algo novo em Linear · list_issues"
 function describeRoutine(r: Pick<Routine, 'schedule' | 'trigger'>, connectorName?: string): string {
@@ -115,7 +116,6 @@ export function RoutinesPage(): ReactNode {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const typing = (e.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable]')
-      if (draft && e.key === 'Escape') return setDraft(null)
       if (draft || typing || e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'ArrowLeft') setWeek((w) => shiftWeek(w, -1))
       else if (e.key === 'ArrowRight') setWeek((w) => shiftWeek(w, 1))
@@ -256,11 +256,9 @@ export function RoutinesPage(): ReactNode {
       {open && <Popover occ={open.occ} rect={open.rect} now={now} onClose={() => setOpen(null)} onEdit={(r) => (setOpen(null), setDraft({ ...r }))} />}
 
       {draft && (
-        <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setDraft(null)}>
-          <div className="form-modal">
-            <RoutineForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
-          </div>
-        </div>
+        <Modal title={draft.id ? L('Editar rotina', 'Edit routine') : L('Nova rotina', 'New routine')} variant="form" onClose={() => setDraft(null)}>
+          <RoutineForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
+        </Modal>
       )}
     </Sheet>
   )
@@ -472,7 +470,8 @@ function Calendar({
 
 function Hook({ token }: { token: string }): ReactNode {
   const [copied, setCopied] = useState(false)
-  const cmd = `curl -d "${L('o que aconteceu', 'what happened')}" ${webhookUrl(token)}`
+  const port = useStore((s) => s.webhookPort)
+  const cmd = `curl -d "${L('o que aconteceu', 'what happened')}" ${webhookUrl(token, port)}`
   return (
     <div className="row row--center routine__hook">
       <code className="small grow truncate">{cmd}</code>

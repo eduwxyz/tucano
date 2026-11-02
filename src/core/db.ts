@@ -1,5 +1,38 @@
 import { DatabaseSync } from 'node:sqlite'
-import { CACHE_READ_WEIGHT, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import {
+  CACHE_READ_WEIGHT,
+  nextRun,
+  type Agent,
+  type AgentApp,
+  type AgentColor,
+  type Approval,
+  type ApprovalState,
+  type Artifact,
+  type ArtifactKind,
+  type Author,
+  type Connector,
+  type ConnectorAuth,
+  type ConnectorTool,
+  type Conversation,
+  type Effort,
+  type LentFolder,
+  type Memory,
+  type MemoryMode,
+  type MemoryState,
+  type Message,
+  type Receipt,
+  type Routine,
+  type RoutineRun,
+  type Run,
+  type Settings,
+  type Skill,
+  type SkillVersion,
+  type ToolClass,
+  type Trigger
+} from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -221,6 +254,16 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN apps TEXT NOT NULL DEFAULT '[]';
+  `,
+  `
+  CREATE TABLE message_notifications (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL,
+    unread INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (message_id, phase)
+  );
+  INSERT INTO message_notifications (message_id, phase)
+    SELECT id, COALESCE(json_extract(run, '$.status'), 'message') FROM messages;
   `
 ]
 
@@ -238,10 +281,11 @@ export class Db {
   // "no agents", since someone may have deleted them all.
   created = false
 
-  constructor(file: string) {
+  constructor(private file: string) {
     this.db = new DatabaseSync(file)
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
-    this.migrate()
+    try { this.migrate(file) }
+    catch (error) { this.db.close(); throw error }
   }
 
   close(): void {
@@ -253,9 +297,61 @@ export class Db {
     this.db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`)
   }
 
-  private migrate(): void {
+  // Snapshot the live DB, then sanitize only the copy. Publish it only after
+  // VACUUM removes deleted history from its pages; no engine/browser files copy.
+  duplicateTo(file: string, name: string): void {
+    if (existsSync(file)) throw new Error('Workspace destination already exists')
+    // Keep the unsanitized snapshot with its source, not in the new workspace.
+    // A crash before sanitizing must not leave source memories in the copy.
+    const stagingDir = this.file === ':memory:' ? dirname(file) : join(dirname(this.file), 'backups')
+    mkdirSync(stagingDir, { recursive: true, mode: 0o700 })
+    const staging = join(stagingDir, `.workspace-copy-${randomUUID()}.preparing`)
+    let copy: Db | undefined
+    try {
+      this.backupTo(staging)
+      copy = new Db(staging)
+      const target = copy
+      target.db.exec('PRAGMA secure_delete = ON')
+      target.tx(() => {
+        target.db.exec(`
+          DELETE FROM messages;
+          DELETE FROM memories;
+          DELETE FROM approvals;
+          DELETE FROM receipts;
+          DELETE FROM artifacts;
+          DELETE FROM services;
+          UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL;
+          DELETE FROM settings WHERE key IN ('quota', 'telegram');
+          DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
+        `)
+        const setup = target.db.prepare("SELECT value FROM settings WHERE key = 'onboarding'").get() as { value: string } | undefined
+        const onboarding = setup ? JSON.parse(setup.value) as Settings['onboarding'] : undefined
+        target.setSettings({ workspaceName: name, onboarding: { ...onboarding, done: onboarding?.done !== false, workspaceManagerSeen: undefined } })
+        for (const r of target.routines()) {
+          const trigger: Trigger | undefined = r.trigger?.kind === 'webhook' ? { kind: 'webhook', token: randomUUID().replaceAll('-', '') }
+            : r.trigger?.kind === 'poll' ? { kind: 'poll', connectorId: r.trigger.connectorId, tool: r.trigger.tool, args: r.trigger.args, everyMinutes: r.trigger.everyMinutes } : undefined
+          target.saveRoutine({ ...r, lastAt: undefined, lastMessageId: undefined, trigger, nextAt: r.enabled && !trigger ? nextRun(r.schedule, Date.now()) : undefined })
+        }
+      })
+      target.db.exec('VACUUM; PRAGMA wal_checkpoint(TRUNCATE)')
+      target.close()
+      copy = undefined
+      renameSync(staging, file)
+    } finally {
+      copy?.close()
+      for (const path of [staging, `${staging}-wal`, `${staging}-shm`]) rmSync(path, { force: true })
+    }
+  }
+
+  private migrate(file: string): void {
     const { user_version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
     this.created = user_version === 0
+    if (user_version > MIGRATIONS.length) throw new Error('This workspace needs a newer Tucano version')
+    if (user_version > 0 && user_version < MIGRATIONS.length && file !== ':memory:') {
+      const backups = join(dirname(file), 'backups')
+      mkdirSync(backups, { recursive: true })
+      this.backupTo(join(backups, `before-schema-${user_version}-${Date.now()}.db`))
+    }
     for (let v = user_version; v < MIGRATIONS.length; v++) {
       this.tx(() => {
         this.db.exec(MIGRATIONS[v]!)
@@ -358,7 +454,7 @@ export class Db {
   // ---------- conversations ----------
 
   conversations(): Conversation[] {
-    const rows = this.db.prepare('SELECT * FROM conversations ORDER BY created_at').all() as Row[]
+    const rows = this.db.prepare(`SELECT c.*, (SELECT COUNT(*) FROM message_notifications n JOIN messages m ON m.id = n.message_id WHERE m.conversation_id = c.id AND n.unread = 1) AS unread FROM conversations c ORDER BY created_at`).all() as Row[]
     const members = this.db.prepare('SELECT conversation_id, agent_id FROM members').all() as { conversation_id: string; agent_id: string }[]
     return rows.map((r) => ({
       id: str(r['id']),
@@ -368,7 +464,8 @@ export class Db {
       members: members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id),
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
-      summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined
+      summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
+      unread: Number(r['unread'])
     }))
   }
 
@@ -428,6 +525,20 @@ export class Db {
   }
 
   // ---------- messages ----------
+
+  markRead(conversationId: string): void {
+    this.db.prepare('UPDATE message_notifications SET unread = 0 WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)').run(conversationId)
+  }
+
+  recordActivity(message: Message, viewing: string | null): void {
+    if (message.author.kind !== 'agent' && message.author.kind !== 'routine') return
+    const phase = message.run?.status ?? 'message'
+    if (phase !== 'message' && !['working', 'done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(phase)) return
+    // A running reply counts once. If it was read while running, its completion
+    // is new content, but repeated terminal events and deltas must not count again.
+    const unread = message.conversationId !== viewing && (phase === 'working' || phase === 'message' || (this.conversation(message.conversationId)?.unread ?? 0) === 0)
+    this.db.prepare('INSERT OR IGNORE INTO message_notifications (message_id, phase, unread) VALUES (?, ?, ?)').run(message.id, phase, unread ? 1 : 0)
+  }
 
   private toMessage(r: Row): Message {
     const kind = str(r['author_kind'])

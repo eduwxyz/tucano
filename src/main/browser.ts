@@ -30,7 +30,7 @@ export class Browsers {
   private reopening = new Map<string, Promise<void>>()
   private quitting = false
 
-  constructor(private onShown: (agentId: string, shown: boolean) => void) {}
+  constructor(private onShown: (agentId: string, shown: boolean) => void, private namespace = '') {}
 
   quit(): void {
     this.quitting = true
@@ -39,7 +39,7 @@ export class Browsers {
   }
 
   private partition(agentId: string): string {
-    return `persist:navegador-${agentId}`
+    return `persist:navegador-${this.namespace}${agentId}`
   }
 
   private win(agentId: string): BrowserWindow {

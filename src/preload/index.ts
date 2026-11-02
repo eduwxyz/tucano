@@ -8,6 +8,19 @@ ipcRenderer.on('core:port', (event) => {
 })
 
 contextBridge.exposeInMainWorld('tucano', {
+  workspaces: {
+    list: () => ipcRenderer.invoke('workspaces:list'),
+    create: () => ipcRenderer.invoke('workspaces:create'),
+    delete: (id?: string) => ipcRenderer.invoke('workspaces:delete', id),
+    duplicate: (id: string, name?: string) => ipcRenderer.invoke('workspaces:duplicate', id, name),
+    setPaused: (paused: boolean, id?: string) => ipcRenderer.invoke('workspaces:pause', paused, id),
+    switch: (id: string) => ipcRenderer.invoke('workspaces:switch', id),
+    subscribe: (cb: (list: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, list: unknown): void => cb(list)
+      ipcRenderer.on('workspaces', listener)
+      return () => ipcRenderer.removeListener('workspaces', listener)
+    }
+  },
   connect: (): void => ipcRenderer.send('core:connect'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
   // A click on a notification opens its conversation.

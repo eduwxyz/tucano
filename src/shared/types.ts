@@ -206,7 +206,7 @@ export interface Settings {
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
-  onboarding?: { done: boolean; checklistHidden?: boolean }
+  onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean }
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).

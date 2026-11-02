@@ -203,9 +203,17 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
 // ---------- backups ----------
 
 // A copy of the database (secrets stay encrypted for this Mac's keychain).
-export function backup(db: Db, dir: string): string {
+export function backup(db: Db, dir: string, workspaceName?: string): string {
   mkdirSync(dir, { recursive: true })
-  const file = join(dir, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.db`)
+  const safe = workspaceName
+    ? workspaceName
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/gi, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'workspace'
+    : 'workspace'
+  const file = join(dir, `tucano-${safe}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.db`)
   if (existsSync(file)) rmSync(file)
   db.backupTo(file)
   const old = readdirSync(dir)

@@ -20,6 +20,7 @@ import {
   modelInfo,
   usable,
   navigate,
+  openDialog,
   newChannel,
   refreshEngines,
   newAgentDraft,
@@ -1088,7 +1089,8 @@ interface Item {
   title: string
   how: string
   done: (s: State) => boolean
-  go: (s: State) => View
+  go?: (s: State) => View
+  open?: () => void
   action: string
 }
 
@@ -1154,11 +1156,19 @@ const ITEMS = (): Item[] => [
     done: (s) => !!s.settings.telegram?.chat,
     go: () => ({ kind: 'settings' }),
     action: L('Configurações', 'Settings')
+  },
+  {
+    id: 'workspaces',
+    title: L('Conhecer os workspaces', 'Explore workspaces'),
+    how: L('Separe seus contextos. Crie, duplique e gerencie seus workspaces.', 'Keep your contexts separate. Create, duplicate and manage your workspaces.'),
+    done: (s) => !!s.settings.onboarding?.workspaceManagerSeen,
+    open: () => openDialog({ kind: 'workspaces' }),
+    action: L('Workspaces', 'Workspaces')
   }
 ]
 
 export function GettingStarted(): ReactNode {
-  const items = ITEMS()
+  const items = ITEMS().filter((item) => item.id !== 'workspaces' || !!window.tucano.workspaces)
   const done = useStore((s) => items.map((i) => i.done(s)))
   const onboarding = useStore((s) => s.settings.onboarding)
   const [open, setOpen] = useState(false)
@@ -1193,7 +1203,8 @@ export function GettingStarted(): ReactNode {
                   <button
                     className={`btn btn--sm ${i === nextIndex ? 'btn--primary' : ''}`}
                     onClick={() => {
-                      navigate(item.go(getState()))
+                      if (item.open) item.open()
+                      else if (item.go) navigate(item.go(getState()))
                       setOpen(false)
                     }}
                   >
