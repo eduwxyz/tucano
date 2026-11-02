@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { CACHE_READ_WEIGHT, type Agent, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
+import { CACHE_READ_WEIGHT, routineCap, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -220,13 +220,23 @@ const MIGRATIONS = [
   ALTER TABLE agents ADD COLUMN kind TEXT;
   `,
   `
-  ALTER TABLE messages ADD COLUMN forwarded TEXT;
+  ALTER TABLE agents ADD COLUMN apps TEXT NOT NULL DEFAULT '[]';
   `,
   `
-  UPDATE messages SET forwarded = json_remove(json_set(forwarded,
-    '$.conversationName', json_extract(forwarded, '$.channel'),
-    '$.conversationKind', 'channel'), '$.channel')
-  WHERE forwarded IS NOT NULL AND json_type(forwarded, '$.channel') IS NOT NULL;
+  ALTER TABLE agents ADD COLUMN fallback_model TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN account TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN fallback_account TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN max_routines INTEGER NOT NULL DEFAULT 10;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN custom_color TEXT;
+  ALTER TABLE agents ADD COLUMN picture TEXT;
   `,
   `
   ALTER TABLE messages ADD COLUMN reply TEXT;
@@ -313,8 +323,12 @@ export class Db {
       color: str(r['color']) as AgentColor,
       instructions: str(r['instructions']),
       modelId: str(r['model']),
+      ...(str(r['account']) ? { accountId: str(r['account']) } : {}),
+      ...(str(r['fallback_model']) ? { fallbackModelId: str(r['fallback_model']) } : {}),
+      ...(str(r['fallback_account']) ? { fallbackAccountId: str(r['fallback_account']) } : {}),
       effort: str(r['effort']) as Effort,
       limit: Number(r['limit_tokens']),
+      maxRoutines: routineCap(Number(r['max_routines'])),
       used: this.usedThisMonth(str(r['id'])),
       grants: JSON.parse(str(r['grants']) || '{}') as Agent['grants'],
       memory: (str(r['memory_mode']) || 'auto') as MemoryMode,
@@ -322,6 +336,9 @@ export class Db {
       computerKind: str(r['computer_kind']) === 'mac' ? 'mac' : 'linux',
       web: r['web'] !== 0,
       browser: r['browser'] === 1,
+      apps: JSON.parse(str(r['apps']) || '[]') as AgentApp[],
+      ...(r['custom_color'] ? { customColor: str(r['custom_color']) } : {}),
+      ...(r['picture'] ? { picture: str(r['picture']) } : {}),
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
@@ -341,14 +358,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, computer_kind, web, browser, auto_approve, archived, kind, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, custom_color, picture, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
-           color = excluded.color, instructions = excluded.instructions, model = excluded.model, effort = excluded.effort,
-           limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind)`
+           color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
+           limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, Date.now())
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -449,7 +466,6 @@ export class Db {
       at: Number(r['at']),
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
-      forwarded: r['forwarded'] ? (JSON.parse(str(r['forwarded'])) as Message['forwarded']) : undefined,
       reply: r['reply'] ? (JSON.parse(str(r['reply'])) as Message['reply']) : undefined
     }
   }
@@ -482,7 +498,7 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, forwarded, reply) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, reply) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
       .run(
@@ -494,7 +510,6 @@ export class Db {
         m.at,
         m.run ? JSON.stringify(m.run) : null,
         m.routine ? JSON.stringify(m.routine) : null,
-        m.forwarded ? JSON.stringify(m.forwarded) : null,
         m.reply ? JSON.stringify(m.reply) : null
       )
   }

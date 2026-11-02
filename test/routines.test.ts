@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
-import { describeSchedule, nextRun, type Agent, type EngineId, type Message, type Routine, type Settings } from '../src/shared/types'
+import { describeSchedule, nextRun, routineCap, type Agent, type EngineId, type Message, type Routine, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
@@ -237,6 +237,33 @@ describe('routines', () => {
     expect(routines.schedule(lia, dm, ask)).toMatchObject({ error: true, reply: expect.stringContaining('Cancele') as string })
     expect(routines.cancel(lia, mine.routine!.id).reply).toContain('apagada')
     expect(db.routines()).toHaveLength(MAX_AGENT_ROUTINES - 1)
+  })
+
+  it("follows the agent's own limit, kept as a whole number of at least 1", () => {
+    const dm = db.conversation('d1')!
+    const ask = { nome: 'x', pedido: 'y', horario: '9:00' }
+    db.saveAgent({ ...db.agent('a1')!, maxRoutines: 2 })
+    const lia = db.agent('a1')!
+    expect(lia.maxRoutines).toBe(2) // survives a save and a load
+    const first = routines.schedule(lia, dm, ask)
+    routines.schedule(lia, dm, ask)
+    expect(routines.schedule(lia, dm, ask)).toMatchObject({ error: true, reply: expect.stringContaining('2 rotinas') as string })
+    expect(routines.schedule(lia, dm, { ...ask, horario: '10:00', substitui: first.routine!.id }).error).toBeFalsy() // replacing at the cap
+    expect(db.routines()).toHaveLength(2)
+
+    // Above the old fixed 10, with no upper bound.
+    db.saveAgent({ ...db.agent('a1')!, maxRoutines: 15 })
+    const busy = db.agent('a1')!
+    for (let i = 2; i < 15; i++) expect(routines.schedule(busy, dm, ask).error).toBeFalsy()
+    expect(routines.schedule(busy, dm, ask).error).toBe(true)
+
+    // Whatever reaches the core, the limit is a whole number, at least 1.
+    for (const [given, kept] of [[-3, 1], [0, 1], [2.7, 3], [Number.NaN, MAX_AGENT_ROUTINES]] as const) {
+      db.saveAgent({ ...db.agent('a1')!, maxRoutines: given })
+      expect(db.agent('a1')!.maxRoutines).toBe(kept)
+    }
+    expect(routines.schedule({ ...busy, maxRoutines: -3 }, db.conversation('d1')!, ask).reply).not.toContain('-3')
+    expect(routineCap(undefined)).toBe(MAX_AGENT_ROUTINES) // agents from before keep 10
   })
 })
 

@@ -2,23 +2,26 @@
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
+import { cleanLook } from './agent-look'
 import { Db } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
 import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
-import { adoptLoginShellPath, detectEngines } from './engines/detect'
+import { accountDir, accountStatus, adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
 import { fakeEngine } from './engines/fake'
+import { DesktopApps, macApps, SELF } from './apps'
+import { linuxApps, windowsApps, type SystemApp } from './apps-os'
 import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
@@ -33,7 +36,7 @@ import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
-import { findOnPath, isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
+import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -81,23 +84,84 @@ const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
 let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine }
 // The models OpenCode and Pi list (what the person has logins for), from the last check.
 let listed: Partial<Record<EngineId, string[]>> = {}
+// Codex's own catalog for this login (names and what each model is for), from the last check.
+let codexCatalog: CodexModel[] = []
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 async function detect(): Promise<void> {
   if (fake) {
     engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
-  } else ({ engines, listed } = await detectEngines(codexHome))
+  } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
+  await checkAccounts()
+  rememberModels(codexCatalog.map((m) => ({ id: m.slug, engine: 'codex', label: m.label, hint: m.description ?? '' })))
   gatewayLists.clear()
   emit({ type: 'settings', settings: settings() })
 }
+// The harness's own sign-in, in a terminal, with the variables that say which login it is.
+function openLogin(engine: EngineId, vars: Record<string, string>): { opened: boolean; command: string } {
+  const bin = engines[engine].path ?? ENGINES[engine].cli
+  const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
+  if (isWin) {
+    // A new console window running a small script, its paths in the environment.
+    openWindowsConsole(join(dataDir, 'login.cmd'), [`call "%TUCANO_CLI%" ${sub}`], { TUCANO_CLI: bin, ...vars })
+    return { opened: true, command: `"${bin}" ${sub}` }
+  }
+  const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
+  const cmd = [...Object.entries(vars).map(([k, v]) => `${k}=${q(v)}`), q(bin), sub].filter(Boolean).join(' ')
+  if (fake) return { opened: true, command: cmd } // test engines: nothing to sign into
+  const term = terminalCommand(cmd, osOf(), onPath)
+  // Its own process, so the terminal outlives the app if the person quits it mid-login.
+  if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
+  return { opened: !!term, command: cmd }
+}
+
+// After a sign-in or an install in a terminal, the harness is checked again every few
+// seconds until it shows up (for 10 minutes at most): it appears with no "Check again".
+let watching: ReturnType<typeof setInterval> | undefined
+function watchEngine(engine: EngineId, done: (s: EngineStatus) => boolean): void {
+  if (watching) clearInterval(watching)
+  const until = Date.now() + 10 * 60_000
+  watching = setInterval(() => {
+    if (done(engines[engine]) || Date.now() > until) return void clearInterval(watching)
+    void detect()
+  }, 4_000)
+  watching.unref()
+}
+
 const gateway = new Gateway()
 const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
 
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), github: githubInfo() }
+  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), github: githubInfo(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+}
+
+// More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
+// the CLI's own status when the harnesses are, and every few seconds after a sign-in.
+const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>()
+const savedAccounts = (): Account[] => (db.getSettings(DEFAULTS).accounts ?? []).map(({ id, engine, name }) => ({ id, engine, name }))
+async function checkAccounts(only?: string): Promise<void> {
+  await Promise.all(
+    savedAccounts()
+      .filter((a) => !only || a.id === only)
+      .map(async (a) => {
+        const bin = engines[a.engine].path
+        if (fake) accountLogins.set(a.id, { loggedIn: true, detail: L('Motor de teste', 'Test engine') })
+        else accountLogins.set(a.id, bin ? await accountStatus(a.engine, bin, accountDir(dataDir, a.id)) : { loggedIn: false })
+      })
+  )
+}
+let watchingAccount: NodeJS.Timeout | null = null
+function watchAccount(id: string): void {
+  if (watchingAccount) clearInterval(watchingAccount)
+  const until = Date.now() + 10 * 60_000
+  watchingAccount = setInterval(() => {
+    if (accountLogins.get(id)?.loggedIn || Date.now() > until || !savedAccounts().some((a) => a.id === id)) return void clearInterval(watchingAccount!)
+    void checkAccounts(id).then(() => emit({ type: 'settings', settings: settings() }))
+  }, 4_000)
+  watchingAccount.unref()
 }
 // github is made further down; settings can be asked for before.
 const githubInfo = (): Settings['github'] => githubRef?.info()
@@ -170,7 +234,7 @@ function toPhone(e: CoreEvent): void {
 
 // Desktop notification, and the same on the phone.
 const notifyAll = (title: string, body: string, conversationId?: string): void => {
-  toMain({ type: 'notify', title, body, conversationId })
+  toMain({ type: 'notify', title, body, conversationId, sound: settings().sounds !== false })
   void telegram?.notice(title, body)
 }
 
@@ -178,7 +242,7 @@ const notifyAll = (title: string, body: string, conversationId?: string): void =
 type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done' }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -202,12 +266,75 @@ process.parentPort.on('message', (e) => {
     else p?.resolve(r.data as BrowserReply)
     return
   }
+  if (r?.type === 'icons-result') {
+    iconWaits.get(r.id)?.((r.data ?? {}) as Record<string, string>)
+    iconWaits.delete(r.id)
+    return
+  }
   if (r?.type !== 'screenshot-result') return
   const p = shots.get(r.id)
   shots.delete(r.id)
   if (r.error !== undefined) p?.reject(new Error(r.error))
   else p?.resolve(Buffer.from(String(r.data ?? ''), 'base64'))
 })
+// The apps' icons come from the main process (Electron's), a few seconds at most.
+const iconWaits = new Map<string, (icons: Record<string, string>) => void>()
+const appIcons = (paths: string[]): Promise<Record<string, string>> =>
+  paths.length === 0 || serverMode || fake
+    ? Promise.resolve({})
+    : new Promise((resolve) => {
+        const id = randomUUID()
+        iconWaits.set(id, resolve)
+        process.parentPort.postMessage({ type: 'icons', id, paths })
+        setTimeout(() => iconWaits.has(id) && (iconWaits.delete(id), resolve({})), 8_000).unref()
+      })
+
+// The person's installed apps, with their icons, kept in the data folder: the apps picker
+// shows them at once, even right after a restart, and a refresh runs behind it when they
+// may have changed. Made once a few seconds after start, so even the first look is instant.
+// bundleId: a Mac app's bundle id, a Windows app's AppUserModelID, a Linux desktop id.
+type ShelfApp = { name: string; bundleId?: string; path?: string; icon?: string; exe?: string; exec?: string[]; chromium?: boolean }
+// Each system's own list: the Mac's Applications folders, Windows' Start menu, Linux's application menu.
+const systemApps = async (): Promise<ShelfApp[]> => {
+  if (process.platform === 'darwin') return (await macApps().catch(() => [])).filter((a) => !SELF.test(a.bundleId ?? ''))
+  const list: SystemApp[] = process.platform === 'win32' ? await windowsApps().catch(() => []) : linuxApps()
+  return list.map(({ id, ...a }) => ({ ...a, ...(id ? { bundleId: id } : {}) }))
+}
+const shelfFile = join(dataDir, 'apps.json')
+let shelf: { at: number; list: ShelfApp[] } | undefined = (() => {
+  try {
+    return JSON.parse(readFileSync(shelfFile, 'utf8')) as { at: number; list: ShelfApp[] }
+  } catch {
+    return undefined
+  }
+})()
+let restocking: Promise<ShelfApp[]> | undefined
+const restock = (): Promise<ShelfApp[]> =>
+  (restocking ??= (async () => {
+    const found = await systemApps()
+    // The icons the system draws from a program (a Mac bundle, a Windows .exe) come from the
+    // main process, once; Store apps and Linux's bring theirs.
+    const known = new Map((shelf?.list ?? []).filter((a) => a.path && a.icon).map((a) => [a.path!, a.icon!]))
+    const icons = await appIcons(found.filter((a) => a.path && !a.icon && !known.has(a.path)).map((a) => a.path!))
+    const list = found
+      .map((a) => {
+        const icon = a.icon ?? (a.path ? (known.get(a.path) ?? icons[a.path]) : undefined)
+        return { ...a, ...(icon ? { icon } : {}) }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+    shelf = { at: Date.now(), list }
+    try {
+      writeFileSync(shelfFile, JSON.stringify(shelf))
+    } catch {}
+    return list
+  })().finally(() => (restocking = undefined)))
+const shelfNow = async (): Promise<ShelfApp[]> => {
+  if (!shelf) return restock()
+  if (Date.now() - shelf.at > 5 * 60_000) void restock()
+  return shelf.list
+}
+if (!serverMode && !fake) setTimeout(() => void restock(), 4_000).unref()
+
 // On a server there's no Electron: the agents' Chrome takes the picture instead.
 const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
 const electronShoot: Shooter = (opts) =>
@@ -238,6 +365,12 @@ const chrome =
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
+// The person's own apps, through agent-desktop (none on a server: no screen there).
+// Off a Mac it needs the installed apps to know each one's program.
+const desktopApps = new DesktopApps(undefined, {
+  installed: async () => (await shelfNow()).map(({ bundleId, ...a }) => ({ ...a, ...(bundleId ? { id: bundleId } : {}) }))
+})
+
 const browser = new Browser({
   host,
   db,
@@ -309,11 +442,12 @@ const runner = new Runner({
   memory,
   computers,
   browser,
+  ...(serverMode ? {} : { apps: desktopApps }),
   routines,
   skills,
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
-  notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind }) : notifyAll(title, body, conversationId)),
+  notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId)),
   jev: { key: () => secrets.get(JEV_SECRET) },
   github,
   onBusy: (busy) => toMain({ type: 'busy', busy }),
@@ -491,8 +625,6 @@ const api: Api = {
 
   sendMessage: ({ conversationId, text, images, reply }) => runner.send(conversationId, text, images, { reply }),
 
-  forwardMessage: ({ messageId, conversationId }) => runner.forward(messageId, conversationId),
-
   stopRun: ({ messageId }) => runner.stop(messageId),
 
   retryRun: ({ messageId }) => runner.retry(messageId),
@@ -502,7 +634,7 @@ const api: Api = {
   saveAgent: ({ agent, channelIds }) => {
     const before = db.agent(agent.id)
     // Archived changes only through archiveAgent, which also stops what the agent was doing.
-    const clean: Agent = { ...agent, name: agent.name.trim(), handle: agent.handle.trim().toLowerCase(), archived: before?.archived ?? false }
+    const clean: Agent = { ...cleanLook(agent), name: agent.name.trim(), handle: agent.handle.trim().toLowerCase(), archived: before?.archived ?? false }
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -647,6 +779,8 @@ const api: Api = {
   // The models a harness offers, besides the app's list for a plan: what OpenCode
   // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
   engineModels: async ({ engine }) => {
+    if (engine === 'codex' && codexCatalog.length)
+      return { models: codexCatalog.map((m) => m.slug), labels: Object.fromEntries(codexCatalog.map((m) => [m.slug, { label: m.label, ...(m.description ? { hint: m.description } : {}) }])) }
     if (listed[engine]) return { models: listed[engine]! }
     if (engines[engine].route !== 'gateway') return { models: [] }
     if (!gatewayLists.has(engine))
@@ -682,7 +816,7 @@ const api: Api = {
     return { ok: true, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
   },
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, ...patch } }) => {
+  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...patch } }) => {
     db.setSettings(patch)
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
@@ -771,41 +905,79 @@ const api: Api = {
   // Login always happens in the CLI's own flow; the app never sees credentials.
   // Codex logs into the app's own home (see codexEnv), separate from the user's.
   loginEngine: ({ engine }) => {
-    const bin = engines[engine].path ?? ENGINES[engine].cli
-    const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
-    if (isWin) {
-      // A new console window running a small script: cmd's quoting can't be trusted with paths otherwise.
-      const script = join(dataDir, 'login.cmd')
-      const env = engine === 'codex' ? `set "HOME=${codexHome}"\r\nset "CODEX_HOME=${join(codexHome, '.codex')}"\r\n` : ''
-      writeFileSync(script, `@echo off\r\n${env}call "${bin}" ${sub}\r\n`)
-      spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'cmd.exe', '/k', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
-      return { opened: true, command: `"${bin}" ${sub}` }
+    // The sign-in happens in a terminal: check again until it lands, wherever the person is.
+    watchEngine(engine, (s) => s.loggedIn)
+    return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {})
+  },
+
+  // Another login of Claude Code or Codex: a folder of its own, signed into in a terminal like the first.
+  addAccount: ({ engine, name }) => {
+    const account: Account = { id: randomUUID().slice(0, 8), engine, name: name.trim() || ENGINES[engine].label }
+    mkdirSync(join(accountDir(dataDir, account.id), '.codex'), { recursive: true })
+    db.setSettings({ accounts: [...savedAccounts(), account] })
+    void checkAccounts(account.id).then(() => emit({ type: 'settings', settings: settings() }))
+    emit({ type: 'settings', settings: settings() })
+    return account
+  },
+  loginAccount: ({ id }) => {
+    const a = savedAccounts().find((x) => x.id === id)
+    if (!a) return { opened: false, command: '' }
+    const dir = accountDir(dataDir, a.id)
+    watchAccount(a.id)
+    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex') })
+  },
+  // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
+  removeAccount: ({ id }) => {
+    db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id) })
+    accountLogins.delete(id)
+    for (const agent of db.agents().filter((x) => x.accountId === id || x.fallbackAccountId === id)) {
+      const rest = { ...agent }
+      if (rest.accountId === id) delete rest.accountId
+      if (rest.fallbackAccountId === id) delete rest.fallbackAccountId
+      db.saveAgent(rest)
+      emit({ type: 'agent', agent: db.agent(agent.id)! })
     }
-    const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
-    const cmd = engine === 'codex' ? `HOME=${q(codexHome)} CODEX_HOME=${q(join(codexHome, '.codex'))} ${q(bin)} ${sub}` : `${q(bin)} ${sub}`
-    const term = terminalCommand(cmd, osOf(), onPath)
-    // Its own process, so the terminal outlives the app if the person quits it mid-login.
-    if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
-    return { opened: !!term, command: cmd }
+    rmSync(accountDir(dataDir, id), { recursive: true, force: true })
+    emit({ type: 'settings', settings: settings() })
   },
 
   // The harness's own installer, in a terminal the person sees: its progress, its
   // questions and its errors stay theirs. Detection picks the CLI up once it lands.
   installEngine: ({ engine }) => {
-    const command = (isWin && ENGINES[engine].windows) || ENGINES[engine].install
-    // An npm package needs Node.js first; without it the command would only fail.
-    if (/^npm\s/.test(command) && !findOnPath('npm')) return { opened: false, command, needsNode: true }
-    if (isWin) {
-      // A PowerShell window running a small script: the install commands are PowerShell.
-      const script = join(dataDir, 'install.ps1')
-      writeFileSync(script, `${command}\r\n`)
-      spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'powershell.exe', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
-      return { opened: true, command }
-    }
-    const term = terminalCommand(command, osOf(), onPath)
-    if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
-    return { opened: !!term, command }
+    const r = installer((isWin && ENGINES[engine].windows) || ENGINES[engine].install)
+    // It installs in a terminal: check again until it lands, wherever the person is.
+    if (r.opened) watchEngine(engine, (st) => st.installed)
+    return r
+  },
+
+  // The person's apps (agent-desktop): whether it's there and allowed, and what's open.
+  desktopStatus: async () => (serverMode ? { installed: false, server: true } : desktopApps.status()),
+  // The installed apps come from a shelf kept on disk (instant, refreshed behind); the open
+  // ones are asked each time, apart, so the list never waits for them.
+  installedApps: async () => (serverMode ? [] : shelfNow()),
+  openApps: async () => (serverMode ? [] : desktopApps.foreground().catch(() => [])),
+  installDesktop: () => installer('npm install -g agent-desktop@1.0.2'), // the version the apps feature is tested with
+  desktopPermissions: () => {
+    // Opens the system's privacy settings at Accessibility (agent-desktop knows where).
+    void desktopApps.guide()
   }
+}
+
+// An installer in a terminal the person sees: its progress, its questions and its
+// errors stay theirs. Detection picks the program up once it lands.
+function installer(command: string): { opened: boolean; command: string; needsNode?: boolean } {
+  // An npm package needs Node.js first; without it the command would only fail.
+  if (/^npm\s/.test(command) && !findOnPath('npm')) return { opened: false, command, needsNode: true }
+  if (isWin) {
+    // A PowerShell window running a small script: the install commands are PowerShell.
+    const script = join(dataDir, 'install.ps1')
+    writeFileSync(script, `${command}\r\n`)
+    spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'powershell.exe', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+    return { opened: true, command }
+  }
+  const term = terminalCommand(command, osOf(), onPath)
+  if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
+  return { opened: !!term, command }
 }
 
 function handle(port: MessagePortMain, req: Request): void {

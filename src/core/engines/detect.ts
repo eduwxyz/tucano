@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
-import type { EngineId, EngineStatus } from '../../shared/types'
+import type { AccountEngine, EngineId, EngineStatus } from '../../shared/types'
 import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
@@ -90,6 +90,34 @@ const gatewayHost = (url: string | undefined): string | undefined => {
 }
 
 // Checks the app's own Codex login (see codexEnv), not the user's.
+// Whether another login of Claude Code or Codex (Settings › Accounts) is signed in, and on which
+// plan, from the CLI's own status for that folder. The parsing is pure, to test it on their output.
+export function accountLogin(engine: AccountEngine, out: { code: number; stdout: string; stderr: string }): { loggedIn: boolean; detail?: string } {
+  if (engine === 'claude') {
+    let status: Record<string, unknown> = {}
+    try {
+      status = JSON.parse(out.stdout) as Record<string, unknown>
+    } catch {
+      // not signed in, or an older CLI
+    }
+    if (status['loggedIn'] !== true) return { loggedIn: false }
+    const plan = typeof status['subscriptionType'] === 'string' ? status['subscriptionType'] : undefined
+    const email = typeof status['email'] === 'string' ? status['email'] : undefined
+    const what = status['authMethod'] === 'claude.ai' ? `${L('Plano Claude', 'Claude plan')}${plan ? ` ${plan[0]!.toUpperCase()}${plan.slice(1)}` : ''}` : L('Chave de API', 'API key')
+    return { loggedIn: true, detail: email ? `${what} · ${email}` : what }
+  }
+  const text = `${out.stdout}\n${out.stderr}`
+  const loggedIn = out.code === 0 && /logged in/i.test(text) && !/not logged in/i.test(text)
+  return loggedIn ? { loggedIn, detail: /chatgpt/i.test(text) ? L('Plano ChatGPT', 'ChatGPT plan') : L('Chave de API', 'API key') } : { loggedIn }
+}
+
+export const accountDir = (dataDir: string, id: string): string => join(dataDir, 'accounts', id)
+
+export async function accountStatus(engine: AccountEngine, bin: string, dir: string): Promise<{ loggedIn: boolean; detail?: string }> {
+  const out = engine === 'claude' ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir }) : await run(bin, ['login', 'status'], 15_000, codexEnv(dir))
+  return accountLogin(engine, out)
+}
+
 export async function detectCodex(home: string): Promise<EngineStatus> {
   const path = await which('codex')
   if (!path) return { installed: false, loggedIn: false }
@@ -107,6 +135,45 @@ export async function detectCodex(home: string): Promise<EngineStatus> {
     ...(loggedIn ? { route: viaChatGpt ? ('plan' as const) : ('apikey' as const) } : {}),
     account: loggedIn ? (viaChatGpt ? L('Plano ChatGPT · login próprio do Tucano', "ChatGPT plan · Tucano's own login") : L('Chave de API', 'API key')) : L('Precisa de um login próprio do Tucano', "Needs Tucano's own login"),
     warning: loggedIn && !viaChatGpt ? apiKeyWarning() : undefined
+  }
+}
+
+// The models Codex offers this login, newest first, from its own catalog: `codex debug models`
+// (its cache when that command isn't there). Hidden ones (internal, retired) are left out.
+export interface CodexModel {
+  slug: string
+  label: string
+  description?: string
+}
+
+// 0 is the top of the list, not a missing priority.
+const priorityOf = (p: unknown): number => (typeof p === 'number' ? p : 999)
+
+export function parseCodexCatalog(json: string): CodexModel[] {
+  try {
+    const d = JSON.parse(json) as { models?: unknown } | unknown[]
+    const list = (Array.isArray(d) ? d : Array.isArray(d.models) ? d.models : []) as { slug?: unknown; display_name?: unknown; description?: unknown; visibility?: unknown; priority?: unknown }[]
+    return list
+      .filter((m) => typeof m.slug === 'string' && m.slug && (m.visibility === undefined || m.visibility === 'list'))
+      .sort((a, b) => priorityOf(a.priority) - priorityOf(b.priority))
+      .map((m) => ({
+        slug: m.slug as string,
+        label: typeof m.display_name === 'string' && m.display_name ? m.display_name : (m.slug as string),
+        ...(typeof m.description === 'string' && m.description ? { description: m.description } : {})
+      }))
+  } catch {
+    return []
+  }
+}
+
+export async function codexModels(path: string, home: string): Promise<CodexModel[]> {
+  const r = await run(path, ['debug', 'models'], 15_000, codexEnv(home))
+  const list = r.code === 0 ? parseCodexCatalog(r.stdout) : []
+  if (list.length) return list
+  try {
+    return parseCodexCatalog(readFileSync(join(home, '.codex', 'models_cache.json'), 'utf8'))
+  } catch {
+    return []
   }
 }
 
@@ -179,9 +246,17 @@ export async function detectGemini(): Promise<{ status: EngineStatus; models: st
   }
 }
 
-export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {
+export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
+  // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
+  const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
   const [claude, codex, opencode, pi, gemini] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini()])
-  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status }, listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models } }
+  // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
+  const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
+  return {
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status },
+    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    codexCatalog
+  }
 }

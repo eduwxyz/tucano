@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
-import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
+import { customModel, type Agent, type EngineId, type Message, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
@@ -104,85 +104,22 @@ describe('Runner', () => {
     expect(db.message('question')?.run?.status).toBe('waiting_input')
   })
 
-  it('forwards a channel message with its origin, without copying the agent run', async () => {
-    const source: Message = { id: 'original', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: '**The deployment is ready.**', at: 123, run: { status: 'done', steps: [] } }
-    db.saveMessage(source)
-    db.createConversation({ id: 'c2', kind: 'channel', name: 'launch', members: ['a1'] })
+  it('keeps explicit mentions ahead of the quoted author and does not route quoted mentions', async () => {
+    db.saveMessage({ id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: 'Ask @theo about this.', at: 100 })
     const r = runner()
-    await r.forward(source.id, 'c2')
+    await r.send('c1', '@lia please explain.', [], { reply: { messageId: 'quoted' } })
     await r.idle()
-
-    const forwarded = db.messages().find((m) => m.conversationId === 'c2' && m.author.kind === 'me')!
-    expect(forwarded).toMatchObject({ text: source.text, forwarded: { messageId: 'original', conversationId: 'c1', conversationName: 'engenharia', conversationKind: 'channel', author: 'theo', agentId: 'a2', at: 123 } })
-    expect(forwarded.id).not.toBe(source.id)
-    expect(forwarded.run).toBeUndefined()
-    expect(db.message(source.id)).toMatchObject(source)
-    expect(claude.turns[0]?.prompt).toContain('[Encaminhada de theo em #engenharia]')
-    expect(claude.turns[0]?.prompt).toContain(source.text)
-
-    // Forwarding again keeps the original attribution even after a rename.
-    db.createConversation({ id: 'c3', kind: 'channel', name: 'release', members: [] })
-    db.saveAgent(agent('a2', 'new-name'))
-    await r.forward(forwarded.id, 'c3')
-    expect(db.messages().find((m) => m.conversationId === 'c3' && m.author.kind === 'me')?.forwarded).toEqual(forwarded.forwarded)
+    expect(agentMessages().map((m) => m.author)).toEqual([{ kind: 'agent', id: 'a2' }, { kind: 'agent', id: 'a1' }])
+    expect(claude.turns).toHaveLength(1)
   })
 
-  it('rejects forwarding to the same conversation, missing conversations and unfinished or empty messages', async () => {
-    const source: Message = { id: 'original', conversationId: 'c1', author: { kind: 'me' }, text: 'hello', at: 123 }
-    db.saveMessage(source)
+  it('answers a pending question when replying to the agent who asked it', async () => {
+    db.saveMessage({ id: 'question', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Which environment?', at: 100, run: { status: 'waiting_input', steps: [], question: 'Which environment?' } })
     const r = runner()
-    for (const destination of ['c1', 'missing']) await expect(r.forward(source.id, destination)).rejects.toThrow()
-    await expect(r.forward('missing', 'c1')).rejects.toThrow()
-    db.createConversation({ id: 'c2', kind: 'channel', name: 'launch', members: [] })
-    db.saveMessage({ ...source, text: '' })
-    await expect(r.forward(source.id, 'c2')).rejects.toThrow()
-    db.saveMessage({ ...source, run: { status: 'working', steps: [] } })
-    await expect(r.forward(source.id, 'c2')).rejects.toThrow()
-    expect(db.messages().filter((m) => m.conversationId === 'c2')).toEqual([])
-  })
-
-  it('forwards to an agent DM and forwards DM messages to channels or another DM', async () => {
-    db.saveMessage({ id: 'original', conversationId: 'c1', author: { kind: 'me' }, text: 'Review this deployment.', at: 123 })
-    const r = runner()
-    await r.forward('original', 'd1')
+    await r.send('c1', 'Staging.', [], { reply: { messageId: 'question' } })
     await r.idle()
-    expect(db.messages().some((m) => m.conversationId === 'd1' && m.author.kind === 'agent')).toBe(true)
-    const reply = db.messages().find((m) => m.conversationId === 'd1' && m.author.kind === 'agent')!
-    db.createConversation({ id: 'd2', kind: 'dm', name: 'a2', members: ['a2'] })
-    await r.forward(reply.id, 'd2')
-    await r.forward(reply.id, 'c1')
-    await r.idle()
-    for (const id of ['d2', 'c1']) {
-      expect(db.messages().find((m) => m.conversationId === id && m.forwarded?.messageId === reply.id)?.forwarded).toMatchObject({ conversationName: 'lia', conversationKind: 'dm', author: 'lia', agentId: 'a1' })
-    }
-    await expect(r.forward(reply.id, 'd1')).rejects.toThrow()
-    db.saveAgent({ ...db.agent('a2')!, archived: true })
-    await expect(r.forward(reply.id, 'd2')).rejects.toThrow()
-  })
-
-  it('does not consume a pending question when forwarding a message', async () => {
-    db.saveMessage({ id: 'original', conversationId: 'c1', author: { kind: 'me' }, text: 'A quote, not an answer.', at: 123 })
-    db.saveMessage({ id: 'question', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'Which environment?', at: 124, run: { status: 'waiting_input', steps: [], question: 'Which environment?' } })
-    const r = runner()
-    r.setPaused(true)
-    await r.forward('original', 'd1')
-    expect(db.message('question')?.run?.status).toBe('waiting_input')
-  })
-
-  it('copies forwarded image attachments so deleting the source does not lose them', async () => {
-    const data = mkdtempSync(join(tmpdir(), 'ad-data-'))
-    const r = runner(undefined, data)
-    r.setPaused(true)
-    await r.send('c1', '', [{ name: 'test.png', mime: 'image/png', data: Buffer.from('image-content').toString('base64') }])
-    const source = db.messages().find((m) => m.author.kind === 'me')!
-    db.createConversation({ id: 'c2', kind: 'channel', name: 'launch', members: [] })
-    await r.forward(source.id, 'c2')
-    const copy = db.artifacts().find((a) => a.conversationId === 'c2')!
-    expect(copy.id).not.toBe(db.artifacts().find((a) => a.conversationId === 'c1')?.id)
-    expect(copy).toMatchObject({ name: 'test.png', agentId: '', kind: 'image' })
-    db.deleteConversation('c1')
-    expect(readFileSync(join(data, 'artifacts', copy.id, copy.name), 'utf8')).toBe('image-content')
-    expect(db.message(copy.messageId)?.forwarded?.conversationName).toBe('engenharia')
+    expect(db.message('question')?.run?.status).toBe('done')
+    expect(claude.turns).toHaveLength(1)
   })
 
   it('answers in a DM, streams deltas and records a receipt that matches the agent usage', async () => {
@@ -492,6 +429,19 @@ describe('browser handback', () => {
     expect(claude.turns).toHaveLength(0)
     await r.handedBack('ghost')
     await r.idle()
+    expect(claude.turns).toHaveLength(0)
+  })
+})
+
+describe('an agent on Gemini', () => {
+  it('runs on Gemini, not on Claude', async () => {
+    db.saveAgent(agent('a9', 'gi', { modelId: customModel('gemini', 'gemini/gemini-2.5-flash') }))
+    db.createConversation({ id: 'd9', kind: 'dm', name: 'a9', members: ['a9'] })
+    const gemini = counted(fakeEngine('gemini'))
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-gemini-')) })
+    await r.send('d9', 'oi')
+    await r.idle()
+    expect(gemini.turns.map((t) => t.model)).toEqual(['gemini/gemini-2.5-flash'])
     expect(claude.turns).toHaveLength(0)
   })
 })

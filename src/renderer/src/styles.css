@@ -324,6 +324,35 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.section__head .badge {
+  margin-right: 4px;
+}
+.fold-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: left;
+}
+.fold-toggle:hover {
+  color: var(--text-2);
+}
+.fold-toggle svg {
+  flex-shrink: 0;
+  transition: transform 0.15s var(--ease);
+}
+.fold-toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+/* What's folded goes, except where you are: the row you're in never disappears from under you. */
+.is-folded .nav-item:not(.is-active) {
+  display: none;
+}
 .nav-item {
   width: 100%;
   display: flex;
@@ -358,6 +387,13 @@ h3 {
 .nav-item__meta {
   font-size: 11.5px;
   color: var(--text-3);
+}
+.nav-item__role {
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .badge {
   background: var(--danger);
@@ -758,16 +794,35 @@ h3 {
   min-width: 0;
   max-width: 100%;
 }
-.msg__forwarded {
+.msg__actions {
   display: flex;
+  margin-top: 4px;
+}
+.msg__reply {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  max-width: 100%;
-  margin-bottom: 5px;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: var(--radius);
   color: var(--text-3);
-  font-size: 11.5px;
-  overflow-wrap: anywhere;
-  text-align: left;
+}
+.msg__reply:hover,
+.msg__reply:focus-visible,
+.msg__reply--excerpt {
+  background: var(--bubble);
+  color: var(--text);
+}
+.msg__reply--excerpt {
+  padding: 0 8px;
+  font-size: 12px;
+}
+@media (pointer: coarse) {
+  .msg__reply {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 .reply-quote {
   display: flex;
@@ -800,29 +855,6 @@ h3 {
 .composer__reply .reply-quote {
   flex: 1;
   margin: 0;
-}
-.forward-preview {
-  margin: 0 0 14px;
-  padding: 8px 12px;
-  border-left: 2px solid var(--border-strong);
-  color: var(--text-2);
-  font-size: 13px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 140px;
-  overflow-y: auto;
-}
-.agent-dialog__identity {
-  margin-top: 12px;
-  overflow-wrap: anywhere;
-}
-.agent-dialog__identity .grow {
-  min-width: 0;
-}
-.agent-dialog__identity p {
-  margin: 3px 0 0;
-  max-height: 160px;
-  overflow-y: auto;
 }
 /* My messages: a bubble on the right, no avatar or name. */
 .msg--me {
@@ -908,6 +940,9 @@ h3 {
   background: var(--code-bg);
 }
 .md table {
+  display: block; /* a wide table scrolls by itself, with its words whole */
+  overflow-x: auto;
+  overflow-wrap: normal;
   border-collapse: collapse;
   margin: 6px 0 8px;
   font-size: 13px;
@@ -932,6 +967,11 @@ h3 {
 }
 .md a {
   color: var(--accent);
+}
+/* A long link or word breaks instead of pushing the message out of the conversation. */
+.md {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .system-line {
   display: flex;
@@ -3947,6 +3987,30 @@ table.csv th {
   font-size: 13px;
   line-height: 1.5;
 }
+/* More logins of a harness, in Settings › Models. */
+.accounts {
+  display: grid;
+  gap: 4px;
+}
+.accounts__add {
+  margin-top: 8px;
+}
+.accounts__add select {
+  flex: 0 0 auto;
+  width: auto;
+}
+.accounts__add input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* An agent's reserve model, under the main one. */
+.reserve {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
 .model-picker {
   display: flex;
   flex-wrap: wrap;
@@ -6326,6 +6390,9 @@ kbd {
   display: none;
 }
 @media (max-width: 760px) {
+  .fold-toggle {
+    min-height: 36px;
+  }
   .app {
     grid-template-columns: minmax(0, 1fr);
     height: 100dvh;
@@ -6488,4 +6555,135 @@ kbd {
   select {
     font-size: 16px;
   }
+}
+
+/* ---------- an agent's computer apps ---------- */
+.apps-card { display: grid; gap: 12px; }
+.apps-setup { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); color: var(--text); font-size: 14px; }
+.apps-list { display: grid; gap: 8px; }
+.apps-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+.apps-row__name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.apps-row__name strong { font-weight: 600; }
+.apps-open { font-size: 12px; color: var(--ok); background: var(--ok-soft); padding: 2px 8px; border-radius: 999px; }
+.app-ic { flex: none; border-radius: 22%; display: block; }
+.app-ic--blank { display: grid; place-items: center; background: var(--border); color: var(--text-3); font-weight: 700; font-size: 13px; }
+.apps-add { justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
+.app-picker { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); overflow: hidden; box-shadow: var(--shadow); }
+.app-picker__head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-3); }
+.app-picker__head input { border: 0; outline: 0; background: transparent; font: inherit; font-size: 15px; color: var(--text); padding: 4px 0; }
+.app-picker__body { max-height: 320px; overflow-y: auto; padding: 12px; display: grid; gap: 10px; }
+.app-picker__label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.app-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 8px; border: 0; border-radius: 12px; background: transparent; cursor: pointer; color: var(--text); }
+.app-tile:hover:not(:disabled) { background: var(--accent-soft); }
+.app-tile.is-given { opacity: .5; cursor: default; }
+.app-tile__ic { position: relative; }
+.app-tile__check { position: absolute; right: -4px; bottom: -4px; width: 18px; height: 18px; border-radius: 50%; background: var(--ok); color: #fff; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--panel); }
+.app-tile__name { font-size: 12px; line-height: 1.2; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.app-picker .app-picker__head input,
+.app-picker .app-picker__head input:focus { border: 0; box-shadow: none; outline: none; background: transparent; padding: 4px 0; }
+
+.apps-setup__how { display: block; margin-top: 4px; color: var(--text-2); font-size: 12px; }
+
+/* An image the size of the window */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  background: rgba(12, 11, 10, 0.94);
+  color: #f3efe8;
+}
+.lightbox__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  -webkit-app-region: no-drag;
+}
+.lightbox__bar .icon-btn {
+  color: inherit;
+}
+.lightbox__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lightbox__zoom {
+  min-width: 44px;
+  text-align: center;
+}
+.lightbox__stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+}
+.lightbox__stage.is-zoomed {
+  cursor: grab;
+}
+.lightbox__stage.is-zoomed:active {
+  cursor: grabbing;
+}
+.lightbox__stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+.lightbox__nav {
+  position: absolute;
+  top: 50%;
+  width: 44px;
+  height: 64px;
+  padding: 0;
+  transform: translateY(-50%);
+  text-align: center;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font-size: 28px;
+  cursor: pointer;
+}
+.lightbox__nav:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.lightbox__nav--prev {
+  left: 12px;
+}
+.lightbox__nav--next {
+  right: 12px;
+}
+[data-os='mac'] .lightbox__bar {
+  padding-left: 84px; /* the window's buttons are here */
+}
+
+/* An agent's own color and picture */
+.avatar__photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.swatch--custom {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--agent, conic-gradient(#e5484d, #f5a524, #30a46c, #0091ff, #8e4ec6, #e5484d));
+}
+.swatch--custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.swatch--custom.is-active {
+  overflow: visible;
 }

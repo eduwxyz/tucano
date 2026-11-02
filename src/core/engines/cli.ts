@@ -72,6 +72,13 @@ export function parseJson(line: string): Record<string, unknown> | null {
   }
 }
 
+// The CLI's own words when the subscription or the provider is out for now: Claude Code's
+// "You've hit your limit" and 5-hour or weekly limit, Codex's "usage limit", Gemini's quota
+// (RESOURCE_EXHAUSTED), OpenCode's and the providers' 429s. Not Tucano's own monthly limit,
+// which never reaches here as an engine error.
+const OUT_OF_QUOTA = /usage limit|hit your (usage )?limit|limit reached|limit_reached|quota|resource_exhausted|rate.?limit|too many requests|\b429\b|insufficient_quota|credit balance is too low|out of (extra )?usage/i
+export const outOfQuota = (message: string): boolean => OUT_OF_QUOTA.test(message)
+
 export const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 
 export function lastLines(text: string, n = 3): string {

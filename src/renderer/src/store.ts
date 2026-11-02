@@ -4,6 +4,9 @@ import { useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { CoreEvent } from '../../shared/rpc'
 import {
+  type Account,
+  type AccountEngine,
+  MAX_AGENT_ROUTINES,
   MODELS,
   modelInfo,
   type EngineId,
@@ -64,6 +67,7 @@ export interface State {
   models: Model[]
   agents: Agent[]
   connectors: Connector[]
+  lightbox: { items: { url: string; title: string }[]; index: number } | null
   conversations: Conversation[]
   messages: Message[]
   approvals: Approval[]
@@ -82,7 +86,7 @@ export interface State {
   demoServer?: { command: string; args: string[] }
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic' | 'agent-card'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string } | { kind: 'forward'; messageId: string }
+export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
 
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
 
@@ -114,6 +118,7 @@ let state: State = {
   models: MODELS,
   agents: [],
   connectors: [],
+  lightbox: null,
   conversations: [],
   messages: [],
   approvals: [],
@@ -329,7 +334,18 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 
 export const refreshEngines = (): void => void call('refreshEngines')
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
+// More logins of Claude Code and Codex, each signed into in a terminal.
+export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })
+export const loginAccount = (id: string): Promise<{ opened: boolean; command: string }> => call('loginAccount', { id })
+export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
+// The person's own apps, through agent-desktop.
+export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> => call('desktopStatus')
+export type InstalledApp = { name: string; bundleId?: string; path?: string; running?: boolean; icon?: string }
+export const installedApps = (): Promise<InstalledApp[]> => call('installedApps')
+export const openApps = (): Promise<{ name: string; bundleId?: string }[]> => call('openApps')
+export const installDesktop = (): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installDesktop')
+export const desktopPermissions = (): void => void call('desktopPermissions')
 
 export function saveAgent(agent: Agent, channelIds: string[]): Promise<void> {
   return call('saveAgent', { agent, channelIds })
@@ -346,6 +362,7 @@ export function newAgentDraft(): Agent {
     modelId: 'sonnet',
     effort: 'medium',
     limit: state.settings.defaultLimit,
+    maxRoutines: MAX_AGENT_ROUTINES,
     used: 0,
     grants: {},
     memory: 'auto',
@@ -408,7 +425,6 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
 export const setReplyTo = (conversationId: string, reply?: ReplyTarget): void => set((s) => ({ ...s, replyTo: { ...s.replyTo, [conversationId]: reply } }))
 
 export const stopRun = (messageId: string): void => void call('stopRun', { messageId })
-export const forwardMessage = (messageId: string, conversationId: string): Promise<void> => call('forwardMessage', { messageId, conversationId })
 export const retryRun = (messageId: string): void => void call('retryRun', { messageId })
 export const continueRun = (messageId: string): void => void call('continueRun', { messageId })
 
@@ -433,6 +449,10 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 }
 
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openLightbox = (items: { url: string; title: string }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
+export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
+export const moveLightbox = (by: number): void =>
+  set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
 export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog, navOpen: dialog ? false : s.navOpen }))
 export const setTab = (page: string, tab: string): void => set((s) => ({ ...s, tabs: { ...s.tabs, [page]: tab } }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
@@ -452,7 +472,7 @@ export const openExternal = (url: string): void =>
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
-export const engineModels = (engine: EngineId): Promise<{ models: string[]; error?: string }> => call('engineModels', { engine })
+export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
 export const localSkills = (): Promise<LocalSkill[]> => call('localSkills')

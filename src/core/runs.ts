@@ -1,13 +1,14 @@
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type ReplyTarget, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type ReplyTarget, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
+import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { ABRIR_PR, GITHUB, type GitHub } from './github'
@@ -15,6 +16,8 @@ import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills
 import { availableModels, builderSection, draftFrom, PROPOR_AGENTE } from './tuca'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
+import { accountDir } from './engines/detect'
+import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
@@ -65,6 +68,7 @@ export interface RunnerDeps {
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
+  apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done') => void
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
@@ -82,7 +86,7 @@ export interface Connectors {
 }
 
 type Exposed = { connector: Connector; tool: ConnectorTool & { inputSchema: Record<string, unknown> } }
-type SendOptions = { reply?: ReplyTarget; forwarded?: Message['forwarded']; artifacts?: Artifact[] }
+type SendOptions = { reply?: ReplyTarget }
 
 // Tool names the CLI sees: "<connector>__<tool>", unique per turn.
 function exposedName(connector: Connector, tool: string, taken: Set<string>): string {
@@ -134,33 +138,6 @@ export class Runner {
     this.paused = paused
   }
 
-  async forward(messageId: string, conversationId: string): Promise<void> {
-    const { db } = this.deps
-    const source = db.message(messageId)
-    const from = source && db.conversation(source.conversationId)
-    const to = db.conversation(conversationId)
-    if (!source || !from || !to || from.id === to.id)
-      throw new Error(L('Escolha outra conversa para encaminhar a mensagem.', 'Choose another conversation to forward the message.'))
-    const recipient = to.kind === 'dm' ? db.agent(to.name) : undefined
-    if (to.kind === 'dm' && (!recipient || recipient.archived))
-      throw new Error(L('Esse agente não está disponível.', 'This agent is unavailable.'))
-    if (!['me', 'agent'].includes(source.author.kind) || source.run?.status === 'working')
-      throw new Error(L('Essa mensagem ainda não pode ser encaminhada.', 'This message cannot be forwarded yet.'))
-    const artifacts = db.artifacts().filter((a) => a.messageId === source.id)
-    if (!source.text.trim() && !artifacts.length)
-      throw new Error(L('Essa mensagem está vazia.', 'This message is empty.'))
-    if (artifacts.length && !this.deps.dataDir)
-      throw new Error(L('Os anexos não estão disponíveis.', 'Attachments are unavailable.'))
-    await this.send(conversationId, source.text, [], {
-      forwarded: source.forwarded ?? {
-        messageId: source.id, conversationId: from.id, conversationKind: from.kind,
-        conversationName: from.kind === 'channel' ? from.name : db.agent(from.name)?.name ?? L('Agente removido', 'Removed agent'),
-        author: await this.authorOf(source), agentId: source.author.kind === 'agent' ? source.author.id : undefined, at: source.at
-      },
-      artifacts
-    })
-  }
-
   // Explicit mentions and replies choose who answers before a pending question,
   // the DM agent, the channel's only agent, or the router.
   async send(conversationId: string, text: string, images: ImageUpload[] = [], options: SendOptions = {}): Promise<void> {
@@ -168,15 +145,15 @@ export class Runner {
     const conv = db.conversation(conversationId)
     const body = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
-    const { forwarded, artifacts = [], reply } = options
-    if (!conv || (!body && pictures.length === 0 && !artifacts.length)) return
+    const { reply } = options
+    if (!conv || (!body && pictures.length === 0)) return
     const original = reply ? db.message(reply.messageId) : undefined
     if (reply && (!original || original.conversationId !== conversationId || !['me', 'agent'].includes(original.author.kind) || original.run?.status === 'working'))
       throw new Error(L('Escolha uma mensagem desta conversa para responder.', 'Choose a message in this conversation to reply to.'))
     if (reply?.quote !== undefined && (!reply.quote.trim() || reply.quote.length > MAX_QUOTE_CHARS))
       throw new Error(L('Selecione um trecho de até 32.000 caracteres para citar.', 'Select an excerpt of up to 32,000 characters to quote.'))
 
-    const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), forwarded }
+    const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now() }
     if (original) {
       const agentId = original.author.kind === 'agent' ? original.author.id : undefined
       mine.reply = {
@@ -185,17 +162,16 @@ export class Runner {
         author: await this.authorOf(original), agentId
       }
     }
-    for (const artifact of artifacts) this.copyArtifact(mine, artifact)
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
 
     const members = this.members(conv)
-    let responders = forwarded ? [] : mentioned(body, members).slice(0, MAX_MENTIONS)
+    let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
     const replyAgent = mine.reply?.agentId
     if (!responders.length && replyAgent) responders = members.filter((a) => a.id === replyAgent)
 
-    const pending = forwarded ? undefined : this.pendingQuestion(conv.id)
+    const pending = this.pendingQuestion(conv.id)
     const asked = pending && (!original || (pending.author.kind === 'agent' && pending.author.id === replyAgent)) ? pending : undefined
     if (asked) {
       this.update(asked, { run: { ...asked.run!, status: 'done' } })
@@ -222,18 +198,8 @@ export class Runner {
   }
 
   private async authorOf(message: Message): Promise<string> {
-    if (message.forwarded) return message.forwarded.author
     if (message.author.kind === 'agent') return this.deps.db.agent(message.author.id)?.name ?? L('Agente removido', 'Removed agent')
     return (await this.deps.settings()).workspaceName
-  }
-
-  private copyArtifact(message: Message, original: Artifact): void {
-    const artifact: Artifact = { ...original, id: randomUUID(), agentId: '', conversationId: message.conversationId, messageId: message.id, createdAt: message.at }
-    const dir = join(this.deps.dataDir!, 'artifacts', artifact.id)
-    mkdirSync(dir, { recursive: true })
-    copyFileSync(join(this.deps.dataDir!, 'artifacts', original.id, original.name), join(dir, artifact.name))
-    this.deps.db.saveArtifact(artifact)
-    this.deps.emit({ type: 'artifact', artifact })
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -286,6 +252,7 @@ export class Runner {
       .slice(-40)
       .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : ''}`)
     const task = [
+      msg.run.task, // what it was asked: a trigger's event is only there
       L(
         `Você pausou a sua última resposta ao chegar no teto de gasto dela, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
         `You paused your last reply when it reached its spending cap, and ${me} asked you to go on. What you wrote is in your last message above.`
@@ -481,20 +448,41 @@ export class Runner {
     }
   }
 
+  // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
+  // The agent's reserve, when it can take the reply: its model, and the account it runs on (unset: its harness's
+  // usual login). None when it's the very login and model that just ran out, or when its login isn't ready.
+  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
+    const model = agent.fallbackModelId ? modelInfo(agent.fallbackModelId) : undefined
+    if (!model?.id) return undefined
+    // An account of another harness (the reserve's model changed since) means the usual login, like the agent's own.
+    const account = agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
+    if (agent.fallbackModelId === agent.modelId && account?.id === from?.id) return undefined
+    const status = settings.engines[model.engine]
+    if (!status?.installed || (account ? !account.loggedIn : !status.loggedIn)) return undefined
+    return { model, account }
+  }
+
   private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean }): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
     const model = modelInfo(agent.modelId)
-    const engineId: EngineId = model?.engine ?? 'claude'
-    const engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
+    // The model this reply runs on: the agent's, or its reserve once the main one's subscription is out.
+    let modelId = agent.modelId
+    let onReserve = false // the reserve takes a reply once
+    let modelName = model?.id ?? agent.modelId
+    let engineId: EngineId = model?.engine ?? 'claude'
+    let engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
 
     const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now() }
     const started = Date.now()
     let stepStarted = started
     const thinking = (): Step => ({ id: randomUUID(), label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' })
     msg.text = ''
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()] }
+    // "Try again" passes no task: it repeats the one of the reply it's redoing.
+    const task = opts.task ?? opts.existing?.run?.task
+    const again = task ? { task } : {}
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
@@ -516,18 +504,36 @@ export class Runner {
     if (used >= agent.limit) {
       save({
         text: L('Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.', "I stopped: I've used all my tokens for this month. It can be raised on my page."),
-        run: { status: 'limit_reached', depth: opts.depth, steps: [] }
+        run: { status: 'limit_reached', depth: opts.depth, steps: [], ...again }
       })
       return msg
     }
 
-    const status = settings.engines[engineId]
-    if (!status.installed || !status.loggedIn) {
+    // Another login of this harness (Settings › Accounts), when the agent has one.
+    let account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    if (account && !account.loggedIn) {
       save({
         run: {
           status: 'failed',
           depth: opts.depth,
           steps: [],
+          ...again,
+          error: L(
+            `A conta “${account.name}” do ${ENGINES[engineId].label} não está logada. Entre nela em Configurações › Modelos › Contas e mande de novo.`,
+            `The “${account.name}” ${ENGINES[engineId].label} account isn't signed in. Sign in under Settings › Models › Accounts and send it again.`
+          )
+        }
+      })
+      return msg
+    }
+    const status = settings.engines[engineId]
+    if (!status.installed || (!status.loggedIn && !account)) {
+      save({
+        run: {
+          status: 'failed',
+          depth: opts.depth,
+          steps: [],
+          ...again,
           error: L(
             `O ${ENGINES[engineId].label} ${status.installed ? 'não está logado' : 'não está instalado'}. Resolva em Configurações e mande de novo.`,
             `${ENGINES[engineId].label} ${status.installed ? "isn't signed in" : "isn't installed"}. Fix it in Settings and send it again.`
@@ -562,6 +568,7 @@ export class Runner {
     const builds = !!this.deps.gateway && agent.kind === 'tuca'
     const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
+    const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
     const skills = this.deps.gateway ? this.deps.skills : undefined
     const mySkills = skills?.forAgent(agent.id) ?? []
@@ -581,6 +588,7 @@ export class Runner {
     const seen = new Map<string, { result: string; n: number }>()
     let failing = 0 // tool calls failing in a row
     let inFlight = 0 // a tool running has its own timeout, so it isn't silence
+    let acted = false // called a tool or searched the web: a failed turn then isn't redone on the reserve model
     let lastSign = Date.now()
     let overBudget = false
     let refusedOver = 0
@@ -623,7 +631,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
@@ -680,6 +688,7 @@ export class Runner {
       ...(builds ? [PROPOR_AGENTE] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
+      ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
@@ -862,6 +871,59 @@ export class Runner {
           return clip(out.result)
         }
 
+        // The person's own apps: each action a step; a click that sends, pays or deletes, an approval.
+        if (apps && APP_TOOL_NAMES.has(name)) {
+          const current = db.agent(agent.id)
+          if (!current?.apps?.length) return textResult(L('Seus apps foram desligados.', 'Your apps were turned off.'), true)
+          const t0 = Date.now()
+          const { label, detail } = appStep(name, args)
+          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          flush()
+          msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
+          save()
+          const out = await apps.call(current, name, args)
+          const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
+          if (out.approval) {
+            if (question || approval) {
+              msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
+              save()
+              return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+            }
+            approval = {
+              id: randomUUID(),
+              hash: approvalHash(APPS, name, out.approval.args),
+              agentId: agent.id,
+              conversationId: conv.id,
+              messageId: msg.id,
+              connectorId: APPS,
+              connectorName: L('Apps do computador', 'Computer apps'),
+              tool: name,
+              args: out.approval.args,
+              why: out.approval.why,
+              highRisk: false,
+              state: 'pending',
+              createdAt: Date.now(),
+              expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+            }
+            db.createApproval(approval)
+            emit({ type: 'approval', approval })
+            msg.run = { ...msg.run!, approvalId: approval.id, steps: [...close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }), thinking()] }
+            stepStarted = Date.now()
+            save()
+            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval')
+            return textResult(
+              L(
+                `Pedido de aprovação criado. A ação ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
+                `Approval request created. The action has NOT happened yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
+              )
+            )
+          }
+          msg.run = { ...msg.run!, steps: [...close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {}), thinking()] }
+          stepStarted = Date.now()
+          save()
+          return clip(out.result)
+        }
+
         if (name === ABRIR_PR && prTool) {
           const repo = repos.length > 1 ? repos.find((r) => r === args['repositorio']) : repos[0]
           if (!repo) return textResult(L(`Diga o repositório: ${repos.join(' ou ')}.`, `Say the repository: ${repos.join(' or ')}.`), true)
@@ -1011,6 +1073,7 @@ export class Runner {
           )
         }
         inFlight++
+        acted = true
         sign()
         try {
           const r = await runTool(name, args)
@@ -1044,68 +1107,92 @@ export class Runner {
     const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary, images: names })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names })
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
     try {
-      const events = engines[engineId].run({
-        model: model?.id ?? agent.modelId,
-        effort: agent.effort,
-        system: systemPrompt({
-          agent,
-          settings,
-          conversation: conv,
-          peers,
-          memories: promptMemories,
-          canRemember,
-          hasComputer: !!computers,
-          browser: !!browser,
-          offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
-          macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
-          web: agent.web !== false,
-          routines: routines?.forAgent(agent.id),
-          skills: skills && mySkills,
-          publish: repos,
-          builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
-        }),
-        prompt: blocks.join('\n\n'),
-        blocks,
-        images,
-        cwd,
-        signal: control.ctl.signal,
-        mcpUrl: session?.url,
-        web: agent.web !== false
-      })
-      for await (const ev of events) {
-        sign()
-        if (ev.type === 'text') {
-          msg.text += ev.delta
-          pending += ev.delta
-          timer ??= setTimeout(flush, DELTA_FLUSH_MS)
-        } else if (ev.type === 'progress') {
-          progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
-          const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
-          if (used + counted > agent.limit) halt('limit')
-          else if (counted > budget) {
-            if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
-            overBudget = true
-            if (counted > budget * BUDGET_OVERRUN) halt('budget')
+      for (;;) {
+        try {
+          const events = engines[engineId].run({
+            model: modelName,
+            effort: agent.effort,
+            system: systemPrompt({
+              agent,
+              settings,
+              conversation: conv,
+              peers,
+              memories: promptMemories,
+              canRemember,
+              hasComputer: !!computers,
+              browser: !!browser,
+              apps: apps ? agent.apps : undefined,
+              offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
+              macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
+              web: agent.web !== false,
+              routines: routines?.forAgent(agent.id),
+              skills: skills && mySkills,
+              publish: repos,
+              builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
+            }),
+            prompt: blocks.join('\n\n'),
+            blocks,
+            images,
+            cwd,
+            signal: control.ctl.signal,
+            mcpUrl: session?.url,
+            web: agent.web !== false,
+            account: account && this.deps.dataDir ? accountDir(this.deps.dataDir, account.id) : undefined
+          })
+          for await (const ev of events) {
+            sign()
+            if (ev.type === 'text') {
+              msg.text += ev.delta
+              pending += ev.delta
+              timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+            } else if (ev.type === 'progress') {
+              progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
+              const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
+              if (used + counted > agent.limit) halt('limit')
+              else if (counted > budget) {
+                if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
+                overBudget = true
+                if (counted > budget * BUDGET_OVERRUN) halt('budget')
+              }
+            } else if (ev.type === 'quota') {
+              if (!account) this.deps.onQuota?.(ev.quota) // the windows shown are the usual login's
+            } else if (ev.type === 'web') {
+              // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
+              acted = true
+              addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })
+              if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
+            } else if (ev.type === 'done') {
+              result = ev
+            } else if (ev.type === 'error') {
+              error = ev.message
+            }
           }
-        } else if (ev.type === 'quota') {
-          this.deps.onQuota?.(ev.quota)
-        } else if (ev.type === 'web') {
-          // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
-          addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })
-          if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
-        } else if (ev.type === 'done') {
-          result = ev
-        } else if (ev.type === 'error') {
-          error = ev.message
+        } catch (e) {
+          error = e instanceof Error ? e.message : String(e)
         }
+        // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
+        // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
+        const reserve = !onReserve && !result && error && !control.reason && !acted && !question && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
+        if (!reserve) break
+        const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
+        flush()
+        msg.text = '' // the CLI's own "you've hit your limit", when it wrote it as text
+        onReserve = true
+        modelId = agent.fallbackModelId!
+        modelName = reserve.model.id
+        engineId = reserve.model.engine
+        engineLabel = `${ENGINES[engineId].label} · ${reserve.model.label}`
+        account = reserve.account
+        const to = `${engineLabel}${account ? ` (${account.name})` : ''}`
+        addSteps({ id: randomUUID(), label: L('Foi pro modelo reserva', 'Moved to the reserve model'), detail: L(`${from} está sem limite agora; segue no ${to}`, `${from} is out of quota for now; going on with ${to}`), status: 'done' })
+        error = null
+        progress = { tokens: 0, cacheRead: 0 }
       }
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e)
     } finally {
       clearInterval(stall)
       flush()
@@ -1115,9 +1202,9 @@ export class Runner {
 
     const ms = Date.now() - started
     const receipt: Receipt | undefined = result
-      ? { model: agent.modelId, ms, ...result.usage }
+      ? { model: modelId, ms, ...result.usage }
       : progress.tokens > 0
-        ? { model: agent.modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
+        ? { model: modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
     const usedNow = db.usedThisMonth(agent.id)
@@ -1139,7 +1226,7 @@ export class Runner {
 
     const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
     if (control.reason === 'stopped') {
-      save({ run: { ...base, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
+      save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
       const why = {
         loop: L(`repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`, `I repeated the same thing, with the same result, ${REPEAT_STOP} times. It looked like a loop`),
@@ -1148,18 +1235,18 @@ export class Runner {
       }[control.reason]
       save({
         text: msg.text ? `${msg.text} …` : '',
-        run: { ...base, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
+        run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
       })
     } else if (overBudget && control.reason !== 'limit') {
       // Wrapped up at the budget, or cut past it: either way it can go on from here.
       save({
         text: msg.text.trim() ? msg.text : (result?.text ?? ''),
-        run: { ...base, status: 'paused', budget, steps: closeThinking('done', L('Pausou', 'Paused')) }
+        run: { ...base, ...again, status: 'paused', budget, steps: closeThinking('done', L('Pausou', 'Paused')) }
       })
     } else if (control.reason === 'limit') {
       save({
         text: msg.text ? `${msg.text} …` : '',
-        run: { ...base, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
+        run: { ...base, ...again, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
       })
     } else if (result) {
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
@@ -1171,7 +1258,7 @@ export class Runner {
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question')
       else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done')
     } else {
-      save({ run: { ...base, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: error ?? L('O motor terminou sem resposta.', 'The engine ended without a reply.') } })
+      save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: error ?? L('O motor terminou sem resposta.', 'The engine ended without a reply.') } })
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
     const st = msg.run?.status
@@ -1191,7 +1278,7 @@ export class Runner {
     const ap = db.approval(id)
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason)) return
     const owner = db.agent(ap.agentId)
-    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
+    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), `${ap.connectorId}:${ap.tool}`] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
     }
@@ -1204,6 +1291,7 @@ export class Runner {
     const ran = L('Executou.', 'Ran.')
 
     let outcome: string
+    let ok = false // whether the approved thing went through
     let task: string
     if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
       if (decision === 'approved') {
@@ -1215,6 +1303,7 @@ export class Runner {
             `\n\n---\nMade by ${agent?.name ?? 'an agent'} in Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens in ${cost.replies} repl${cost.replies > 1 ? 'ies' : 'y'} so far` : ''}.`
           )
           const pr = await this.deps.github!.openPr({ ...ap.args, body: `${String(ap.args['body'] ?? '')}${footer}` })
+          ok = true
           outcome = L(`Abriu a PR #${pr.number}.`, `Opened PR #${pr.number}.`)
           task = L(`${me} aprovou, e o app abriu a PR #${pr.number}: ${pr.url}\n\nAvise ${me} com o link em uma frase.`, `${me} approved, and the app opened PR #${pr.number}: ${pr.url}\n\nTell ${me} with the link in one sentence.`)
         } catch (e) {
@@ -1232,11 +1321,37 @@ export class Runner {
           `${me} ${decision === 'refused' ? `turned down the PR${reason ? `: "${reason}"` : ''}` : "didn't answer the PR request"}. Nothing was opened. Reply with that in mind.`
         )
       }
+    } else if (ap.connectorId === APPS) {
+      // A click or key in one of the person's apps: made on the same app, on the same element.
+      const onde = typeof ap.args['onde'] === 'string' ? ap.args['onde'] : ''
+      const where = onde === 'menu de contexto' ? L(', no menu que abre com o clique direito (app_clicar com botao_direito)', ', in the menu a right click opens (app_clicar with botao_direito)') : onde === 'barra de menus' ? L(', na barra de menus (app_menu)', ', in the menu bar (app_menu)') : ''
+      const what = typeof ap.args['texto'] === 'string' ? L(`confirmar "${ap.args['texto']}" no ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `clique em "${String(ap.args['alvo'] ?? '')}"`})`, `confirming "${ap.args['texto']}" in ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `click on "${String(ap.args['alvo'] ?? '')}"`})`) : typeof ap.args['tecla'] === 'string' ? L(`apertar ${ap.args['tecla']} no ${String(ap.args['app'])}`, `pressing ${ap.args['tecla']} in ${String(ap.args['app'])}`) : L(`clicar em "${String(ap.args['alvo'] ?? '')}" no ${String(ap.args['app'])}${where}`, `clicking "${String(ap.args['alvo'] ?? '')}" in ${String(ap.args['app'])}${where}`)
+      if (decision === 'approved' && agent?.apps?.length && this.deps.apps) {
+        const r = await this.deps.apps.approved(agent, ap.args)
+        ok = r.ok
+        outcome = r.ok ? L('Liberado: o agente faz agora.', 'Allowed: the agent does it now.') : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
+        task = r.ok
+          ? L(
+              `${me} aprovou ${what}. Faça agora: leia o app de novo, deixe a tela como estava quando você pediu (selecione o item, se precisar) e faça exatamente essa ação, pelo mesmo caminho; desta vez ela passa sem pedir, uma vez só, nos próximos 30 minutos. Depois confira o resultado e conte a ${me}.`,
+              `${me} approved ${what}. Do it now: read the app again, set the screen as it was when you asked (select the item, if needed) and do exactly that action, the same way; this time it goes through without asking, once, within the next 30 minutes. Then check the result and tell ${me}.`
+            )
+          : L(`${me} aprovou ${what}, mas não deu: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but it couldn't be done: ${r.text} Tell ${me} in one sentence.`)
+      } else if (decision === 'approved') {
+        outcome = L('Não executou: esse agente não tem mais esse app.', "Didn't run: this agent no longer has that app.")
+        task = L(`${me} aprovou ${what}, mas você não tem mais esse app. Avise ${me} em uma frase.`, `${me} approved ${what}, but you no longer have that app. Tell ${me} in one sentence.`)
+      } else {
+        outcome = decision === 'refused' ? L('Nada foi feito.', 'Nothing was done.') : expired
+        task = L(
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi feito. Responda considerando isso.`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was done. Reply with that in mind.`
+        )
+      }
     } else if (ap.connectorId === NAVEGADOR) {
       // A click in the agent's browser: made only on the same page, on the same button.
       const what = L(`clicar em "${String(ap.args['alvo'] ?? '')}"`, `clicking "${String(ap.args['alvo'] ?? '')}"`)
       if (decision === 'approved' && agent?.browser && this.deps.browser) {
         const r = await this.deps.browser.approved(agent, ap.args)
+        ok = r.ok
         outcome = r.ok ? ran : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
         task = r.ok
           ? L(`${me} aprovou ${what}, e o app clicou. A página agora:\n${r.text}\n\nContinue a partir daqui e conte o resultado a ${me}.`, `${me} approved ${what}, and the app clicked. The page now:\n${r.text}\n\nGo on from here and tell ${me} the result.`)
@@ -1259,6 +1374,7 @@ export class Runner {
         const fresh = db.agent(agent.id)!
         db.saveAgent({ ...fresh, grants: { ...fresh.grants, [ap.connectorId]: nivel } })
         emit({ type: 'agent', agent: db.agent(agent.id)! })
+        ok = true
         outcome = L(`Acesso liberado: ${label}.`, `Access granted: ${label}.`)
         task = L(
           `${me} liberou o seu acesso ao ${ap.connectorName} (${label}). As ferramentas dele já estão com você. Continue de onde parou.`,
@@ -1283,6 +1399,7 @@ export class Runner {
       } else {
         try {
           const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
+          ok = !r.isError
           outcome = r.isError ? L('Executou, com erro.', 'Ran, with an error.') : ran
           task = L(
             `${me} aprovou o seu pedido ${call}. O app executou exatamente essa chamada${r.isError ? ' e ela devolveu um erro' : ''}. Resultado:\n${resultText(r)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
@@ -1314,7 +1431,7 @@ export class Runner {
         run: {
           ...msg.run,
           status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
-          steps: [...msg.run.steps, { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && outcome.startsWith(ran) ? 'done' : 'error' }]
+          steps: [...msg.run.steps, { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' }]
         }
       })
     }

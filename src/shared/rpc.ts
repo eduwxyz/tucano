@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Os, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, ReplyTarget, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport } from './types'
+import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, ReplyTarget, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -23,7 +23,6 @@ export interface Api {
   snapshot(): Snapshot
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; reply?: ReplyTarget }): Promise<void>
-  forwardMessage(p: { messageId: string; conversationId: string }): Promise<void>
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
@@ -41,7 +40,15 @@ export interface Api {
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
   loginEngine(p: { engine: EngineId }): { opened: boolean; command: string } // not opened: no terminal to open, the person runs the command
+  addAccount(p: { engine: AccountEngine; name: string }): Account
+  loginAccount(p: { id: string }): { opened: boolean; command: string }
+  removeAccount(p: { id: string }): void
   installEngine(p: { engine: EngineId }): { opened: boolean; command: string; needsNode?: boolean } // needsNode: an npm install with no npm here
+  desktopStatus(): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> // agent-desktop, for the person's apps
+  installedApps(): Promise<{ name: string; bundleId?: string; path?: string; icon?: string }[]> // the person's installed apps (a Mac's), kept on disk
+  openApps(): Promise<{ name: string; bundleId?: string }[]> // the apps with windows right now
+  installDesktop(): { opened: boolean; command: string; needsNode?: boolean }
+  desktopPermissions(): void
   addConnector(p: { input: ConnectorInput }): Promise<string>
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
@@ -68,7 +75,7 @@ export interface Api {
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
-  engineModels(p: { engine: EngineId }): Promise<{ models: string[]; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
+  engineModels(p: { engine: EngineId }): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
   testEngine(p: { model: string }): Promise<{ ok: boolean; message: string }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
   localSkills(): LocalSkill[] // the skills of the user's Claude Code, its plugins and Codex

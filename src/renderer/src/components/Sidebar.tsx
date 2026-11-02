@@ -15,9 +15,11 @@ import {
   shortcut,
   updateSettings,
   useStore,
+  type Agent,
   type View
 } from '../store'
 import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
+import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
 import { AgentAvatar, Icon, TucaMark, type IconName } from './ui'
@@ -45,6 +47,25 @@ function TucaItem(): ReactNode {
     </button>
   )
 }
+
+function Section({ id, label, unread = 0, action, children }: { id: string; label: string; unread?: number; action?: ReactNode; children: ReactNode }): ReactNode {
+  const { open, toggle } = useFold(`section:${id}`)
+  return (
+    <div className={`section ${open ? '' : 'is-folded'}`}>
+      <div className="section__head">
+        <FoldToggle open={open} onToggle={toggle}>
+          {label}
+        </FoldToggle>
+        {/* A closed section still says when something in it is waiting. */}
+        {!open && unread > 0 && <span className="badge badge--soft">{unread}</span>}
+        {action}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const unreadIn = (conversations: { unread?: number }[]): number => conversations.reduce((sum, c) => sum + (c.unread ?? 0), 0)
 
 export function Sidebar(): ReactNode {
   const s = useStore((s) => s)
@@ -139,44 +160,46 @@ export function Sidebar(): ReactNode {
         <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} />
         <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} />
 
-        <div className="section">
-          <div className="section__head">
-            <span>{L('Canais', 'Channels')}</span>
+        <Section
+          id="channels"
+          label={L('Canais', 'Channels')}
+          unread={unreadIn(channels)}
+          action={
             <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(s.platform, 'N')})`, `New channel (${shortcut(s.platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
               <Icon name="plus" size={14} />
             </button>
-          </div>
+          }
+        >
           {channels.map((c) => (
             <div key={c.id} onContextMenu={(e) => open(e, channelMenu(c))}>
               <ChannelItem id={c.id} name={c.name} unread={c.unread} />
             </div>
           ))}
-        </div>
+        </Section>
 
         {dms.length > 0 && (
-        <div className="section">
-          <div className="section__head">
-            <span>{L('Mensagens diretas', 'Direct messages')}</span>
-          </div>
+        <Section id="dms" label={L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)}>
           {dms.map((c) => {
             const agent = agentById(s, c.name)
             if (!agent) return null
             return (
               <div key={c.id} onContextMenu={(e) => open(e, dmMenu(c.id, agent.id, agent.name))}>
-                <DmItem id={c.id} name={agent.name} color={agent.color} unread={c.unread} />
+                <DmItem id={c.id} agent={agent} unread={c.unread} />
               </div>
             )
           })}
-        </div>
+        </Section>
         )}
 
-        <div className="section">
-          <div className="section__head">
-            <span>{L('Agentes', 'Agents')}</span>
+        <Section
+          id="agents"
+          label={L('Agentes', 'Agents')}
+          action={
             <button className="icon-btn icon-btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={openTuca}>
               <Icon name="plus" size={14} />
             </button>
-          </div>
+          }
+        >
           {s.agents
             .filter(isTeam)
             .map((a) => (
@@ -191,7 +214,7 @@ export function Sidebar(): ReactNode {
               <span className="nav-item__meta">{s.agents.filter((a) => a.archived).length}</span>
             </button>
           )}
-        </div>
+        </Section>
       </nav>
 
       {s.settings.onboarding?.done && !s.settings.onboarding.checklistHidden && <GettingStarted />}
@@ -219,12 +242,13 @@ function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: 
   )
 }
 
-function DmItem({ id, name, color, unread }: { id: string; name: string; color: Parameters<typeof AgentAvatar>[0]['agent']['color']; unread?: number }): ReactNode {
+function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: number }): ReactNode {
+  const name = agent.name
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'working'))
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
-      <AgentAvatar agent={{ name, color }} size={18} busy={working} />
+      <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
       {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
       {unread ? <span className="badge badge--soft">{unread}</span> : null}
@@ -243,7 +267,7 @@ function AgentItem({ id }: { id: string }): ReactNode {
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'agent', id })}>
       <AgentAvatar agent={agent} size={18} />
       <span className="nav-item__label">{agent.name}</span>
-      <span className="nav-item__meta">{agent.role}</span>
+      <span className="nav-item__meta nav-item__role" title={agent.role}>{agent.role}</span>
       {agent.computer && agent.computerKind === 'mac' && (
         <span className="nav-item__mac" title={L('Roda no seu computador', 'Runs on your computer')}>
           <Icon name="laptop" size={13} />

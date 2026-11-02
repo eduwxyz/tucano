@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to attach the Windows files to (e.g. v0.2.0)
-        required: true
+        description: Release tag to attach the Windows files to (e.g. v0.2.0); empty for a test build, kept as an artifact
+        required: false
   pull_request:
     paths:
       - package.json

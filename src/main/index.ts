@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
-import type { BrowserOp } from '../shared/types'
+import { chirpOf, type BrowserOp } from '../shared/types'
 import { Browsers } from './browser'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
@@ -65,11 +65,12 @@ type CoreRequest =
   | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done' }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
   | { type: 'screenshot'; id: string; url: string; width: number; height: number; fullPage: boolean }
+  | { type: 'icons'; id: string; paths: string[] }
   | { type: 'browser'; id: string; agentId: string; op: BrowserOp; args?: Record<string, unknown> }
 
 // The conversation open in the window, so a notification about it can stay quiet.
@@ -181,7 +182,8 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
   } else if (msg.type === 'notify') {
     // Already looking at that conversation: nothing to tell.
     if (msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
-    chirp(msg.kind === 'approval' || msg.kind === 'question' ? 'chama' : 'pronto')
+    const sound = chirpOf(msg.kind, msg.sound)
+    if (sound) chirp(sound)
     if (!Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
     n.on('click', () => showWindow(msg.conversationId))
@@ -203,6 +205,13 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
       (data) => child.postMessage({ type: 'browser-result', id: msg.id, data }),
       (e: unknown) => child.postMessage({ type: 'browser-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
     )
+  } else if (msg.type === 'icons') {
+    // The apps' own icons, small, for the picker of the apps an agent may use.
+    // The system's own thumbnail of an app bundle is its real icon (getFileIcon gives a generic one for bundles on a Mac).
+    const icon = (p: string): Promise<string> =>
+      nativeImage.createThumbnailFromPath(p, { width: 64, height: 64 }).then((i) => (i.isEmpty() ? Promise.reject(new Error('empty')) : i.toDataURL())).catch(() => app.getFileIcon(p, { size: 'normal' }).then((i) => i.toDataURL(), () => ''))
+    void Promise.all(msg.paths.map(icon))
+      .then((urls) => child.postMessage({ type: 'icons-result', id: msg.id, data: Object.fromEntries(msg.paths.map((p, i) => [p, urls[i]])) }))
   } else if (msg.type === 'screenshot') {
     screenshot(msg).then(
       (png) => child.postMessage({ type: 'screenshot-result', id: msg.id, data: png.toString('base64') }),

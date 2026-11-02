@@ -55,10 +55,20 @@ export interface Agent {
   handle: string
   role: string
   color: AgentColor
+  customColor?: string // a color of the person's own (#rrggbb), over `color`
+  picture?: string // a small picture (data URL), over the face
   instructions: string
   modelId: string
+  // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
+  // only when the main model failed before doing anything, and the next reply tries the main one again.
+  fallbackModelId?: string
+  // The login the reserve runs on: one of settings.accounts, of the reserve's harness; unset: that harness's usual login.
+  // With it, the reserve can be the same model on another account, when the main account's limit is out.
+  fallbackAccountId?: string
+  accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
   limit: number // tokens per month
+  maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   used: number // tokens used this month, computed from receipts
   grants: Record<string, GrantLevel>
   memory: MemoryMode
@@ -66,10 +76,17 @@ export interface Agent {
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
+  apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
+}
+
+// One of the person's apps given to an agent, by the name the system shows.
+export interface AgentApp {
+  name: string
+  level: 'read' | 'read_write'
 }
 
 // A folder of the Mac mounted in an agent's computer at /projetos/<name>.
@@ -143,6 +160,7 @@ export interface Run {
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
+  task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
 }
@@ -155,6 +173,7 @@ export interface AgentDraft {
   instructions: string
   modelId: string
   effort: Effort
+  maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   web: boolean
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
@@ -175,7 +194,6 @@ export interface Message {
   at: number
   run?: Run
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
-  forwarded?: { messageId: string; conversationId: string; conversationName: string; conversationKind: Conversation['kind']; author: string; agentId?: string; at: number }
   reply?: { messageId: string; author: string; agentId?: string; text: string; at: number; excerpt?: boolean }
 }
 
@@ -204,6 +222,30 @@ export interface Settings {
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
   onboarding?: { done: boolean; checklistHidden?: boolean }
+  folded?: string[] // the ids of what I folded in the sidebar
+  sounds?: boolean // the toucan's chirp on a notification; unset: on
+  accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+}
+
+// Which chirp a notification plays: a knock when an agent needs me, two notes when the work
+// is done, none when I turned the sounds off. The system's own notification is always silent,
+// so this is the only sound the app makes.
+export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, sounds: boolean | undefined): 'chama' | 'pronto' | null {
+  if (sounds === false) return null
+  return kind === 'approval' || kind === 'question' ? 'chama' : 'pronto'
+}
+
+// Another login of a harness (a work account beside a personal one), in a folder of its own
+// in the app's data: Claude Code's CLAUDE_CONFIG_DIR (with its own Keychain entry), Codex's
+// CODEX_HOME. The person signs in through the CLI itself; the app never sees the credentials.
+export const ACCOUNT_ENGINES = ['claude', 'codex'] as const satisfies readonly EngineId[]
+export type AccountEngine = (typeof ACCOUNT_ENGINES)[number]
+export interface Account {
+  id: string
+  engine: AccountEngine
+  name: string // what the person calls it ("Trabalho")
+  loggedIn?: boolean // computed, from the CLI's own status
+  detail?: string // computed: the plan it's on, as the CLI says
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
@@ -276,6 +318,12 @@ export interface TelegramInfo {
 
 // Guards per reply (spec §3), so nothing runs away unattended (a routine at 3 a.m.)
 // without cutting long work that is going somewhere.
+// Routines an agent can have on at once, so it can't schedule itself without end. Each agent can
+// change it on its page (no upper bound: the monthly limit still holds); this is the default.
+export const MAX_AGENT_ROUTINES = 10
+// A whole number, at least 1: what the core enforces, whatever reached it.
+export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
+
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
@@ -335,11 +383,24 @@ export const customModel = (engine: EngineId, name: string): string => `${engine
 // A model to run with: a custom one with no name yet falls back to the default.
 export const usable = (m: Model | undefined): Model | undefined => (m?.id ? m : undefined)
 
+// Models a harness lists on its own (Codex's catalog), known once it's read: their names
+// show everywhere (an agent's page, Tuca's list), not just in the picker.
+const found = new Map<string, Model>()
+export const rememberModels = (list: Model[]): void => {
+  for (const m of list) found.set(customModel(m.engine, m.id), m)
+}
+// A Codex model as an agent keeps it: the app's own ids stay as they were, the rest go by name.
+export const codexValue = (slug: string): string => (MODELS.some((m) => m.id === slug) ? slug : customModel('codex', slug))
+
 export const modelInfo = (id: string): Model | undefined => {
   const listed = MODELS.find((m) => m.id === id)
   if (listed) return listed
-  const m = /^(claude|codex|opencode|pi):(.*)$/s.exec(id)
-  return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: L('Nome próprio', 'Custom name') } : undefined
+  const known = found.get(id)
+  if (known) return known
+  const engine = ENGINE_IDS.find((e) => id.startsWith(`${e}:`))
+  if (!engine) return undefined
+  const name = id.slice(engine.length + 1).trim()
+  return { id: name, engine, label: name, hint: L('Nome próprio', 'Custom name') }
 }
 
 export interface ConnectorTool {

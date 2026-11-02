@@ -11,7 +11,7 @@ Eles fazem o trabalho. O que mexe no mundo espera o seu sim.
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-141210)](LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-chip%20Apple-141210?logo=apple)](#instalar) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#instalar) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#instalar)
+[![macOS](https://img.shields.io/badge/macOS-chip%20Apple%20%7C%20Intel-141210?logo=apple)](#instalar) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#instalar) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#instalar)
 [![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
 
 [English](README.md) · **Português** · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Novidades](CHANGELOG.md)
@@ -77,6 +77,10 @@ Falta alguém no time? Conte pro Tuca do que você precisa, como explicaria pra 
 
 Dê a um agente um computador, um Linux isolado no Docker onde ele instala, roda e testa, ou, se você escolher, o seu próprio computador. Empreste uma pasta ou um repositório. Dê um navegador só dele, um Chrome que você acompanha ao vivo e assume quando ele precisa entrar numa conta.
 
+
+### Os seus apps
+
+Dê a um agente os apps do seu computador, como Notas, Calendário ou Spotify, cada um em *só ler* ou *ler e mexer*. Ele lê a janela como as tecnologias assistivas leem, e clica e escreve nela sem mexer no seu mouse. O que envia, paga, publica, agenda ou apaga espera a sua aprovação. Funciona no macOS, no Windows e no Linux, pelo [agent-desktop](https://github.com/vercel-labs/agent-desktop), open source da Vercel Labs.
 ## Roda no que você já tem
 
 | Harness | Entra com | Observações |
@@ -92,7 +96,7 @@ Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra
 
 ## Instalar
 
-**Você precisa** de um Mac com chip Apple (M1 em diante; testado no macOS 26) de um PC com Linux (x64 ou ARM64; testado no Ubuntu com KDE e Xfce) ou de um PC com Windows 10 ou 11 (x64), e de pelo menos um harness instalado e logado. No Windows, também do [Git for Windows](https://git-scm.com/download/win): o Git Bash dele roda os comandos dos agentes no seu PC, e o Claude Code também precisa dele lá. Opcional: o Docker, pra dar um computador Linux aos agentes ([Docker Desktop](https://www.docker.com/products/docker-desktop/) no Mac ou no Windows; Docker Engine ou Docker Desktop no Linux), e o Google Chrome (ou o Chromium, no Linux), pro navegador deles (sem ele, o app usa o navegador embutido).
+**Você precisa** de um Mac com chip Apple ou Intel (testado no macOS 26, com chip Apple), de um PC com Linux (x64 ou ARM64; testado no Ubuntu com KDE e Xfce) ou de um PC com Windows 10 ou 11 (x64), e de pelo menos um harness instalado e logado. No Windows, também do [Git for Windows](https://git-scm.com/download/win): o Git Bash dele roda os comandos dos agentes no seu PC, e o Claude Code também precisa dele lá. Opcional: o Docker, pra dar um computador Linux aos agentes ([Docker Desktop](https://www.docker.com/products/docker-desktop/) no Mac ou no Windows; Docker Engine ou Docker Desktop no Linux), e o Google Chrome (ou o Chromium, no Linux), pro navegador deles (sem ele, o app usa o navegador embutido).
 
 **1. Instale um harness.** O Claude Code é o mais rápido:
 
@@ -105,7 +109,7 @@ No Windows, no PowerShell: `irm https://claude.ai/install.ps1 | iex` e depois `c
 
 **2. Instale o Tucano.**
 
-- **No Mac:** [baixe o .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), abra e arraste o Tucano pra **Aplicativos**. O app é assinado e notarizado pela Apple, então abre sem aviso.
+- **No Mac:** [baixe o .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), abra e arraste o Tucano pra **Aplicativos**. Num Mac Intel, baixe o [tucano-mac-x64.dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-x64.dmg). O app é assinado e notarizado pela Apple, então abre sem aviso.
 - **No Ubuntu, no Debian e na família deles** (Mint, Pop!_OS…): [baixe o .deb](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-amd64.deb) e abra, ou rode `sudo apt install ./tucano-linux-amd64.deb`.
 - **Nas outras distribuições Linux:** [baixe o AppImage](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-x86_64.AppImage), torne executável (`chmod +x`) e abra. Ele precisa do FUSE, que a maioria dos sistemas tem. No Ubuntu 24.04 em diante, prefira o .deb: ele instala o perfil do AppArmor que apps Electron precisam lá.
 - No Linux ARM64, use os arquivos que terminam em `-arm64` (`tucano-linux-arm64.deb`, `tucano-linux-arm64.AppImage`).
@@ -141,9 +145,9 @@ Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se 
 | **⌘N** | Novo canal |
 | **⌘1 … ⌘9** | Os canais, na ordem da barra lateral |
 | **⌘,** | Configurações |
-| **Botão direito** | Num canal: agentes, renomear, excluir. Num agente: mensagem, editar, arquivar. Numa mensagem: responder, encaminhar, copiar |
+| **Botão direito** | Num canal: agentes, renomear, excluir. Num agente: mensagem, editar, arquivar |
 
-Para responder a parte de uma mensagem, selecione o texto e clique com o botão direito → **Responder ao trecho**. A resposta fica no mesmo canal ou DM, com uma citação que leva à mensagem original. **Encaminhar mensagem** envia uma cópia, incluindo anexos e o nome do autor, para outro canal ou para a DM de um agente.
+Use o ícone **Responder** abaixo da mensagem no desktop ou no celular. Para responder a um trecho, selecione o texto e toque em **Responder ao trecho** abaixo daquela mensagem. A resposta fica no mesmo canal ou DM, com uma citação que leva à mensagem original.
 
 No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o Tucano rodando na bandeja do sistema, perto do relógio (rotinas e gatilhos continuam); pra encerrar, use o ícone da bandeja.
 
@@ -253,3 +257,5 @@ Leia o [CONTRIBUTING.md](CONTRIBUTING.md) antes de abrir um pull request (o cód
 ## Licença
 
 [Apache-2.0](LICENSE). O Tucano não é afiliado à Anthropic, à OpenAI nem a nenhuma das ferramentas a que ele se conecta.
+
+Os apps do computador rodam sobre o [agent-desktop](https://github.com/vercel-labs/agent-desktop), da Vercel Labs (Apache-2.0), instalado à parte. Obrigado!

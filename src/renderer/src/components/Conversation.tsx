@@ -1,7 +1,6 @@
 import { L } from '../../../shared/lang'
 import { CODE_SPANS } from '../../../shared/types'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -43,7 +42,6 @@ import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal } from './Tuca'
-import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
@@ -110,6 +108,22 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 export function MessageList({ messages, conversationId, empty, focus }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string }): ReactNode {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const [selection, setSelection] = useState<{ messageId: string; quote: string } | null>(null)
+
+  useEffect(() => {
+    const changed = (): void => {
+      const anchor = window.getSelection()?.anchorNode
+      const element = anchor instanceof Element ? anchor : anchor?.parentElement
+      const row = element?.closest<HTMLElement>('[data-message-id]')
+      const quote = row && ref.current?.contains(row) ? selectedQuote(row) : undefined
+      setSelection((current) => {
+        if (!quote || !row?.dataset.messageId) return current === null ? current : null
+        return current?.messageId === row.dataset.messageId && current.quote === quote ? current : { messageId: row.dataset.messageId, quote }
+      })
+    }
+    document.addEventListener('selectionchange', changed)
+    return () => document.removeEventListener('selectionchange', changed)
+  }, [])
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once.
   useEffect(() => {
@@ -179,15 +193,13 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
           !m.run &&
           m.author.kind !== 'system' &&
           m.author.kind !== 'routine'
-        return <MessageRow key={m.id} message={m} grouped={grouped} />
+        return <MessageRow key={m.id} message={m} grouped={grouped} quote={selection?.messageId === m.id ? selection.quote : undefined} />
       })}
     </div>
   )
 }
 
-function MessageRow({ message, grouped }: { message: Message; grouped: boolean }): ReactNode {
-  const [menu, setMenu] = useState<MenuState>(null)
-  const closeMenu = useCallback(() => setMenu(null), [])
+function MessageRow({ message, grouped, quote }: { message: Message; grouped: boolean; quote?: string }): ReactNode {
   const me = useStore((s) => s.me)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
@@ -213,29 +225,12 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
   if (message.author.kind === 'routine') return <RoutineMessage message={message} />
 
   const name = agent ? agent.name : me.name
-  const canOpenMenu = message.run?.status !== 'working' && Boolean(message.text.trim() || attached.length > 0 || message.run?.artifactIds?.length)
-  const openMenu = (e: React.MouseEvent<HTMLElement>): void => {
-    if (!canOpenMenu || (e.target as HTMLElement).closest('a, button, input, textarea, select, [role="menu"]')) return
-    const quote = selectedQuote(e.currentTarget)
-    // A selection spanning messages belongs to the browser's native copy menu.
-    if (window.getSelection()?.toString().trim() && !quote) return
-    e.preventDefault()
-    const copyText = quote ?? e.currentTarget.querySelector<HTMLElement>('.msg__text')?.innerText ?? message.text
-    const items: MenuItem[] = []
-    if (quote) items.push({ label: L('Responder ao trecho', 'Reply to selection'), icon: 'reply', onClick: () => startReply(message, quote) })
-    items.push(
-      { label: L('Responder mensagem', 'Reply to message'), icon: 'reply', onClick: () => startReply(message) },
-      { label: L('Encaminhar mensagem', 'Forward message'), icon: 'forward', onClick: () => openDialog({ kind: 'forward', messageId: message.id }) },
-      'separator',
-      { label: quote ? L('Copiar trecho', 'Copy selection') : L('Copiar texto', 'Copy text'), icon: 'copy', onClick: () => void navigator.clipboard.writeText(copyText) }
-    )
-    setMenu({ x: e.clientX, y: e.clientY, items })
-  }
+  const canReply = message.run?.status !== 'working' && Boolean(message.text.trim() || attached.length > 0 || message.run?.artifactIds?.length)
 
   return (
     <article
       className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''}`}
-      onContextMenu={openMenu}
+      data-message-id={message.id}
     >
       <div className="msg__gutter">
         {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={me.initials} size={34} />)}
@@ -259,7 +254,6 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
           </div>
         )}
         {message.run && <RunSteps message={message} />}
-        {message.forwarded && <ForwardedFrom forwarded={message.forwarded} />}
         {message.reply && <ReplyQuote reply={message.reply} conversationId={message.conversationId} />}
         {message.text ? (
           <div className="md msg__text">
@@ -304,8 +298,21 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
           </button>
         )}
         {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+        {canReply && (
+          <div className="msg__actions">
+            <button
+              className={`msg__reply ${quote ? 'msg__reply--excerpt' : ''}`}
+              title={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
+              aria-label={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => startReply(message, quote)}
+            >
+              <Icon name="reply" size={16} />
+              {quote && <span>{L('Responder ao trecho', 'Reply to selection')}</span>}
+            </button>
+          </div>
+        )}
       </div>
-      {menu && createPortal(<ContextMenu menu={menu} onClose={closeMenu} />, document.body)}
     </article>
   )
 }
@@ -330,23 +337,6 @@ function ReplyQuote({ reply, conversationId }: { reply: NonNullable<Message['rep
       <strong>{reply.excerpt ? L(`Trecho de ${reply.author}`, `Excerpt from ${reply.author}`) : L(`Em resposta a ${reply.author}`, `In reply to ${reply.author}`)}</strong>
       <span>{reply.text || L('Anexo', 'Attachment')}</span>
     </button>
-  )
-}
-
-function ForwardedFrom({ forwarded }: { forwarded: NonNullable<Message['forwarded']> }): ReactNode {
-  const original = useStore((s) => s.messages.find((m) => m.id === forwarded.messageId))
-  const agent = useStore((s) => {
-    const id = forwarded.agentId ?? (original?.author.kind === 'agent' ? original.author.id : undefined)
-    return id ? agentById(s, id) : undefined
-  })
-  return (
-    <div className="msg__forwarded">
-      <Icon name="forward" size={13} />
-      <span>
-        {L('Encaminhada de ', 'Forwarded from ')}
-        {agent ? <button className="link" onClick={() => openDialog({ kind: 'agent-card', id: agent.id })}>{forwarded.author}</button> : forwarded.author}
-      </span>
-    </div>
   )
 }
 
@@ -698,6 +688,24 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('quer abrir uma', 'wants to open a')} <strong>pull request</strong> {L('em', 'in')} {String(approval.args['repo'])}
           </>
+        ) : approval.connectorId === 'apps' ? (
+          <>
+            {agent?.name ?? L('Agente', 'Agent')}{' '}
+            {typeof approval.args['texto'] === 'string' ? (
+              <>
+                {L('quer confirmar', 'wants to confirm')} <strong>“{approval.args['texto']}”</strong>
+              </>
+            ) : typeof approval.args['tecla'] === 'string' ? (
+              <>
+                {L('quer apertar', 'wants to press')} <strong>{approval.args['tecla']}</strong>
+              </>
+            ) : (
+              <>
+                {L('quer clicar em', 'wants to click')} <strong>{String(approval.args['alvo'] ?? '')}</strong>
+              </>
+            )}{' '}
+            {L('no', 'in')} {String(approval.args['app'] ?? '')}
+          </>
         ) : approval.connectorId === 'navegador' ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('quer clicar em', 'wants to click')} <strong>{String(approval.args['alvo'] || L('um ponto da tela', 'a spot on the screen'))}</strong> {L('em', 'on')} {String(approval.args['url']).replace(/^https?:\/\//, '').slice(0, 60)}
@@ -768,7 +776,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
                 {L('Aprovar', 'Approve')}
               </button>
-              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && (
+              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (
                 <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa ${approval.tool} no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses ${approval.tool} in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
@@ -840,7 +848,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const replyTarget = useStore((s) => s.replyTo[conversationId])
   const replyId = replyTarget?.messageId
   const reply = useStore((s) => s.messages.find((m) => m.id === replyId))
-  const replyAuthor = useStore((s) => reply?.forwarded?.author ?? (reply?.author.kind === 'agent' ? agentById(s, reply.author.id)?.name ?? L('Agente removido', 'Removed agent') : s.me.name))
+  const replyAuthor = useStore((s) => reply?.author.kind === 'agent' ? agentById(s, reply.author.id)?.name ?? L('Agente removido', 'Removed agent') : s.me.name)
   const replyLabel = !reply ? L('Mensagem removida', 'Removed message') : replyTarget?.quote
     ? L(`Respondendo ao trecho de ${replyAuthor}`, `Replying to an excerpt from ${replyAuthor}`)
     : L(`Respondendo a ${replyAuthor}`, `Replying to ${replyAuthor}`)
