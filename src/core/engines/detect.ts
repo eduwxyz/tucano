@@ -118,13 +118,16 @@ export interface CodexModel {
   description?: string
 }
 
+// 0 is the top of the list, not a missing priority.
+const priorityOf = (p: unknown): number => (typeof p === 'number' ? p : 999)
+
 export function parseCodexCatalog(json: string): CodexModel[] {
   try {
     const d = JSON.parse(json) as { models?: unknown } | unknown[]
     const list = (Array.isArray(d) ? d : Array.isArray(d.models) ? d.models : []) as { slug?: unknown; display_name?: unknown; description?: unknown; visibility?: unknown; priority?: unknown }[]
     return list
       .filter((m) => typeof m.slug === 'string' && m.slug && (m.visibility === undefined || m.visibility === 'list'))
-      .sort((a, b) => (Number(a.priority) || 999) - (Number(b.priority) || 999))
+      .sort((a, b) => priorityOf(a.priority) - priorityOf(b.priority))
       .map((m) => ({
         slug: m.slug as string,
         label: typeof m.display_name === 'string' && m.display_name ? m.display_name : (m.slug as string),
