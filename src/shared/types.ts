@@ -184,6 +184,8 @@ export interface AgentDraft {
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
 
+export type ReplyTarget = { messageId: string; quote?: string }
+
 export interface Message {
   id: string
   conversationId: string
@@ -192,6 +194,7 @@ export interface Message {
   at: number
   run?: Run
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
+  reply?: { messageId: string; author: string; agentId?: string; text: string; at: number; excerpt?: boolean }
 }
 
 export interface Settings {

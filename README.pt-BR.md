@@ -147,6 +147,8 @@ Na primeira vez que o Tucano guardar uma senha de conector, o macOS pergunta se 
 | **⌘,** | Configurações |
 | **Botão direito** | Num canal: agentes, renomear, excluir. Num agente: mensagem, editar, arquivar |
 
+Use o ícone **Responder** abaixo da mensagem no desktop ou no celular. Para responder a um trecho, selecione o texto e toque em **Responder ao trecho** abaixo daquela mensagem. A resposta fica no mesmo canal ou DM, com uma citação que leva à mensagem original.
+
 No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o Tucano rodando na bandeja do sistema, perto do relógio (rotinas e gatilhos continuam); pra encerrar, use o ícone da bandeja.
 
 - **Conectar uma ferramenta:** **Conectores → Adicionar**, cole o endereço do servidor MCP. Os com OAuth abrem o navegador; os outros pedem um token. Depois, na página de cada agente, escolha o acesso dele a cada conector.

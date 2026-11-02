@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type ReplyTarget, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
@@ -31,6 +31,7 @@ const MAX_DEPTH = 3 // agent replies chained from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
+const MAX_QUOTE_CHARS = 32_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
@@ -85,6 +86,7 @@ export interface Connectors {
 }
 
 type Exposed = { connector: Connector; tool: ConnectorTool & { inputSchema: Record<string, unknown> } }
+type SendOptions = { reply?: ReplyTarget }
 
 // Tool names the CLI sees: "<connector>__<tool>", unique per turn.
 function exposedName(connector: Connector, tool: string, taken: Set<string>): string {
@@ -136,25 +138,41 @@ export class Runner {
     this.paused = paused
   }
 
-  // Saves the human message and decides who answers it: mentioned agents
-  // first, then whoever asked a pending question, then the DM agent or the
-  // only agent in the channel, and otherwise the router.
-  async send(conversationId: string, text: string, images: ImageUpload[] = []): Promise<void> {
+  // Explicit mentions and replies choose who answers before a pending question,
+  // the DM agent, the channel's only agent, or the router.
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], options: SendOptions = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const body = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
+    const { reply } = options
     if (!conv || (!body && pictures.length === 0)) return
+    const original = reply ? db.message(reply.messageId) : undefined
+    if (reply && (!original || original.conversationId !== conversationId || !['me', 'agent'].includes(original.author.kind) || original.run?.status === 'working'))
+      throw new Error(L('Escolha uma mensagem desta conversa para responder.', 'Choose a message in this conversation to reply to.'))
+    if (reply?.quote !== undefined && (!reply.quote.trim() || reply.quote.length > MAX_QUOTE_CHARS))
+      throw new Error(L('Selecione um trecho de até 32.000 caracteres para citar.', 'Select an excerpt of up to 32,000 characters to quote.'))
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now() }
+    if (original) {
+      const agentId = original.author.kind === 'agent' ? original.author.id : undefined
+      mine.reply = {
+        messageId: original.id, text: reply?.quote ?? original.text, at: original.at,
+        ...(reply?.quote !== undefined ? { excerpt: true } : {}),
+        author: await this.authorOf(original), agentId
+      }
+    }
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
 
     const members = this.members(conv)
     let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
+    const replyAgent = mine.reply?.agentId
+    if (!responders.length && replyAgent) responders = members.filter((a) => a.id === replyAgent)
 
-    const asked = this.pendingQuestion(conv.id)
+    const pending = this.pendingQuestion(conv.id)
+    const asked = pending && (!original || (pending.author.kind === 'agent' && pending.author.id === replyAgent)) ? pending : undefined
     if (asked) {
       this.update(asked, { run: { ...asked.run!, status: 'done' } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
@@ -177,6 +195,11 @@ export class Runner {
       }
     }
     for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
+  }
+
+  private async authorOf(message: Message): Promise<string> {
+    if (message.author.kind === 'agent') return this.deps.db.agent(message.author.id)?.name ?? L('Agente removido', 'Removed agent')
+    return (await this.deps.settings()).workspaceName
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).

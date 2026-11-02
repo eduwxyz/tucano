@@ -280,6 +280,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
   // A question asked with ask_user is part of what the agent said.
   const body = (m: Message): string =>
     [
+      m.reply && `${L(`[Em resposta a ${m.reply.author}:]`, `[In reply to ${m.reply.author}:]`)}\n${(m.reply.text || L('[anexo]', '[attachment]')).split('\n').map((line) => `> ${line}`).join('\n')}`,
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
       m.run?.question && L(`(pergunta enviada a ${me} pela ferramenta ask_user: ${m.run.question})`, `(question sent to ${me} with the ask_user tool: ${m.run.question})`)

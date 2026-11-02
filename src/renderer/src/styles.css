@@ -790,6 +790,72 @@ h3 {
 .msg__body {
   min-width: 0;
 }
+.msg__text {
+  min-width: 0;
+  max-width: 100%;
+}
+.msg__actions {
+  display: flex;
+  margin-top: 4px;
+}
+.msg__reply {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: var(--radius);
+  color: var(--text-3);
+}
+.msg__reply:hover,
+.msg__reply:focus-visible,
+.msg__reply--excerpt {
+  background: var(--bubble);
+  color: var(--text);
+}
+.msg__reply--excerpt {
+  padding: 0 8px;
+  font-size: 12px;
+}
+@media (pointer: coarse) {
+  .msg__reply {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border-left: 2px solid var(--border-strong);
+  text-align: left;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.reply-quote span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--text-3);
+}
+.composer__reply {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+.composer__reply .reply-quote {
+  flex: 1;
+  margin: 0;
+}
 /* My messages: a bubble on the right, no avatar or name. */
 .msg--me {
   grid-template-columns: 1fr;

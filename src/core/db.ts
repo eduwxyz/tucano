@@ -237,6 +237,9 @@ const MIGRATIONS = [
   `
   ALTER TABLE agents ADD COLUMN custom_color TEXT;
   ALTER TABLE agents ADD COLUMN picture TEXT;
+  `,
+  `
+  ALTER TABLE messages ADD COLUMN reply TEXT;
   `
 ]
 
@@ -462,7 +465,8 @@ export class Db {
       text: str(r['text']),
       at: Number(r['at']),
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
-      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined
+      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
+      reply: r['reply'] ? (JSON.parse(str(r['reply'])) as Message['reply']) : undefined
     }
   }
 
@@ -494,7 +498,7 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, reply) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
       .run(
@@ -505,7 +509,8 @@ export class Db {
         m.text,
         m.at,
         m.run ? JSON.stringify(m.run) : null,
-        m.routine ? JSON.stringify(m.routine) : null
+        m.routine ? JSON.stringify(m.routine) : null,
+        m.reply ? JSON.stringify(m.reply) : null
       )
   }
 
