@@ -86,7 +86,8 @@ describe('accounts', () => {
     expect(accountLogin('codex', { code: 1, stdout: 'Not logged in', stderr: '' })).toEqual({ loggedIn: false })
   })
 
-  it('points Claude Code at the account’s folder', async () => {
+  // The stand-in CLI is a shell script, which Windows can't run.
+  it.skipIf(process.platform === 'win32')('points Claude Code at the account’s folder', async () => {
     // A stand-in CLI that prints the folder it was given, as a result line.
     const dir = mkdtempSync(join(tmpdir(), 'ad-bin-'))
     const bin = join(dir, 'claude')
