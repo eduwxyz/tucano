@@ -4,6 +4,8 @@ import { useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { CoreEvent } from '../../shared/rpc'
 import {
+  type Account,
+  type AccountEngine,
   MODELS,
   modelInfo,
   type EngineId,
@@ -326,6 +328,10 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 
 export const refreshEngines = (): void => void call('refreshEngines')
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
+// More logins of Claude Code and Codex, each signed into in a terminal.
+export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })
+export const loginAccount = (id: string): Promise<{ opened: boolean; command: string }> => call('loginAccount', { id })
+export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
 // The person's own apps, through agent-desktop.
 export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> => call('desktopStatus')

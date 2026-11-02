@@ -16,6 +16,7 @@ import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills
 import { availableModels, builderSection, draftFrom, PROPOR_AGENTE } from './tuca'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
+import { accountDir } from './engines/detect'
 import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
@@ -466,8 +467,25 @@ export class Runner {
       return msg
     }
 
+    // Another login of this harness (Settings › Accounts), when the agent has one.
+    const account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    if (account && !account.loggedIn) {
+      save({
+        run: {
+          status: 'failed',
+          depth: opts.depth,
+          steps: [],
+          ...again,
+          error: L(
+            `A conta “${account.name}” do ${ENGINES[engineId].label} não está logada. Entre nela em Configurações › Modelos › Contas e mande de novo.`,
+            `The “${account.name}” ${ENGINES[engineId].label} account isn't signed in. Sign in under Settings › Models › Accounts and send it again.`
+          )
+        }
+      })
+      return msg
+    }
     const status = settings.engines[engineId]
-    if (!status.installed || !status.loggedIn) {
+    if (!status.installed || (!status.loggedIn && !account)) {
       save({
         run: {
           status: 'failed',
@@ -1077,7 +1095,8 @@ export class Runner {
         cwd,
         signal: control.ctl.signal,
         mcpUrl: session?.url,
-        web: agent.web !== false
+        web: agent.web !== false,
+        account: account && this.deps.dataDir ? accountDir(this.deps.dataDir, account.id) : undefined
       })
       for await (const ev of events) {
         sign()
@@ -1095,7 +1114,7 @@ export class Runner {
             if (counted > budget * BUDGET_OVERRUN) halt('budget')
           }
         } else if (ev.type === 'quota') {
-          this.deps.onQuota?.(ev.quota)
+          if (!account) this.deps.onQuota?.(ev.quota) // the windows shown are the usual login's
         } else if (ev.type === 'web') {
           // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
           addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })

@@ -55,7 +55,7 @@ import {
   isTeam,
   reachable
 } from '../store'
-import { HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway } from './Harness'
+import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway } from './Harness'
 import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
 import { AgentAvatar, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
@@ -523,7 +523,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           {pane('perfil') && (
             <Card title={L('Harness e modelo', 'Harness and model')} lead={L('O agente roda num dos harnesses que você usa, como você o configurou: no seu plano, no gateway da empresa ou no seu provedor.', 'The agent runs on one of the harnesses you use, the way you set it up: on your plan, your company’s gateway or your provider.')}>
               <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
-              {!engineStatus.loggedIn && (
+              <AccountPicker draft={draft} patch={patch} />
+              {!engineStatus.loggedIn && !draft.accountId && (
                 <p className="hint hint--warn">
                   <Icon name="lock" size={13} />{' '}
                   {L(
@@ -1530,6 +1531,18 @@ export function SettingsPage(): ReactNode {
             }
           >
             <HarnessList />
+          </Card>
+        )}
+
+        {pane('modelos') && (
+          <Card
+            title={L('Contas', 'Accounts')}
+            lead={L(
+              'Mais de um login do Claude Code ou do Codex, como a conta do trabalho e a pessoal. Cada agente escolhe a conta na página dele. O login acontece no próprio CLI: o Tucano não vê nem guarda a senha.',
+              'More than one Claude Code or Codex login, like a work account and a personal one. Each agent picks its account on its page. You sign in through the CLI itself: Tucano never sees or stores the password.'
+            )}
+          >
+            <AccountsCard />
           </Card>
         )}
 

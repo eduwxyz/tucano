@@ -57,6 +57,7 @@ export interface Agent {
   color: AgentColor
   instructions: string
   modelId: string
+  accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
   limit: number // tokens per month
   used: number // tokens used this month, computed from receipts
@@ -209,6 +210,20 @@ export interface Settings {
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
   onboarding?: { done: boolean; checklistHidden?: boolean }
   folded?: string[] // the ids of what I folded in the sidebar
+  accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+}
+
+// Another login of a harness (a work account beside a personal one), in a folder of its own
+// in the app's data: Claude Code's CLAUDE_CONFIG_DIR (with its own Keychain entry), Codex's
+// CODEX_HOME. The person signs in through the CLI itself; the app never sees the credentials.
+export const ACCOUNT_ENGINES = ['claude', 'codex'] as const satisfies readonly EngineId[]
+export type AccountEngine = (typeof ACCOUNT_ENGINES)[number]
+export interface Account {
+  id: string
+  engine: AccountEngine
+  name: string // what the person calls it ("Trabalho")
+  loggedIn?: boolean // computed, from the CLI's own status
+  detail?: string // computed: the plan it's on, as the CLI says
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
