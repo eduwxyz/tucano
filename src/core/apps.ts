@@ -59,14 +59,16 @@ async function bundleOf(app: string): Promise<string | undefined> {
   return (await macOpenApps().catch(() => [])).find(same)?.bundleId ?? (await macApps().catch(() => [])).find(same)?.bundleId
 }
 
-// Types text key by key into the app's focused field. Letters, digits, spaces and common
-// punctuation; anything else goes as a pasted value at the end, which most fields take.
+// Types text key by key into the app's focused field: letters, digits, spaces and common
+// punctuation. With anything else it types nothing and says so, or the field would get part of it.
 const KEYNAME: Record<string, string> = { ' ': 'space', ',': 'comma', '.': 'period', '/': 'slash', ';': 'semicolon', "'": 'quote', '-': 'minus', '=': 'equal' }
+const keyOf = (ch: string): string | undefined => (/^[a-z0-9]$/.test(ch) ? ch : /^[A-Z]$/.test(ch) ? `shift+${ch.toLowerCase()}` : KEYNAME[ch])
+
 export async function typeKeys(cli: Cli, app: string, text: string): Promise<Envelope> {
+  const missing = [...new Set([...text].filter((ch) => !keyOf(ch)))]
+  if (missing.length) return { ok: false, error: { message: L(`Não dá pra digitar ${missing.join(' ')} tecla por tecla. Escreva no campo sem digitar.`, `${missing.join(' ')} can't be typed key by key. Write in the field without typing.`) } }
   for (const ch of text) {
-    const key = /^[a-z0-9]$/.test(ch) ? ch : /^[A-Z]$/.test(ch) ? `shift+${ch.toLowerCase()}` : KEYNAME[ch]
-    if (!key) continue
-    const r = await cli(['press', key, '--app', app], 10_000)
+    const r = await cli(['press', keyOf(ch)!, '--app', app], 10_000)
     if (!r.ok) return r
   }
   return { ok: true }
@@ -199,7 +201,7 @@ const inner = (n: Node): string => {
   return ''
 }
 
-const ROLE: Record<string, string> = {
+const ROLE = (): Record<string, string> => ({
   button: L('botão', 'button'),
   menuitem: L('item de menu', 'menu item'),
   menubaritem: 'menu',
@@ -222,7 +224,7 @@ const ROLE: Record<string, string> = {
   document: L('documento', 'document'),
   listbox: L('lista', 'list'),
   menu: 'menu'
-}
+})
 const clean = (s: unknown): string =>
   String(s ?? '')
     .replace(/[‎‏‪-‮]/g, '')
@@ -249,7 +251,7 @@ export function itemize(tree: Node | undefined, max = MAX_LINES): { items: Item[
         ...(n.available_actions?.length ? { actions: n.available_actions } : {})
       }
       items.push(item)
-      if (lines.length < max) lines.push(`${'  '.repeat(Math.min(depth, 4))}#${item.n} ${ROLE[role] ?? role}${name ? ` "${name}"` : ''}${item.value ? ` = "${item.value.slice(0, 200)}"` : ''}`)
+      if (lines.length < max) lines.push(`${'  '.repeat(Math.min(depth, 4))}#${item.n} ${ROLE()[role] ?? role}${name ? ` "${name}"` : ''}${item.value ? ` = "${item.value.slice(0, 200)}"` : ''}`)
       else more++
     } else if (role === 'statictext' && (name || value) && lines.length < max) lines.push(`${'  '.repeat(Math.min(depth, 4))}${L('texto', 'text')} "${(name || value).slice(0, 200)}"`)
     for (const c of n.children ?? []) visit(c, depth + 1)
@@ -434,7 +436,7 @@ function changeTools(app: Record<string, unknown>, alvo: Record<string, unknown>
   ]
 }
 
-const DONE: Record<string, string> = {
+const DONE = (): Record<string, string> => ({
   apps_listar: L('Viu os apps', 'Checked the apps'),
   app_abrir: L('Abriu', 'Opened'),
   app_ver: L('Leu', 'Read'),
@@ -442,11 +444,11 @@ const DONE: Record<string, string> = {
   app_clicar: L('Clicou em', 'Clicked'),
   app_escrever: L('Escreveu em', 'Typed in'),
   app_tecla: L('Apertou', 'Pressed')
-}
+})
 export function appStep(name: string, args: Record<string, unknown>): { label: string; detail: string } {
   const s = (k: string): string => String(args[k] ?? '').trim()
   const detail = name === 'app_clicar' || name === 'app_escrever' ? `${s('alvo')} · ${s('app')}` : name === 'app_tecla' ? `${s('tecla')} · ${s('app')}` : s('app')
-  return { label: DONE[name] ?? name, detail }
+  return { label: DONE()[name] ?? name, detail }
 }
 
 export interface AppOutcome {

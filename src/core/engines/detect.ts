@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
-import type { EngineId, EngineStatus } from '../../shared/types'
+import type { AccountEngine, EngineId, EngineStatus } from '../../shared/types'
 import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
@@ -90,6 +90,34 @@ const gatewayHost = (url: string | undefined): string | undefined => {
 }
 
 // Checks the app's own Codex login (see codexEnv), not the user's.
+// Whether another login of Claude Code or Codex (Settings › Accounts) is signed in, and on which
+// plan, from the CLI's own status for that folder. The parsing is pure, to test it on their output.
+export function accountLogin(engine: AccountEngine, out: { code: number; stdout: string; stderr: string }): { loggedIn: boolean; detail?: string } {
+  if (engine === 'claude') {
+    let status: Record<string, unknown> = {}
+    try {
+      status = JSON.parse(out.stdout) as Record<string, unknown>
+    } catch {
+      // not signed in, or an older CLI
+    }
+    if (status['loggedIn'] !== true) return { loggedIn: false }
+    const plan = typeof status['subscriptionType'] === 'string' ? status['subscriptionType'] : undefined
+    const email = typeof status['email'] === 'string' ? status['email'] : undefined
+    const what = status['authMethod'] === 'claude.ai' ? `${L('Plano Claude', 'Claude plan')}${plan ? ` ${plan[0]!.toUpperCase()}${plan.slice(1)}` : ''}` : L('Chave de API', 'API key')
+    return { loggedIn: true, detail: email ? `${what} · ${email}` : what }
+  }
+  const text = `${out.stdout}\n${out.stderr}`
+  const loggedIn = out.code === 0 && /logged in/i.test(text) && !/not logged in/i.test(text)
+  return loggedIn ? { loggedIn, detail: /chatgpt/i.test(text) ? L('Plano ChatGPT', 'ChatGPT plan') : L('Chave de API', 'API key') } : { loggedIn }
+}
+
+export const accountDir = (dataDir: string, id: string): string => join(dataDir, 'accounts', id)
+
+export async function accountStatus(engine: AccountEngine, bin: string, dir: string): Promise<{ loggedIn: boolean; detail?: string }> {
+  const out = engine === 'claude' ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir }) : await run(bin, ['login', 'status'], 15_000, codexEnv(dir))
+  return accountLogin(engine, out)
+}
+
 export async function detectCodex(home: string): Promise<EngineStatus> {
   const path = await which('codex')
   if (!path) return { installed: false, loggedIn: false }
@@ -118,13 +146,16 @@ export interface CodexModel {
   description?: string
 }
 
+// 0 is the top of the list, not a missing priority.
+const priorityOf = (p: unknown): number => (typeof p === 'number' ? p : 999)
+
 export function parseCodexCatalog(json: string): CodexModel[] {
   try {
     const d = JSON.parse(json) as { models?: unknown } | unknown[]
     const list = (Array.isArray(d) ? d : Array.isArray(d.models) ? d.models : []) as { slug?: unknown; display_name?: unknown; description?: unknown; visibility?: unknown; priority?: unknown }[]
     return list
       .filter((m) => typeof m.slug === 'string' && m.slug && (m.visibility === undefined || m.visibility === 'list'))
-      .sort((a, b) => (Number(a.priority) || 999) - (Number(b.priority) || 999))
+      .sort((a, b) => priorityOf(a.priority) - priorityOf(b.priority))
       .map((m) => ({
         slug: m.slug as string,
         label: typeof m.display_name === 'string' && m.display_name ? m.display_name : (m.slug as string),

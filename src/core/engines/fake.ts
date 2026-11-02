@@ -14,6 +14,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
     id,
     async *run(turn): AsyncIterable<EngineEvent> {
       const last = lastMessage(turn.prompt)
+      // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
+      // harness, or another account of Claude, whose limit is still there).
+      if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== memorySystem()) {
+        yield { type: 'error', message: "You've hit your limit · resets 5pm" }
+        return
+      }
       let reply: string
       let spend = 0 // "gaste N tokens": a reply that costs that much, to see the budget pause
       if (turn.system === routerSystem()) {

@@ -5,8 +5,12 @@
 import { L } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
 import {
+  ACCOUNT_ENGINES,
+  addAccount,
   ENGINES,
   ENGINE_IDS,
+  loginAccount,
+  removeAccount,
   MODELS,
   startsPicked,
   codexValue,
@@ -22,6 +26,9 @@ import {
   testEngine,
   updateSettings,
   useStore,
+  type Account,
+  type AccountEngine,
+  type Agent,
   type EngineId,
   type EngineStatus,
   type HarnessMcp,
@@ -363,5 +370,95 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
         </div>
       ))}
     </section>
+  )
+}
+
+// More logins of Claude Code and Codex: a work account beside a personal one. Each lives in a
+// folder of its own and is signed into through the CLI, in a terminal; an agent picks one on its page.
+export function AccountsCard(): ReactNode {
+  const accounts = useStore((s) => s.settings.accounts ?? [])
+  const engines = useStore((s) => s.settings.engines)
+  const [engine, setEngine] = useState<AccountEngine>('claude')
+  const [name, setName] = useState('')
+  const [manual, setManual] = useState<Record<string, string>>({})
+  const [removing, setRemoving] = useState<string | null>(null)
+  const add = async (): Promise<void> => {
+    const a = await addAccount(engine, name)
+    setName('')
+    const r = await loginAccount(a.id)
+    if (!r.opened) setManual((m) => ({ ...m, [a.id]: r.command }))
+  }
+  return (
+    <div className="accounts">
+      {accounts.map((a: Account) => (
+        <div key={a.id} className="key-row">
+          <Icon name="user" />
+          <div className="grow">
+            <strong>{a.name}</strong>
+            <p className="muted small">
+              {ENGINES[a.engine].label} · {a.loggedIn ? (a.detail ?? L('Pronta', 'Ready')) : L('Falta entrar', 'Not signed in')}
+            </p>
+            {manual[a.id] && !a.loggedIn && (
+              <>
+                <span className="hint">{L('Não achei um terminal pra abrir. Pra entrar, cole no seu terminal:', "Couldn't find a terminal to open. To sign in, paste in your terminal:")}</span>
+                <code className="harness__cmd">{manual[a.id]}</code>
+              </>
+            )}
+          </div>
+          {!a.loggedIn && (
+            <button className="btn btn--sm btn--primary" onClick={() => void loginAccount(a.id).then((r) => setManual((m) => ({ ...m, [a.id]: r.opened ? '' : r.command })))}>
+              {L('Entrar', 'Sign in')}
+            </button>
+          )}
+          {removing === a.id ? (
+            <button className="btn btn--sm btn--danger" onClick={() => void removeAccount(a.id).then(() => setRemoving(null))}>
+              {L('Remover mesmo', 'Remove it')}
+            </button>
+          ) : (
+            <button className="btn btn--ghost btn--sm" onClick={() => setRemoving(a.id)}>
+              {L('Remover', 'Remove')}
+            </button>
+          )}
+        </div>
+      ))}
+      <div className="row row--center accounts__add">
+        <select value={engine} onChange={(e) => setEngine(e.target.value as AccountEngine)}>
+          {ACCOUNT_ENGINES.filter((e) => engines[e].installed).map((e) => (
+            <option key={e} value={e}>
+              {ENGINES[e].label}
+            </option>
+          ))}
+        </select>
+        <input className="grow" placeholder={L('Nome da conta (ex.: Trabalho)', 'Account name (e.g. Work)')} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
+        <button className="btn btn--sm" disabled={!engines[engine].installed} onClick={() => void add()}>
+          {L('Adicionar e entrar', 'Add and sign in')}
+        </button>
+      </div>
+      {removing && <p className="hint hint--warn">{L('Os agentes dessa conta voltam pro login de sempre do harness, e o login dela sai deste computador.', 'Its agents go back to the harness’s usual login, and its sign-in leaves this computer.')}</p>}
+    </div>
+  )
+}
+
+// Which login of its harness an agent runs on: the usual one, or one of the accounts added in Settings.
+export function AccountPicker({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const engine = modelInfo(draft.modelId)?.engine
+  const accounts = useStore((s) => (s.settings.accounts ?? []).filter((a) => a.engine === engine))
+  if (!accounts.length || !engine) return null
+  const value = accounts.some((a) => a.id === draft.accountId) ? draft.accountId! : ''
+  const chosen = accounts.find((a) => a.id === value)
+  return (
+    <label className="field">
+      <span className="field__label">{L('Conta', 'Account')}</span>
+      <select value={value} onChange={(e) => patch({ accountId: e.target.value || undefined })}>
+        <option value="">{L(`A de sempre do ${ENGINES[engine].label}`, `${ENGINES[engine].label}’s usual one`)}</option>
+        {accounts.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name}
+            {a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')}
+          </option>
+        ))}
+      </select>
+      {chosen && !chosen.loggedIn && <span className="hint hint--warn">{L('Essa conta ainda não entrou: o agente não responde até você entrar nela em Configurações › Modelos.', 'This account isn’t signed in yet: the agent won’t reply until you sign in under Settings › Models.')}</span>}
+    </label>
   )
 }

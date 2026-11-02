@@ -2,6 +2,37 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [0.2.7] - 2026-11-02
+
+> **Em português:** cada agente pode ter um modelo reserva: quando a assinatura do modelo principal chega no limite, a resposta continua no reserva em vez de parar com erro, e a seguinte já volta pro principal. Dá pra entrar com mais de uma conta do Claude Code e do Codex (a do trabalho e a pessoal, por exemplo), escolher a conta de cada agente e usar uma outra conta como reserva. O Tucano agora também sai pra Mac com Intel. E um botão em Configurações desliga o som das notificações.
+
+### Added
+
+- **A reserve model for each agent.** On an agent's page, **Harness and model › Reserve model**, off by default. When the main model's subscription is out (Claude Code's 5-hour or weekly limit, Codex's usage limit, Gemini's quota or a provider's 429), the reply goes on with the reserve instead of stopping with an error. It moves only when the main model failed before doing anything, so no action runs twice, and only once per reply: the next reply starts on the main model again. The reply's steps show the move. ([#70](https://github.com/eduwxyz/tucano/pull/70))
+- **More than one Claude Code or Codex account.** **Settings › Models › Accounts** adds more logins, like a work account beside a personal one, and each agent picks its account on its page. You sign in through the CLI itself, in a terminal; Tucano never sees the credentials. An agent on an account that's signed out says so, instead of falling back to your usual login. The subscription windows shown in the app are still the usual login's. Accounts stay on this computer and aren't part of a team export. ([#71](https://github.com/eduwxyz/tucano/pull/71))
+- **The reserve can be another account** of the same harness: when one Claude Code account is out, the agent goes on with the same model on another. Turning the reserve on picks another account of the main harness, when there is one. ([#72](https://github.com/eduwxyz/tucano/pull/72))
+- **Intel Macs.** Tucano is released for Intel Macs too (`tucano-mac-x64.dmg`), and the Terminal install picks your chip's build, even in a Terminal running under Rosetta. ([#69](https://github.com/eduwxyz/tucano/pull/69))
+- A **Sounds** switch in **Settings › General › Notifications** turns the chirp off; notifications still show. Muting Tucano in the system didn't stop it. ([#67](https://github.com/eduwxyz/tucano/pull/67))
+
+## [0.2.6] - 2026-11-01
+
+> **Em português:** agora dá pra recolher as seções da barra lateral (canais, mensagens diretas e agentes), e uma seção recolhida continua mostrando as não lidas. E uma leva de correções, quase toda da comunidade: o Chrome do agente não perde mais um login recente ao fechar, agentes num modelo do Gemini rodam mesmo no Gemini (antes caíam no Claude), "Tentar de novo" numa rotina lembra o evento que a disparou, links longos não saem mais da conversa, e, nos apps do computador, os rótulos seguem o seu idioma e um texto com "ã" não chega mais pela metade. Obrigado à Rayanne e à Brisa!
+
+### Added
+
+- **Fold the sidebar's sections.** Channels, direct messages and agents each fold from their header. A folded section stays folded after a restart, keeps its **+** button and shows its unread count, and the conversation you're in stays visible in it. Thanks [@BrisaTielly](https://github.com/BrisaTielly)! ([#62](https://github.com/eduwxyz/tucano/pull/62))
+
+### Fixed
+
+- An agent's **Chrome keeps a recent login** when it closes, including one you made by hand after taking the browser over. Tucano now asks Chrome to close and waits for it, instead of killing it before it saved its cookies. A login made right before quitting Tucano can still be lost. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#53](https://github.com/eduwxyz/tucano/pull/53))
+- Agents on a **Gemini** model run on Gemini; they fell back to Claude. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#47](https://github.com/eduwxyz/tucano/pull/47))
+- Tuca proposes agents on **Gemini** models too, from what your signed-in Gemini CLI lists. ([#50](https://github.com/eduwxyz/tucano/pull/50))
+- **Try again** on a routine's reply runs it with what it was asked, the event that triggered it or its scheduled instructions; the agent started without them. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#54](https://github.com/eduwxyz/tucano/pull/54))
+- **Long links and words** break inside a message instead of pushing it out of the conversation, and a wide table scrolls by itself. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#48](https://github.com/eduwxyz/tucano/pull/48))
+- Typing key by key in an app, a character with no key (such as "ã") no longer **vanishes from the text**: nothing is typed, and the agent is told which characters, so it can write them another way. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#57](https://github.com/eduwxyz/tucano/pull/57))
+- The labels of **app actions** follow the language you chose, not the one Tucano started in. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#56](https://github.com/eduwxyz/tucano/pull/56))
+- The model Codex ranks first (priority 0) stays at the **top of the list** instead of going to the end. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#55](https://github.com/eduwxyz/tucano/pull/55))
+
 ## [0.2.5] - 2026-11-01
 
 > **Em português:** os agentes agora usam os apps do seu computador, como Notas, Calendário e Spotify, no Mac, no Windows e no Linux. Você escolhe quais apps cada agente usa e se ele só lê ou também mexe. Ele lê a janela pela acessibilidade do sistema e clica e escreve sem mexer no seu mouse, e o que envia, paga, publica, agenda ou apaga espera a sua aprovação. Feito sobre o agent-desktop, open source da Vercel Labs. Obrigado!
@@ -128,6 +159,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.7]: https://github.com/eduwxyz/tucano/compare/v0.2.6...v0.2.7
+[0.2.6]: https://github.com/eduwxyz/tucano/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/eduwxyz/tucano/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/eduwxyz/tucano/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/eduwxyz/tucano/compare/v0.2.2...v0.2.3

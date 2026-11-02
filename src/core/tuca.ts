@@ -4,7 +4,7 @@
 // person creates it. He has no connectors, no web and no computer of his own.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { codexValue, ENGINES, MODELS, modelInfo, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
+import { codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCap, modelInfo, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
 import type { ToolDef } from './gateway'
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
@@ -159,6 +159,7 @@ export function agentFromDraft(d: AgentDraft, taken: string[], limit: number): A
     instructions: d.instructions,
     modelId: d.modelId,
     effort: d.effort,
+    maxRoutines: routineCap(d.maxRoutines),
     limit,
     used: 0,
     grants: d.grants,
@@ -179,6 +180,7 @@ export function tucaAgent(modelId: string, taken: string[], limit: number): Agen
     instructions: tucaInstructions(),
     modelId,
     effort: 'medium',
+    maxRoutines: MAX_AGENT_ROUTINES,
     limit,
     used: 0,
     grants: {},

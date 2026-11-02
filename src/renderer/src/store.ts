@@ -4,6 +4,9 @@ import { useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { CoreEvent } from '../../shared/rpc'
 import {
+  type Account,
+  type AccountEngine,
+  MAX_AGENT_ROUTINES,
   MODELS,
   modelInfo,
   type EngineId,
@@ -63,6 +66,7 @@ export interface State {
   models: Model[]
   agents: Agent[]
   connectors: Connector[]
+  lightbox: { items: { url: string; title: string }[]; index: number } | null
   conversations: Conversation[]
   messages: Message[]
   approvals: Approval[]
@@ -112,6 +116,7 @@ let state: State = {
   models: MODELS,
   agents: [],
   connectors: [],
+  lightbox: null,
   conversations: [],
   messages: [],
   approvals: [],
@@ -326,6 +331,10 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 
 export const refreshEngines = (): void => void call('refreshEngines')
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
+// More logins of Claude Code and Codex, each signed into in a terminal.
+export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })
+export const loginAccount = (id: string): Promise<{ opened: boolean; command: string }> => call('loginAccount', { id })
+export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
 // The person's own apps, through agent-desktop.
 export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> => call('desktopStatus')
@@ -350,6 +359,7 @@ export function newAgentDraft(): Agent {
     modelId: 'sonnet',
     effort: 'medium',
     limit: state.settings.defaultLimit,
+    maxRoutines: MAX_AGENT_ROUTINES,
     used: 0,
     grants: {},
     memory: 'auto',
@@ -435,6 +445,10 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 }
 
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openLightbox = (items: { url: string; title: string }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
+export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
+export const moveLightbox = (by: number): void =>
+  set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
 export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog, navOpen: dialog ? false : s.navOpen }))
 export const setTab = (page: string, tab: string): void => set((s) => ({ ...s, tabs: { ...s.tabs, [page]: tab } }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>

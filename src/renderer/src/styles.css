@@ -324,6 +324,35 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.section__head .badge {
+  margin-right: 4px;
+}
+.fold-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: left;
+}
+.fold-toggle:hover {
+  color: var(--text-2);
+}
+.fold-toggle svg {
+  flex-shrink: 0;
+  transition: transform 0.15s var(--ease);
+}
+.fold-toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+/* What's folded goes, except where you are: the row you're in never disappears from under you. */
+.is-folded .nav-item:not(.is-active) {
+  display: none;
+}
 .nav-item {
   width: 100%;
   display: flex;
@@ -3892,6 +3921,30 @@ table.csv th {
   font-size: 13px;
   line-height: 1.5;
 }
+/* More logins of a harness, in Settings › Models. */
+.accounts {
+  display: grid;
+  gap: 4px;
+}
+.accounts__add {
+  margin-top: 8px;
+}
+.accounts__add select {
+  flex: 0 0 auto;
+  width: auto;
+}
+.accounts__add input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* An agent's reserve model, under the main one. */
+.reserve {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
 .model-picker {
   display: flex;
   flex-wrap: wrap;
@@ -6271,6 +6324,9 @@ kbd {
   display: none;
 }
 @media (max-width: 760px) {
+  .fold-toggle {
+    min-height: 36px;
+  }
   .app {
     grid-template-columns: minmax(0, 1fr);
     height: 100dvh;
@@ -6462,6 +6518,86 @@ kbd {
 .app-picker .app-picker__head input:focus { border: 0; box-shadow: none; outline: none; background: transparent; padding: 4px 0; }
 
 .apps-setup__how { display: block; margin-top: 4px; color: var(--text-2); font-size: 12px; }
+
+/* An image the size of the window */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  background: rgba(12, 11, 10, 0.94);
+  color: #f3efe8;
+}
+.lightbox__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  -webkit-app-region: no-drag;
+}
+.lightbox__bar .icon-btn {
+  color: inherit;
+}
+.lightbox__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lightbox__zoom {
+  min-width: 44px;
+  text-align: center;
+}
+.lightbox__stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+}
+.lightbox__stage.is-zoomed {
+  cursor: grab;
+}
+.lightbox__stage.is-zoomed:active {
+  cursor: grabbing;
+}
+.lightbox__stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+.lightbox__nav {
+  position: absolute;
+  top: 50%;
+  width: 44px;
+  height: 64px;
+  padding: 0;
+  transform: translateY(-50%);
+  text-align: center;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font-size: 28px;
+  cursor: pointer;
+}
+.lightbox__nav:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.lightbox__nav--prev {
+  left: 12px;
+}
+.lightbox__nav--next {
+  right: 12px;
+}
+[data-os='mac'] .lightbox__bar {
+  padding-left: 84px; /* the window's buttons are here */
+}
 
 /* An agent's own color and picture */
 .avatar__photo {

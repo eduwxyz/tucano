@@ -19,6 +19,7 @@ import {
   type View
 } from '../store'
 import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
+import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
 import { AgentAvatar, Icon, TucaMark, type IconName } from './ui'
@@ -46,6 +47,25 @@ function TucaItem(): ReactNode {
     </button>
   )
 }
+
+function Section({ id, label, unread = 0, action, children }: { id: string; label: string; unread?: number; action?: ReactNode; children: ReactNode }): ReactNode {
+  const { open, toggle } = useFold(`section:${id}`)
+  return (
+    <div className={`section ${open ? '' : 'is-folded'}`}>
+      <div className="section__head">
+        <FoldToggle open={open} onToggle={toggle}>
+          {label}
+        </FoldToggle>
+        {/* A closed section still says when something in it is waiting. */}
+        {!open && unread > 0 && <span className="badge badge--soft">{unread}</span>}
+        {action}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const unreadIn = (conversations: { unread?: number }[]): number => conversations.reduce((sum, c) => sum + (c.unread ?? 0), 0)
 
 export function Sidebar(): ReactNode {
   const s = useStore((s) => s)
@@ -140,25 +160,25 @@ export function Sidebar(): ReactNode {
         <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} />
         <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} />
 
-        <div className="section">
-          <div className="section__head">
-            <span>{L('Canais', 'Channels')}</span>
+        <Section
+          id="channels"
+          label={L('Canais', 'Channels')}
+          unread={unreadIn(channels)}
+          action={
             <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(s.platform, 'N')})`, `New channel (${shortcut(s.platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
               <Icon name="plus" size={14} />
             </button>
-          </div>
+          }
+        >
           {channels.map((c) => (
             <div key={c.id} onContextMenu={(e) => open(e, channelMenu(c))}>
               <ChannelItem id={c.id} name={c.name} unread={c.unread} />
             </div>
           ))}
-        </div>
+        </Section>
 
         {dms.length > 0 && (
-        <div className="section">
-          <div className="section__head">
-            <span>{L('Mensagens diretas', 'Direct messages')}</span>
-          </div>
+        <Section id="dms" label={L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)}>
           {dms.map((c) => {
             const agent = agentById(s, c.name)
             if (!agent) return null
@@ -168,16 +188,18 @@ export function Sidebar(): ReactNode {
               </div>
             )
           })}
-        </div>
+        </Section>
         )}
 
-        <div className="section">
-          <div className="section__head">
-            <span>{L('Agentes', 'Agents')}</span>
+        <Section
+          id="agents"
+          label={L('Agentes', 'Agents')}
+          action={
             <button className="icon-btn icon-btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={openTuca}>
               <Icon name="plus" size={14} />
             </button>
-          </div>
+          }
+        >
           {s.agents
             .filter(isTeam)
             .map((a) => (
@@ -192,7 +214,7 @@ export function Sidebar(): ReactNode {
               <span className="nav-item__meta">{s.agents.filter((a) => a.archived).length}</span>
             </button>
           )}
-        </div>
+        </Section>
       </nav>
 
       {s.settings.onboarding?.done && !s.settings.onboarding.checklistHidden && <GettingStarted />}
