@@ -351,7 +351,7 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
             {L('Claude Code, Codex, OpenCode ou Pi, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, OpenCode or Pi, the way you set them up: on your plan, your company’s gateway or your providers.')}
           </Point>
           <Point icon="shield" title={L('Você no controle', 'You’re in control')}>
-            {L('Cada agente só usa o que você liberar. Comprar, publicar, enviar e apagar sempre esperam o seu ok.', 'Each agent only uses what you allow. Buying, publishing, sending and deleting always wait for your OK.')}
+            {L('Cada agente só usa o que você liberar. Publicar, enviar e apagar esperam o seu ok, a não ser que você deixe o agente agir sozinho. Comprar e pagar sempre esperam.', 'Each agent only uses what you allow. Publishing, sending and deleting wait for your OK, unless you let the agent act on its own. Buying and paying always wait.')}
           </Point>
           <Point icon="lock" title={L('Tudo fica aqui', 'Everything stays here')}>
             {L('Conversas, memória e logins ficam no seu computador. Nada passa por servidor nosso.', 'Conversations, memory and logins stay on your computer. Nothing goes through a server of ours.')}

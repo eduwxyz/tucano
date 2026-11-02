@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
-import type { Agent, BrowserElement, BrowserReply, Settings } from '../src/shared/types'
-import { bareTarget, Browser, browserStep, describePage, findByText, risky, type BrowserHost } from '../src/core/browser'
+import { autonomousClick, type Agent, type BrowserElement, type BrowserReply, type Settings } from '../src/shared/types'
+import { bareTarget, Browser, browserStep, costly, describePage, findByText, risky, type BrowserHost } from '../src/core/browser'
 import { systemPrompt } from '../src/core/context'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
@@ -154,7 +154,7 @@ describe("an agent's browser", () => {
   it('a click that publishes waits for me, with the screen; approved, it clicks only on the same page', async () => {
     await browser.call(lia(), 'navegador_abrir', { url: 'https://studio.youtube.com/video/1' }, ctx)
     const r = await browser.call(lia(), 'navegador_clicar', { alvo: 'Publicar', motivo: 'O Edu pediu pra publicar hoje.' }, ctx)
-    expect(r.approval).toEqual({ args: { url: 'https://studio.youtube.com/video/1', alvo: 'Publicar' }, why: 'O Edu pediu pra publicar hoje.', detail: 'Clicar em "Publicar"' })
+    expect(r.approval).toEqual({ args: { url: 'https://studio.youtube.com/video/1', alvo: 'Publicar' }, why: 'O Edu pediu pra publicar hoje.', detail: 'Clicar em "Publicar"', costly: false })
     expect(r.artifact?.kind).toBe('image')
     expect(existsSync(join(dataDir, 'artifacts', r.artifact!.id, r.artifact!.name))).toBe(true)
     expect(fake.calls.some((c) => c.op === 'click')).toBe(false)
@@ -283,6 +283,69 @@ describe('the runner with a browser', () => {
     expect(db.agent('lia-0001')!.autoApprove ?? []).toEqual([])
     expect(db.agent('lia-0001')!.browser).toBe(true)
     await gateway.stop()
+  })
+
+  it('with autonomy on its sites, the risky click happens right away; on another site, or when it spends money, it still asks', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'ad-nav-auto-'))
+    const db = new Db(join(dataDir, 'test.db'))
+    db.saveAgent(lia({ autonomy: { browser: 'auto', browserSites: ['youtube.com'] } }))
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'conteudo', members: ['lia-0001'] })
+    const fake = fakeHost()
+    const browser = new Browser({ host: fake.host, db, dataDir, emit: () => {}, me: () => 'Edu' })
+    const ready = { installed: true, loggedIn: true }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const gateway = new Gateway()
+    await gateway.start()
+    let url = 'https://studio.youtube.com/video/1'
+    let alvo = 'Publicar'
+    const results: unknown[] = []
+    const claude: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        if (!turn.prompt.includes('o app clicou')) {
+          await callTool(turn.mcpUrl!, 'navegador_abrir', { url })
+          results.push(await callTool(turn.mcpUrl!, 'navegador_clicar', { alvo }))
+        }
+        yield { type: 'done', text: 'ok', usage: { inputTokens: 1000, cacheReadTokens: 0, outputTokens: 10 } }
+      }
+    }
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
+
+    await r.send('c1', '@lia publica o vídeo')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(0)
+    expect(fake.calls.filter((c) => c.op === 'click')).toHaveLength(1)
+    const done = db.messages().find((m) => m.run?.steps.some((s) => s.label === 'Clicou (autônomo)'))
+    expect(done?.run?.status).not.toBe('waiting_approval')
+    expect(done?.run?.artifactIds).toHaveLength(1) // the screenshot stays as the record
+
+    url = 'https://example.com/form'
+    await r.send('c1', '@lia publica lá também')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(1)
+    expect(fake.calls.filter((c) => c.op === 'click')).toHaveLength(1)
+    await gateway.stop()
+  })
+
+  it('autonomy: sites cover subdomains, empty means any site, and money always asks', () => {
+    expect(autonomousClick(undefined, 'https://x.com/home')).toBe(false)
+    expect(autonomousClick({ browser: 'ask', browserSites: ['x.com'] }, 'https://x.com/home')).toBe(false)
+    expect(autonomousClick({ browser: 'auto' }, 'https://qualquer.site/a')).toBe(true)
+    expect(autonomousClick({ browser: 'auto', browserSites: ['https://www.x.com/'] }, 'https://mobile.x.com/compose')).toBe(true)
+    expect(autonomousClick({ browser: 'auto', browserSites: ['x.com'] }, 'https://notx.com/')).toBe(false)
+    expect(autonomousClick({ browser: 'auto', browserSites: ['x.com'] }, 'not a url')).toBe(false)
+    expect(costly('Postar')).toBe(false)
+    expect(costly('Finalizar compra')).toBe(true)
+    expect(costly('Pay now')).toBe(true)
+  })
+
+  it('the prompt says what it does on its own, and where', () => {
+    const settings = { workspaceName: 'Edu', context: '' }
+    const conv = { id: 'c1', kind: 'channel' as const, name: 'conteudo', members: ['lia-0001'], createdAt: 0 }
+    const p = systemPrompt({ agent: lia({ autonomy: { browser: 'auto', browserSites: ['x.com'] } }), settings, conversation: conv, peers: [], browser: true })
+    expect(p).toContain('Você age sozinho em x.com')
+    expect(p).not.toContain('Clique que compra, paga, publica')
+    expect(systemPrompt({ agent: lia(), settings, conversation: conv, peers: [], browser: true })).toContain('Clique que compra, paga, publica')
   })
 
   it('what it says while working goes with the steps; the reply keeps only the end', async () => {

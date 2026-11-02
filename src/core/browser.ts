@@ -122,6 +122,11 @@ const RISKY =
 
 export const risky = (...texts: string[]): boolean => texts.some((t) => RISKY.test(norm(t)))
 
+// What spends money: it always waits for a yes, even for an agent that acts on its own.
+const COSTLY = /\b(compr(ar|e|a)|finalizar (compra|pedido)|checkout|buy|purchase|pag(ar|ue)|pay|reserv(ar|e)|book|transferir|transfer|doar|donate|assinar|subscribe)\b/
+
+export const costly = (...texts: string[]): boolean => texts.some((t) => COSTLY.test(norm(t)))
+
 // The element named by number, by its exact text, or by the only text that contains it.
 export function findByText(target: string, elements: BrowserElement[]): BrowserElement | undefined {
   const num = /^#?\s*(\d+)$/.exec(target.trim()) ?? /^#\s*(\d+)\b/.exec(target.trim()) // "#9" or "#9 botão Buscar"
@@ -206,7 +211,7 @@ export function browserStep(name: string, args: Record<string, unknown>): { labe
 export interface BrowserOutcome {
   result: CallToolResult
   artifact?: Artifact
-  approval?: { args: Record<string, unknown>; why: string; detail: string } // a click that waits for me
+  approval?: { args: Record<string, unknown>; why: string; detail: string; costly?: boolean } // a click that waits for me
   detail?: string // what it clicked or typed in, by name, for the step in the chat
 }
 
@@ -392,7 +397,7 @@ export class Browser {
             return {
               result: textResult(L(`Esse clique ("${label}") precisa de aprovação.`, `This click ("${label}") needs approval.`)),
               artifact,
-              approval: { args: callArgs, why: why || L(`Clicar em "${label}" em ${page.title || page.url}`, `Click "${label}" on ${page.title || page.url}`), detail: L(`Clicar em "${label}"`, `Click "${label}"`) }
+              approval: { args: callArgs, why: why || L(`Clicar em "${label}" em ${page.title || page.url}`, `Click "${label}" on ${page.title || page.url}`), detail: L(`Clicar em "${label}"`, `Click "${label}"`), costly: costly(label || target) }
             }
           }
           const r = await this.deps.host(id, 'click', 'el' in spot ? { ref: spot.ref } : { x: spot.x, y: spot.y })
@@ -462,7 +467,7 @@ export class Browser {
   }
 
   // An approved click: only on the same page, on the element with that text (or the same spot).
-  async approved(agent: Agent, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> {
+  async approved(agent: Agent, args: Record<string, unknown>, label = L('Clicou (aprovado)', 'Clicked (approved)')): Promise<{ ok: boolean; text: string }> {
     const url = String(args['url'] ?? '')
     const target = String(args['alvo'] ?? '')
     this.update(agent.id, { doing: { label: L('Clicando em', 'Clicking'), detail: target } })
@@ -477,7 +482,7 @@ export class Browser {
         if (!el) return { ok: false, text: L(`"${target}" não está mais na página. Nada foi clicado.`, `"${target}" is no longer on the page. Nothing was clicked.`) }
         r = await this.deps.host(agent.id, 'click', { ref: el.ref })
       }
-      return { ok: true, text: await this.after(agent.id, r, { label: L('Clicou (aprovado)', 'Clicked (approved)'), detail: target }).then((x) => (x.content[0] as { text: string }).text) }
+      return { ok: true, text: await this.after(agent.id, r, { label, detail: target }).then((x) => (x.content[0] as { text: string }).text) }
     } catch (e) {
       return { ok: false, text: failed(e) }
     } finally {

@@ -276,6 +276,20 @@ describe('always allow and asking for access', () => {
     expect(last).toBeDefined()
   })
 
+  it('autonomy "tools: auto" runs every sensitive tool without asking; a high-risk one still asks', async () => {
+    db.saveAgent({ ...agent('read_write'), autonomy: { tools: 'auto' } })
+    const r = runner(askDelete)
+    await r.send('d1', 'apaga a 2')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(0)
+    expect(agentMessages().some((m) => m.run?.steps.some((s) => s.label === 'Executou (sempre permitido)'))).toBe(true)
+
+    db.updateTool(connectorId, 'delete_task', { highRisk: true })
+    await r.send('d1', 'apaga a 2 de novo')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(1)
+  })
+
   it('a high-risk tool never becomes a rule', async () => {
     db.saveAgent(agent('read_write'))
     db.updateTool(connectorId, 'delete_task', { highRisk: true })

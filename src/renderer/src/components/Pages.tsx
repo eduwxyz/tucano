@@ -182,6 +182,14 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
     setDraft((d) => ({ ...d, ...p }))
     setSaved(false)
   }
+  // Autonomy, like the browser switch: on a new agent it waits for Save, on an existing one it takes effect right away.
+  const setAutonomy = (p: Partial<NonNullable<Agent['autonomy']>>): void => {
+    const autonomy = { ...draft.autonomy, ...p }
+    if (isNew) return patch({ autonomy })
+    setDraft((d) => ({ ...d, autonomy }))
+    patchAgent(draft.id, { autonomy })
+  }
+  const [sitesText, setSitesText] = useState((draft.autonomy?.browserSites ?? []).join(', '))
 
   const save = async (): Promise<void> => {
     if (!canSave) return
@@ -381,8 +389,18 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 })}
               </div>
               <p className="hint">
-                <Icon name="shield" size={13} /> {L('Ferramentas sensíveis (merge, deploy, apagar, enviar) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir".', 'Sensitive tools (merge, deploy, delete, send) become an approval request in the chat, except the ones you marked as "always allow".')}
+                <Icon name="shield" size={13} />{' '}
+                {draft.autonomy?.tools === 'auto'
+                  ? L('Ferramentas sensíveis (merge, deploy, apagar, enviar) rodam sozinhas. As de alto risco continuam pedindo aprovação.', 'Sensitive tools (merge, deploy, delete, send) run on their own. High-risk ones still ask for approval.')
+                  : L('Ferramentas sensíveis (merge, deploy, apagar, enviar) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir".', 'Sensitive tools (merge, deploy, delete, send) become an approval request in the chat, except the ones you marked as "always allow".')}
               </p>
+              <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Ferramentas sensíveis', 'Sensitive tools')}>
+                {(['ask', 'auto'] as const).map((v) => (
+                  <button key={v} role="radio" aria-checked={(draft.autonomy?.tools ?? 'ask') === v} className={(draft.autonomy?.tools ?? 'ask') === v ? 'is-active' : ''} onClick={() => setAutonomy({ tools: v })}>
+                    {v === 'auto' ? L('Agir sozinho', 'Act on its own') : L('Pedir aprovação', 'Ask for approval')}
+                  </button>
+                ))}
+              </div>
               {!isNew && (draft.autoApprove?.length ?? 0) > 0 && (
                 <div className="always">
                   <span className="small muted">{L('Sempre permitido, sem pedir:', 'Always allowed, without asking:')}</span>
@@ -431,7 +449,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           {pane('ferramentas') && (
             <Card
               title={L('Navegador', 'Browser')}
-              lead={`${L('Um Chrome só dele: abre páginas, clica, preenche e lê como uma pessoa, com logins separados dos seus (você entra pelo Assumir). Clique que compra, publica, envia ou apaga pede sua aprovação.', 'A Chrome of its own: opens pages, clicks, fills in and reads like a person, with logins separate from yours (you sign in via Take over). A click that buys, publishes, sends or deletes asks for your approval.')}${isNew ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
+              lead={`${L('Um Chrome só dele: abre páginas, clica, preenche e lê como uma pessoa, com logins separados dos seus (você entra pelo Assumir).', 'A Chrome of its own: opens pages, clicks, fills in and reads like a person, with logins separate from yours (you sign in via Take over).')}${isNew ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
             >
               <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador', 'Browser')}>
                 {[false, true].map((v) => (
@@ -458,6 +476,32 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                     {L('Apagar logins', 'Delete logins')}
                   </button>
                 </div>
+              )}
+              {draft.browser && (
+                <>
+                  <Field
+                    label={L('Clique que publica, envia ou apaga', 'A click that publishes, sends or deletes')}
+                    hint={L('Compra, pagamento, reserva e doação sempre pedem aprovação.', 'Purchases, payments, bookings and donations always ask for approval.')}
+                  >
+                    <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Autonomia do navegador', 'Browser autonomy')}>
+                      {(['ask', 'auto'] as const).map((v) => (
+                        <button key={v} role="radio" aria-checked={(draft.autonomy?.browser ?? 'ask') === v} className={(draft.autonomy?.browser ?? 'ask') === v ? 'is-active' : ''} onClick={() => setAutonomy({ browser: v })}>
+                          {v === 'auto' ? L('Agir sozinho', 'Act on its own') : L('Pedir aprovação', 'Ask for approval')}
+                        </button>
+                      ))}
+                    </div>
+                  </Field>
+                  {draft.autonomy?.browser === 'auto' && (
+                    <Field label={L('Em quais sites', 'On which sites')} hint={L('Separe por vírgula; vale para os subdomínios. Vazio: qualquer site.', 'Comma-separated; covers subdomains. Empty: any site.')}>
+                      <input
+                        value={sitesText}
+                        placeholder="x.com, linkedin.com"
+                        onChange={(e) => setSitesText(e.target.value)}
+                        onBlur={() => setAutonomy({ browserSites: sitesText.split(',').map((s) => s.trim()).filter(Boolean) })}
+                      />
+                    </Field>
+                  )}
+                </>
               )}
             </Card>
           )}
