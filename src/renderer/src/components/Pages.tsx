@@ -43,6 +43,7 @@ import {
   saveSkill,
   skillApplies,
   modelInfo,
+  MODELS,
   type Agent,
   type AgentColor,
   type Connector,
@@ -55,7 +56,7 @@ import {
   isTeam,
   reachable
 } from '../store'
-import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway } from './Harness'
+import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
 import { AgentAvatar, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
@@ -524,6 +525,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             <Card title={L('Harness e modelo', 'Harness and model')} lead={L('O agente roda num dos harnesses que você usa, como você o configurou: no seu plano, no gateway da empresa ou no seu provedor.', 'The agent runs on one of the harnesses you use, the way you set it up: on your plan, your company’s gateway or your provider.')}>
               <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
               <AccountPicker draft={draft} patch={patch} />
+              <ReserveModel draft={draft} patch={patch} />
               {!engineStatus.loggedIn && !draft.accountId && (
                 <p className="hint hint--warn">
                   <Icon name="lock" size={13} />{' '}
@@ -1245,6 +1247,40 @@ function Tabs({ page, tabs }: { page: string; tabs: TabList }): ReactNode {
 }
 
 // A model to run with, from what each harness in use offers, or another by name.
+// Where the agent's replies go when its model's subscription is out (a 5-hour or weekly limit, a 429).
+// Off by default; turned on, it starts on another harness, since the same subscription is out for both.
+function ReserveModel({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const usable = useStore((s) => usableEngines(s.settings))
+  const main = modelInfo(draft.modelId)?.engine
+  const on = !!draft.fallbackModelId
+  const first = (): string => {
+    const other = usable.find((e) => e !== main) ?? usable[0]
+    return MODELS.find((m) => m.engine === other)?.id ?? draft.modelId
+  }
+  const reserve = draft.fallbackModelId ? modelInfo(draft.fallbackModelId) : undefined
+  return (
+    <div className="reserve">
+      <div className="key-row">
+        <Icon name="layers" />
+        <div className="grow">
+          <strong>{L('Modelo reserva', 'Reserve model')}</strong>
+          <p className="muted small">
+            {L(
+              `Quando a assinatura do modelo principal chega no limite (o de 5 horas ou o semanal), a resposta segue no reserva. Na resposta seguinte, ${draft.name || 'o agente'} tenta o principal de novo.`,
+              `When the main model’s subscription hits its limit (the 5-hour or the weekly one), the reply goes on with the reserve. On the next reply, ${draft.name || 'the agent'} tries the main one again.`
+            )}
+          </p>
+        </div>
+        <Toggle on={on} onChange={(v) => patch({ fallbackModelId: v ? first() : undefined })} />
+      </div>
+      {on && <ModelPicker value={draft.fallbackModelId!} onChange={(fallbackModelId) => patch({ fallbackModelId })} />}
+      {on && reserve && reserve.engine === main && (
+        <p className="hint hint--warn">{L('É o mesmo harness do principal: se o limite for da assinatura, ele também vai estar sem.', 'It’s the same harness as the main one: if the limit is the subscription’s, it’ll be out too.')}</p>
+      )}
+    </div>
+  )
+}
+
 export function ModelSelect(p: { value: string; onChange: (v: string) => void; jev?: boolean; engines?: EngineId[] }): ReactNode {
   return <ModelPicker {...p} />
 }
@@ -1507,6 +1543,19 @@ export function SettingsPage(): ReactNode {
                   {L('Mostrar os primeiros passos', 'Show getting started')}
                 </button>
               )}
+            </div>
+          </Card>
+        )}
+
+        {pane('geral') && (
+          <Card title={L('Notificações', 'Notifications')}>
+            <div className="key-row">
+              <Icon name="volume" />
+              <div className="grow">
+                <strong>{L('Sons', 'Sounds')}</strong>
+                <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', 'The chirp when an agent needs you and when it’s done. Off, notifications still show up, silently.')}</p>
+              </div>
+              <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
             </div>
           </Card>
         )}

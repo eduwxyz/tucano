@@ -57,6 +57,9 @@ export interface Agent {
   color: AgentColor
   instructions: string
   modelId: string
+  // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
+  // only when the main model failed before doing anything, and the next reply tries the main one again.
+  fallbackModelId?: string
   accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
   limit: number // tokens per month
@@ -210,7 +213,16 @@ export interface Settings {
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
   onboarding?: { done: boolean; checklistHidden?: boolean }
   folded?: string[] // the ids of what I folded in the sidebar
+  sounds?: boolean // the toucan's chirp on a notification; unset: on
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+}
+
+// Which chirp a notification plays: a knock when an agent needs me, two notes when the work
+// is done, none when I turned the sounds off. The system's own notification is always silent,
+// so this is the only sound the app makes.
+export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, sounds: boolean | undefined): 'chama' | 'pronto' | null {
+  if (sounds === false) return null
+  return kind === 'approval' || kind === 'question' ? 'chama' : 'pronto'
 }
 
 // Another login of a harness (a work account beside a personal one), in a folder of its own

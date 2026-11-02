@@ -17,6 +17,7 @@ import { availableModels, builderSection, draftFrom, PROPOR_AGENTE } from './tuc
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
+import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
@@ -424,13 +425,23 @@ export class Runner {
     }
   }
 
+  // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
+  private reserveFor(agent: Agent, settings: Settings): ReturnType<typeof modelInfo> {
+    const reserve = agent.fallbackModelId && agent.fallbackModelId !== agent.modelId ? modelInfo(agent.fallbackModelId) : undefined
+    const status = reserve?.id ? settings.engines[reserve.engine] : undefined
+    return reserve && status?.installed && status.loggedIn ? reserve : undefined
+  }
+
   private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean }): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
     const model = modelInfo(agent.modelId)
-    const engineId: EngineId = model?.engine ?? 'claude'
-    const engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
+    // The model this reply runs on: the agent's, or its reserve once the main one's subscription is out.
+    let modelId = agent.modelId
+    let modelName = model?.id ?? agent.modelId
+    let engineId: EngineId = model?.engine ?? 'claude'
+    let engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
 
     const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now() }
     const started = Date.now()
@@ -468,7 +479,7 @@ export class Runner {
     }
 
     // Another login of this harness (Settings › Accounts), when the agent has one.
-    const account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    let account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
     if (account && !account.loggedIn) {
       save({
         run: {
@@ -546,6 +557,7 @@ export class Runner {
     const seen = new Map<string, { result: string; n: number }>()
     let failing = 0 // tool calls failing in a row
     let inFlight = 0 // a tool running has its own timeout, so it isn't silence
+    let acted = false // called a tool or searched the web: a failed turn then isn't redone on the reserve model
     let lastSign = Date.now()
     let overBudget = false
     let refusedOver = 0
@@ -1030,6 +1042,7 @@ export class Runner {
           )
         }
         inFlight++
+        acted = true
         sign()
         try {
           const r = await runTool(name, args)
@@ -1068,65 +1081,85 @@ export class Runner {
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
     try {
-      const events = engines[engineId].run({
-        model: model?.id ?? agent.modelId,
-        effort: agent.effort,
-        system: systemPrompt({
-          agent,
-          settings,
-          conversation: conv,
-          peers,
-          memories: promptMemories,
-          canRemember,
-          hasComputer: !!computers,
-          browser: !!browser,
-          apps: apps ? agent.apps : undefined,
-          offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
-          macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
-          web: agent.web !== false,
-          routines: routines?.forAgent(agent.id),
-          skills: skills && mySkills,
-          publish: repos,
-          builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
-        }),
-        prompt: blocks.join('\n\n'),
-        blocks,
-        images,
-        cwd,
-        signal: control.ctl.signal,
-        mcpUrl: session?.url,
-        web: agent.web !== false,
-        account: account && this.deps.dataDir ? accountDir(this.deps.dataDir, account.id) : undefined
-      })
-      for await (const ev of events) {
-        sign()
-        if (ev.type === 'text') {
-          msg.text += ev.delta
-          pending += ev.delta
-          timer ??= setTimeout(flush, DELTA_FLUSH_MS)
-        } else if (ev.type === 'progress') {
-          progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
-          const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
-          if (used + counted > agent.limit) halt('limit')
-          else if (counted > budget) {
-            if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
-            overBudget = true
-            if (counted > budget * BUDGET_OVERRUN) halt('budget')
+      for (;;) {
+        try {
+          const events = engines[engineId].run({
+            model: modelName,
+            effort: agent.effort,
+            system: systemPrompt({
+              agent,
+              settings,
+              conversation: conv,
+              peers,
+              memories: promptMemories,
+              canRemember,
+              hasComputer: !!computers,
+              browser: !!browser,
+              apps: apps ? agent.apps : undefined,
+              offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
+              macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
+              web: agent.web !== false,
+              routines: routines?.forAgent(agent.id),
+              skills: skills && mySkills,
+              publish: repos,
+              builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
+            }),
+            prompt: blocks.join('\n\n'),
+            blocks,
+            images,
+            cwd,
+            signal: control.ctl.signal,
+            mcpUrl: session?.url,
+            web: agent.web !== false,
+            account: account && this.deps.dataDir ? accountDir(this.deps.dataDir, account.id) : undefined
+          })
+          for await (const ev of events) {
+            sign()
+            if (ev.type === 'text') {
+              msg.text += ev.delta
+              pending += ev.delta
+              timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+            } else if (ev.type === 'progress') {
+              progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
+              const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
+              if (used + counted > agent.limit) halt('limit')
+              else if (counted > budget) {
+                if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
+                overBudget = true
+                if (counted > budget * BUDGET_OVERRUN) halt('budget')
+              }
+            } else if (ev.type === 'quota') {
+              if (!account) this.deps.onQuota?.(ev.quota) // the windows shown are the usual login's
+            } else if (ev.type === 'web') {
+              // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
+              acted = true
+              addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })
+              if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
+            } else if (ev.type === 'done') {
+              result = ev
+            } else if (ev.type === 'error') {
+              error = ev.message
+            }
           }
-        } else if (ev.type === 'quota') {
-          if (!account) this.deps.onQuota?.(ev.quota) // the windows shown are the usual login's
-        } else if (ev.type === 'web') {
-          // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
-          addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })
-          if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
-        } else if (ev.type === 'done') {
-          result = ev
-        } else if (ev.type === 'error') {
-          error = ev.message
+        } catch (e) {
+          error = e instanceof Error ? e.message : String(e)
         }
+        // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
+        // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
+        const reserve = modelId === agent.modelId && !result && error && !control.reason && !acted && !question && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings) : undefined
+        if (!reserve) break
+        const from = engineLabel
+        flush()
+        msg.text = '' // the CLI's own "you've hit your limit", when it wrote it as text
+        modelId = agent.fallbackModelId!
+        modelName = reserve.id
+        engineId = reserve.engine
+        engineLabel = `${ENGINES[engineId].label} · ${reserve.label}`
+        account = undefined // the agent's account is a login of its main harness; the reserve runs on its harness's usual one
+        addSteps({ id: randomUUID(), label: L('Foi pro modelo reserva', 'Moved to the reserve model'), detail: L(`${from} está sem limite agora; segue no ${engineLabel}`, `${from} is out of quota for now; going on with ${engineLabel}`), status: 'done' })
+        error = null
+        progress = { tokens: 0, cacheRead: 0 }
       }
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e)
     } finally {
       clearInterval(stall)
       flush()
@@ -1136,9 +1169,9 @@ export class Runner {
 
     const ms = Date.now() - started
     const receipt: Receipt | undefined = result
-      ? { model: agent.modelId, ms, ...result.usage }
+      ? { model: modelId, ms, ...result.usage }
       : progress.tokens > 0
-        ? { model: agent.modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
+        ? { model: modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
     const usedNow = db.usedThisMonth(agent.id)
