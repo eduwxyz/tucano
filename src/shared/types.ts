@@ -209,6 +209,15 @@ export interface Settings {
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
   onboarding?: { done: boolean; checklistHidden?: boolean }
   folded?: string[] // the ids of what I folded in the sidebar
+  sounds?: boolean // the toucan's chirp on a notification; unset: on
+}
+
+// Which chirp a notification plays: a knock when an agent needs me, two notes when the work
+// is done, none when I turned the sounds off. The system's own notification is always silent,
+// so this is the only sound the app makes.
+export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, sounds: boolean | undefined): 'chama' | 'pronto' | null {
+  if (sounds === false) return null
+  return kind === 'approval' || kind === 'question' ? 'chama' : 'pronto'
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
