@@ -199,7 +199,7 @@ const inner = (n: Node): string => {
   return ''
 }
 
-const ROLE: Record<string, string> = {
+const ROLE = (): Record<string, string> => ({
   button: L('botão', 'button'),
   menuitem: L('item de menu', 'menu item'),
   menubaritem: 'menu',
@@ -222,7 +222,7 @@ const ROLE: Record<string, string> = {
   document: L('documento', 'document'),
   listbox: L('lista', 'list'),
   menu: 'menu'
-}
+})
 const clean = (s: unknown): string =>
   String(s ?? '')
     .replace(/[‎‏‪-‮]/g, '')
@@ -249,7 +249,7 @@ export function itemize(tree: Node | undefined, max = MAX_LINES): { items: Item[
         ...(n.available_actions?.length ? { actions: n.available_actions } : {})
       }
       items.push(item)
-      if (lines.length < max) lines.push(`${'  '.repeat(Math.min(depth, 4))}#${item.n} ${ROLE[role] ?? role}${name ? ` "${name}"` : ''}${item.value ? ` = "${item.value.slice(0, 200)}"` : ''}`)
+      if (lines.length < max) lines.push(`${'  '.repeat(Math.min(depth, 4))}#${item.n} ${ROLE()[role] ?? role}${name ? ` "${name}"` : ''}${item.value ? ` = "${item.value.slice(0, 200)}"` : ''}`)
       else more++
     } else if (role === 'statictext' && (name || value) && lines.length < max) lines.push(`${'  '.repeat(Math.min(depth, 4))}${L('texto', 'text')} "${(name || value).slice(0, 200)}"`)
     for (const c of n.children ?? []) visit(c, depth + 1)
@@ -434,7 +434,7 @@ function changeTools(app: Record<string, unknown>, alvo: Record<string, unknown>
   ]
 }
 
-const DONE: Record<string, string> = {
+const DONE = (): Record<string, string> => ({
   apps_listar: L('Viu os apps', 'Checked the apps'),
   app_abrir: L('Abriu', 'Opened'),
   app_ver: L('Leu', 'Read'),
@@ -442,11 +442,11 @@ const DONE: Record<string, string> = {
   app_clicar: L('Clicou em', 'Clicked'),
   app_escrever: L('Escreveu em', 'Typed in'),
   app_tecla: L('Apertou', 'Pressed')
-}
+})
 export function appStep(name: string, args: Record<string, unknown>): { label: string; detail: string } {
   const s = (k: string): string => String(args[k] ?? '').trim()
   const detail = name === 'app_clicar' || name === 'app_escrever' ? `${s('alvo')} · ${s('app')}` : name === 'app_tecla' ? `${s('tecla')} · ${s('app')}` : s('app')
-  return { label: DONE[name] ?? name, detail }
+  return { label: DONE()[name] ?? name, detail }
 }
 
 export interface AppOutcome {
