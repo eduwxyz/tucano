@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
@@ -426,10 +426,17 @@ export class Runner {
   }
 
   // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
-  private reserveFor(agent: Agent, settings: Settings): ReturnType<typeof modelInfo> {
-    const reserve = agent.fallbackModelId && agent.fallbackModelId !== agent.modelId ? modelInfo(agent.fallbackModelId) : undefined
-    const status = reserve?.id ? settings.engines[reserve.engine] : undefined
-    return reserve && status?.installed && status.loggedIn ? reserve : undefined
+  // The agent's reserve, when it can take the reply: its model, and the account it runs on (unset: its harness's
+  // usual login). None when it's the very login and model that just ran out, or when its login isn't ready.
+  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
+    const model = agent.fallbackModelId ? modelInfo(agent.fallbackModelId) : undefined
+    if (!model?.id) return undefined
+    // An account of another harness (the reserve's model changed since) means the usual login, like the agent's own.
+    const account = agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
+    if (agent.fallbackModelId === agent.modelId && account?.id === from?.id) return undefined
+    const status = settings.engines[model.engine]
+    if (!status?.installed || (account ? !account.loggedIn : !status.loggedIn)) return undefined
+    return { model, account }
   }
 
   private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean }): Promise<Message> {
@@ -439,6 +446,7 @@ export class Runner {
     const model = modelInfo(agent.modelId)
     // The model this reply runs on: the agent's, or its reserve once the main one's subscription is out.
     let modelId = agent.modelId
+    let onReserve = false // the reserve takes a reply once
     let modelName = model?.id ?? agent.modelId
     let engineId: EngineId = model?.engine ?? 'claude'
     let engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
@@ -1146,17 +1154,19 @@ export class Runner {
         }
         // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
         // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
-        const reserve = modelId === agent.modelId && !result && error && !control.reason && !acted && !question && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings) : undefined
+        const reserve = !onReserve && !result && error && !control.reason && !acted && !question && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
         if (!reserve) break
-        const from = engineLabel
+        const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
         flush()
         msg.text = '' // the CLI's own "you've hit your limit", when it wrote it as text
+        onReserve = true
         modelId = agent.fallbackModelId!
-        modelName = reserve.id
-        engineId = reserve.engine
-        engineLabel = `${ENGINES[engineId].label} · ${reserve.label}`
-        account = undefined // the agent's account is a login of its main harness; the reserve runs on its harness's usual one
-        addSteps({ id: randomUUID(), label: L('Foi pro modelo reserva', 'Moved to the reserve model'), detail: L(`${from} está sem limite agora; segue no ${engineLabel}`, `${from} is out of quota for now; going on with ${engineLabel}`), status: 'done' })
+        modelName = reserve.model.id
+        engineId = reserve.model.engine
+        engineLabel = `${ENGINES[engineId].label} · ${reserve.model.label}`
+        account = reserve.account
+        const to = `${engineLabel}${account ? ` (${account.name})` : ''}`
+        addSteps({ id: randomUUID(), label: L('Foi pro modelo reserva', 'Moved to the reserve model'), detail: L(`${from} está sem limite agora; segue no ${to}`, `${from} is out of quota for now; going on with ${to}`), status: 'done' })
         error = null
         progress = { tokens: 0, cacheRead: 0 }
       }

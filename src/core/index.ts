@@ -931,8 +931,10 @@ const api: Api = {
   removeAccount: ({ id }) => {
     db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id) })
     accountLogins.delete(id)
-    for (const agent of db.agents().filter((x) => x.accountId === id)) {
-      const { accountId: _gone, ...rest } = agent
+    for (const agent of db.agents().filter((x) => x.accountId === id || x.fallbackAccountId === id)) {
+      const rest = { ...agent }
+      if (rest.accountId === id) delete rest.accountId
+      if (rest.fallbackAccountId === id) delete rest.fallbackAccountId
       db.saveAgent(rest)
       emit({ type: 'agent', agent: db.agent(agent.id)! })
     }

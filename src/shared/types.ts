@@ -60,6 +60,9 @@ export interface Agent {
   // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
   // only when the main model failed before doing anything, and the next reply tries the main one again.
   fallbackModelId?: string
+  // The login the reserve runs on: one of settings.accounts, of the reserve's harness; unset: that harness's usual login.
+  // With it, the reserve can be the same model on another account, when the main account's limit is out.
+  fallbackAccountId?: string
   accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
   limit: number // tokens per month
