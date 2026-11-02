@@ -3921,6 +3921,13 @@ table.csv th {
   font-size: 13px;
   line-height: 1.5;
 }
+/* An agent's reserve model, under the main one. */
+.reserve {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
 .model-picker {
   display: flex;
   flex-wrap: wrap;

@@ -57,6 +57,9 @@ export interface Agent {
   color: AgentColor
   instructions: string
   modelId: string
+  // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
+  // only when the main model failed before doing anything, and the next reply tries the main one again.
+  fallbackModelId?: string
   effort: Effort
   limit: number // tokens per month
   used: number // tokens used this month, computed from receipts
