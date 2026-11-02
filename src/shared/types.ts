@@ -55,6 +55,8 @@ export interface Agent {
   handle: string
   role: string
   color: AgentColor
+  customColor?: string // a color of the person's own (#rrggbb), over `color`
+  picture?: string // a small picture (data URL), over the face
   instructions: string
   modelId: string
   // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried

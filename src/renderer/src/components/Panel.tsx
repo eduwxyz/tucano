@@ -6,7 +6,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { agentById, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
-import { Icon, type IconName } from './ui'
+import { Icon, ownColor, type IconName } from './ui'
 
 const KIND_LABEL = (): Record<Artifact['kind'], string> => ({
   image: L('Imagem', 'Image'),
@@ -169,7 +169,7 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
     <div className={`screen ${onOpen ? 'screen--button' : ''}`} onClick={onOpen} role={onOpen ? 'button' : undefined}>
       <img className="screen__frame" src={view.frame} alt={view.title} draggable={false} />
       {c && !view.shown && agent && (
-        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
+        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ ...ownColor(agent), left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
           <i key={c.at} className="screen__ripple" />
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
             <path d="m4 2 16 8-7 2-3 7L4 2Z" />

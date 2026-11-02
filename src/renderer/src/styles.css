@@ -6598,3 +6598,26 @@ kbd {
 [data-os='mac'] .lightbox__bar {
   padding-left: 84px; /* the window's buttons are here */
 }
+
+/* An agent's own color and picture */
+.avatar__photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.swatch--custom {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--agent, conic-gradient(#e5484d, #f5a524, #30a46c, #0091ff, #8e4ec6, #e5484d));
+}
+.swatch--custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.swatch--custom.is-active {
+  overflow: visible;
+}

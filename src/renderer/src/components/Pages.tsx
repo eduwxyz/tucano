@@ -1,5 +1,5 @@
 import { L, locale, type Lang } from '../../../shared/lang'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
   navigate,
@@ -138,7 +138,63 @@ export function Sheet({
 
 // ---------- Agent profile / creation ----------
 
+// A square of 128 px: enough for any place it shows.
+async function pictureFrom(file: File): Promise<string> {
+  const image = await createImageBitmap(file)
+  const side = Math.min(image.width, image.height)
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 128
+  canvas.getContext('2d')!.drawImage(image, (image.width - side) / 2, (image.height - side) / 2, side, side, 0, 0, 128, 128)
+  image.close()
+  return canvas.toDataURL('image/webp', 0.85)
+}
+
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
+
+// The eight colors and one of the person's own, here and in the onboarding.
+export function ColorPicker({ agent, patch }: { agent: Pick<Agent, 'color' | 'customColor'>; patch: (p: Partial<Agent>) => void }): ReactNode {
+  return (
+    <div className="swatches">
+      {COLORS.map((c) => (
+        <button key={c} className={`swatch c-${c} ${!agent.customColor && agent.color === c ? 'is-active' : ''}`} onClick={() => patch({ color: c, customColor: undefined })} aria-label={c} />
+      ))}
+      <label className={`swatch swatch--custom ${agent.customColor ? 'is-active' : ''}`} style={agent.customColor ? ({ '--agent': agent.customColor } as CSSProperties) : undefined} title={L('Outra cor', 'Another color')}>
+        <input type="color" aria-label={L('Outra cor', 'Another color')} value={agent.customColor ?? '#888888'} onChange={(e) => patch({ customColor: e.target.value })} />
+      </label>
+    </div>
+  )
+}
+
+// A picture over the face, scaled down here; taken off the same way.
+export function PicturePicker({ agent, patch }: { agent: Pick<Agent, 'name' | 'color' | 'customColor' | 'picture'>; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const [error, setError] = useState('')
+  return (
+    <>
+      <div className="row row--center">
+        <AgentAvatar agent={{ ...agent, name: agent.name || '?' }} size={40} />
+        <label className="btn btn--sm">
+          {L('Enviar imagem', 'Upload image')}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) pictureFrom(file).then((picture) => (setError(''), patch({ picture })), () => setError(L('Não consegui abrir essa imagem.', "I couldn't open that image.")))
+            }}
+          />
+        </label>
+        {agent.picture && (
+          <button type="button" className="btn btn--sm btn--ghost" onClick={() => patch({ picture: undefined })}>
+            {L('Tirar', 'Remove')}
+          </button>
+        )}
+      </div>
+      {error && <span className="field__error">{error}</span>}
+    </>
+  )
+}
 const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] => [
   { value: 'auto', label: L('Grava sozinho', 'Saves on its own'), hint: L('Guarda e avisa na mensagem, com Desfazer.', 'Keeps it and says so in the message, with Undo.') },
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
@@ -207,7 +263,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
     <Page
       title={
         <span className="row row--center">
-          <AgentAvatar agent={{ name: draft.name || '?', color: draft.color }} size={26} />
+          <AgentAvatar agent={{ ...draft, name: draft.name || '?' }} size={26} />
           {isNew ? L('Novo agente', 'New agent') : draft.name}
         </span>
       }
@@ -269,16 +325,10 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <input value={draft.role} placeholder={L('Ex.: Engenharia', 'E.g. Engineering')} onChange={(e) => patch({ role: e.target.value })} />
               </Field>
               <Field label={L('Cor', 'Color')}>
-                <div className="swatches">
-                  {COLORS.map((c) => (
-                    <button
-                      key={c}
-                      className={`swatch c-${c} ${draft.color === c ? 'is-active' : ''}`}
-                      onClick={() => patch({ color: c })}
-                      aria-label={c}
-                    />
-                  ))}
-                </div>
+                <ColorPicker agent={draft} patch={patch} />
+              </Field>
+              <Field label={L('Foto ou ícone', 'Photo or icon')}>
+                <PicturePicker agent={draft} patch={patch} />
               </Field>
             </Card>
           )}
@@ -575,7 +625,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
 
         <aside className="agent-side">
           <div className="profile-card">
-            <AgentAvatar agent={{ name: draft.name || '?', color: draft.color }} size={72} />
+            <AgentAvatar agent={{ ...draft, name: draft.name || '?' }} size={72} />
             <strong className="profile-card__name">{draft.name || L('Sem nome', 'No name')}</strong>
             <span className="muted">@{draft.handle || 'handle'}</span>
             {draft.role && <span className="tag">{draft.role}</span>}
