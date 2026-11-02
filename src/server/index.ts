@@ -6,14 +6,20 @@
 // the server's token.
 //
 //   node out/main/server.js        (TUCANO_DATA, TUCANO_HOST, TUCANO_PORT, TUCANO_TOKEN)
+//
+// Behind a reverse proxy on this machine (Caddy, nginx, a tunnel), wrong tokens are counted by the address the
+// proxy saw (X-Forwarded-For). TUCANO_ORIGINS (https://tucano.example.com, comma separated) names the page's
+// origin if the proxy doesn't pass Host on, and TUCANO_COOKIE_SECURE=1 marks the cookie Secure if it doesn't
+// send X-Forwarded-Proto.
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { extname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Forwarder, isPrivate } from './forward'
+import { clientKey, decodePart, parseJson, parseOrigins, sameOrigin, Strikes } from './guard'
 import { vault } from './vault'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
@@ -93,12 +99,17 @@ const TYPES: Record<string, string> = {
 }
 
 function file(res: ServerResponse, path: string, headers: Record<string, string> = {}): void {
-  if (!existsSync(path)) return void res.writeHead(404).end('not found')
+  if (!existsSync(path) || !statSync(path).isFile()) return void res.writeHead(404).end('not found')
   res.writeHead(200, { 'content-type': TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream', ...headers }).end(readFileSync(path))
 }
 
 const sameToken = (t: string | undefined): boolean => !!t && t.length === token.length && timingSafeEqual(Buffer.from(t), Buffer.from(token))
 const cookieToken = (req: IncomingMessage): string | undefined => /(?:^|;\s*)tucano=([^;]+)/.exec(req.headers.cookie ?? '')?.[1]
+
+// Wrong tokens, counted by who sent them: 10 in 10 minutes, then a wait (guard.ts).
+const strikes = new Strikes()
+const origins = parseOrigins(process.env['TUCANO_ORIGINS'])
+const cookieSecure = process.env['TUCANO_COOKIE_SECURE'] === '1'
 
 // The pages agents serve (a dashboard, an API) listen on the server's own
 // loopback. On a private address (Tailscale, a home network) each running one
@@ -145,19 +156,41 @@ function body(req: IncomingMessage): Promise<string> {
   })
 }
 
-const server = createServer((req, res) => {
-  const url = new URL(req.url ?? '/', 'http://x')
+// A bug while handling one request answers that request and goes no further.
+function fail(res: ServerResponse): void {
+  if (!res.headersSent) res.writeHead(500)
+  res.end()
+}
+
+function route(req: IncomingMessage, res: ServerResponse, url: URL): void {
+  const who = clientKey(req.socket.remoteAddress, req.headers['x-forwarded-for'])
+  const wait = strikes.retryAfter(who)
+  if (wait) {
+    return void res
+      .writeHead(429, { 'content-type': 'text/plain; charset=utf-8', 'retry-after': String(wait) })
+      .end('Tucano: too many wrong tokens, try again later.\nTucano: tokens errados demais, tente de novo mais tarde.')
+  }
+
   // The link with ?token= signs this browser in, then drops it from the address bar. Lax, not
   // Strict: the link is often clicked from elsewhere (a chat), and a Strict cookie wouldn't ride
   // the redirect that follows. Lax still keeps it off other sites' POSTs to /rpc.
-  if (sameToken(url.searchParams.get('token') ?? undefined)) {
-    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
+  const given = url.searchParams.get('token') ?? undefined
+  if (sameToken(given)) {
+    strikes.clear(who)
+    const secure = cookieSecure || req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
     return void res.writeHead(302, { 'set-cookie': `tucano=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`, location: '/' }).end()
   }
-  if (!sameToken(cookieToken(req))) {
+  const cookie = cookieToken(req)
+  if (!sameToken(cookie)) {
+    // Opening the address with no token at all isn't a guess, and doesn't count.
+    if (given !== undefined || cookie !== undefined) strikes.fail(who)
     return void res
       .writeHead(401, { 'content-type': 'text/plain; charset=utf-8' })
       .end('Tucano: open the link with the token the server printed (…/?token=…).\nTucano: abra o link com o token que o servidor mostrou (…/?token=…).')
+  }
+
+  if ((url.pathname === '/events' || url.pathname === '/rpc') && !sameOrigin(req.headers.origin, req.headers.host, origins)) {
+    return void res.writeHead(403).end()
   }
 
   if (url.pathname === '/events') {
@@ -179,13 +212,17 @@ const server = createServer((req, res) => {
   if (url.pathname === '/rpc' && req.method === 'POST') {
     const c = clients.get(url.searchParams.get('c') ?? '')
     if (!c) return void res.writeHead(410).end()
-    body(req).then(
-      (text) => {
-        c.emit('message', { data: JSON.parse(text) })
-        res.writeHead(204).end()
-      },
-      () => res.writeHead(413).end()
-    )
+    body(req)
+      .then(
+        (text) => {
+          const msg = parseJson(text)
+          if (!msg) return void res.writeHead(400).end()
+          c.emit('message', { data: msg.value })
+          res.writeHead(204).end()
+        },
+        () => res.writeHead(413).end()
+      )
+      .catch(() => fail(res))
     return
   }
 
@@ -193,16 +230,31 @@ const server = createServer((req, res) => {
   const art = /^\/artifact\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
   if (art) {
     const dir = join(dataDir, 'artifacts', art[1]!)
-    const path = normalize(join(dir, decodeURIComponent(art[2]!)))
+    const name = decodePart(art[2]!)
+    if (name === undefined) return void res.writeHead(400).end()
+    const path = normalize(join(dir, name))
     if (!path.startsWith(dir + sep)) return void res.writeHead(404).end()
     return file(res, path, { 'content-security-policy': 'sandbox allow-scripts allow-popups' })
   }
 
   if (url.pathname === '/tucano-web.js') return void res.writeHead(200, { 'content-type': TYPES['.js']! }).end(WEB)
   if (url.pathname === '/' || url.pathname === '/index.html') return void res.writeHead(200, { 'content-type': TYPES['.html']!, 'cache-control': 'no-cache' }).end(index())
-  const path = normalize(join(page, decodeURIComponent(url.pathname)))
+  const rel = decodePart(url.pathname)
+  if (rel === undefined) return void res.writeHead(400).end()
+  const path = normalize(join(page, rel))
   if (!path.startsWith(page + sep)) return void res.writeHead(404).end()
   file(res, path)
+}
+
+const server = createServer((req, res) => {
+  const url = new URL(req.url ?? '/', 'http://x')
+  res.setHeader('x-content-type-options', 'nosniff')
+  res.setHeader('referrer-policy', 'no-referrer')
+  try {
+    route(req, res, url)
+  } catch {
+    fail(res)
+  }
 })
 
 // window.tucano for a browser: the core's port comes from the event stream and
