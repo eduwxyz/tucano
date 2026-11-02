@@ -29,11 +29,14 @@ const alive = (pid: number): boolean => {
     return false
   }
 }
+const exited = (proc: ChildProcess, ms: number): Promise<unknown> =>
+  Promise.race([proc.exitCode !== null || proc.signalCode !== null ? Promise.resolve() : new Promise((r) => proc.once('exit', r)), wait(ms)])
+
 // Chrome takes a moment to let go of its profile; a new one started before that just hands over to it.
 async function gone(proc: ChildProcess, ms = 10_000): Promise<void> {
   if (proc.exitCode !== null || proc.signalCode !== null) return
   proc.kill()
-  await Promise.race([new Promise((r) => proc.once('exit', r)), wait(ms)])
+  await exited(proc, ms)
   if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL')
 }
 
@@ -271,6 +274,16 @@ export class ChromeBrowsers {
     return tab
   }
 
+  // Asked to close, Chrome writes its cookies first. Killed, it loses what the last 30 s or so
+  // held: a login just made wouldn't be there when this profile opens again.
+  private async shutDown(t: Tab): Promise<void> {
+    t.closedAll = undefined // this is the app closing it, not the person handing it back
+    await Promise.race([t.send('Browser.close').catch(() => {}), wait(2000)])
+    await exited(t.proc, 5000)
+    t.close()
+    await gone(t.proc)
+  }
+
   // The agent's Chrome, headless, started when first needed.
   private async tab(agentId: string): Promise<Tab> {
     const t = this.tabs.get(agentId)
@@ -287,11 +300,8 @@ export class ChromeBrowsers {
     if (this.handingBack.has(agentId)) return
     this.handingBack.add(agentId)
     const t = this.tabs.get(agentId)
-    if (t?.headed) {
-      this.tabs.delete(agentId)
-      t.close()
-    }
-    const p = (t?.headed ? gone(t.proc) : Promise.resolve())
+    if (t?.headed) this.tabs.delete(agentId)
+    const p = (t?.headed ? this.shutDown(t) : Promise.resolve())
       .then(() => this.launch(agentId, false, url))
       .then(async (tab) => {
         await this.settle(tab)
@@ -310,8 +320,11 @@ export class ChromeBrowsers {
     if (op === 'close' || op === 'clear') {
       const t = this.tabs.get(agentId)
       this.tabs.delete(agentId)
-      t?.close()
-      if (t) await gone(t.proc)
+      if (t && op === 'close') await this.shutDown(t)
+      else if (t) {
+        t.close()
+        await gone(t.proc)
+      }
       if (op === 'clear') {
         rmSync(this.profile(agentId), { recursive: true, force: true })
       }
@@ -343,8 +356,7 @@ export class ChromeBrowsers {
       const url = current?.url
       if (current) {
         this.tabs.delete(agentId)
-        current.close()
-        await gone(current.proc)
+        await this.shutDown(current)
       }
       const tab = await this.launch(agentId, true, url)
       this.onShown(agentId, true)
