@@ -66,6 +66,7 @@ export interface Agent {
   accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
   limit: number // tokens per month
+  maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   used: number // tokens used this month, computed from receipts
   grants: Record<string, GrantLevel>
   memory: MemoryMode
@@ -170,6 +171,7 @@ export interface AgentDraft {
   instructions: string
   modelId: string
   effort: Effort
+  maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   web: boolean
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
@@ -311,6 +313,12 @@ export interface TelegramInfo {
 
 // Guards per reply (spec §3), so nothing runs away unattended (a routine at 3 a.m.)
 // without cutting long work that is going somewhere.
+// Routines an agent can have on at once, so it can't schedule itself without end. Each agent can
+// change it on its page (no upper bound: the monthly limit still holds); this is the default.
+export const MAX_AGENT_ROUTINES = 10
+// A whole number, at least 1: what the core enforces, whatever reached it.
+export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
+
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course

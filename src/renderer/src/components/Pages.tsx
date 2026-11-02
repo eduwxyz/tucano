@@ -36,7 +36,9 @@ import {
   useStore,
   EFFORTS,
   ENGINES,
+  MAX_AGENT_ROUTINES,
   RUN_BUDGET_PCT,
+  routineCap,
   RUN_STALL_MINUTES,
   archiveAgent,
   setTab,
@@ -554,6 +556,15 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                     step={0.5}
                     value={draft.limit / 1_000_000}
                     onChange={(n) => patch({ limit: Math.max(0, Math.round(n * 1_000_000)) })}
+                    className="input--short"
+                  />
+                </Field>
+                <Field label={L('Máx. rotinas ligadas', 'Max. enabled routines')} hint={L('Quantas rotinas o agente pode ter ligadas ao mesmo tempo.', 'How many routines the agent can have enabled at the same time.')}>
+                  <NumberInput
+                    min={1}
+                    step={1}
+                    value={draft.maxRoutines ?? MAX_AGENT_ROUTINES}
+                    onChange={(n) => patch({ maxRoutines: routineCap(n) })}
                     className="input--short"
                   />
                 </Field>
