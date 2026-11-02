@@ -4,8 +4,7 @@
 // person creates it. He has no connectors, no web and no computer of his own.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { MAX_AGENT_ROUTINES } from './routines'
-import { codexValue, ENGINES, MODELS, modelInfo, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
+import { codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCap, modelInfo, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
 import type { ToolDef } from './gateway'
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
@@ -160,7 +159,7 @@ export function agentFromDraft(d: AgentDraft, taken: string[], limit: number): A
     instructions: d.instructions,
     modelId: d.modelId,
     effort: d.effort,
-    maxRoutines: d.maxRoutines ?? MAX_AGENT_ROUTINES,
+    maxRoutines: routineCap(d.maxRoutines),
     limit,
     used: 0,
     grants: d.grants,

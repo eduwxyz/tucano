@@ -36,7 +36,9 @@ import {
   useStore,
   EFFORTS,
   ENGINES,
+  MAX_AGENT_ROUTINES,
   RUN_BUDGET_PCT,
+  routineCap,
   RUN_STALL_MINUTES,
   archiveAgent,
   setTab,
@@ -561,8 +563,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   <NumberInput
                     min={1}
                     step={1}
-                    value={draft.maxRoutines ?? 10}
-                    onChange={(n) => patch({ maxRoutines: Math.max(1, Math.round(n)) })}
+                    value={draft.maxRoutines ?? MAX_AGENT_ROUTINES}
+                    onChange={(n) => patch({ maxRoutines: routineCap(n) })}
                     className="input--short"
                   />
                 </Field>

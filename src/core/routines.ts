@@ -5,17 +5,18 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L, locale } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
-import { describeSchedule, nextRun, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
+import { describeSchedule, MAX_AGENT_ROUTINES, nextRun, routineCap, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
+
+export { MAX_AGENT_ROUTINES } // the default; each agent's own is agent.maxRoutines
 
 export const TICK_MS = 30_000
 export const LATE_GRACE_MS = 12 * 3_600_000 // a run missed by more than this is skipped
 const LATE_AFTER_MS = 2 * 60_000 // later than this is "atrasada" in the conversation
 // A reply that fails is tried again in place, after these waits; then it stays failed.
 export const RETRY_WAITS_MS = [60_000, 5 * 60_000]
-export const MAX_AGENT_ROUTINES = 10 // active ones per agent, so an agent can't schedule itself without end
 
 const DAY_KEYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab']
 const DAY_KEYS_EN = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] // also understood
@@ -253,7 +254,7 @@ export class Routines {
     const replaces = text('substitui')
     const prev = replaces ? this.deps.db.routine(replaces) : undefined
     if (replaces && prev?.agentId !== agent.id) return fail(L(`Não achei uma rotina sua com id ${replaces}.`, `I couldn't find a routine of yours with id ${replaces}.`))
-    const max = agent.maxRoutines ?? MAX_AGENT_ROUTINES
+    const max = routineCap(agent.maxRoutines)
     if (!prev && this.forAgent(agent.id).length >= max) return fail(L(`Você já tem ${max} rotinas ligadas. Cancele uma antes.`, `You already have ${max} routines on. Cancel one first.`))
 
     const keys = Array.isArray(args['dias']) ? (args['dias'] as unknown[]).map((d) => {

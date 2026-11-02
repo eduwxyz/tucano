@@ -6,6 +6,7 @@ import type { CoreEvent } from '../../shared/rpc'
 import {
   type Account,
   type AccountEngine,
+  MAX_AGENT_ROUTINES,
   MODELS,
   modelInfo,
   type EngineId,
@@ -356,7 +357,7 @@ export function newAgentDraft(): Agent {
     modelId: 'sonnet',
     effort: 'medium',
     limit: state.settings.defaultLimit,
-    maxRoutines: 10, // default: MAX_AGENT_ROUTINES (src/core/routines.ts)
+    maxRoutines: MAX_AGENT_ROUTINES,
     used: 0,
     grants: {},
     memory: 'auto',
