@@ -354,6 +354,35 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.section__head .badge {
+  margin-right: 4px;
+}
+.fold-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: left;
+}
+.fold-toggle:hover {
+  color: var(--text-2);
+}
+.fold-toggle svg {
+  flex-shrink: 0;
+  transition: transform 0.15s var(--ease);
+}
+.fold-toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+/* What's folded goes, except where you are: the row you're in never disappears from under you. */
+.is-folded .nav-item:not(.is-active) {
+  display: none;
+}
 .nav-item {
   width: 100%;
   display: flex;
@@ -886,6 +915,9 @@ h3 {
   background: var(--code-bg);
 }
 .md table {
+  display: block; /* a wide table scrolls by itself, with its words whole */
+  overflow-x: auto;
+  overflow-wrap: normal;
   border-collapse: collapse;
   margin: 6px 0 8px;
   font-size: 13px;
@@ -910,6 +942,11 @@ h3 {
 }
 .md a {
   color: var(--accent);
+}
+/* A long link or word breaks instead of pushing the message out of the conversation. */
+.md {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .system-line {
   display: flex;
@@ -6307,6 +6344,9 @@ kbd {
   display: none;
 }
 @media (max-width: 760px) {
+  .fold-toggle {
+    min-height: 36px;
+  }
   .app {
     grid-template-columns: minmax(0, 1fr);
     height: 100dvh;

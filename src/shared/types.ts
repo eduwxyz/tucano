@@ -150,6 +150,7 @@ export interface Run {
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
+  task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
 }
@@ -207,6 +208,7 @@ export interface Settings {
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
   onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean }
+  folded?: string[] // the ids of what I folded in the sidebar
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
@@ -352,8 +354,10 @@ export const modelInfo = (id: string): Model | undefined => {
   if (listed) return listed
   const known = found.get(id)
   if (known) return known
-  const m = /^(claude|codex|opencode|pi):(.*)$/s.exec(id)
-  return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: L('Nome próprio', 'Custom name') } : undefined
+  const engine = ENGINE_IDS.find((e) => id.startsWith(`${e}:`))
+  if (!engine) return undefined
+  const name = id.slice(engine.length + 1).trim()
+  return { id: name, engine, label: name, hint: L('Nome próprio', 'Custom name') }
 }
 
 export interface ConnectorTool {

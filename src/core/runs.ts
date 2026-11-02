@@ -231,6 +231,7 @@ export class Runner {
       .slice(-40)
       .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : ''}`)
     const task = [
+      msg.run.task, // what it was asked: a trigger's event is only there
       L(
         `Você pausou a sua última resposta ao chegar no teto de gasto dela, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
         `You paused your last reply when it reached its spending cap, and ${me} asked you to go on. What you wrote is in your last message above.`
@@ -450,7 +451,10 @@ export class Runner {
     let stepStarted = started
     const thinking = (): Step => ({ id: randomUUID(), label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' })
     msg.text = ''
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()] }
+    // "Try again" passes no task: it repeats the one of the reply it's redoing.
+    const task = opts.task ?? opts.existing?.run?.task
+    const again = task ? { task } : {}
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
@@ -472,7 +476,7 @@ export class Runner {
     if (used >= agent.limit) {
       save({
         text: L('Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.', "I stopped: I've used all my tokens for this month. It can be raised on my page."),
-        run: { status: 'limit_reached', depth: opts.depth, steps: [] }
+        run: { status: 'limit_reached', depth: opts.depth, steps: [], ...again }
       })
       return msg
     }
@@ -484,6 +488,7 @@ export class Runner {
           status: 'failed',
           depth: opts.depth,
           steps: [],
+          ...again,
           error: L(
             `O ${ENGINES[engineId].label} ${status.installed ? 'não está logado' : 'não está instalado'}. Resolva em Configurações e mande de novo.`,
             `${ENGINES[engineId].label} ${status.installed ? "isn't signed in" : "isn't installed"}. Fix it in Settings and send it again.`
@@ -1055,7 +1060,7 @@ export class Runner {
     const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary, images: names })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names })
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -1151,7 +1156,7 @@ export class Runner {
 
     const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
     if (control.reason === 'stopped') {
-      save({ run: { ...base, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
+      save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
       const why = {
         loop: L(`repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`, `I repeated the same thing, with the same result, ${REPEAT_STOP} times. It looked like a loop`),
@@ -1160,18 +1165,18 @@ export class Runner {
       }[control.reason]
       save({
         text: msg.text ? `${msg.text} …` : '',
-        run: { ...base, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
+        run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
       })
     } else if (overBudget && control.reason !== 'limit') {
       // Wrapped up at the budget, or cut past it: either way it can go on from here.
       save({
         text: msg.text.trim() ? msg.text : (result?.text ?? ''),
-        run: { ...base, status: 'paused', budget, steps: closeThinking('done', L('Pausou', 'Paused')) }
+        run: { ...base, ...again, status: 'paused', budget, steps: closeThinking('done', L('Pausou', 'Paused')) }
       })
     } else if (control.reason === 'limit') {
       save({
         text: msg.text ? `${msg.text} …` : '',
-        run: { ...base, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
+        run: { ...base, ...again, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
       })
     } else if (result) {
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
@@ -1183,7 +1188,7 @@ export class Runner {
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question')
       else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done')
     } else {
-      save({ run: { ...base, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: error ?? L('O motor terminou sem resposta.', 'The engine ended without a reply.') } })
+      save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: error ?? L('O motor terminou sem resposta.', 'The engine ended without a reply.') } })
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
     const st = msg.run?.status

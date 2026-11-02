@@ -21,6 +21,11 @@ describe("Codex's own catalog", () => {
     ])
   })
 
+  it('keeps priority 0 at the top, and one with no priority last', () => {
+    const list = parseCodexCatalog(JSON.stringify([{ slug: 'none' }, { slug: 'second', priority: 1 }, { slug: 'first', priority: 0 }]))
+    expect(list.map((m) => m.slug)).toEqual(['first', 'second', 'none'])
+  })
+
   it('takes a bare list (the cache file) and bad output without breaking', () => {
     expect(parseCodexCatalog(JSON.stringify([{ slug: 'x' }]))).toEqual([{ slug: 'x', label: 'x' }])
     expect(parseCodexCatalog('')).toEqual([])
@@ -43,5 +48,16 @@ describe("Codex's own catalog", () => {
     ])
     // No catalog (an old Codex): the app's list, as before.
     expect(availableModels(s).map((m) => m.id)).toEqual(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'])
+  })
+})
+
+describe("Tuca's list of models", () => {
+  it('includes the Gemini models when the Gemini CLI is signed in', () => {
+    const off = { installed: false, loggedIn: false }
+    const s = { engines: { claude: off, codex: off, opencode: off, pi: off, gemini: { installed: true, loggedIn: true, route: 'providers' } } } as unknown as Pick<Settings, 'engines'>
+    expect(availableModels(s, { gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'] })).toEqual([
+      { id: 'gemini:gemini-2.5-pro', label: 'Gemini CLI · gemini-2.5-pro' },
+      { id: 'gemini:gemini-2.5-flash', label: 'Gemini CLI · gemini-2.5-flash' }
+    ])
   })
 })

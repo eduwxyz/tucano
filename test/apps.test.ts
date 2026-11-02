@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { appTools, DesktopApps, grantOf, itemize, keyFor, parseLsappinfo, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
+import { setLang } from '../src/shared/lang'
+import { appStep, appTools, DesktopApps, grantOf, itemize, keyFor, parseLsappinfo, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
 import type { Agent } from '../src/shared/types'
 
 // A Notes window as agent-desktop describes it.
@@ -201,6 +202,15 @@ describe('confirming and typing', () => {
     expect((await typeKeys(cli, 'Spotify', 'Lofi 24, ok.')).ok).toBe(true)
     expect(keys).toEqual(['shift+l', 'o', 'f', 'i', 'space', '2', '4', 'comma', 'space', 'o', 'k', 'period'])
   })
+
+  it('types nothing and says so when a character has no key', async () => {
+    const keys: string[] = []
+    const cli: Cli = async (a) => (keys.push(a[1]!), { ok: true })
+    const refused = await typeKeys(cli, 'Spotify', 'Olá joão@x')
+    expect(refused.ok).toBe(false)
+    expect(refused.error?.message).toMatch(/á ã @/)
+    expect(keys).toEqual([])
+  })
 })
 
 describe('an app with several windows', () => {
@@ -294,5 +304,14 @@ describe('on Windows and Linux', () => {
     await apps.call(nina, 'app_escrever', { app: 'Notepad', alvo: '#1', texto: 'oi', teclando: true })
     expect(calls.some((c) => c[0] === 'focus' || c[0] === 'type' || c[0] === 'press')).toBe(false)
     expect(calls.find((c) => c[0] === 'set-value')).toEqual(['set-value', '@s1:e1', 'oi'])
+  })
+})
+
+describe('labels of what happens in an app', () => {
+  it('follow the language chosen, not the one at startup', () => {
+    setLang('en')
+    expect(appStep('app_ver', {}).label).toBe('Read')
+    setLang('pt')
+    expect(appStep('app_ver', {}).label).toBe('Leu')
   })
 })
