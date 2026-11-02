@@ -17,7 +17,7 @@ Especially interesting:
 ## How Tucano keeps agents in bounds
 
 - Each reply runs the harness CLI isolated from your personal configuration, with no built-in tools. Its only tools come from Tucano's local MCP gateway, through a secret per-turn URL that lists just that agent's tools; any other call is refused.
-- Write actions that matter (merge, publish, send, delete) become an approval tied to the exact call and arguments. Approving runs exactly that call, after checking the grant again.
+- Write actions that matter (merge, publish, send, delete) become an approval tied to the exact call and arguments. Approving runs exactly that call, after checking the grant again. An agent you set to act on its own skips that approval only where you chose (its sensitive connector tools, or risky browser clicks on the sites you listed), and never for high-risk tools or clicks that spend money.
 - Connector secrets are encrypted with a key in the macOS Keychain (on Linux, the system keyring: GNOME Keyring or KWallet) before they reach the database. Without a keyring, Tucano refuses to store them.
 - An agent's computer is a Docker container with only its own folder and the folders you lend it, or, if you choose so, your own computer.
 - Everything stays on your computer: conversations, memory, logins. There is no Tucano server.

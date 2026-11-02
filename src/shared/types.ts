@@ -68,9 +68,33 @@ export interface Agent {
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
+  autonomy?: Autonomy // what it does on its own, without waiting for a yes
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
+}
+
+// Autonomy: actions that would wait for a yes run on their own instead. Default 'ask' everywhere.
+// browser: risky clicks (publish, send, buy…) on browserSites (empty = any site);
+// tools: every sensitive connector tool, never a high-risk one.
+export interface Autonomy {
+  browser?: 'ask' | 'auto'
+  browserSites?: string[]
+  tools?: 'ask' | 'auto'
+}
+
+// A site in browserSites covers its subdomains: "x.com" covers "mobile.x.com".
+export function autonomousClick(autonomy: Autonomy | undefined, url: string): boolean {
+  if (autonomy?.browser !== 'auto') return false
+  const sites = (autonomy.browserSites ?? []).map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).filter(Boolean)
+  if (!sites.length) return true
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return false
+  }
+  return sites.some((s) => host === s || host.endsWith(`.${s}`))
 }
 
 // One of the person's apps given to an agent, by the name the system shows.

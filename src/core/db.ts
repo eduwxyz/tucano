@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { CACHE_READ_WEIGHT, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
+import { CACHE_READ_WEIGHT, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Autonomy, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -221,6 +221,9 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN apps TEXT NOT NULL DEFAULT '[]';
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN autonomy TEXT NOT NULL DEFAULT '{}';
   `
 ]
 
@@ -315,6 +318,7 @@ export class Db {
       browser: r['browser'] === 1,
       apps: JSON.parse(str(r['apps']) || '[]') as AgentApp[],
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
+      autonomy: JSON.parse(str(r['autonomy']) || '{}') as Autonomy,
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {})
@@ -333,14 +337,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, autonomy, archived, kind, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, effort = excluded.effort,
            limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind)`
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, autonomy = excluded.autonomy, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind)`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(a.autonomy ?? {}), a.archived ? 1 : 0, a.kind ?? null, Date.now())
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, autonomousClick, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
@@ -760,6 +760,18 @@ export class Runner {
           const out = await browser.call(current, name, args, { conversationId: conv.id, messageId: msg.id })
           if (out.artifact) artifactIds.push(out.artifact.id)
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
+          // Autonomy: on the agent's sites, the risky click happens now; the screenshot stays as the record. Money still asks.
+          if (out.approval && !out.approval.costly && autonomousClick(current.autonomy, String(out.approval.args['url'] ?? ''))) {
+            const done = await browser.approved(current, out.approval.args, L('Clicou (autônomo)', 'Clicked (autonomous)'))
+            msg.run = {
+              ...msg.run!,
+              artifactIds: artifactIds.length ? [...artifactIds] : undefined,
+              steps: [...close(done.ok ? 'done' : 'error', { label: L('Clicou (autônomo)', 'Clicked (autonomous)'), detail: out.approval.detail }), thinking()]
+            }
+            stepStarted = Date.now()
+            save()
+            return textResult(done.text, !done.ok)
+          }
           if (out.approval) {
             if (question || approval) {
               msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
@@ -944,7 +956,9 @@ export class Runner {
         const detail = `${hit.connector.name} · ${current.name}`
 
         // "Sempre permitir": a sensitive tool approved for good runs like a write one (never a high-risk one).
-        const always = current.cls === 'sensitive' && !current.highRisk && !!db.agent(agent.id)?.autoApprove?.includes(`${hit.connector.id}:${current.name}`)
+        // Autonomy 'tools: auto' does the same for every sensitive tool of the agent.
+        const fresh = db.agent(agent.id)
+        const always = current.cls === 'sensitive' && !current.highRisk && (!!fresh?.autoApprove?.includes(`${hit.connector.id}:${current.name}`) || fresh?.autonomy?.tools === 'auto')
         if (current.cls === 'sensitive' && !always) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           const { [REASON_PARAM]: why, ...callArgs } = args
