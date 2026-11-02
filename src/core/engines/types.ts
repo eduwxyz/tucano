@@ -11,6 +11,7 @@ export interface Turn {
   signal: AbortSignal
   mcpUrl?: string // the app's gateway for this turn: the only tools the CLI gets, besides the web ones
   web?: boolean // the CLI's own web search and page reading
+  account?: string // the folder of another login of this harness (Settings › Accounts); unset: its usual one
 }
 
 // An image file, shown to the model right after block `block` (the message it came with).

@@ -2,14 +2,14 @@
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { Db } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
@@ -17,7 +17,7 @@ import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
-import { adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
+import { accountDir, accountStatus, adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import { DesktopApps, macApps, SELF } from './apps'
 import { linuxApps, windowsApps, type SystemApp } from './apps-os'
@@ -92,10 +92,29 @@ async function detect(): Promise<void> {
     engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
   } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
+  await checkAccounts()
   rememberModels(codexCatalog.map((m) => ({ id: m.slug, engine: 'codex', label: m.label, hint: m.description ?? '' })))
   gatewayLists.clear()
   emit({ type: 'settings', settings: settings() })
 }
+// The harness's own sign-in, in a terminal, with the variables that say which login it is.
+function openLogin(engine: EngineId, vars: Record<string, string>): { opened: boolean; command: string } {
+  const bin = engines[engine].path ?? ENGINES[engine].cli
+  const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
+  if (isWin) {
+    // A new console window running a small script, its paths in the environment.
+    openWindowsConsole(join(dataDir, 'login.cmd'), [`call "%TUCANO_CLI%" ${sub}`], { TUCANO_CLI: bin, ...vars })
+    return { opened: true, command: `"${bin}" ${sub}` }
+  }
+  const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
+  const cmd = [...Object.entries(vars).map(([k, v]) => `${k}=${q(v)}`), q(bin), sub].filter(Boolean).join(' ')
+  if (fake) return { opened: true, command: cmd } // test engines: nothing to sign into
+  const term = terminalCommand(cmd, osOf(), onPath)
+  // Its own process, so the terminal outlives the app if the person quits it mid-login.
+  if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
+  return { opened: !!term, command: cmd }
+}
+
 // After a sign-in or an install in a terminal, the harness is checked again every few
 // seconds until it shows up (for 10 minutes at most): it appears with no "Check again".
 let watching: ReturnType<typeof setInterval> | undefined
@@ -115,7 +134,33 @@ const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLog
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), github: githubInfo() }
+  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), github: githubInfo(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+}
+
+// More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
+// the CLI's own status when the harnesses are, and every few seconds after a sign-in.
+const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>()
+const savedAccounts = (): Account[] => (db.getSettings(DEFAULTS).accounts ?? []).map(({ id, engine, name }) => ({ id, engine, name }))
+async function checkAccounts(only?: string): Promise<void> {
+  await Promise.all(
+    savedAccounts()
+      .filter((a) => !only || a.id === only)
+      .map(async (a) => {
+        const bin = engines[a.engine].path
+        if (fake) accountLogins.set(a.id, { loggedIn: true, detail: L('Motor de teste', 'Test engine') })
+        else accountLogins.set(a.id, bin ? await accountStatus(a.engine, bin, accountDir(dataDir, a.id)) : { loggedIn: false })
+      })
+  )
+}
+let watchingAccount: NodeJS.Timeout | null = null
+function watchAccount(id: string): void {
+  if (watchingAccount) clearInterval(watchingAccount)
+  const until = Date.now() + 10 * 60_000
+  watchingAccount = setInterval(() => {
+    if (accountLogins.get(id)?.loggedIn || Date.now() > until || !savedAccounts().some((a) => a.id === id)) return void clearInterval(watchingAccount!)
+    void checkAccounts(id).then(() => emit({ type: 'settings', settings: settings() }))
+  }, 4_000)
+  watchingAccount.unref()
 }
 // github is made further down; settings can be asked for before.
 const githubInfo = (): Settings['github'] => githubRef?.info()
@@ -188,7 +233,7 @@ function toPhone(e: CoreEvent): void {
 
 // Desktop notification, and the same on the phone.
 const notifyAll = (title: string, body: string, conversationId?: string): void => {
-  toMain({ type: 'notify', title, body, conversationId })
+  toMain({ type: 'notify', title, body, conversationId, sound: settings().sounds !== false })
   void telegram?.notice(title, body)
 }
 
@@ -196,7 +241,7 @@ const notifyAll = (title: string, body: string, conversationId?: string): void =
 type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done' }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -401,7 +446,7 @@ const runner = new Runner({
   skills,
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
-  notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind }) : notifyAll(title, body, conversationId)),
+  notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId)),
   jev: { key: () => secrets.get(JEV_SECRET) },
   github,
   onBusy: (busy) => toMain({ type: 'busy', busy }),
@@ -772,7 +817,7 @@ const api: Api = {
     return { ok: true, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
   },
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, ...patch } }) => {
+  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...patch } }) => {
     db.setSettings(patch)
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
@@ -861,21 +906,40 @@ const api: Api = {
   // Login always happens in the CLI's own flow; the app never sees credentials.
   // Codex logs into the app's own home (see codexEnv), separate from the user's.
   loginEngine: ({ engine }) => {
-    const bin = engines[engine].path ?? ENGINES[engine].cli
-    const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
     // The sign-in happens in a terminal: check again until it lands, wherever the person is.
     watchEngine(engine, (s) => s.loggedIn)
-    if (isWin) {
-      // A new console window running a small script, its paths in the environment.
-      openWindowsConsole(join(dataDir, 'login.cmd'), [`call "%TUCANO_CLI%" ${sub}`], { TUCANO_CLI: bin, ...(engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {}) })
-      return { opened: true, command: `"${bin}" ${sub}` }
+    return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {})
+  },
+
+  // Another login of Claude Code or Codex: a folder of its own, signed into in a terminal like the first.
+  addAccount: ({ engine, name }) => {
+    const account: Account = { id: randomUUID().slice(0, 8), engine, name: name.trim() || ENGINES[engine].label }
+    mkdirSync(join(accountDir(dataDir, account.id), '.codex'), { recursive: true })
+    db.setSettings({ accounts: [...savedAccounts(), account] })
+    void checkAccounts(account.id).then(() => emit({ type: 'settings', settings: settings() }))
+    emit({ type: 'settings', settings: settings() })
+    return account
+  },
+  loginAccount: ({ id }) => {
+    const a = savedAccounts().find((x) => x.id === id)
+    if (!a) return { opened: false, command: '' }
+    const dir = accountDir(dataDir, a.id)
+    watchAccount(a.id)
+    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex') })
+  },
+  // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
+  removeAccount: ({ id }) => {
+    db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id) })
+    accountLogins.delete(id)
+    for (const agent of db.agents().filter((x) => x.accountId === id || x.fallbackAccountId === id)) {
+      const rest = { ...agent }
+      if (rest.accountId === id) delete rest.accountId
+      if (rest.fallbackAccountId === id) delete rest.fallbackAccountId
+      db.saveAgent(rest)
+      emit({ type: 'agent', agent: db.agent(agent.id)! })
     }
-    const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
-    const cmd = engine === 'codex' ? `HOME=${q(codexHome)} CODEX_HOME=${q(join(codexHome, '.codex'))} ${q(bin)} ${sub}` : `${q(bin)} ${sub}`
-    const term = terminalCommand(cmd, osOf(), onPath)
-    // Its own process, so the terminal outlives the app if the person quits it mid-login.
-    if (term) spawn(term.bin, term.args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
-    return { opened: !!term, command: cmd }
+    rmSync(accountDir(dataDir, id), { recursive: true, force: true })
+    emit({ type: 'settings', settings: settings() })
   },
 
   // The harness's own installer, in a terminal the person sees: its progress, its

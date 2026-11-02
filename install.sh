@@ -33,8 +33,10 @@ fetch() { # fetch <url or file> <to>
 }
 
 install_mac() {
-  [ "$(uname -m)" = arm64 ] || fail "Por enquanto o Tucano é só pra Macs com chip Apple (M1 em diante)." "For now Tucano needs a Mac with Apple silicon (M1 or later)."
-  ZIP="${TUCANO_ZIP:-$LATEST/tucano-mac-arm64.zip}"
+  # Apple silicon or Intel. uname says x86_64 in a Terminal running under Rosetta, so ask the chip.
+  ARCH=x64
+  [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && ARCH=arm64
+  ZIP="${TUCANO_ZIP:-$LATEST/tucano-mac-$ARCH.zip}"
   DEST="${TUCANO_DEST:-/Applications}"
   [ -w "$DEST" ] || [ -n "$TUCANO_DEST" ] || DEST="$HOME/Applications"
   mkdir -p "$DEST"
