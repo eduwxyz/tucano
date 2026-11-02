@@ -1248,16 +1248,25 @@ function Tabs({ page, tabs }: { page: string; tabs: TabList }): ReactNode {
 
 // A model to run with, from what each harness in use offers, or another by name.
 // Where the agent's replies go when its model's subscription is out (a 5-hour or weekly limit, a 429).
-// Off by default; turned on, it starts on another harness, since the same subscription is out for both.
+// Off by default. Turned on, it starts on another login of the same harness when there is one (the
+// limit is the account's), else on another harness, since the same subscription is out for both.
 function ReserveModel({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
   const usable = useStore((s) => usableEngines(s.settings))
+  const accounts = useStore((s) => s.settings.accounts) ?? []
   const main = modelInfo(draft.modelId)?.engine
+  const mainAccount = accounts.find((a) => a.id === draft.accountId && a.engine === main)
   const on = !!draft.fallbackModelId
-  const first = (): string => {
-    const other = usable.find((e) => e !== main) ?? usable[0]
-    return MODELS.find((m) => m.engine === other)?.id ?? draft.modelId
+  const first = (): Partial<Agent> => {
+    const other = accounts.find((a) => a.engine === main && a.id !== mainAccount?.id)
+    if (other) return { fallbackModelId: draft.modelId, fallbackAccountId: other.id }
+    if (mainAccount) return { fallbackModelId: draft.modelId, fallbackAccountId: undefined } // the harness's usual login
+    const engine = usable.find((e) => e !== main) ?? usable[0]
+    return { fallbackModelId: MODELS.find((m) => m.engine === engine)?.id ?? draft.modelId, fallbackAccountId: undefined }
   }
   const reserve = draft.fallbackModelId ? modelInfo(draft.fallbackModelId) : undefined
+  const reserveAccounts = accounts.filter((a) => a.engine === reserve?.engine)
+  const reserveAccount = reserveAccounts.find((a) => a.id === draft.fallbackAccountId)
+  const sameLogin = !!reserve && reserve.engine === main && reserveAccount?.id === mainAccount?.id
   return (
     <div className="reserve">
       <div className="key-row">
@@ -1266,16 +1275,41 @@ function ReserveModel({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent
           <strong>{L('Modelo reserva', 'Reserve model')}</strong>
           <p className="muted small">
             {L(
-              `Quando a assinatura do modelo principal chega no limite (o de 5 horas ou o semanal), a resposta segue no reserva. Na resposta seguinte, ${draft.name || 'o agente'} tenta o principal de novo.`,
-              `When the main model’s subscription hits its limit (the 5-hour or the weekly one), the reply goes on with the reserve. On the next reply, ${draft.name || 'the agent'} tries the main one again.`
+              `Quando a assinatura do modelo principal chega no limite (o de 5 horas ou o semanal), a resposta segue no reserva, que pode ser outro harness ou outra conta. Na resposta seguinte, ${draft.name || 'o agente'} tenta o principal de novo.`,
+              `When the main model’s subscription hits its limit (the 5-hour or the weekly one), the reply goes on with the reserve, which can be another harness or another account. On the next reply, ${draft.name || 'the agent'} tries the main one again.`
             )}
           </p>
         </div>
-        <Toggle on={on} onChange={(v) => patch({ fallbackModelId: v ? first() : undefined })} />
+        <Toggle on={on} onChange={(v) => patch(v ? first() : { fallbackModelId: undefined, fallbackAccountId: undefined })} />
       </div>
-      {on && <ModelPicker value={draft.fallbackModelId!} onChange={(fallbackModelId) => patch({ fallbackModelId })} />}
-      {on && reserve && reserve.engine === main && (
-        <p className="hint hint--warn">{L('É o mesmo harness do principal: se o limite for da assinatura, ele também vai estar sem.', 'It’s the same harness as the main one: if the limit is the subscription’s, it’ll be out too.')}</p>
+      {on && (
+        <ModelPicker
+          value={draft.fallbackModelId!}
+          onChange={(fallbackModelId) => patch({ fallbackModelId, ...(modelInfo(fallbackModelId)?.engine !== reserve?.engine ? { fallbackAccountId: undefined } : {}) })}
+        />
+      )}
+      {on && reserve && reserveAccounts.length > 0 && (
+        <label className="field">
+          <span className="field__label">{L('Conta da reserva', 'Reserve account')}</span>
+          <select value={reserveAccount?.id ?? ''} onChange={(e) => patch({ fallbackAccountId: e.target.value || undefined })}>
+            <option value="">{L(`A de sempre do ${ENGINES[reserve.engine].label}`, `${ENGINES[reserve.engine].label}’s usual one`)}</option>
+            {reserveAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')}
+              </option>
+            ))}
+          </select>
+          {reserveAccount && !reserveAccount.loggedIn && <span className="hint hint--warn">{L('Essa conta ainda não entrou: a reserva só funciona depois que você entrar nela em Configurações › Modelos.', 'This account isn’t signed in yet: the reserve only works once you sign in under Settings › Models.')}</span>}
+        </label>
+      )}
+      {on && sameLogin && (
+        <p className="hint hint--warn">
+          {draft.fallbackModelId === draft.modelId
+            ? L('É o mesmo modelo, na mesma conta do principal: a reserva não vai ser usada.', 'It’s the same model, on the same account as the main one: the reserve won’t be used.')
+            : L('É o mesmo harness, na mesma conta do principal: se o limite for da assinatura, ele também vai estar sem.', 'It’s the same harness, on the same account as the main one: if the limit is the subscription’s, it’ll be out too.')}
+          {reserveAccounts.length > 0 ? L(' Escolha outra conta em “Conta da reserva”.', ' Pick another one under “Reserve account”.') : ''}
+        </p>
       )}
     </div>
   )
