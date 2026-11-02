@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
 import { describeSchedule, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
 import type { Db } from './db'
+import { MAX_AGENT_ROUTINES } from './routines'
 
 const FENCE = 'tucano-team'
 const OLD_FENCE = 'agent-desk-team' // teams exported before the rename
@@ -133,6 +134,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
       instructions: a.instructions ?? '',
       modelId: modelInfo(a.model)?.id ? a.model : 'sonnet',
       effort: a.effort ?? 'medium',
+      maxRoutines: MAX_AGENT_ROUTINES,
       limit: a.limit || defaultLimit,
       used: 0,
       grants: Object.fromEntries(Object.entries(a.grants ?? {}).flatMap(([name, g]) => (connectorId(name) ? [[connectorId(name)!, g]] : (added.skipped.push(L(`acesso de @${a.handle} ao ${name}`, `@${a.handle}'s access to ${name}`)), [])))),

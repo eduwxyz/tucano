@@ -350,6 +350,7 @@ export function newAgentDraft(): Agent {
     modelId: 'sonnet',
     effort: 'medium',
     limit: state.settings.defaultLimit,
+    maxRoutines: 10, // default: MAX_AGENT_ROUTINES (src/core/routines.ts)
     used: 0,
     grants: {},
     memory: 'auto',

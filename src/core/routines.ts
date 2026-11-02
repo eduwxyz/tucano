@@ -253,7 +253,8 @@ export class Routines {
     const replaces = text('substitui')
     const prev = replaces ? this.deps.db.routine(replaces) : undefined
     if (replaces && prev?.agentId !== agent.id) return fail(L(`Não achei uma rotina sua com id ${replaces}.`, `I couldn't find a routine of yours with id ${replaces}.`))
-    if (!prev && this.forAgent(agent.id).length >= MAX_AGENT_ROUTINES) return fail(L(`Você já tem ${MAX_AGENT_ROUTINES} rotinas ligadas. Cancele uma antes.`, `You already have ${MAX_AGENT_ROUTINES} routines on. Cancel one first.`))
+    const max = agent.maxRoutines ?? MAX_AGENT_ROUTINES
+    if (!prev && this.forAgent(agent.id).length >= max) return fail(L(`Você já tem ${max} rotinas ligadas. Cancele uma antes.`, `You already have ${max} routines on. Cancel one first.`))
 
     const keys = Array.isArray(args['dias']) ? (args['dias'] as unknown[]).map((d) => {
           const k = String(d).toLowerCase().normalize('NFD').replace(/[^a-z]/g, '').slice(0, 3)

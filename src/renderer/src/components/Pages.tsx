@@ -554,6 +554,15 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                     className="input--short"
                   />
                 </Field>
+                <Field label={L('Máx. rotinas ligadas', 'Max. enabled routines')} hint={L('Quantas rotinas o agente pode ter ligadas ao mesmo tempo.', 'How many routines the agent can have enabled at the same time.')}>
+                  <NumberInput
+                    min={1}
+                    step={1}
+                    value={draft.maxRoutines ?? 10}
+                    onChange={(n) => patch({ maxRoutines: Math.max(1, Math.round(n)) })}
+                    className="input--short"
+                  />
+                </Field>
               </div>
             </Card>
           )}

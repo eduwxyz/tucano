@@ -59,6 +59,7 @@ export interface Agent {
   modelId: string
   effort: Effort
   limit: number // tokens per month
+  maxRoutines?: number // routines ligadas ao mesmo tempo; padrão MAX_AGENT_ROUTINES (10)
   used: number // tokens used this month, computed from receipts
   grants: Record<string, GrantLevel>
   memory: MemoryMode
@@ -163,6 +164,7 @@ export interface AgentDraft {
   instructions: string
   modelId: string
   effort: Effort
+  maxRoutines?: number // rotinas ligadas; padrão MAX_AGENT_ROUTINES
   web: boolean
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
