@@ -30,7 +30,7 @@ const shortTime = (at: number): string => {
 // The app's own turns go under one name; agents keep theirs.
 function whoOf(id: string, agents: Agent[]): { key: string; name: string; color: string } {
   const a = agents.find((x) => x.id === id)
-  if (a && isTeam(a)) return { key: a.id, name: a.name, color: `var(--c-${a.color})` }
+  if (a && isTeam(a)) return { key: a.id, name: a.name, color: a.customColor ?? `var(--c-${a.color})` }
   return { key: APP, name: L('Bastidores', 'Behind the scenes'), color: 'var(--text-3)' }
 }
 

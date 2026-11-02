@@ -175,13 +175,16 @@ export function SleepingToucan({ size = 120 }: { size?: number }): ReactNode {
   )
 }
 
+// An agent's own color, over its class's, wherever the agent's color shows.
+export const ownColor = (agent: Partial<Pick<Agent, 'customColor'>>): CSSProperties => (agent.customColor ? ({ '--agent': agent.customColor } as CSSProperties) : {})
+
 // busy: the eyes read, left to right, while the agent works. Otherwise they blink now and then.
-export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'avatar'>>; size?: number; busy?: boolean }): ReactNode {
+export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'picture'>>; size?: number; busy?: boolean }): ReactNode {
   if (agent.kind === 'tuca') return <TucaMark size={size} />
   return (
-    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...(agent.customColor ? ({ '--agent': agent.customColor } as CSSProperties) : {}) }}>
-      {agent.avatar ? (
-        <img className="avatar__photo" src={agent.avatar} alt="" />
+    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...ownColor(agent) }}>
+      {agent.picture ? (
+        <img className="avatar__photo" src={agent.picture} alt="" />
       ) : (
         <span className="avatar__eyes" aria-hidden>
           <i />

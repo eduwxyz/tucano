@@ -1,7 +1,6 @@
 // The core runs in an Electron utility process: database, engines and runs
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
-import { cleanLook } from './agent-look'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
@@ -12,6 +11,7 @@ import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
 import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
+import { cleanLook } from './agent-look'
 import { Db } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
 import { codexEngine, userCodexProvider } from './engines/codex'
