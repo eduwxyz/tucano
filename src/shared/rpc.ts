@@ -90,6 +90,7 @@ export interface Api {
   unpairTelegram(): void
   exportTeam(): string // the team as Markdown
   importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
+  importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
   backupNow(): string // where the copy went
   openBackups(): void
   report(p: { week?: number }): Report // the calendar week starting at `week` (a Monday); this one by default

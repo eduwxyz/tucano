@@ -29,6 +29,7 @@ import {
   unpairTelegram,
   setGithubToken,
   exportTeam,
+  importAgents,
   importTeam,
   backupNow,
   openBackups,
@@ -1472,6 +1473,7 @@ function GithubCard({ info }: { info?: { user?: string; error?: string } }): Rea
 }
 
 // The team as a file, and backups of everything.
+const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
   const download = (): void => {
@@ -1483,15 +1485,30 @@ function TeamCard(): ReactNode {
       URL.revokeObjectURL(a.href)
     })
   }
+  const failed = (e: unknown): void => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
   const upload = (file?: File): void => {
     if (!file) return
+    void file.text().then(importTeam).then(setNote, failed)
+  }
+  // Another app's export: on the desktop the core reads the file where it is; in a browser it goes up whole.
+  const fromApp = (file?: File): void => {
+    if (!file) return
+    setNote(L('Lendo o arquivo…', 'Reading the file…'))
+    const path = window.tucano.pathOf?.(file)
+    if (path) return void importAgents({ path }).then(setNote, failed)
+    if (file.size > MAX_UPLOAD) return setNote(L('Arquivo grande demais pra mandar pelo navegador. Importe no app do computador, ou exporte sem os arquivos.', 'File too big to send through the browser. Import it in the desktop app, or export without the files.'))
     void file
-      .text()
-      .then(importTeam)
-      .then(setNote, (e: unknown) => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
+      .arrayBuffer()
+      .then((b) => {
+        const bytes = new Uint8Array(b)
+        let bin = ''
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+        return importAgents({ data: btoa(bin) })
+      })
+      .then(setNote, failed)
   }
   return (
-    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. And a copy of everything once a day (the last 7).')}>
+    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot também entram, sem nenhum conector liberado. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot come in too, with no connector granted. And a copy of everything once a day (the last 7).')}>
       <div className="row">
         <button className="btn btn--sm" onClick={download}>
           {L('Exportar time', 'Export team')}
@@ -1499,6 +1516,18 @@ function TeamCard(): ReactNode {
         <label className="btn btn--sm">
           {L('Importar time…', 'Import team…')}
           <input type="file" accept=".md,text/markdown" hidden onChange={(e) => upload(e.target.files?.[0])} />
+        </label>
+        <label className="btn btn--sm" title={L('OpenBot: Configurações do servidor → Transfer → Export from this server, com os arquivos.', 'OpenBot: Server settings → Transfer → Export from this server, with the files.')}>
+          {L('Importar do OpenBot…', 'Import from OpenBot…')}
+          <input
+            type="file"
+            accept=".zip,application/zip"
+            hidden
+            onChange={(e) => {
+              fromApp(e.target.files?.[0])
+              e.target.value = ''
+            }}
+          />
         </label>
         <span className="grow" />
         <button className="btn btn--sm" onClick={() => void backupNow().then((f) => setNote(L(`Backup feito: ${f.split('/').pop()}`, `Backup done: ${f.split('/').pop()}`)))}>
@@ -1508,7 +1537,7 @@ function TeamCard(): ReactNode {
           {L('Abrir pasta', 'Open folder')}
         </button>
       </div>
-      {note && <p className="small muted">{note}</p>}
+      {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
     </Card>
   )
 }

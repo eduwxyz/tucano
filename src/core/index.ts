@@ -34,6 +34,8 @@ import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
+import { applyForeignTeam, readForeignZip } from './agent-import'
+import { zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
@@ -761,6 +763,23 @@ const api: Api = {
     for (const k of db.skills()) emit({ type: 'skill', skill: k })
     for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
     return r
+  },
+  importAgents: ({ path, data }) => {
+    if (!path && !data) throw new Error(L('Escolha um arquivo .zip.', 'Choose a .zip file.'))
+    const zip = path ? zipFromFile(path) : zipFromBuffer(Buffer.from(data!, 'base64'))
+    try {
+      const s = settings()
+      const harness = s.harnesses?.find((h) => h === 'claude' || h === 'codex')
+      const r = applyForeignTeam(db, readForeignZip(zip), { defaultLimit: s.defaultLimit, defaultModel: harness === 'codex' ? 'gpt-5.6-luna' : 'sonnet' })
+      for (const id of r.agents) emit({ type: 'agent', agent: db.agent(id)! })
+      emitConversations()
+      for (const k of db.skills()) emit({ type: 'skill', skill: k })
+      for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
+      for (const m of r.memories) emit({ type: 'memory', memory: m })
+      return r.summary
+    } finally {
+      zip.close()
+    }
   },
   backupNow: () => backup(db, backups),
   openBackups: () => {
