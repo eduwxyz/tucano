@@ -65,8 +65,12 @@ jobs:
           sudo loginctl enable-linger tucano
           sudo install -m 0644 install-server.sh /home/tucano/install-server.sh
           sudo install -m 0644 dist-server/tucano-server.tar.gz dist-server/tucano-server.tar.gz.sha256 /home/tucano/
-          for _ in $(seq 1 30); do test -S /run/user/$(id -u tucano)/bus && break; sleep 1; done
-          ls -l /run/user/$(id -u tucano)/
+          # /run/user/<uid> is the user's alone (mode 0700): look at it as root.
+          for _ in $(seq 1 30); do
+            if sudo test -S /run/user/$(id -u tucano)/bus || sudo test -S /run/user/$(id -u tucano)/systemd/private; then break; fi
+            sleep 1
+          done
+          sudo ls -l /run/user/$(id -u tucano)/ /run/user/$(id -u tucano)/systemd
       - name: Install it as that user (the program and the service)
         run: |
           sudo -u tucano -H env XDG_RUNTIME_DIR=/run/user/$(id -u tucano) TUCANO_TARBALL=/home/tucano/tucano-server.tar.gz TUCANO_PORT=7399 \
