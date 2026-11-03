@@ -224,13 +224,26 @@ async function assertReachable(locator, description, scroll = true) {
   })
   assert.equal(visible, true, `${description} must remain visible, unobscured and reachable`)
 }
+async function resize(page, viewport) {
+  await page.setViewportSize(viewport)
+  // Chromium updates dynamic viewport units/media queries on the next frame.
+  // Measure the settled layout, not the old dialog against the new innerHeight.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+}
 async function assertReflow(page) {
-  const overflow = await dialog(page).evaluate((element) => {
+  const measured = await dialog(page).evaluate((element) => {
     const box = element.getBoundingClientRect()
-    return { horizontal: element.scrollWidth - element.clientWidth, x: box.x, right: box.right, bottom: box.bottom, y: box.y, width: innerWidth, height: innerHeight }
+    const style = getComputedStyle(element)
+    return {
+      horizontal: element.scrollWidth - element.clientWidth,
+      box: { x: box.x, y: box.y, width: box.width, height: box.height, right: box.right, bottom: box.bottom },
+      viewport: { width: innerWidth, height: innerHeight, visualWidth: visualViewport?.width, visualHeight: visualViewport?.height },
+      style: { maxHeight: style.maxHeight, transitionProperty: style.transitionProperty, transitionDuration: style.transitionDuration }
+    }
   })
-  assert.ok(overflow.horizontal <= 1, `Modal must not scroll horizontally: ${JSON.stringify(overflow)}`)
-  assert.ok(overflow.x >= 0 && overflow.y >= 0 && overflow.right <= overflow.width + 1 && overflow.bottom <= overflow.height + 1, 'Modal must fit the viewport')
+  const details = JSON.stringify(measured)
+  assert.ok(measured.horizontal <= 1, `Modal must not scroll horizontally: ${details}`)
+  assert.ok(measured.box.x >= 0 && measured.box.y >= 0 && measured.box.right <= measured.viewport.width + 1 && measured.box.bottom <= measured.viewport.height + 1, `Modal must fit the viewport: ${details}`)
   await assertReachable(close(page), 'Close', false)
 }
 async function assertContrast(page) {
@@ -532,7 +545,7 @@ try {
     // At 200% browser zoom a 1100x850 window has a 550x425 CSS viewport.
     // Resizing to those CSS dimensions tests the same layout/reflow constraints.
     for (const viewport of [{ width: 550, height: 425 }, { width: 360, height: 640 }]) {
-      await page.setViewportSize(viewport)
+      await resize(page, viewport)
       await assertReflow(page)
       await assertReachable(dialog(page).getByRole('button', { name: 'Gerenciar ambientes', exact: true }), 'Manage at reduced CSS viewport')
       await assertReachable(dialog(page).getByRole('button', { name: 'Adicionar ambiente', exact: true }), 'Add at reduced CSS viewport')
@@ -546,7 +559,7 @@ try {
       await screenshot(viewport.width === 550 ? 'zoom-200' : 'narrow')
       await back(page)
     }
-    await page.setViewportSize({ width: 1100, height: 850 })
+    await resize(page, { width: 1100, height: 850 })
     await page.emulateMedia({ colorScheme: 'dark' })
     await assertContrast(page)
     await screenshot('dark')
