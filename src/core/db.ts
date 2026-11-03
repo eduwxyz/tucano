@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import {
   CACHE_READ_WEIGHT,
   nextRun,
+  routineCap,
   type Agent,
   type AgentApp,
   type AgentColor,
@@ -256,13 +257,29 @@ const MIGRATIONS = [
   ALTER TABLE agents ADD COLUMN apps TEXT NOT NULL DEFAULT '[]';
   `,
   `
-  CREATE TABLE message_notifications (
+  ALTER TABLE agents ADD COLUMN fallback_model TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN account TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN fallback_account TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN max_routines INTEGER NOT NULL DEFAULT 10;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN custom_color TEXT;
+  ALTER TABLE agents ADD COLUMN picture TEXT;
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS message_notifications (
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     phase TEXT NOT NULL,
     unread INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (message_id, phase)
   );
-  INSERT INTO message_notifications (message_id, phase)
+  INSERT OR IGNORE INTO message_notifications (message_id, phase)
     SELECT id, COALESCE(json_extract(run, '$.status'), 'message') FROM messages;
   `
 ]
@@ -352,7 +369,13 @@ export class Db {
       mkdirSync(backups, { recursive: true })
       this.backupTo(join(backups, `before-schema-${user_version}-${Date.now()}.db`))
     }
-    for (let v = user_version; v < MIGRATIONS.length; v++) {
+    // Earlier workspace builds used the next upstream version for unread
+    // tracking. Replay from that fork point without skipping fallback_model.
+    const forkVersion = MIGRATIONS.findIndex((sql) => sql.includes('ADD COLUMN fallback_model'))
+    const workspacePreview = user_version === forkVersion + 1
+      && !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_notifications'").get()
+      && !(this.db.prepare('PRAGMA table_info(agents)').all() as { name: string }[]).some((column) => column.name === 'fallback_model')
+    for (let v = workspacePreview ? forkVersion : user_version; v < MIGRATIONS.length; v++) {
       this.tx(() => {
         this.db.exec(MIGRATIONS[v]!)
         this.db.exec(`PRAGMA user_version = ${v + 1}`)
@@ -400,8 +423,12 @@ export class Db {
       color: str(r['color']) as AgentColor,
       instructions: str(r['instructions']),
       modelId: str(r['model']),
+      ...(str(r['account']) ? { accountId: str(r['account']) } : {}),
+      ...(str(r['fallback_model']) ? { fallbackModelId: str(r['fallback_model']) } : {}),
+      ...(str(r['fallback_account']) ? { fallbackAccountId: str(r['fallback_account']) } : {}),
       effort: str(r['effort']) as Effort,
       limit: Number(r['limit_tokens']),
+      maxRoutines: routineCap(Number(r['max_routines'])),
       used: this.usedThisMonth(str(r['id'])),
       grants: JSON.parse(str(r['grants']) || '{}') as Agent['grants'],
       memory: (str(r['memory_mode']) || 'auto') as MemoryMode,
@@ -410,6 +437,8 @@ export class Db {
       web: r['web'] !== 0,
       browser: r['browser'] === 1,
       apps: JSON.parse(str(r['apps']) || '[]') as AgentApp[],
+      ...(r['custom_color'] ? { customColor: str(r['custom_color']) } : {}),
+      ...(r['picture'] ? { picture: str(r['picture']) } : {}),
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
@@ -429,14 +458,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, custom_color, picture, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
-           color = excluded.color, instructions = excluded.instructions, model = excluded.model, effort = excluded.effort,
-           limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind)`
+           color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
+           limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, Date.now())
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.

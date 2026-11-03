@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
-import type { BrowserOp, Settings } from '../shared/types'
+import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { Browsers } from './browser'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
@@ -112,7 +112,7 @@ type CoreRequest =
   | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done' }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -246,7 +246,8 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
   } else if (msg.type === 'notify') {
     // Already looking at that conversation: nothing to tell.
     if (registry.selected().id === workspace.id && msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
-    chirp(msg.kind === 'approval' || msg.kind === 'question' ? 'chama' : 'pronto')
+    const sound = chirpOf(msg.kind, msg.sound)
+    if (sound) chirp(sound)
     if (!Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
     n.on('click', () => { void switchWorkspace(workspace.id).then(() => showWindow(msg.conversationId)).catch(console.error) })

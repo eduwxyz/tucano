@@ -4,9 +4,9 @@ import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { agentById, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { agentById, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
-import { Icon, type IconName } from './ui'
+import { Icon, ownColor, type IconName } from './ui'
 
 const KIND_LABEL = (): Record<Artifact['kind'], string> => ({
   image: L('Imagem', 'Image'),
@@ -21,13 +21,19 @@ const KIND_LABEL = (): Record<Artifact['kind'], string> => ({
 
 export const bytes = (n: number): string => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`)
 
+// The window's size, with the conversation's other images a key away.
+function showImages(a: Artifact): void {
+  const images = getState().artifacts.filter((x) => x.kind === 'image' && x.conversationId === a.conversationId)
+  openLightbox(images.map((x) => ({ url: artifactUrl(x), title: x.title })), Math.max(0, images.findIndex((x) => x.id === a.id)))
+}
+
 export function ArtifactCard({ id }: { id: string }): ReactNode {
   const a = useStore((s) => s.artifacts.find((x) => x.id === id))
   const open = useStore((s) => s.panel?.kind === 'artifact' && s.panel.id === id)
   if (!a) return null
   if (a.kind === 'image')
     return (
-      <button className={`artifact-image ${open ? 'is-open' : ''}`} onClick={() => openPanel({ kind: 'artifact', id })} title={a.title}>
+      <button className="artifact-image" onClick={() => showImages(a)} title={a.title}>
         <img src={artifactUrl(a)} alt={a.title} />
         <span className="artifact-image__caption">{a.title}</span>
       </button>
@@ -163,7 +169,7 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
     <div className={`screen ${onOpen ? 'screen--button' : ''}`} onClick={onOpen} role={onOpen ? 'button' : undefined}>
       <img className="screen__frame" src={view.frame} alt={view.title} draggable={false} />
       {c && !view.shown && agent && (
-        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
+        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ ...ownColor(agent), left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
           <i key={c.at} className="screen__ripple" />
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
             <path d="m4 2 16 8-7 2-3 7L4 2Z" />

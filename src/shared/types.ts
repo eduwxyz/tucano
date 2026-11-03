@@ -55,10 +55,20 @@ export interface Agent {
   handle: string
   role: string
   color: AgentColor
+  customColor?: string // a color of the person's own (#rrggbb), over `color`
+  picture?: string // a small picture (data URL), over the face
   instructions: string
   modelId: string
+  // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
+  // only when the main model failed before doing anything, and the next reply tries the main one again.
+  fallbackModelId?: string
+  // The login the reserve runs on: one of settings.accounts, of the reserve's harness; unset: that harness's usual login.
+  // With it, the reserve can be the same model on another account, when the main account's limit is out.
+  fallbackAccountId?: string
+  accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
   limit: number // tokens per month
+  maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   used: number // tokens used this month, computed from receipts
   grants: Record<string, GrantLevel>
   memory: MemoryMode
@@ -163,6 +173,7 @@ export interface AgentDraft {
   instructions: string
   modelId: string
   effort: Effort
+  maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   web: boolean
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
@@ -209,6 +220,29 @@ export interface Settings {
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
   onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean }
   folded?: string[] // the ids of what I folded in the sidebar
+  sounds?: boolean // the toucan's chirp on a notification; unset: on
+  accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+}
+
+// Which chirp a notification plays: a knock when an agent needs me, two notes when the work
+// is done, none when I turned the sounds off. The system's own notification is always silent,
+// so this is the only sound the app makes.
+export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, sounds: boolean | undefined): 'chama' | 'pronto' | null {
+  if (sounds === false) return null
+  return kind === 'approval' || kind === 'question' ? 'chama' : 'pronto'
+}
+
+// Another login of a harness (a work account beside a personal one), in a folder of its own
+// in the app's data: Claude Code's CLAUDE_CONFIG_DIR (with its own Keychain entry), Codex's
+// CODEX_HOME. The person signs in through the CLI itself; the app never sees the credentials.
+export const ACCOUNT_ENGINES = ['claude', 'codex'] as const satisfies readonly EngineId[]
+export type AccountEngine = (typeof ACCOUNT_ENGINES)[number]
+export interface Account {
+  id: string
+  engine: AccountEngine
+  name: string // what the person calls it ("Trabalho")
+  loggedIn?: boolean // computed, from the CLI's own status
+  detail?: string // computed: the plan it's on, as the CLI says
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
@@ -281,6 +315,12 @@ export interface TelegramInfo {
 
 // Guards per reply (spec §3), so nothing runs away unattended (a routine at 3 a.m.)
 // without cutting long work that is going somewhere.
+// Routines an agent can have on at once, so it can't schedule itself without end. Each agent can
+// change it on its page (no upper bound: the monthly limit still holds); this is the default.
+export const MAX_AGENT_ROUTINES = 10
+// A whole number, at least 1: what the core enforces, whatever reached it.
+export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
+
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course

@@ -42,7 +42,7 @@ import {
   isTeam
 } from '../store'
 import { HarnessList, ModelPicker, usableEngines } from './Harness'
-import { JevKey, LanguagePicker, ModelSelect, Toggle } from './Pages'
+import { ColorPicker, JevKey, LanguagePicker, ModelSelect, PicturePicker, Toggle } from './Pages'
 import { Splash } from './Splash'
 import { Composer, MessageList } from './Conversation'
 import { draftAgent, UseDraft } from './Tuca'
@@ -147,8 +147,6 @@ const TEMPLATES = (): Template[] => [
 // The introduction draws again when the language changes: the opening plays only once.
 let opened = false
 
-const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
-
 const STEPS = ['welcome', 'engine', 'models', 'you', 'tools', 'skills', 'agent', 'powers', 'first'] as const
 type Step = (typeof STEPS)[number]
 // The builder screen (the Tuca, from the sidebar) is the introduction's last three steps.
@@ -166,7 +164,7 @@ const readyModels = (engines: State['settings']['engines']): typeof MODELS => MO
 // A template fills in who the agent is; the model stays if it still works.
 function fromTemplate(a: Agent, t: Template, models: typeof MODELS): Agent {
   const model = MODELS.some((m) => m.id === a.modelId) ? (models.find((m) => m.id === a.modelId) ?? models[0]) : modelInfo(a.modelId) ? { id: a.modelId } : models[0]
-  return { ...a, name: t.name, role: t.role, color: t.color, instructions: t.instructions, modelId: model?.id ?? a.modelId, web: true }
+  return { ...a, name: t.name, role: t.role, color: t.color, customColor: undefined, instructions: t.instructions, modelId: model?.id ?? a.modelId, web: true }
 }
 
 export function Onboarding({ build = false, from }: { build?: boolean; from?: View } = {}): ReactNode {
@@ -840,11 +838,11 @@ function MakeAgent(p: {
         </div>
         <div className="onb__field">
           <span>{L('Cor', 'Color')}</span>
-          <div className="swatches">
-            {COLORS.map((c) => (
-              <button key={c} className={`swatch c-${c} ${agent.color === c ? 'is-active' : ''}`} onClick={() => patch({ color: c })} aria-label={c} />
-            ))}
-          </div>
+          <ColorPicker agent={agent} patch={patch} />
+        </div>
+        <div className="onb__field">
+          <span>{L('Foto ou ícone', 'Photo or icon')}</span>
+          <PicturePicker agent={agent} patch={patch} />
         </div>
         <div className="onb__field">
           <span>{L('Modelo', 'Model')}</span>
@@ -869,7 +867,7 @@ function AgentCard({ agent, handle, computer }: { agent: Agent; handle: string; 
   const first = agent.instructions.trim().split(/(?<=\.)\s/)[0]
   return (
     <div className="onb-card">
-      <AgentAvatar agent={{ name, color: agent.color }} size={64} />
+      <AgentAvatar agent={{ ...agent, name }} size={64} />
       <h2>{name}</h2>
       <span className="muted">
         @{handle}
@@ -886,7 +884,7 @@ function AgentCard({ agent, handle, computer }: { agent: Agent; handle: string; 
         <Power on={!!agent.browser} icon="pointer" label={L('Navegador', 'Browser')} />
       </div>
       <div className="onb-card__bubble">
-        <AgentAvatar agent={{ name, color: agent.color }} size={22} />
+        <AgentAvatar agent={{ ...agent, name }} size={22} />
         <p>
           {L(`Oi! Eu sou ${agent.name.trim() ? `${agent.name.trim()}` : 'o seu agente'}.`, `Hi! I’m ${agent.name.trim() ? `${agent.name.trim()}` : 'your agent'}.`)}{first ? ` ${first}` : L(' Me diz o que eu faço e eu começo.', ' Tell me what I do and I’ll get started.')}
         </p>

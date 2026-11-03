@@ -11,7 +11,7 @@ They do the work. Anything that touches the real world waits for your yes.
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-141210)](LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-Apple%20silicon-141210?logo=apple)](#install) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#install) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#install)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20silicon%20%7C%20Intel-141210?logo=apple)](#install) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#install) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#install)
 [![Runs on](https://img.shields.io/badge/runs%20on-Claude%20Code%20·%20Codex%20·%20OpenCode%20·%20Pi-E2541B)](#runs-on-what-you-already-have)
 
 **English** · [Português](README.pt-BR.md) · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Changelog](CHANGELOG.md)
@@ -96,7 +96,7 @@ Each agent picks its harness and model, so a team can mix them: Opus to fix, GPT
 
 ## Install
 
-**You need** a Mac with Apple silicon (M1 or later; tested on macOS 26) a Linux PC (x64 or ARM64; tested on Ubuntu with KDE and Xfce) or a Windows 10 or 11 PC (x64), and at least one harness, installed and signed in. On Windows, also [Git for Windows](https://git-scm.com/download/win): its Git Bash runs agents' commands on your PC, and Claude Code needs it there too. Optional: Docker to give agents a Linux computer ([Docker Desktop](https://www.docker.com/products/docker-desktop/) on a Mac or Windows; Docker Engine or Docker Desktop on Linux), and Google Chrome (or Chromium, on Linux) for their browser (without it, the built-in browser is used).
+**You need** a Mac with Apple silicon or Intel (tested on macOS 26, Apple silicon), a Linux PC (x64 or ARM64; tested on Ubuntu with KDE and Xfce) or a Windows 10 or 11 PC (x64), and at least one harness, installed and signed in. On Windows, also [Git for Windows](https://git-scm.com/download/win): its Git Bash runs agents' commands on your PC, and Claude Code needs it there too. Optional: Docker to give agents a Linux computer ([Docker Desktop](https://www.docker.com/products/docker-desktop/) on a Mac or Windows; Docker Engine or Docker Desktop on Linux), and Google Chrome (or Chromium, on Linux) for their browser (without it, the built-in browser is used).
 
 **1. Install a harness.** Claude Code is the quickest:
 
@@ -109,7 +109,7 @@ On Windows, in PowerShell: `irm https://claude.ai/install.ps1 | iex`, then `clau
 
 **2. Install Tucano.**
 
-- **On a Mac:** [download the .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), open it and drag Tucano into **Applications**. The app is signed and notarized by Apple, so it opens with no warning.
+- **On a Mac:** [download the .dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg), open it and drag Tucano into **Applications**. On an Intel Mac, take [tucano-mac-x64.dmg](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-x64.dmg) instead. The app is signed and notarized by Apple, so it opens with no warning.
 - **On Ubuntu, Debian and their family** (Mint, Pop!_OS…): [download the .deb](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-amd64.deb) and open it, or run `sudo apt install ./tucano-linux-amd64.deb`.
 - **On other Linux distributions:** [download the AppImage](https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-x86_64.AppImage), make it executable (`chmod +x`) and open it. It needs FUSE, which most systems have. On Ubuntu 24.04 and later, prefer the .deb: it installs the AppArmor profile Electron apps need there.
 - On ARM64 Linux, take the files that end in `-arm64` (`tucano-linux-arm64.deb`, `tucano-linux-arm64.AppImage`).

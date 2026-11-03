@@ -22,7 +22,7 @@ import {
   isTeam
 } from '../store'
 import { Card, Field, Sheet, Toggle } from './Pages'
-import { AgentAvatar, Icon, shiftWeek, startOfWeek, weekRange } from './ui'
+import { AgentAvatar, Icon, ownColor, shiftWeek, startOfWeek, weekRange } from './ui'
 import { Modal } from './Modal'
 
 const DAYS = (): string[] => (lang() === 'en' ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'])
@@ -424,7 +424,7 @@ function Calendar({
                     <button
                       key={o.key}
                       className={`cal__ev ${o.upcoming ? '' : 'is-past'} ${live ? 'is-live' : ''} ${selected === o.key ? 'is-selected' : ''} ${only && only !== o.agentId ? 'is-dim' : ''} c-${a?.color ?? 'graphite'}`}
-                      style={{ top }}
+                      style={{ ...(a ? ownColor(a) : {}), top }}
                       title={`${hm(o.at)} · ${o.name}`}
                       onMouseEnter={() => setGhost(null)}
                       onClick={(e) => onPick(o, e.currentTarget.getBoundingClientRect())}

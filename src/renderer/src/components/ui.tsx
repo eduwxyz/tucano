@@ -1,5 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
-import { useState, type InputHTMLAttributes, type ReactNode } from 'react'
+import { useState, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react'
 import type { Agent } from '../store'
 
 const PATHS: Record<string, ReactNode> = {
@@ -112,6 +112,7 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8" />
     </>
   ),
+  volume: <path d="M4 9v6h4l5 4V5L8 9H4ZM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" />,
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />
 }
 
@@ -174,15 +175,22 @@ export function SleepingToucan({ size = 120 }: { size?: number }): ReactNode {
   )
 }
 
+// An agent's own color, over its class's, wherever the agent's color shows.
+export const ownColor = (agent: Partial<Pick<Agent, 'customColor'>>): CSSProperties => (agent.customColor ? ({ '--agent': agent.customColor } as CSSProperties) : {})
+
 // busy: the eyes read, left to right, while the agent works. Otherwise they blink now and then.
-export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind'>>; size?: number; busy?: boolean }): ReactNode {
+export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'picture'>>; size?: number; busy?: boolean }): ReactNode {
   if (agent.kind === 'tuca') return <TucaMark size={size} />
   return (
-    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42 }}>
-      <span className="avatar__eyes" aria-hidden>
-        <i />
-        <i />
-      </span>
+    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...ownColor(agent) }}>
+      {agent.picture ? (
+        <img className="avatar__photo" src={agent.picture} alt="" />
+      ) : (
+        <span className="avatar__eyes" aria-hidden>
+          <i />
+          <i />
+        </span>
+      )}
       <span className="sr-only">{agent.name}</span>
     </span>
   )

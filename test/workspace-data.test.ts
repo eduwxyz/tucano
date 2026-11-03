@@ -119,6 +119,33 @@ it('migrates every opened workspace and backs up older schemas before changing t
   expect(readdirSync(join(dir, 'backups'))).toEqual(backups)
 })
 
+it('upgrades the earlier workspace schema without skipping upstream agent columns or losing unread state', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tucano-preview-migration-'))
+  dirs.push(dir)
+  const file = join(dir, 'tucano.db')
+  const first = new Db(file)
+  first.createConversation({ id: 'kept', name: 'kept', kind: 'channel', members: [] })
+  const message: Message = { id: 'kept-message', conversationId: 'kept', author: { kind: 'me' }, text: 'keep me', at: 1 }
+  first.saveMessage(message)
+  first.recordActivity(message, null)
+  const unread = first.conversation('kept')?.unread
+  first.close()
+  const raw = new DatabaseSync(file)
+  const version = (raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+  for (const column of ['fallback_model', 'account', 'fallback_account', 'max_routines', 'custom_color', 'picture']) raw.exec(`ALTER TABLE agents DROP COLUMN ${column}`)
+  raw.exec(`PRAGMA user_version = ${version - 5}`)
+  raw.close()
+  const migrated = open(file)
+  expect(migrated.messages().map((m) => m.text)).toEqual(['keep me'])
+  expect(migrated.conversation('kept')?.unread).toBe(unread)
+  const check = new DatabaseSync(file)
+  expect(check.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: version })
+  const columns = (check.prepare('PRAGMA table_info(agents)').all() as { name: string }[]).map((column) => column.name)
+  expect(columns).toEqual(expect.arrayContaining(['fallback_model', 'account', 'fallback_account', 'max_routines', 'custom_color', 'picture']))
+  check.close()
+  expect(readdirSync(join(dir, 'backups'))).toHaveLength(1)
+})
+
 it('duplicates configuration and credentials without copying history or mutating the source', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tucano-duplicate-'))
   dirs.push(dir)

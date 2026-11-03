@@ -1,5 +1,5 @@
 import { L, locale, type Lang } from '../../../shared/lang'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
   navigate,
@@ -36,13 +36,16 @@ import {
   useStore,
   EFFORTS,
   ENGINES,
+  MAX_AGENT_ROUTINES,
   RUN_BUDGET_PCT,
+  routineCap,
   RUN_STALL_MINUTES,
   archiveAgent,
   setTab,
   saveSkill,
   skillApplies,
   modelInfo,
+  MODELS,
   type Agent,
   type AgentColor,
   type Connector,
@@ -55,7 +58,7 @@ import {
   isTeam,
   reachable
 } from '../store'
-import { HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway } from './Harness'
+import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
 import { AgentAvatar, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
@@ -136,7 +139,63 @@ export function Sheet({
 
 // ---------- Agent profile / creation ----------
 
+// A square of 128 px: enough for any place it shows.
+async function pictureFrom(file: File): Promise<string> {
+  const image = await createImageBitmap(file)
+  const side = Math.min(image.width, image.height)
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 128
+  canvas.getContext('2d')!.drawImage(image, (image.width - side) / 2, (image.height - side) / 2, side, side, 0, 0, 128, 128)
+  image.close()
+  return canvas.toDataURL('image/webp', 0.85)
+}
+
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
+
+// The eight colors and one of the person's own, here and in the onboarding.
+export function ColorPicker({ agent, patch }: { agent: Pick<Agent, 'color' | 'customColor'>; patch: (p: Partial<Agent>) => void }): ReactNode {
+  return (
+    <div className="swatches">
+      {COLORS.map((c) => (
+        <button key={c} className={`swatch c-${c} ${!agent.customColor && agent.color === c ? 'is-active' : ''}`} onClick={() => patch({ color: c, customColor: undefined })} aria-label={c} />
+      ))}
+      <label className={`swatch swatch--custom ${agent.customColor ? 'is-active' : ''}`} style={agent.customColor ? ({ '--agent': agent.customColor } as CSSProperties) : undefined} title={L('Outra cor', 'Another color')}>
+        <input type="color" aria-label={L('Outra cor', 'Another color')} value={agent.customColor ?? '#888888'} onChange={(e) => patch({ customColor: e.target.value })} />
+      </label>
+    </div>
+  )
+}
+
+// A picture over the face, scaled down here; taken off the same way.
+export function PicturePicker({ agent, patch }: { agent: Pick<Agent, 'name' | 'color' | 'customColor' | 'picture'>; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const [error, setError] = useState('')
+  return (
+    <>
+      <div className="row row--center">
+        <AgentAvatar agent={{ ...agent, name: agent.name || '?' }} size={40} />
+        <label className="btn btn--sm">
+          {L('Enviar imagem', 'Upload image')}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) pictureFrom(file).then((picture) => (setError(''), patch({ picture })), () => setError(L('Não consegui abrir essa imagem.', "I couldn't open that image.")))
+            }}
+          />
+        </label>
+        {agent.picture && (
+          <button type="button" className="btn btn--sm btn--ghost" onClick={() => patch({ picture: undefined })}>
+            {L('Tirar', 'Remove')}
+          </button>
+        )}
+      </div>
+      {error && <span className="field__error">{error}</span>}
+    </>
+  )
+}
 const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] => [
   { value: 'auto', label: L('Grava sozinho', 'Saves on its own'), hint: L('Guarda e avisa na mensagem, com Desfazer.', 'Keeps it and says so in the message, with Undo.') },
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
@@ -205,7 +264,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
     <Page
       title={
         <span className="row row--center">
-          <AgentAvatar agent={{ name: draft.name || '?', color: draft.color }} size={26} />
+          <AgentAvatar agent={{ ...draft, name: draft.name || '?' }} size={26} />
           {isNew ? L('Novo agente', 'New agent') : draft.name}
         </span>
       }
@@ -267,16 +326,10 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <input value={draft.role} placeholder={L('Ex.: Engenharia', 'E.g. Engineering')} onChange={(e) => patch({ role: e.target.value })} />
               </Field>
               <Field label={L('Cor', 'Color')}>
-                <div className="swatches">
-                  {COLORS.map((c) => (
-                    <button
-                      key={c}
-                      className={`swatch c-${c} ${draft.color === c ? 'is-active' : ''}`}
-                      onClick={() => patch({ color: c })}
-                      aria-label={c}
-                    />
-                  ))}
-                </div>
+                <ColorPicker agent={draft} patch={patch} />
+              </Field>
+              <Field label={L('Foto ou ícone', 'Photo or icon')}>
+                <PicturePicker agent={draft} patch={patch} />
               </Field>
             </Card>
           )}
@@ -524,7 +577,9 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           {pane('perfil') && (
             <Card title={L('Harness e modelo', 'Harness and model')} lead={L('O agente roda num dos harnesses que você usa, como você o configurou: no seu plano, no gateway da empresa ou no seu provedor.', 'The agent runs on one of the harnesses you use, the way you set it up: on your plan, your company’s gateway or your provider.')}>
               <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
-              {!engineStatus.loggedIn && (
+              <AccountPicker draft={draft} patch={patch} />
+              <ReserveModel draft={draft} patch={patch} />
+              {!engineStatus.loggedIn && !draft.accountId && (
                 <p className="hint hint--warn">
                   <Icon name="lock" size={13} />{' '}
                   {L(
@@ -555,6 +610,15 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                     className="input--short"
                   />
                 </Field>
+                <Field label={L('Máx. rotinas ligadas', 'Max. enabled routines')} hint={L('Quantas rotinas o agente pode ter ligadas ao mesmo tempo.', 'How many routines the agent can have enabled at the same time.')}>
+                  <NumberInput
+                    min={1}
+                    step={1}
+                    value={draft.maxRoutines ?? MAX_AGENT_ROUTINES}
+                    onChange={(n) => patch({ maxRoutines: routineCap(n) })}
+                    className="input--short"
+                  />
+                </Field>
               </div>
             </Card>
           )}
@@ -562,7 +626,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
 
         <aside className="agent-side">
           <div className="profile-card">
-            <AgentAvatar agent={{ name: draft.name || '?', color: draft.color }} size={72} />
+            <AgentAvatar agent={{ ...draft, name: draft.name || '?' }} size={72} />
             <strong className="profile-card__name">{draft.name || L('Sem nome', 'No name')}</strong>
             <span className="muted">@{draft.handle || 'handle'}</span>
             {draft.role && <span className="tag">{draft.role}</span>}
@@ -1245,6 +1309,74 @@ function Tabs({ page, tabs }: { page: string; tabs: TabList }): ReactNode {
 }
 
 // A model to run with, from what each harness in use offers, or another by name.
+// Where the agent's replies go when its model's subscription is out (a 5-hour or weekly limit, a 429).
+// Off by default. Turned on, it starts on another login of the same harness when there is one (the
+// limit is the account's), else on another harness, since the same subscription is out for both.
+function ReserveModel({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const usable = useStore((s) => usableEngines(s.settings))
+  const accounts = useStore((s) => s.settings.accounts) ?? []
+  const main = modelInfo(draft.modelId)?.engine
+  const mainAccount = accounts.find((a) => a.id === draft.accountId && a.engine === main)
+  const on = !!draft.fallbackModelId
+  const first = (): Partial<Agent> => {
+    const other = accounts.find((a) => a.engine === main && a.id !== mainAccount?.id)
+    if (other) return { fallbackModelId: draft.modelId, fallbackAccountId: other.id }
+    if (mainAccount) return { fallbackModelId: draft.modelId, fallbackAccountId: undefined } // the harness's usual login
+    const engine = usable.find((e) => e !== main) ?? usable[0]
+    return { fallbackModelId: MODELS.find((m) => m.engine === engine)?.id ?? draft.modelId, fallbackAccountId: undefined }
+  }
+  const reserve = draft.fallbackModelId ? modelInfo(draft.fallbackModelId) : undefined
+  const reserveAccounts = accounts.filter((a) => a.engine === reserve?.engine)
+  const reserveAccount = reserveAccounts.find((a) => a.id === draft.fallbackAccountId)
+  const sameLogin = !!reserve && reserve.engine === main && reserveAccount?.id === mainAccount?.id
+  return (
+    <div className="reserve">
+      <div className="key-row">
+        <Icon name="layers" />
+        <div className="grow">
+          <strong>{L('Modelo reserva', 'Reserve model')}</strong>
+          <p className="muted small">
+            {L(
+              `Quando a assinatura do modelo principal chega no limite (o de 5 horas ou o semanal), a resposta segue no reserva, que pode ser outro harness ou outra conta. Na resposta seguinte, ${draft.name || 'o agente'} tenta o principal de novo.`,
+              `When the main model’s subscription hits its limit (the 5-hour or the weekly one), the reply goes on with the reserve, which can be another harness or another account. On the next reply, ${draft.name || 'the agent'} tries the main one again.`
+            )}
+          </p>
+        </div>
+        <Toggle on={on} onChange={(v) => patch(v ? first() : { fallbackModelId: undefined, fallbackAccountId: undefined })} />
+      </div>
+      {on && (
+        <ModelPicker
+          value={draft.fallbackModelId!}
+          onChange={(fallbackModelId) => patch({ fallbackModelId, ...(modelInfo(fallbackModelId)?.engine !== reserve?.engine ? { fallbackAccountId: undefined } : {}) })}
+        />
+      )}
+      {on && reserve && reserveAccounts.length > 0 && (
+        <label className="field">
+          <span className="field__label">{L('Conta da reserva', 'Reserve account')}</span>
+          <select value={reserveAccount?.id ?? ''} onChange={(e) => patch({ fallbackAccountId: e.target.value || undefined })}>
+            <option value="">{L(`A de sempre do ${ENGINES[reserve.engine].label}`, `${ENGINES[reserve.engine].label}’s usual one`)}</option>
+            {reserveAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')}
+              </option>
+            ))}
+          </select>
+          {reserveAccount && !reserveAccount.loggedIn && <span className="hint hint--warn">{L('Essa conta ainda não entrou: a reserva só funciona depois que você entrar nela em Configurações › Modelos.', 'This account isn’t signed in yet: the reserve only works once you sign in under Settings › Models.')}</span>}
+        </label>
+      )}
+      {on && sameLogin && (
+        <p className="hint hint--warn">
+          {draft.fallbackModelId === draft.modelId
+            ? L('É o mesmo modelo, na mesma conta do principal: a reserva não vai ser usada.', 'It’s the same model, on the same account as the main one: the reserve won’t be used.')
+            : L('É o mesmo harness, na mesma conta do principal: se o limite for da assinatura, ele também vai estar sem.', 'It’s the same harness, on the same account as the main one: if the limit is the subscription’s, it’ll be out too.')}
+          {reserveAccounts.length > 0 ? L(' Escolha outra conta em “Conta da reserva”.', ' Pick another one under “Reserve account”.') : ''}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function ModelSelect(p: { value: string; onChange: (v: string) => void; jev?: boolean; engines?: EngineId[] }): ReactNode {
   return <ModelPicker {...p} />
 }
@@ -1573,6 +1705,19 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('geral') && (
+          <Card title={L('Notificações', 'Notifications')}>
+            <div className="key-row">
+              <Icon name="volume" />
+              <div className="grow">
+                <strong>{L('Sons', 'Sounds')}</strong>
+                <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', 'The chirp when an agent needs you and when it’s done. Off, notifications still show up, silently.')}</p>
+              </div>
+              <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
+            </div>
+          </Card>
+        )}
+
+        {pane('geral') && (
           <Card title={L('Atualizações', 'Updates')}>
             <UpdateSettings />
           </Card>
@@ -1592,6 +1737,18 @@ export function SettingsPage(): ReactNode {
             }
           >
             <HarnessList />
+          </Card>
+        )}
+
+        {pane('modelos') && (
+          <Card
+            title={L('Contas', 'Accounts')}
+            lead={L(
+              'Mais de um login do Claude Code ou do Codex, como a conta do trabalho e a pessoal. Cada agente escolhe a conta na página dele. O login acontece no próprio CLI: o Tucano não vê nem guarda a senha.',
+              'More than one Claude Code or Codex login, like a work account and a personal one. Each agent picks its account on its page. You sign in through the CLI itself: Tucano never sees or stores the password.'
+            )}
+          >
+            <AccountsCard />
           </Card>
         )}
 
