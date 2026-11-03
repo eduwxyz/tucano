@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { DEFAULT_PORT, formatPairLink, parsePairLink, parseServerUrl, parseSshTarget, type Reach } from '../../../shared/pairlink'
 import type { RemoteState } from '../rpc'
@@ -12,6 +12,33 @@ function connectionError(error: unknown): string {
   if (/code|expired|pair|401|403|unauthorized/i.test(message)) return L('Código expirado, inválido ou acesso revogado. Gere um novo código no servidor e tente parear novamente.', 'Code expired, invalid or access revoked. Generate a new code on the server and pair again.')
   if (/ssh|host key|permission denied/i.test(message)) return L('Verifique o usuário, endereço, chave SSH e host conhecido. Teste a conexão SSH no Terminal primeiro.', 'Check the user, address, SSH key and known host. Test the SSH connection in Terminal first.')
   return L('Não foi possível conectar. Verifique o serviço no servidor, endereço, porta e rede. Tente reconectar ou use o modo local.', 'Could not connect. Check the server service, address, port and network. Reconnect or use local mode.')
+}
+
+// Native modal dialogs make the page inert, but Chromium can still move focus
+// into browser chrome at a Tab boundary. Keep keyboard traversal in this dialog.
+// Recompute each time: pairing disables controls and profile edits add/remove them.
+function keepDialogFocus(event: KeyboardEvent<HTMLDialogElement>): void {
+  if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return
+  const dialog = event.currentTarget
+  const controls = [...dialog.querySelectorAll<HTMLElement>('button, input, select, textarea, a[href], [tabindex]')]
+    .filter((element) => element.tabIndex >= 0 && !element.matches(':disabled') && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden')
+  const first = controls[0]
+  const last = controls.at(-1)
+  const active = document.activeElement
+  if (!first || !last) {
+    event.preventDefault()
+    dialog.focus()
+  } else if (!controls.some((element) => element === active)) {
+    event.preventDefault()
+    const target = event.shiftKey ? last : first
+    target.focus()
+  } else if (event.shiftKey && active === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 export function Connections({ children }: { children: ReactNode }): ReactNode {
@@ -111,7 +138,7 @@ export function Connections({ children }: { children: ReactNode }): ReactNode {
         {(state.status === 'error' || error) && <button className="btn btn--ghost btn--xs" onClick={() => setOpen(true)}>{L('Gerenciar conexão', 'Manage connection')}</button>}
       </header>
       <div className="connection-content">{children}</div>
-      <dialog ref={dialog} className="connection-dialog" aria-labelledby="connection-title" onCancel={() => setOpen(false)} onClose={() => setOpen(false)}>
+      <dialog ref={dialog} tabIndex={-1} onKeyDown={keepDialogFocus} className="connection-dialog" aria-labelledby="connection-title" onCancel={() => setOpen(false)} onClose={() => setOpen(false)}>
         <header className="connection-heading"><h2 id="connection-title">{L('Ambientes', 'Environments')}</h2><button className="btn btn--ghost" onClick={() => setOpen(false)} aria-label={L('Fechar', 'Close')}>×</button></header>
         <p className="muted">{L('Alterne entre este computador e suas VPS. Cada ambiente tem seus próprios agentes, dados e ferramentas.', 'Switch between this computer and your VPS servers. Each environment has its own agents, data and tools.')}</p>
         <div className="connection-profiles">

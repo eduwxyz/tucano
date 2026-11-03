@@ -115,7 +115,12 @@ jobs:
           pid=$(sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user show -p MainPID --value tucano.service)
           sudo kill -9 "$pid"
           for _ in $(seq 1 30); do
-            test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7399/)" = 401 && exit 0
+            new_pid=$(sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user show -p MainPID --value tucano.service)
+            if [[ "$new_pid" =~ ^[1-9][0-9]*$ ]] && test "$new_pid" != "$pid" && \
+              sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-active --quiet tucano.service && \
+              test "$(curl --max-time 3 -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7399/)" = 401; then
+              exit 0
+            fi
             sleep 1
           done
           sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid journalctl --user -u tucano --no-pager | tail -30
@@ -130,9 +135,9 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7399/)" = 401
           sudo -u tucano -H env XDG_CONFIG_HOME=/home/tucano/.config XDG_RUNTIME_DIR=/run/user/$uid sh /home/tucano/install-server.sh --uninstall
           if sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-active --quiet tucano.service; then echo "still running"; exit 1; fi
-          test ! -e /home/tucano/.local/share/tucano-server
-          test ! -e /home/tucano/.local/bin/tucano-server
-          test -d /home/tucano/.tucano-server
+          sudo -u tucano -H test ! -e /home/tucano/.local/share/tucano-server
+          sudo -u tucano -H test ! -e /home/tucano/.local/bin/tucano-server
+          sudo -u tucano -H test -d /home/tucano/.tucano-server
 
       - name: Attach to the release
         env:

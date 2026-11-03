@@ -85,6 +85,8 @@ export class RemoteStore {
     const temp = `${this.file}.${randomUUID()}.tmp`
     try {
       writeFileSync(temp, JSON.stringify({ version: 1, entries }), { mode: 0o600, flag: 'wx' })
+      // POSIX permission hardening; Windows chmod does not set an ACL. There the file
+      // inherits the app data directory ACL and safeStorage protects tokens with DPAPI.
       chmodSync(temp, 0o600)
       renameSync(temp, this.file)
     } catch { throw new Error('Cannot save the server connection.') }

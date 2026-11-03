@@ -25,12 +25,14 @@ function stream(text = 'event: hello\ndata: client-123\n\n') {
 }
 
 describe('secure saved remote tokens', () => {
-  it('persists encrypted tokens, private mode, metadata-only list and safe whitelisted fields', () => {
+  it('persists encrypted tokens, POSIX private mode, metadata-only list and safe whitelisted fields', () => {
     const path = file(), store = new RemoteStore(path, storage())
     store.put({ ...profile, token: 'injected-secret' } as SavedRemote, token)
     expect(readFileSync(path, 'utf8')).not.toContain(token)
     expect(readFileSync(path, 'utf8')).not.toContain('injected-secret')
-    expect(statSync(path).mode & 0o777).toBe(0o600)
+    // Windows stat/chmod expose only writable/read-only bits, not per-user ACLs.
+    // Ciphertext, token isolation and persistence assertions still run on every platform.
+    if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600)
     expect(new RemoteStore(path, storage()).get(profile.id)).toEqual({ profile, token })
     expect(store.list()).toEqual([profile])
     store.remove(profile.id); expect(store.list()).toEqual([])

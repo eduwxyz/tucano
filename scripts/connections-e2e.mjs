@@ -91,6 +91,10 @@ try {
   await page.keyboard.press('Escape')
   await page.locator('.connection-switch').click()
   assert.equal(await submit.isDisabled(), true, 'Closing and reopening must not permit duplicate pending pairing')
+  for (const key of ['Tab', 'Shift+Tab']) {
+    await page.keyboard.press(key)
+    assert.equal(await page.getByRole('button', { name: 'Fechar', exact: true }).evaluate((button) => button === document.activeElement), true, 'While busy, traversal must skip disabled controls and stay on Close')
+  }
   assert.equal(await page.evaluate(() => window.calls.filter((c) => c[0] === 'pair').length), 1)
   const paired = new URL(await page.evaluate(() => window.calls.find((c) => c[0] === 'pair')[1]))
   assert.equal(paired.searchParams.get('ssh'), 'me@example.com:2222')
@@ -127,11 +131,20 @@ try {
   assert.equal(await submit.isDisabled(), true)
   await form.locator('input').nth(0).fill('http://100.64.1.2:7337')
   assert.equal(await submit.isEnabled(), true)
-  for (let i = 0; i < 20; i++) {
-    await page.keyboard.press('Tab')
-    assert.equal(await page.evaluate(() => !!document.activeElement.closest('dialog')), true, 'Focus must stay inside the modal')
+  const close = page.getByRole('button', { name: 'Fechar', exact: true })
+  await submit.focus()
+  await page.keyboard.press('Tab')
+  assert.equal(await close.evaluate((button) => button === document.activeElement), true, 'Tab on the final control must wrap to Close')
+  await page.keyboard.press('Shift+Tab')
+  assert.equal(await submit.evaluate((button) => button === document.activeElement), true, 'Shift+Tab on Close must wrap to the final control')
+  for (const key of ['Tab', 'Shift+Tab']) {
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press(key)
+      assert.equal(await page.evaluate(() => !!document.activeElement.closest('dialog')), true, `${key}: focus must stay inside the modal`)
+    }
   }
   await page.keyboard.press('Escape')
+  assert.equal(await page.locator('.connection-switch').evaluate((button) => button === document.activeElement), true, 'Closing must return focus to the connection switch')
   await page.evaluate(() => {
     const overlay = document.createElement('div')
     overlay.className = 'onb'

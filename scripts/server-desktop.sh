@@ -20,6 +20,8 @@ if [[ ${1:-} == --session ]]; then
   export NO_AT_BRIDGE=0 GTK_MODULES=atk-bridge
   openbox >/dev/null 2>&1 &
   wm=$!
+  # Invoked by the EXIT trap, including failures after the window manager starts.
+  # shellcheck disable=SC2317
   cleanup_session() { kill "$wm" 2>/dev/null || true; wait "$wm" 2>/dev/null || true; }
   trap cleanup_session EXIT
   "$@" &
@@ -53,6 +55,8 @@ unset DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS
 # and session bus together on exit. systemd additionally uses KillMode=control-group.
 setsid xvfb-run --auto-servernum --server-args='-screen 0 1440x900x24 -nolisten tcp' dbus-run-session -- bash "$script" --session "$@" &
 child=$!
+# Invoked by the EXIT trap after normal exit or a signal-triggered exit.
+# shellcheck disable=SC2317
 cleanup() {
   trap - EXIT TERM INT HUP
   kill -TERM -- "-$child" 2>/dev/null || true

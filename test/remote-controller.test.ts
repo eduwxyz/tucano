@@ -16,7 +16,7 @@ vi.mock('electron', async () => {
     isDestroyed = () => false; isMinimized = () => false; isFocused = () => true
     show = vi.fn(); focus = vi.fn(); restore = vi.fn(); loadFile = vi.fn(async () => {}); loadURL = vi.fn(async () => {})
   }
-  const app = Object.assign(new EventEmitter(), { isPackaged: false, setName: vi.fn(), getPreferredSystemLanguages: () => ['en'], getPath: () => process.env.TUCANO_DATA!, setPath: vi.fn(), requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), isReady: () => true, setAboutPanelOptions: vi.fn(), getVersion: () => '1.0.0', getAppPath: () => '/app', quit: vi.fn() })
+  const app = Object.assign(new EventEmitter(), { isPackaged: false, setName: vi.fn(), setAppUserModelId: vi.fn(), setLoginItemSettings: vi.fn(), setAsDefaultProtocolClient: vi.fn(), exit: vi.fn(), getPreferredSystemLanguages: () => ['en'], getPath: () => process.env.TUCANO_DATA!, setPath: vi.fn(), requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), isReady: () => true, setAboutPanelOptions: vi.fn(), getVersion: () => '1.0.0', getAppPath: () => '/app', quit: vi.fn() })
   const ipcMain = Object.assign(new EventEmitter(), { handle: (name: string, fn: Function) => h.handlers.set(name, fn) })
   h.app = app; h.ipc = ipcMain
   return {
@@ -64,6 +64,14 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }) })
 
 describe('native remote controller lifecycle', () => {
+  it('initializes the native shell on the current operating system', async () => {
+    await boot()
+    expect(h.app.setName).toHaveBeenCalledWith('Tucano')
+    if (process.platform === 'win32') expect(h.app.setAppUserModelId).toHaveBeenCalledWith('dev.tucano.app')
+    else expect(h.app.setAppUserModelId).not.toHaveBeenCalled()
+    expect(h.cores).toHaveLength(1)
+    expect(invoke('remote:state').status).toBe('local')
+  })
   it('switches Local → A → B → Local while preserving the single local core', async () => {
     await boot(); const localPort = port()
     expect(h.cores[0].postMessage).toHaveBeenCalledWith(null, [localPort])
