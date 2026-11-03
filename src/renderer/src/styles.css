@@ -2634,6 +2634,9 @@ table.csv th {
 }
 
 /* ---------- phone ---------- */
+.phone-finished {
+  margin-top: 20px;
+}
 .phone-code {
   font: 600 20px/1 var(--mono, ui-monospace, monospace);
   letter-spacing: 3px;

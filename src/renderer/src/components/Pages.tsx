@@ -1572,14 +1572,13 @@ function PhoneCard({ info, finished }: { info?: TelegramInfo; finished?: boolean
           </button>
         </div>
       )}
-      <div className="row row--center">
+      <div className="row row--center phone-finished">
         <div className="grow">
           <strong>{L('Receber todas as respostas concluídas', 'Receive all finished replies')}</strong>
-          <p className="hint">{L('Desativado por padrão. Aprovações, perguntas e avisos de rotinas continuam chegando. Responda a uma mensagem para continuar no mesmo canal e agente.', 'Off by default. Approvals, questions and routine notices still arrive. Reply to a message to continue with the same channel and agent.')}</p>
+          <p className="hint">{L('Receba notificações dos seus agentes sempre que concluírem uma tarefa. Envie uma mensagem ao seu bot e ele a encaminhará ao canal e agente adequados.', 'Receive notifications from your agents whenever they complete a task. Send a message to your bot, and it will forward it to the appropriate channel and agent.')}</p>
         </div>
         <Toggle label={L('Receber todas as respostas concluídas', 'Receive all finished replies')} on={finished === true} onChange={(v) => updateSettings({ telegramFinishedMessages: v })} />
       </div>
-      <p className="hint">{L('Mande uma tarefa ao bot: a IA escolhe o canal e o agente antes de publicar. Se não identificar o canal, usa #geral (ou o primeiro canal).', 'Send a task to the bot: AI selects its channel and agent before posting. If the channel is unclear, it uses #general (or the first channel).')}</p>
       {(error || info?.error) && <p className="note note--error">{error || L(`O Telegram não está respondendo: ${info?.error}`, `Telegram isn't responding: ${info?.error}`)}</p>}
       <p className="hint">
         <Icon name="shield" size={13} /> {L('O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo). O token fica no cofre do sistema. Uma ação de alto risco pede dois toques.', 'Telegram receives the text of approvals and questions (tool, arguments, reason). The token stays in the system’s vault. A high-risk action takes two taps.')}

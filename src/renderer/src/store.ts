@@ -7,6 +7,7 @@ import {
   type Account,
   type AccountEngine,
   MAX_AGENT_ROUTINES,
+  ENGINE_IDS,
   MODELS,
   modelInfo,
   type EngineId,
@@ -180,6 +181,12 @@ const upsert = <T extends { id: string }>(list: T[], item: T): T[] =>
 // ---------- core sync ----------
 
 function withSettings(s: State, settings: Settings): State {
+  // A dev renderer can reload while an older core is still running. Harnesses
+  // added since that core started are absent from its snapshot/events; treat
+  // them as unavailable rather than letting Settings dereference undefined.
+  const engines = { ...settings.engines }
+  for (const id of ENGINE_IDS) engines[id] ??= { installed: false, loggedIn: false, soon: true }
+  settings = { ...settings, engines }
   setLang(settings.language)
   const name = settings.workspaceName || L('Eu', 'Me')
   return { ...s, settings, me: { name, initials: initials(name) } }
