@@ -35,3 +35,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # The built server, run and attacked (scripts/server-e2e.mjs): what the unit tests can't reach, because
+      # src/server/index.ts starts a server the moment it is imported.
+      - run: npm run test:server
+        if: runner.os != 'Windows'
