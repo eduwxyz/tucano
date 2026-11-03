@@ -1,11 +1,12 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
 import { geminiArgs, geminiEnv, geminiHome, geminiParser } from '../src/core/engines/gemini'
+import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
@@ -300,5 +301,245 @@ describe('Gemini config', () => {
     const a = geminiHome(appDir, { system: 'a', mcpUrl: undefined, web: false }, userHome)
     const b = geminiHome(appDir, { system: 'b', mcpUrl: undefined, web: false }, userHome)
     expect(a).not.toBe(b)
+  })
+})
+
+describe('Cursor stream', () => {
+  const answer = 'Vou consultar a hora no servidor tucano e a versão LTS atual do Node.js.\n\nSão 21:58 no Tucano e a LTS atual do Node.js é a 26.13.0 (Lithium).\n\n— Lia'
+
+  it('streams the deltas once (not the whole message that repeats them), with paragraphs around tool calls', () => {
+    const events = feed(cursorParser(), fixture('cursor-stream.jsonl'))
+    expect(text(events)).toBe(answer)
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ type: 'done', text: answer })
+  })
+
+  it('reports the usage the CLI gives, cache reads and writes counted as sent', () => {
+    const done = feed(cursorParser(), fixture('cursor-stream.jsonl')).find((e) => e.type === 'done')
+    expect(done).toMatchObject({ usage: { inputTokens: 12277 + 31744, cacheReadTokens: 31744, outputTokens: 338 } })
+  })
+
+  it("reports a web search that ran, not the gateway's tools", () => {
+    const web = feed(cursorParser(), fixture('cursor-stream.jsonl')).filter((e) => e.type === 'web')
+    expect(web).toEqual([{ type: 'web', action: 'search', detail: 'Node.js current LTS version' }])
+  })
+
+  it("doesn't report a web read the permissions refused", () => {
+    const refused = '{"type":"tool_call","subtype":"completed","tool_call":{"webFetchToolCall":{"args":{"url":"https://nodejs.org"},"result":{"permissionDenied":{}}}}}'
+    const ran = '{"type":"tool_call","subtype":"completed","tool_call":{"webFetchToolCall":{"args":{"url":"https://nodejs.org"},"result":{"success":{}}}}}'
+    expect(feed(cursorParser(), [refused]).filter((e) => e.type === 'web')).toEqual([])
+    expect(feed(cursorParser(), [ran]).filter((e) => e.type === 'web')).toEqual([{ type: 'web', action: 'fetch', detail: 'https://nodejs.org' }])
+  })
+
+  it('takes the whole message when no deltas came', () => {
+    const whole = '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]},"model_call_id":"m1","timestamp_ms":1}'
+    const last = '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}'
+    const result = '{"type":"result","subtype":"success","is_error":false,"result":"OK","usage":{"inputTokens":10,"outputTokens":1,"cacheReadTokens":0,"cacheWriteTokens":0}}'
+    const events = feed(cursorParser(), [whole, last, result])
+    expect(text(events)).toBe('OK')
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ text: 'OK' })
+  })
+
+  it('estimates the usage when the CLI gives none: the characters sent and received, about 4 a token, the sent part doubled', () => {
+    const delta = '{"type":"assistant","message":{"content":[{"type":"text","text":"12345678"}]},"timestamp_ms":1}'
+    const result = '{"type":"result","subtype":"success","is_error":false,"result":"12345678"}'
+    const done = feed(cursorParser(400), [delta, result]).find((e) => e.type === 'done')
+    expect(done).toMatchObject({ usage: { inputTokens: 200, cacheReadTokens: 0, outputTokens: 2 } })
+  })
+
+  it('turns an error result into an error, and an exit without a result too', () => {
+    const bad = '{"type":"result","subtype":"error","is_error":true,"result":"You have hit your usage limit"}'
+    expect(feed(cursorParser(), [bad])).toEqual([{ type: 'error', message: 'You have hit your usage limit' }])
+    const gone = feed(cursorParser(), ['{"type":"system","subtype":"init"}'], 1, 'boom\nnot logged in')
+    expect(gone).toHaveLength(1)
+    expect((gone[0] as { message: string }).message).toContain('not logged in')
+  })
+})
+
+describe('Cursor config', () => {
+  it('runs headless with deltas, the prompt on stdin, the model named, and neither --force nor --approve-mcps', () => {
+    const args = cursorArgs({ model: 'auto' })
+    expect(args).toEqual(['-p', '--output-format', 'stream-json', '--stream-partial-output', '--trust', '--model', 'auto'])
+    expect(args).not.toContain('--force')
+    expect(args).not.toContain('--yolo')
+    expect(args).not.toContain('--approve-mcps')
+  })
+
+  it('attaches the images that exist with --image, once per file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tucano-cursor-img-'))
+    const a = join(dir, 'a.png')
+    const b = join(dir, 'b.jpg')
+    writeFileSync(a, 'x')
+    writeFileSync(b, 'y')
+    const images = [
+      { block: 0, path: a, mime: 'image/png' },
+      { block: 1, path: join(dir, 'gone.png'), mime: 'image/png' },
+      { block: 2, path: b, mime: 'image/jpeg' }
+    ]
+    expect(cursorArgs({ model: 'auto', images }).slice(7)).toEqual(['--image', a, '--image', b])
+  })
+
+  it('knows when the CLI refused --image itself', () => {
+    expect(imageRefused("Cursor exited without a reply (code 1).\nerror: unknown option '--image'")).toBe(true)
+    expect(imageRefused("error: unknown option '--imagex'")).toBe(false)
+    expect(imageRefused('You have hit your usage limit')).toBe(false)
+    expect(imageRefused('Could not read --image file')).toBe(false)
+  })
+
+
+  it("denies Cursor's own files and shell, and allows only the gateway", () => {
+    const c = cursorConfig({ mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }) as { permissions: { allow: string[]; deny: string[] }; autoAcceptWebSearch: boolean }
+    expect(c.permissions.allow).toEqual(['Mcp(tucano:*)'])
+    expect(c.permissions.deny).toEqual(['Read(**)', 'Write(**)', 'Shell(*)', 'WebFetch(*)'])
+    expect(c.autoAcceptWebSearch).toBe(false)
+  })
+
+  it('lets the web in only when the agent has it', () => {
+    const c = cursorConfig({ mcpUrl: undefined, web: true }) as { permissions: { allow: string[]; deny: string[] }; autoAcceptWebSearch: boolean }
+    expect(c.permissions.allow).toEqual(['WebFetch(*)'])
+    expect(c.permissions.deny).toEqual(['Read(**)', 'Write(**)', 'Shell(*)'])
+    expect(c.autoAcceptWebSearch).toBe(true)
+  })
+
+  it('gives each turn its own folder: the config, the instructions as AGENTS.md, the gateway as the only MCP server', () => {
+    const appDir = mkdtempSync(join(tmpdir(), 'cu-'))
+    const a = cursorTurnDirs(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false })
+    const b = cursorTurnDirs(appDir, { system: 'You are Theo.', mcpUrl: undefined, web: false })
+    expect(a.root).not.toBe(b.root)
+    expect(a.root.startsWith(appDir)).toBe(true)
+    expect(a.data.startsWith(a.root)).toBe(true)
+    expect(readFileSync(join(a.workspace, 'AGENTS.md'), 'utf8')).toBe('You are Iris.')
+    expect(JSON.parse(readFileSync(join(a.workspace, '.cursor', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { tucano: { url: 'http://127.0.0.1:1/mcp/x' } } })
+    expect(JSON.parse(readFileSync(join(a.config, 'cli-config.json'), 'utf8')).permissions.deny).toContain('Shell(*)')
+    expect(() => readFileSync(join(b.workspace, '.cursor', 'mcp.json'))).toThrow()
+  })
+
+  // The CLI reads hooks, plugins and skills from the home folder: a turn gets one of its own.
+  it("gives each turn an empty home, with only the way to the person's login", () => {
+    const real = join('/h', 'eduar')
+    const turnHome = join('/t', 'home')
+    const app = join('/app', 'cursor')
+    const mac = cursorHomeEnv(turnHome, app, 'mac', real, {})
+    expect(mac).toEqual({ HOME: turnHome, NODE_COMPILE_CACHE: join(app, 'compile-cache') })
+    // Linux: the login is a file under XDG_CONFIG_HOME, which stays the person's.
+    expect(cursorHomeEnv(turnHome, app, 'linux', real, {})['XDG_CONFIG_HOME']).toBe(join(real, '.config'))
+    expect(cursorHomeEnv(turnHome, app, 'linux', real, { XDG_CONFIG_HOME: '/x/conf' })['XDG_CONFIG_HOME']).toBe('/x/conf')
+    expect(cursorHomeEnv(turnHome, app, 'linux', real, {})['HOME']).toBe(turnHome)
+    // Windows: the home is USERPROFILE; the login is under %APPDATA%, which stays the person's.
+    const win = cursorHomeEnv(turnHome, app, 'windows', real, { APPDATA: 'C:/Users/e/AppData/Roaming' })
+    expect(win['USERPROFILE']).toBe(turnHome)
+    expect(win['APPDATA']).toBe('C:/Users/e/AppData/Roaming')
+    expect(win['LOCALAPPDATA']).toBe(join(real, 'AppData', 'Local'))
+    expect(cursorHomeEnv(turnHome, app, 'windows', real, {})['APPDATA']).toBe(join(real, 'AppData', 'Roaming'))
+  })
+
+  // Symlinks need privileges on Windows; the link is only made on macOS.
+  it.skipIf(process.platform === 'win32')('links only the keychain into the home on macOS, and the cleanup leaves what it points to', async () => {
+    const real = mkdtempSync(join(tmpdir(), 'cu-real-'))
+    mkdirSync(join(real, 'Library', 'Keychains'), { recursive: true })
+    writeFileSync(join(real, 'Library', 'Keychains', 'login.keychain-db'), 'secret')
+    mkdirSync(join(real, '.claude'), { recursive: true })
+    const appDir = mkdtempSync(join(tmpdir(), 'cu-'))
+    const dirs = cursorTurnDirs(appDir, { system: 'x', mcpUrl: undefined, web: false }, 'mac', real)
+    expect(dirs.home.startsWith(dirs.root)).toBe(true)
+    expect(readdirSync(dirs.home)).toEqual(['Library'])
+    expect(readdirSync(join(dirs.home, 'Library'))).toEqual(['Keychains'])
+    expect(lstatSync(join(dirs.home, 'Library', 'Keychains')).isSymbolicLink()).toBe(true)
+    expect(readFileSync(join(dirs.home, 'Library', 'Keychains', 'login.keychain-db'), 'utf8')).toBe('secret')
+    await cursorCleanup(dirs)
+    expect(existsSync(dirs.root)).toBe(false)
+    expect(readFileSync(join(real, 'Library', 'Keychains', 'login.keychain-db'), 'utf8')).toBe('secret')
+    // Elsewhere the home stays empty.
+    const linux = cursorTurnDirs(appDir, { system: 'x', mcpUrl: undefined, web: false }, 'linux', real)
+    expect(readdirSync(linux.home)).toEqual([])
+  })
+
+  it('names a workspace the way the CLI does', () => {
+    expect(cursorSlug('/Users/x/Library/Application Support/Tucano/cursor/ab12/workspace')).toBe('Users-x-Library-Application-Support-Tucano-cursor-ab12-workspace')
+  })
+
+  // The worker's socket is a Unix socket: on Windows the turn doesn't look for it.
+  it.skipIf(process.platform === 'win32')('finds its worker socket the way the CLI does', () => {
+    // short: under <data>/projects
+    expect(cursorWorkerSocket('/t/w', '/t/d')).toBe(join('/t/d', 'projects', 't-w', 'worker.sock'))
+    // long: cut to 83 characters plus a hash (the CLI's rule, checked against a real run)
+    const ws = '/Users/eduardo/Library/Application Support/Tucano/cursor/0011223344556677/workspace'
+    const sock = cursorWorkerSocket(ws, '/Users/eduardo/Library/Application Support/Tucano/cursor/0011223344556677/d')
+    expect(sock.startsWith('/Users/eduardo/Library/Application Support/Tucano/cursor/0011223344556677/d/Users-')).toBe(true)
+    expect(sock).toMatch(/-[0-9a-f]{7}\/worker\.sock$/)
+    expect(sock.length).toBeLessThanOrEqual(83 + 8 + '/worker.sock'.length)
+  })
+
+  it('reads the model list and the login', () => {
+    expect(parseCursorModels('Available models\n\nauto - Auto (default)\ngpt-5.3-codex - Codex 5.3\nclaude-opus-5-5-high - Claude Opus 5.5 1M High\n\nTip: use --model')).toEqual(['auto', 'gpt-5.3-codex', 'claude-opus-5-5-high'])
+    expect(cursorSignedIn('✓ Logged in as someone@example.com', {})).toBe(true)
+    expect(cursorSignedIn('Not logged in', {})).toBe(false)
+    expect(cursorSignedIn('Not logged in', { CURSOR_API_KEY: 'k' })).toBe(true)
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('Cursor engine with images', () => {
+  // A stand-in CLI: it takes `mcp enable`, and answers with what it was given.
+  const fakeCli = (takesImages: boolean): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'tucano-cursor-cli-'))
+    const bin = join(dir, 'cursor-agent')
+    writeFileSync(
+      bin,
+      `#!/bin/sh
+[ "$1" = mcp ] && exit 0
+images=0
+for a in "$@"; do [ "$a" = --image ] && images=$((images+1)); done
+${takesImages ? '' : `[ $images -gt 0 ] && { echo "error: unknown option '--image'" >&2; exit 1; }`}
+note=no
+cat | grep -q 'Tucano:' && note=yes
+echo '{"type":"result","subtype":"success","is_error":false,"result":"images='"$images"' note='"$note"'","usage":{"inputTokens":1,"outputTokens":1}}'
+`,
+      { mode: 0o755 }
+    )
+    return bin
+  }
+  const reply = async (bin: string, images: { block: number; path: string; mime: string }[]): Promise<EngineEvent[]> => {
+    const app = mkdtempSync(join(tmpdir(), 'tucano-cursor-app-'))
+    const turn = { model: 'auto', effort: 'medium' as const, system: 'You are Iris.', prompt: 'What is in the picture?', images, cwd: app, signal: new AbortController().signal }
+    const out: EngineEvent[] = []
+    for await (const ev of cursorEngine(() => bin, app).run(turn)) out.push(ev)
+    return out
+  }
+  const picture = (): { block: number; path: string; mime: string }[] => {
+    const p = join(mkdtempSync(join(tmpdir(), 'tucano-cursor-pic-')), 'p.png')
+    writeFileSync(p, 'x')
+    return [{ block: 0, path: p, mime: 'image/png' }]
+  }
+
+  it("runs the CLI with the turn's home, and the turn's folder goes afterwards", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tucano-cursor-cli-'))
+    const bin = join(dir, 'cursor-agent')
+    writeFileSync(bin, `#!/bin/sh\n[ "$1" = mcp ] && exit 0\ncat >/dev/null\necho '{"type":"result","subtype":"success","is_error":false,"result":"'"$HOME|$CURSOR_CONFIG_DIR"'","usage":{"inputTokens":1,"outputTokens":1}}'\n`, { mode: 0o755 })
+    const app = mkdtempSync(join(tmpdir(), 'tucano-cursor-app-'))
+    const turn = { model: 'auto', effort: 'medium' as const, system: 'You are Iris.', prompt: 'Hi', cwd: app, signal: new AbortController().signal }
+    const out: EngineEvent[] = []
+    for await (const ev of cursorEngine(() => bin, app).run(turn)) out.push(ev)
+    const done = out.find((e) => e.type === 'done')
+    const [home, config] = (done && done.type === 'done' ? done.text : '').split('|')
+    expect(home).not.toBe(homedir())
+    expect(home!.startsWith(app)).toBe(true)
+    expect(home).toBe(join(dirname(config!), 'home'))
+    expect(existsSync(dirname(config!))).toBe(false)
+  })
+
+  it('sends the images along when the CLI takes them', async () => {
+    const done = (await reply(fakeCli(true), picture())).find((e) => e.type === 'done')
+    expect(done && done.type === 'done' && done.text).toBe('images=1 note=no')
+  })
+
+  it('runs again without them, and tells the agent, when the CLI refuses --image', async () => {
+    const events = await reply(fakeCli(false), picture())
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+    const done = events.find((e) => e.type === 'done')
+    expect(done && done.type === 'done' && done.text).toBe('images=0 note=yes')
+  })
+
+  it('runs once, without --image, when there are no images', async () => {
+    const done = (await reply(fakeCli(false), [])).find((e) => e.type === 'done')
+    expect(done && done.type === 'done' && done.text).toBe('images=0 note=no')
   })
 })

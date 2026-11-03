@@ -1,10 +1,11 @@
 // Domain types shared by the core (utility process) and the renderer.
+import type { AvatarDefinition } from 'open-bot-avatar'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -57,6 +58,7 @@ export interface Agent {
   color: AgentColor
   customColor?: string // a color of the person's own (#rrggbb), over `color`
   picture?: string // a small picture (data URL), over the face
+  avatar?: AvatarDefinition // a drawn character (open-bot-avatar), over the face; a picture wins over it
   instructions: string
   modelId: string
   // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
@@ -339,7 +341,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
-  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' }
+  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
+  cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 

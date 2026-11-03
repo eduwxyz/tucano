@@ -236,6 +236,13 @@ describe('folders the CLIs install into', () => {
     expect(withInstallDirs('/a', 'windows', home, env, () => false)).toBe('/a')
   })
 
+  it("adds Cursor's install folder on Windows (%LOCALAPPDATA%\\cursor-agent)", () => {
+    const cursor = join('/h', 'eduar', 'AppData', 'Local', 'cursor-agent')
+    const withLocal = { ...env, LOCALAPPDATA: join('/h', 'eduar', 'AppData', 'Local') }
+    expect(withInstallDirs('/a', 'windows', home, withLocal, (p) => p === cursor)).toBe(['/a', cursor].join(delimiter))
+    expect(withInstallDirs('/a', 'mac', home, withLocal, (p) => p === cursor)).toBe('/a')
+  })
+
   it("doesn't repeat a folder already there, whatever its case or trailing slash on Windows", () => {
     expect(withInstallDirs([local.toUpperCase() + '/'].join(delimiter), 'windows', home, env, (p) => p === local)).toBe(local.toUpperCase() + '/')
     expect(withInstallDirs(local, 'mac', home, env, () => true)).toBe(local)

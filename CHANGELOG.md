@@ -2,6 +2,18 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [0.2.8] - 2026-11-03
+
+> **Em português:** os agentes agora também rodam no Cursor CLI, na sua conta do Cursor, com a mesma governança dos outros: só as ferramentas do Tucano, limite de gasto e nada dos seus hooks, plugins ou skills pessoais. Uma imagem do chat abre do tamanho da janela, com zoom, e as setas passam pelas outras imagens da conversa. Cada agente pode ter uma cor própria, uma foto ou um personagem desenhado do Open Bot Avatar, que se mexe e pisca. E cada agente tem o seu limite de rotinas ligadas, em vez de 10 pra todos. Obrigado à Rayanne e ao b7s!
+
+### Added
+
+- **Cursor CLI.** Agents can run on [Cursor CLI](https://cursor.com/cli), on your Cursor account, with the same governance as the other harnesses: Cursor's own file reads, writes and shell stay off, only Tucano's tools load, and spend comes from the usage Cursor reports. Each reply runs with a home folder of its own, so your hooks, plugins, skills and `~/.cursor/mcp.json` servers don't load. Images attached in the chat go along with the message. Each reply adds about 10k tokens of Cursor's own prompt, and the per-reply budget can't pause a Cursor reply midway, since Cursor reports usage only at the end. ([#79](https://github.com/eduwxyz/tucano/pull/79))
+- **Images open the size of the window.** Clicking an image in the chat opens it over the whole window: the wheel zooms where the pointer is, dragging moves it, a double click switches between fit and actual size, and the arrow keys go through the conversation's other images. Esc or a click outside closes it. HTML, documents and videos still open in the side panel. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#58](https://github.com/eduwxyz/tucano/pull/58))
+- **An agent's own color or picture.** An agent's page has a color picker next to the eight colors, and takes a PNG, JPEG or WebP that replaces the face wherever the agent shows. A picture stays on its computer and isn't part of a team export. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#59](https://github.com/eduwxyz/tucano/pull/59))
+- **Drawn avatars.** An agent can also be one of 22 characters from [Open Bot Avatar](https://github.com/DominikScholz/open-bot-avatar), in the agent's color, on its page and in onboarding. Large ones move and blink, follow the pointer with their eyes, and look like they're thinking while the agent works. A team export carries the character and the color. ([#76](https://github.com/eduwxyz/tucano/pull/76))
+- **A routine limit for each agent.** **Harness and model › Max. enabled routines** sets how many routines an agent can have on at once, 10 by default; it was 10 for every agent. Thanks [@b7s](https://github.com/b7s)! ([#66](https://github.com/eduwxyz/tucano/pull/66))
+
 ## [0.2.7] - 2026-11-02
 
 > **Em português:** cada agente pode ter um modelo reserva: quando a assinatura do modelo principal chega no limite, a resposta continua no reserva em vez de parar com erro, e a seguinte já volta pro principal. Dá pra entrar com mais de uma conta do Claude Code e do Codex (a do trabalho e a pessoal, por exemplo), escolher a conta de cada agente e usar uma outra conta como reserva. O Tucano agora também sai pra Mac com Intel. E um botão em Configurações desliga o som das notificações.
@@ -159,6 +171,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.8]: https://github.com/eduwxyz/tucano/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/eduwxyz/tucano/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/eduwxyz/tucano/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/eduwxyz/tucano/compare/v0.2.4...v0.2.5
