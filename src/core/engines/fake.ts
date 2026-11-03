@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { L } from '../../shared/lang'
 import { memorySystem } from '../memory'
+import { curatorSystem } from '../wiki-curator'
 import { routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
@@ -26,6 +27,8 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeRoute(turn.prompt))
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
+      } else if (turn.system === curatorSystem()) {
+        reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
       } else if (turn.mcpUrl && (turn.system.includes('## Pra montar agentes') || turn.system.includes('## For building agents'))) {
@@ -217,4 +220,19 @@ export async function callTool(url: string, name: string, args: Record<string, u
   } finally {
     await client.close()
   }
+}
+
+// The wiki's curator, for trying it without an engine: a page the stretch names gets a line
+// under History; a stretch with numbers or a decision becomes a page of its own.
+function fakeCuration(prompt: string): { guardar: boolean; motivo: string; titulo_fonte: string; mudancas: Record<string, string>[] } {
+  const stretch = prompt.split(/\n## [^\n]*(?:Trecho|Stretch)[^\n]*\n/)[1]?.split('\n\nResponda')[0]?.split('\n\nReply')[0] ?? ''
+  const titles = [...prompt.matchAll(/^- \[\[([^\]]+)\]\]/gm)].map((m) => m[1]!)
+  const named = titles.find((t) => t.toLowerCase().split(/\s+/).filter((w) => w.length >= 5).some((w) => stretch.toLowerCase().includes(w)))
+  const plain = stretch.replace(/\*\*[^*]+\*\* \([^)]*\): /g, '').replace(/\s+/g, ' ').trim()
+  const line = plain.length > 160 ? `${plain.slice(0, 157)}…` : plain
+  const day = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  const mudancas: Record<string, string>[] = []
+  if (named) mudancas.push({ op: 'append', pagina: named, secao: L('Histórico', 'History'), texto: `- **${day}:** ${line}` })
+  if (/\d|decid|fech|guarda/i.test(plain) && !named) mudancas.push({ op: 'create', pagina: plain.split(/[.!?:]/)[0]!.split(' ').slice(0, 5).join(' '), tipo: L('Assunto', 'Topic'), texto: `${line}\n\n## ${L('Detalhes', 'Details')}\n- ${line}` })
+  return { guardar: mudancas.length > 0, motivo: L('Um fato que vale lembrar.', 'A fact worth remembering.'), titulo_fonte: plain.split(/[.!?]/)[0]!.slice(0, 60) || L('Trecho de conversa', 'Conversation excerpt'), mudancas }
 }

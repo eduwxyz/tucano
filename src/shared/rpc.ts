@@ -1,4 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
+import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport } from './types'
 
 export interface Snapshot {
@@ -98,6 +99,38 @@ export interface Api {
   setGithubToken(p: { token: string | null }): Promise<void> // checked with GitHub; throws why it's refused
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
+  // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.
+  wiki(): { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number } // pending: the curator's changes; the review's are in findings
+  wikiPage(p: { title: string }): WikiPage | null
+  wikiSearch(p: { q: string }): WikiHit[]
+  wikiSave(p: { title: string; body: string; kind?: string; expectedHash?: string; rename?: string }): WikiPage // throws on a conflict or a taken title
+  wikiRemove(p: { title: string }): void
+  wikiHistory(p: { title: string }): WikiVersion[]
+  wikiRestore(p: { id: number }): WikiPage
+  wikiSchema(): string
+  wikiSaveSchema(p: { text: string }): void
+  openWikiFolder(): void
+  wikiChanges(p: { state?: WikiChange['state'] }): WikiChange[]
+  wikiChange(p: { id: string }): WikiChange | null
+  wikiApplyChange(p: { id: string }): WikiChange // a pending one; a conflict comes back as such
+  wikiRefuseChange(p: { id: string }): void
+  wikiUndoChange(p: { id: string }): void
+  wikiSources(): WikiSource[]
+  wikiSource(p: { id: string }): (WikiSource & { text: string }) | null
+  wikiKeepMessage(p: { messageId: string }): Promise<number> // how many changes it made; throws when no model is ready
+  wikiRedoChange(p: { id: string }): Promise<number> // a conflict, made again on the newer page
+  // Sources brought on purpose: the text is taken now, the curator reads it next (status on the source).
+  wikiAddFile(p: { name: string; data: string }): Promise<WikiSource> // data: base64
+  wikiAddLink(p: { url: string }): Promise<WikiSource>
+  wikiAddNote(p: { text: string; title?: string }): WikiSource
+  wikiOpenOriginal(p: { id: string }): { name: string; data: string } | null // on a server: the file itself (base64), to download
+  wikiIngestAgain(p: { id: string }): void
+  wikiReview(): WikiReview // the last review and what it found that's still open
+  wikiRunReview(): void // reviews now, in the background; a 'wiki' event when done
+  wikiDismissFinding(p: { id: string }): void // and refuses its fix
+  wikiImport(p: { dir: string }): WikiImport // an Obsidian vault copied in, as it is
+  setWikiCapture(p: { conversationId: string; on: boolean }): void
+  setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now
 }
 
 export type Method = keyof Api
@@ -123,6 +156,7 @@ export type CoreEvent =
   | { type: 'conversation_removed'; id: string }
   | { type: 'skill'; skill: Skill }
   | { type: 'skill_removed'; id: string }
+  | { type: 'wiki' } // a page changed: here, by an agent or in another app
 
 export type Request = { id: number; method: Method; params: unknown }
 export type Response = { id: number; result?: unknown; error?: string }

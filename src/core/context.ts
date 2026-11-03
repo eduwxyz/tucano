@@ -27,8 +27,9 @@ export function systemPrompt(opts: {
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   team?: { team: Agent[]; others: Agent[] } // who it can hand work to with delegar: the ones it coordinates, and the rest
   delegatedBy?: Agent // the agent whose task this reply works on
+  wiki?: { pages: number; kinds: string[] } // the wiki it may read
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, wiki } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const other = conversation.kind === 'agents' ? peers[0] : undefined
   const where = delegatedBy
@@ -86,6 +87,11 @@ export function systemPrompt(opts: {
     builder,
     team && teamSection(me, team.team, team.others, delegatedBy ? 'task' : conversation.kind === 'dm' ? 'dm' : 'open'),
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0 || !!memories.searchable) && memorySection(me, memories),
+    wiki &&
+      L(
+        `## A wiki\n${me} tem uma wiki com ${wiki.pages === 1 ? '1 página' : `${wiki.pages} páginas`} (${wiki.kinds.join(', ')}): o que ${me} e o time sabem, escrito. Quando a pergunta puder estar lá (uma pessoa, um cliente, um projeto, uma decisão, um assunto), consulte antes de responder ou de perguntar: wiki_indice pra ver o que existe, wiki_buscar pra achar, wiki_ler pra abrir. Ao usar uma página, cite com [[Título]]. Se a wiki não disser, diga que não está lá; não invente. Você só lê a wiki: o curador a atualiza sozinho depois da conversa, com o que ficar decidido; não diga que ela vai ficar desatualizada nem peça pra alguém editar.`,
+        `## The wiki\n${me} has a wiki with ${wiki.pages === 1 ? '1 page' : `${wiki.pages} pages`} (${wiki.kinds.join(', ')}): what ${me} and the team know, written down. When the answer could be there (a person, a client, a project, a decision, a topic), look before replying or asking: wiki_indice to see what exists, wiki_buscar to find, wiki_ler to open. When you use a page, cite it as [[Title]]. If the wiki doesn't say, say it isn't there; don't make it up. You only read the wiki: the curator updates it on its own after the conversation, with what was settled; don't say it will be out of date or ask anyone to edit it.`
+      ),
     skills &&
       skills.length > 0 &&
       `${L(

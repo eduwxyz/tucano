@@ -12,6 +12,20 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **A team, a report, and a private DM.** On an agent's page, **Channels, team and skills › Team** picks the agents it coordinates: they're listed first in its prompt, with what they do, and it's told to split up the work and report back. Its report, marked **Team report**, covers the result, who did what, what was decided, what was actually applied and where, and what's left or needs your decision, with each task's outcome and a link to its conversation underneath. Work asked from your DM with an agent happens in a **DM between the two agents**, under **Between agents** in the sidebar, where you can read along and answer their questions; your DM shows one line per task with how it's going. Asked from a channel, it happens in the channel. When the work comes back but nobody is called to report (paused, stopped, archived), your DM says so. A team export carries who coordinates whom, by handle.
 - **A ceiling per request.** Everything one request sets off with `delegar` shares a token budget, 1M counted tokens by default (**Settings › Agents › Limits**). Past it, no more work is handed out and the agent reports back with what it has.
 
+## [0.2.9] - 2026-11-03
+
+> **Em português:** o Tucano agora tem uma wiki: o que você e o seu time sabem, em páginas ligadas, que os agentes consultam antes de responder e citam. Um curador lê as conversas e os documentos que você traz (PDF, Word, planilha, link ou anotação) e escreve nas páginas, citando de onde veio; mudar uma página que já existe espera a sua aprovação, se você quiser. A wiki é uma pasta de Markdown que o Obsidian abre, aparece como um mapa que você arrasta, e uma revisão aponta o que não bate, o que ficou velho e o que está repetido. Já tem um cofre do Obsidian? Ele entra como está, com pastas, links e anexos. E dá pra trazer agentes do OpenBot e do Grok Bot.
+
+### Added
+
+- **A wiki.** What you and the team know, as linked pages, one wiki per workspace and separate from Memory. The pages are a folder of plain Markdown that Obsidian opens as is; Tucano indexes it for search, links and history, and picks up edits made in other apps. Agents read it before answering and cite pages as `[[Title]]`; each agent's page can turn its access off. ([#94](https://github.com/eduwxyz/tucano/pull/94))
+  - **A curator** (the memory's model) reads a conversation once it settles, and the files, links and notes you bring in: PDF, Word, spreadsheets, CSV, text and web pages, with the original kept. It writes what lasts into the pages and cites the source. New pages go in right away; a change to a page that exists waits for you, or goes in on its own, as you set. Every change has history and Undo, and one made on a page that changed since can be redone on the newer version. Capture can be turned off for a channel or a DM, and **Keep in the wiki** on a message keeps it on purpose.
+  - **A map** of the pages: drag it, zoom it, pull a page and the ones it links to follow. A page opens in a panel over it; links show a preview on hover; ⌘K (Ctrl K) searches.
+  - **A review**, by hand or once a week: broken links, names that several pages mention with no page of their own, pages nothing links to, and, read by the model, pages that disagree, facts that got old and duplicates. All of it waits for you as suggestions.
+  - **Import an Obsidian vault** as it is: folders, frontmatter (tags, aliases and the rest are kept on edit), links with paths, aliases and headings, and attachments. The vault itself isn't changed. The wiki can also point at a vault in place.
+  - The wiki isn't part of a team export.
+- **Import agents from OpenBot and Grok Bot.** **Settings › Team & backup › Import from another app…** reads OpenBot's transfer export, and a zip that a Grok Bot agent makes with a skill Tucano gives you (experimental). Agents keep their name, role, instructions, photo, color and skills; they arrive with no connectors, web search off, routines off and memories waiting for your confirmation, and are never added to a channel that already exists. A summary lists what came in, what was left out and why. ([#91](https://github.com/eduwxyz/tucano/pull/91))
+
 ## [0.2.8] - 2026-11-03
 
 > **Em português:** os agentes agora também rodam no Cursor CLI, na sua conta do Cursor, com a mesma governança dos outros: só as ferramentas do Tucano, limite de gasto e nada dos seus hooks, plugins ou skills pessoais. Uma imagem do chat abre do tamanho da janela, com zoom, e as setas passam pelas outras imagens da conversa. Cada agente pode ter uma cor própria, uma foto ou um personagem desenhado do Open Bot Avatar, que se mexe e pisca. E cada agente tem o seu limite de rotinas ligadas, em vez de 10 pra todos. Obrigado à Rayanne e ao b7s!
@@ -181,6 +195,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.9]: https://github.com/eduwxyz/tucano/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/eduwxyz/tucano/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/eduwxyz/tucano/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/eduwxyz/tucano/compare/v0.2.5...v0.2.6

@@ -52,6 +52,7 @@ export type View =
   | { kind: 'usage' }
   | { kind: 'connectors' }
   | { kind: 'memory' }
+  | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
   | { kind: 'skills' }
   | { kind: 'report' }
@@ -76,6 +77,7 @@ export interface State {
   browsers: BrowserView[]
   routines: Routine[]
   skills: Skill[]
+  wikiRev: number // goes up when a wiki page changes: the wiki screens read again
   platform: Os
   packaged: boolean
   panel: Panel | null // the side panel next to a conversation
@@ -98,6 +100,7 @@ const initials = (name: string): string =>
 
 let state: State = {
   ready: false,
+  wikiRev: 0,
   navOpen: false,
   view: null,
   me: { name: 'Eu', initials: 'EU' },
@@ -257,6 +260,8 @@ function apply(e: CoreEvent): void {
         return { ...s, skills: upsert(s.skills, e.skill).sort((a, b) => a.name.localeCompare(b.name)) }
       case 'skill_removed':
         return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
+      case 'wiki':
+        return { ...s, wikiRev: s.wikiRev + 1 }
     }
   })
 }

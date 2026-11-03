@@ -18,13 +18,15 @@ import {
   type Agent,
   type View
 } from '../store'
+import { call } from '../rpc'
 import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
 import { AgentAvatar, Icon, TucaMark, type IconName } from './ui'
 
-const same = (a: View | null, b: View): boolean => JSON.stringify(a) === JSON.stringify(b)
+// The wiki stays lit on any of its pages.
+const same = (a: View | null, b: View): boolean => (b.kind === 'wiki' ? a?.kind === 'wiki' : JSON.stringify(a) === JSON.stringify(b))
 
 function NavItem({ view, icon, label, badge }: { view: View; icon: IconName; label: string; badge?: number }): ReactNode {
   const active = useStore((s) => same(s.view, view))
@@ -82,11 +84,18 @@ export function Sidebar(): ReactNode {
     e.preventDefault()
     setMenu({ x: e.clientX, y: e.clientY, items })
   }
+  // The wiki's curator reads every conversation; one can be kept out (a personal DM, say).
+  const wikiItem = (id: string, on: boolean): MenuItem => ({
+    label: on ? L('Não guardar na wiki', "Don't keep in the wiki") : L('Voltar a guardar na wiki', 'Keep in the wiki again'),
+    icon: 'layers',
+    onClick: () => void call('setWikiCapture', { conversationId: id, on: !on })
+  })
   const channelMenu = (c: (typeof channels)[number]): MenuItem[] => [
     { label: L('Adicionar ou remover agentes…', 'Add or remove agents…'), icon: 'users', onClick: () => openDialog({ kind: 'members', id: c.id }) },
     { label: L('Renomear…', 'Rename…'), icon: 'edit', onClick: () => openDialog({ kind: 'rename', id: c.id }) },
     { label: L('Mudar o tema…', 'Change the topic…'), icon: 'hash', onClick: () => openDialog({ kind: 'topic', id: c.id }) },
     ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
+    wikiItem(c.id, c.wikiCapture !== false),
     'separator',
     {
       label: L('Excluir canal…', 'Delete channel…'),
@@ -100,6 +109,7 @@ export function Sidebar(): ReactNode {
   const dmMenu = (id: string, agentId: string, agentName: string): MenuItem[] => [
     { label: L(`Ver ${agentName}`, `See ${agentName}`), icon: 'eye', onClick: () => navigate({ kind: 'agent', id: agentId }) },
     { label: L('Marcar como lido', 'Mark as read'), icon: 'check', onClick: () => markRead(id) },
+    wikiItem(id, s.conversations.find((x) => x.id === id)?.wikiCapture !== false),
     'separator',
     {
       label: L('Apagar a conversa…', 'Delete the conversation…'),
@@ -158,6 +168,7 @@ export function Sidebar(): ReactNode {
         <TucaItem />
         <NavItem view={{ kind: 'approvals' }} icon="shield" label={L('Aprovações', 'Approvals')} badge={pending} />
         <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} />
+        <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" />
         <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} />
         <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} />
         <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} />

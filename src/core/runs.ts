@@ -4,9 +4,10 @@ import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, REQUEST_BUDGET, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type Delegated, type Delegation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, REQUEST_BUDGET, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type Delegated, type Delegation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
+import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
@@ -77,6 +78,8 @@ export interface RunnerDeps {
   github?: Pick<GitHub, 'pushable' | 'openPr'> // without it, agents can't open PRs
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
+  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds'> // without it, agents have no wiki
+  wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
 }
 
 // What the runner needs from the connector manager.
@@ -686,6 +689,8 @@ export class Runner {
     const others = colleagues.filter((a) => !team.includes(a))
     const root = opts.root ?? opts.delegation?.root // the request this reply belongs to, when it's part of one
     const delegated: Delegated[] = []
+    // The wiki: for agents that may read it, once it has a page.
+    const wiki = this.deps.gateway && this.deps.wiki && wikiAccess(agent) !== 'none' && this.deps.wiki.count() > 0 ? this.deps.wiki : undefined
 
     const control: Control = { ctl: new AbortController() }
     this.controllers.set(msg.id, control)
@@ -806,6 +811,7 @@ export class Runner {
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
+      ...(wiki ? WIKI_TOOLS : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
@@ -909,6 +915,12 @@ export class Runner {
           msg.run = { ...msg.run!, memoryIds: [...memoryIds] }
           addSteps({ id: randomUUID(), label: r.label!, detail: r.memory.text, status: 'done' })
           return textResult(r.reply)
+        }
+
+        if (wiki && WIKI_TOOL_NAMES.has(name)) {
+          const r = wikiCall(wiki, name, args)
+          addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: 'done' })
+          return textResult(r.text, r.error)
         }
 
         if (skills && SKILL_TOOL_NAMES.has(name)) {
@@ -1273,6 +1285,7 @@ export class Runner {
               web: agent.web !== false,
               routines: routines?.forAgent(agent.id),
               skills: skills && mySkills,
+              wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
               publish: repos,
               team: colleagues.length ? { team, others } : undefined,
               delegatedBy: opts.delegation ? db.agent(opts.delegation.by) : undefined,
@@ -1411,6 +1424,7 @@ export class Runner {
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
     void memory?.consolidate(conv.id)
+    if (!opts.routine && msg.run?.status === 'done') this.deps.wikiCurator?.afterReply(conv.id)
     return msg
   }
 
