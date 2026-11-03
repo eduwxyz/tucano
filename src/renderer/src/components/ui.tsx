@@ -1,6 +1,9 @@
 import { L, lang, locale } from '../../../shared/lang'
-import { useState, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react'
-import type { Agent } from '../store'
+import { examples, type AvatarDefinition } from 'open-bot-avatar'
+import { mountAvatar, type AvatarOptions, type MountedAvatar } from 'open-bot-avatar/dom'
+import { useEffect, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react'
+import type { Agent, AgentColor } from '../store'
+import gallery from '../assets/bot-avatars.json'
 
 const PATHS: Record<string, ReactNode> = {
   hash: <path d="M5 9h14M5 15h14M10 4 8 20M16 4l-2 16" />,
@@ -178,9 +181,37 @@ export function SleepingToucan({ size = 120 }: { size?: number }): ReactNode {
 // An agent's own color, over its class's, wherever the agent's color shows.
 export const ownColor = (agent: Partial<Pick<Agent, 'customColor'>>): CSSProperties => (agent.customColor ? ({ '--agent': agent.customColor } as CSSProperties) : {})
 
+// The drawn characters an agent can take (Open Bot Avatar's starters and gallery, MIT).
+export const AVATARS: AvatarDefinition[] = [...examples, ...(gallery as AvatarDefinition[])]
+
+// The eight colors as the drawn avatar takes them (it wants #rrggbb, not a CSS variable).
+const HEX: Record<AgentColor, string> = { sky: '#3b9eea', indigo: '#5b6cf0', violet: '#8b5cf6', rose: '#e5557a', amber: '#e3a008', green: '#22a35a', teal: '#14a3a3', graphite: '#5d6470' }
+
+// A drawn avatar. Big ones and busy ones move (busy: thinking); the rest are one still SVG,
+// so a long chat stays light. The biggest follow the pointer with their eyes.
+function DrawnAvatar({ definition, color, size, busy }: { definition: AvatarDefinition; color: string; size: number; busy?: boolean }): ReactNode {
+  const host = useRef<HTMLSpanElement>(null)
+  const avatar = useRef<MountedAvatar | null>(null)
+  const options: AvatarOptions = { definition, color, mood: busy ? 'thinking' : 'idle', still: size < 40 && !busy, followPointer: size >= 64, label: '' }
+  useEffect(() => {
+    avatar.current = mountAvatar(host.current!, options)
+    return () => avatar.current?.destroy()
+  }, [])
+  useEffect(() => avatar.current?.update(options), [definition, color, options.mood, options.still, options.followPointer])
+  return <span ref={host} className="avatar__drawn" />
+}
+
 // busy: the eyes read, left to right, while the agent works. Otherwise they blink now and then.
-export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'picture'>>; size?: number; busy?: boolean }): ReactNode {
+// A picture wins over a drawn avatar, and both over the face.
+export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'picture' | 'avatar'>>; size?: number; busy?: boolean }): ReactNode {
   if (agent.kind === 'tuca') return <TucaMark size={size} />
+  if (!agent.picture && agent.avatar)
+    return (
+      <span className="avatar avatar--drawn" style={{ width: size, height: size }}>
+        <DrawnAvatar definition={agent.avatar} color={agent.customColor ?? HEX[agent.color]} size={size} busy={busy} />
+        <span className="sr-only">{agent.name}</span>
+      </span>
+    )
   return (
     <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...ownColor(agent) }}>
       {agent.picture ? (
