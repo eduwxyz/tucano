@@ -6,7 +6,7 @@
 // a save made from an older copy of a page is refused instead of overwriting the newer one.
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { basename, join, relative, resolve, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { L, locale } from '../shared/lang'
 import type { WikiChange, WikiFinding, WikiHit, WikiImport, WikiOp, WikiPage, WikiPageInfo, WikiSource, WikiVersion } from '../shared/types'
@@ -395,7 +395,7 @@ export class Wiki {
       links: linksIn(body),
       missing: linksIn(body).filter((t) => !known.has(t.toLowerCase())),
       backlinks,
-      file: relative(this.dir, join(this.pagesDir, file))
+      file: relative(this.dir, join(this.pagesDir, file)).split(sep).join('/')
     }
   }
 
@@ -517,7 +517,7 @@ export class Wiki {
   importVault(src: string, byName: string): WikiImport {
     const from = resolve(src)
     if (!existsSync(from) || !statSync(from).isDirectory()) throw new Error(L('Essa pasta não existe.', "That folder doesn't exist."))
-    if (from === resolve(this.dir) || resolve(this.pagesDir).startsWith(from + '/') || from.startsWith(resolve(this.dir) + '/')) throw new Error(L('Essa pasta é a própria wiki, ou está dentro dela.', "That folder is the wiki itself, or inside it."))
+    if (from === resolve(this.dir) || resolve(this.pagesDir).startsWith(from + sep) || from.startsWith(resolve(this.dir) + sep)) throw new Error(L('Essa pasta é a própria wiki, ou está dentro dela.', "That folder is the wiki itself, or inside it."))
     const files = walk(from)
     const notes = files.filter((f) => f.endsWith('.md'))
     if (!notes.length) throw new Error(L('Não achei nenhuma nota (.md) nessa pasta.', 'I found no notes (.md) in that folder.'))
@@ -550,7 +550,7 @@ export class Wiki {
       const k = (this.db.prepare('SELECT kind FROM pages WHERE file = ?').get(f) as { kind: string } | undefined)?.kind
       if (k) kinds.set(k, (kinds.get(k) ?? 0) + 1)
     }
-    const name = from.split('/').pop()
+    const name = basename(from)
     this.appendLog(L(`**${byName}** importou ${pages.length} ${pages.length === 1 ? 'nota' : 'notas'} de ${name}`, `**${byName}** imported ${pages.length} ${pages.length === 1 ? 'note' : 'notes'} from ${name}`))
     this.writeIndex()
     this.onChange()

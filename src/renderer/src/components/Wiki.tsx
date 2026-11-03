@@ -326,7 +326,7 @@ const PANEL = 560 // the panel's width; the map keeps what's left of it in view
 const ease = (p: number): number => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2)
 
 // The whole wiki as a map you can move around: drag the empty map to move it, drag a page to
-// pull it (and what it links to) around, pinch (or ⌘ + scroll) to zoom. A page picked flies to
+// pull it (and what it links to) around, pinch or the mouse wheel (or ⌘/Ctrl + scroll) to zoom. A page picked flies to
 // the middle of what the panel leaves free, with its links lit.
 function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; selected?: string; pending: Set<string>; only: string | null; panel: boolean }): ReactNode {
   const [ref, size] = useSize()
@@ -404,7 +404,9 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
       e.preventDefault()
       cancelAnimationFrame(anim.current)
       const r = el.getBoundingClientRect()
-      if (e.ctrlKey || e.metaKey) zoom(Math.exp(-e.deltaY * 0.012), { x: e.clientX - r.left, y: e.clientY - r.top })
+      // a mouse wheel (notches of 100 or 120, or lines) zooms too; a trackpad's two fingers move
+      const wheel = e.deltaMode !== 0 || (e.deltaX === 0 && e.deltaY !== 0 && (Math.abs(e.deltaY) % 100 === 0 || Math.abs(e.deltaY) % 120 === 0))
+      if (e.ctrlKey || e.metaKey || wheel) zoom(Math.exp(-(wheel ? Math.sign(e.deltaY) * 0.18 : e.deltaY * 0.012)), { x: e.clientX - r.left, y: e.clientY - r.top })
       else {
         const c = camRef.current
         if (c) setCam({ ...c, x: c.x - e.deltaX, y: c.y - e.deltaY })
@@ -553,6 +555,9 @@ export function WikiView(): ReactNode {
   return <WikiShell view={view} />
 }
 
+// The search shortcut as the keyboard in front of the person says it (a browser on a server included).
+const SEARCH_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K'
+
 function WikiShell({ view }: { view: WikiViewState }): ReactNode {
   const data = useWikiData()
   const rev = useStore((s) => s.wikiRev)
@@ -640,9 +645,9 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
               ))}
             </div>
           )}
-          <button className="wk-search-btn" title={L('Buscar (⌘K)', 'Search (⌘K)')} onClick={() => setSearching(true)}>
+          <button className="wk-search-btn" title={L(`Buscar (${SEARCH_KEY})`, `Search (${SEARCH_KEY})`)} onClick={() => setSearching(true)}>
             <Icon name="search" size={14} />
-            <kbd>⌘K</kbd>
+            <kbd>{SEARCH_KEY}</kbd>
           </button>
           <button className="btn btn--ghost btn--sm wk-icon-btn" title={L('Ajustes da wiki', 'Wiki settings')} onClick={() => setSettings(true)}>
             <Icon name="gear" size={15} />
