@@ -34,6 +34,7 @@ let browser
 let activePage
 let activeJourney = 'startup'
 const errors = []
+const failures = []
 
 async function screenshot(view, page = activePage) {
   const output = process.env.CONNECTIONS_SCREENSHOT
@@ -272,7 +273,8 @@ async function journey(name, run) {
   activeJourney = name
   try { await run(); console.log(`PASS: ${name}`) } catch (error) {
     await screenshot(`failure-${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`).catch(() => {})
-    throw error
+    console.error(`FAIL: ${name}`, error)
+    failures.push(new Error(name, { cause: error }))
   } finally { await activePage?.close(); activePage = undefined }
 }
 
@@ -361,7 +363,7 @@ try {
     await privateLink.fill('invalid-link')
     await assertInvalid(privateLink)
     assert.equal(await submit(page).isDisabled(), true)
-    await form(page).getByLabel('Como conectar', { exact: true }).selectOption('ssh')
+    await form(page).getByRole('combobox', { name: /^Como conectar/ }).selectOption('ssh')
     const ssh = form(page).getByLabel('Usuário e host SSH (porta SSH opcional)', { exact: true })
     const servicePort = form(page).getByRole('spinbutton', { name: /^Porta do serviço Tucano/ })
     const pairingCode = form(page).getByLabel('Código de pareamento', { exact: true })
@@ -382,7 +384,7 @@ try {
     await assertFocusableDialog(page)
     await assertContrast(page)
     await screenshot('pairing')
-    await form(page).getByLabel('Como conectar', { exact: true }).selectOption('url')
+    await form(page).getByRole('combobox', { name: /^Como conectar/ }).selectOption('url')
     const url = form(page).getByLabel('Endereço do servidor', { exact: true })
     await pairingCode.fill(code)
     for (const unsafe of ['http://example.com', 'http://100.64.1.2:7337', 'https://user:pass@example.com', 'https://example.com/private']) {
@@ -396,7 +398,7 @@ try {
     await url.fill('http://127.0.0.1:7337')
     assert.equal(await submit(page).isEnabled(), true, 'HTTP is permitted for loopback only')
     assert.equal(await callCount(page, 'pair'), 0, 'Editing and reviewing targets never pairs by itself')
-    await form(page).getByLabel('Como conectar', { exact: true }).selectOption('ssh')
+    await form(page).getByRole('combobox', { name: /^Como conectar/ }).selectOption('ssh')
     await ssh.fill('me@example.com:2222')
     await servicePort.fill('7444')
     await pairingCode.fill(code)
@@ -665,7 +667,8 @@ try {
     assert.equal(await page.evaluate(() => window.coreCalls.filter((call) => call.method === 'sendMessage').length), 0, 'Preparing images never sends a message')
   })
 
-  assert.deepEqual(errors, [], 'All renderer journeys must be free of uncaught errors')
+  try { assert.deepEqual(errors, [], 'All renderer journeys must be free of uncaught errors') } catch (error) { failures.push(error) }
+  if (failures.length) throw new AggregateError(failures, `${failures.length} connection UI regression check(s) failed`)
   console.log('PASS: all connection UI journeys (synthetic desktop bridge, no real VPS or credentials).')
 } finally {
   await browser?.close()
