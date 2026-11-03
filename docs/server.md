@@ -26,13 +26,16 @@ npm run build
 npm run server
 ```
 
-It prints the address to open:
+On the first start, with nobody paired yet, it prints a link with a one-time code:
 
 ```
-Tucano server: http://127.0.0.1:7337/?token=…
+Tucano server: http://127.0.0.1:7337/
+Nobody is paired yet. This browser can sign in once, in the next 5 minutes: http://127.0.0.1:7337/?pair=K7QM-2XPD-9TWH
 ```
 
-Open that link once. The token signs the browser in, and a cookie keeps it signed in. The token lives in `~/.tucano-server/server-token`. To sign every browser out, delete that file and restart Tucano.
+Open that link once. The browser trades the code for a token of its own and a cookie keeps it signed in. For another device, make a new code on the server with `node out/main/server.js pair --label "My Mac"` (see [pairing.md](pairing.md): who is paired, revoking one device, and the Mac app).
+
+The server doesn't print its own token, because a log is read by more people than the one who owns the server. It is in `~/.tucano-server/server-token`, for scripts (`Authorization: Bearer …`). To cut it, delete that file and restart Tucano, or set `TUCANO_TOKEN`.
 
 ### Signing the harnesses in
 
@@ -49,8 +52,8 @@ Codex is signed in from Tucano's **Settings › Models**, like on a desktop. On 
 
 By default the server only listens on the server itself (`127.0.0.1`), because anyone who has the token controls your agents. Pick one of these ways to reach it:
 
-- **SSH tunnel**, the simplest: run `ssh -L 7337:127.0.0.1:7337 you@your-server`, then open the printed link on your computer.
-- **Tailscale** (or another private network): set `TUCANO_HOST` to the server's Tailscale address, then open `http://<that address>:7337/?token=…` from any of your devices, including your phone.
+- **SSH tunnel**, the simplest: run `ssh -L 7337:127.0.0.1:7337 you@your-server`, then open the pairing link on your computer (or pair the Mac app: [pairing.md](pairing.md)).
+- **Tailscale** (or another private network): set `TUCANO_HOST` to the server's Tailscale address, then open `http://<that address>:7337/?pair=<code>` (a code from `pair`) from any of your devices, including your phone.
 - **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Turn off response buffering for `/events`, which is a live event stream. For example, with Caddy:
 
   ```
@@ -83,7 +86,7 @@ Environment=TUCANO_PORT=7337
 WantedBy=multi-user.target
 ```
 
-Then run `sudo systemctl enable --now tucano`. The logs, including the address with the token, are in `journalctl -u tucano`.
+Then run `sudo systemctl enable --now tucano`. The logs are in `journalctl -u tucano`. They hold no token; the first start prints a pairing code, good for 5 minutes and one device.
 
 To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl restart tucano`.
 

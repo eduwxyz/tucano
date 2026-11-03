@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cli } from '../src/server/cli'
+import { parsePairLink } from '../src/shared/pairlink'
 import { CODE_TTL_MS, Pairing, SESSION_MS, cleanLabel, cookieName, normalizeCode, pairRequest } from '../src/server/pairing'
 
 const MINUTE = 60_000
@@ -292,9 +293,9 @@ describe('what the app sends to trade a code', () => {
 
 describe('the commands on the server machine', () => {
   const base = 'http://127.0.0.1:7337'
-  const run = (args: string[], p = open()): { code: number | undefined; out: string } => {
+  const run = (args: string[], p = open(), at = base): { code: number | undefined; out: string } => {
     const lines: string[] = []
-    const code = cli(args, p, base, (l) => lines.push(l))
+    const code = cli(args, p, at, (l) => lines.push(l))
     return { code, out: lines.join('\n') }
   }
 
@@ -317,6 +318,39 @@ describe('the commands on the server machine', () => {
     const p = open()
     const given = /[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}/.exec(run(['pair', '--label=Phone'], p).out)?.[0]
     expect(p.redeem(given!)?.device.label).toBe('Phone')
+  })
+
+  it('pair --ssh also prints the link that pairs the Mac app, and it reads back as what was asked', () => {
+    const p = open()
+    const { code, out } = run(['pair', '--label', 'My VPS', '--ssh', 'julio@203.0.113.7:2222'], p)
+    expect(code).toBe(0)
+    const given = /[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}/.exec(out)![0]
+    const shown = /(tucano:\/\/pair\?\S+)/.exec(out)?.[1]
+    expect(shown).toBeDefined()
+    const parsed = parsePairLink(shown!)
+    expect(parsed).toEqual({
+      ok: true,
+      link: { code: given, reach: { via: 'ssh', user: 'julio', host: '203.0.113.7', port: 2222 }, remotePort: 7337, name: 'My VPS' }
+    })
+    expect(out).toContain(`${base}/?pair=${given}`) // the browser link is still there
+  })
+
+  it('pair --url prints the link for an address, and the port of the server comes from where it listens', () => {
+    const out = run(['pair', '--url', 'https://tucano.example.com'], open(), 'http://127.0.0.1:9000').out
+    const link = parsePairLink(/(tucano:\/\/pair\?\S+)/.exec(out)![1]!)
+    expect(link).toMatchObject({ ok: true, link: { reach: { via: 'url', url: 'https://tucano.example.com' }, name: 'tucano.example.com' } })
+    const ssh = parsePairLink(/(tucano:\/\/pair\?\S+)/.exec(run(['pair', '--ssh=me@h.io'], open(), 'http://127.0.0.1:9000').out)![1]!)
+    expect(ssh).toMatchObject({ ok: true, link: { remotePort: 9000 } })
+  })
+
+  it('pair refuses a bad --ssh or --url without using up a code', () => {
+    for (const args of [['--ssh', '-oProxyCommand=x@h.io'], ['--ssh', 'h.io'], ['--ssh'], ['--url', 'http://203.0.113.7'], ['--ssh', 'a@b.io', '--url', 'https://x.io']]) {
+      const p = open()
+      const { code, out } = run(['pair', ...args], p)
+      expect(code, args.join(' ')).toBe(2)
+      expect(out).not.toContain('Pairing code')
+      expect(existsSync(file()) ? JSON.parse(readFileSync(file(), 'utf8')).pending : []).toHaveLength(0) // no code was made
+    }
   })
 
   it('devices says who is paired, or that nobody is', () => {
