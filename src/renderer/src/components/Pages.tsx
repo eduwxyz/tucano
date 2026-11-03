@@ -20,6 +20,7 @@ import {
   addConnector,
   authorizeConnector,
   reconnectConnector,
+  setConnectorToken,
   removeConnector,
   updateTool,
   updateSettings,
@@ -1036,6 +1037,30 @@ const STATUS = (): Record<Connector['status'], { label: string; tone: string }> 
 
 const address = (c: Connector): string => (c.kind === 'remote' ? (c.url ?? '') : [c.command, ...(c.args ?? [])].join(' '))
 
+// The token of a connector, set or replaced without removing it (which would lose the agents' access).
+function ConnectorToken({ id }: { id: string }): ReactNode {
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = (): void => {
+    setBusy(true)
+    setError(null)
+    setConnectorToken(id, token)
+      .then(() => setToken(''))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="row">
+      <input className="grow" type="password" value={token} placeholder={L('Token (substitui o atual)', 'Token (replaces the current one)')} onChange={(e) => setToken(e.target.value)} />
+      <button className="btn btn--sm" disabled={busy || !token.trim()} onClick={save}>
+        {L('Salvar token', 'Save token')}
+      </button>
+      {error && <span className="note note--error">{error}</span>}
+    </div>
+  )
+}
+
 export function ConnectorsPage(): ReactNode {
   const connectors = useStore((s) => s.connectors)
   const agents = useStore((s) => s.agents)
@@ -1106,6 +1131,7 @@ export function ConnectorsPage(): ReactNode {
                     </p>
                   )}
                   {c.error && <p className="note note--error">{c.error}</p>}
+                  {c.kind === 'remote' && c.auth === 'token' && <ConnectorToken id={c.id} />}
                   <div className="row connector__actions">
                     {c.status === 'needs_auth' && (
                       <button className="btn btn--primary btn--sm" onClick={() => authorizeConnector(c.id)}>

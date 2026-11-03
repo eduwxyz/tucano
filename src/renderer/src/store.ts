@@ -407,6 +407,7 @@ export const updateTool = (connectorId: string, name: string, patch: Partial<Pic
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
 export const removeConnector = (id: string): void => void call('removeConnector', { id })
 export const reconnectConnector = (id: string): void => void call('reconnectConnector', { id })
+export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
 // On a server the authorization page comes back to be opened here, then pasted back.
 export const authorizeConnector = (id: string): void =>
   void call('authorizeConnector', { id }).then((r) => r.url && openDialog({ kind: 'oauth', id, url: r.url }))

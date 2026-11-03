@@ -903,6 +903,7 @@ const api: Api = {
 
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
+  setConnectorToken: ({ id, token }) => connectors.setToken(id, token),
   authorizeConnector: async ({ id }) => {
     const url = await connectors.authorize(id)
     return serverMode && url ? { url } : {}
