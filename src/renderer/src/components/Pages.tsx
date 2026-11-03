@@ -590,6 +590,36 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             </Card>
           )}
 
+          {pane('memoria') && (
+            <Card
+              title="Wiki"
+              lead={L('A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas.', 'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages.')}
+            >
+              <div className="segmented segmented--wide" role="radiogroup" aria-label="Wiki">
+                {([['read', L('Lê a wiki', 'Reads the wiki')], ['none', L('Sem acesso', 'No access')]] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    role="radio"
+                    aria-checked={(draft.wiki ?? 'read') === value}
+                    className={(draft.wiki ?? 'read') === value ? 'is-active' : ''}
+                    onClick={() => {
+                      if (isNew) return patch({ wiki: value })
+                      setDraft((d) => ({ ...d, wiki: value }))
+                      patchAgent(draft.id, { wiki: value })
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="muted small">
+                <button className="link" onClick={() => navigate({ kind: 'wiki' })}>
+                  {L('Abrir a wiki', 'Open the wiki')}
+                </button>
+              </p>
+            </Card>
+          )}
+
           {pane('perfil') && (
             <Card title={L('Harness e modelo', 'Harness and model')} lead={L('O agente roda num dos harnesses que você usa, como você o configurou: no seu plano, no gateway da empresa ou no seu provedor.', 'The agent runs on one of the harnesses you use, the way you set it up: on your plan, your company’s gateway or your provider.')}>
               <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />

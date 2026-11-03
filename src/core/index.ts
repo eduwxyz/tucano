@@ -1,15 +1,16 @@
 // The core runs in an Electron utility process: database, engines and runs
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
+import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -33,6 +34,10 @@ import { GitHub } from './github'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
+import { Wiki } from './wiki'
+import { WikiCurator } from './wiki-curator'
+import { WikiReviewer } from './wiki-review'
+import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { applyForeignTeam, readForeignZip } from './agent-import'
 import { zipFromBuffer, zipFromFile } from './zip'
@@ -246,6 +251,7 @@ const notifyAll = (title: string, body: string, conversationId?: string): void =
 type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
+  | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
   | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
@@ -433,6 +439,39 @@ const routines = new Routines({
 })
 
 const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, body) })
+// The wiki's folder is the truth (Markdown, as Obsidian opens it); TUCANO_WIKI points it elsewhere.
+// The default folder keeps wiki.db; another folder gets an index of its own, so going back finds the old one.
+const wikiHome = join(dataDir, 'wiki')
+const wikiIndex = (dir: string): string => (dir === wikiHome ? join(dataDir, 'wiki.db') : join(dataDir, `wiki-${createHash('sha256').update(dir).digest('hex').slice(0, 12)}.db`))
+const wikiDir = (): string => process.env['TUCANO_WIKI'] || settings().wikiDir || wikiHome
+const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }) })
+wiki.init()
+toMain({ type: 'wiki_dir', path: wiki.dir })
+// The curator reads the conversations with the memory's cheap model, and keeps what lasts.
+const wikiLlm = async (system: string, prompt: string): Promise<string> => {
+  const s = settings()
+  const model = usable(modelInfo(s.memoryModel)) ?? modelInfo('haiku')!
+  const st = s.engines[model.engine]
+  if (!st.installed || !st.loggedIn) throw new Error(L(`O ${ENGINES[model.engine].label} não está pronto pra organizar a wiki.`, `${ENGINES[model.engine].label} isn't ready to organize the wiki.`))
+  const cwd = join(dataDir, 'agents', '_wiki')
+  mkdirSync(cwd, { recursive: true })
+  const started = Date.now()
+  let text = ''
+  for await (const ev of engineImpls[model.engine].run({ model: model.id, effort: 'low', system, prompt, cwd, signal: AbortSignal.timeout(180_000) })) {
+    if (ev.type === 'text') text += ev.delta
+    else if (ev.type === 'done') {
+      text = ev.text || text
+      db.addReceipt({ ...ev.usage, model: model.id, ms: Date.now() - started, messageId: 'wiki', agentId: 'wiki', engine: model.engine, at: Date.now() })
+    } else if (ev.type === 'error') throw new Error(ev.message)
+  }
+  return text
+}
+const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm })
+// The review: by hand, or once a week when asked (checked every hour).
+const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
+setInterval(() => {
+  if (reviewer.due()) void reviewer.review().then(() => emit({ type: 'wiki' }))
+}, 3600_000).unref()
 
 const runner = new Runner({
   db,
@@ -449,6 +488,8 @@ const runner = new Runner({
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
   skills,
+  wiki,
+  wikiCurator: curator,
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
   notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId)),
@@ -928,6 +969,73 @@ const api: Api = {
 
   saveRoutine: ({ routine }) => routines.save(routine),
   removeRoutine: ({ id }) => routines.remove(id),
+  wiki: () => ({ dir: wiki.dir, pages: wiki.list(), kinds: wiki.kinds(), log: wiki.log(), pending: [...wiki.changes('pending'), ...wiki.changes('conflict')].filter((c) => c.by !== 'review').length, findings: wiki.findings().length, server: serverMode, graph: wiki.graph(), recent: wiki.recent(), sources: wiki.sourceCount() }),
+  wikiPage: ({ title }) => wiki.page(title) ?? null,
+  wikiSearch: ({ q }) => wiki.search(q, 20),
+  wikiSave: ({ title, body, kind, expectedHash, rename }) => wiki.save({ title, body, by: 'me', byName: settings().workspaceName || L('Você', 'You'), ...(kind !== undefined ? { kind } : {}), ...(expectedHash !== undefined ? { expectedHash } : {}), ...(rename ? { rename } : {}) }),
+  wikiRemove: ({ title }) => wiki.remove(title, 'me', settings().workspaceName || L('Você', 'You')),
+  wikiHistory: ({ title }) => wiki.history(title),
+  wikiRestore: ({ id }) => wiki.restore(id, 'me', settings().workspaceName || L('Você', 'You')),
+  wikiSchema: () => wiki.schema(),
+  wikiSaveSchema: ({ text }) => wiki.saveSchema(text),
+  wikiChanges: ({ state }) => wiki.changes(state),
+  wikiChange: ({ id }) => wiki.change(id) ?? null,
+  wikiApplyChange: ({ id }) => wiki.applyChange(id, settings().workspaceName || L('Você', 'You')),
+  wikiRefuseChange: ({ id }) => wiki.refuseChange(id),
+  wikiUndoChange: ({ id }) => wiki.undoChange(id, settings().workspaceName || L('Você', 'You')),
+  wikiSources: () => wiki.sources(),
+  wikiSource: ({ id }) => wiki.source(id) ?? null,
+  wikiKeepMessage: async ({ messageId }) => (await curator.keepMessage(messageId)).length,
+  wikiRedoChange: async ({ id }) => (await curator.redo(id)).length,
+  wikiAddFile: async ({ name, data }) => {
+    const buf = Buffer.from(data, 'base64')
+    const text = await extractFile(name, buf)
+    const src = wiki.addSource({ title: name, text, kind: 'file', file: { name, data: buf }, by: 'me', status: 'reading' })
+    void curator.ingest(src.id)
+    return src
+  },
+  wikiAddLink: async ({ url }) => {
+    const page = await extractLink(url.trim())
+    const src = wiki.addSource({ title: page.title, text: `${url.trim()}\n\n${page.text}`, kind: 'link', origin: { url: url.trim() }, by: 'me', status: 'reading' })
+    void curator.ingest(src.id)
+    return src
+  },
+  wikiAddNote: ({ text, title }) => {
+    const first = text.trim().split('\n')[0]!.replace(/^#+\s*/, '').slice(0, 60)
+    const src = wiki.addSource({ title: title?.trim() || first || L('Anotação', 'Note'), text, kind: 'note', by: 'me', status: 'reading' })
+    void curator.ingest(src.id)
+    return src
+  },
+  wikiOpenOriginal: ({ id }) => {
+    const p = wiki.originalPath(id)
+    if (!p || !existsSync(p)) return null
+    if (serverMode) return { name: basename(p), data: readFileSync(p).toString('base64') }
+    toMain({ type: 'open_path', path: p })
+    return null
+  },
+  wikiIngestAgain: ({ id }) => void curator.ingest(id),
+  wikiReview: () => reviewer.status(),
+  wikiRunReview: () => {
+    void reviewer.review().then(() => emit({ type: 'wiki' }))
+    emit({ type: 'wiki' })
+  },
+  wikiDismissFinding: ({ id }) => wiki.dismissFinding(id),
+  wikiImport: ({ dir }) => wiki.importVault(dir, settings().workspaceName || L('Você', 'You')),
+  setWikiCapture: ({ conversationId, on }) => {
+    db.setWikiCapture(conversationId, on)
+    const c = db.conversation(conversationId)
+    if (c) emit({ type: 'conversation', conversation: c })
+  },
+  setWikiDir: async ({ dir }) => {
+    const next = dir?.trim() || wikiHome
+    if (!existsSync(next)) throw new Error(L('Essa pasta não existe.', "That folder doesn't exist."))
+    db.setSettings({ wikiDir: next === wikiHome ? undefined : next })
+    wiki.relocate(next, wikiIndex(next))
+    toMain({ type: 'wiki_dir', path: next })
+    emit({ type: 'settings', settings: settings() })
+    return next
+  },
+  openWikiFolder: () => (serverMode ? undefined : toMain({ type: 'open_path', path: wiki.dir })),
   runRoutine: ({ id }) => routines.runNow(id),
 
   refreshEngines: () => {
