@@ -14,7 +14,29 @@ Status: **new and experimental.** The core, the screens and the agents work in a
 | Optional: Docker Engine | For agents' isolated Linux computers |
 | Optional: Chromium or Google Chrome | For agents' browsers (`apt install chromium`) |
 
-## Install
+## Install with one command
+
+As the user that will run Tucano, not root. On a new VPS, make that user once (`adduser tucano && loginctl enable-linger tucano`), then sign in over SSH as `tucano`:
+
+```bash
+curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install-server.sh | sh -s -- --label "My Mac"
+```
+
+It needs `curl` and `tar` and nothing else, and it takes about a minute. The script:
+
+- downloads the server (one package for x64 and ARM64) and checks it against its SHA-256 checksum before it unpacks anything;
+- uses the system's Node 24 if there is one, and otherwise downloads one of its own, checked against nodejs.org's checksums (nothing is installed system-wide);
+- keeps the server running as a systemd **user service**: it restarts if it dies and starts at boot. It listens on `127.0.0.1:7337` only, so nothing is exposed until you choose how (see [Reaching it](#reaching-it));
+- adds the `tucano-server` command to `~/.local/bin` (`pair`, `devices`, `revoke`; see [pairing.md](pairing.md));
+- prints a pairing code, the link that pairs the Mac app, and the `ssh` command for a browser.
+
+The link names the address your computer reaches the server at. Run over SSH, the script takes it from your login; to say it yourself, use `--host vps.example.com` (or `--host vps.example.com:2222`, or `--host user@vps.example.com`). The journal holds no token.
+
+Run the same command again to **update**: the data in `~/.tucano-server` stays, paired devices keep working, and the last two versions are kept to go back to. `sh -s -- --uninstall` removes the service and the program (the data stays; add `--purge` to delete it too). `sh -s -- --help` lists the rest: `--port`, `--no-service`, `--pair` (a new code on an update).
+
+The harness (Claude Code, Codex…) is installed and signed in on the server as that user; see below.
+
+## Install from source
 
 As the user that will run Tucano (not root):
 
@@ -88,7 +110,7 @@ WantedBy=multi-user.target
 
 Then run `sudo systemctl enable --now tucano`. The logs are in `journalctl -u tucano`. They hold no token; the first start prints a pairing code, good for 5 minutes and one device.
 
-To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl restart tucano`.
+To update a source install, run `git pull && npm ci && npm run build && sudo systemctl restart tucano`. (An install made with the script updates by running the script again.)
 
 ## Settings
 
@@ -107,5 +129,5 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 - **Agents' browsers** need Chromium or Chrome on the server, and run without a window. **Take over** doesn't open a window there: the live picture of the browser in the panel becomes the browser. Click on it, type, paste and scroll, then click **Hand back**. This is how you sign in to a site for an agent.
 - **Pages agents serve** (a dashboard, an API) listen on the server's own `127.0.0.1`. Agents take their screenshots with the server's Chrome. When Tucano listens on a private address (Tailscale or a home network), it also passes each running page through on the same port at that address, so the preview panel and **Open** work from your computer. That doesn't happen on a public address, because those pages have no token. Over an SSH tunnel, forward the page's port too (`-L 5173:127.0.0.1:5173`).
 - **Choosing a folder** asks for its path on the server, since the browser can't browse the server's disk.
-- **No self-update.** Update with `git pull` (see above).
+- **No self-update.** Update by running the install script again, or with `git pull` (see above).
 - **One Tucano per data folder.** Don't run the desktop app and the server on the same data folder at the same time.
