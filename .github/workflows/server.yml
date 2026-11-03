@@ -1,0 +1,129 @@
+# The server for a VPS: one package (tucano-server.tar.gz, no native code, so x64 and ARM64 alike) and the
+# script that installs it (install-server.sh). Every run packs the server, installs it on a clean Ubuntu with
+# the script (the program, then the systemd service) and pairs a device with it. Once a release is published,
+# this attaches the package, its checksum and the script to that same release, which is where
+#   curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install-server.sh | sh
+# looks for them.
+name: Server
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the server to (e.g. v0.2.8)
+        required: true
+  pull_request:
+    paths:
+      - install-server.sh
+      - scripts/pack-server.sh
+      - src/server/**
+      - package.json
+      - package-lock.json
+      - .github/workflows/server.yml
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: The version is the release's
+        if: env.TAG != ''
+        run: test "v$(node -p "require('./package.json').version")" = "$TAG"
+      - name: Lint the scripts
+        run: |
+          shellcheck -s sh install-server.sh scripts/pack-server.sh
+          dash -n install-server.sh
+      - name: Pack the server
+        run: sh scripts/pack-server.sh dist-server
+
+      # The same steps a person takes on a VPS, as a user of its own that is not root, with a systemd user
+      # session (lingering starts one, as it does on a VPS). The Node on this runner is not under /usr, so the
+      # script downloads its own Node 24, checked against nodejs.org's checksums.
+      - name: A user for the server, with a systemd session
+        run: |
+          sudo useradd -m -s /bin/bash tucano
+          sudo loginctl enable-linger tucano
+          sudo install -m 0644 install-server.sh /home/tucano/install-server.sh
+          sudo install -m 0644 dist-server/tucano-server.tar.gz dist-server/tucano-server.tar.gz.sha256 /home/tucano/
+          for _ in $(seq 1 30); do test -S /run/user/$(id -u tucano)/bus && break; sleep 1; done
+          ls -l /run/user/$(id -u tucano)/
+      - name: Install it as that user (the program and the service)
+        run: |
+          sudo -u tucano -H env XDG_RUNTIME_DIR=/run/user/$(id -u tucano) TUCANO_TARBALL=/home/tucano/tucano-server.tar.gz TUCANO_PORT=7399 \
+            sh /home/tucano/install-server.sh --label "CI device" --host ci.example.com:2222 | tee install.log
+          grep -q "Pairing code" install.log
+          grep -q "installed" install.log
+          # The link that pairs the Mac app carries the address and port the script was told.
+          grep -q "tucano://pair?v=1&code=.*ssh=tucano%40ci.example.com%3A2222" install.log
+          grep -q "ssh -N -L 17337:127.0.0.1:7399 -p 2222 tucano@ci.example.com" install.log
+      - name: The service is up, and its journal has no token in it
+        run: |
+          uid=$(id -u tucano)
+          sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-active tucano.service
+          sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-enabled tucano.service
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7399/)" = 401
+          sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid journalctl --user -u tucano --no-pager > journal.txt
+          if grep -q 'token=' journal.txt; then echo "a token is in the journal:"; cat journal.txt; exit 1; fi
+          test "$(loginctl show-user tucano -p Linger --value)" = yes
+      - name: Pair a device with the code the script printed
+        run: |
+          code=$(sed -n 's/^  \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}-[A-Z0-9]\{4\}\)$/\1/p' install.log | head -1)
+          test -n "$code"
+          curl -fsS -X POST http://127.0.0.1:7399/pair -d "{\"code\":\"$code\"}" | tee pair.json
+          grep -q '"token":"tk_' pair.json
+          sudo -u tucano /home/tucano/.local/bin/tucano-server devices | grep -q "CI device"
+      - name: The service comes back by itself when it dies
+        run: |
+          uid=$(id -u tucano)
+          pid=$(sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user show -p MainPID --value tucano.service)
+          sudo kill -9 "$pid"
+          for _ in $(seq 1 30); do
+            test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7399/)" = 401 && exit 0
+            sleep 1
+          done
+          sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid journalctl --user -u tucano --no-pager | tail -30
+          exit 1
+      - name: Update it (the same package again), then take it off
+        run: |
+          uid=$(id -u tucano)
+          sudo -u tucano -H env XDG_RUNTIME_DIR=/run/user/$uid TUCANO_TARBALL=/home/tucano/tucano-server.tar.gz \
+            sh /home/tucano/install-server.sh | tee update.log
+          grep -q "reinstalled" update.log
+          if grep -q "Pairing code" update.log; then echo "an update made a pairing code"; exit 1; fi
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7399/)" = 401
+          sudo -u tucano -H env XDG_RUNTIME_DIR=/run/user/$uid sh /home/tucano/install-server.sh --uninstall
+          if sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-active --quiet tucano.service; then echo "still running"; exit 1; fi
+          test ! -e /home/tucano/.local/share/tucano-server
+          test ! -e /home/tucano/.local/bin/tucano-server
+          test -d /home/tucano/.tucano-server
+
+      - name: Attach to the release
+        if: env.TAG != ''
+        run: gh release upload "$TAG" dist-server/tucano-server.tar.gz dist-server/tucano-server.tar.gz.sha256 install-server.sh --clobber
+      - name: Keep the package of a test build
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: tucano-server
+          path: dist-server/tucano-server.tar.gz*
+          retention-days: 3
