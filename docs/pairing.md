@@ -12,9 +12,26 @@ On the machine the server runs on:
 node out/main/server.js pair --label "My Mac"
 ```
 
-It prints a code like `K7QM-2XPD-9TWH` and a link, `http://127.0.0.1:7337/?pair=K7QM-2XPD-9TWH`.
+It prints a code like `K7QM-2XPD-9TWH` and a link, `http://127.0.0.1:7337/?pair=K7QM-2XPD-9TWH`. With
+`--ssh` (or `--url`) it also prints the link that pairs the **Mac app**:
 
-- The code works **once**, for **one device**, for **5 minutes**.
+```sh
+node out/main/server.js pair --label "My VPS" --ssh you@203.0.113.7
+# tucano://pair?v=1&code=K7QM-2XPD-9TWH&ssh=you%40203.0.113.7&name=My+VPS
+```
+
+- `--ssh user@host[:port]` is how the app reaches this machine: it opens an SSH tunnel to the server's own
+  loopback, so no port is open to the internet. The user is the one you sign in to the server as.
+- `--url https://tucano.example.com` is for a server reached at an address instead (a reverse proxy with HTTPS,
+  or Tailscale: `http://100.x.y.z:7337` or a `*.ts.net` name). Plain `http` is refused anywhere else.
+- The link is read by `src/shared/pairlink.ts`. It comes from outside (a chat, a web page) and ends up as an
+  `ssh` command, so a link whose user or host could pass for an `ssh` option (`-oProxyCommand=…`), carries
+  anything beyond a name and an address, or gives a part twice, is refused whole.
+- A wrong `--ssh` or `--url` is said before any code is made, so a typo doesn't use one up.
+
+About the code:
+
+- It works **once**, for **one device**, for **5 minutes**.
 - **In a browser:** open the link (through your SSH tunnel, Tailscale address or proxy: use the address
   you reach the server at). The browser trades the code for its own token, kept in a cookie, and the
   address bar goes back to `/`.
@@ -69,9 +86,11 @@ wrong guesses.
 
 ## The server's own token
 
-`…/?token=…` (the link the server prints at start) and `Authorization: Bearer <token>` still work, for
-scripts and for what you set up before pairing. Signing in with the token now gives the browser a
-device token of its own, so the server's own token no longer sits in a cookie for a year.
+`…/?token=…` and `Authorization: Bearer <token>` still work, for scripts and for what you set up before
+pairing. The token is in `server-token` in the data directory: the server **doesn't print it** at start,
+because a log (`journalctl`, a file) is read by more people than the one who owns the server. What it
+prints, when nobody is paired yet, is a pairing code. Signing in with the token gives the browser a
+device token of its own, so the server's own token never sits in a cookie.
 
 The cookie from before pairing (named `tucano`) isn't read any more: open the link once more to sign
 in again. To cut the server's own token, set a new `TUCANO_TOKEN` (or delete `server-token` in the
