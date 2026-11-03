@@ -234,6 +234,7 @@ const fold = (s: string): string =>
 const PAGES = (): { label: string; view: View; icon: IconName }[] => [
   { label: L('Aprovações', 'Approvals'), view: { kind: 'approvals' }, icon: 'shield' },
   { label: L('Memória', 'Memory'), view: { kind: 'memory' }, icon: 'book' },
+  { label: 'Wiki', view: { kind: 'wiki' }, icon: 'layers' },
   { label: L('Rotinas', 'Routines'), view: { kind: 'routines' }, icon: 'clock' },
   { label: 'Skills', view: { kind: 'skills' }, icon: 'layers' },
   { label: L('Boletim', 'Report'), view: { kind: 'report' }, icon: 'report' },
