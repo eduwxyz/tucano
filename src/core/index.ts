@@ -235,9 +235,9 @@ function toPhone(e: CoreEvent): void {
 }
 
 // Desktop notification, and the same on the phone.
-const notifyAll = (title: string, body: string, conversationId?: string): void => {
-  toMain({ type: 'notify', title, body, conversationId, sound: settings().sounds !== false })
-  void telegram?.notice(title, body)
+const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string): void => {
+  toMain({ type: 'notify', title, body: shortText, conversationId, sound: settings().sounds !== false })
+  void telegram?.notice(title, fullText ?? shortText)
 }
 
 // Asks the main process to do what only it can: open the browser or a folder, show a notification.
