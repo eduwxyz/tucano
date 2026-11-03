@@ -3,30 +3,39 @@
 // core and the window, this does: it stands in for Electron's parentPort, keeps
 // the secrets with a key of its own, and serves the page plus a bridge to the
 // core (events down an event stream, requests up by POST). Every request needs
-// the server's token.
+// a token: the server's own, or the one a paired device was given (pairing.ts).
 //
 //   node out/main/server.js        (TUCANO_DATA, TUCANO_HOST, TUCANO_PORT, TUCANO_TOKEN)
+//   node out/main/server.js pair | devices | revoke    who may sign in (cli.ts, docs/pairing.md)
 //
 // Behind a reverse proxy on this machine (Caddy, nginx, a tunnel), wrong tokens are counted by the address the
 // proxy saw (X-Forwarded-For). TUCANO_ORIGINS (https://tucano.example.com, comma separated) names the page's
 // origin if the proxy doesn't pass Host on, and TUCANO_COOKIE_SECURE=1 marks the cookie Secure if it doesn't
 // send X-Forwarded-Proto.
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { extname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { cli } from './cli'
 import { Forwarder, isPrivate } from './forward'
 import { clearedCookie, clientKey, cookieValue, decodePart, parseJson, parseOrigins, sameOrigin, sessionCookie, Strikes } from './guard'
+import { cookieName, Pairing, pairRequest, SESSION_MS } from './pairing'
 import { vault } from './vault'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
 const host = process.env['TUCANO_HOST'] || '127.0.0.1'
 const port = Number(process.env['TUCANO_PORT'] || 7337)
 const page = join(import.meta.dirname, '..', 'renderer')
+const shown = host === '0.0.0.0' || host === '::' ? 'localhost' : host
 mkdirSync(dataDir, { recursive: true, mode: 0o700 })
+
+// Who is paired. The commands run here, before anything starts, and leave.
+const pairing = new Pairing(join(dataDir, 'pairing.json'))
+const exit = cli(process.argv.slice(2), pairing, `http://${shown}:${port}`, console.log)
+if (exit !== undefined) process.exit(exit)
 
 // A file only this user reads, made once: the server's key or token.
 function kept(name: string, make: () => string): string {
@@ -36,6 +45,10 @@ function kept(name: string, make: () => string): string {
   return readFileSync(file, 'utf8').trim()
 }
 const token = process.env['TUCANO_TOKEN'] || kept('server-token', () => randomBytes(24).toString('base64url'))
+// A cookie belongs to a host, not to a port: two servers reached through tunnels on 127.0.0.1 would take each
+// other's. So each one's cookie is named after an id of its own.
+const serverId = kept('server-id', () => randomBytes(6).toString('hex'))
+const COOKIE = cookieName(serverId)
 // The secrets (Telegram, GitHub, connector keys) are sealed with this key; on a
 // desktop it's the system's keychain, which a server doesn't have.
 const key = Buffer.from(kept('server.key', () => randomBytes(32).toString('base64')), 'base64')
@@ -103,13 +116,19 @@ function file(res: ServerResponse, path: string, headers: Record<string, string>
   res.writeHead(200, { 'content-type': TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream', ...headers }).end(readFileSync(path))
 }
 
-const sameToken = (t: string | undefined): boolean => !!t && t.length === token.length && timingSafeEqual(Buffer.from(t), Buffer.from(token))
-const COOKIE = 'tucano'
+// Compared by digest, so a token of another length or with other characters is only a wrong one.
+const digest = (s: string): Buffer => createHash('sha256').update(s).digest()
+const tokenDigest = digest(token)
+const sameToken = (t: string | undefined): boolean => !!t && timingSafeEqual(digest(t), tokenDigest)
 
-// Wrong tokens, counted by who sent them: 10 in 10 minutes, then a wait (guard.ts).
+// The server's own token (a script's Authorization: Bearer, or the ?token= link) or a paired device's.
+const allowed = (t: string | undefined): boolean => sameToken(t) || !!pairing.check(t)
+
+// Wrong tokens and codes, counted by who sent them: 10 in 10 minutes, then a wait (guard.ts).
 const strikes = new Strikes()
 const origins = parseOrigins(process.env['TUCANO_ORIGINS'])
 const cookieSecure = process.env['TUCANO_COOKIE_SECURE'] === '1'
+const JSON_BODY = { 'content-type': 'application/json', 'cache-control': 'no-store' }
 
 // The pages agents serve (a dashboard, an API) listen on the server's own
 // loopback. On a private address (Tailscale, a home network) each running one
@@ -142,13 +161,13 @@ function index(): string {
     .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1" />\n    <script src="./tucano-web.js"></script>\n    <title>')
 }
 
-function body(req: IncomingMessage): Promise<string> {
+function body(req: IncomingMessage, max = 64 * 1024 * 1024): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
     req.on('data', (c: Buffer) => {
       size += c.length
-      if (size > 64 * 1024 * 1024) return reject(new Error('too large'))
+      if (size > max) return reject(new Error('too large'))
       chunks.push(c)
     })
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
@@ -171,25 +190,67 @@ function route(req: IncomingMessage, res: ServerResponse, url: URL): void {
       .end('Tucano: too many wrong tokens, try again later.\nTucano: tokens errados demais, tente de novo mais tarde.')
   }
 
-  // The link with ?token= signs this browser in, then drops it from the address bar. Lax, not
-  // Strict: the link is often clicked from elsewhere (a chat), and a Strict cookie wouldn't ride
-  // the redirect that follows. Lax still keeps it off other sites' POSTs to /rpc.
   const secure = cookieSecure || req.headers['x-forwarded-proto'] === 'https'
-  const given = url.searchParams.get('token') ?? undefined
-  if (sameToken(given)) {
-    strikes.clear(who)
-    return void res.writeHead(302, { 'set-cookie': sessionCookie(COOKIE, token, 31536000, secure), location: '/' }).end()
+
+  // The app (or a script) trades a pairing code for its token by POST and keeps the token itself: it is sent
+  // back in the body, with no cookie to pick out of a Set-Cookie header. A wrong code counts like a wrong token;
+  // a body that isn't a request for one isn't a guess.
+  if (url.pathname === '/pair' && req.method === 'POST') {
+    if (!sameOrigin(req.headers.origin, req.headers.host, origins)) return void res.writeHead(403).end()
+    body(req, 4096)
+      .then(
+        (text) => {
+          const ask = pairRequest(text)
+          if (!ask) return void res.writeHead(400).end()
+          const issued = pairing.redeem(ask.code, ask.label)
+          if (!issued) {
+            strikes.fail(who)
+            return void res.writeHead(401, JSON_BODY).end(JSON.stringify({ error: 'wrong or expired code' }))
+          }
+          strikes.clear(who)
+          res
+            .writeHead(200, JSON_BODY)
+            .end(JSON.stringify({ server: serverId, token: issued.token, device: issued.device, days: SESSION_MS / 86_400_000 }))
+        },
+        () => res.writeHead(413).end()
+      )
+      .catch(() => fail(res))
+    return
   }
+
+  // A browser signs in with a pairing code (…/?pair=CODE, made by `pair` on this machine) or with the
+  // server's own token (…/?token=…). Either is traded for a token of the browser's own, kept in a
+  // cookie, good for 30 days from its last use and revocable: the server's own token never sits in
+  // the cookie. Then the code or token is dropped from the address bar. Lax, not Strict: the link is
+  // often clicked from elsewhere (a chat), and a Strict cookie wouldn't ride the redirect that follows.
+  // Lax still keeps it off other sites' POSTs to /rpc.
+  const code = url.searchParams.get('pair') ?? undefined
+  const given = url.searchParams.get('token') ?? undefined
+  const signedIn = (code !== undefined ? pairing.redeem(code) : undefined) ?? (sameToken(given) ? pairing.enroll('browser') : undefined)
+  if (signedIn) {
+    strikes.clear(who)
+    return void res
+      .writeHead(302, {
+        // The shared name from before pairing is dropped too: that cookie held the server's own token.
+        'set-cookie': [sessionCookie(COOKIE, signedIn.token, SESSION_MS / 1000, secure), clearedCookie('tucano', secure)],
+        location: '/'
+      })
+      .end()
+  }
+
   const cookie = cookieValue(req.headers.cookie, COOKIE)
-  if (!sameToken(cookie)) {
+  const bearer = /^Bearer (\S+)$/i.exec(req.headers.authorization ?? '')?.[1]
+  // Whichever proves who is asking, kept to prove it again on a stream that stays open.
+  const proof = [cookie, bearer].find(allowed)
+  if (proof === undefined) {
     // Opening the address with no token at all isn't a guess, and doesn't count.
-    if (given !== undefined || cookie !== undefined) strikes.fail(who)
-    // A cookie that opens nothing any more (the token was changed) is taken back, so the page that holds it
-    // stops sending it, and stops being counted against its owner with every request.
+    if (code !== undefined || given !== undefined || cookie !== undefined || bearer !== undefined) strikes.fail(who)
+    // A cookie that opens nothing any more (revoked, expired) is taken back, so a page left open stops sending
+    // it, and stops being counted against its owner with every request.
     const stale = cookie === undefined ? {} : { 'set-cookie': clearedCookie(COOKIE, secure) }
     return void res
       .writeHead(401, { 'content-type': 'text/plain; charset=utf-8', ...stale })
-      .end('Tucano: open the link with the token the server printed (…/?token=…).\nTucano: abra o link com o token que o servidor mostrou (…/?token=…).')
+      .end('Tucano: open the link the server printed (…/?token=…), or pair with a code (…/?pair=CODE).\nTucano: abra o link que o servidor mostrou (…/?token=…) ou pareie com um código (…/?pair=CÓDIGO).')
   }
 
   if ((url.pathname === '/events' || url.pathname === '/rpc') && !sameOrigin(req.headers.origin, req.headers.host, origins)) {
@@ -202,7 +263,8 @@ function route(req: IncomingMessage, res: ServerResponse, url: URL): void {
     clients.set(id, c)
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'x-accel-buffering': 'no' })
     res.write(`event: hello\ndata: ${id}\n\n`)
-    const beat = setInterval(() => res.write(': \n\n'), 25_000)
+    // On each beat, the device is checked again: one revoked since is cut off here.
+    const beat = setInterval(() => (allowed(proof) ? res.write(': \n\n') : res.end()), 25_000)
     toCore(null, [c])
     req.on('close', () => {
       clearInterval(beat)
@@ -307,8 +369,8 @@ toCore(null, [watcher])
 watcher.emit('message', { data: { id: 1, method: 'snapshot' } })
 
 server.listen(port, host, () => {
-  const shown = host === '0.0.0.0' || host === '::' ? 'localhost' : host
   console.log(`Tucano server: http://${shown}:${port}/?token=${token}`)
   console.log(`Data: ${dataDir}`)
+  console.log('To pair a browser or the app with a one-time code: node out/main/server.js pair --label "My Mac" (docs/pairing.md)')
   if (host === '127.0.0.1') console.log('Listening on this machine only: reach it through an SSH tunnel, Tailscale or a reverse proxy with HTTPS (docs/server.md).')
 })
