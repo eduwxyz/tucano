@@ -606,15 +606,18 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 </p>
               )}
               <div className="grid2">
-                <Field label={L('Esforço de raciocínio', 'Reasoning effort')} hint={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
-                  <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
-                    {EFFORTS.map((ef) => (
-                      <option key={ef.id} value={ef.id}>
-                        {ef.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                {/* Cursor's models carry the effort in the name (…-high, …-xhigh): no separate pick. */}
+                {engine !== 'cursor' && (
+                  <Field label={L('Esforço de raciocínio', 'Reasoning effort')} hint={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
+                    <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
+                      {EFFORTS.map((ef) => (
+                        <option key={ef.id} value={ef.id}>
+                          {ef.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
                 <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you.`)}>
                   <NumberInput
                     min={0}

@@ -6,6 +6,7 @@ import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
 import { geminiArgs, geminiEnv, geminiHome, geminiParser } from '../src/core/engines/gemini'
+import { cursorArgs, cursorConfig, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, parseCursorModels } from '../src/core/engines/cursor'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
@@ -302,3 +303,111 @@ describe('Gemini config', () => {
     expect(a).not.toBe(b)
   })
 })
+
+describe('Cursor stream', () => {
+  const answer = 'Vou consultar a hora no servidor tucano e a versão LTS atual do Node.js.\n\nSão 21:58 no Tucano e a LTS atual do Node.js é a 26.13.0 (Lithium).\n\n— Lia'
+
+  it('streams the deltas once (not the whole message that repeats them), with paragraphs around tool calls', () => {
+    const events = feed(cursorParser(), fixture('cursor-stream.jsonl'))
+    expect(text(events)).toBe(answer)
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ type: 'done', text: answer })
+  })
+
+  it('reports the usage the CLI gives, cache reads and writes counted as sent', () => {
+    const done = feed(cursorParser(), fixture('cursor-stream.jsonl')).find((e) => e.type === 'done')
+    expect(done).toMatchObject({ usage: { inputTokens: 12277 + 31744, cacheReadTokens: 31744, outputTokens: 338 } })
+  })
+
+  it("reports a web search that ran, not the gateway's tools", () => {
+    const web = feed(cursorParser(), fixture('cursor-stream.jsonl')).filter((e) => e.type === 'web')
+    expect(web).toEqual([{ type: 'web', action: 'search', detail: 'Node.js current LTS version' }])
+  })
+
+  it("doesn't report a web read the permissions refused", () => {
+    const refused = '{"type":"tool_call","subtype":"completed","tool_call":{"webFetchToolCall":{"args":{"url":"https://nodejs.org"},"result":{"permissionDenied":{}}}}}'
+    const ran = '{"type":"tool_call","subtype":"completed","tool_call":{"webFetchToolCall":{"args":{"url":"https://nodejs.org"},"result":{"success":{}}}}}'
+    expect(feed(cursorParser(), [refused]).filter((e) => e.type === 'web')).toEqual([])
+    expect(feed(cursorParser(), [ran]).filter((e) => e.type === 'web')).toEqual([{ type: 'web', action: 'fetch', detail: 'https://nodejs.org' }])
+  })
+
+  it('takes the whole message when no deltas came', () => {
+    const whole = '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]},"model_call_id":"m1","timestamp_ms":1}'
+    const last = '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}'
+    const result = '{"type":"result","subtype":"success","is_error":false,"result":"OK","usage":{"inputTokens":10,"outputTokens":1,"cacheReadTokens":0,"cacheWriteTokens":0}}'
+    const events = feed(cursorParser(), [whole, last, result])
+    expect(text(events)).toBe('OK')
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ text: 'OK' })
+  })
+
+  it('estimates the usage when the CLI gives none: the characters sent and received, about 4 a token, the sent part doubled', () => {
+    const delta = '{"type":"assistant","message":{"content":[{"type":"text","text":"12345678"}]},"timestamp_ms":1}'
+    const result = '{"type":"result","subtype":"success","is_error":false,"result":"12345678"}'
+    const done = feed(cursorParser(400), [delta, result]).find((e) => e.type === 'done')
+    expect(done).toMatchObject({ usage: { inputTokens: 200, cacheReadTokens: 0, outputTokens: 2 } })
+  })
+
+  it('turns an error result into an error, and an exit without a result too', () => {
+    const bad = '{"type":"result","subtype":"error","is_error":true,"result":"You have hit your usage limit"}'
+    expect(feed(cursorParser(), [bad])).toEqual([{ type: 'error', message: 'You have hit your usage limit' }])
+    const gone = feed(cursorParser(), ['{"type":"system","subtype":"init"}'], 1, 'boom\nnot logged in')
+    expect(gone).toHaveLength(1)
+    expect((gone[0] as { message: string }).message).toContain('not logged in')
+  })
+})
+
+describe('Cursor config', () => {
+  it('runs headless with deltas, the prompt on stdin, the model named, and neither --force nor --approve-mcps', () => {
+    const args = cursorArgs({ model: 'auto' })
+    expect(args).toEqual(['-p', '--output-format', 'stream-json', '--stream-partial-output', '--trust', '--model', 'auto'])
+    expect(args).not.toContain('--force')
+    expect(args).not.toContain('--yolo')
+    expect(args).not.toContain('--approve-mcps')
+  })
+
+  it("denies Cursor's own files and shell, and allows only the gateway", () => {
+    const c = cursorConfig({ mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }) as { permissions: { allow: string[]; deny: string[] }; autoAcceptWebSearch: boolean }
+    expect(c.permissions.allow).toEqual(['Mcp(tucano:*)'])
+    expect(c.permissions.deny).toEqual(['Read(**)', 'Write(**)', 'Shell(*)', 'WebFetch(*)'])
+    expect(c.autoAcceptWebSearch).toBe(false)
+  })
+
+  it('lets the web in only when the agent has it', () => {
+    const c = cursorConfig({ mcpUrl: undefined, web: true }) as { permissions: { allow: string[]; deny: string[] }; autoAcceptWebSearch: boolean }
+    expect(c.permissions.allow).toEqual(['WebFetch(*)'])
+    expect(c.permissions.deny).toEqual(['Read(**)', 'Write(**)', 'Shell(*)'])
+    expect(c.autoAcceptWebSearch).toBe(true)
+  })
+
+  it('gives each turn its own folder: the config, the instructions as AGENTS.md, the gateway as the only MCP server', () => {
+    const appDir = mkdtempSync(join(tmpdir(), 'cu-'))
+    const a = cursorTurnDirs(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false })
+    const b = cursorTurnDirs(appDir, { system: 'You are Theo.', mcpUrl: undefined, web: false })
+    expect(a.root).not.toBe(b.root)
+    expect(a.root.startsWith(appDir)).toBe(true)
+    expect(a.data.startsWith(a.root)).toBe(true)
+    expect(readFileSync(join(a.workspace, 'AGENTS.md'), 'utf8')).toBe('You are Iris.')
+    expect(JSON.parse(readFileSync(join(a.workspace, '.cursor', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { tucano: { url: 'http://127.0.0.1:1/mcp/x' } } })
+    expect(JSON.parse(readFileSync(join(a.config, 'cli-config.json'), 'utf8')).permissions.deny).toContain('Shell(*)')
+    expect(() => readFileSync(join(b.workspace, '.cursor', 'mcp.json'))).toThrow()
+  })
+
+  it('names a workspace and finds its worker socket the way the CLI does', () => {
+    expect(cursorSlug('/Users/x/Library/Application Support/Tucano/cursor/ab12/workspace')).toBe('Users-x-Library-Application-Support-Tucano-cursor-ab12-workspace')
+    // short: under <data>/projects
+    expect(cursorWorkerSocket('/t/w', '/t/d')).toBe(join('/t/d', 'projects', 't-w', 'worker.sock'))
+    // long: cut to 83 characters plus a hash (the CLI's rule, checked against a real run)
+    const ws = '/Users/eduardo/Library/Application Support/Tucano/cursor/0011223344556677/workspace'
+    const sock = cursorWorkerSocket(ws, '/Users/eduardo/Library/Application Support/Tucano/cursor/0011223344556677/d')
+    expect(sock.startsWith('/Users/eduardo/Library/Application Support/Tucano/cursor/0011223344556677/d/Users-')).toBe(true)
+    expect(sock).toMatch(/-[0-9a-f]{7}\/worker\.sock$/)
+    expect(sock.length).toBeLessThanOrEqual(83 + 8 + '/worker.sock'.length)
+  })
+
+  it('reads the model list and the login', () => {
+    expect(parseCursorModels('Available models\n\nauto - Auto (default)\ngpt-5.3-codex - Codex 5.3\nclaude-opus-5-5-high - Claude Opus 5.5 1M High\n\nTip: use --model')).toEqual(['auto', 'gpt-5.3-codex', 'claude-opus-5-5-high'])
+    expect(cursorSignedIn('✓ Logged in as someone@example.com', {})).toBe(true)
+    expect(cursorSignedIn('Not logged in', {})).toBe(false)
+    expect(cursorSignedIn('Not logged in', { CURSOR_API_KEY: 'k' })).toBe(true)
+  })
+})
+
