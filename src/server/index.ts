@@ -19,7 +19,7 @@ import { homedir } from 'node:os'
 import { extname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Forwarder, isPrivate } from './forward'
-import { clientKey, decodePart, parseJson, parseOrigins, sameOrigin, Strikes } from './guard'
+import { clearedCookie, clientKey, cookieValue, decodePart, parseJson, parseOrigins, sameOrigin, sessionCookie, Strikes } from './guard'
 import { vault } from './vault'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
@@ -104,7 +104,7 @@ function file(res: ServerResponse, path: string, headers: Record<string, string>
 }
 
 const sameToken = (t: string | undefined): boolean => !!t && t.length === token.length && timingSafeEqual(Buffer.from(t), Buffer.from(token))
-const cookieToken = (req: IncomingMessage): string | undefined => /(?:^|;\s*)tucano=([^;]+)/.exec(req.headers.cookie ?? '')?.[1]
+const COOKIE = 'tucano'
 
 // Wrong tokens, counted by who sent them: 10 in 10 minutes, then a wait (guard.ts).
 const strikes = new Strikes()
@@ -174,18 +174,21 @@ function route(req: IncomingMessage, res: ServerResponse, url: URL): void {
   // The link with ?token= signs this browser in, then drops it from the address bar. Lax, not
   // Strict: the link is often clicked from elsewhere (a chat), and a Strict cookie wouldn't ride
   // the redirect that follows. Lax still keeps it off other sites' POSTs to /rpc.
+  const secure = cookieSecure || req.headers['x-forwarded-proto'] === 'https'
   const given = url.searchParams.get('token') ?? undefined
   if (sameToken(given)) {
     strikes.clear(who)
-    const secure = cookieSecure || req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
-    return void res.writeHead(302, { 'set-cookie': `tucano=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`, location: '/' }).end()
+    return void res.writeHead(302, { 'set-cookie': sessionCookie(COOKIE, token, 31536000, secure), location: '/' }).end()
   }
-  const cookie = cookieToken(req)
+  const cookie = cookieValue(req.headers.cookie, COOKIE)
   if (!sameToken(cookie)) {
     // Opening the address with no token at all isn't a guess, and doesn't count.
     if (given !== undefined || cookie !== undefined) strikes.fail(who)
+    // A cookie that opens nothing any more (the token was changed) is taken back, so the page that holds it
+    // stops sending it, and stops being counted against its owner with every request.
+    const stale = cookie === undefined ? {} : { 'set-cookie': clearedCookie(COOKIE, secure) }
     return void res
-      .writeHead(401, { 'content-type': 'text/plain; charset=utf-8' })
+      .writeHead(401, { 'content-type': 'text/plain; charset=utf-8', ...stale })
       .end('Tucano: open the link with the token the server printed (…/?token=…).\nTucano: abra o link com o token que o servidor mostrou (…/?token=…).')
   }
 

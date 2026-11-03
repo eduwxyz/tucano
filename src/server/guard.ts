@@ -103,3 +103,21 @@ export class Strikes {
     this.hits.delete(key)
   }
 }
+
+// The cookie that signs a browser in. HttpOnly, and Lax: not Strict, because the link that signs in is often
+// clicked from elsewhere (a chat) and a Strict cookie wouldn't ride the redirect that follows.
+export const sessionCookie = (name: string, value: string, maxAgeSeconds: number, secure: boolean): string =>
+  `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}${secure ? '; Secure' : ''}`
+
+// The same cookie with nothing in it and no time left: the browser drops it. Sent with the 401 for a cookie that
+// opens nothing any more, so a page left open stops sending it, and stops being counted as a wrong guess.
+export const clearedCookie = (name: string, secure: boolean): string => sessionCookie(name, '', 0, secure)
+
+// One cookie by name out of the Cookie header; an empty one is none.
+export function cookieValue(header: string | undefined, name: string): string | undefined {
+  for (const part of (header ?? '').split(';')) {
+    const at = part.indexOf('=')
+    if (at > 0 && part.slice(0, at).trim() === name) return part.slice(at + 1).trim() || undefined
+  }
+  return undefined
+}

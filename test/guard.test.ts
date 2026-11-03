@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clientKey, decodePart, parseJson, parseOrigins, sameOrigin, Strikes } from '../src/server/guard'
+import { clearedCookie, clientKey, cookieValue, decodePart, parseJson, parseOrigins, sameOrigin, sessionCookie, Strikes } from '../src/server/guard'
 
 describe('what a client sends that would throw', () => {
   it('reads JSON, also a body that is only null or false', () => {
@@ -101,5 +101,30 @@ describe('too many wrong tokens', () => {
     for (let i = 0; i <= 10_000; i++) s.fail(`k${i}`)
     expect(s.retryAfter('k0')).toBe(0) // the oldest was dropped
     expect(s.retryAfter('k10000')).toBeGreaterThan(0)
+  })
+})
+
+describe('the cookie', () => {
+  it('signs a browser in: HttpOnly, Lax, the whole site, Secure when asked', () => {
+    expect(sessionCookie('tucano', 'abc', 60, false)).toBe('tucano=abc; HttpOnly; SameSite=Lax; Path=/; Max-Age=60')
+    expect(sessionCookie('tucano', 'abc', 60, true)).toBe('tucano=abc; HttpOnly; SameSite=Lax; Path=/; Max-Age=60; Secure')
+  })
+
+  it('is taken back with nothing in it and no time left', () => {
+    expect(clearedCookie('tucano', false)).toBe('tucano=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0')
+    expect(clearedCookie('tucano', true)).toBe('tucano=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; Secure')
+  })
+
+  it('is read by its name among the others, and only by its whole name', () => {
+    expect(cookieValue('a=1; tucano=tok; b=2', 'tucano')).toBe('tok')
+    expect(cookieValue('tucano=tok', 'tucano')).toBe('tok')
+    expect(cookieValue('xtucano=1; tucano-2=z', 'tucano')).toBeUndefined()
+    expect(cookieValue('tucano-2=z', 'tucano-2')).toBe('z')
+  })
+
+  it('is none when it is empty or the header is not there', () => {
+    expect(cookieValue('tucano=', 'tucano')).toBeUndefined()
+    expect(cookieValue('', 'tucano')).toBeUndefined()
+    expect(cookieValue(undefined, 'tucano')).toBeUndefined()
   })
 })
