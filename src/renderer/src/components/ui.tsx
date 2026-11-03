@@ -140,6 +140,25 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }): Re
   )
 }
 
+// Copy button with a temporary check mark feedback after copying.
+export function CopyButton({ value, label = false, size = 14, onCopied }: { value: string; label?: boolean; size?: number; onCopied?: () => void }): ReactNode {
+  const [checked, setChecked] = useState(false)
+  const handleClick = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setChecked(true)
+      onCopied?.()
+      setTimeout(() => setChecked(false), 700)
+    } catch {}
+  }
+  return (
+    <button className="btn btn--sm btn--ghost" onClick={handleClick} title={L('Copiar', 'Copy')} aria-label={label ? L('Copiar', 'Copy') : undefined}>
+      {checked ? <Icon name="check" size={size} /> : <Icon name="copy" size={size} />}
+      {label && <span className="small">{checked ? L('Copiado!', 'Copied!') : L('Copiar', 'Copy')}</span>}
+    </button>
+  )
+}
+
 // The Tuca wears the app's own toucan: he belongs to the app, not to the team.
 export function TucaMark({ size = 32 }: { size?: number }): ReactNode {
   return (

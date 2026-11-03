@@ -231,7 +231,7 @@ export class Telegram {
 
   private async send(text: string, extra: Record<string, unknown> = {}): Promise<number | undefined> {
     if (!this.chat) return undefined
-    const r = (await this.api('sendMessage', { chat_id: this.chat.id, text: clip(text), ...extra }).catch((e: unknown) => console.error('[telegram]', e))) as { message_id?: number } | undefined
+    const r = (await this.api('sendMessage', { chat_id: this.chat.id, text: clip(toPlainText(text)), ...extra }).catch((e: unknown) => console.error('[telegram]', e))) as { message_id?: number } | undefined
     return r?.message_id
   }
 
@@ -286,3 +286,17 @@ function approvalText(ap: Approval): string {
 }
 
 const clip = (s: string): string => (s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}…` : s)
+
+// Strip inline markdown formatting for clean Telegram plain-text delivery.
+// Keeps line breaks, list indentation and code-block separation intact.
+function toPlainText(s: string): string {
+  return s
+    // fenced code blocks: ```lang → ---lang, closing ``` → ---
+    .replace(/```(\w*)/g, '---$1')
+    .replace(/^```\s*$/gm, '---')
+    // **bold** and *italic* → text
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    // `inline code` → text
+    .replace(/`([^`]+)`/g, '$1')
+}
