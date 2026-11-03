@@ -1,7 +1,18 @@
-import { connect, createServer, type Server, type Socket } from 'node:net'
+import { connect, createServer, isIP, type Server, type Socket } from 'node:net'
 
 // A private address: a home or office network, or Tailscale's 100.64.0.0/10.
-export const isPrivate = (host: string): boolean => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host)
+export const isPrivate = (host: string): boolean => isIP(host) === 4 && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host)
+
+// Binding Tucano itself never grants access to an agent's unauthenticated ports.
+// The listener, browser bridge and frame policy all use this separate opt-in.
+export function serviceAccess(host: string, optIn?: string): { enabled: boolean; previewHost: string | null; frameSrc: string } {
+  const enabled = optIn === '1' && isPrivate(host)
+  return {
+    enabled,
+    previewHost: enabled ? host : null,
+    frameSrc: `frame-src 'self' tucano:${enabled ? ` http://${host}:*` : ''}`
+  }
+}
 
 // Passes ports of the server's own loopback through at another of its addresses,
 // as plain TCP (pages, their scripts, websockets alike), and stops when told.

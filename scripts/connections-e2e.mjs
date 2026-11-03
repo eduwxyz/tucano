@@ -1,4 +1,8 @@
 // Renderer-only desktop connection UX regression. No real server, SSH or tokens.
+// Screenshots are the actual rendered UI with synthetic demo profiles, never a real
+// user VPS or proof of a live connection. Label them as demo fixtures in PR/docs.
+// CONNECTIONS_SCREENSHOT preserves the offline image path and also writes sibling
+// -connected.png and -pairing.png images for the multi-environment and add views.
 // Run: npm run build && node scripts/connections-e2e.mjs
 // Install a Playwright Chromium first, or set CHROMIUM_PATH to a local executable.
 import { chromium } from 'playwright'
@@ -6,7 +10,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { mkdir, readFile, stat } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { dirname, extname, resolve, sep } from 'node:path'
+import { dirname, extname, parse, resolve, sep } from 'node:path'
 
 const root = fileURLToPath(new URL('../out/renderer/', import.meta.url))
 await stat(resolve(root, 'index.html'))
@@ -25,14 +29,23 @@ let browser
 try {
   browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) })
   const page = await browser.newPage({ viewport: { width: 1100, height: 850 } })
+  const screenshot = async (view, target = page) => {
+    const output = process.env.CONNECTIONS_SCREENSHOT
+    if (!output) return
+    const { dir, name } = parse(output)
+    const path = view === 'offline' ? output : resolve(dir || '.', `${name}-${view}.png`)
+    await mkdir(dirname(path), { recursive: true })
+    await page.evaluate(async () => { await document.fonts.ready })
+    await target.screenshot({ path, animations: 'disabled' })
+  }
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(() => {
     window.mockState = {
       active: 'prod',
       profiles: [
-        { id: 'prod', name: 'Production', reach: { via: 'ssh', user: 'me', host: 'example.com', port: 22 }, remotePort: 7337 },
-        { id: 'dev', name: 'Development', reach: { via: 'url', url: 'https://dev.example.com' }, remotePort: 7337 }
+        { id: 'prod', name: 'Pessoal (exemplo)', reach: { via: 'ssh', user: 'me', host: 'example.com', port: 22 }, remotePort: 7337 },
+        { id: 'dev', name: 'Trabalho (exemplo)', reach: { via: 'url', url: 'https://dev.example.com' }, remotePort: 7337 }
       ],
       status: 'error', error: 'secret=DO-NOT-ECHO',
       pairLink: 'tucano://pair?v=1&code=K7QM-2XPD-9TWH&ssh=me@example.com&name=NewVPS'
@@ -74,10 +87,27 @@ try {
   assert.equal(await page.locator('[data-connection-id]').count(), 2)
   assert.equal(await page.locator('[data-connection-id="prod"].is-selected').count(), 1)
   assert.ok(!(await page.locator('body').innerText()).includes('DO-NOT-ECHO'), 'Native exceptions must be redacted')
-  if (process.env.CONNECTIONS_SCREENSHOT) {
-    await mkdir(dirname(process.env.CONNECTIONS_SCREENSHOT), { recursive: true })
-    await page.screenshot({ path: process.env.CONNECTIONS_SCREENSHOT })
+  await screenshot('offline')
+  // Specific security failures must retain actionable guidance, not become generic
+  // network/expired-code errors just because the native message says "pair again".
+  for (const [message, expected] of [
+    ['Server identity changed. Verify the VPS and pair again.', 'A identidade deste servidor mudou.'],
+    ['Cannot verify this server identity. Update the VPS server.', 'Não foi possível verificar a identidade do servidor.'],
+    ['Secure storage is unavailable. Unlock the system keychain and pair again.', 'O armazenamento seguro está indisponível ou bloqueado.'],
+    ['This saved server uses plaintext HTTP outside localhost. Configure HTTPS (including Tailscale Serve) and pair again.', 'Esta conexão salva precisa de HTTPS, inclusive no Tailscale.']
+  ]) {
+    await page.evaluate((message) => {
+      window.mockState = { ...window.mockState, error: `${message} secret=DO-NOT-ECHO` }
+      for (const handler of window.handlers) handler(window.mockState)
+    }, message)
+    await page.getByRole('alert').filter({ hasText: expected }).waitFor()
+    assert.ok(!(await page.locator('body').innerText()).includes('DO-NOT-ECHO'), 'Security error guidance must never echo native secrets')
   }
+  await page.evaluate(() => {
+    window.mockState = { ...window.mockState, error: 'Network unavailable' }
+    for (const handler of window.handlers) handler(window.mockState)
+  })
+  await page.getByRole('alert').filter({ hasText: 'Não foi possível conectar.' }).waitFor()
   const form = page.locator('.connection-form')
   const submit = form.locator('button[type=submit]')
   await form.locator('input[type=password]').fill('invalid-link')
@@ -87,6 +117,8 @@ try {
   await form.locator('input[type=password]').fill('K7QM-2XPD-9TWH')
   await form.getByLabel('Nome do ambiente (opcional)', { exact: true }).fill('Staging')
   assert.equal(await submit.isEnabled(), true)
+  // Synthetic code remains masked by the real password field; nothing contacts a VPS.
+  await screenshot('pairing', form)
   await submit.click()
   await page.keyboard.press('Escape')
   await page.locator('.connection-switch').click()
@@ -106,6 +138,9 @@ try {
   await dev.getByRole('button', { name: 'Conectar', exact: true }).click()
   await page.waitForFunction(() => window.mockState.active === 'dev')
   assert.equal(await dev.locator('.connection-selected').count(), 1)
+  // Reset the dialog scroll so both demo environments and the active badge are visible.
+  await page.locator('dialog').evaluate((dialog) => { dialog.scrollTop = 0 })
+  await screenshot('connected')
   await dev.getByRole('button', { name: 'Renomear', exact: true }).click()
   await dev.getByLabel('Nome do ambiente', { exact: true }).fill('Sandbox')
   await dev.getByRole('button', { name: 'Salvar nome', exact: true }).click()
@@ -130,7 +165,11 @@ try {
   await form.locator('input[type=password]').fill('K7QM-2XPD-9TWH')
   assert.equal(await submit.isDisabled(), true)
   await form.locator('input').nth(0).fill('http://100.64.1.2:7337')
+  assert.equal(await submit.isDisabled(), true, 'Tailscale direct URLs also require HTTPS')
+  await form.locator('input').nth(0).fill('https://demo.example.ts.net')
   assert.equal(await submit.isEnabled(), true)
+  await form.locator('input').nth(0).fill('http://127.0.0.1:7337')
+  assert.equal(await submit.isEnabled(), true, 'Loopback HTTP remains permitted')
   const close = page.getByRole('button', { name: 'Fechar', exact: true })
   await submit.focus()
   await page.keyboard.press('Tab')

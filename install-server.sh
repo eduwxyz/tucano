@@ -57,7 +57,7 @@ Usage: sh install-server.sh [options]
   --label NAME     a name for the device the first pairing code is for (default: My computer)
   --host ADDRESS   the address your computer reaches this machine at over SSH (host, or host:port); default: the
                    address you are logged in at now, when this runs over SSH
-  --url ADDRESS    HTTPS or Tailscale URL for direct pairing (instead of --host); does not configure a proxy
+  --url ADDRESS    HTTPS URL (including Tailscale Serve) for direct pairing (instead of --host); does not configure a proxy
   --port N         the port the server listens on, on this machine only (default: 7337)
   --pair           make a pairing code even on an update
   --no-pair        don't make one on a first install
@@ -505,7 +505,7 @@ if [ -n "$PAIR" ]; then
   if [ -n "$URL_GIVEN" ]; then
     say "No navegador:" "In a browser:"
     echo "  ${URL_GIVEN%/}/?pair=$CODE"
-    say "Configure HTTPS/proxy ou Tailscale separadamente; o serviço continua em 127.0.0.1." "Configure HTTPS/proxy or Tailscale separately; the service still listens on 127.0.0.1."
+    say "Configure um proxy HTTPS ou Tailscale Serve HTTPS separadamente; o serviço continua em 127.0.0.1." "Configure an HTTPS proxy or Tailscale Serve HTTPS separately; the service still listens on 127.0.0.1."
   else
   say "Ou, sem o app, em um navegador: abra um túnel SSH até este servidor e abra o link:" "Or, without the app, in a browser: open an SSH tunnel to this server, then open the link:"
   echo

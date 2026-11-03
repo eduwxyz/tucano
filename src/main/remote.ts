@@ -10,7 +10,7 @@ export type Tunnel = { origin: string; close(): void; onClose(listener: () => vo
 type SshReach = Extract<Reach, { via: 'ssh' }>
 export function sshArgs(reach: SshReach, remotePort: number, localPort: number): string[] {
   if (!validReach(reach) || ![remotePort, localPort].every(p => Number.isInteger(p) && p > 0 && p <= 65535)) throw new Error('Invalid SSH destination.')
-  return ['-F', process.platform === 'win32' ? 'NUL' : '/dev/null', '-N', '-T',
+  return ['-F', process.platform === 'win32' ? 'NUL' : '/dev/null', '-N', '-T', '-v',
     '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ExitOnForwardFailure=yes',
     '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
     '-o', 'ForwardAgent=no', '-o', 'PermitLocalCommand=no', '-o', 'ProxyCommand=none',
@@ -40,10 +40,26 @@ export async function openSshTunnel(reach: SshReach, remotePort: number, signal?
   const port = await freePort()
   if (signal?.aborted) throw new Error('Connection cancelled.')
   const child = spawn('ssh', sshArgs(reach, remotePort, port), { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, shell: false })
-  let stderr = '', stopped = false
+  let stderr = '', pendingLine = '', stopped = false, processExited = false, expectedListener = false, listenerReady = false
   const listeners = new Set<() => void>()
   const close = (): void => { if (!stopped) { stopped = true; child.kill(); } }
-  child.stderr.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-8192) })
+  child.stderr.on('data', chunk => {
+    stderr = (stderr + String(chunk)).slice(-8192)
+    pendingLine += String(chunk)
+    let newline: number
+    while ((newline = pendingLine.indexOf('\n')) >= 0) {
+      const line = pendingLine.slice(0, newline).replace(/\r$/, '')
+      pendingLine = pendingLine.slice(newline + 1)
+      // OpenSSH prints 'Local forwarding listening' BEFORE bind/listen. Only the
+      // subsequent channel_new diagnostic proves that this process owns a listener.
+      // Accept old/new portable and Windows OpenSSH formats; unknown formats fail closed.
+      if (line === `debug1: Local forwarding listening on 127.0.0.1 port ${port}.`) expectedListener = true
+      else if (expectedListener && /^debug1: channel \d+: new (?:port-listener )?\[port listener\](?: \(inactive timeout: \d+(?:\.\d+)?\))?$/.test(line)) listenerReady = true
+      else if (/^(?:bind |listen |debug1: Local forwarding listening)/.test(line)) expectedListener = false
+    }
+    if (pendingLine.length > 8192) pendingLine = ''
+  })
+  child.once('exit', () => { processExited = true })
   signal?.addEventListener('abort', close, { once: true })
   child.once('close', () => { stopped = true; signal?.removeEventListener('abort', close); for (const listener of listeners) listener() })
   return new Promise((resolve, reject) => {
@@ -59,12 +75,13 @@ export async function openSshTunnel(reach: SshReach, remotePort: number, signal?
     const exited = (): void => finish(new Error(signal?.aborted ? 'Connection cancelled.' : sshError(stderr)))
     child.once('error', failed); child.once('exit', exited)
     const poll = setInterval(() => {
+      if (!listenerReady || stopped || processExited) return
       const socket = createConnection({ host: '127.0.0.1', port })
       socket.setTimeout(200)
-      socket.once('connect', () => { socket.destroy(); if (!stopped) finish() })
+      socket.once('connect', () => { socket.destroy(); if (listenerReady && !stopped && !processExited && child.exitCode == null && child.signalCode == null) finish() })
       socket.once('error', () => socket.destroy()); socket.once('timeout', () => socket.destroy())
     }, 100)
-    const timeout = setTimeout(() => finish(new Error('SSH connection timed out. Check the network and try connecting in Terminal.')), 20_000)
+    const timeout = setTimeout(() => finish(new Error('SSH tunnel readiness timed out. Check the network and use a supported OpenSSH client; try connecting in Terminal.')), 20_000)
   })
 }
 

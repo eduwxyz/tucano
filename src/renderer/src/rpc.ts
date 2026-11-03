@@ -24,6 +24,7 @@ declare global {
     tucano: {
       remote?: RemoteApi
       remoteMode?: boolean
+      servicePreviews?: boolean
       clientPlatform?: 'mac' | 'windows' | 'linux'
       connect: () => void
       pickFolder: () => Promise<string | null>

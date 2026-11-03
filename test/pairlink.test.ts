@@ -60,11 +60,13 @@ describe('an ssh address', () => {
 })
 
 describe('a server address', () => {
-  it('takes https anywhere, and http only on this machine or on Tailscale', () => {
+  it('takes https anywhere, including Tailscale, and http only on loopback', () => {
     expect(parseServerUrl('https://tucano.example.com')).toBe('https://tucano.example.com')
     expect(parseServerUrl('https://tucano.example.com:8443/')).toBe('https://tucano.example.com:8443')
-    expect(parseServerUrl('http://100.101.102.103:7337')).toBe('http://100.101.102.103:7337')
-    expect(parseServerUrl('http://vps.tail1234.ts.net:7337')).toBe('http://vps.tail1234.ts.net:7337')
+    expect(parseServerUrl('https://100.101.102.103:7337')).toBe('https://100.101.102.103:7337')
+    expect(parseServerUrl('https://vps.tail1234.ts.net')).toBe('https://vps.tail1234.ts.net')
+    expect(parseServerUrl('http://localhost:7337')).toBe('http://localhost:7337')
+    expect(parseServerUrl('http://127.24.5.6:7337')).toBe('http://127.24.5.6:7337')
     expect(parseServerUrl('http://127.0.0.1:17337')).toBe('http://127.0.0.1:17337')
     expect(parseServerUrl('http://[::1]:7337')).toBe('http://[::1]:7337')
   })
@@ -75,6 +77,12 @@ describe('a server address', () => {
       'http://203.0.113.7:7337',
       'http://192.168.1.10:7337',
       'http://10.0.0.5:7337',
+      'http://100.64.0.1:7337',
+      'http://100.101.102.103:7337',
+      'http://100.127.255.254:7337',
+      'http://vps.tail1234.ts.net:7337',
+      'http://[fd7a:115c:a1e0::1]:7337',
+      'http://localhost.evil.com',
       'http://100.63.0.1:7337', // just below Tailscale's range
       'http://100.128.0.1:7337', // just above it
       'http://127.0.0.1.evil.com',
@@ -95,6 +103,11 @@ describe('a server address', () => {
 })
 
 describe('a pairing link', () => {
+  it('refuses plaintext Tailscale URLs in incoming pairing links', () => {
+    for (const url of ['http://100.64.1.2:7337', 'http://vps.tail1234.ts.net:7337', 'http://[fd7a:115c:a1e0::1]:7337'])
+      expect(refused(link('&url=' + encodeURIComponent(url)))).toContain('http on localhost only')
+  })
+
   it('carries the code, the way in and a name', () => {
     expect(ok(link('&ssh=julio@203.0.113.7&name=My%20VPS'))).toEqual({
       code: CODE,

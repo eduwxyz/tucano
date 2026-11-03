@@ -11,7 +11,7 @@
 
 export type Reach =
   | { via: 'ssh'; user: string; host: string; port: number } // an SSH tunnel to the server's own loopback
-  | { via: 'url'; url: string } // an address reached as it is: Tailscale, or HTTPS (a proxy, a tunnel)
+  | { via: 'url'; url: string } // an address reached as it is: HTTPS (including Tailscale Serve), or local loopback
 
 export type PairLink = { code: string; reach: Reach; remotePort: number; name: string }
 export type Parsed = { ok: true; link: PairLink } | { ok: false; error: string }
@@ -45,16 +45,13 @@ export function parseSshTarget(text: string): Extract<Reach, { via: 'ssh' }> | u
   return p === undefined ? undefined : { via: 'ssh', user, host, port: p }
 }
 
-// Plain http only where the road is private already: this machine, or a Tailscale address (WireGuard
-// carries it). Anywhere else the token would cross the internet or a LAN in the clear, so it is https.
-function tailnet(hostname: string): boolean {
+// A private-looking address does not prove an encrypted route. Direct connections always
+// need TLS, including Tailscale/CGNAT addresses. HTTP is only for this machine's loopback
+// (also where a managed SSH tunnel terminates).
+function loopback(hostname: string): boolean {
   const h = hostname.toLowerCase()
-  if (h === 'localhost' || h === '[::1]' || h.endsWith('.ts.net')) return true
-  if (h.startsWith('[fd7a:115c:a1e0:')) return true
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(h)
-  if (!v4) return false
-  const [a, b] = [Number(v4[1]), Number(v4[2])]
-  return a === 127 || (a === 100 && b >= 64 && b <= 127)
+  if (h === 'localhost' || h === '[::1]') return true
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
 }
 
 export function parseServerUrl(text: string): string | undefined {
@@ -65,7 +62,7 @@ export function parseServerUrl(text: string): string | undefined {
     return undefined
   }
   if (u.username || u.password || u.search || u.hash || u.pathname !== '/') return undefined
-  if (u.protocol === 'https:' || (u.protocol === 'http:' && tailnet(u.hostname))) return u.origin
+  if (u.protocol === 'https:' || (u.protocol === 'http:' && loopback(u.hostname))) return u.origin
   return undefined
 }
 
@@ -97,7 +94,7 @@ export function parsePairLink(text: string): Parsed {
     const origin = parseServerUrl(url)
     reach = origin ? { via: 'url', url: origin } : undefined
   }
-  if (!reach) return bad(ssh !== null ? 'the ssh address is not valid (user@host or user@host:port)' : 'the address is not valid (https, or http on Tailscale)')
+  if (!reach) return bad(ssh !== null ? 'the ssh address is not valid (user@host or user@host:port)' : 'the address is not valid (https, or http on localhost only)')
 
   const remotePort = port(q.get('port') ?? undefined, DEFAULT_PORT)
   if (remotePort === undefined) return bad('the port is not valid')

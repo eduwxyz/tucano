@@ -60,7 +60,7 @@ curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install-se
 
 `--url` only chooses the address in the pairing link. It does not create a proxy, open a firewall port, configure DNS, or change the loopback bind address. Configure and verify that route first. For an existing install, issue a new link with `tucano-server pair --label "My Mac" --url https://tucano.example.com`, or rerun the installer with `--pair --url …`. `--host` and `--url` are alternatives, not options to combine.
 
-For private Tailscale HTTP access, use the machine's Tailscale IP (for example `http://100.64.0.2:7337`), set `TUCANO_HOST` in a persistent service override as described below, and connect the Mac to that tailnet. Prefer Tailscale Serve HTTPS if available. Public HTTP URLs are not accepted by the Mac pairing flow.
+For Tailscale direct access, use Tailscale Serve HTTPS forwarding to `127.0.0.1:7337` and pair with the resulting `https://<machine>.<tailnet>.ts.net` URL. The Mac rejects all non-loopback HTTP URLs, including `100.64.0.0/10` and `*.ts.net`: an address alone does not prove an encrypted route.
 
 In the Mac app, open **Settings → Servers → Add**, paste the `tucano://pair` link, and confirm. The app exchanges the code for a separate device token. SSH mode uses your Mac's existing SSH access; direct mode uses the URL. To check or remove access, run `tucano-server devices` or `tucano-server revoke <id>`. See [pairing.md](pairing.md) for keychain storage, expiration and reconnect behavior.
 
@@ -91,7 +91,7 @@ loginctl show-user "$USER" -p Linger
 
 If there is no user session, install `dbus-user-session` on Debian/Ubuntu and log in over SSH again. An administrator can run `loginctl enable-linger tucano` so this user's service survives logout and starts at boot. `sudo -u` alone may not create a user session. The installer clears another user's inherited XDG/session-bus settings when invoked through a cross-user `sudo`; an ordinary SSH login is the simplest setup.
 
-If you deliberately customize service environment settings, use `systemctl --user edit tucano.service`. For example, to listen on your own Tailscale IP:
+If you deliberately customize service environment settings, use `systemctl --user edit tucano.service`. For example, a deployment with a separately secured network/proxy may explicitly bind its own Tailscale IP (this does not enable direct HTTP pairing in the Mac app):
 
 ```ini
 [Service]
@@ -99,6 +99,8 @@ Environment="TUCANO_HOST=100.64.0.2"
 ```
 
 Then run `systemctl --user daemon-reload && systemctl --user restart tucano.service`. Replace the example with the server's actual address. Drop-in overrides survive installer updates. Do not set a public bind address without a secure access plan.
+
+Changing `TUCANO_HOST` only changes where Tucano listens. It does **not** forward agents' service ports. That requires a separate opt-in described under [Agent service previews](#agent-service-previews).
 
 For a manual binary rollback, inspect `ls ~/.local/share/tucano-server/versions`, point `current` at the retained release, and restart the service:
 
@@ -149,7 +151,7 @@ Codex is signed in from Tucano's **Settings › Models**, like on a desktop. On 
 By default the server only listens on the server itself (`127.0.0.1`), because anyone who has the token controls your agents. Pick one of these ways to reach it:
 
 - **SSH tunnel**, the simplest: run `ssh -L 7337:127.0.0.1:7337 you@your-server`, then open the pairing link on your computer (or pair the Mac app: [pairing.md](pairing.md)).
-- **Tailscale** (or another private network): set `TUCANO_HOST` to the server's Tailscale address, then open `http://<that address>:7337/?pair=<code>` (a code from `pair`) from any of your devices, including your phone.
+- **Tailscale Serve HTTPS**: keep Tucano bound to `127.0.0.1`, expose it through Tailscale Serve with HTTPS, then pair using `https://<machine>.<tailnet>.ts.net`. Do not send pairing codes or tokens over plaintext HTTP to a tailnet address.
 - **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Turn off response buffering for `/events`, which is a live event stream. For example, with Caddy:
 
   ```
@@ -161,6 +163,20 @@ By default the server only listens on the server itself (`127.0.0.1`), because a
   ```
 
 Never expose port 7337 on a public address without HTTPS.
+
+### Agent service previews
+
+Agent-created pages and APIs listen on the server's own loopback. **Forwarding is off by default**, even when `TUCANO_HOST` is a private LAN or Tailscale address. Pairing with Tucano, enabling a VPS desktop, or forwarding Tucano's port over SSH does not forward those service ports.
+
+For a specific service, prefer a deliberate SSH tunnel, such as `ssh -L 5173:127.0.0.1:5173 you@your-server`, then open `http://127.0.0.1:5173` separately in your browser. Alternatively, configure and secure a separate HTTPS route for that service. Automatic embedded previews and **Open** are disabled in the server web app by default, including when its address is `localhost`: that address might only tunnel Tucano's control port. Remote Mac app previews remain disabled too. Native desktop-local previews are unchanged.
+
+For deployments that deliberately want to expose **all running agent services** on a private interface, set `TUCANO_FORWARD_SERVICES=1` separately alongside a specific private IPv4 `TUCANO_HOST`. Only RFC1918 and `100.64.0.0/10` addresses qualify. Wildcard, public, loopback, IPv6 and hostname binds never enable this forwarding, even with the flag set.
+
+**Warning:** these forwarded ports have no Tucano authentication or HTTPS. Anyone on the LAN/tailnet who can reach them can access the pages and APIs without pairing, and revoking a Tucano device does not revoke that network access. Restrict access with a separately managed firewall/tailnet policy and review the services before opting in. The server prints this warning at startup when forwarding is enabled. This setting changes neither Tucano's own token authentication nor its transport protections.
+
+With that explicit opt-in, the web app only enables automatic previews when opened over HTTP at the exact private bind IP. HTTPS proxy views, alternate hostnames and SSH-tunneled views do not automatically preview those plaintext ports. Do not weaken HTTPS for Tucano to obtain a preview; use a deliberate separate service URL instead.
+
+**Upgrade note:** private-address deployments that previously received automatic service forwarding now need this separate opt-in, or an explicit tunnel/HTTPS route. Remove the flag or set it to `0` and restart to disable automatic forwarding.
 
 ## Keeping it running
 
@@ -197,6 +213,7 @@ To update a source install, run `git pull && npm ci && npm run build && sudo sys
 |---|---|---|
 | `TUCANO_DATA` | `~/.tucano-server` | Where everything is kept: database, memory, agents' files, the key and the token |
 | `TUCANO_HOST` | `127.0.0.1` | The address to listen on |
+| `TUCANO_FORWARD_SERVICES` | `0` (off) | `1` explicitly exposes all running agent service ports on a specific private IPv4 bind address, without Tucano authentication or HTTPS; see [Agent service previews](#agent-service-previews) |
 | `TUCANO_PORT` | `7337` | |
 | `TUCANO_TOKEN` | a random token, kept in `server-token` | Set it to use a token of your own |
 
@@ -206,7 +223,7 @@ To update a source install, run `git pull && npm ci && npm run build && sudo sys
 - **Secrets** (connector keys, Telegram, GitHub) are encrypted with AES-256-GCM. The key is in `server.key` in the data folder, and only your user can read that file. A desktop app keeps that key in the system's keychain instead. Back the key up together with the data folder: the secrets can't be read without it.
 - **Notifications:** connect Telegram (**Settings › Phone and GitHub**) to get approvals, questions and results on your phone. The browser doesn't pop up notifications.
 - **Agents' browsers** need Chromium or Chrome on the server, and run without a window. **Take over** doesn't open a window there: the live picture of the browser in the panel becomes the browser. Click on it, type, paste and scroll, then click **Hand back**. This is how you sign in to a site for an agent.
-- **Pages agents serve** (a dashboard, an API) listen on the server's own `127.0.0.1`. Agents take their screenshots with the server's Chrome. When Tucano listens on a private address (Tailscale or a home network), it also passes each running page through on the same port at that address, so the preview panel and **Open** work from your computer. That doesn't happen on a public address, because those pages have no token. Over an SSH tunnel, forward the page's port too (`-L 5173:127.0.0.1:5173`).
+- **Pages agents serve** (a dashboard, an API) listen on the server's own `127.0.0.1`. Agents take their screenshots with the server's Chrome. They are not automatically exposed on the LAN/tailnet. Use a deliberate service tunnel or HTTPS route; forwarding all services requires the separate, unauthenticated-access opt-in described in [Agent service previews](#agent-service-previews).
 - **Choosing a folder** asks for its path on the server, since the browser can't browse the server's disk.
 - **No self-update.** Update by running the install script again, or with `git pull` (see above).
 - **One Tucano per data folder.** Don't run the desktop app and the server on the same data folder at the same time.

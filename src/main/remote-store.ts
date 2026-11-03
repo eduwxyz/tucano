@@ -30,6 +30,22 @@ export function validProfile(p: SavedRemote): boolean {
     !!p.device && typeof p.device.id === 'string' && typeof p.device.label === 'string' &&
     Number.isFinite(p.device.created) && Number.isFinite(p.device.seen) && Number.isFinite(p.days) && p.days > 0
 }
+// Older releases accepted plaintext Tailscale-looking URLs. Retain their metadata so
+// users can rename/forget them without making unrelated safe profiles unreadable.
+// This exception is ONLY for reading metadata, never connecting or unlocking tokens.
+function validStoredProfile(p: SavedRemote): boolean {
+  if (validProfile(p)) return true
+  if (!p || p.reach?.via !== 'url' || typeof p.reach.url !== 'string') return false
+  let url: URL
+  try { url = new URL(p.reach.url) } catch { return false }
+  if (url.protocol !== 'http:' || url.origin !== p.reach.url || url.username || url.password || url.search || url.hash || url.pathname !== '/') return false
+  const host = url.hostname.toLowerCase()
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host)
+  const formerlyAllowed = host.endsWith('.ts.net') || host.startsWith('[fd7a:115c:a1e0:') ||
+    (!!v4 && Number(v4[1]) === 100 && Number(v4[2]) >= 64 && Number(v4[2]) <= 127)
+  return formerlyAllowed && validProfile({ ...p, reach: { via: 'url', url: 'https://legacy.invalid' } })
+}
+
 function clean(p: SavedRemote): SavedRemote {
   const reach: Reach = p.reach.via === 'url' ? { via: 'url', url: p.reach.url } : { via: 'ssh', user: p.reach.user, host: p.reach.host, port: p.reach.port }
   return { id: p.id, name: p.name, reach, remotePort: p.remotePort, server: p.server, days: p.days,
@@ -49,7 +65,7 @@ export class RemoteStore {
     }
     try {
       const value = JSON.parse(data)
-      if (value.version !== 1 || !Array.isArray(value.entries) || !value.entries.every((e: Entry) => validProfile(e.profile) && typeof e.encrypted === 'string')) throw new Error()
+      if (value.version !== 1 || !Array.isArray(value.entries) || !value.entries.every((e: Entry) => validStoredProfile(e.profile) && typeof e.encrypted === 'string')) throw new Error()
       return value.entries.map((e: Entry) => ({ profile: clean(e.profile), encrypted: e.encrypted }))
     } catch { throw new Error('Saved servers are unreadable. Restore the file from a backup or pair again.') }
   }
@@ -57,6 +73,7 @@ export class RemoteStore {
   get(id: string): { profile: SavedRemote; token: string } | undefined {
     const entry = this.read().find(e => e.profile.id === id)
     if (!entry) return undefined
+    if (!validProfile(entry.profile)) throw new Error('This saved server uses plaintext HTTP outside localhost. Configure HTTPS (including Tailscale Serve) and pair again, or forget this connection. No token was unlocked or sent.')
     this.available()
     try { return { profile: entry.profile, token: this.secrets.decryptString(Buffer.from(entry.encrypted, 'base64')) } }
     catch { throw new Error('Cannot unlock this server token. Unlock the system keychain or pair again.') }

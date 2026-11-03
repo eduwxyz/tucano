@@ -823,6 +823,7 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
 // What the agent left running (servers, dashboards), on its computer or on the Mac.
 function Services({ agentId }: { agentId: string }): ReactNode {
   const info = useStore((s) => computerOf(s, agentId))
+  const previewUnavailable = !!window.tucano.remoteMode || window.tucano.servicePreviews === false
   return (
     <>
       {info && info.services.length > 0 && (
@@ -835,7 +836,7 @@ function Services({ agentId }: { agentId: string }): ReactNode {
               </span>
               {svc.running && svc.url && (
                 <>
-                  <button className="btn btn--sm btn--ghost" disabled={!!window.tucano.remoteMode} title={window.tucano.remoteMode ? L('Encaminhe esta porta da VPS por SSH para abrir a página.', 'Forward this VPS port over SSH to open its page.') : undefined} onClick={() => openExternal(reachable(svc.url!))}>
+                  <button className="btn btn--sm btn--ghost" disabled={previewUnavailable} title={previewUnavailable ? L('Encaminhe esta porta do servidor por SSH ou configure uma URL HTTPS e abra a página separadamente.', 'Forward this server port over SSH or configure an HTTPS URL, then open its page separately.') : undefined} onClick={() => openExternal(reachable(svc.url!))}>
                     {L('Abrir', 'Open')}
                   </button>
                   <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, svc.name)}>

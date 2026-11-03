@@ -22,7 +22,7 @@ it('owns the SSH process, binds only loopback, and terminates the tunnel on disc
   mocked.spawn.mockImplementation((_exe, args) => {
     const forward = args[args.indexOf('-L') + 1]
     const port = Number(forward.split(':')[1])
-    const server = createServer(s => s.destroy()); servers.push(server); server.listen(port, '127.0.0.1')
+    const server = createServer(s => s.destroy()); servers.push(server); server.listen(port, '127.0.0.1', () => child.stderr.write(`debug1: Local forwarding listening on 127.0.0.1 port ${port}.\r\ndebug1: channel 0: new port-listener [port listener] (inactive timeout: 0)\r\n`))
     return child
   })
   const tunnel = await openSshTunnel(reach, 7337)
@@ -47,4 +47,54 @@ it('cancels a pending SSH startup and kills its child', async () => {
   controller.abort()
   await expect(pending).rejects.toThrow('cancelled')
   expect(child.kill).toHaveBeenCalledTimes(1)
+})
+
+it('does not consider an accepting TCP port ready without the SSH post-listen diagnostic', async () => {
+  const child = processFixture(), controller = new AbortController()
+  let port = 0
+  mocked.spawn.mockImplementation((_exe, args) => {
+    port = Number(args[args.indexOf('-L') + 1].split(':')[1])
+    const server = createServer(s => s.destroy()); servers.push(server); server.listen(port, '127.0.0.1')
+    return child
+  })
+  let resolved = false
+  const pending = openSshTunnel(reach, 7337, controller.signal).then(tunnel => { resolved = true; return tunnel })
+  const failure = expect(pending).rejects.toThrow('cancelled')
+  await vi.waitFor(() => expect(mocked.spawn).toHaveBeenCalled())
+  // This diagnostic is pre-bind in OpenSSH; it is not enough by itself.
+  child.stderr.write(`debug1: Local forwarding listening on 127.0.0.1 port ${port}.\n`)
+  await new Promise(resolve => setTimeout(resolve, 250))
+  expect(resolved).toBe(false)
+  controller.abort(); await failure
+})
+it('requires the matching port and supports chunked older OpenSSH readiness output', async () => {
+  const child = processFixture()
+  let port = 0
+  mocked.spawn.mockImplementation((_exe, args) => {
+    port = Number(args[args.indexOf('-L') + 1].split(':')[1])
+    const server = createServer(s => s.destroy()); servers.push(server); server.listen(port, '127.0.0.1')
+    return child
+  })
+  let resolved = false
+  const pending = openSshTunnel(reach, 7337).then(tunnel => { resolved = true; return tunnel })
+  await vi.waitFor(() => expect(mocked.spawn).toHaveBeenCalled())
+  child.stderr.write('debug1: Local forwarding listening on 127.0.0.1 port 1.\ndebug1: channel 0: new [port listener]\n')
+  await new Promise(resolve => setTimeout(resolve, 150)); expect(resolved).toBe(false)
+  child.stderr.write(`debug1: Local forwarding listening on 127.0.0.1 port ${port}.\ndebug1: channel 0: new [port lis`)
+  await new Promise(resolve => setTimeout(resolve, 150)); expect(resolved).toBe(false)
+  child.stderr.write('tener]\n')
+  const tunnel = await pending; tunnel.close()
+})
+it('rejects an SSH process exiting before readiness despite an accepting TCP port', async () => {
+  const child = processFixture()
+  mocked.spawn.mockImplementation((_exe, args) => {
+    const port = Number(args[args.indexOf('-L') + 1].split(':')[1])
+    const server = createServer(s => s.destroy()); servers.push(server)
+    server.listen(port, '127.0.0.1', () => {
+      child.stderr.write(`debug1: Local forwarding listening on 127.0.0.1 port ${port}.\ndebug1: channel 0: new [port listener]\n`)
+      child.emit('exit', 255)
+    })
+    return child
+  })
+  await expect(openSshTunnel(reach, 7337)).rejects.toThrow('SSH connection failed')
 })

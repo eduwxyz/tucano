@@ -20,10 +20,11 @@ import { homedir } from 'node:os'
 import { extname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { cli } from './cli'
-import { Forwarder, isPrivate } from './forward'
+import { Forwarder, isPrivate, serviceAccess } from './forward'
 import { clearedCookie, clientKey, cookieValue, decodePart, parseJson, parseOrigins, sameOrigin, sessionCookie, Strikes } from './guard'
 import { cookieName, Pairing, pairRequest, SESSION_MS } from './pairing'
 import { vault } from './vault'
+import { webBridge, webPage } from './web'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
 const host = process.env['TUCANO_HOST'] || '127.0.0.1'
@@ -130,14 +131,12 @@ const origins = parseOrigins(process.env['TUCANO_ORIGINS'])
 const cookieSecure = process.env['TUCANO_COOKIE_SECURE'] === '1'
 const JSON_BODY = { 'content-type': 'application/json', 'cache-control': 'no-store' }
 
-// The pages agents serve (a dashboard, an API) listen on the server's own
-// loopback. On a private address (Tailscale, a home network) each running one
-// is passed through on the same port at the server's address, so the preview
-// panel can show it. Never on a public address: those pages have no token.
-const privateHost = isPrivate(host)
+// Agent pages have no Tucano authentication. Forwarding them needs a separate
+// opt-in even on a private address; changing the app's bind address is not enough.
+const services = serviceAccess(host, process.env['TUCANO_FORWARD_SERVICES'])
 const forwarder = new Forwarder(host)
 const forwardServices = (ports: Set<number>): void => {
-  if (privateHost) forwarder.set(new Set([...ports].filter((p) => p !== port)))
+  if (services.enabled) forwarder.set(new Set([...ports].filter((p) => p !== port)))
 }
 const servicePorts = new Map<string, number[]>() // by agent
 const loopbackPort = (url?: string): number | undefined => (url ? Number(/^http:\/\/127\.0\.0\.1:(\d+)/.exec(url)?.[1]) || undefined : undefined)
@@ -156,9 +155,7 @@ const watcher = new Port((msg) => {
 // The desktop page, told it's in a browser: the bridge script first, and its
 // policy letting it frame the agents' pages from this server.
 function index(): string {
-  return readFileSync(join(page, 'index.html'), 'utf8')
-    .replace('frame-src tucano:', `frame-src 'self' tucano:${privateHost ? ` http://${host}:*` : ''}`)
-    .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1" />\n    <script src="./tucano-web.js"></script>\n    <title>')
+  return webPage(readFileSync(join(page, 'index.html'), 'utf8'), services.frameSrc)
 }
 
 function body(req: IncomingMessage, max = 64 * 1024 * 1024): Promise<string> {
@@ -319,9 +316,16 @@ function route(req: IncomingMessage, res: ServerResponse, url: URL): void {
 }
 
 const server = createServer((req, res) => {
-  const url = new URL(req.url ?? '/', 'http://x')
   res.setHeader('x-content-type-options', 'nosniff')
   res.setHeader('referrer-policy', 'no-referrer')
+  // Node accepts absolute-form request targets too. Invalid authorities such as
+  // http://[ must only reject this request, never throw out of the HTTP handler.
+  let url: URL
+  try {
+    url = new URL(req.url ?? '/', 'http://x')
+  } catch {
+    return void res.writeHead(400).end('bad request')
+  }
   try {
     route(req, res, url)
   } catch {
@@ -331,41 +335,7 @@ const server = createServer((req, res) => {
 
 // window.tucano for a browser: the core's port comes from the event stream and
 // the requests go up by POST; what only the desktop does is left out quietly.
-const WEB = `(() => {
-  window.__TUCANO_WEB__ = true
-  let client = null
-  const connect = () => {
-    const ch = new MessageChannel()
-    const es = new EventSource('./events')
-    let opened = false
-    es.addEventListener('hello', (e) => {
-      if (opened) return location.reload() // a new connection after a drop: start fresh
-      opened = true
-      client = e.data
-      window.postMessage('core:port', '*', [ch.port1])
-    })
-    es.onmessage = (e) => ch.port2.postMessage(JSON.parse(e.data))
-    ch.port2.onmessage = (m) => {
-      fetch('./rpc?c=' + encodeURIComponent(client), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(m.data) }).then((r) => {
-        if (r.status === 410) location.reload()
-      })
-    }
-  }
-  window.tucano = {
-    connect,
-    pickFolder: async () => {
-      const p = prompt('Pasta no servidor (caminho completo) / Folder on the server (full path):')
-      return p && p.trim() ? p.trim() : null
-    },
-    onNavigate: () => {},
-    viewing: () => {},
-    updateState: async () => ({ version: '', status: 'off' }),
-    onUpdate: () => {},
-    checkUpdates: () => {},
-    installUpdate: () => {}
-  }
-})()
-`
+const WEB = webBridge(services.previewHost)
 
 process.env['TUCANO_DATA'] = dataDir
 process.env['TUCANO_PACKAGED'] = '1'
@@ -378,6 +348,9 @@ watcher.emit('message', { data: { id: 1, method: 'snapshot' } })
 server.listen(port, host, () => {
   console.log(`Tucano server: http://${shown}:${port}/`)
   console.log(`Data: ${dataDir}`)
+  if (services.enabled) console.warn(`WARNING: TUCANO_FORWARD_SERVICES=1 exposes every running agent service on ${host} without Tucano authentication or HTTPS. Anyone on the LAN/tailnet who can reach those ports can access them. Restrict network access separately (docs/server.md).`)
+  else if (process.env['TUCANO_FORWARD_SERVICES'] === '1') console.warn('TUCANO_FORWARD_SERVICES=1 ignored: TUCANO_HOST must be a specific private IPv4 address. Agent service forwarding is disabled.')
+  else if (isPrivate(host)) console.log('Agent service forwarding is disabled. Changing TUCANO_HOST does not expose preview ports; TUCANO_FORWARD_SERVICES=1 is a separate, unauthenticated-access opt-in (docs/server.md).')
   // The server's own token is not printed: a log (journalctl, a file a service writes) is read by more people
   // than the one who owns the server, and the token opens everything for good. A device pairs with a code that
   // works once and dies in minutes; with nobody paired yet, the first is made here.

@@ -124,6 +124,16 @@ test('a request with nothing is refused, and sets no cookie', async () => {
   eq(r.headers['referrer-policy'], 'no-referrer', 'referrer-policy')
 })
 
+test('malformed absolute request targets return 400 without crashing the server', async () => {
+  for (const path of ['http://[', 'http://example.com:invalid/', '//[']) {
+    const r = await http(a, { path })
+    eq(r.status, 400, `malformed request ${path}`)
+    eq(cookiesOf(r).length, 0, 'no authentication cookie')
+    yes(!r.text.includes(path), 'the invalid target was reflected')
+    eq((await http(a, { path: '/identity' })).status, 200, 'server remains available')
+  }
+})
+
 test('the first code signs a browser in once, with a cookie named after this server', async () => {
   const code = codeIn(a.log())
   const r = await http(a, { path: `/?pair=${code}` })

@@ -11,12 +11,17 @@ import { createHash } from 'node:crypto'
 const installer = resolve('install-server.sh')
 const fixtureSource = `
 const fs = require('node:fs');
+const { parseServerUrl } = require(${JSON.stringify(resolve('src/shared/pairlink.ts'))});
 fs.mkdirSync(process.env.TUCANO_DATA, {recursive:true});
 fs.writeFileSync(process.env.TUCANO_DATA + '/server-id', 'fixture-server');
 if (process.argv[2] === 'pair') {
-  fs.appendFileSync(process.env.TUCANO_DATA + '/pair-calls', 'pair\\n');
   const args = process.argv.slice(3);
   const value = key => args[args.indexOf(key)+1];
+  if (args.includes('--url') && !parseServerUrl(value('--url'))) {
+    console.log('--url requires HTTPS except for loopback HTTP.');
+    process.exit(2);
+  }
+  fs.appendFileSync(process.env.TUCANO_DATA + '/pair-calls', 'pair\\n');
   const code = 'AAAA-BBBB-CCCC';
   console.log('Pairing code: ' + code);
   const reach = args.includes('--url') ? 'url=' + encodeURIComponent(value('--url')) : args.includes('--ssh') ? 'ssh=' + encodeURIComponent(value('--ssh')) : '';
@@ -182,13 +187,23 @@ test('unsafe versions, links, and paths are rejected', t => {
 
 test('direct HTTPS/Tailscale pairing forwards --url and does not print SSH instructions', t => {
   const f = fixture(t)
-  for (const url of ['https://tucano.example.com', 'http://100.64.0.2:7337']) {
+  for (const url of ['https://tucano.example.com', 'https://personal.example.ts.net']) {
     const output = f.ok(['--no-service', '--pair', '--url', url], { SSH_CONNECTION: '1.2.3.4 1234 5.6.7.8 22' })
     assert.ok(output.includes('url=' + encodeURIComponent(url)))
     assert.ok(output.includes(url + '/?pair=AAAA-BBBB-CCCC'))
     assert.doesNotMatch(output, /ssh -N|opens the SSH tunnel/)
   }
   assert.match(f.bad(['--host', 'vps', '--url', 'https://example.com']), /not both/)
+})
+
+test('installer propagates real URL-policy rejection without issuing a fallback pairing code', t => {
+  const f = fixture(t)
+  for (const url of ['http://100.64.0.2:7337', 'http://personal.example.ts.net', 'http://192.168.1.5:7337', 'http://[fd7a:115c:a1e0::1]:7337']) {
+    const output = f.bad(['--no-service', '--pair', '--url', url])
+    assert.match(output, /requires HTTPS/)
+    assert.doesNotMatch(output, /Pairing code|tucano:\/\/pair|AAAA-BBBB-CCCC/)
+    assert.ok(!existsSync(join(f.data, 'pair-calls')))
+  }
 })
 
 test('uninstall keeps data by default; explicit purge deletes only recognized data', t => {

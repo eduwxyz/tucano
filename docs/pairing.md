@@ -23,7 +23,7 @@ node out/main/server.js pair --label "My VPS" --ssh you@203.0.113.7
 - `--ssh user@host[:port]` is how the app reaches this machine: it opens an SSH tunnel to the server's own
   loopback, so no port is open to the internet. The user is the one you sign in to the server as.
 - `--url https://tucano.example.com` is for a server reached at an address instead (a reverse proxy with HTTPS,
-  or Tailscale: `http://100.x.y.z:7337` or a `*.ts.net` name). Plain `http` is refused anywhere else.
+  or Tailscale Serve HTTPS: `https://vps.tail1234.ts.net`). Plain `http` is accepted only on localhost/loopback, including a local SSH tunnel. A Tailscale IP or hostname alone does not prove traffic is encrypted.
 - The link is read by `src/shared/pairlink.ts`. It comes from outside (a chat, a web page) and ends up as an
   `ssh` command, so a link whose user or host could pass for an `ssh` option (`-oProxyCommand=…`), carries
   anything beyond a name and an address, or gives a part twice, is refused whole.
@@ -32,7 +32,7 @@ node out/main/server.js pair --label "My VPS" --ssh you@203.0.113.7
 About the code:
 
 - It works **once**, for **one device**, for **5 minutes**.
-- **In a browser:** open the link (through your SSH tunnel, Tailscale address or proxy: use the address
+- **In a browser:** open the link (through your SSH tunnel, Tailscale Serve HTTPS or HTTPS proxy: use the address
   you reach the server at). The browser trades the code for its own token, kept in a cookie, and the
   address bar goes back to `/`.
 - **From the app or a script:** trade the code by `POST /pair` (below) and keep the token.
@@ -64,12 +64,17 @@ different names in one shared account. The local core stays running while the de
 VPS agents keep running even after the app closes or switches to another server. Local notifications
 are labelled Local when a VPS is selected and return to the local workspace when clicked.
 
-Each saved connection has an independent encrypted device token. The renderer never receives it.
+Each saved connection has an independent encrypted device token. The app stores ciphertext in its
+connection metadata file, encrypted using Electron safeStorage with an OS-protected secret (macOS
+Keychain-backed; Windows DPAPI). The renderer never receives the token.
 The application refuses plaintext/fallback key storage. A locked/unavailable keychain requires the
 owner to unlock it, not a bypass. A new connection also checks the saved server ID at `/identity`
 before sending a bearer token (update older servers first), so a new database at the same address is not silently treated as the
-old environment. Re-pair deliberately after verifying a changed server. Pairing the same server and
+old environment. This server ID is a mismatch guard, not a cryptographic identity pin: TLS certificate
+verification or SSH host-key verification authenticates the transport. Re-pair deliberately after verifying a changed server. Pairing the same server and
 transport again replaces its local credential while preserving its name rather than duplicating it.
+Legacy plaintext HTTP Tailscale connections remain visible for rename/removal, but cannot unlock or
+send their token. Configure HTTPS and pair again explicitly; the app never silently rewrites the URL.
 
 Connection loss is visible. Use **Reconnect** after fixing the service/network; failed requests are
 not replayed automatically, since an action might already have run. A failed switch keeps the prior
@@ -98,7 +103,8 @@ It answers `200` with the device's token, once:
 { "server": "9f2c41ab07de", "token": "tk_…", "device": { "id": "…", "label": "My Mac" }, "days": 30 }
 ```
 
-Keep the token (the Mac app keeps it in the Keychain, not in a file) and send it with every request as
+Keep the token (the Mac app stores only encrypted ciphertext in its connection file, protected by
+a macOS Keychain-backed secret through Electron safeStorage) and send it with every request as
 `Authorization: Bearer tk_…`. No cookie is set. `server` is the server's id, to tell servers apart.
 The label is only used if the code was made without `--label`.
 

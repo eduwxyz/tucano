@@ -62,6 +62,18 @@ keychain. `test/remote-controller.test.ts` imports the production main process w
 and network boundaries, checking multi-environment transitions, concurrent/failed switching,
 late response isolation, offline startup, deep links, rename and forgetting.
 
+## Unsigned macOS packaging check
+
+The macOS CI job packages the built app with signing, notarization and publishing disabled,
+then runs `node scripts/check-mac-package.mjs dist-ci`. It verifies the bundle identifier,
+`tucano://` registration in the generated Info.plist, executable, packaged main/core/server and
+preload entry points, renderer assets, shared chunks, icons and sounds. The check inspects the
+actual app bundle and ASAR archive without launching the app or accessing a keychain.
+
+This is packaging evidence only. It does not validate Gatekeeper, signing, notarization,
+Launch Services opening a pairing link, or a real user's macOS Keychain. The actual Mac/VPS
+acceptance sequence below is still required.
+
 ## What this does not prove
 
 The token store uses an AES-GCM fixture secret-storage implementation. This tests persistence
@@ -87,7 +99,7 @@ actual Mac with an authorized disposable Linux VPS:
 6. Restart the VPS service while connected. Confirm the app shows loss of connection, then use
    reconnect and verify the same workspace returns.
 7. Use a separately generated URL pairing link through an authorized HTTPS reverse proxy or
-   Tailscale connection. Repeat the RPC/artifact/reconnect checks. An untrusted TLS certificate
+   Tailscale Serve HTTPS connection. Confirm non-loopback HTTP (including Tailscale IPs/names) is rejected. Repeat the RPC/artifact/reconnect checks. An untrusted TLS certificate
    must not be bypassed.
 8. Revoke the Mac device on the VPS. Confirm RPC and reconnect fail, and a fresh one-use pairing
    link is required. Confirm tokens are absent from the app/server logs.

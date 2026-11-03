@@ -18,7 +18,7 @@ const USAGE = [
   '  (no command)              start the server',
   '  pair [--label "My Mac"]   make a one-time code to pair a browser or the app',
   '       [--ssh you@host[:port]]   also print the link for the Mac app, to reach this server by an SSH tunnel',
-  '       [--url https://…]         or the link for the app to reach it at an address (https, or Tailscale)',
+  '       [--url https://…]         or the link for the app to reach it at an address (HTTPS, including Tailscale Serve)',
   '  devices                   list the paired devices',
   '  revoke <id|label>         take one device\'s access away',
   '  revoke --all              take every device\'s access away, and drop the codes not used yet'
@@ -48,7 +48,7 @@ function reachOf(args: string[], say: (line: string) => void): Reach | undefined
     return r ?? null
   }
   const origin = url === undefined ? undefined : parseServerUrl(url)
-  if (!origin) say('--url wants an https address, or an http one on Tailscale (http://100.x.y.z:7337), with no path.')
+  if (!origin) say('--url wants an HTTPS address (including Tailscale Serve), or HTTP on localhost only, with no path.')
   return origin ? { via: 'url', url: origin } : null
 }
 

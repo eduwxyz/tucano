@@ -64,6 +64,28 @@ describe('secure saved remote tokens', () => {
     expect(() => locked.rename('missing', 'Valid')).toThrow('not found')
     store.remove(other.id); expect(store.get(profile.id)?.token).toBe(token)
   })
+  it('retains legacy HTTP metadata without unlocking tokens or blocking safe profiles', async () => {
+    const path = file(), adapter = storage(), store = new RemoteStore(path, adapter)
+    store.put(profile, token)
+    for (const [id, url] of [['legacy-ip', 'http://100.64.0.2:7337'], ['legacy-name', 'http://vps.tail1234.ts.net:7337'], ['legacy-v6', 'http://[fd7a:115c:a1e0::1]:7337']]) {
+      const saved = JSON.parse(readFileSync(path, 'utf8'))
+      saved.entries.push({ profile: { ...profile, id, reach: { via: 'url', url } }, encrypted: adapter.encryptString('legacy-token').toString('base64') })
+      writeFileSync(path, JSON.stringify(saved))
+    }
+    const decrypt = vi.fn(adapter.decryptString), loaded = new RemoteStore(path, { ...adapter, decryptString: decrypt })
+    expect(loaded.list()).toHaveLength(4)
+    expect(loaded.get(profile.id)?.token).toBe(token); decrypt.mockClear()
+    const fetcher = vi.fn<typeof fetch>(), { client } = fixture(fetcher)
+    for (const legacy of loaded.list().filter(p => p.id.startsWith('legacy'))) {
+      expect(() => loaded.get(legacy.id)).toThrow('plaintext HTTP outside localhost')
+      await expect(client.connect(legacy, 'legacy-token')).rejects.toThrow('Invalid server credentials')
+    }
+    expect(decrypt).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled()
+    loaded.rename('legacy-ip', 'Old server')
+    expect(loaded.list().find(p => p.id === 'legacy-ip')?.reach).toEqual({ via: 'url', url: 'http://100.64.0.2:7337' })
+    loaded.remove('legacy-ip'); expect(loaded.get(profile.id)?.token).toBe(token)
+    expect(loaded.list()).toHaveLength(3)
+  })
   it('does not silently overwrite corrupt saved data', () => {
     const path = file(); writeFileSync(path, 'bad json')
     expect(() => new RemoteStore(path, storage()).put(profile, token)).toThrow('unreadable')
