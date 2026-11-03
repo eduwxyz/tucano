@@ -1,65 +1,66 @@
 ---
 name: tucano-export
-description: Packs the user's Grok Bot agents into one .zip that Tucano (tucano.sh) imports, with each agent's instructions, picture, skills, scheduled tasks, memories and group chats. Use when the user asks to move, migrate or export their agents to Tucano.
+description: Writes a .zip that Tucano (tucano.sh) opens to recreate the user's agents from here, with their instructions, pictures, skills, scheduled tasks, remembered facts and group chats. Use when the user wants their agents in Tucano.
 ---
 
-# Move my agents to Tucano
+# Export to Tucano
 
-Tucano is a desktop app that runs a team of agents on the user's own computer. It has no way to reach
-Grok Bot, so you write a `.zip` here and the user opens it in Tucano at **Settings → Team and backup →
-Import from another app**.
+The user is moving to Tucano, a desktop app where a team of agents runs on their own computer. Tucano
+can't connect to this app. What it can do is open one file: a `.zip` holding `tucano-import.json` and a
+few files per agent. Your job is to write that file and hand it to the user, who opens it in Tucano at
+**Settings → Team and backup → Import from another app**.
 
-Tucano refuses the whole file if `tucano-import.json` doesn't follow the format below, so follow it
-exactly. Tucano also gives the imported agents no access to anything: the user grants each tool there.
-Don't try to carry access, logins or connections over.
+Tucano reads only the fields and paths described here and ignores everything else. Logins, tool access
+and connections never travel: every imported agent starts in Tucano with no tools, web search off and its
+scheduled tasks paused, and the user turns each thing on there. So spend no effort on access.
 
-## Steps
-
-1. **List what there is.** Find every agent the user has here, except yourself (you only run this
-   export) and except this skill. Find the group chats too. Show the user the list and ask which ones
-   to bring, all by default. Wait for the answer.
-
-2. **Read each chosen agent.** Collect, when you can read it:
-   - its name and a short role (a few words, like "Market research");
-   - its full instructions or system prompt, word for word;
-   - its picture;
-   - its skills, each a folder with a `SKILL.md`;
-   - its scheduled tasks: name, the prompt that runs, the days, the time and the time zone;
-   - from its past conversations, up to 50 facts worth keeping (see step 3).
-
-   When you can't read a part, leave it out and tell the user at the end. Never fill it in by guessing.
-
-3. **Write the memories.** Each memory is one fact in one sentence, 500 characters or fewer, written as
-   a statement: "The user wants reports in BRL.", "The weekly review is on Fridays." Keep preferences,
-   names, decisions and open work. Don't copy messages. The user confirms each memory in Tucano before
-   an agent uses it.
-
-4. **Take secrets out.** No API keys, tokens, passwords, cookies, private keys or `.env` content
-   anywhere: not in instructions, skills or memories. Where an instruction had a secret, write
-   `[ask the user]` instead. Leave out of the skill folders any `.env*` file, key file, archive
-   (`.zip`, `.tar`, `.gz`), `.git` and `node_modules`.
-
-5. **Build the folder** below, writing `tucano-import.json` last.
-
-6. **Check it** against the checklist, then zip the folder's contents (with `tucano-import.json` at the
-   root of the zip, not inside a folder) as `tucano-export-<YYYY-MM-DD>.zip`.
-
-7. **Give the file to the user** in this chat, so they can download it. Then tell them how many agents
-   and group chats went in, what you left out and why, and where to open it in Tucano.
-
-## The folder
+## What goes in the zip
 
 ```
-tucano-import.json
-agents/<key>/picture.png                  optional: PNG, JPEG or WebP, 140 KB or less
-agents/<key>/skills/<skill>/SKILL.md      one folder per skill
+tucano-import.json                        at the root of the zip, not inside a folder
+agents/<key>/picture.png                  optional; .png, .jpg or .webp, up to 140 KB
+agents/<key>/skills/<name>/SKILL.md       one folder per skill, with only that file in it
 ```
 
-`<key>` names one agent inside the file: lowercase letters, digits and hyphens, 64 characters or
-fewer, not starting or ending with a hyphen, different for each agent (`research`, `sales-desk`).
-Every path of an agent starts with `agents/<key>/`.
+`<key>` is a short id you choose for each agent, used only inside this file: it starts with a lowercase
+letter, then lowercase letters, digits or hyphens, 40 characters at most, and no two agents share one
+(`writer`, `ops-2`).
 
-## tucano-import.json
+## How to fill each field
+
+Copy, don't compose. Whatever you can't read here, leave out and list in the report you give at the end.
+
+**Agents** (40 at most). For each agent the user wants to bring:
+
+- `key`: as above.
+- `name`: the agent's name, up to 80 characters. Required.
+- `role`: what it does, in two to five words, up to 80 characters.
+- `instructions`: its standing instructions or system prompt, copied as they are, up to 32,000 characters.
+  If a line holds a password, token, API key or any other credential, drop that line and say so in the
+  report. Tucano asks for credentials through its own connectors.
+- `picture`: the path of its picture in the zip, when it has one.
+- `skills`: the paths of its skill folders (20 at most per agent). Each `SKILL.md` starts with a
+  frontmatter block holding `name` and `description`, followed by the recipe, up to 20,000 characters.
+  Tucano reads that file alone, so don't copy scripts, data or anything else into the folder.
+- `routines`: its scheduled tasks (20 at most per agent), each with `name`, `prompt` (what the task
+  asks), `days` (any of `sun mon tue wed thu fri sat`), `time` (`HH:MM`, 24-hour clock) and `timezone`
+  (an IANA name, like `Europe/Lisbon`). Add `"once": true` to a task that runs a single time. Tucano runs
+  tasks only at a time of day on chosen weekdays: a task that repeats every few minutes or hours, or on a
+  date of the month, doesn't fit, so leave it out and report it.
+- `memories`: what the agent knows about the user and the work, as plain statements of one fact each,
+  up to 300 characters and 40 per agent. Prefer what still matters next month: preferences, people,
+  decisions, ongoing projects. Each one waits in Tucano until the user confirms it, so a wrong fact costs
+  them a click; a made-up one costs their trust. Never copy a credential into a memory.
+
+**Group chats** (30 at most) go in `channels`: `name` (up to 80 characters), `topic` (one line,
+optional) and `members` (the keys of the agents in it). Tucano always makes a new channel for each one.
+
+## Before you write anything
+
+Tell the user which agents and group chats you found and ask which to bring. Unless they say otherwise,
+bring them all. Then write the agents' files, and `tucano-import.json` once those are in place.
+
+## Example
 
 ```json
 {
@@ -92,24 +93,13 @@ Every path of an agent starts with `agents/<key>/`.
 }
 ```
 
-| Field | Rule |
-| --- | --- |
-| `format`, `version`, `source` | Exactly as above. |
-| `key` | As described under "The folder". |
-| `name` | Required, 80 characters or fewer. |
-| `role` | A few words, 80 characters or fewer. |
-| `instructions` | The agent's full instructions, word for word, 32,000 characters or fewer. |
-| `picture` | A path in the zip, or leave the field out. |
-| `skills` | Folder paths. Each `SKILL.md` starts with frontmatter holding `name` and `description`, and its text is 20,000 characters or fewer. Tucano reads only `SKILL.md`. |
-| `routines` | `days` uses `sun` `mon` `tue` `wed` `thu` `fri` `sat`; `time` is `HH:MM`, 24 h. Add `"once": true` for a task that runs one time. Tucano can't run tasks every hour, every few minutes or on a day of the month: leave those out and tell the user. |
-| `memories` | Strings, 500 characters or fewer each. |
-| `channels` | Optional: one per group chat. `name` 80 characters or fewer, `topic` one line, `members` the keys of the agents in it. |
+`format`, `version` and `source` stay exactly as in the example. Tucano turns down a file whose
+`format` or `version` differs, and skips an agent whose `key` or `name` breaks the rules above.
 
-## Checklist
+## Handing it over
 
-- `tucano-import.json` is valid JSON, at the root of the zip, with `"format": "tucano-agent-import"`
-  and `"version": 1`.
-- Every key follows the rule and is used by one agent only.
-- Every path in the file exists in the zip and starts with its agent's `agents/<key>/`.
-- Every routine has `days` and `time`; every channel member is a key in `agents`.
-- No secret anywhere, and neither you nor this skill is in the file.
+Zip the contents of the folder, so `tucano-import.json` sits at the top of the zip, and name it
+`tucano-export-<YYYY-MM-DD>.zip`. Send it to the user here as a file they can download.
+
+With it, send a short report: for each agent, what went in (instructions, picture, how many skills,
+tasks and memories) and what didn't, with the reason. End with where to open the file in Tucano.

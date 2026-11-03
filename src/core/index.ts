@@ -549,12 +549,22 @@ const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
 // even when archived. His model: the one given, else a plan's, else the router's
 // or the memory's, which the introduction made sure work.
 // `fresh` starts a new session: the builder screen opens with only his hello.
-function ensureTuca(modelId?: string, fresh = false): { agentId: string; conversationId: string } {
-  const s = settings()
-  const works = (id: string): boolean => {
+// A model runs here when its harness is chosen and signed in.
+function worksWith(s: Settings): (id: string) => boolean {
+  return (id) => {
     const m = modelInfo(id)
     return !!m?.id && s.engines[m.engine].loggedIn
   }
+}
+// The first that runs: the one given, a plan's, the router's or the memory's, or any a harness lists.
+function readyModel(s: Settings, first?: string): string | undefined {
+  const works = worksWith(s)
+  return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
+}
+
+function ensureTuca(modelId?: string, fresh = false): { agentId: string; conversationId: string } {
+  const s = settings()
+  const works = worksWith(s)
   let tuca = db.agents().find((a) => a.kind === 'tuca')
   // A harness turned off since: the model given now, if it works.
   if (tuca && !works(tuca.modelId) && modelId && works(modelId)) {
@@ -563,7 +573,7 @@ function ensureTuca(modelId?: string, fresh = false): { agentId: string; convers
     emit({ type: 'agent', agent: tuca })
   }
   if (!tuca) {
-    const model = [modelId, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
+    const model = readyModel(s, modelId)
     tuca = tucaAgent(model ?? 'sonnet', db.agents().map((a) => a.handle), s.defaultLimit)
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
@@ -769,8 +779,7 @@ const api: Api = {
     const zip = path ? zipFromFile(path) : zipFromBuffer(Buffer.from(data!, 'base64'))
     try {
       const s = settings()
-      const harness = s.harnesses?.find((h) => h === 'claude' || h === 'codex')
-      const r = applyForeignTeam(db, readForeignZip(zip), { defaultLimit: s.defaultLimit, defaultModel: harness === 'codex' ? 'gpt-5.6-luna' : 'sonnet' })
+      const r = applyForeignTeam(db, readForeignZip(zip), { defaultLimit: s.defaultLimit, defaultModel: readyModel(s) ?? 'sonnet', works: worksWith(s) })
       for (const id of r.agents) emit({ type: 'agent', agent: db.agent(id)! })
       emitConversations()
       for (const k of db.skills()) emit({ type: 'skill', skill: k })

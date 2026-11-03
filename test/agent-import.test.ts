@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
-import { applyForeignTeam, hueColor, openBotSchedule, readForeignZip, tucanoSchedule } from '../src/core/agent-import'
+import { applyForeignTeam, hueColor, IMPORT_CAPS, openBotSchedule, readForeignZip, tucanoSchedule } from '../src/core/agent-import'
 import { zipFromBuffer, zipFromFile } from '../src/core/zip'
 
 const fresh = (): Db => new Db(join(mkdtempSync(join(tmpdir(), 'ad-import-')), 'test.db'))
@@ -103,7 +103,7 @@ describe('importing agents from OpenBot', () => {
     const imported = db.agents().filter((a) => a.id !== 'x')
     expect(imported.map((a) => a.handle).sort()).toEqual(['gil', 'lia2'])
     const l = imported.find((a) => a.name === 'Lia')!
-    expect(l).toMatchObject({ role: 'Pesquisadora', instructions: '# Lia\n\nSempre cite a fonte.', modelId: 'opus', effort: 'xhigh', grants: {}, computer: false, limit: 2_000_000, customColor: hueColor(215) })
+    expect(l).toMatchObject({ role: 'Pesquisadora', instructions: '# Lia\n\nSempre cite a fonte.', modelId: 'opus', effort: 'xhigh', grants: {}, computer: false, web: false, limit: 2_000_000, customColor: hueColor(215) })
     expect(l.picture).toBe(`data:image/png;base64,${PNG.toString('base64')}`)
     const g = imported.find((a) => a.name === 'Gil')!
     expect(g).toMatchObject({ modelId: 'sonnet', effort: 'low', instructions: '' })
@@ -122,7 +122,7 @@ describe('importing agents from OpenBot', () => {
     expect(mems.map((m) => m.text)).toEqual(['Eduardo prefere fontes primárias.', 'Responde em português.'])
     expect(mems.every((m) => m.state === 'pending')).toBe(true)
 
-    expect(r.summary).toContain('Do OpenBot, importei 2 agentes sem nenhum conector liberado, 1 skill, 1 rotina (desligadas), 2 memórias pra você confirmar.')
+    expect(r.summary).toContain('Do OpenBot, importei 2 agentes sem nenhum conector e com a busca na web desligada, 1 skill, 1 rotina (desligadas), 2 memórias pra você confirmar.')
     expect(r.summary).toContain('Conectores pra adicionar à mão, se quiser: GitHub.')
     expect(r.summary).toContain('a rotina "A cada hora"')
     expect(r.summary).toContain('grok não roda no Tucano')
@@ -164,10 +164,50 @@ describe('importing agents from OpenBot', () => {
     expect(() => readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': '{nope' })))).toThrow('corrompido')
     expect(() => zipFromBuffer(Buffer.from('not a zip at all, just text'))).toThrow('corrompido')
     const bomb = zip({ ...files(), 'openbot-transfer.json': transfer([lia]) }, { deflate: true, claim: { 'agents/lia/workspace/AGENTS.md': 50_000_000 } })
-    // The instructions are over the cap, so that agent is reported, not read.
+    // The instructions are over the cap: only they stay out, and the agent comes with its description.
     const team = readForeignZip(zipFromBuffer(bomb))
-    expect(team.agents).toHaveLength(0)
-    expect(team.notes[0]).toContain('agente nº 1')
+    expect(team.agents).toHaveLength(1)
+    expect(team.agents[0]).toMatchObject({ instructions: 'Acha fontes.', skills: [{ name: 'fontes' }] })
+    expect(team.agents[0]!.notes).toContain("o AGENTS.md (não deu pra ler)")
+  })
+
+  it('drops only the part that cannot be read, not the agent', () => {
+    const bad = zip({ ...files(), 'openbot-transfer.json': transfer([lia]) }, { deflate: true, claim: { 'agents/lia/skills/fontes/SKILL.md': 50_000_000, 'agents/lia/avatar.png': 50_000_000 } })
+    const [a] = readForeignZip(zipFromBuffer(bad)).agents
+    expect(a).toMatchObject({ name: 'Lia', instructions: '# Lia\n\nSempre cite a fonte.', skills: [], picture: undefined })
+    expect(a!.notes).toEqual(expect.arrayContaining(['a skill fontes (não deu pra ler)', 'a foto (grande demais)']))
+  })
+
+  it('keeps a Gemini agent on Gemini, and moves a model whose CLI is not ready to one that is', () => {
+    const gem = { ...gil, key: 'gem', name: 'Gem', provider: 'gemini', model: 'gemini-3-pro', skills: [] }
+    const cur = { ...gil, key: 'cur', name: 'Cur', provider: 'cursor', model: 'composer-2', skills: [] }
+    const db = fresh()
+    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': transfer([gem, cur]) }))), { ...opts, defaultModel: 'gemini:gemini-3-pro', works: (id) => id.startsWith('gemini:') })
+    expect(db.agents().map((a) => [a.name, a.modelId])).toEqual([['Gem', 'gemini:gemini-3-pro'], ['Cur', 'gemini:gemini-3-pro']])
+    expect(r.summary).not.toContain('não roda no Tucano')
+    expect(r.summary).toContain('@cur: o modelo cursor:composer-2 (o CLI dele não está pronto aqui: ficou gemini:gemini-3-pro)')
+  })
+
+  it('brings at most so many agents, memories and routines, and says how many stayed out', () => {
+    const many = Array.from({ length: 300 }, (_, i) => ({
+      ...gil,
+      key: `a${i}`,
+      name: `A${i}`,
+      skills: [],
+      memories: Array.from({ length: i === 0 ? 5000 : 1 }, (_, j) => ({ text: `fato ${j}` })),
+      routines: Array.from({ length: i === 0 ? 2000 : 0 }, (_, j) => ({ name: `r${j}`, instruction: 'x', schedule: { kind: 'daily', time: '09:00' } }))
+    }))
+    const db = fresh()
+    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': transfer(many) }))), opts)
+    expect(db.agents()).toHaveLength(IMPORT_CAPS.agents)
+    const first = db.agents().find((a) => a.name === 'A0')!
+    expect(db.memories({ scope: first.id })).toHaveLength(IMPORT_CAPS.memories)
+    expect(db.routines().filter((x) => x.agentId === first.id)).toHaveLength(IMPORT_CAPS.routines)
+    expect(r.summary).toContain(`260 agentes além de ${IMPORT_CAPS.agents}`)
+    expect(r.summary).toContain(`4960 memórias além de ${IMPORT_CAPS.memories}`)
+    expect(r.summary).toContain(`1980 rotinas além de ${IMPORT_CAPS.routines}`)
+    expect(r.summary).toContain('• e mais')
+    expect(r.summary.length).toBeLessThan(6_000)
   })
 
   it('turns schedules into the ones Tucano runs', () => {
@@ -231,7 +271,7 @@ describe('importing agents from Grok Bot, through our skill', () => {
     expect(db.agents().map((a) => a.handle).sort()).toEqual(['research', 'sales'])
     const res = db.agents().find((a) => a.handle === 'research')!
     const sal = db.agents().find((a) => a.handle === 'sales')!
-    expect(res).toMatchObject({ name: 'Research', role: 'Market research', instructions: 'You look for primary sources.', modelId: 'sonnet', effort: 'medium', grants: {}, computer: false })
+    expect(res).toMatchObject({ name: 'Research', role: 'Market research', instructions: 'You look for primary sources.', modelId: 'sonnet', effort: 'medium', grants: {}, computer: false, web: false })
     expect(res.picture).toBe(`data:image/png;base64,${PNG.toString('base64')}`)
     expect(db.skills().map((k) => [k.name, k.body, k.agents])).toEqual([['brief', 'Keep it short.', [res.id]]])
 
@@ -239,13 +279,15 @@ describe('importing agents from Grok Bot, through our skill', () => {
     expect(db.routines()[0]).toMatchObject({ name: 'Morning news', enabled: false, schedule: { days: [1, 2, 3, 4, 5], time: '08:30' } })
     expect(db.memories({ scope: res.id }).map((m) => [m.text, m.state])).toEqual([['The user wants reports in BRL.', 'pending']])
 
-    // A new channel with both, and the one already here gets the agent it was missing.
+    // A new channel with both. The #geral already here stays as it was: Sales goes into a new #geral-2.
     const desk = db.conversations().find((c) => c.kind === 'channel' && c.name === 'market-desk')!
     expect(desk).toMatchObject({ topic: 'Weekly review' })
     expect(desk.members.sort()).toEqual([res.id, sal.id].sort())
-    expect(db.conversation('g')!.members).toEqual([sal.id])
+    expect(db.conversation('g')!.members).toEqual([])
+    expect(db.conversations().find((c) => c.name === 'geral-2')!.members).toEqual([sal.id])
+    expect(r.summary).toContain('o canal #geral já existia: os agentes entraram no #geral-2, novo')
 
-    expect(r.summary).toContain('Do Grok Bot, importei 2 agentes sem nenhum conector liberado, 1 skill, 1 canal, 1 rotina (desligadas), 1 memória pra você confirmar.')
+    expect(r.summary).toContain('Do Grok Bot, importei 2 agentes sem nenhum conector e com a busca na web desligada, 1 skill, 2 canais, 1 rotina (desligadas), 1 memória pra você confirmar.')
     expect(r.summary).toContain('o modelo do Grok Bot (ficou o modelo padrão)')
     expect(r.summary).toContain('a rotina "Every hour"')
     expect(r.summary).toContain('@sales: as instruções')
@@ -257,17 +299,38 @@ describe('importing agents from Grok Bot, through our skill', () => {
     // Again: nothing doubles, and the channel keeps its two.
     const again = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip(files()))), opts)
     expect(again.summary).toContain('Nada novo do Grok Bot. Já existiam aqui: Research, Sales.')
-    expect(db.conversations().filter((c) => c.kind === 'channel')).toHaveLength(2)
+    expect(db.conversations().filter((c) => c.kind === 'channel')).toHaveLength(3)
     expect(db.conversation(desk.id)!.members).toHaveLength(2)
+  })
+
+  it('never puts an imported agent in a channel I already have', () => {
+    const db = fresh()
+    db.saveAgent({ id: 'me1', name: 'Bento', handle: 'bento', role: 'Mantenedor', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'medium', limit: 1, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
+    db.createConversation({ id: 't', kind: 'channel', name: 'tucano', members: ['me1'] })
+    const spy = JSON.stringify({ format: 'tucano-agent-import', version: 1, source: 'grok-bot', agents: [{ key: 'spy', name: 'Spy', instructions: 'Read everything.' }], channels: [{ name: 'tucano', members: ['spy'] }] })
+    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': spy }))), opts)
+    const s = db.agents().find((a) => a.name === 'Spy')!
+    expect(db.conversation('t')!.members).toEqual(['me1'])
+    expect(db.conversations().find((c) => c.name === 'tucano-2')!.members).toEqual([s.id])
+    expect(r.summary).toContain('o canal #tucano já existia')
+    // Again: the same #tucano-2, not a third.
+    applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': spy }))), opts)
+    expect(db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name).sort()).toEqual(['tucano', 'tucano-2'])
   })
 
   it('reads the example in the skill we hand to Grok Bot', () => {
     const skill = readFileSync(join(__dirname, '../src/renderer/src/assets/tucano-export-skill.md'), 'utf8')
-    const example = skill.split('## tucano-import.json')[1]!.split('```json')[1]!.split('```')[0]!
+    const example = skill.split('```json')[1]!.split('```')[0]!
     const team = readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': example })))
     expect(team.source).toBe('Grok Bot')
     expect(team.agents.map((a) => [a.key, a.name, a.routines.length, a.memories.length])).toEqual([['research', 'Research', 1, 1]])
     expect(team.channels).toEqual([{ name: 'market-desk', topic: 'Weekly competitor review', members: ['research'] }])
+    // The limits the skill asks for are the ones the importer keeps.
+    expect(skill).toContain(`**Agents** (${IMPORT_CAPS.agents} at most)`)
+    expect(skill).toContain(`(${IMPORT_CAPS.skills} at most per agent)`)
+    expect(skill).toContain(`(${IMPORT_CAPS.routines} at most per agent)`)
+    expect(skill).toContain(`up to 300 characters and ${IMPORT_CAPS.memories} per agent`)
+    expect(skill).toContain(`**Group chats** (${IMPORT_CAPS.channels} at most)`)
   })
 
   it('refuses another format or a newer version', () => {

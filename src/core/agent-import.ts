@@ -1,7 +1,8 @@
-// Agents from another app (spec §21). Each source becomes one `ForeignTeam`, and `applyForeignTeam`
-// adds it the same way for all: the agents come in with no connector granted, their routines off and their
-// memories waiting for the person to confirm. Nothing that can run comes in by itself: an MCP server of
-// the other app is named in the summary, never added as a connector.
+// Agents from another app (spec §26). Each source becomes one `ForeignTeam`, and `applyForeignTeam`
+// adds it the same way for all: the agents come in with no connector granted, web search off, their
+// routines off and their memories waiting for the person to confirm. Nothing that can run comes in by
+// itself: an MCP server of the other app is named in the summary, never added as a connector. A file
+// never puts an agent in a channel that's already here: its group chats become channels of their own.
 //
 // OpenBot: the .zip of Server settings → Transfer → Export from this server (`openbot-transfer.json`,
 // format "openbot-instance-transfer", version 1). Only its documented format is read here; none of
@@ -53,8 +54,11 @@ const MAX_MANIFEST = 20_000_000
 const MAX_TEXT = 1_000_000
 const MAX_INSTRUCTIONS = 32_000
 const MAX_PICTURE_BYTES = 145_000 // as a data URL it stays under cleanLook's cap
-const MAX_MEMORY = 500
+const MAX_MEMORY = 300
 const MAX_SKILL_BODY = 20_000
+// What one file brings at most; the rest is counted in the summary.
+export const IMPORT_CAPS = { agents: 40, channels: 30, skills: 20, routines: 20, memories: 40 }
+const SUMMARY_LINES = 40
 
 const str = (v: unknown, max = 10_000): string => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
@@ -62,10 +66,27 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object'
 const time = (v: unknown): string | undefined => (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : undefined)
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 
+// The first `cap` items of a list; the summary says how many stayed out.
+function capped(v: unknown, cap: number, what: (n: number) => string, notes: string[]): unknown[] {
+  const list = arr(v)
+  if (list.length > cap) notes.push(what(list.length - cap))
+  return list.slice(0, cap)
+}
+// A part that can't be read (too big, broken) stays out alone, not with the whole agent.
+function attempt<T>(read: () => T, fallback: T, note: string, notes: string[]): T {
+  try {
+    return read()
+  } catch {
+    notes.push(note)
+    return fallback
+  }
+}
+
 // A path the manifest names must be inside the agent's own folder, without "..".
 const inside = (path: unknown, prefix: string): string | undefined =>
   typeof path === 'string' && path.startsWith(prefix) && !path.split('/').some((p) => p === '..' || p === '') ? path : undefined
-const KEY = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
+const KEY = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/ // OpenBot's agent keys
+const OUR_KEY = /^[a-z][a-z0-9-]{0,39}$/ // tucano-import.json's
 
 // The picture, as a data URL, when it's a kind and a size this app shows.
 function readPicture(zip: Zip, path: unknown, prefix: string, notes: string[]): string | undefined {
@@ -82,14 +103,17 @@ function readPicture(zip: Zip, path: unknown, prefix: string, notes: string[]): 
     notes.push(L('a foto (grande demais)', 'the picture (too big)'))
     return undefined
   }
-  return `data:image/${type};base64,${zip.read(avatar, MAX_PICTURE_BYTES)!.toString('base64')}`
+  const bytes = attempt(() => zip.read(avatar, MAX_PICTURE_BYTES), undefined, L('a foto (não deu pra ler)', "the picture (it couldn't be read)"), notes)
+  return bytes && `data:image/${type};base64,${bytes.toString('base64')}`
 }
 
 // Each skill is a folder with a SKILL.md; only the recipe comes, the files beside it are counted.
 function readSkills(zip: Zip, paths: unknown, prefix: string, notes: string[]): ForeignSkill[] {
-  return arr(paths).flatMap((path) => {
+  const list = capped(paths, IMPORT_CAPS.skills, (n) => L(`${n} skill${n > 1 ? 's' : ''} além de ${IMPORT_CAPS.skills}`, `${n} skill${n > 1 ? 's' : ''} beyond ${IMPORT_CAPS.skills}`), notes)
+  return list.flatMap((path) => {
     const folder = inside(path, `${prefix}skills/`)
-    const text = folder && zip.read(`${folder}/SKILL.md`, MAX_TEXT)?.toString('utf8')
+    const where = folder?.split('/').pop() ?? ''
+    const text = folder && attempt(() => zip.read(`${folder}/SKILL.md`, MAX_TEXT)?.toString('utf8'), undefined, L(`a skill ${where} (não deu pra ler)`, `the ${where} skill (it couldn't be read)`), notes)
     if (!folder || !text) return []
     const fm = frontmatter(text)
     const nm = skillName(fm.name || folder.split('/').pop()!)
@@ -104,7 +128,13 @@ function readSkills(zip: Zip, paths: unknown, prefix: string, notes: string[]): 
   })
 }
 
-const memoriesOf = (v: unknown): string[] => arr(v).flatMap((item) => str(typeof item === 'string' ? item : obj(item)['text'], MAX_MEMORY) || [])
+const memoriesOf = (v: unknown, notes: string[]): string[] =>
+  capped(v, IMPORT_CAPS.memories, (n) => L(`${n} memória${n > 1 ? 's' : ''} além de ${IMPORT_CAPS.memories}`, `${n} memor${n > 1 ? 'ies' : 'y'} beyond ${IMPORT_CAPS.memories}`), notes).flatMap(
+    (item) => str(typeof item === 'string' ? item : obj(item)['text'], MAX_MEMORY) || []
+  )
+const routinesOver = (n: number): string => L(`${n} rotina${n > 1 ? 's' : ''} além de ${IMPORT_CAPS.routines}`, `${n} routine${n > 1 ? 's' : ''} beyond ${IMPORT_CAPS.routines}`)
+const agentsOver = (n: number): string => L(`${n} agente${n > 1 ? 's' : ''} além de ${IMPORT_CAPS.agents} (importe de novo com menos)`, `${n} agent${n > 1 ? 's' : ''} beyond ${IMPORT_CAPS.agents} (import again with fewer)`)
+const channelsOver = (n: number): string => L(`${n} ${n > 1 ? 'canais' : 'canal'} além de ${IMPORT_CAPS.channels}`, `${n} channel${n > 1 ? 's' : ''} beyond ${IMPORT_CAPS.channels}`)
 
 // A routine's own time zone isn't this computer's: the time stays the same, and the summary says so.
 function zoneNote(tz: string, name: string, notes: string[]): void {
@@ -129,7 +159,7 @@ export function readOpenBot(zip: Zip): ForeignTeam {
   if (m['version'] !== 1) throw new Error(L('Essa exportação vem de uma versão do OpenBot que o Tucano ainda não lê.', "That export comes from an OpenBot version Tucano doesn't read yet."))
 
   const notes: string[] = []
-  const agents = arr(m['agents']).flatMap((item, i) => {
+  const agents = capped(m['agents'], IMPORT_CAPS.agents, agentsOver, notes).flatMap((item, i) => {
     try {
       const a = openBotAgent(zip, obj(item))
       return a ? [a] : []
@@ -155,7 +185,9 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
 
   // The standing rules live in the workspace's AGENTS.md (or CLAUDE.md), only there when the export took the files.
   const files = inside(a['files'], prefix)
-  const fromFile = files ? (['AGENTS.md', 'CLAUDE.md'].map((f) => zip.read(`${files}/${f}`, MAX_TEXT)).find(Boolean)?.toString('utf8').trim() ?? '') : ''
+  const fromFile = files
+    ? attempt(() => ['AGENTS.md', 'CLAUDE.md'].map((f) => zip.read(`${files}/${f}`, MAX_TEXT)).find(Boolean)?.toString('utf8').trim() ?? '', '', L('o AGENTS.md (não deu pra ler)', "AGENTS.md (it couldn't be read)"), notes)
+    : ''
   const description = str(a['description'], 2_000)
   const instructions = (fromFile || description).slice(0, MAX_INSTRUCTIONS)
   if (!fromFile) notes.push(description ? L('as instruções (só veio a descrição: exporte com os arquivos)', 'the instructions (only the description came: export with the files)') : L('as instruções (exporte com os arquivos)', 'the instructions (export with the files)'))
@@ -167,7 +199,7 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
   const picture = readPicture(zip, a['avatar'], prefix, notes)
   const skills = readSkills(zip, a['skills'], prefix, notes)
 
-  const routines = [...arr(a['routines']), ...arr(a['oneTimeRoutines'])].flatMap((item) => {
+  const routines = capped([...arr(a['routines']), ...arr(a['oneTimeRoutines'])], IMPORT_CAPS.routines, routinesOver, notes).flatMap((item) => {
     const r = obj(item)
     const rname = str(r['name'], 120)
     const prompt = str(r['instruction'], 20_000)
@@ -181,7 +213,7 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
     return [{ name: rname, prompt, schedule }]
   })
 
-  const memories = memoriesOf(a['memories'])
+  const memories = memoriesOf(a['memories'], notes)
 
   const hue = a['avatarHue']
   return {
@@ -202,7 +234,7 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
 
 // The same CLI keeps the model; a provider Tucano doesn't run leaves the agent on the default.
 function openBotModel(provider: string, model: string): { modelId?: string; note?: string } {
-  const engines: Record<string, EngineId> = { claude: 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', cursor: 'cursor' }
+  const engines: Record<string, EngineId> = { claude: 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', gemini: 'gemini', cursor: 'cursor' }
   const engine = engines[provider]
   if (engine === 'claude') return { modelId: /opus/i.test(model) ? 'opus' : /haiku/i.test(model) ? 'haiku' : 'sonnet' }
   if (engine === 'codex') return model ? { modelId: codexValue(model) } : {}
@@ -281,7 +313,7 @@ export function readTucanoImport(zip: Zip): ForeignTeam {
 
   const notes: string[] = []
   const keys = new Set<string>()
-  const agents = arr(m['agents']).flatMap((item, i) => {
+  const agents = capped(m['agents'], IMPORT_CAPS.agents, agentsOver, notes).flatMap((item, i) => {
     try {
       const a = tucanoAgent(zip, obj(item), source)
       if (!a || keys.has(a.key)) {
@@ -295,7 +327,7 @@ export function readTucanoImport(zip: Zip): ForeignTeam {
       return []
     }
   })
-  const channels = arr(m['channels']).flatMap((item) => {
+  const channels = capped(m['channels'], IMPORT_CAPS.channels, channelsOver, notes).flatMap((item) => {
     const c = obj(item)
     const name = channelName(str(c['name'], 80))
     if (!name) return []
@@ -307,16 +339,16 @@ export function readTucanoImport(zip: Zip): ForeignTeam {
 }
 
 function tucanoAgent(zip: Zip, a: Record<string, unknown>, source: string): ForeignAgent | undefined {
-  const key = str(a['key'], 64)
+  const key = str(a['key'], 40)
   const name = str(a['name'], 80)
-  if (!KEY.test(key) || !name) return undefined
+  if (!OUR_KEY.test(key) || !name) return undefined
   const prefix = `agents/${key}/`
   const notes: string[] = []
   const instructions = str(a['instructions'], MAX_INSTRUCTIONS)
   if (!instructions) notes.push(L('as instruções (não vieram no arquivo)', "the instructions (they weren't in the file)"))
   notes.push(L(`o modelo do ${source} (ficou o modelo padrão)`, `the ${source} model (it got the default model)`))
 
-  const routines = arr(a['routines']).flatMap((item) => {
+  const routines = capped(a['routines'], IMPORT_CAPS.routines, routinesOver, notes).flatMap((item) => {
     const r = obj(item)
     const rname = str(r['name'], 120)
     const prompt = str(r['prompt'], 20_000)
@@ -339,7 +371,7 @@ function tucanoAgent(zip: Zip, a: Record<string, unknown>, source: string): Fore
     picture: readPicture(zip, a['picture'], prefix, notes),
     skills: readSkills(zip, a['skills'], prefix, notes),
     routines,
-    memories: memoriesOf(a['memories']),
+    memories: memoriesOf(a['memories'], notes),
     notes
   }
 }
@@ -374,7 +406,8 @@ export interface ImportResult {
   memories: Memory[]
 }
 
-export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit: number; defaultModel: string }): ImportResult {
+// `works`: whether a model runs here now (its harness chosen and signed in); `defaultModel` is one that does.
+export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit: number; defaultModel: string; works?: (modelId: string) => boolean }): ImportResult {
   const added = { agents: [] as string[], skills: 0, routines: 0, memories: [] as Memory[], same: [] as string[] }
   const left: string[] = [...team.notes]
   const skillsBefore = new Set(db.skills().filter((k) => k.state === 'active').map((k) => k.name))
@@ -391,6 +424,9 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
       continue
     }
     const handle = handleFor(f.name, new Set(db.agents().map((x) => x.handle)))
+    // The other app's model when it runs here; else one that does.
+    const ready = f.modelId && (!opts.works || opts.works(f.modelId))
+    if (f.modelId && !ready) left.push(L(`@${handle}: o modelo ${f.modelId} (o CLI dele não está pronto aqui: ficou ${opts.defaultModel})`, `@${handle}: the ${f.modelId} model (its CLI isn't ready here: it got ${opts.defaultModel})`))
     const agent: Agent = cleanLook({
       id: randomUUID(),
       name: f.name,
@@ -400,13 +436,15 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
       customColor: f.customColor,
       picture: f.picture,
       instructions: f.instructions,
-      modelId: f.modelId ?? opts.defaultModel,
+      modelId: ready ? f.modelId! : opts.defaultModel,
       effort: f.effort,
       maxRoutines: MAX_AGENT_ROUTINES,
       limit: opts.defaultLimit,
       used: 0,
       grants: {}, // the other app's access doesn't come: each connector is given here, by hand
       memory: 'auto',
+      // Instructions written somewhere else: no way out to the internet until the person turns it on.
+      web: false,
       computer: false,
       archived: false
     })
@@ -462,32 +500,39 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
     }
   }
 
-  // Group chats become channels; one with the same name gets the agents it's missing.
+  // Group chats become channels of their own: an imported agent never joins one that's already here,
+  // where it would read the conversation. One made by an earlier import of the same file (same name,
+  // or the name with a number, and the same agents) stays as it is.
   let channels = 0
   for (const c of team.channels) {
-    const members = c.members.flatMap((k) => byKey.get(k) ?? [])
-    const there = db.conversations().find((x) => x.kind === 'channel' && x.name === c.name)
-    if (there) {
-      for (const id of members)
-        if (!there.members.includes(id)) db.setAgentChannels(id, [...db.conversations().filter((x) => x.kind === 'channel' && x.members.includes(id)).map((x) => x.id), there.id])
-      continue
-    }
-    db.createConversation({ id: randomUUID(), kind: 'channel', name: c.name, topic: c.topic, members })
+    const members = [...new Set(c.members.flatMap((k) => byKey.get(k) ?? []))]
+    if (!members.length) continue
+    const all = db.conversations().filter((x) => x.kind === 'channel')
+    const base = c.name.slice(0, 54) // room for "-<number>" within a channel name's 60
+    const same = (x: { name: string; members: string[] }): boolean =>
+      (x.name === c.name || (x.name.startsWith(`${base}-`) && /^\d+$/.test(x.name.slice(base.length + 1)))) && x.members.length === members.length && members.every((id) => x.members.includes(id))
+    if (all.some(same)) continue
+    let name = c.name
+    for (let i = 2; all.some((x) => x.name === name); i++) name = `${base}-${i}`
+    if (name !== c.name) left.push(L(`o canal #${c.name} já existia: os agentes entraram no #${name}, novo`, `#${c.name} already existed: the agents went into a new #${name}`))
+    db.createConversation({ id: randomUUID(), kind: 'channel', name, topic: c.topic, members })
     channels++
   }
 
   const n = added.agents.length
   const parts = [
-    n && L(`${n} agente${n > 1 ? 's' : ''} sem nenhum conector liberado`, `${n} agent${n > 1 ? 's' : ''} with no connector granted`),
+    n && L(`${n} agente${n > 1 ? 's' : ''} sem nenhum conector e com a busca na web desligada`, `${n} agent${n > 1 ? 's' : ''} with no connector and web search off`),
     added.skills && `${added.skills} skill${added.skills > 1 ? 's' : ''}`,
-    channels && L(`${channels} canal${channels > 1 ? 'is' : ''}`, `${channels} channel${channels > 1 ? 's' : ''}`),
+    channels && L(`${channels} ${channels > 1 ? 'canais' : 'canal'}`, `${channels} channel${channels > 1 ? 's' : ''}`),
     added.routines && L(`${added.routines} rotina${added.routines > 1 ? 's' : ''} (desligadas)`, `${added.routines} routine${added.routines > 1 ? 's' : ''} (off)`),
     added.memories.length && L(`${added.memories.length} memória${added.memories.length > 1 ? 's' : ''} pra você confirmar`, `${added.memories.length} memor${added.memories.length > 1 ? 'ies' : 'y'} for you to confirm`)
   ].filter(Boolean)
   const done = parts.length ? L(`Do ${team.source}, importei ${parts.join(', ')}.`, `From ${team.source}, I imported ${parts.join(', ')}.`) : L(`Nada novo do ${team.source}.`, `Nothing new from ${team.source}.`)
   const same = added.same.length ? L(` Já existiam aqui: ${added.same.join(', ')}.`, ` Already here: ${added.same.join(', ')}.`) : ''
   const servers = team.servers.length ? L(` Conectores pra adicionar à mão, se quiser: ${team.servers.join(', ')}.`, ` Connectors to add by hand, if you want: ${team.servers.join(', ')}.`) : ''
-  const out = left.length ? `\n\n${L('Ficou de fora:', 'Left out:')}\n${left.map((x) => `• ${x}`).join('\n')}` : ''
+  const shown = left.slice(0, SUMMARY_LINES).map((x) => `• ${x}`)
+  if (left.length > SUMMARY_LINES) shown.push(L(`• e mais ${left.length - SUMMARY_LINES}`, `• and ${left.length - SUMMARY_LINES} more`))
+  const out = left.length ? `\n\n${L('Fica pra você ver:', 'For you to check:')}\n${shown.join('\n')}` : ''
   return { summary: `${done}${same}${servers}${out}`, agents: added.agents, memories: added.memories }
 }
 
