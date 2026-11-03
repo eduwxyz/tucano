@@ -6,6 +6,7 @@
 // the person lands in a channel watching it work. Then "Primeiros passos" in the sidebar
 // walks through the rest, checking itself off as each feature gets used.
 import { L, lang } from '../../../shared/lang'
+import { hostAccessWarning, hostComputerLabel, serverExecution } from '../execution-context'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ENGINES,
@@ -262,7 +263,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
         if (fromTuca) settleDraft(fromTuca.messageId, a.id)
         const dm = await dmWith(a.id)
         navigate({ kind: 'conversation', id: dm })
-        sendMessage(dm, task.trim())
+        await sendMessage(dm, task.trim())
         return
       }
       const channelId = await newChannel(unique(L('geral', 'general'), channels))
@@ -271,7 +272,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
       await Promise.all(skills.map((source) => linkSkill(source).catch(() => undefined))) // for every agent; who uses each changes in Skills
       updateSettings({ workspaceName: name.trim() || settings.workspaceName, context: context.trim(), routerModel, memoryModel, onboarding: { done: true } })
       navigate({ kind: 'conversation', id: channelId })
-      sendMessage(channelId, `@${a.handle} ${task.trim()}`)
+      await sendMessage(channelId, `@${a.handle} ${task.trim()}`)
     } finally {
       setBusy(false)
     }
@@ -342,7 +343,7 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
       <section className="onb__main">
         <LanguagePicker className="onb__lang" />
         <span className="onb__kicker">{L('Bem-vindo ao Tucano', 'Welcome to Tucano')}</span>
-        <h1>{L('Um time de agentes de IA, trabalhando no seu computador.', 'A team of AI agents, working on your computer.')}</h1>
+        <h1>{serverExecution() ? L('Um time de agentes de IA, trabalhando no servidor conectado.', 'A team of AI agents, working on the connected server.') : L('Um time de agentes de IA, trabalhando no seu computador.', 'A team of AI agents, working on your computer.')}</h1>
         <p className="onb__lead">{L('Você conversa com eles em canais, como num chat do trabalho. Eles pesquisam, escrevem, programam e usam as suas ferramentas, e você decide até onde cada um vai.', 'You talk to them in channels, like a work chat. They research, write, code and use your tools, and you decide how far each one goes.')}</p>
         <ul className="onb__points">
           <Point icon="zap" title={L('No harness que você já usa', 'On the harness you already use')}>
@@ -351,8 +352,10 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
           <Point icon="shield" title={L('Você no controle', 'You’re in control')}>
             {L('Cada agente só usa o que você liberar. Comprar, publicar, enviar e apagar sempre esperam o seu ok.', 'Each agent only uses what you allow. Buying, publishing, sending and deleting always wait for your OK.')}
           </Point>
-          <Point icon="lock" title={L('Tudo fica aqui', 'Everything stays here')}>
-            {L('Conversas, memória e logins ficam no seu computador. Nada passa por servidor nosso.', 'Conversations, memory and logins stay on your computer. Nothing goes through a server of ours.')}
+          <Point icon="lock" title={serverExecution() ? L('Seu time fica no servidor', 'Your team stays on the server') : L('Tudo fica aqui', 'Everything stays here')}>
+            {serverExecution()
+              ? L('Conversas, memória e logins ficam no servidor conectado. Os provedores de IA e conectores recebem os dados necessários ao uso deles. Nada passa por servidor do Tucano.', 'Conversations, memory and logins stay on the connected server. AI providers and connectors receive the data needed to use them. Nothing goes through a Tucano-operated server.')
+              : L('Conversas, memória e logins ficam no seu computador. Nada passa por servidor nosso.', 'Conversations, memory and logins stay on your computer. Nothing goes through a server of ours.')}
           </Point>
         </ul>
         <label className="onb__field">
@@ -439,7 +442,9 @@ function Harnesses({ ready, onBack, onNext }: { ready: boolean; onBack: () => vo
       <section className="onb__main">
         <span className="onb__kicker">{L('Passo 1 · Os harnesses', 'Step 1 · The harnesses')}</span>
         <h1>{L('Quais harnesses seus agentes vão usar?', 'Which harnesses will your agents use?')}</h1>
-        <p className="onb__lead">{L('Os agentes rodam nos programas que já estão no seu computador, do jeito que você configurou cada um. O Tucano só lê essa configuração: nunca vê nem guarda as suas senhas e chaves.', 'The agents run on the programs already on your computer, the way you set up each one. Tucano only reads that setup: it never sees or stores your passwords and keys.')}</p>
+        <p className="onb__lead">{serverExecution()
+          ? L('Os agentes usam os harnesses instalados e configurados no servidor conectado. Instale e faça login por lá; esta lista vem do servidor, não do aplicativo ou navegador que exibe esta interface.', 'Agents use the harnesses installed and configured on the connected server. Install and sign in there; this list comes from the server, not the app or browser displaying this interface.')
+          : L('Os agentes rodam nos programas que já estão no seu computador, do jeito que você configurou cada um. O Tucano só lê essa configuração: nunca vê nem guarda as suas senhas e chaves.', 'The agents run on the programs already on your computer, the way you set up each one. Tucano only reads that setup: it never sees or stores your passwords and keys.')}</p>
         <HarnessList />
         {!ready && (
           <p className="onb__wait">
@@ -879,7 +884,7 @@ function AgentCard({ agent, handle, computer }: { agent: Agent; handle: string; 
       )}
       <div className="onb-card__powers">
         <Power on={agent.web !== false} icon="globe" label="Web" />
-        <Power on={computer !== 'none'} icon={computer === 'mac' ? 'laptop' : 'terminal'} label={computer === 'mac' ? L('Seu computador', 'Your computer') : L('Computador', 'Computer')} />
+        <Power on={computer !== 'none'} icon={computer === 'mac' ? 'laptop' : 'terminal'} label={computer === 'mac' ? (serverExecution() ? hostComputerLabel() : L('Seu computador', 'Your computer')) : L('Computador', 'Computer')} />
         <Power on={!!agent.browser} icon="pointer" label={L('Navegador', 'Browser')} />
       </div>
       <div className="onb-card__bubble">
@@ -939,7 +944,9 @@ function Powers(p: {
             </span>
             <div>
               <strong>{L('Navegador próprio', 'Its own browser')}</strong>
-              <p>{L('Um Chrome só dele: abre sites, clica e preenche. Você assiste ao vivo e assume quando precisar entrar numa conta.', 'A Chrome of its own: opens sites, clicks and fills in. You watch live and take over when it needs to sign in to an account.')}</p>
+              <p>{serverExecution()
+                ? L('Um Chrome só dele no servidor, com logins separados deste dispositivo. Você assiste pelo painel e assume por ali quando precisar entrar numa conta.', 'A Chrome of its own on the server, with logins separate from this device. Watch it in the panel and take over there when it needs to sign in to an account.')
+                : L('Um Chrome só dele: abre sites, clica e preenche. Você assiste ao vivo e assume quando precisar entrar numa conta.', 'A Chrome of its own: opens sites, clicks and fills in. You watch live and take over when it needs to sign in to an account.')}</p>
             </div>
             <Toggle on={!!agent.browser} onChange={(v) => patch({ browser: v })} />
           </div>
@@ -950,24 +957,28 @@ function Powers(p: {
             <div>
               <strong>{L('Computador', 'Computer')}</strong>
               <p>{L('Onde ele roda comandos, cria arquivos e sobe sites e apps pra você ver.', 'Where it runs commands, creates files and starts sites and apps for you to see.')}</p>
-              <div className="segmented segmented--wide">
+              <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Computador', 'Computer')} aria-describedby="onb-computer-hint">
                 {(
                   [
                     ['none', L('Nenhum', 'None')],
                     ['linux', L('Linux isolado', 'Isolated Linux')],
-                    ['mac', L('Este computador', 'This computer')]
+                    ['mac', hostComputerLabel()]
                   ] as const
                 ).map(([k, label]) => (
-                  <button key={k} className={computer === k ? 'is-active' : ''} onClick={() => p.setComputer(k)}>
+                  <button key={k} role="radio" aria-checked={computer === k} className={computer === k ? 'is-active' : ''} onClick={() => p.setComputer(k)}>
                     {label}
                   </button>
                 ))}
               </div>
-              {computer === 'none' && <p className="hint">{L('Só conversa, web e navegador. Dá pra ligar depois.', 'Just chat, web and browser. You can turn it on later.')}</p>}
-              {computer === 'linux' && <p className="hint">{L('Um computador só dele, separado do seu. Instala e roda o que precisar sem pedir. Precisa do Docker rodando.', 'A computer of its own, apart from yours. It installs and runs what it needs without asking. Needs Docker running.')}</p>}
+              {computer === 'none' && <p id="onb-computer-hint" className="hint">{L('Só conversa, web e navegador. Dá pra ligar depois.', 'Just chat, web and browser. You can turn it on later.')}</p>}
+              {computer === 'linux' && <p id="onb-computer-hint" className="hint">{serverExecution()
+                ? L('Um Linux isolado no servidor conectado. Instala e roda o que precisar sem pedir. Precisa do Docker rodando na máquina que executa o servidor.', 'An isolated Linux on the connected server. It installs and runs what it needs without asking. Requires Docker running on the machine hosting the server.')
+                : L('Um computador só dele, separado do seu. Instala e roda o que precisar sem pedir. Precisa do Docker rodando.', 'A computer of its own, apart from yours. It installs and runs what it needs without asking. Needs Docker running.')}</p>}
               {computer === 'mac' && (
-                <p className="hint hint--warn">
-                  <Icon name="lock" size={13} /> {L(`${agent.name.trim() || 'O agente'} roda comandos no seu computador como se fosse você, com tudo o que você tem instalado. Escolha só se confia nessa função.`, `${agent.name.trim() || 'The agent'} runs commands on your computer as if it were you, with everything you have installed. Only choose this if you trust that role.`)}
+                <p id="onb-computer-hint" className="hint hint--warn">
+                  <Icon name="lock" size={13} /> {serverExecution()
+                    ? `${hostAccessWarning().title} ${hostAccessWarning().detail}`
+                    : L(`${agent.name.trim() || 'O agente'} roda comandos no seu computador como se fosse você, com tudo o que você tem instalado. Escolha só se confia nessa função.`, `${agent.name.trim() || 'The agent'} runs commands on your computer as if it were you, with everything you have installed. Only choose this if you trust that role.`)}
                 </p>
               )}
             </div>
