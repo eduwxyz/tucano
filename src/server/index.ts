@@ -369,8 +369,21 @@ toCore(null, [watcher])
 watcher.emit('message', { data: { id: 1, method: 'snapshot' } })
 
 server.listen(port, host, () => {
-  console.log(`Tucano server: http://${shown}:${port}/?token=${token}`)
+  console.log(`Tucano server: http://${shown}:${port}/`)
   console.log(`Data: ${dataDir}`)
-  console.log('To pair a browser or the app with a one-time code: node out/main/server.js pair --label "My Mac" (docs/pairing.md)')
+  // The server's own token is not printed: a log (journalctl, a file a service writes) is read by more people
+  // than the one who owns the server, and the token opens everything for good. A device pairs with a code that
+  // works once and dies in minutes; with nobody paired yet, the first is made here.
+  let first: string | undefined
+  if (!pairing.list().length) {
+    try {
+      first = pairing.invite('first device').code
+    } catch {
+      // The file is busy: `pair` below still works.
+    }
+  }
+  if (first) console.log(`Nobody is paired yet. This browser can sign in once, in the next 5 minutes: http://${shown}:${port}/?pair=${first}`)
+  console.log('To pair a browser or the Mac app with a one-time code: node out/main/server.js pair --label "My Mac" [--ssh you@host] (docs/pairing.md)')
+  if (!process.env['TUCANO_TOKEN']) console.log(`The server's own token, for scripts (Authorization: Bearer …), is in ${join(dataDir, 'server-token')}`)
   if (host === '127.0.0.1') console.log('Listening on this machine only: reach it through an SSH tunnel, Tailscale or a reverse proxy with HTTPS (docs/server.md).')
 })
