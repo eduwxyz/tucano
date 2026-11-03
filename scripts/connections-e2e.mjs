@@ -230,6 +230,24 @@ async function resize(page, viewport) {
   // Measure the settled layout, not the old dialog against the new innerHeight.
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 }
+async function theme(page, colorScheme) {
+  await page.emulateMedia({ colorScheme })
+  await page.evaluate(async () => {
+    // A color media change updates text immediately but can leave a background
+    // at the start of a CSS transition until Chromium advances a frame.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const finite = document.getAnimations().filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime))
+    let timeout
+    try {
+      await Promise.race([
+        Promise.all(finite.map((animation) => animation.finished.catch(() => {}))),
+        new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Theme transitions did not settle within 2 seconds')), 2_000) })
+      ])
+    } finally { clearTimeout(timeout) }
+    await new Promise(requestAnimationFrame)
+  })
+  assert.equal(await page.evaluate((scheme) => matchMedia(`(prefers-color-scheme: ${scheme})`).matches, colorScheme), true)
+}
 async function assertReflow(page) {
   const measured = await dialog(page).evaluate((element) => {
     const box = element.getBoundingClientRect()
@@ -560,7 +578,7 @@ try {
       await back(page)
     }
     await resize(page, { width: 1100, height: 850 })
-    await page.emulateMedia({ colorScheme: 'dark' })
+    await theme(page, 'dark')
     await assertContrast(page)
     await screenshot('dark')
     await add(page)
