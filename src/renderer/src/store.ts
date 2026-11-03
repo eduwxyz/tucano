@@ -416,8 +416,8 @@ export const setChannelMembers = (id: string, agentIds: string[]): Promise<void>
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
 
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = []): void => {
-  if (text.trim() || images.length) void call('sendMessage', { conversationId, text, ...(images.length ? { images } : {}) })
+export const sendMessage = async (conversationId: string, text: string, images: ImageUpload[] = []): Promise<void> => {
+  if (text.trim() || images.length) await call('sendMessage', { conversationId, text, ...(images.length ? { images } : {}) })
 }
 
 export const stopRun = (messageId: string): void => void call('stopRun', { messageId })

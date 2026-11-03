@@ -1,6 +1,6 @@
 import { L } from '../../../shared/lang'
 import { CODE_SPANS } from '../../../shared/types'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -41,6 +41,7 @@ import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal } from './Tuca'
+import { ComposerDrafts } from '../drafts'
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
@@ -774,15 +775,22 @@ async function prepareImage(file: File): Promise<Attached | string> {
   }
 }
 
-// One draft per conversation, kept while the app runs: leaving a channel doesn't
-// lose the message you were typing.
-const drafts = new Map<string, { text: string; images: Attached[] }>()
+// Scope comes from this page's private preload session, never from conversation IDs.
+const drafts = new ComposerDrafts(window.tucano?.drafts)
+const attachedImages = (images: ImageUpload[]): Attached[] => images.map((image) => ({ ...image, url: `data:${image.mime};base64,${image.data}` }))
+const draftImages = (id: string): Attached[] => attachedImages(drafts.get(id)?.images ?? [])
 
-export function Composer({ conversationId, members, placeholder }: { conversationId: string; members: Agent[]; placeholder: string }): ReactNode {
+type ComposerProps = { conversationId: string; members: Agent[]; placeholder: string }
+export function Composer(props: ComposerProps): ReactNode { return <ComposerInput key={props.conversationId} {...props} /> }
+
+function ComposerInput({ conversationId, members, placeholder }: ComposerProps): ReactNode {
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
   const [text, setText] = useState(() => drafts.get(conversationId)?.text ?? '')
-  const [images, setImages] = useState<Attached[]>(() => drafts.get(conversationId)?.images ?? [])
+  const [images, setImages] = useState<Attached[]>(() => draftImages(conversationId))
+  const delivery = useSyncExternalStore(drafts.subscribe, () => drafts.sendState(conversationId))
+  const sentRevision = useRef(delivery.revision)
+  const preparing = useSyncExternalStore(drafts.subscribe, () => drafts.preparingState(conversationId))
   const [note, setNote] = useState('')
   const [dragging, setDragging] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
@@ -802,30 +810,37 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const live = useRef({ text, images })
   live.current = { text, images }
   useEffect(() => {
+    if (sentRevision.current === delivery.revision) return
+    sentRevision.current = delivery.revision
+    live.current = { text: '', images: [] }
+    setText(''); setImages([]); setNote(''); setMention(null)
+  }, [delivery.revision])
+  useEffect(() => {
     const draft = drafts.get(conversationId)
     setText(draft?.text ?? '')
-    setImages(draft?.images ?? [])
+    setImages(draftImages(conversationId))
     setNote('')
     ref.current?.focus()
-    return () => {
-      const { text, images } = live.current
-      if (text.trim() || images.length) drafts.set(conversationId, { text, images })
-      else drafts.delete(conversationId)
-    }
+    return drafts.activate(conversationId,
+      () => sentRevision.current === drafts.sendState(conversationId).revision ? live.current : { text: '', images: [] },
+      (draft) => {
+        const images = attachedImages(draft.images)
+        live.current = { text: draft.text, images }
+        setText(draft.text); setImages(images)
+      })
   }, [conversationId])
 
   const addFiles = async (files: File[]): Promise<void> => {
-    if (!files.length) return
-    const done = await Promise.all(files.map(prepareImage))
-    const ok = done.filter((d): d is Attached => typeof d !== 'string')
-    const errors = done.filter((d): d is string => typeof d === 'string')
-    let over = false
-    setImages((cur) => {
-      over = cur.length + ok.length > MAX_IMAGES_PER_MESSAGE
-      return [...cur, ...ok].slice(0, MAX_IMAGES_PER_MESSAGE)
-    })
-    setNote([...errors, over ? L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`) : ''].filter(Boolean).join(' '))
-    ref.current?.focus()
+    if (!files.length || drafts.sendState(conversationId).pending) return
+    const finished = drafts.preparingAttachment(conversationId)
+    try {
+      const done = await Promise.all(files.map(prepareImage))
+      const ok = done.filter((d): d is Attached => typeof d !== 'string')
+      const errors = done.filter((d): d is string => typeof d === 'string')
+      const over = drafts.appendImages(conversationId, ok)
+      setNote([...errors, over ? L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`) : ''].filter(Boolean).join(' '))
+      ref.current?.focus()
+    } finally { finished() }
   }
 
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
@@ -897,17 +912,13 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   }
 
   const submit = (): void => {
-    if (!text.trim() && images.length === 0) return
-    sendMessage(
+    if (delivery.pending || preparing || (!text.trim() && images.length === 0)) return
+    setNote('')
+    void drafts.send(conversationId, { text, images }, () => sendMessage(
       conversationId,
       text,
       images.map(({ name, mime, data }) => ({ name, mime, data }))
-    )
-    drafts.delete(conversationId)
-    setText('')
-    setImages([])
-    setNote('')
-    setMention(null)
+    ))
   }
 
   return (
@@ -954,7 +965,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             {images.map((img, i) => (
               <div key={i} className="composer__image" title={img.name}>
                 <img src={img.url} alt={img.name} />
-                <button className="composer__image-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
+                <button className="composer__image-x" disabled={delivery.pending} title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
                   <Icon name="x" size={11} />
                 </button>
               </div>
@@ -965,6 +976,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
           ref={ref}
           rows={1}
           value={text}
+          disabled={delivery.pending}
           placeholder={asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
           onChange={(e) => {
             setText(e.target.value)
@@ -990,7 +1002,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
           }}
         />
         <div className="composer__bar">
-          <button className="icon-btn" title={L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
+          <button className="icon-btn" disabled={delivery.pending} title={L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
             <Icon name="image" size={15} />
           </button>
           <input
@@ -1004,15 +1016,15 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
               e.target.value = ''
             }}
           />
-          <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : isDm ? L('O agente sempre responde na DM', 'The agent always replies in a DM') : L('@ chama um agente · sem menção, o router decide', '@ calls an agent · without a mention, the router decides'))}
+          <span role={delivery.error ? 'alert' : undefined} className={`composer__hint ${note || delivery.error ? 'composer__hint--warn' : ''}`}>
+            {note || (delivery.pending ? L('Enviando…', 'Sending…') : delivery.error ? L('Não foi possível confirmar o envio. Rascunho mantido; confira a conversa antes de reenviar.', 'Could not confirm the send. Draft kept; check the conversation before trying again.') : preparing ? L('Preparando imagens…', 'Preparing images…') : members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : isDm ? L('O agente sempre responde na DM', 'The agent always replies in a DM') : L('@ chama um agente · sem menção, o router decide', '@ calls an agent · without a mention, the router decides'))}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((m) => stopRun(m.id))}>
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
             </button>
           ) : null}
-          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={submit} title={L('Enviar (Enter)', 'Send (Enter)')}>
+          <button className="btn btn--primary btn--sm btn--icon" disabled={delivery.pending || preparing > 0 || (!text.trim() && images.length === 0)} onClick={submit} title={L('Enviar (Enter)', 'Send (Enter)')}>
             <Icon name="send" size={14} />
           </button>
         </div>

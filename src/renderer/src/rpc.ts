@@ -1,6 +1,7 @@
 import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../shared/rpc'
 import type { UpdateState } from '../../shared/types'
 import type { Reach } from '../../shared/pairlink'
+import type { DraftApi } from '../../shared/drafts'
 
 export type RemoteState = {
   active: string | null
@@ -8,6 +9,8 @@ export type RemoteState = {
   status: 'local' | 'connecting' | 'connected' | 'error'
   error?: string
   pairLink?: string
+  pairLinkId?: number
+  switching?: boolean
 }
 
 export type RemoteApi = {
@@ -24,6 +27,7 @@ declare global {
     tucano: {
       remote?: RemoteApi
       remoteMode?: boolean
+      drafts?: DraftApi
       servicePreviews?: boolean
       clientPlatform?: 'mac' | 'windows' | 'linux'
       connect: () => void

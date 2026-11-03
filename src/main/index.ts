@@ -10,6 +10,7 @@ import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { RemoteClient, type RemoteState as TransportState } from './remote'
 import { RemoteStore } from './remote-store'
+import { SessionDrafts } from './session-drafts'
 import { parsePairLink } from '../shared/pairlink'
 import { autostartEntry, autostartFile, onPath } from '../core/platform'
 
@@ -191,8 +192,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     if (!Notification.isSupported()) return
     const n = new Notification({ title: activeRemote ? `${L('Local', 'Local')} · ${msg.title}` : msg.title, body: msg.body, silent: true, ...noteIcon() })
     n.on('click', () => {
-      if (activeRemote) void switchConnection(null).then(() => showWindow(msg.conversationId)).catch(() => {})
-      else showWindow(msg.conversationId)
+      void openLocalConversation(msg.conversationId)
     })
     n.show()
   } else if (msg.type === 'busy') {
@@ -282,8 +282,16 @@ let remoteClient: RemoteClient | undefined
 const clientStates = new WeakMap<RemoteClient, TransportState>()
 let activeRemote: string | null = null
 let remoteStatus: TransportState = { status: 'disconnected' }
+let switchError: string | undefined
 let pendingPairLink: string | undefined
+let pairLinkSequence = 0
 let switching = false
+let switchSettled = Promise.resolve()
+let activeServer: string | undefined
+const sessionDrafts = new SessionDrafts()
+let draftSession: string | undefined
+let checkpointSequence = 0
+let pendingCheckpoint: { id: number; session: string; finish(ok: boolean): void } | undefined
 let remotePort: Electron.MessagePortMain | undefined
 let requestSequence = 0
 const remoteRequests = new Map<number, number>()
@@ -296,11 +304,11 @@ function rememberSelection(id: string | null): void {
 }
 function connectionState(): unknown {
   let profiles = [] as ReturnType<RemoteStore['list']>
-  let error = remoteStatus.error
+  let error = switchError ?? remoteStatus.error
   try { profiles = remoteStore?.list() ?? [] } catch { error = 'Cannot read saved servers. Restore the connection file from backup.' }
   return { active: activeRemote, profiles: profiles.map(({ id, name, reach, remotePort }) => ({ id, name, reach, remotePort })),
-    status: error ? 'error' : !activeRemote && !switching ? 'local' : remoteStatus.status === 'disconnected' ? 'connecting' : remoteStatus.status,
-    error, pairLink: pendingPairLink }
+    status: !activeRemote ? 'local' : remoteStatus.status === 'disconnected' ? 'connecting' : remoteStatus.status,
+    error, switching, pairLink: pendingPairLink, pairLinkId: pendingPairLink ? pairLinkSequence : undefined }
 }
 function publishConnection(): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote:state', connectionState())
@@ -326,6 +334,7 @@ function candidateClient(): RemoteClient {
       if (remoteClient !== client) return
       remoteStatus = state
       if (state.status === 'error') {
+        switchError = undefined
         for (const id of remoteRequests.values()) remotePort?.postMessage({ id, error: state.error ?? 'Server disconnected.' })
         remoteRequests.clear()
       }
@@ -337,27 +346,81 @@ function candidateClient(): RemoteClient {
 function trustedWindow(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void {
   if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Untrusted window.')
 }
+ipcMain.on('drafts:open', (event) => {
+  trustedWindow(event)
+  const opened = sessionDrafts.open(activeRemote, activeServer)
+  draftSession = opened.session
+  event.returnValue = opened
+})
+ipcMain.on('drafts:save', (event, session: unknown, entries: unknown) => {
+  trustedWindow(event)
+  event.returnValue = typeof session === 'string' ? sessionDrafts.save(session, entries) : 'invalid'
+})
+ipcMain.on('drafts:checkpoint', (event, id: unknown, session: unknown, entries: unknown) => {
+  trustedWindow(event)
+  if (!pendingCheckpoint || id !== pendingCheckpoint.id || session !== pendingCheckpoint.session) return
+  pendingCheckpoint.finish(sessionDrafts.save(pendingCheckpoint.session, entries) !== 'invalid')
+})
+async function checkpointDrafts(): Promise<void> {
+  if (!draftSession || !mainWindow || mainWindow.isDestroyed()) return
+  const session = draftSession, win = mainWindow
+  const saved = await new Promise<boolean>((resolve) => {
+    const id = ++checkpointSequence
+    const timer = setTimeout(() => finish(false), 5000)
+    const finish = (ok: boolean): void => {
+      clearTimeout(timer)
+      if (pendingCheckpoint?.id === id) pendingCheckpoint = undefined
+      resolve(ok)
+    }
+    pendingCheckpoint = { id, session, finish }
+    win.webContents.send('drafts:checkpoint', id)
+  })
+  if (!saved) throw new Error('Cannot keep unsent drafts. Your current environment is unchanged. Try again or save your draft before switching.')
+}
+async function openLocalConversation(conversationId?: string): Promise<void> {
+  // A notification belongs to the local core even if a VPS transition is pending.
+  while (switching) await switchSettled
+  try {
+    if (activeRemote) await switchConnection(null)
+    showWindow(conversationId)
+  } catch {
+    // Keep the current environment intact (for example while a draft is sending).
+    showWindow()
+  }
+}
 async function switchConnection(id: string | null, pairingLink?: string, reload = true): Promise<void> {
   if (switching) throw new Error('A connection is already in progress.')
   if (!remoteStore) throw new Error('Connections are not ready.')
   if (id !== null && (typeof id !== 'string' || !id)) throw new Error('Invalid server selection.')
+  if (pairingLink === undefined && id === activeRemote && (id === null ? !remoteStatus.error : remoteClient && remoteStatus.status === 'connected')) return
   switching = true
+  switchError = undefined
+  let settle!: () => void
+  switchSettled = new Promise<void>((resolve) => { settle = resolve })
   publishConnection()
   let candidate: RemoteClient | undefined
+  let server: string | undefined
+  let pairedSaved = false
   try {
     if (pairingLink !== undefined) {
       const parsed = parsePairLink(pairingLink)
       if (!parsed.ok) throw new Error(parsed.error)
+      const pending = pendingPairLink ? parsePairLink(pendingPairLink) : undefined
+      const arrival = pending?.ok && pending.link.code === parsed.link.code && pending.link.remotePort === parsed.link.remotePort &&
+        JSON.stringify(pending.link.reach) === JSON.stringify(parsed.link.reach) ? pairLinkSequence : undefined
+      // Refuse an unreadable store before consuming a single-use pairing code.
+      const profiles = remoteStore.list()
       // Check the vault before redeeming a single-use code.
       if (!safeStorage.isEncryptionAvailable() || (process.platform === 'linux' && ['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend())))
         throw new Error('Secure storage is unavailable. Unlock the system keychain and try again.')
       candidate = candidateClient()
       const { profile, token } = await candidate.pair(parsed.link)
-      const previous = remoteStore.list().find((p) => p.server === profile.server && p.remotePort === profile.remotePort && JSON.stringify(p.reach) === JSON.stringify(profile.reach))
+      const previous = profiles.find((p) => p.server === profile.server && p.remotePort === profile.remotePort && JSON.stringify(p.reach) === JSON.stringify(profile.reach))
       if (previous) { profile.id = previous.id; profile.name = previous.name }
       remoteStore.put(profile, token)
+      pairedSaved = true
       id = profile.id
-      pendingPairLink = undefined
+      if (arrival !== undefined && arrival === pairLinkSequence) pendingPairLink = undefined
     }
     if (id) {
       const saved = remoteStore.get(id)
@@ -366,11 +429,16 @@ async function switchConnection(id: string | null, pairingLink?: string, reload 
       await candidate.connect(saved.profile, saved.token)
       const ready = clientStates.get(candidate)
       if (ready?.status !== 'connected') throw new Error(ready?.error ?? 'Server disconnected before the workspace opened.')
+      server = saved.profile.server
     }
+    if (reload) await checkpointDrafts()
+    // The event stream can close while the renderer checkpoints a large draft.
+    if (candidate && clientStates.get(candidate)?.status !== 'connected') throw new Error('Server disconnected before the workspace opened.')
     rememberSelection(id)
     const old = remoteClient
     remoteClient = candidate
     activeRemote = id
+    activeServer = server
     remoteStatus = { status: id ? 'connected' : 'disconnected' }
     old?.disconnect()
     remotePort?.close(); remotePort = undefined; remoteRequests.clear()
@@ -382,9 +450,11 @@ async function switchConnection(id: string | null, pairingLink?: string, reload 
     candidate?.disconnect()
     // Keep the previous connection usable after a failed switch.
     if (!activeRemote && !core) core = startCore()
-    if (!remoteClient) remoteStatus = { status: 'error', error: error instanceof Error ? error.message : 'Connection failed.' }
-    throw error
-  } finally { switching = false; publishConnection() }
+    const failure = pairedSaved ? new Error('Server paired and saved, but connection failed. Choose its saved connection to retry without a new pairing code.') : error
+    switchError = failure instanceof Error ? failure.message : 'Connection failed.'
+    if (!remoteClient) remoteStatus = { status: 'error', error: failure instanceof Error ? failure.message : 'Connection failed.' }
+    throw failure
+  } finally { switching = false; publishConnection(); settle() }
 }
 ipcMain.handle('remote:state', (event) => { trustedWindow(event); return connectionState() })
 ipcMain.handle('remote:pair', async (event, link: unknown) => {
@@ -408,6 +478,7 @@ ipcMain.handle('remote:forget', async (event, id: unknown) => {
   if (switching || typeof id !== 'string') throw new Error('Connection is busy or invalid.')
   if (activeRemote === id) await switchConnection(null)
   remoteStore?.remove(id)
+  sessionDrafts.forget(id)
   publishConnection()
 })
 ipcMain.on('remote:mode', (event) => {
@@ -417,6 +488,7 @@ function receivePairLink(link: string): void {
   if (!parsePairLink(link).ok) return
   // An external link only opens a review screen. It never runs SSH or redeems a code by itself.
   pendingPairLink = link
+  pairLinkSequence++
   if (app.isReady()) { showWindow(); publishConnection() }
 }
 app.on('open-url', (event, url) => { event.preventDefault(); receivePairLink(url) })
@@ -524,6 +596,17 @@ function createWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
   mainWindow = win
+  win.webContents.on('will-prevent-unload', (event) => {
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: [L('Continuar editando', 'Keep editing'), L('Continuar mesmo assim', 'Continue anyway')],
+      defaultId: 0, cancelId: 0,
+      message: L('Não foi possível preservar os rascunhos', 'Could not preserve unsent drafts'),
+      detail: L('Aguarde o envio ou o preparo de imagens e tente novamente. Se o rascunho for muito grande, copie o texto antes de sair. Continuar pode descartar rascunhos; uma mensagem já enviada ainda pode chegar ao servidor.', 'Wait for sending or image preparation to finish, then try again. If the draft is too large, copy the text before leaving. Continuing may discard drafts; a message already sent may still reach the server.')
+    })
+    if (choice === 1) event.preventDefault()
+    else quitting = false
+  })
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
     stillOpen()
@@ -643,10 +726,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true
-  browsers.quit()
 })
 
 app.on('will-quit', () => {
+  browsers.quit()
   remoteClient?.disconnect()
   core?.kill()
 })
