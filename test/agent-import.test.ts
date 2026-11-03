@@ -1,10 +1,10 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
-import { applyForeignTeam, hueColor, openBotSchedule, readForeignZip } from '../src/core/agent-import'
+import { applyForeignTeam, hueColor, openBotSchedule, readForeignZip, tucanoSchedule } from '../src/core/agent-import'
 import { zipFromBuffer, zipFromFile } from '../src/core/zip'
 
 const fresh = (): Db => new Db(join(mkdtempSync(join(tmpdir(), 'ad-import-')), 'test.db'))
@@ -182,5 +182,105 @@ describe('importing agents from OpenBot', () => {
     expect(openBotSchedule({ kind: 'once', date, time: '12:00' })).toEqual({ days: [soon.getDay()], time: '12:00', once: true })
     expect(openBotSchedule({ kind: 'once', date: '2020-01-01', time: '12:00' })).toBeUndefined()
     expect(hueColor(0)).toMatch(/^#[0-9a-f]{6}$/)
+  })
+})
+
+describe('importing agents from Grok Bot, through our skill', () => {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const manifest = (extra: Record<string, unknown> = {}): string =>
+    JSON.stringify({
+      format: 'tucano-agent-import',
+      version: 1,
+      source: 'grok-bot',
+      agents: [
+        {
+          key: 'research',
+          name: 'Research',
+          role: 'Market research',
+          instructions: 'You look for primary sources.',
+          picture: 'agents/research/picture.png',
+          skills: ['agents/research/skills/brief'],
+          routines: [
+            { name: 'Morning news', prompt: 'Summarize the news.', days: ['mon', 'tue', 'wed', 'thu', 'fri'], time: '08:30', timezone: zone },
+            { name: 'Every hour', prompt: 'Check the inbox.', days: [], time: '00:00' }
+          ],
+          memories: ['The user wants reports in BRL.', 'The user wants reports in BRL.']
+        },
+        { key: 'sales', name: 'Sales', role: 'Outbound', instructions: '', routines: [], memories: [] },
+        { key: 'sales', name: 'Twin', instructions: 'same key' },
+        { key: 'Bad Key', name: 'Nope', instructions: 'x' }
+      ],
+      channels: [
+        { name: 'Market Desk', topic: 'Weekly review', members: ['research', 'sales', 'ghost'], routines: [{ name: 'Friday' }] },
+        { name: 'geral', members: ['sales'] }
+      ],
+      ...extra
+    })
+  const files = (): Record<string, string | Buffer> => ({
+    'tucano-import.json': manifest(),
+    'agents/research/picture.png': PNG,
+    'agents/research/skills/brief/SKILL.md': '---\nname: brief\ndescription: When writing a brief\n---\n\nKeep it short.\n',
+    'agents/research/skills/brief/template.txt': 'x'
+  })
+
+  it('brings agents, skills, routines off, memories to confirm and group chats as channels', () => {
+    const db = fresh()
+    db.createConversation({ id: 'g', kind: 'channel', name: 'geral', members: [] })
+    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip(files(), { deflate: true }))), opts)
+
+    expect(db.agents().map((a) => a.handle).sort()).toEqual(['research', 'sales'])
+    const res = db.agents().find((a) => a.handle === 'research')!
+    const sal = db.agents().find((a) => a.handle === 'sales')!
+    expect(res).toMatchObject({ name: 'Research', role: 'Market research', instructions: 'You look for primary sources.', modelId: 'sonnet', effort: 'medium', grants: {}, computer: false })
+    expect(res.picture).toBe(`data:image/png;base64,${PNG.toString('base64')}`)
+    expect(db.skills().map((k) => [k.name, k.body, k.agents])).toEqual([['brief', 'Keep it short.', [res.id]]])
+
+    expect(db.routines()).toHaveLength(1)
+    expect(db.routines()[0]).toMatchObject({ name: 'Morning news', enabled: false, schedule: { days: [1, 2, 3, 4, 5], time: '08:30' } })
+    expect(db.memories({ scope: res.id }).map((m) => [m.text, m.state])).toEqual([['The user wants reports in BRL.', 'pending']])
+
+    // A new channel with both, and the one already here gets the agent it was missing.
+    const desk = db.conversations().find((c) => c.kind === 'channel' && c.name === 'market-desk')!
+    expect(desk).toMatchObject({ topic: 'Weekly review' })
+    expect(desk.members.sort()).toEqual([res.id, sal.id].sort())
+    expect(db.conversation('g')!.members).toEqual([sal.id])
+
+    expect(r.summary).toContain('Do Grok Bot, importei 2 agentes sem nenhum conector liberado, 1 skill, 1 canal, 1 rotina (desligadas), 1 memória pra você confirmar.')
+    expect(r.summary).toContain('o modelo do Grok Bot (ficou o modelo padrão)')
+    expect(r.summary).toContain('a rotina "Every hour"')
+    expect(r.summary).toContain('@sales: as instruções')
+    expect(r.summary).toContain('as rotinas do canal #market-desk')
+    expect(r.summary).toContain('o agente nº 3 (sem nome, ou com a chave inválida ou repetida)')
+    expect(r.summary).toContain('o agente nº 4')
+    expect(r.summary).toContain('1 arquivo da skill brief além do SKILL.md')
+
+    // Again: nothing doubles, and the channel keeps its two.
+    const again = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip(files()))), opts)
+    expect(again.summary).toContain('Nada novo do Grok Bot. Já existiam aqui: Research, Sales.')
+    expect(db.conversations().filter((c) => c.kind === 'channel')).toHaveLength(2)
+    expect(db.conversation(desk.id)!.members).toHaveLength(2)
+  })
+
+  it('reads the example in the skill we hand to Grok Bot', () => {
+    const skill = readFileSync(join(__dirname, '../src/renderer/src/assets/tucano-export-skill.md'), 'utf8')
+    const example = skill.split('## tucano-import.json')[1]!.split('```json')[1]!.split('```')[0]!
+    const team = readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': example })))
+    expect(team.source).toBe('Grok Bot')
+    expect(team.agents.map((a) => [a.key, a.name, a.routines.length, a.memories.length])).toEqual([['research', 'Research', 1, 1]])
+    expect(team.channels).toEqual([{ name: 'market-desk', topic: 'Weekly competitor review', members: ['research'] }])
+  })
+
+  it('refuses another format or a newer version', () => {
+    expect(() => readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': manifest({ version: 2 }) })))).toThrow('versão mais nova')
+    expect(() => readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': manifest({ format: 'x' }) })))).toThrow('não é uma exportação pro Tucano')
+    expect(() => readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': '[' })))).toThrow('corrompido')
+  })
+
+  it('reads day names and times', () => {
+    expect(tucanoSchedule({ days: ['Sun', 'sat', 'sun'], time: '18:00' })).toEqual({ days: [0, 6], time: '18:00' })
+    expect(tucanoSchedule({ days: ['fri'], time: '09:15', once: true })).toEqual({ days: [5], time: '09:15', once: true })
+    expect(tucanoSchedule({ days: ['someday'], time: '09:15' })).toBeUndefined()
+    expect(tucanoSchedule({ days: ['mon'], time: '25:00' })).toBeUndefined()
+    expect(tucanoSchedule({ days: [], time: '09:00' })).toBeUndefined()
   })
 })

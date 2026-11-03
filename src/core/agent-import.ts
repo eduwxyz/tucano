@@ -6,9 +6,13 @@
 // OpenBot: the .zip of Server settings → Transfer → Export from this server (`openbot-transfer.json`,
 // format "openbot-instance-transfer", version 1). Only its documented format is read here; none of
 // OpenBot's code is used.
+//
+// Apps with no export of their own (Grok Bot): the person gives one of their agents there our skill
+// (assets/tucano-export-skill.md), and it writes a .zip in Tucano's own format (`tucano-import.json`,
+// format "tucano-agent-import", version 1), read by `readTucanoImport`.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { codexValue, customModel, MAX_AGENT_ROUTINES, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
+import { channelName, codexValue, customModel, MAX_AGENT_ROUTINES, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
 import { frontmatter } from './local-skills'
@@ -23,6 +27,7 @@ export interface ForeignSkill {
 }
 
 export interface ForeignAgent {
+  key: string // the agent's id inside the file, which channels name
   name: string
   role: string
   instructions: string
@@ -37,8 +42,9 @@ export interface ForeignAgent {
 }
 
 export interface ForeignTeam {
-  source: string // "OpenBot"
+  source: string // "OpenBot", "Grok Bot"
   agents: ForeignAgent[]
+  channels: { name: string; topic?: string; members: string[] }[] // members by agent key
   servers: string[] // MCP servers there, by name, to add by hand
   notes: string[]
 }
@@ -59,6 +65,52 @@ const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 // A path the manifest names must be inside the agent's own folder, without "..".
 const inside = (path: unknown, prefix: string): string | undefined =>
   typeof path === 'string' && path.startsWith(prefix) && !path.split('/').some((p) => p === '..' || p === '') ? path : undefined
+const KEY = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
+
+// The picture, as a data URL, when it's a kind and a size this app shows.
+function readPicture(zip: Zip, path: unknown, prefix: string, notes: string[]): string | undefined {
+  const avatar = inside(path, prefix)
+  if (!avatar) return undefined
+  const type = ({ png: 'png', jpg: 'jpeg', jpeg: 'jpeg', webp: 'webp' } as Record<string, string>)[avatar.split('.').pop()!.toLowerCase()]
+  if (!type) {
+    notes.push(L('a foto (formato que o Tucano não mostra)', "the picture (a format Tucano doesn't show)"))
+    return undefined
+  }
+  const entry = zip.entries.get(avatar)
+  if (!entry) return undefined
+  if (entry.size > MAX_PICTURE_BYTES) {
+    notes.push(L('a foto (grande demais)', 'the picture (too big)'))
+    return undefined
+  }
+  return `data:image/${type};base64,${zip.read(avatar, MAX_PICTURE_BYTES)!.toString('base64')}`
+}
+
+// Each skill is a folder with a SKILL.md; only the recipe comes, the files beside it are counted.
+function readSkills(zip: Zip, paths: unknown, prefix: string, notes: string[]): ForeignSkill[] {
+  return arr(paths).flatMap((path) => {
+    const folder = inside(path, `${prefix}skills/`)
+    const text = folder && zip.read(`${folder}/SKILL.md`, MAX_TEXT)?.toString('utf8')
+    if (!folder || !text) return []
+    const fm = frontmatter(text)
+    const nm = skillName(fm.name || folder.split('/').pop()!)
+    const body = fm.body.trim()
+    if (!nm || !body) return []
+    if (body.length > MAX_SKILL_BODY) {
+      notes.push(L(`a skill ${nm} (receita longa demais)`, `the ${nm} skill (recipe too long)`))
+      return []
+    }
+    const extraFiles = [...zip.entries.keys()].filter((f) => f.startsWith(`${folder}/`) && f !== `${folder}/SKILL.md`).length
+    return [{ name: nm, description: str(fm.description, 1_000) || nm, body, extraFiles }]
+  })
+}
+
+const memoriesOf = (v: unknown): string[] => arr(v).flatMap((item) => str(typeof item === 'string' ? item : obj(item)['text'], MAX_MEMORY) || [])
+
+// A routine's own time zone isn't this computer's: the time stays the same, and the summary says so.
+function zoneNote(tz: string, name: string, notes: string[]): void {
+  if (tz && tz !== Intl.DateTimeFormat().resolvedOptions().timeZone)
+    notes.push(L(`o fuso da rotina "${name}" (${tz}): o horário ficou como estava, no fuso deste computador`, `the time zone of the routine "${name}" (${tz}): the time stayed as it was, in this computer's zone`))
+}
 
 // ---------- OpenBot ----------
 
@@ -91,13 +143,13 @@ export function readOpenBot(zip: Zip): ForeignTeam {
   if (arr(settings['customProviders']).length) notes.push(L('os provedores de modelo próprios', 'the custom model providers'))
   if (arr(settings['routineFlows']).length) notes.push(L('os fluxos entre rotinas', 'the routine flows'))
   if (m['shared']) notes.push(L('a pasta Shared', 'the Shared folder'))
-  return { source: 'OpenBot', agents, servers, notes }
+  return { source: 'OpenBot', agents, servers, notes, channels: [] }
 }
 
 function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | undefined {
   const key = str(a['key'], 128)
   const name = str(a['name'], 80)
-  if (!key || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(key) || !name) return undefined
+  if (!key || !KEY.test(key) || !name) return undefined
   const prefix = `agents/${key}/`
   const notes: string[] = []
 
@@ -112,32 +164,9 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
   const { modelId, note } = openBotModel(str(a['provider'], 32), str(a['model'], 256))
   if (note) notes.push(note)
 
-  let picture: string | undefined
-  const avatar = inside(a['avatar'], prefix)
-  const type = avatar && ({ png: 'png', jpg: 'jpeg', jpeg: 'jpeg', webp: 'webp' } as Record<string, string>)[avatar.split('.').pop()!.toLowerCase()]
-  if (avatar && type) {
-    const bytes = zip.entries.get(avatar)
-    if (bytes && bytes.size <= MAX_PICTURE_BYTES) picture = `data:image/${type};base64,${zip.read(avatar, MAX_PICTURE_BYTES)!.toString('base64')}`
-    else notes.push(L('a foto (grande demais)', 'the picture (too big)'))
-  } else if (avatar) notes.push(L('a foto (formato que o Tucano não mostra)', "the picture (a format Tucano doesn't show)"))
+  const picture = readPicture(zip, a['avatar'], prefix, notes)
+  const skills = readSkills(zip, a['skills'], prefix, notes)
 
-  const skills = arr(a['skills']).flatMap((path) => {
-    const folder = inside(path, `${prefix}skills/`)
-    const text = folder && zip.read(`${folder}/SKILL.md`, MAX_TEXT)?.toString('utf8')
-    if (!folder || !text) return []
-    const fm = frontmatter(text)
-    const nm = skillName(fm.name || folder.split('/').pop()!)
-    const body = fm.body.trim()
-    if (!nm || !body) return []
-    if (body.length > MAX_SKILL_BODY) {
-      notes.push(L(`a skill ${nm} (receita longa demais)`, `the ${nm} skill (recipe too long)`))
-      return []
-    }
-    const extraFiles = [...zip.entries.keys()].filter((f) => f.startsWith(`${folder}/`) && f !== `${folder}/SKILL.md`).length
-    return [{ name: nm, description: str(fm.description, 1_000) || nm, body, extraFiles }]
-  })
-
-  const here = Intl.DateTimeFormat().resolvedOptions().timeZone
   const routines = [...arr(a['routines']), ...arr(a['oneTimeRoutines'])].flatMap((item) => {
     const r = obj(item)
     const rname = str(r['name'], 120)
@@ -148,15 +177,15 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
       notes.push(L(`a rotina "${rname}" (horário sem equivalente aqui)`, `the routine "${rname}" (a schedule with no match here)`))
       return []
     }
-    const tz = str(r['timezone'], 64)
-    if (tz && tz !== here) notes.push(L(`o fuso da rotina "${rname}" (${tz}): o horário ficou como estava, no fuso deste computador`, `the time zone of the routine "${rname}" (${tz}): the time stayed as it was, in this computer's zone`))
+    zoneNote(str(r['timezone'], 64), rname, notes)
     return [{ name: rname, prompt, schedule }]
   })
 
-  const memories = arr(a['memories']).flatMap((item) => str(obj(item)['text'], MAX_MEMORY) || [])
+  const memories = memoriesOf(a['memories'])
 
   const hue = a['avatarHue']
   return {
+    key,
     name,
     role: str(a['title'], 80),
     instructions,
@@ -230,6 +259,99 @@ export function hueColor(h: number): string {
   return '#' + [f(0), f(8), f(4)].map((x) => Math.round(x * 255).toString(16).padStart(2, '0')).join('')
 }
 
+// ---------- Tucano's own format (Grok Bot, and any app with no export) ----------
+
+export const TUCANO_IMPORT = 'tucano-import.json'
+const SOURCES: Record<string, string> = { 'grok-bot': 'Grok Bot' }
+const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+
+export function readTucanoImport(zip: Zip): ForeignTeam {
+  const raw = zip.read(TUCANO_IMPORT, MAX_MANIFEST)
+  if (!raw) throw new Error(L('Esse .zip não é uma exportação pro Tucano.', "That .zip isn't an export for Tucano."))
+  let m: Record<string, unknown>
+  try {
+    m = obj(JSON.parse(raw.toString('utf8')))
+  } catch {
+    throw new Error(L('O arquivo tucano-import.json está corrompido.', 'The tucano-import.json file is corrupted.'))
+  }
+  if (m['format'] !== 'tucano-agent-import') throw new Error(L('Esse .zip não é uma exportação pro Tucano.', "That .zip isn't an export for Tucano."))
+  if (m['version'] !== 1) throw new Error(L('Essa exportação é de uma versão mais nova do formato. Atualize o Tucano.', 'That export is from a newer version of the format. Update Tucano.'))
+  const app = str(m['source'], 40)
+  const source = SOURCES[app] ?? (app || L('outro app', 'another app'))
+
+  const notes: string[] = []
+  const keys = new Set<string>()
+  const agents = arr(m['agents']).flatMap((item, i) => {
+    try {
+      const a = tucanoAgent(zip, obj(item), source)
+      if (!a || keys.has(a.key)) {
+        notes.push(L(`o agente nº ${i + 1} (sem nome, ou com a chave inválida ou repetida)`, `agent #${i + 1} (no name, or a key that's invalid or repeated)`))
+        return []
+      }
+      keys.add(a.key)
+      return [a]
+    } catch {
+      notes.push(L(`o agente nº ${i + 1}, que não deu pra ler`, `agent #${i + 1}, which couldn't be read`))
+      return []
+    }
+  })
+  const channels = arr(m['channels']).flatMap((item) => {
+    const c = obj(item)
+    const name = channelName(str(c['name'], 80))
+    if (!name) return []
+    const members = arr(c['members']).filter((k): k is string => typeof k === 'string' && keys.has(k))
+    if (arr(c['routines']).length) notes.push(L(`as rotinas do canal #${name} (crie de novo no canal)`, `the routines of #${name} (make them again in the channel)`))
+    return [{ name, topic: str(c['topic'], 200) || undefined, members: [...new Set(members)] }]
+  })
+  return { source, agents, servers: [], notes, channels }
+}
+
+function tucanoAgent(zip: Zip, a: Record<string, unknown>, source: string): ForeignAgent | undefined {
+  const key = str(a['key'], 64)
+  const name = str(a['name'], 80)
+  if (!KEY.test(key) || !name) return undefined
+  const prefix = `agents/${key}/`
+  const notes: string[] = []
+  const instructions = str(a['instructions'], MAX_INSTRUCTIONS)
+  if (!instructions) notes.push(L('as instruções (não vieram no arquivo)', "the instructions (they weren't in the file)"))
+  notes.push(L(`o modelo do ${source} (ficou o modelo padrão)`, `the ${source} model (it got the default model)`))
+
+  const routines = arr(a['routines']).flatMap((item) => {
+    const r = obj(item)
+    const rname = str(r['name'], 120)
+    const prompt = str(r['prompt'], 20_000)
+    if (!rname || !prompt) return []
+    const schedule = tucanoSchedule(r)
+    if (!schedule) {
+      notes.push(L(`a rotina "${rname}" (horário sem equivalente aqui)`, `the routine "${rname}" (a schedule with no match here)`))
+      return []
+    }
+    zoneNote(str(r['timezone'], 64), rname, notes)
+    return [{ name: rname, prompt, schedule }]
+  })
+
+  return {
+    key,
+    name,
+    role: str(a['role'], 80),
+    instructions,
+    effort: 'medium',
+    picture: readPicture(zip, a['picture'], prefix, notes),
+    skills: readSkills(zip, a['skills'], prefix, notes),
+    routines,
+    memories: memoriesOf(a['memories']),
+    notes
+  }
+}
+
+// { days: ["mon", "wed"], time: "08:30", once?: true }: what a routine here already is, with day names.
+export function tucanoSchedule(r: Record<string, unknown>): Schedule | undefined {
+  const t = time(r['time'])
+  const days = arr(r['days']).map((d) => (typeof d === 'string' ? DAYS.indexOf(d.toLowerCase().slice(0, 3)) : -1))
+  if (!t || !days.length || days.some((d) => d < 0)) return undefined
+  return { days: [...new Set(days)].sort(), time: t, ...(r['once'] === true ? { once: true } : {}) }
+}
+
 // ---------- adding it here ----------
 
 // A @handle from a name: "Lúcia M." → "luciam", with a number when it's taken.
@@ -257,12 +379,15 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
   const left: string[] = [...team.notes]
   const skillsBefore = new Set(db.skills().filter((k) => k.state === 'active').map((k) => k.name))
   const createdSkills = new Map<string, string>() // name → id, made by this import
+  const byKey = new Map<string, string>() // the file's agent key → the agent here
 
   for (const f of team.agents) {
     const existing = db.agents().filter((x) => !x.archived)
     // The same agent imported before: same name, role and instructions.
-    if (existing.some((x) => x.name === f.name && x.role === f.role && x.instructions === f.instructions)) {
+    const before = existing.find((x) => x.name === f.name && x.role === f.role && x.instructions === f.instructions)
+    if (before) {
       added.same.push(f.name)
+      byKey.set(f.key, before.id)
       continue
     }
     const handle = handleFor(f.name, new Set(db.agents().map((x) => x.handle)))
@@ -287,6 +412,7 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
     })
     db.saveAgent(agent)
     added.agents.push(agent.id)
+    byKey.set(f.key, agent.id)
     for (const n of f.notes) left.push(`@${handle}: ${n}`)
 
     for (const k of f.skills) {
@@ -336,10 +462,25 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
     }
   }
 
+  // Group chats become channels; one with the same name gets the agents it's missing.
+  let channels = 0
+  for (const c of team.channels) {
+    const members = c.members.flatMap((k) => byKey.get(k) ?? [])
+    const there = db.conversations().find((x) => x.kind === 'channel' && x.name === c.name)
+    if (there) {
+      for (const id of members)
+        if (!there.members.includes(id)) db.setAgentChannels(id, [...db.conversations().filter((x) => x.kind === 'channel' && x.members.includes(id)).map((x) => x.id), there.id])
+      continue
+    }
+    db.createConversation({ id: randomUUID(), kind: 'channel', name: c.name, topic: c.topic, members })
+    channels++
+  }
+
   const n = added.agents.length
   const parts = [
     n && L(`${n} agente${n > 1 ? 's' : ''} sem nenhum conector liberado`, `${n} agent${n > 1 ? 's' : ''} with no connector granted`),
     added.skills && `${added.skills} skill${added.skills > 1 ? 's' : ''}`,
+    channels && L(`${channels} canal${channels > 1 ? 'is' : ''}`, `${channels} channel${channels > 1 ? 's' : ''}`),
     added.routines && L(`${added.routines} rotina${added.routines > 1 ? 's' : ''} (desligadas)`, `${added.routines} routine${added.routines > 1 ? 's' : ''} (off)`),
     added.memories.length && L(`${added.memories.length} memória${added.memories.length > 1 ? 's' : ''} pra você confirmar`, `${added.memories.length} memor${added.memories.length > 1 ? 'ies' : 'y'} for you to confirm`)
   ].filter(Boolean)
@@ -353,6 +494,7 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
 // Reads whichever app the .zip came from.
 export function readForeignZip(zip: Zip): ForeignTeam {
   if (isOpenBotTransfer(zip)) return readOpenBot(zip)
-  if (zip.entries.has('openbot-import.json')) throw new Error(L('Esse .zip é o do Grok Bot para o OpenBot, que o Tucano ainda não lê.', "That .zip is Grok Bot's export for OpenBot, which Tucano doesn't read yet."))
-  throw new Error(L('Não reconheci esse .zip. O Tucano importa a exportação do OpenBot (Configurações do servidor → Transfer → Export).', "I didn't recognize that .zip. Tucano imports OpenBot's export (Server settings → Transfer → Export)."))
+  if (zip.entries.has(TUCANO_IMPORT)) return readTucanoImport(zip)
+  if (zip.entries.has('openbot-import.json')) throw new Error(L('Esse .zip foi feito pro OpenBot. Pra trazer do Grok Bot, use a skill de exportação do Tucano (botão "Skill pro Grok Bot").', 'That .zip was made for OpenBot. To bring agents from Grok Bot, use Tucano\'s export skill (the "Skill for Grok Bot" button).'))
+  throw new Error(L('Não reconheci esse .zip. O Tucano importa a exportação do OpenBot (Configurações do servidor → Transfer → Export) e a do Grok Bot feita com a skill do Tucano.', "I didn't recognize that .zip. Tucano imports OpenBot's export (Server settings → Transfer → Export) and Grok Bot's, made with Tucano's skill."))
 }
