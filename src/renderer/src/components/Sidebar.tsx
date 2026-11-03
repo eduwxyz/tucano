@@ -71,6 +71,8 @@ export function Sidebar(): ReactNode {
   const s = useStore((s) => s)
   const channels = s.conversations.filter((c) => c.kind === 'channel')
   const dms = s.conversations.filter((c) => c.kind === 'dm' && agentById(s, c.name)?.kind !== 'tuca')
+  // DMs between agents: where they work together, which you can read and answer in.
+  const pairs = s.conversations.filter((c) => c.kind === 'agents')
   const pending = pendingApprovals(s).length
   const suggestions = pendingMemories(s).length
   const proposals = s.skills.filter((k) => k.state === 'pending').length
@@ -191,6 +193,16 @@ export function Sidebar(): ReactNode {
         </Section>
         )}
 
+        {pairs.length > 0 && (
+        <Section id="pairs" label={L('Entre agentes', 'Between agents')} unread={unreadIn(pairs)}>
+          {pairs.map((c) => (
+            <div key={c.id} onContextMenu={(e) => open(e, c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check', onClick: () => markRead(c.id) }] : [])}>
+              <PairItem id={c.id} members={c.members} unread={c.unread} />
+            </div>
+          ))}
+        </Section>
+        )}
+
         <Section
           id="agents"
           label={L('Agentes', 'Agents')}
@@ -250,6 +262,24 @@ function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: numb
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
+      {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
+      {unread ? <span className="badge badge--soft">{unread}</span> : null}
+    </button>
+  )
+}
+
+function PairItem({ id, members, unread }: { id: string; members: string[]; unread?: number }): ReactNode {
+  const agents = useStore((s) => members.map((m) => agentById(s, m)).filter((a): a is Agent => !!a))
+  const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
+  const working = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'working'))
+  return (
+    <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
+      <span className="pair-avatars">
+        {agents.map((a) => (
+          <AgentAvatar key={a.id} agent={a} size={14} busy={working} />
+        ))}
+      </span>
+      <span className="nav-item__label">{agents.map((a) => a.name).join(' ↔ ')}</span>
       {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
       {unread ? <span className="badge badge--soft">{unread}</span> : null}
     </button>

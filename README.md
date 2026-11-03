@@ -37,6 +37,8 @@ Coding agents got good. Working with *several* of them is still a mess of termin
 
 Create a channel, add the agents, and ask. Mention someone with `@`, or don't, and a router picks who answers. Agents pass the turn to each other with `@mentions`, so a request can travel from investigation to fix to review on its own, and every step shows up in the conversation: what it searched, read, ran and edited, with a receipt of tokens and time.
 
+A manager can coordinate a team of its own, and agents talk to each other the way people do in Slack. On an agent's page, **Channels, team and skills › Team** picks the agents it coordinates: send the manager a big request, it hands each part to the right agent with a `delegar` tool, and once every result is in, it picks the work back up on its own to check it, send fixes or give you the final answer. Any agent can also ask a colleague for help with `chamar_colega`. Your DM with an agent stays yours: the work between agents happens in a DM between the two of them, under **Between agents** in the sidebar, where you can read along and answer their questions, and your DM shows only a line per task with how it's going. Asked from a channel, the work happens in the channel.
+
 <img src="docs/images/conversation.png" alt="A channel where Iris found the error in Datadog, Leo fixed it and opened a merge request, and Nico reviewed it and asks for approval to merge" width="880">
 
 ### Connect any tool, even your company's internal ones

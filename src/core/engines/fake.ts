@@ -46,6 +46,20 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           })
           reply = textOf(r).includes('card') ? L('Montei o Rafa. Dá pra criar, editar antes ou me pedir ajustes.', 'I put Rafa together. You can create it, edit it first or ask me for changes.') : textOf(r)
         } else reply = L('Legal! Que tipo de tarefa você quer delegar? Me dá um exemplo de algo que você fez essa semana.', 'Nice! What kind of task do you want to delegate? Give me an example of something you did this week.')
+      } else if (CAME_BACK.test(turn.prompt) && !delegatedTask(turn.prompt)) {
+        // A manager with its team's results: sums them up.
+        reply = fakeReport(turn.prompt)
+      } else if (delegatedTask(turn.prompt) !== undefined) {
+        // A delegate: "pergunte" in its task asks once; anything else is done right away.
+        const task = delegatedTask(turn.prompt)!
+        if (turn.mcpUrl && (DELEGUE.test(task) || CHAME.test(task)) && !CAME_BACK.test(turn.prompt)) reply = await delegateAll(turn.mcpUrl, task)
+        else if (CAME_BACK.test(turn.prompt)) reply = L(`Feito, com a ajuda: ${task.slice(0, 120)}`, `Done, with the help: ${task.slice(0, 120)}`)
+        else if (turn.mcpUrl && /pergunt|ask/i.test(task) && !/ferramenta ask_user|ask_user tool/.test(turn.prompt)) {
+          await callTool(turn.mcpUrl, 'ask_user', { question: L('Pra quando você precisa disso?', 'When do you need this by?') })
+          reply = L('Te mandei uma pergunta.', 'I sent you a question.')
+        } else reply = L(`Feito: ${task.slice(0, 120)}`, `Done: ${task.slice(0, 120)}`)
+      } else if (turn.mcpUrl && (DELEGUE.test(last) || CHAME.test(last))) {
+        reply = await delegateAll(turn.mcpUrl, last)
       } else if (/pe[çc]a pr[oa] (\w+)/i.test(last)) {
         reply = `@${/pe[çc]a pr[oa] (\w+)/i.exec(last)![1]!.toLowerCase()}, pode ajudar aqui?`
       } else if (turn.mcpUrl && /(lista|liste|mostra|quais).*tarefas/i.test(last)) {
@@ -116,6 +130,37 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       }
     }
   }
+}
+
+// "delegue a @dev: X; chame @ana: Y": a task for the team, or a colleague's help, through the gateway.
+const DELEGUE = /delegue (?:a|ao|à|pra|pro|para|to) @[\w-]/i
+const CHAME = /chame @[\w-]/i
+const CAME_BACK = /Voltou o que você pediu|What you asked of your team/
+async function delegateAll(url: string, text: string): Promise<string> {
+  const sent: string[] = []
+  for (const m of text.matchAll(/(delegue (?:a|ao|à|pra|pro|para|to)|chame) @([\w-]+):?\s*([^;\n]+)/gi)) {
+    const colega = m[1]!.toLowerCase() === 'chame'
+    const r = (await callTool(url, colega ? 'chamar_colega' : 'delegar', { agente: m[2]!, [colega ? 'pedido' : 'tarefa']: m[3]!.trim() })) as { isError?: boolean }
+    // A refusal names the handle with @: said back without it, so it calls no one.
+    sent.push(r.isError ? `${m[2]} (${textOf(r).replace(/@/g, '')})` : m[2]!)
+  }
+  return L(`Mandei pra equipe: ${sent.join(', ')}. Os resultados voltam aqui.`, `Sent to the team: ${sent.join(', ')}. The results come back here.`)
+}
+
+// A lead's report from the results it got back: each one's line, with the reply it wrote elsewhere.
+function fakeReport(prompt: string): string {
+  const items = [...prompt.matchAll(/^- (.+?) \(@[\w-]+\) (.+?)\. (?:Tarefa|Pedido|Task|Request): (.+)$(?:\n(?:Resposta|Reply):\n<(?:resposta|reply)>\n([\s\S]*?)\n<\/(?:resposta|reply)>)?/gm)]
+  const done = items.every((m) => /terminou|finished/.test(m[2]!))
+  const lines = items.map((m) => `- **${m[1]}** · ${m[3]}: ${m[4]?.trim() || m[2]}`)
+  return L(
+    [`**Resultado:** ${done ? 'pronto, a equipe fez tudo o que você pediu.' : 'parte ficou faltando, abaixo.'}`, '**Quem fez o quê**', ...lines, '**Decidido:** segui o que cada um entregou, sem mudanças.', '**Aplicado:** nada fora desta conversa; são respostas, nenhum arquivo ou sistema foi mexido.', `**Pendências:** ${done ? 'nenhuma.' : 'as tarefas que não terminaram.'}`].join('\n\n'),
+    [`**Result:** ${done ? 'done, the team did everything you asked.' : 'part of it is missing, below.'}`, '**Who did what**', ...lines, '**Decided:** I went with what each one delivered, unchanged.', '**Applied:** nothing outside this conversation; these are replies, no file or system was touched.', `**Left:** ${done ? 'nothing.' : "the tasks that didn't finish."}`].join('\n\n')
+  )
+}
+
+// The task a delegate was handed, when this turn works on one.
+function delegatedTask(prompt: string): string | undefined {
+  return /<(?:tarefa|task)>\n([\s\S]*?)\n<\/(?:tarefa|task)>/.exec(prompt)?.[1]
 }
 
 // The text of the last message in a transcript or router prompt.

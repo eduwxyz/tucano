@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type Delegated, type Delegation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
@@ -22,12 +22,13 @@ import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { briefFor, CHAMAR, chamarTool, colleaguesOf, DELEGAR, delegarTool, MAX_DELEGATION_DEPTH, MAX_DELEGATIONS, MAX_TEAM_ROUNDS, resultsTask, settled, teamOf } from './delegation'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
-const MAX_DEPTH = 3 // agent replies chained from one human message
+const MAX_DEPTH = 6 // agent replies chained by @mentions from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
@@ -121,6 +122,7 @@ export interface RoutineEvent {
 }
 
 type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
+type TurnOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; delegation?: Delegation; round?: number; reportOf?: string }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -155,11 +157,18 @@ export class Runner {
     let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
 
     const asked = this.pendingQuestion(conv.id)
+    let delegate: Agent | undefined // asked while working on a task its manager handed it: the answer goes back to that task
     if (asked) {
       this.update(asked, { run: { ...asked.run!, status: 'done' } })
-      const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
-      if (asker && responders.length === 0) responders = [asker]
+      const task = asked.run?.delegation
+      const by = asked.author.kind === 'agent' ? asked.author.id : undefined
+      // Whoever asked, member or not: an agent called in by a mention may ask too.
+      const asker = by ? db.agent(by) : undefined
+      if (task && asker && !asker.archived && responders.length === 0 && !this.paused) delegate = asker
+      else if (task) this.settle(task.from) // nobody goes on with it: its manager gets what there is
+      else if (asker && !asker.archived && responders.length === 0) responders = [asker]
     }
+    if (delegate) return this.follow(delegate, conv, { delegation: asked!.run!.delegation, work: asked!.run!.work })
 
     if (members.length === 0) {
       this.post(conv.id, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
@@ -210,6 +219,8 @@ export class Runner {
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
+    // A team's task (or a manager's turn on its results) keeps its place: its manager is waiting on it.
+    if (msg.run.delegation || msg.run.round) return this.follow(agent, conv, { existing: msg, task: msg.run.task, delegation: msg.run.delegation, round: msg.run.round, reportOf: msg.run.reportOf, work: msg.run.work })
     this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }))
   }
 
@@ -239,6 +250,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
+    if (msg.run.delegation || msg.run.round) return this.follow(agent, conv, { task, delegation: msg.run.delegation, round: msg.run.round, reportOf: msg.run.reportOf, work: msg.run.work })
     this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work }))
   }
 
@@ -405,6 +417,100 @@ export class Runner {
     for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
   }
 
+  // A turn whose message shows up at once, before it leaves the queue: a team's task must never look
+  // settled while the turn that goes on with it waits for a slot. On a task, it's asked the task again
+  // (`then` after it), since what it was handed isn't in the conversation.
+  private follow(agent: Agent, conv: Conversation, opts: { delegation?: Delegation; then?: string | ((me: string) => string); task?: string; work?: string; round?: number; reportOf?: string; existing?: Message }): void {
+    const delegation = opts.delegation && { ...opts.delegation, reported: undefined }
+    const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now() }
+    // Nothing of what it was before (a question, an approval card) while it waits its turn.
+    this.update(msg, { text: '', run: { status: 'working', depth: 1, steps: [{ id: randomUUID(), label: L('Na fila', 'Queued'), status: 'running' }], ...(delegation ? { delegation } : {}), ...(opts.round ? { round: opts.round } : {}), ...(opts.reportOf ? { reportOf: opts.reportOf } : {}) } })
+    this.enqueue(async () => {
+      const me = (await this.deps.settings()).workspaceName
+      const then = typeof opts.then === 'function' ? opts.then(me) : opts.then
+      const task = opts.task ?? (delegation ? briefFor(delegation, this.deps.db.agent(delegation.by), me, then) : then)
+      return this.execute(agent, conv, { depth: 1, existing: msg, task, work: opts.work, delegation, round: opts.round, reportOf: opts.reportOf })
+    })
+  }
+
+  // Hands out the tasks a reply delegated, once that reply is over. Stopped, or with everyone paused, nothing goes.
+  private dispatch(manager: Agent, conv: Conversation, msg: Message, stopped: boolean): void {
+    const { db } = this.deps
+    const all = msg.run?.delegated ?? []
+    const go = stopped || this.paused ? [] : all.flatMap((t) => (db.agent(t.agentId) && !db.agent(t.agentId)!.archived ? [t] : []))
+    if (go.length < all.length && this.paused && !stopped) this.post(conv.id, L(`Os agentes estão pausados: o que **${manager.name}** delegou não foi entregue.`, `The agents are paused: what **${manager.name}** delegated wasn't handed out.`))
+    // In a channel the work happens there, in the open. Anywhere else (the person's DM stays theirs, like
+    // a DM in Slack), in a DM between the two agents: the request opens there, and the answer is given there.
+    const placed = go.map((t) => {
+      const target = db.agent(t.agentId)!
+      const where = conv.kind === 'channel' ? conv : this.pair(manager, target)
+      return { t: { ...t, conversationId: where.id }, target, where }
+    })
+    this.update(msg, { run: { ...msg.run!, delegated: placed.length ? placed.map((p) => p.t) : undefined } })
+    const above = msg.run?.delegation
+    for (const { t, target, where } of placed) {
+      if (where.id !== conv.id) {
+        // A millisecond earlier than the reply it gets, so it always reads first.
+        const ask: Message = { id: randomUUID(), conversationId: where.id, author: { kind: 'agent', id: manager.id }, text: [t.task, t.doneWhen && `${L('Pronto quando', 'Done when')}: ${t.doneWhen}`].filter(Boolean).join('\n\n'), at: Date.now() - 1 }
+        db.saveMessage(ask)
+        this.deps.emit({ type: 'message', message: ask })
+      }
+      const delegation: Delegation = { id: t.id, ...(t.kind ? { kind: t.kind } : {}), by: manager.id, from: msg.id, task: t.task, ...(t.doneWhen ? { doneWhen: t.doneWhen } : {}), chain: [...(above?.chain ?? []), manager.id], since: msg.at }
+      this.follow(target, where, { delegation, work: msg.run?.work })
+    }
+    if (!placed.length && above) this.settle(above.from)
+  }
+
+  // The DM between two agents, made the first time one asks the other for something.
+  private pair(a: Agent, b: Agent): Conversation {
+    const { db, emit } = this.deps
+    const found = db.conversations().find((c) => c.kind === 'agents' && c.members.length === 2 && c.members.includes(a.id) && c.members.includes(b.id))
+    if (found) return found
+    const conv: Conversation = { id: randomUUID(), kind: 'agents', name: `${a.handle}-${b.handle}`, members: [a.id, b.id] }
+    db.createConversation(conv)
+    emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
+    return db.conversation(conv.id)!
+  }
+
+  // Called when a reply on a task ends: once every task of that manager's message is settled, the manager
+  // gets the results it hasn't seen yet, in a new turn.
+  private settle(from: string): void {
+    const { db } = this.deps
+    const head = db.message(from)
+    const tasks = head?.run?.delegated
+    if (!head?.run || !tasks?.length || head.author.kind !== 'agent') return
+    // Each task's replies are where it ran: the DM between the two agents, or the manager's channel.
+    const places = [...new Set(tasks.map((t) => t.conversationId ?? head.conversationId))]
+    const replies = places.flatMap((c) => db.recentMessages(c, 400)).filter((m) => m.run?.delegation?.from === from).sort((a, b) => a.at - b.at)
+    const latest = tasks.map((t) => replies.filter((m) => m.run!.delegation!.id === t.id).at(-1))
+    if (!latest.every(settled)) return
+    const fresh = (latest as Message[]).filter((m) => !m.run!.delegation!.reported)
+    if (!fresh.length) return
+    for (const m of fresh) this.update(m, { run: { ...m.run!, delegation: { ...m.run!.delegation!, reported: true } } })
+
+    const manager = db.agent(head.author.id)
+    const conv = db.conversation(head.conversationId)
+    const stopped = fresh.every((m) => m.run!.status === 'stopped')
+    const resume = !!manager && !manager.archived && !!conv && !this.paused && !stopped
+    if (!resume) {
+      // Nobody reports back, so the person hears why here, where they asked.
+      const who = manager?.name ?? L('O agente', 'The agent')
+      const why = this.paused
+        ? L(`os agentes estão pausados, e **${who}** não foi chamado com o que a equipe fez`, `the agents are paused, and **${who}** wasn't called with what the team did`)
+        : stopped
+          ? L(`o trabalho foi parado, e **${who}** não foi chamado de volta`, `the work was stopped, and **${who}** wasn't called back`)
+          : L(`**${who}** não está mais disponível pra dar o retorno`, `**${who}** is no longer available to report back`)
+      this.post(head.conversationId, L(`A equipe terminou, mas ${why}. As respostas estão nas conversas de cada um.`, `The team is done, but ${why}. The replies are in each one's conversation.`))
+      // The manager's message is settled as it is, and its own manager, if any, can go on.
+      this.update(head, { run: { ...head.run, released: true } })
+      if (head.run.delegation) this.settle(head.run.delegation.from)
+      return
+    }
+    const round = (head.run.round ?? 0) + 1
+    const results = fresh.map((message) => ({ agent: db.agent(message.author.kind === 'agent' ? message.author.id : ''), message, elsewhere: message.conversationId !== head.conversationId }))
+    this.follow(manager!, conv!, { delegation: head.run.delegation, round, reportOf: head.id, work: head.run.work, then: (me) => resultsTask(me, results, round) })
+  }
+
   private enqueue(job: () => Promise<unknown>): void {
     this.queue.push(job)
     this.pump()
@@ -439,7 +545,16 @@ export class Runner {
     return { model, account }
   }
 
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean }): Promise<Message> {
+  // A reply, and then the team work around it: what it delegated goes out, or, on a task of its own,
+  // its manager may get the results back.
+  private async execute(agent: Agent, conv: Conversation, opts: TurnOpts): Promise<Message> {
+    const msg = await this.turn(agent, conv, opts)
+    if (msg.run?.delegated?.length) this.dispatch(agent, conv, msg, msg.run.status === 'stopped')
+    else if (opts.delegation) this.settle(opts.delegation.from)
+    return msg
+  }
+
+  private async turn(agent: Agent, conv: Conversation, opts: TurnOpts): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -458,7 +573,8 @@ export class Runner {
     msg.text = ''
     // "Try again" passes no task: it repeats the one of the reply it's redoing.
     const task = opts.task ?? opts.existing?.run?.task
-    const again = task ? { task } : {}
+    // A team's task stays one with every reply on it, and so does a manager's count of rounds.
+    const again = { ...(task ? { task } : {}), ...(opts.delegation ? { delegation: opts.delegation } : {}), ...(opts.round ? { round: opts.round } : {}), ...(opts.reportOf ? { reportOf: opts.reportOf } : {}) }
     msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
@@ -525,15 +641,21 @@ export class Runner {
     const cwd = join(this.deps.workDir, agent.id)
     mkdirSync(cwd, { recursive: true })
     const members = this.members(conv)
-    const peers = members.filter((a) => a.id !== agent.id)
+    // On a task, the conversation's agents aren't its to call: what it hands on goes back to its manager.
+    const peers = opts.delegation ? [] : members.filter((a) => a.id !== agent.id)
     const memory = this.deps.memory
-    const { summary, messages: history } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? {
+    const window = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? {
       summary: undefined,
       messages: db
         .recentMessages(conv.id, HISTORY_LIMIT + 40)
         .filter((m) => m.id !== msg.id && m.at <= msg.at)
         .slice(-HISTORY_LIMIT)
     }
+    // A delegate working in its manager's channel sees what it was sent and the channel from then on, not what
+    // came before. In the DM between the two, it's their own conversation: it sees it as it is.
+    const inline = !!opts.delegation && db.message(opts.delegation.from)?.conversationId === conv.id
+    const summary = inline ? undefined : window.summary
+    const history = inline ? window.messages.filter((m) => m.id === opts.delegation!.from || m.at > opts.delegation!.since) : window.messages
     // What this reply counts toward: given (a chain, a routine's issue), or an issue named in the message it answers.
     const asked = [...history].reverse().find((m) => m.author.kind === 'me' || m.author.kind === 'routine')
     const work = opts.work ?? opts.existing?.run?.work ?? (asked ? workIn(asked.text) : undefined)
@@ -549,6 +671,13 @@ export class Runner {
     const routines = this.deps.gateway ? this.deps.routines : undefined
     const skills = this.deps.gateway ? this.deps.skills : undefined
     const mySkills = skills?.forAgent(agent.id) ?? []
+    // Its team, minus whoever is above it on this task; past MAX_DELEGATION_DEPTH levels, nobody.
+    const chain = [...(opts.delegation?.chain ?? []), agent.id]
+    const team = this.deps.gateway && chain.length <= MAX_DELEGATION_DEPTH ? teamOf(agent, db.agents()).filter((a) => !chain.includes(a.id)) : []
+    // Anyone else it may call for help, under the same limits.
+    // The Tuca builds agents and names them with @ while it does: it calls no one.
+    const colleagues = this.deps.gateway && agent.kind !== 'tuca' && chain.length <= MAX_DELEGATION_DEPTH ? colleaguesOf(agent, db.agents()).filter((a) => !chain.includes(a.id)) : []
+    const delegated: Delegated[] = []
 
     const control: Control = { ctl: new AbortController() }
     this.controllers.set(msg.id, control)
@@ -608,7 +737,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, DELEGAR, CHAMAR, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
@@ -663,6 +792,8 @@ export class Runner {
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(builds ? [PROPOR_AGENTE] : []),
+      ...(team.length ? [delegarTool(team)] : []),
+      ...(colleagues.length ? [chamarTool(colleagues)] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -722,6 +853,39 @@ export class Runner {
             L(
               'A proposta está no card, com Criar, Editar antes e Descartar. Termine com uma frase curta (dá pra criar, editar ou pedir ajustes pra você), sem repetir o que o card mostra.',
               "The proposal is in the card, with Create, Edit first and Discard. Finish with one short sentence (they can create it, edit it or ask you for changes), without repeating what the card shows."
+            )
+          )
+        }
+
+        // delegar (a task for the team) and chamar_colega (a colleague's help): either way the other agent works
+        // after this reply ends, and this agent is called again with what came back.
+        if ((name === DELEGAR && team.length) || (name === CHAMAR && colleagues.length)) {
+          const colega = name === CHAMAR
+          const handle = typeof args['agente'] === 'string' ? args['agente'].trim().replace(/^@/, '').toLowerCase() : ''
+          const pedido = (typeof args[colega ? 'pedido' : 'tarefa'] === 'string' ? (args[colega ? 'pedido' : 'tarefa'] as string) : '').trim()
+          const doneWhen = !colega && typeof args['pronto_quando'] === 'string' ? args['pronto_quando'].trim() : ''
+          // As they are now: someone may have left the team, or been archived, since the turn started.
+          const now = db.agents()
+          const pool = (colega ? colleaguesOf(db.agent(agent.id) ?? agent, now) : teamOf(db.agent(agent.id) ?? agent, now)).filter((a) => !chain.includes(a.id))
+          const target = pool.find((a) => a.handle === handle)
+          const offered = (colega ? colleagues : team).map((a) => a.handle).join(', ')
+          if (!target)
+            return textResult(
+              colega ? L(`@${handle} não é um colega que você pode chamar agora. Use um destes: ${offered}.`, `@${handle} isn't a colleague you can call now. Use one of these: ${offered}.`) : L(`@${handle} não está na sua equipe. Use um destes: ${offered}.`, `@${handle} isn't on your team. Use one of these: ${offered}.`),
+              true
+            )
+          if (!pedido) return textResult(colega ? L('Faltou o pedido.', 'Missing the request.') : L('Faltou a tarefa.', 'Missing the task.'), true)
+          if ((opts.round ?? 0) >= MAX_TEAM_ROUNDS)
+            return textResult(L(`Você já foi chamado de volta ${opts.round} vezes seguidas. Não peça mais nada: responda a ${settings.workspaceName} com o que tem.`, `You've been called back ${opts.round} times in a row. Don't ask anyone for more: answer ${settings.workspaceName} with what you have.`), true)
+          if (delegated.some((t) => t.agentId === target.id)) return textResult(L(`Você já chamou ${target.name} nesta resposta: junte tudo num pedido só.`, `You already called ${target.name} in this reply: put it all in one request.`), true)
+          if (delegated.length >= MAX_DELEGATIONS) return textResult(L(`Já são ${MAX_DELEGATIONS} pedidos nesta resposta, o máximo. Encerre agora; dá pra pedir mais quando as respostas voltarem.`, `That's ${MAX_DELEGATIONS} requests in this reply, the most. End now; you can ask for more when the answers come back.`), true)
+          delegated.push({ id: randomUUID(), agentId: target.id, task: pedido, ...(colega ? { kind: 'colega' as const } : {}), ...(doneWhen ? { doneWhen } : {}) })
+          msg.run = { ...msg.run!, delegated: [...delegated] }
+          addSteps({ id: randomUUID(), label: colega ? L(`Chamou ${target.name}`, `Called ${target.name}`) : L(`Delegou a ${target.name}`, `Delegated to ${target.name}`), detail: pedido.replace(/\s+/g, ' ').slice(0, 240), status: 'done' })
+          return textResult(
+            L(
+              `${colega ? 'Pedido enviado a' : 'Tarefa entregue a'} ${target.name}: começa quando você encerrar a resposta. Se for chamar mais alguém, faça agora; depois encerre com uma frase dizendo o que pediu a quem. A resposta volta pra você numa nova mensagem.`,
+              `${colega ? 'Request sent to' : 'Task handed to'} ${target.name}: it starts when you end your reply. If you'll call anyone else, do it now; then end with one sentence saying what you asked of whom. The answer comes back to you in a new message.`
             )
           )
         }
@@ -1110,6 +1274,10 @@ export class Runner {
               routines: routines?.forAgent(agent.id),
               skills: skills && mySkills,
               publish: repos,
+              team: team.length ? team : undefined,
+              delegatedBy: opts.delegation ? db.agent(opts.delegation.by) : undefined,
+              colleague: opts.delegation?.kind === 'colega',
+              colleagues: colleagues.filter((a) => !team.includes(a)),
               builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
             }),
             prompt: blocks.join('\n\n'),
@@ -1201,7 +1369,7 @@ export class Runner {
       )
     }
 
-    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
+    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, delegation: opts.delegation, round: opts.round, reportOf: opts.reportOf, delegated: delegated.length ? delegated : undefined }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
@@ -1232,8 +1400,9 @@ export class Runner {
         run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
+      // A team's work isn't over while tasks are out or when a task is done: the manager's last reply is.
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question')
-      else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done')
+      else if (!approval && !delegated.length && !opts.delegation && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done')
     } else {
       save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: error ?? L('O motor terminou sem resposta.', 'The engine ended without a reply.') } })
     }
@@ -1412,7 +1581,12 @@ export class Runner {
         }
       })
     }
-    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work }))
+    const onTask = msg?.run?.delegation
+    if (agent && conv && !agent.archived) {
+      // On a team's task, it goes on with the task in hand; a manager keeps its count of rounds.
+      if (onTask || msg?.run?.round) this.follow(agent, conv, { delegation: onTask, round: msg?.run?.round, reportOf: msg?.run?.reportOf, work: msg?.run?.work, ...(onTask ? { then: task } : { task }) })
+      else this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work }))
+    } else if (onTask) this.settle(onTask.from)
   }
 
   async expireApprovals(): Promise<void> {
@@ -1437,23 +1611,22 @@ export class Runner {
     }
     if (!hit) return
     const { conv, asked } = hit
-    this.update(asked, { run: { ...asked.run!, status: 'done' } })
     const { workspaceName } = await this.deps.settings()
-    this.enqueue(() =>
-      this.execute(agent, conv, {
-        depth: 1,
-        work: asked.run?.work,
-        task: L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
-      })
-    )
+    this.update(asked, { run: { ...asked.run!, status: 'done' } })
+    const back = L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
+    if (asked.run?.delegation || asked.run?.round) return this.follow(agent, conv, { delegation: asked.run.delegation, round: asked.run.round, reportOf: asked.run.reportOf, work: asked.run.work, ...(asked.run.delegation ? { then: back } : { task: back }) })
+    this.enqueue(() => this.execute(agent, conv, { depth: 1, work: asked.run?.work, task: back }))
   }
 
-  // An agent that mentions another agent of the conversation hands it the turn,
+  // An agent that mentions another agent hands it the turn, in this conversation,
   // up to MAX_DEPTH replies in a row without a human message in between.
   // Whether the conversation goes on with another agent.
   private chain(agent: Agent, conv: Conversation, msg: Message, depth: number): boolean {
-    if (this.paused) return false
-    const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+    if (this.paused || agent.kind === 'tuca') return false
+    // In a channel, any active agent, member or not, answers next. The person's DM stays theirs: no one else
+    // is called into it. In a DM between two agents, the other one.
+    const reachable = conv.kind === 'channel' ? colleaguesOf(agent, this.deps.db.agents()) : this.members(conv).filter((a) => a.id !== agent.id)
+    const next = mentioned(msg.text, reachable).slice(0, MAX_MENTIONS)
     if (next.length === 0) return false
     if (depth >= MAX_DEPTH) {
       this.post(conv.id, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))

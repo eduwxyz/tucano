@@ -383,6 +383,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             </Card>
           )}
 
+          {pane('canais') && <TeamPicker draft={draft} patch={patch} />}
+
           {!isNew && pane('canais') && <AgentSkills agentId={draft.id} name={draft.name} />}
 
           {pane('ferramentas') && (
@@ -662,6 +664,12 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <span className="muted small">{L('Canais', 'Channels')}</span>
                 <span>{chosen.length || '—'}</span>
               </div>
+              {(draft.team?.length ?? 0) > 0 && (
+                <div>
+                  <span className="muted small">{L('Equipe', 'Team')}</span>
+                  <span>{draft.team!.length}</span>
+                </div>
+              )}
               <div>
                 <span className="muted small">{L('Conectores', 'Connectors')}</span>
                 <span>{Object.values(draft.grants).filter((g) => g !== 'none').length || '—'}</span>
@@ -680,6 +688,41 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
         </aside>
       </div>
     </Page>
+  )
+}
+
+// The agents it coordinates: it hands them tasks with `delegar`, and gets their results back to answer you.
+function TeamPicker({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const others = useStore((s) => s.agents.filter((a) => a.id !== draft.id && !a.archived && a.kind !== 'tuca'))
+  const team = draft.team ?? []
+  return (
+    <Card
+      title={L('Equipe', 'Team')}
+      lead={L(
+        `Os agentes que ${draft.name || 'este agente'} coordena. Você conversa com ele, e ele delega partes do trabalho pra equipe, em paralelo; os resultados voltam pra ele conferir e te responder.`,
+        `The agents ${draft.name || 'this agent'} coordinates. You talk to it, and it delegates parts of the work to the team, in parallel; the results come back to it to check and answer you.`
+      )}
+    >
+      {others.length === 0 ? (
+        <p className="muted small">{L('Crie outros agentes pra montar uma equipe.', 'Create other agents to build a team.')}</p>
+      ) : (
+        <div className="checks">
+          {others.map((a) => (
+            <label key={a.id} className="check">
+              <input type="checkbox" checked={team.includes(a.id)} onChange={(e) => patch({ team: e.target.checked ? [...team, a.id] : team.filter((x) => x !== a.id) })} />
+              <AgentAvatar agent={a} size={16} /> {a.name}
+              {a.role && <span className="muted small"> · {a.role}</span>}
+            </label>
+          ))}
+        </div>
+      )}
+      <p className="hint">
+        {L(
+          'Cada um trabalha com o próprio modelo, ferramentas e limites, e só vê o que receber. Perguntas e aprovações deles aparecem na conversa.',
+          'Each one works with its own model, tools and limits, and only sees what it’s sent. Their questions and approvals show up in the conversation.'
+        )}
+      </p>
+    </Card>
   )
 }
 
@@ -1303,7 +1346,7 @@ const SETTINGS_TABS = (): TabList => [
 ]
 const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
-  ['canais', L('Canais e skills', 'Channels and skills')],
+  ['canais', L('Canais, equipe e skills', 'Channels, team and skills')],
   ['ferramentas', L('Ferramentas', 'Tools')],
   ['memoria', L('Memória', 'Memory')]
 ]

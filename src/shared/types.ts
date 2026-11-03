@@ -81,6 +81,8 @@ export interface Agent {
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
+  // The agents it coordinates: it may hand them tasks with `delegar`, and their results come back to it.
+  team?: string[]
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
 }
@@ -106,7 +108,8 @@ export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a
 
 export interface Conversation {
   id: string
-  kind: 'channel' | 'dm'
+  // 'agents': a DM between two agents (members), where they work together; the person can read it and write in it.
+  kind: 'channel' | 'dm' | 'agents'
   name: string // channel name, or agent id for a DM
   topic?: string
   members: string[] // agent ids
@@ -165,6 +168,34 @@ export interface Run {
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
+  delegation?: Delegation // this reply works on a task another agent handed it
+  delegated?: Delegated[] // the tasks this reply handed its team; it waits for their results
+  round?: number // how many times in a row this agent got its team's results back without a human message
+  reportOf?: string // the message whose delegated work this reply reports on, once it came back
+  released?: boolean // what it delegated came back, but it wasn't called with it (paused, stopped, archived)
+}
+
+// A task one agent (the manager) handed another with `delegar`. Every reply of the delegate on it carries
+// the same id; once all of the manager's message's tasks are settled, the manager gets the results back.
+export interface Delegation {
+  id: string
+  kind?: 'colega' // a colleague's help asked with chamar_colega; unset: a task handed to the team with delegar
+  by: string // the agent that delegated
+  from: string // its message that delegated: the batch this task belongs to
+  task: string // what it was asked, in the manager's words
+  doneWhen?: string
+  chain: string[] // the agents above it, top first; `by` is the last
+  since: number // `at` of the manager's message: what the delegate sees of the conversation starts there
+  reported?: boolean // its result already went back to `by`
+}
+
+export interface Delegated {
+  id: string
+  kind?: 'colega'
+  agentId: string
+  conversationId?: string // where it runs, once handed out: the DM between the two agents, or the channel it came from
+  task: string
+  doneWhen?: string
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.

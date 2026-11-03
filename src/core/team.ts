@@ -31,6 +31,7 @@ interface TeamFile {
     web: boolean
     computer: boolean
     grants: Record<string, GrantLevel> // by connector name
+    team?: string[] // the agents it coordinates, by handle
   }[]
   skills: { name: string; description: string; body: string; agents: string[] }[] // agents by handle
   channels: { name: string; topic?: string; members: string[] }[]
@@ -63,7 +64,8 @@ export function exportTeam(db: Db): string {
       limit: a.limit,
       web: a.web !== false,
       computer: a.computer,
-      grants: Object.fromEntries(Object.entries(a.grants).flatMap(([id, g]) => (g !== 'none' && connectorName(id) ? [[connectorName(id)!, g]] : [])))
+      grants: Object.fromEntries(Object.entries(a.grants).flatMap(([id, g]) => (g !== 'none' && connectorName(id) ? [[connectorName(id)!, g]] : []))),
+      ...(a.team?.some((id) => handle(id)) ? { team: a.team.flatMap((id) => handle(id) ?? []) } : {})
     })),
     skills: db.skills().filter((k) => k.state === 'active').map((k) => ({ name: k.name, description: k.description, body: k.body, agents: k.agents.flatMap((id) => handle(id) ?? []) })),
     channels: channels.map((c) => ({ name: c.name, topic: c.topic, members: c.members.flatMap((id) => handle(id) ?? []) })),
@@ -87,7 +89,7 @@ export function exportTeam(db: Db): string {
     L('## Agentes', '## Agents'),
     ...data.agents.map(
       (a) =>
-        `- **${a.name}** (@${a.handle})${a.role ? ` · ${a.role}` : ''} · ${modelInfo(a.model)?.label ?? a.model}${a.computer ? L(' · com computador', ' · with a computer') : ''}${Object.keys(a.grants).length ? ` · ${L('acessa', 'uses')} ${Object.keys(a.grants).join(', ')}` : ''}`
+        `- **${a.name}** (@${a.handle})${a.role ? ` · ${a.role}` : ''} · ${modelInfo(a.model)?.label ?? a.model}${a.computer ? L(' · com computador', ' · with a computer') : ''}${Object.keys(a.grants).length ? ` · ${L('acessa', 'uses')} ${Object.keys(a.grants).join(', ')}` : ''}${a.team?.length ? ` · ${L('coordena', 'coordinates')} ${a.team.map((h) => `@${h}`).join(', ')}` : ''}`
     ),
     '',
     ...(data.skills.length ? ['## Skills', ...data.skills.map((k) => `- **${k.name}**: ${k.description}`), ''] : []),
@@ -153,6 +155,14 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
     added.agents++
   }
   const byHandle = (h: string): string | undefined => db.agents().find((x) => x.handle === h)?.id
+
+  // Teams once every agent is in: a manager's team may come later in the file. An agent that was
+  // already here keeps the team it has.
+  for (const a of data.agents ?? []) {
+    const agent = db.agents().find((x) => x.handle === a.handle)
+    if (!a.team?.length || !agent || agent.team?.length) continue
+    db.saveAgent({ ...agent, team: a.team.flatMap((h) => byHandle(h) ?? []) })
+  }
 
   for (const k of data.skills ?? []) {
     if (db.skills().some((x) => x.state === 'active' && x.name === k.name)) continue

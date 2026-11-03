@@ -4,6 +4,7 @@
 import { L, lang, locale } from '../shared/lang'
 import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Routine, type Settings, type Skill } from '../shared/types'
 import { osOf, shellCommand, systemName } from './platform'
+import { colleaguesSection, delegatedWhere, teamSection } from './delegation'
 
 export const HISTORY_LIMIT = 30
 
@@ -24,11 +25,22 @@ export function systemPrompt(opts: {
   skills?: Skill[] // the active ones it follows, when it has skill tools
   publish?: string[] // the GitHub repositories it can push agent/* branches to
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
+  team?: Agent[] // the agents it coordinates, when it can delegate to them
+  delegatedBy?: Agent // the manager whose task this reply works on, or the colleague who called it in
+  colleague?: boolean // delegatedBy called it in with chamar_colega
+  colleagues?: Agent[] // the other agents it may call, outside its team
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, browser, apps, routines, skills, publish, builder } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, colleague, colleagues } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
-  const where =
-    conversation.kind === 'dm'
+  const other = conversation.kind === 'agents' ? peers[0] : undefined
+  const where = delegatedBy
+    ? delegatedWhere(me, delegatedBy, colleague)
+    : conversation.kind === 'agents'
+      ? L(
+          `Você está numa DM com ${other ? `${other.name} (@${other.handle}), outro agente` : 'outro agente'}, onde vocês trabalham juntos. ${me} pode ler e escrever aqui.`,
+          `You're in a DM with ${other ? `${other.name} (@${other.handle}), another agent` : 'another agent'}, where you work together. ${me} can read and write here.`
+        )
+      : conversation.kind === 'dm'
       ? L(`Você está numa conversa direta (DM) com ${me}.`, `You're in a direct conversation (DM) with ${me}.`)
       : `${L(`Você está no canal #${conversation.name}.`, `You're in the #${conversation.name} channel.`)}${peers.length ? ` ${L('Outros agentes aqui', 'Other agents here')}: ${peers.map((p) => `${p.name} (@${p.handle}${p.role ? `, ${p.role}` : ''})`).join('; ')}.` : ''}`
 
@@ -74,6 +86,8 @@ export function systemPrompt(opts: {
     browser && browserSection(me),
     apps?.length && appsSection(me, apps),
     builder,
+    team && team.length > 0 && teamSection(me, team),
+    colleagues && colleagues.length > 0 && colleaguesSection(me, colleagues, { where: delegatedBy ? 'task' : conversation.kind === 'dm' ? 'dm' : 'open' }),
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0 || !!memories.searchable) && memorySection(me, memories),
     skills &&
       skills.length > 0 &&
@@ -97,6 +111,7 @@ export function systemPrompt(opts: {
       L('- Seja direto e natural, como num chat de trabalho.', '- Be direct and natural, as in a work chat.'),
       replyLanguage(me),
       peers.length > 0 &&
+        !colleagues?.length && // the colleagues' section says how to call them
         L(
           '- Se outro agente do canal for mais indicado pra uma parte, mencione-o com @handle na sua resposta: ele responde em seguida. Só mencione quando precisar mesmo: pra falar de alguém sem passar a vez (num resumo, por exemplo), escreva só o nome, sem @.',
           '- If another agent in the channel is better suited for a part, mention them with @handle in your reply: they answer next. Only mention when you really need to: to talk about someone without handing over (in a summary, say), write just the name, without @.'
@@ -288,7 +303,8 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       .join('\n\n')
 
   const shown = messages.filter((m) => m.author.kind !== 'system' && body(m))
-  const where = conversation.kind === 'dm' ? L(`DM com ${me}`, `DM with ${me}`) : `#${conversation.name}`
+  const pair = conversation.kind === 'agents' ? conversation.members.map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent')).join(L(' e ', ' and ')) : ''
+  const where = conversation.kind === 'dm' ? L(`DM com ${me}`, `DM with ${me}`) : conversation.kind === 'agents' ? L(`DM entre ${pair}`, `DM between ${pair}`) : `#${conversation.name}`
   const head = [
     summary?.trim() && `${L(`Resumo do que veio antes em ${where}`, `Summary of what came before in ${where}`)}:\n${summary.trim()}`,
     `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
