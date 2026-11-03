@@ -6,7 +6,7 @@ name: Desktop apps
 
 on:
   pull_request:
-    paths: ['src/core/apps*.ts', 'scripts/desktop-e2e.ts', '.github/workflows/desktop-apps.yml']
+    paths: ['src/core/apps*.ts', 'src/core/index.ts', 'src/server/**', 'scripts/desktop-e2e.ts', 'scripts/server-desktop*', 'test/server-desktop.test.ts', 'docs/vps-desktop.md', '.github/workflows/desktop-apps.yml']
   workflow_dispatch:
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm install -g agent-desktop@1.0.2
@@ -32,7 +32,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends at-spi2-core dbus-x11 xvfb openbox gedit
+          sudo apt-get install -y --no-install-recommends at-spi2-core dbus-x11 xvfb xauth x11-utils openbox gedit
 
       - name: End to end (Linux)
         if: runner.os == 'Linux'
@@ -47,6 +47,12 @@ jobs:
           npx -y tsx scripts/desktop-e2e.ts
           SCRIPT
           dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' bash "$RUNNER_TEMP/session.sh"
+
+      - name: Private VPS desktop and authenticated server Apps RPC (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          npm run build
+          node scripts/server-desktop-e2e.mjs
 
       - name: End to end (Windows)
         if: runner.os == 'Windows'

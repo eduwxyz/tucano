@@ -40,6 +40,52 @@ About the code:
 - The server keeps only a hash of the code and of each token, in `pairing.json` in the data directory
   (readable only by the server's user).
 
+## Select Personal, Work, or another environment in the desktop app
+
+The connection button at the top of the app is always available, including onboarding and when a
+saved server is offline. Choose **This computer** or a named VPS. Add any number of independent
+servers, for example **Personal**, **Work**, and **Staging**. Each entry shows its destination,
+transport and connection state. Rename an entry without pairing again.
+
+1. Run `tucano-server pair --label "My Mac" --ssh you@your-vps` on that VPS, or use
+   `--url https://tucano.example.com` for HTTPS/Tailscale.
+2. Open the `tucano://pair?...` link in the installed app, or paste it into **Connections**.
+   In development, paste the link; protocol registration belongs to the installed application.
+3. Review the destination, optionally name the environment, and click **Pair and connect**.
+   Opening a link alone never runs SSH or redeems a code. Manual SSH/address and code fields
+   are available too.
+4. For SSH, first verify the VPS host fingerprint through its provider and connect in Terminal.
+   Load the authorized key into `ssh-agent`. The app uses key/agent authentication with strict
+   host checking, not password prompts, automatic trust, or arbitrary SSH config commands.
+
+Selection changes the workspace on screen; it does not copy agents, messages, connectors, keys or
+files between servers. Personal and Work are separate server instances/databases, not folders with
+different names in one shared account. The local core stays running while the desktop app is open;
+VPS agents keep running even after the app closes or switches to another server. Local notifications
+are labelled Local when a VPS is selected and return to the local workspace when clicked.
+
+Each saved connection has an independent encrypted device token. The renderer never receives it.
+The application refuses plaintext/fallback key storage. A locked/unavailable keychain requires the
+owner to unlock it, not a bypass. A new connection also checks the saved server ID at `/identity`
+before sending a bearer token (update older servers first), so a new database at the same address is not silently treated as the
+old environment. Re-pair deliberately after verifying a changed server. Pairing the same server and
+transport again replaces its local credential while preserving its name rather than duplicating it.
+
+Connection loss is visible. Use **Reconnect** after fixing the service/network; failed requests are
+not replayed automatically, since an action might already have run. A failed switch keeps the prior
+connected environment. **Forget** removes only that computer's saved connection/token; revoke the
+device on the VPS to invalidate its server-side access.
+
+The existing [browser and Linux computer](server.md) run on the selected VPS. Browser takeover is
+controlled from the live browser panel, not by opening a browser on the Mac. The optional
+[Linux graphical session](vps-desktop.md) enables explicitly granted desktop apps on the server.
+It is shared within the service user's session, not one private graphical desktop per agent.
+
+Agent-created web service ports are separate from the Tucano control port. The native remote client
+does not yet automatically forward those preview ports; their embedded preview is disabled rather
+than accidentally opening the same port on the Mac. Use a deliberate SSH port forward or an HTTPS
+URL for those pages. This limitation does not affect RPC, events, artifacts, or browser takeover.
+
 ## Trading a code from a program
 
 ```sh

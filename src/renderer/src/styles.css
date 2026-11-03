@@ -6652,3 +6652,50 @@ kbd {
 .swatch--custom.is-active {
   overflow: visible;
 }
+
+/* Desktop connection controls stay available before the core finishes booting. */
+.connection-shell { height: 100%; display: flex; flex-direction: column; }
+.connection-content { flex: 1; min-height: 0; }
+.connection-bar { min-height: 38px; padding: 4px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border); background: var(--sidebar); -webkit-app-region: drag; }
+:root[data-os='mac'] .connection-bar { padding-left: 84px; }
+.connection-bar button { -webkit-app-region: no-drag; }
+.connection-switch { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-2); font-size: 12px; padding: 4px 6px; border-radius: 6px; }
+.connection-switch:hover { background: var(--hover); }
+.connection-switch strong { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45vw; }
+.connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
+.connection-dot--connected { background: var(--ok); }
+.connection-dot--connecting { background: var(--warn); }
+.connection-dot--error { background: var(--danger); }
+.connection-dialog { color: var(--text); background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 24px; width: min(580px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; }
+.connection-dialog::backdrop { background: rgba(0, 0, 0, .38); }
+.connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.connection-heading h2 { font-size: 19px; }
+.connection-dialog p { margin: 10px 0; }
+.connection-profiles { margin: 18px 0; }
+.connection-profile { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.connection-profile > div:first-child { min-width: 0; }
+.connection-profile small { display: block; color: var(--text-2); overflow-wrap: anywhere; margin-top: 3px; }
+.connection-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.connection-forget { width: 100%; border-radius: var(--radius); background: var(--danger-soft); padding: 12px; }
+.connection-error { color: var(--danger); background: var(--danger-soft); border-radius: var(--radius); padding: 12px; }
+.connection-form { display: flex; flex-direction: column; gap: 12px; }
+.connection-form h3 { font-size: 15px; }
+.connection-form label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.connection-form input, .connection-form select { width: 100%; min-height: 36px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); color: var(--text); padding: 8px 10px; }
+.connection-preview { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.connection-preview span { display: block; color: var(--text-2); overflow-wrap: anywhere; margin-top: 4px; }
+.connection-bar { position: relative; z-index: 61; height: 38px; flex-shrink: 0; }
+.connection-shell .onb, .connection-shell .splash { top: 38px; }
+.connection-shell .app { height: 100%; }
+.connection-profile { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); margin-top: 8px; }
+.connection-profile > div:first-child { flex: 1 1 180px; }
+.connection-profile strong { display: block; overflow-wrap: anywhere; }
+.connection-profile.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.connection-kind { display: inline-block; color: var(--text-2); font-size: 10px; letter-spacing: .08em; font-weight: 600; margin-bottom: 4px; }
+.connection-section { display: flex; align-items: center; gap: 8px; margin-top: 20px; font-size: 13px; }
+.connection-section span { color: var(--text-2); font-weight: 400; }
+.connection-profile small.connection-selected { color: var(--accent); font-weight: 500; }
+.connection-empty { border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 16px; color: var(--text-2); }
+.connection-rename { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.connection-rename label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.connection-rename input { min-height: 36px; width: 100%; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--panel); color: var(--text); }

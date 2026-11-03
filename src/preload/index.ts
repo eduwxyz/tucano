@@ -8,6 +8,20 @@ ipcRenderer.on('core:port', (event) => {
 })
 
 contextBridge.exposeInMainWorld('tucano', {
+  clientPlatform: process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux',
+  remoteMode: ipcRenderer.sendSync('remote:mode') as boolean,
+  remote: {
+    state: (): Promise<unknown> => ipcRenderer.invoke('remote:state'),
+    onState: (cb: (state: unknown) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: unknown): void => cb(state)
+      ipcRenderer.on('remote:state', listener)
+      return () => { ipcRenderer.removeListener('remote:state', listener) }
+    },
+    pair: (link: string): Promise<void> => ipcRenderer.invoke('remote:pair', link),
+    select: (id: string | null): Promise<void> => ipcRenderer.invoke('remote:select', id),
+    rename: (id: string, name: string): Promise<void> => ipcRenderer.invoke('remote:rename', id, name),
+    forget: (id: string): Promise<void> => ipcRenderer.invoke('remote:forget', id)
+  },
   connect: (): void => ipcRenderer.send('core:connect'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
   // A click on a notification opens its conversation.

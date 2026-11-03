@@ -13,13 +13,18 @@ import { ReportPage } from './components/Report'
 import { Onboarding } from './components/Onboarding'
 import { Dialogs } from './components/Dialogs'
 import { Icon } from './components/ui'
+import { Connections } from './components/Connections'
 
 export function App(): ReactNode {
+  return <Connections><AppContent /></Connections>
+}
+
+function AppContent(): ReactNode {
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
-  const mac = useStore((s) => s.platform === 'mac')
+  const mac = useStore((s) => (window.tucano.clientPlatform ?? s.platform) === 'mac')
   const navOpen = useStore((s) => s.navOpen)
 
   useEffect(() => {
@@ -39,7 +44,7 @@ export function App(): ReactNode {
   useEffect(() => {
     const keys = (e: KeyboardEvent): void => {
       const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-      if (!mod || e.altKey || intro) return
+      if (!mod || e.altKey || intro || document.querySelector('.connection-dialog[open]')) return
       const s = getState()
       const channels = s.conversations.filter((c) => c.kind === 'channel')
       if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })

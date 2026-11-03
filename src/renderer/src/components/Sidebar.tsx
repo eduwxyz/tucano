@@ -165,7 +165,7 @@ export function Sidebar(): ReactNode {
           label={L('Canais', 'Channels')}
           unread={unreadIn(channels)}
           action={
-            <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(s.platform, 'N')})`, `New channel (${shortcut(s.platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
+            <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(window.tucano.clientPlatform ?? s.platform, 'N')})`, `New channel (${shortcut(window.tucano.clientPlatform ?? s.platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
               <Icon name="plus" size={14} />
             </button>
           }

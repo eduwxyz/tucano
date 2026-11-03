@@ -6,7 +6,7 @@ import { start, useStore } from './store'
 import '@fontsource-variable/inter/opsz.css'
 import './styles.css'
 
-void start()
+void start().catch(() => { /* The connection picker remains usable when a saved VPS is offline. */ })
 
 // Switching the language draws everything again, in the new one.
 function Root(): ReactNode {

@@ -84,7 +84,7 @@ export interface State {
   demoServer?: { command: string; args: string[] }
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string } | { kind: 'remote-folder'; agentId: string }
 
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
 
@@ -337,7 +337,7 @@ export const loginAccount = (id: string): Promise<{ opened: boolean; command: st
 export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
 // The person's own apps, through agent-desktop.
-export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> => call('desktopStatus')
+export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean; desktopEnabled?: boolean; desktopReady?: boolean }> => call('desktopStatus')
 export type InstalledApp = { name: string; bundleId?: string; path?: string; running?: boolean; icon?: string }
 export const installedApps = (): Promise<InstalledApp[]> => call('installedApps')
 export const openApps = (): Promise<{ name: string; bundleId?: string }[]> => call('openApps')
@@ -457,10 +457,10 @@ export const stopService = (agentId: string, name: string): void => void call('s
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void call('browserAction', { agentId, action })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
-export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
+export const windowless = (): boolean => !!window.tucano.remoteMode || !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
 // A page an agent serves, as this browser reaches it: on a server, at the server's
 // address (it passes running services through on a private network).
-export const reachable = (url: string): string => (windowless() ? url.replace(/^http:\/\/127\.0\.0\.1:/, `http://${location.hostname}:`) : url)
+export const reachable = (url: string): string => ((window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? url.replace(/^http:\/\/127\.0\.0\.1:/, `http://${location.hostname}:`) : url)
 export const browserInput = (agentId: string, input: BrowserInput): void => void call('browserInput', { agentId, input }).catch(() => {})
 // In a browser (Tucano as a server) the page opens it itself: the server has no screen.
 export const openExternal = (url: string): void =>
@@ -502,8 +502,17 @@ export const slug = (name: string): string =>
 // The id of the DM with an agent, created if it doesn't exist yet, without opening it.
 export const dmWith = (agentId: string): Promise<string> => call('openDm', { agentId })
 
+export const lendRemoteFolder = (agentId: string, path: string): Promise<void> => {
+  if (!path.startsWith('/') || /[\r\n\0]/.test(path)) return Promise.reject(new Error(L('Informe um caminho absoluto na VPS.', 'Enter an absolute path on the VPS.')))
+  return call('lendFolder', { agentId, path })
+}
+
 // Opens the Mac's folder picker; resolves with why it couldn't be lent, if so.
 export async function lendFolder(agentId: string): Promise<string | null> {
+  if (window.tucano.remoteMode) {
+    openDialog({ kind: 'remote-folder', agentId })
+    return null
+  }
   const path = await window.tucano.pickFolder()
   if (!path) return null
   try {

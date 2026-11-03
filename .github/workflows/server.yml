@@ -17,8 +17,12 @@ on:
   pull_request:
     paths:
       - install-server.sh
+      - scripts/server-desktop.sh
+      - test/server-desktop.test.ts
+      - scripts/installer-test.mjs
       - scripts/pack-server.sh
-      - src/server/**
+      - src/**
+      - electron.vite.config.ts
       - package.json
       - package-lock.json
       - .github/workflows/server.yml
@@ -34,7 +38,6 @@ jobs:
         shell: bash
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
-      GH_TOKEN: ${{ github.token }}
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v7
@@ -46,13 +49,23 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Real SSH transport against the server
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openssh-server
+          TUCANO_REMOTE_E2E=1 TUCANO_REMOTE_SSH_E2E=1 npx vitest run test/remote-live.test.ts
       - name: The version is the release's
         if: env.TAG != ''
         run: test "v$(node -p "require('./package.json').version")" = "$TAG"
       - name: Lint the scripts
         run: |
           shellcheck -s sh install-server.sh scripts/pack-server.sh
+          shellcheck scripts/server-desktop.sh
           dash -n install-server.sh
+      - name: Installer regression tests (sandbox, no service changes)
+        run: |
+          node --test scripts/installer-test.mjs
+          npx vitest run test/server-desktop.test.ts
       - name: Pack the server
         run: sh scripts/pack-server.sh dist-server
 
@@ -73,7 +86,7 @@ jobs:
           sudo ls -l /run/user/$(id -u tucano)/ /run/user/$(id -u tucano)/systemd
       - name: Install it as that user (the program and the service)
         run: |
-          sudo -u tucano -H env XDG_RUNTIME_DIR=/run/user/$(id -u tucano) TUCANO_TARBALL=/home/tucano/tucano-server.tar.gz TUCANO_PORT=7399 \
+          sudo -u tucano -H env XDG_CONFIG_HOME=/home/tucano/.config XDG_RUNTIME_DIR=/run/user/$(id -u tucano) TUCANO_TARBALL=/home/tucano/tucano-server.tar.gz TUCANO_PORT=7399 \
             sh /home/tucano/install-server.sh --label "CI device" --host ci.example.com:2222 | tee install.log
           grep -q "Pairing code" install.log
           grep -q "installed" install.log
@@ -93,7 +106,7 @@ jobs:
         run: |
           code=$(sed -n 's/^  \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}-[A-Z0-9]\{4\}\)$/\1/p' install.log | head -1)
           test -n "$code"
-          curl -fsS -X POST http://127.0.0.1:7399/pair -d "{\"code\":\"$code\"}" | tee pair.json
+          curl -fsS -X POST http://127.0.0.1:7399/pair -d "{\"code\":\"$code\"}" > pair.json
           grep -q '"token":"tk_' pair.json
           sudo -u tucano /home/tucano/.local/bin/tucano-server devices | grep -q "CI device"
       - name: The service comes back by itself when it dies
@@ -110,18 +123,20 @@ jobs:
       - name: Update it (the same package again), then take it off
         run: |
           uid=$(id -u tucano)
-          sudo -u tucano -H env XDG_RUNTIME_DIR=/run/user/$uid TUCANO_TARBALL=/home/tucano/tucano-server.tar.gz \
+          sudo -u tucano -H env XDG_CONFIG_HOME=/home/tucano/.config XDG_RUNTIME_DIR=/run/user/$uid TUCANO_TARBALL=/home/tucano/tucano-server.tar.gz \
             sh /home/tucano/install-server.sh | tee update.log
           grep -q "reinstalled" update.log
           if grep -q "Pairing code" update.log; then echo "an update made a pairing code"; exit 1; fi
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7399/)" = 401
-          sudo -u tucano -H env XDG_RUNTIME_DIR=/run/user/$uid sh /home/tucano/install-server.sh --uninstall
+          sudo -u tucano -H env XDG_CONFIG_HOME=/home/tucano/.config XDG_RUNTIME_DIR=/run/user/$uid sh /home/tucano/install-server.sh --uninstall
           if sudo -u tucano env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-active --quiet tucano.service; then echo "still running"; exit 1; fi
           test ! -e /home/tucano/.local/share/tucano-server
           test ! -e /home/tucano/.local/bin/tucano-server
           test -d /home/tucano/.tucano-server
 
       - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
         if: env.TAG != ''
         run: gh release upload "$TAG" dist-server/tucano-server.tar.gz dist-server/tucano-server.tar.gz.sha256 install-server.sh --clobber
       - name: Keep the package of a test build

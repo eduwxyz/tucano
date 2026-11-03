@@ -168,3 +168,14 @@ describe('a pairing link', () => {
     expect(ok(link('&ssh=me@h.io&exec=rm%20-rf%20/&ssh_args=-oProxyCommand=x'))).toEqual(ok(link('&ssh=me@h.io')))
   })
 })
+
+
+describe('pairing links do not carry unrelated commands or credentials', () => {
+  it('rejects userinfo, paths and fragments', () => {
+    for (const text of [
+      `tucano://user@pair?v=1&code=${CODE}&ssh=me@host`,
+      `tucano://pair/command?v=1&code=${CODE}&ssh=me@host`,
+      link('&ssh=me@host#extra')
+    ]) expect(parsePairLink(text).ok).toBe(false)
+  })
+})

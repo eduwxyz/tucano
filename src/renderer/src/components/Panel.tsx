@@ -380,7 +380,7 @@ export function SidePanel(): ReactNode {
         {panel.kind === 'browser' && <LiveBadge agentId={panel.agentId} />}
         <span className="grow" />
         {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} />}
-        {service?.url && (
+        {service?.url && !window.tucano.remoteMode && (
           <>
             <button className="icon-btn" title={L('Recarregar', 'Reload')} onClick={() => setReload((n) => n + 1)}>
               <Icon name="clock" size={14} />
@@ -397,7 +397,7 @@ export function SidePanel(): ReactNode {
       <div className="side-panel__body">
         {artifact && <ArtifactView artifact={artifact} />}
         {panel.kind === 'service' &&
-          (service?.running && service.url ? (
+          (service?.running && service.url ? window.tucano.remoteMode ? <p className="empty">{L('Este serviço escuta na VPS. Para visualizar sua página, encaminhe essa porta por SSH ou use uma URL HTTPS configurada no servidor. O aplicativo não abre a mesma porta deste Mac.', 'This service listens on the VPS. To preview its page, forward that port over SSH or use an HTTPS URL configured on the server. The app does not open the same port on this computer.')}</p> : (
             // Same origin is the service's own (127.0.0.1:port), not the app's.
             <iframe key={reload} src={reachable(service.url)} sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals" title={service.name} />
           ) : (

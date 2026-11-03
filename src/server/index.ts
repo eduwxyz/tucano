@@ -190,6 +190,13 @@ function route(req: IncomingMessage, res: ServerResponse, url: URL): void {
       .end('Tucano: too many wrong tokens, try again later.\nTucano: tokens errados demais, tente de novo mais tarde.')
   }
 
+  // Public, read-only identity lets a paired desktop detect an address now serving a different
+  // database before transmitting its device token. It contains no credentials or user data.
+  if (url.pathname === '/identity' && req.method === 'GET') {
+    return void res.writeHead(200, { ...JSON_BODY, 'cache-control': 'no-store' })
+      .end(JSON.stringify({ server: serverId, protocol: 1 }))
+  }
+
   const secure = cookieSecure || req.headers['x-forwarded-proto'] === 'https'
 
   // The app (or a script) trades a pairing code for its token by POST and keeps the token itself: it is sent

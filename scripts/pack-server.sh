@@ -21,11 +21,19 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 PKG="$STAGE/tucano-server"
 
-mkdir -p "$PKG/out" "$OUT"
+mkdir -p "$PKG/out" "$PKG/scripts" "$OUT"
+cp scripts/server-desktop.sh "$PKG/scripts/"
+chmod 0755 "$PKG/scripts/server-desktop.sh"
 cp -R out/main out/renderer "$PKG/out/"
 cp package.json package-lock.json "$PKG/"
 # Only what the server runs on: the Electron app and the build tools stay out.
-(cd "$PKG" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error)
+(cd "$PKG" && npm ci --omit=dev --ignore-scripts --bin-links=false --no-audit --no-fund --loglevel=error)
+# CLI entry-point symlinks are not used by the bundled server. Keep release archives
+# link-free so the installer can reject symlink/hardlink extraction attacks.
+if find "$PKG" -type l | grep -q .; then
+  echo "Refusing to pack dependency symlinks; inspect the production dependencies." >&2
+  exit 1
+fi
 echo "$VERSION" > "$PKG/VERSION"
 
 # On a Mac, tar adds ._ files and extended attributes (COPYFILE_DISABLE, --no-xattrs), which GNU tar on the

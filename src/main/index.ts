@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
@@ -8,6 +8,9 @@ import { chirpOf, type BrowserOp } from '../shared/types'
 import { Browsers } from './browser'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
+import { RemoteClient, type RemoteState as TransportState } from './remote'
+import { RemoteStore } from './remote-store'
+import { parsePairLink } from '../shared/pairlink'
 import { autostartEntry, autostartFile, onPath } from '../core/platform'
 
 const NAME = 'Tucano'
@@ -53,7 +56,7 @@ function startCore(): UtilityProcess {
     serviceName: 'tucano-core',
     env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_LOCALE: systemLocale ?? '' }
   })
-  child.on('message', (msg: CoreRequest) => handleCore(child, msg))
+  child.on('message', (msg: CoreRequest) => { if (core === child) handleCore(child, msg) })
   child.on('exit', (code) => {
     console.error(`[main] core exited with code ${code}`)
     if (core === child) core = null
@@ -76,7 +79,7 @@ type CoreRequest =
 // The conversation open in the window, so a notification about it can stay quiet.
 let viewing: string | null = null
 ipcMain.on('viewing', (_e, id: unknown) => {
-  viewing = typeof id === 'string' ? id : null
+  viewing = !activeRemote && typeof id === 'string' ? id : null
 })
 
 // The toucan's own sound, instead of the system's: a knock at the door when an agent needs
@@ -155,6 +158,7 @@ function stillOpen(): void {
 
 // Things the core can't do itself: the OS keychain, the browser, notifications.
 function handleCore(child: UtilityProcess, msg: CoreRequest): void {
+  if (child !== core) return
   if (msg.type === 'secret') {
     try {
       // Linux without an open keyring falls back to a fixed key, or to nothing: Tucano keeps no
@@ -185,8 +189,11 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     const sound = chirpOf(msg.kind, msg.sound)
     if (sound) chirp(sound)
     if (!Notification.isSupported()) return
-    const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
-    n.on('click', () => showWindow(msg.conversationId))
+    const n = new Notification({ title: activeRemote ? `${L('Local', 'Local')} · ${msg.title}` : msg.title, body: msg.body, silent: true, ...noteIcon() })
+    n.on('click', () => {
+      if (activeRemote) void switchConnection(null).then(() => showWindow(msg.conversationId)).catch(() => {})
+      else showWindow(msg.conversationId)
+    })
     n.show()
   } else if (msg.type === 'busy') {
     if (msg.busy && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension')
@@ -195,6 +202,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
       awakeBlocker = null
     }
   } else if (msg.type === 'lang') {
+    if (activeRemote) return
     setLang(msg.lang)
     setMenu()
   } else if (msg.type === 'login_item') {
@@ -202,8 +210,8 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     if (app.isPackaged) openAtLogin(msg.open)
   } else if (msg.type === 'browser') {
     browsers.run(msg.agentId, msg.op, msg.args).then(
-      (data) => child.postMessage({ type: 'browser-result', id: msg.id, data }),
-      (e: unknown) => child.postMessage({ type: 'browser-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
+      (data) => { if (core === child) child.postMessage({ type: 'browser-result', id: msg.id, data }) },
+      (e: unknown) => { if (core === child) child.postMessage({ type: 'browser-result', id: msg.id, error: e instanceof Error ? e.message : String(e) }) }
     )
   } else if (msg.type === 'icons') {
     // The apps' own icons, small, for the picker of the apps an agent may use.
@@ -211,11 +219,11 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     const icon = (p: string): Promise<string> =>
       nativeImage.createThumbnailFromPath(p, { width: 64, height: 64 }).then((i) => (i.isEmpty() ? Promise.reject(new Error('empty')) : i.toDataURL())).catch(() => app.getFileIcon(p, { size: 'normal' }).then((i) => i.toDataURL(), () => ''))
     void Promise.all(msg.paths.map(icon))
-      .then((urls) => child.postMessage({ type: 'icons-result', id: msg.id, data: Object.fromEntries(msg.paths.map((p, i) => [p, urls[i]])) }))
+      .then((urls) => { if (core === child) child.postMessage({ type: 'icons-result', id: msg.id, data: Object.fromEntries(msg.paths.map((p, i) => [p, urls[i]])) }) })
   } else if (msg.type === 'screenshot') {
     screenshot(msg).then(
-      (png) => child.postMessage({ type: 'screenshot-result', id: msg.id, data: png.toString('base64') }),
-      (e: unknown) => child.postMessage({ type: 'screenshot-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
+      (png) => { if (core === child) child.postMessage({ type: 'screenshot-result', id: msg.id, data: png.toString('base64') }) },
+      (e: unknown) => { if (core === child) child.postMessage({ type: 'screenshot-result', id: msg.id, error: e instanceof Error ? e.message : String(e) }) }
     )
   }
 }
@@ -253,6 +261,10 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
 function serveArtifact(req: Request): Promise<Response> | Response {
   const u = new URL(req.url)
   const [id = '', name = ''] = u.pathname.slice(1).split('/')
+  if (activeRemote) {
+    if (u.host !== 'artifact' || !/^[0-9a-f-]{36}$/.test(id) || !name || u.search || u.hash) return new Response('not found', { status: 404 })
+    return remoteClient?.asset(`/artifact/${id}/${name}`).catch(() => new Response('remote asset unavailable', { status: 503 })) ?? new Response('server disconnected', { status: 503 })
+  }
   const dir = join(dataDir(), 'artifacts', id)
   const file = normalize(join(dir, decodeURIComponent(name)))
   if (u.host !== 'artifact' || !/^[0-9a-f-]{36}$/.test(id) || !file.startsWith(dir + sep)) return new Response('not found', { status: 404 })
@@ -264,11 +276,178 @@ function serveArtifact(req: Request): Promise<Response> | Response {
   })
 }
 
-// Each page load asks for a port; one end goes to the core, the other to the page.
+// A remote server uses the same renderer contract, but its token stays in this process.
+let remoteStore: RemoteStore | undefined
+let remoteClient: RemoteClient | undefined
+const clientStates = new WeakMap<RemoteClient, TransportState>()
+let activeRemote: string | null = null
+let remoteStatus: TransportState = { status: 'disconnected' }
+let pendingPairLink: string | undefined
+let switching = false
+let remotePort: Electron.MessagePortMain | undefined
+let requestSequence = 0
+const remoteRequests = new Map<number, number>()
+const selectionFile = (): string => join(dataDir(), 'remote-selection.json')
+function rememberSelection(id: string | null): void {
+  mkdirSync(dataDir(), { recursive: true, mode: 0o700 })
+  const file = selectionFile()
+  writeFileSync(`${file}.tmp`, JSON.stringify({ active: id }), { mode: 0o600 })
+  renameSync(`${file}.tmp`, file)
+}
+function connectionState(): unknown {
+  let profiles = [] as ReturnType<RemoteStore['list']>
+  let error = remoteStatus.error
+  try { profiles = remoteStore?.list() ?? [] } catch { error = 'Cannot read saved servers. Restore the connection file from backup.' }
+  return { active: activeRemote, profiles: profiles.map(({ id, name, reach, remotePort }) => ({ id, name, reach, remotePort })),
+    status: error ? 'error' : !activeRemote && !switching ? 'local' : remoteStatus.status === 'disconnected' ? 'connecting' : remoteStatus.status,
+    error, pairLink: pendingPairLink }
+}
+function publishConnection(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote:state', connectionState())
+}
+function remoteMessage(message: unknown): void {
+  if (!message || typeof message !== 'object' || !remotePort) return
+  const msg = message as { id?: number; event?: unknown; result?: unknown; error?: string }
+  if ('event' in msg) { remotePort.postMessage(msg); return }
+  if (typeof msg.id !== 'number') return
+  const original = remoteRequests.get(msg.id)
+  if (original === undefined) return
+  remoteRequests.delete(msg.id)
+  // Keep the server platform for its tool setup; desktop chrome uses the separate client platform.
+  if (msg.result && typeof msg.result === 'object' && 'platform' in msg.result && 'settings' in msg.result)
+    msg.result = { ...msg.result, packaged: app.isPackaged }
+  remotePort.postMessage({ ...msg, id: original })
+}
+function candidateClient(): RemoteClient {
+  const client = new RemoteClient({
+    onMessage: (message) => { if (remoteClient === client) remoteMessage(message) },
+    onState: (state) => {
+      clientStates.set(client, state)
+      if (remoteClient !== client) return
+      remoteStatus = state
+      if (state.status === 'error') {
+        for (const id of remoteRequests.values()) remotePort?.postMessage({ id, error: state.error ?? 'Server disconnected.' })
+        remoteRequests.clear()
+      }
+      publishConnection()
+    }
+  })
+  return client
+}
+function trustedWindow(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Untrusted window.')
+}
+async function switchConnection(id: string | null, pairingLink?: string, reload = true): Promise<void> {
+  if (switching) throw new Error('A connection is already in progress.')
+  if (!remoteStore) throw new Error('Connections are not ready.')
+  if (id !== null && (typeof id !== 'string' || !id)) throw new Error('Invalid server selection.')
+  switching = true
+  publishConnection()
+  let candidate: RemoteClient | undefined
+  try {
+    if (pairingLink !== undefined) {
+      const parsed = parsePairLink(pairingLink)
+      if (!parsed.ok) throw new Error(parsed.error)
+      // Check the vault before redeeming a single-use code.
+      if (!safeStorage.isEncryptionAvailable() || (process.platform === 'linux' && ['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend())))
+        throw new Error('Secure storage is unavailable. Unlock the system keychain and try again.')
+      candidate = candidateClient()
+      const { profile, token } = await candidate.pair(parsed.link)
+      const previous = remoteStore.list().find((p) => p.server === profile.server && p.remotePort === profile.remotePort && JSON.stringify(p.reach) === JSON.stringify(profile.reach))
+      if (previous) { profile.id = previous.id; profile.name = previous.name }
+      remoteStore.put(profile, token)
+      id = profile.id
+      pendingPairLink = undefined
+    }
+    if (id) {
+      const saved = remoteStore.get(id)
+      if (!saved) throw new Error('Saved server not found.')
+      candidate ??= candidateClient()
+      await candidate.connect(saved.profile, saved.token)
+      const ready = clientStates.get(candidate)
+      if (ready?.status !== 'connected') throw new Error(ready?.error ?? 'Server disconnected before the workspace opened.')
+    }
+    rememberSelection(id)
+    const old = remoteClient
+    remoteClient = candidate
+    activeRemote = id
+    remoteStatus = { status: id ? 'connected' : 'disconnected' }
+    old?.disconnect()
+    remotePort?.close(); remotePort = undefined; remoteRequests.clear()
+    viewing = null
+    // Selecting an environment only changes the view. Local and VPS routines keep running.
+    core ??= startCore()
+    if (reload && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload()
+  } catch (error) {
+    candidate?.disconnect()
+    // Keep the previous connection usable after a failed switch.
+    if (!activeRemote && !core) core = startCore()
+    if (!remoteClient) remoteStatus = { status: 'error', error: error instanceof Error ? error.message : 'Connection failed.' }
+    throw error
+  } finally { switching = false; publishConnection() }
+}
+ipcMain.handle('remote:state', (event) => { trustedWindow(event); return connectionState() })
+ipcMain.handle('remote:pair', async (event, link: unknown) => {
+  trustedWindow(event)
+  if (typeof link !== 'string' || link.length > 2048) throw new Error('Invalid pairing link.')
+  await switchConnection(null, link)
+})
+ipcMain.handle('remote:select', async (event, id: unknown) => {
+  trustedWindow(event)
+  if (id !== null && (typeof id !== 'string' || !id)) throw new Error('Invalid server selection.')
+  await switchConnection(id)
+})
+ipcMain.handle('remote:rename', (event, id: unknown, name: unknown) => {
+  trustedWindow(event)
+  if (switching || typeof id !== 'string' || typeof name !== 'string') throw new Error('Connection is busy or invalid.')
+  remoteStore?.rename(id, name)
+  publishConnection()
+})
+ipcMain.handle('remote:forget', async (event, id: unknown) => {
+  trustedWindow(event)
+  if (switching || typeof id !== 'string') throw new Error('Connection is busy or invalid.')
+  if (activeRemote === id) await switchConnection(null)
+  remoteStore?.remove(id)
+  publishConnection()
+})
+ipcMain.on('remote:mode', (event) => {
+  event.returnValue = !!mainWindow && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame && !!activeRemote
+})
+function receivePairLink(link: string): void {
+  if (!parsePairLink(link).ok) return
+  // An external link only opens a review screen. It never runs SSH or redeems a code by itself.
+  pendingPairLink = link
+  if (app.isReady()) { showWindow(); publishConnection() }
+}
+app.on('open-url', (event, url) => { event.preventDefault(); receivePairLink(url) })
+
+// Each page load gets a new port; RPC ids are remapped so a late reply cannot reach another screen.
 ipcMain.on('core:connect', (event) => {
-  core ??= startCore()
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return
   const { port1, port2 } = new MessageChannelMain()
-  core.postMessage(null, [port1])
+  if (!activeRemote) {
+    core ??= startCore()
+    core.postMessage(null, [port1])
+  } else {
+    remotePort?.close(); remoteRequests.clear(); remotePort = port1
+    port1.on('close', () => { if (remotePort === port1) { remotePort = undefined; remoteRequests.clear() } })
+    port1.on('message', ({ data }: { data: { id?: unknown; method?: unknown; params?: unknown } }) => {
+      if (!data || !Number.isSafeInteger(data.id) || typeof data.method !== 'string') return
+      const id = data.id as number
+      if (data.method === 'openExternal') {
+        const url = (data.params as { url?: unknown } | undefined)?.url
+        if (typeof url === 'string' && /^https?:\/\//.test(url)) void shell.openExternal(url)
+        port1.postMessage({ id, result: null }); return
+      }
+      if (!remoteClient || remoteStatus.status !== 'connected') { port1.postMessage({ id, error: 'Server disconnected. Use Reconnect or Local.' }); return }
+      const wireId = ++requestSequence
+      remoteRequests.set(wireId, id)
+      void remoteClient.send({ ...data, id: wireId }).catch((error: unknown) => {
+        if (remoteRequests.delete(wireId)) port1.postMessage({ id, error: error instanceof Error ? error.message : 'Server disconnected.' })
+      })
+    })
+    port1.start()
+  }
   event.sender.postMessage('core:port', null, [port2])
 })
 
@@ -312,6 +491,8 @@ ipcMain.on('update:install', () => {
 
 // The Mac's folder picker, for a folder lent to an agent's computer. The core checks the choice.
 ipcMain.handle('pick-folder', async (event) => {
+  trustedWindow(event)
+  if (activeRemote) throw new Error('Use a folder path on the VPS, not a folder on this computer.')
   const win = BrowserWindow.fromWebContents(event.sender)
   const opts = { title: L('Escolher pasta', 'Choose a folder'), buttonLabel: L('Escolher', 'Choose'), properties: ['openDirectory' as const] }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
@@ -350,7 +531,8 @@ function createWindow(): BrowserWindow {
 
   // Links in messages open in the default browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+    else if (url.startsWith('tucano://pair')) receivePairLink(url)
     return { action: 'deny' }
   })
 
@@ -359,9 +541,10 @@ function createWindow(): BrowserWindow {
   // Same promise as above, for those: web links go to the real browser;
   // a same-URL navigation (reload) is not a link and stays.
   win.webContents.on('will-navigate', (event, url) => {
-    if (!/^https?:\/\//.test(url) || url === win.webContents.getURL()) return
+    if (url === win.webContents.getURL()) return
     event.preventDefault()
-    void shell.openExternal(url)
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+    else if (url.startsWith('tucano://pair')) receivePairLink(url)
   })
 
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -381,7 +564,12 @@ if (process.env['TUCANO_DATA']) app.setPath('userData', process.env['TUCANO_DATA
 const quitOnly = process.argv.includes('--quit')
 const primary = app.requestSingleInstanceLock() && !quitOnly
 if (!primary) app.quit()
-app.on('second-instance', (_e, argv) => (argv.includes('--quit') ? app.quit() : showWindow()))
+app.on('second-instance', (_e, argv) => {
+  if (argv.includes('--quit')) return app.quit()
+  for (const arg of argv) if (arg.startsWith('tucano://pair')) receivePairLink(arg)
+  showWindow()
+})
+for (const arg of process.argv) if (arg.startsWith('tucano://pair')) receivePairLink(arg)
 
 // The app's own menu, in the app's language (Electron's would be in English).
 function setMenu(): void {
@@ -425,15 +613,22 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
     })
     app.exit(0)
   })
-} else if (primary) app.whenReady().then(() => {
+} else if (primary) app.whenReady().then(async () => {
   setMenu()
   protocol.handle('tucano', serveArtifact)
+  remoteStore = new RemoteStore(join(dataDir(), 'remote-connections.json'), safeStorage)
+  try {
+    const selected = JSON.parse(readFileSync(selectionFile(), 'utf8')) as { active?: unknown }
+    if (typeof selected.active === 'string') activeRemote = selected.active
+  } catch { /* a fresh installation starts locally */ }
+  if (app.isPackaged) app.setAsDefaultProtocolClient('tucano')
   core = startCore()
   // The Mac wakes for a few seconds at a time while asleep (maintenance, "DarkWake"):
   // routines wait for a real wake, so a run doesn't start and freeze mid-way.
   powerMonitor.on('suspend', () => core?.postMessage({ type: 'power', awake: false }))
   powerMonitor.on('resume', () => core?.postMessage({ type: 'power', awake: true }))
   createWindow()
+  if (activeRemote) void switchConnection(activeRemote, undefined, true).catch(() => publishConnection())
   setTray()
   updates.start()
   app.on('activate', () => {
@@ -452,5 +647,6 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
+  remoteClient?.disconnect()
   core?.kill()
 })

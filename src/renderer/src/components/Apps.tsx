@@ -45,9 +45,10 @@ export function AppsCard({ apps, onChange }: { apps: AgentApp[]; onChange: (apps
   const level = (n: string, l: AgentApp['level']): void => onChange(apps.map((a) => (a.name === n ? { ...a, level: l } : a)))
   const remove = (n: string): void => onChange(apps.filter((a) => a.name !== n))
 
-  if (status?.server) return <p className="hint">{L('No Tucano em servidor não há apps: a máquina não tem tela.', 'Tucano as a server has no apps: the machine has no screen.')}</p>
+  if (status?.server && !status.desktopReady) return <div className="apps-setup"><span className="grow">{L('Desktop da VPS indisponível. O navegador e os computadores Docker continuam separados.', 'VPS desktop unavailable. The browser and Docker computers remain separate.')}<small className="apps-setup__how">{status.suggestion}</small></span><button className="btn btn--sm btn--ghost" onClick={check}>{L('Verificar de novo', 'Check again')}</button></div>
   return (
     <div className="apps-card">
+      {status?.server && <p className="hint">{L('Estes apps estão na VPS selecionada, não no seu Mac. Cada agente só recebe os apps liberados abaixo.', 'These apps run on the selected VPS, not your Mac. Each agent only gets the apps granted below.')}</p>}
       {status && !status.installed && (
         <div className="apps-setup">
           <Icon name="plug" size={16} />

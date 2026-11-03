@@ -39,3 +39,34 @@ jobs:
       # src/server/index.ts starts a server the moment it is imported.
       - run: npm run test:server
         if: runner.os != 'Windows'
+
+      - name: Desktop transport against the real server
+        if: runner.os != 'Windows'
+        env:
+          TUCANO_REMOTE_E2E: '1'
+        run: npx vitest run test/remote-live.test.ts
+
+  connection-ui:
+    name: Connection picker UI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:connections
+        env:
+          CONNECTIONS_SCREENSHOT: artifacts/connections.png
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: connection-picker-screenshot
+          path: artifacts/connections.png
+          retention-days: 7

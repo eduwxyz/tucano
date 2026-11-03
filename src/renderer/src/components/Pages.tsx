@@ -835,7 +835,7 @@ function Services({ agentId }: { agentId: string }): ReactNode {
               </span>
               {svc.running && svc.url && (
                 <>
-                  <button className="btn btn--sm btn--ghost" onClick={() => openExternal(reachable(svc.url!))}>
+                  <button className="btn btn--sm btn--ghost" disabled={!!window.tucano.remoteMode} title={window.tucano.remoteMode ? L('Encaminhe esta porta da VPS por SSH para abrir a página.', 'Forward this VPS port over SSH to open its page.') : undefined} onClick={() => openExternal(reachable(svc.url!))}>
                     {L('Abrir', 'Open')}
                   </button>
                   <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, svc.name)}>

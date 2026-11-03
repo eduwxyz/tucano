@@ -80,6 +80,7 @@ export function parsePairLink(text: string): Parsed {
     return bad('not a Tucano link')
   }
   if (u.protocol !== 'tucano:' || u.hostname !== 'pair') return bad('not a Tucano pairing link')
+  if (u.username || u.password || u.port || (u.pathname !== '' && u.pathname !== '/') || u.hash) return bad('unexpected content in pairing link')
   const q = u.searchParams
   for (const k of new Set(q.keys())) if (q.getAll(k).length > 1) return bad(`"${k}" is given twice`)
   if (q.get('v') !== '1') return bad('a link from a version this app doesn’t know')
