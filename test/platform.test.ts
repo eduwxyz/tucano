@@ -245,7 +245,7 @@ describe('folders the CLIs install into', () => {
 
   it("doesn't repeat a folder already there, whatever its case or trailing slash on Windows", () => {
     expect(withInstallDirs([local.toUpperCase() + '/'].join(delimiter), 'windows', home, env, (p) => p === local)).toBe(local.toUpperCase() + '/')
-    expect(withInstallDirs(local, 'mac', home, env, () => true)).toBe(local)
+    expect(withInstallDirs(local, 'mac', home, env, () => true)).toBe([local, join(home, '.grok', 'bin')].join(delimiter))
   })
 })
 
