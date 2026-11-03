@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, symlinkSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
@@ -49,12 +49,29 @@ it('adopts the existing folder without moving its data and persists selection', 
   registry.rename(a.id, 'Company')
   const loaded = new Workspaces(dir)
   expect(loaded.selected()).toEqual({ ...a, name: 'Company' })
-  expect(loaded.get(original.id).dataDir).toBe(dir)
+  expect(loaded.get(original.id).dataDir).toBe(realpathSync(dir))
   expect(readFileSync(join(dir, 'tucano.db'), 'utf8')).toBe('existing data')
-  expect(a.dataDir).toBe(join(dir, 'workspaces', a.id))
+  expect(a.dataDir).toBe(join(realpathSync(dir), 'workspaces', a.id))
   expect(new Set(loaded.list().flatMap((w) => [w.gitPort, w.webhookPort])).size).toBe(6)
   expect(b.isDefault).toBe(false)
   expect(() => registry.select('../outside')).toThrow('Workspace not found')
+})
+
+it.skipIf(process.platform === 'win32')('adopts a symlinked root using canonical paths without moving its data', () => {
+  const dir = root()
+  const alias = join(root(), 'alias')
+  symlinkSync(dir, alias)
+  writeFileSync(join(alias, 'tucano.db'), 'existing data')
+  const registry = new Workspaces(alias)
+  const original = registry.selected()
+  const workspace = registry.create()
+  registry.select(workspace.id)
+  const loaded = new Workspaces(alias)
+  expect(loaded.get(original.id).dataDir).toBe(realpathSync(dir))
+  expect(loaded.selected()).toEqual(workspace)
+  expect(workspace.dataDir).toBe(join(realpathSync(dir), 'workspaces', workspace.id))
+  expect(new Workspaces(dir).list()).toEqual(loaded.list())
+  expect(readFileSync(join(alias, 'tucano.db'), 'utf8')).toBe('existing data')
 })
 
 it('refuses invalid registries without overwriting them', () => {
