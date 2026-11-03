@@ -1398,8 +1398,8 @@ export function ModelSelect(p: { value: string; onChange: (v: string) => void; j
   return <ModelPicker {...p} />
 }
 
-export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
-  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />
+export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }): ReactNode {
+  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-label={label} aria-checked={on} onClick={() => onChange(!on)} />
 }
 
 // ---------- Settings ----------
@@ -1514,7 +1514,7 @@ function TeamCard(): ReactNode {
 }
 
 // The phone (spec §19): a Telegram bot of the user's own, paired with a code.
-function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
+function PhoneCard({ info, finished }: { info?: TelegramInfo; finished?: boolean }): ReactNode {
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1572,6 +1572,14 @@ function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
           </button>
         </div>
       )}
+      <div className="row row--center">
+        <div className="grow">
+          <strong>{L('Receber todas as respostas concluídas', 'Receive all finished replies')}</strong>
+          <p className="hint">{L('Desativado por padrão. Aprovações, perguntas e avisos de rotinas continuam chegando. Responda a uma mensagem para continuar no mesmo canal e agente.', 'Off by default. Approvals, questions and routine notices still arrive. Reply to a message to continue with the same channel and agent.')}</p>
+        </div>
+        <Toggle label={L('Receber todas as respostas concluídas', 'Receive all finished replies')} on={finished === true} onChange={(v) => updateSettings({ telegramFinishedMessages: v })} />
+      </div>
+      <p className="hint">{L('Mande uma tarefa ao bot: a IA escolhe o canal e o agente antes de publicar. Se não identificar o canal, usa #geral (ou o primeiro canal).', 'Send a task to the bot: AI selects its channel and agent before posting. If the channel is unclear, it uses #general (or the first channel).')}</p>
       {(error || info?.error) && <p className="note note--error">{error || L(`O Telegram não está respondendo: ${info?.error}`, `Telegram isn't responding: ${info?.error}`)}</p>}
       <p className="hint">
         <Icon name="shield" size={13} /> {L('O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo). O token fica no cofre do sistema. Uma ação de alto risco pede dois toques.', 'Telegram receives the text of approvals and questions (tool, arguments, reason). The token stays in the system’s vault. A high-risk action takes two taps.')}
@@ -1741,7 +1749,7 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
-        {pane('integracoes') && <PhoneCard info={settings.telegram} />}
+        {pane('integracoes') && <PhoneCard info={settings.telegram} finished={settings.telegramFinishedMessages} />}
 
         {pane('modelos') && (
           <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', 'A small model summarizes what leaves each conversation’s window and, from the same stretch, picks what’s worth remembering about you.')}>

@@ -213,6 +213,7 @@ export interface Settings {
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
+  telegramFinishedMessages?: boolean // opt in to all completed agent replies; default false
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
   quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)

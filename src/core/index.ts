@@ -35,6 +35,7 @@ import { usage } from './usage'
 import { Skills } from './skills'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
+import { routePhone, type PhoneChannel } from './telegram-router'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
@@ -77,6 +78,7 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
   memoryLearning: 'approve',
   defaultLimit: 2_000_000,
   approvalTtlHours: 24,
+  telegramFinishedMessages: false,
   theme: 'system',
   language: langOf(process.env['TUCANO_LOCALE'])
 }
@@ -226,11 +228,15 @@ function toPhone(e: CoreEvent): void {
   const name = (id: string): string => db.agent(id)?.name ?? L('Um agente', 'An agent')
   if (e.type === 'approval' && e.approval.state === 'pending' && !sentToPhone.has(e.approval.id)) {
     sentToPhone.add(e.approval.id)
-    void telegram.approvalAsked(e.approval, name(e.approval.agentId))
+    void telegram.approvalAsked(e.approval, name(e.approval.agentId)).catch((error: unknown) => console.error('[telegram]', error))
   } else if (e.type === 'message' && e.message.run?.status === 'waiting_input' && e.message.run.question && e.message.author.kind === 'agent' && !sentToPhone.has(e.message.id)) {
     sentToPhone.add(e.message.id)
     const conv = db.conversation(e.message.conversationId)
-    void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM'))
+    void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM')).catch((error: unknown) => console.error('[telegram]', error))
+  } else if (e.type === 'message' && e.message.author.kind === 'agent' && e.message.run?.status === 'done' && !e.message.run.question && settings().telegramFinishedMessages === true && !sentToPhone.has(`done:${e.message.id}`)) {
+    sentToPhone.add(`done:${e.message.id}`)
+    const conv = db.conversation(e.message.conversationId)
+    void telegram.finished(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM')).catch((error: unknown) => console.error('[telegram]', error))
   }
 }
 
@@ -448,7 +454,7 @@ const runner = new Runner({
   routines,
   skills,
   models: () => availableModels(settings(), listed),
-  // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
+  // Approvals, questions and opt-in completed replies reach the phone through toPhone.
   notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId)),
   jev: { key: () => secrets.get(JEV_SECRET) },
   github,
@@ -469,6 +475,29 @@ telegram = new Telegram({
   decide: (id, decision, reason) => runner.decide(id, decision, reason),
   approval: (id) => db.approval(id),
   answer: (conversationId, text) => void runner.send(conversationId, text),
+  receive: async (text, reply) => {
+    const s = await ready.then(settings)
+    const channels: PhoneChannel[] = db.conversations().filter((c) => c.kind === 'channel').map((c) => ({
+      workspaceId: 'default', workspaceName: s.workspaceName,
+      conversationId: c.id, name: c.name, topic: c.topic,
+      default: /^(general|geral)$/i.test(c.name),
+      agents: c.members.map((id) => db.agent(id)).filter((a): a is Agent => !!a && !a.archived),
+      connectors: connectors.list()
+    }))
+    const model = modelInfo(s.routerModel === JEV_MODEL ? 'haiku' : s.routerModel) ?? modelInfo('haiku')!
+    const cwd = join(dataDir, 'agents', '_phone-router')
+    mkdirSync(cwd, { recursive: true })
+    const destination = reply ?? await routePhone({
+      text, channels, engine: engineImpls[model.engine], model: model.id, cwd, ready: s.engines[model.engine].installed && s.engines[model.engine].loggedIn,
+      receipt: (usage, ms) => db.addReceipt({ ...usage, model: model.id, ms, messageId: randomUUID(), agentId: 'router', engine: model.engine, at: Date.now() })
+    })
+    // Re-check after the asynchronous triage: channels/agents may have changed.
+    const conv = db.conversation(destination.conversationId)
+    if (destination.workspaceId !== 'default' || !conv || (destination.agentId && (!conv.members.includes(destination.agentId) || db.agent(destination.agentId)?.archived))) throw new Error('Telegram destination is no longer available')
+    if (!conv.members.some((id) => { const a = db.agent(id); return a && !a.archived })) throw new Error('No active agent in this channel')
+    await runner.send(conv.id, text, [], destination)
+    return destination
+  },
   changed: () => emit({ type: 'settings', settings: settings() })
 })
 
