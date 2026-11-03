@@ -6,7 +6,7 @@ import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
 import { geminiArgs, geminiEnv, geminiHome, geminiParser } from '../src/core/engines/gemini'
-import { cursorArgs, cursorConfig, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, parseCursorModels } from '../src/core/engines/cursor'
+import { cursorArgs, cursorConfig, cursorEngine, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
@@ -364,6 +364,28 @@ describe('Cursor config', () => {
     expect(args).not.toContain('--approve-mcps')
   })
 
+  it('attaches the images that exist with --image, once per file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tucano-cursor-img-'))
+    const a = join(dir, 'a.png')
+    const b = join(dir, 'b.jpg')
+    writeFileSync(a, 'x')
+    writeFileSync(b, 'y')
+    const images = [
+      { block: 0, path: a, mime: 'image/png' },
+      { block: 1, path: join(dir, 'gone.png'), mime: 'image/png' },
+      { block: 2, path: b, mime: 'image/jpeg' }
+    ]
+    expect(cursorArgs({ model: 'auto', images }).slice(7)).toEqual(['--image', a, '--image', b])
+  })
+
+  it('knows when the CLI refused --image itself', () => {
+    expect(imageRefused("Cursor exited without a reply (code 1).\nerror: unknown option '--image'")).toBe(true)
+    expect(imageRefused("error: unknown option '--imagex'")).toBe(false)
+    expect(imageRefused('You have hit your usage limit')).toBe(false)
+    expect(imageRefused('Could not read --image file')).toBe(false)
+  })
+
+
   it("denies Cursor's own files and shell, and allows only the gateway", () => {
     const c = cursorConfig({ mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }) as { permissions: { allow: string[]; deny: string[] }; autoAcceptWebSearch: boolean }
     expect(c.permissions.allow).toEqual(['Mcp(tucano:*)'])
@@ -411,3 +433,53 @@ describe('Cursor config', () => {
   })
 })
 
+describe.skipIf(process.platform === 'win32')('Cursor engine with images', () => {
+  // A stand-in CLI: it takes `mcp enable`, and answers with what it was given.
+  const fakeCli = (takesImages: boolean): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'tucano-cursor-cli-'))
+    const bin = join(dir, 'cursor-agent')
+    writeFileSync(
+      bin,
+      `#!/bin/sh
+[ "$1" = mcp ] && exit 0
+images=0
+for a in "$@"; do [ "$a" = --image ] && images=$((images+1)); done
+${takesImages ? '' : `[ $images -gt 0 ] && { echo "error: unknown option '--image'" >&2; exit 1; }`}
+note=no
+cat | grep -q 'Tucano:' && note=yes
+echo '{"type":"result","subtype":"success","is_error":false,"result":"images='"$images"' note='"$note"'","usage":{"inputTokens":1,"outputTokens":1}}'
+`,
+      { mode: 0o755 }
+    )
+    return bin
+  }
+  const reply = async (bin: string, images: { block: number; path: string; mime: string }[]): Promise<EngineEvent[]> => {
+    const app = mkdtempSync(join(tmpdir(), 'tucano-cursor-app-'))
+    const turn = { model: 'auto', effort: 'medium' as const, system: 'You are Iris.', prompt: 'What is in the picture?', images, cwd: app, signal: new AbortController().signal }
+    const out: EngineEvent[] = []
+    for await (const ev of cursorEngine(() => bin, app).run(turn)) out.push(ev)
+    return out
+  }
+  const picture = (): { block: number; path: string; mime: string }[] => {
+    const p = join(mkdtempSync(join(tmpdir(), 'tucano-cursor-pic-')), 'p.png')
+    writeFileSync(p, 'x')
+    return [{ block: 0, path: p, mime: 'image/png' }]
+  }
+
+  it('sends the images along when the CLI takes them', async () => {
+    const done = (await reply(fakeCli(true), picture())).find((e) => e.type === 'done')
+    expect(done && done.type === 'done' && done.text).toBe('images=1 note=no')
+  })
+
+  it('runs again without them, and tells the agent, when the CLI refuses --image', async () => {
+    const events = await reply(fakeCli(false), picture())
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+    const done = events.find((e) => e.type === 'done')
+    expect(done && done.type === 'done' && done.text).toBe('images=0 note=yes')
+  })
+
+  it('runs once, without --image, when there are no images', async () => {
+    const done = (await reply(fakeCli(false), [])).find((e) => e.type === 'done')
+    expect(done && done.type === 'done' && done.text).toBe('images=0 note=no')
+  })
+})

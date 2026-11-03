@@ -114,9 +114,34 @@ export function cursorParser(sent = 0): Parser {
 // stream-json with deltas, the model named, and the turn's workspace trusted
 // (it's the app's own). No --force: a tool the permissions don't allow is
 // refused, never run. No --approve-mcps: only the approved gateway loads.
-export function cursorArgs(turn: Pick<Turn, 'model'>): string[] {
-  return ['-p', '--output-format', 'stream-json', '--stream-partial-output', '--trust', '--model', turn.model]
+// Images attached in the chat go with the prompt (--image, once per file), as
+// with Codex: the agent sees them with Cursor's own file reads still denied.
+// The CLI hides that option ("internal only"), so it may go away; see
+// imageRefused for what the turn does then.
+export function cursorArgs(turn: Pick<Turn, 'model' | 'images'>): string[] {
+  return [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--stream-partial-output',
+    '--trust',
+    '--model',
+    turn.model,
+    ...(turn.images ?? []).filter((i) => existsSync(i.path)).flatMap((i) => ['--image', i.path])
+  ]
 }
+
+// Whether the CLI refused --image itself (an unknown option, before any reply):
+// then the turn runs again without the images.
+export const imageRefused = (message: string): boolean => /unknown option|unrecognized|unexpected argument/i.test(message) && /--image\b/.test(message)
+
+// What the agent is told when its images couldn't go along, so it says so
+// instead of answering as if it had seen them.
+export const imagesLeftOut = (): string =>
+  L(
+    '\n\n(Aviso do Tucano: as imagens anexadas nesta conversa não puderam ser mostradas a você desta vez, porque o Cursor CLI não aceitou anexá-las. Se a pessoa perguntar sobre uma imagem, diga que não conseguiu vê-la.)',
+    "\n\n(Note from Tucano: the images attached in this conversation couldn't be shown to you this time, because Cursor CLI didn't take them. If you're asked about an image, say you couldn't see it.)"
+  )
 
 // The permissions of a turn: Cursor's file reads, writes (deleting and saving
 // images included) and shell are denied; the gateway's tools are allowed and
@@ -227,7 +252,26 @@ export function cursorEngine(bin: () => string | undefined, appDir: string, shel
           return
         }
         const sent = turn.system.length + turn.prompt.length
-        yield* runCli({ bin: path, args: cursorArgs({ model }), stdin: turn.prompt, cwd: dirs.workspace, signal: turn.signal, parser: cursorParser(sent), env })
+        const run = (images: Turn['images'], prompt: string): AsyncIterable<EngineEvent> =>
+          runCli({ bin: path, args: cursorArgs({ model, images }), stdin: prompt, cwd: dirs.workspace, signal: turn.signal, parser: cursorParser(sent), env })
+        const withImages = (turn.images ?? []).some((i) => existsSync(i.path))
+        if (!withImages) {
+          yield* run(undefined, turn.prompt)
+          return
+        }
+        // With images, a refusal of --image (it comes before anything else) runs
+        // the turn again without them, and the agent is told why.
+        let said = false
+        let refused = false
+        for await (const ev of run(turn.images, turn.prompt)) {
+          if (!said && ev.type === 'error' && imageRefused(ev.message)) {
+            refused = true
+            break
+          }
+          said = said || ev.type === 'text'
+          yield ev
+        }
+        if (refused && !turn.signal.aborted) yield* run(undefined, turn.prompt + imagesLeftOut())
       } finally {
         // The worker quits, and the turn's folder goes: the config, the workspace,
         // and what Cursor kept for it (the transcript, the approval, the socket).
