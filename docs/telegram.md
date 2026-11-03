@@ -10,8 +10,12 @@ can send tasks, answer questions or act on approvals.
 - Send a new message such as “on company X, check the dates of the next 3
   meetings”. Before posting anything, the configured router model sees the
   message and the available channels, topics and agents (including their roles
-  and connector access). It chooses one channel and one agent. It gets no tools
-  and does not execute the task itself.
+  and connector access). It chooses the channel(s) and agent(s). It gets no
+  tools and does not execute the task itself.
+- If your message asks for several different things for different channels
+  (e.g. “sobre a música, faça o texto mais curto e sobre o php ainda vou
+  decidir”), the router splits it and sends each part to the matching channel
+  and agent. Parts that don’t match any channel go to the default channel.
 - With one channel, delivery goes straight there; AI still selects an agent if
   it has multiple active members. With one channel and one agent, no AI triage
   call is needed.
@@ -19,6 +23,7 @@ can send tasks, answer questions or act on approvals.
   `#general`/`#geral`, or the first channel when neither exists. The channel's
   first active member is the fallback speaker if AI cannot select one. Empty
   channels cannot run tasks; the bot reports that delivery failed.
+- Copy the pairing code with the copy button next to it in Settings.
 - **Receive all finished replies** is **off by default**. Enabling it mirrors
   completed agent replies from channels and DMs, even when started in the app.
   This shares those responses with Telegram. Long replies arrive in multiple

@@ -1550,9 +1550,14 @@ function PhoneCard({ info, finished, incoming }: { info?: TelegramInfo; finished
           <p className="small">
             {L('Agora abra o', 'Now open')} <strong>{info.bot}</strong> {L('no Telegram e mande:', 'in Telegram and send:')}
           </p>
-          <p>
+          <div className="row row--center">
             <code className="phone-code">/start {info.code}</code>
-          </p>
+            <button className="btn btn--sm btn--ghost" onClick={() => {
+              navigator.clipboard.writeText(`/start ${info.code}`).catch(() => {})
+            }} title={L('Copiar código', 'Copy code')}>
+              <Icon name="copy" size={14} />
+            </button>
+          </div>
           <p className="muted small">{L('Só quem mandar este código fica com o bot. Esperando…', 'Only whoever sends this code gets the bot. Waiting…')}</p>
           <button className="btn btn--sm btn--ghost" onClick={() => save(null)}>
             {L('Trocar de bot', 'Change bot')}

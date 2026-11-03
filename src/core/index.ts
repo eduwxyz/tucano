@@ -35,7 +35,7 @@ import { usage } from './usage'
 import { Skills } from './skills'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
-import { routePhone, type PhoneChannel } from './telegram-router'
+import { routePhone, type PhoneChannel, type PhoneTarget } from './telegram-router'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
@@ -484,21 +484,34 @@ telegram = new Telegram({
       conversationId: c.id, name: c.name, topic: c.topic,
       default: /^(general|geral)$/i.test(c.name),
       agents: c.members.map((id) => db.agent(id)).filter((a): a is Agent => !!a && !a.archived),
-      connectors: connectors.list()
+      connectors: connectors.list(),
+      recentMessages: db.recentMessages(c.id, 8).reverse().map((m) => ({
+        kind: m.author.kind === 'me' ? 'me' : 'agent',
+        name: m.author.kind === 'me' ? s.workspaceName : m.author.kind === 'agent' ? db.agent(m.author.id)?.name ?? L('Um agente', 'An agent') : L('Sistema', 'System'),
+        text: m.text
+      }))
     }))
     const model = modelInfo(s.routerModel === JEV_MODEL ? 'haiku' : s.routerModel) ?? modelInfo('haiku')!
     const cwd = join(dataDir, 'agents', '_phone-router')
     mkdirSync(cwd, { recursive: true })
-    const destination = reply ?? await routePhone({
-      text, channels, engine: engineImpls[model.engine], model: model.id, cwd, ready: s.engines[model.engine].installed && s.engines[model.engine].loggedIn,
-      receipt: (usage, ms) => db.addReceipt({ ...usage, model: model.id, ms, messageId: randomUUID(), agentId: 'router', engine: model.engine, at: Date.now() })
-    })
-    // Re-check after the asynchronous triage: channels/agents may have changed.
-    const conv = db.conversation(destination.conversationId)
-    if (destination.workspaceId !== 'default' || !conv || (destination.agentId && (!conv.members.includes(destination.agentId) || db.agent(destination.agentId)?.archived))) throw new Error('Telegram destination is no longer available')
-    if (!conv.members.some((id) => { const a = db.agent(id); return a && !a.archived })) throw new Error('No active agent in this channel')
-    await runner.send(conv.id, text, [], destination)
-    return destination
+    const routeDestinations: PhoneTarget[] = reply
+      ? [{ ...reply, workspaceId: 'default', text }]
+      : await routePhone({
+        text, channels, engine: engineImpls[model.engine], model: model.id, cwd, ready: s.engines[model.engine].installed && s.engines[model.engine].loggedIn,
+        receipt: (usage, ms) => db.addReceipt({ ...usage, model: model.id, ms, messageId: randomUUID(), agentId: 'router', engine: model.engine, at: Date.now() })
+      })
+    const results: PhoneTarget[] = []
+    for (const dest of routeDestinations) {
+      // Re-check after the asynchronous triage: channels/agents may have changed.
+      const conv = db.conversation(dest.conversationId)
+      if (dest.workspaceId !== 'default' || !conv || (dest.agentId && (!conv.members.includes(dest.agentId) || db.agent(dest.agentId)?.archived))) continue
+      if (!conv.members.some((id) => { const a = db.agent(id); return a && !a.archived })) continue
+      const part = (dest.text ?? text).trim()
+      await runner.send(conv.id, part, [], { agentId: dest.agentId, messageId: dest.messageId })
+      results.push(dest)
+    }
+    if (results.length === 0) throw new Error('No Telegram destination is available.')
+    return results[results.length - 1] as PhoneTarget
   },
   changed: () => emit({ type: 'settings', settings: settings() })
 })
