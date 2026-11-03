@@ -1,12 +1,15 @@
 // The server's own commands, run on the machine it lives on, so only whoever can log in there
 // decides who may sign in:
 //
-//   node out/main/server.js pair [--label "My Mac"]   a one-time code, and the link that signs a browser in
+//   node out/main/server.js pair [--label "My Mac"] [--ssh you@host[:port] | --url https://…]
+//                                                     a one-time code, the link that signs a browser in, and
+//                                                     (with --ssh or --url) the link that pairs the Mac app
 //   node out/main/server.js devices                   who is paired
 //   node out/main/server.js revoke <id|label>|--all   take access away
 //
 // Returns the exit code, or undefined when the arguments aren't a command and the server should start.
 
+import { DEFAULT_PORT, formatPairLink, parseServerUrl, parseSshTarget, type Reach } from '../shared/pairlink'
 import { CODE_TTL_MS, type Pairing } from './pairing'
 
 const USAGE = [
@@ -14,6 +17,8 @@ const USAGE = [
   '',
   '  (no command)              start the server',
   '  pair [--label "My Mac"]   make a one-time code to pair a browser or the app',
+  '       [--ssh you@host[:port]]   also print the link for the Mac app, to reach this server by an SSH tunnel',
+  '       [--url https://…]         or the link for the app to reach it at an address (https, or Tailscale)',
   '  devices                   list the paired devices',
   '  revoke <id|label>         take one device\'s access away',
   '  revoke --all              take every device\'s access away, and drop the codes not used yet'
@@ -24,6 +29,27 @@ function flag(args: string[], name: string): string | undefined {
   const a = args[i]
   if (a === undefined) return undefined
   return a === name ? args[i + 1] : a.slice(name.length + 1)
+}
+
+// How the app reaches this server, from --ssh or --url: undefined when neither is given, null (after saying
+// why) when what was given isn't valid.
+function reachOf(args: string[], say: (line: string) => void): Reach | undefined | null {
+  const named = (name: string): boolean => args.some((a) => a === name || a.startsWith(`${name}=`))
+  const ssh = flag(args, '--ssh')
+  const url = flag(args, '--url')
+  if (!named('--ssh') && !named('--url')) return undefined
+  if (named('--ssh') && named('--url')) {
+    say('Give --ssh or --url, not both.')
+    return null
+  }
+  if (named('--ssh')) {
+    const r = ssh === undefined ? undefined : parseSshTarget(ssh)
+    if (!r) say('--ssh wants user@host or user@host:port (the user you sign in to this machine as, and the address you reach it at).')
+    return r ?? null
+  }
+  const origin = url === undefined ? undefined : parseServerUrl(url)
+  if (!origin) say('--url wants an https address, or an http one on Tailscale (http://100.x.y.z:7337), with no path.')
+  return origin ? { via: 'url', url: origin } : null
 }
 
 const stamp = (t: number): string => new Date(t).toISOString().slice(0, 16).replace('T', ' ')
@@ -48,9 +74,17 @@ export function cli(argv: string[], pairing: Pairing, base: string, say: (line: 
 
 function run(cmd: string, args: string[], pairing: Pairing, base: string, say: (line: string) => void): number {
   if (cmd === 'pair') {
-    const { code, expires } = pairing.invite(flag(args, '--label'))
+    const label = flag(args, '--label')
+    // Checked before the code is made, so a typo doesn't use one up.
+    const reach = reachOf(args, say)
+    if (reach === null) return 2
+    const { code, expires } = pairing.invite(label)
     say(`Pairing code: ${code}`)
     say(`For one device, once, until ${stamp(expires)} UTC (${CODE_TTL_MS / 60_000} minutes).`)
+    if (reach) {
+      const name = label?.trim() || (reach.via === 'ssh' ? reach.host : new URL(reach.url).hostname)
+      say(`For the Mac app: ${formatPairLink({ code, reach, remotePort: Number(new URL(base).port) || DEFAULT_PORT, name })}`)
+    }
     say(`In a browser: ${base}/?pair=${code}`)
     say('Through a tunnel or a proxy, use the address you reach the server at instead of that one.')
     return 0
