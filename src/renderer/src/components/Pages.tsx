@@ -62,7 +62,7 @@ import {
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
-import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { AgentAvatar, AVATARS, CopyButton, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 
@@ -1400,8 +1400,8 @@ export function ModelSelect(p: { value: string; onChange: (v: string) => void; j
   return <ModelPicker {...p} />
 }
 
-export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
-  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />
+export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }): ReactNode {
+  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-label={label} aria-checked={on} onClick={() => onChange(!on)} />
 }
 
 // ---------- Settings ----------
@@ -1572,7 +1572,7 @@ function TeamCard(): ReactNode {
 }
 
 // The phone (spec §19): a Telegram bot of the user's own, paired with a code.
-function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
+function PhoneCard({ info, finished, incoming }: { info?: TelegramInfo; finished?: boolean; incoming?: boolean }): ReactNode {
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1608,9 +1608,10 @@ function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
           <p className="small">
             {L('Agora abra o', 'Now open')} <strong>{info.bot}</strong> {L('no Telegram e mande:', 'in Telegram and send:')}
           </p>
-          <p>
+          <div className="row phone-code-row">
+            <CopyButton value={`/start ${info.code}`} />
             <code className="phone-code">/start {info.code}</code>
-          </p>
+          </div>
           <p className="muted small">{L('Só quem mandar este código fica com o bot. Esperando…', 'Only whoever sends this code gets the bot. Waiting…')}</p>
           <button className="btn btn--sm btn--ghost" onClick={() => save(null)}>
             {L('Trocar de bot', 'Change bot')}
@@ -1630,6 +1631,20 @@ function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
           </button>
         </div>
       )}
+      <div className="row row--center phone-option">
+        <div className="grow">
+          <strong>{L('Enviar mensagens aos agentes', 'Send messages to agents')}</strong>
+          <p className="hint">{L('Envie uma mensagem ao seu bot e a IA a encaminhará ao canal e agente adequados.', 'Send a message to your bot, and AI will forward it to the appropriate channel and agent.')}</p>
+        </div>
+        <Toggle label={L('Enviar mensagens aos agentes', 'Send messages to agents')} on={incoming === true} onChange={(v) => updateSettings({ telegramIncomingMessages: v })} />
+      </div>
+      <div className="row row--center phone-option">
+        <div className="grow">
+          <strong>{L('Receber todas as respostas concluídas', 'Receive all finished replies')}</strong>
+          <p className="hint">{L('Receba notificações dos seus agentes sempre que concluírem uma tarefa. Responda à mensagem para continuar a conversa.', 'Receive notifications from your agents whenever they complete a task. Reply to the message to continue the conversation.')}</p>
+        </div>
+        <Toggle label={L('Receber todas as respostas concluídas', 'Receive all finished replies')} on={finished === true} onChange={(v) => updateSettings({ telegramFinishedMessages: v })} />
+      </div>
       {(error || info?.error) && <p className="note note--error">{error || L(`O Telegram não está respondendo: ${info?.error}`, `Telegram isn't responding: ${info?.error}`)}</p>}
       <p className="hint">
         <Icon name="shield" size={13} /> {L('O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo). O token fica no cofre do sistema. Uma ação de alto risco pede dois toques.', 'Telegram receives the text of approvals and questions (tool, arguments, reason). The token stays in the system’s vault. A high-risk action takes two taps.')}
@@ -1799,7 +1814,7 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
-        {pane('integracoes') && <PhoneCard info={settings.telegram} />}
+        {pane('integracoes') && <PhoneCard info={settings.telegram} finished={settings.telegramFinishedMessages} incoming={settings.telegramIncomingMessages} />}
 
         {pane('modelos') && (
           <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', 'A small model summarizes what leaves each conversation’s window and, from the same stretch, picks what’s worth remembering about you.')}>

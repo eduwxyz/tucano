@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { L } from '../../shared/lang'
 import { memorySystem } from '../memory'
 import { routerSystem } from '../router'
+import { PHONE_ROUTER_SYSTEM } from '../telegram-router'
 import type { Engine, EngineEvent, Turn } from './types'
 
 // Deterministic engine for tests and screenshots. Never spawns anything, but
@@ -22,7 +23,13 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       }
       let reply: string
       let spend = 0 // "gaste N tokens": a reply that costs that much, to see the budget pause
-      if (turn.system === routerSystem()) {
+      if (turn.system === PHONE_ROUTER_SYSTEM) {
+        const input = JSON.parse(turn.prompt) as { message: string; channels: { workspaceId: string; conversationId: string; name: string; default: boolean; agents: { id: string; handle: string }[] }[] }
+        const normalize = (s: string): string => s.toLowerCase().replace(/[-_\s]+/g, ' ')
+        const channel = input.channels.find((c) => normalize(input.message).includes(normalize(c.name))) ?? input.channels.find((c) => c.default) ?? input.channels[0]!
+        const agent = channel.agents.find((a) => input.message.includes(`@${a.handle}`)) ?? channel.agents[0]
+        reply = JSON.stringify({ workspaceId: channel.workspaceId, conversationId: channel.conversationId, agentId: agent?.id })
+      } else if (turn.system === routerSystem()) {
         reply = JSON.stringify(fakeRoute(turn.prompt))
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))

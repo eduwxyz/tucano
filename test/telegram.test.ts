@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Approval, Message } from '../src/shared/types'
 import { Telegram } from '../src/core/telegram'
+import type { PhoneTarget } from '../src/core/telegram-router'
 
 // A stand-in for Telegram's Bot API: updates are queued by the test; what the bot sends is recorded.
 function botApi() {
@@ -44,6 +45,28 @@ describe('Telegram', () => {
   let decided: [string, string, string | undefined][]
   let answered: [string, string][]
   let approvals: Map<string, Approval>
+  let received: { text: string; reply?: PhoneTarget }[]
+  let receiveError: boolean
+  let incomingEnabled: boolean
+  const makeBot = (): Telegram => new Telegram({
+    secrets: { get: async (k) => store.get(k), set: async (k, v) => void (v === undefined ? store.delete(k) : store.set(k, v)) },
+    decide: async (id, d, reason) => {
+      decided.push([id, d, reason])
+      approvals.set(id, { ...approvals.get(id)!, state: d })
+    },
+    approval: (id) => approvals.get(id),
+    answer: (conv, text) => answered.push([conv, text]),
+    canReceive: () => incomingEnabled,
+    receive: async (text, reply) => {
+      received.push({ text, reply })
+      if (receiveError) throw new Error('deleted channel')
+      const destination = reply ?? { workspaceId: 'default', conversationId: 'company', agentId: 'calendar' }
+      answered.push([destination.conversationId, text])
+      return destination
+    },
+    changed: () => {},
+    fetch: api.f
+  })
 
   beforeEach(async () => {
     api = botApi()
@@ -51,17 +74,10 @@ describe('Telegram', () => {
     decided = []
     answered = []
     approvals = new Map()
-    tg = new Telegram({
-      secrets: { get: async (k) => store.get(k), set: async (k, v) => void (v === undefined ? store.delete(k) : store.set(k, v)) },
-      decide: async (id, d, reason) => {
-        decided.push([id, d, reason])
-        approvals.set(id, { ...approvals.get(id)!, state: d })
-      },
-      approval: (id) => approvals.get(id),
-      answer: (conv, text) => answered.push([conv, text]),
-      changed: () => {},
-      fetch: api.f
-    })
+    received = []
+    receiveError = false
+    incomingEnabled = true
+    tg = makeBot()
   })
   afterEach(() => tg.stop())
 
@@ -92,6 +108,7 @@ describe('Telegram', () => {
 
   it('sends an approval with buttons, and a tap decides it', async () => {
     await pair()
+    incomingEnabled = false
     await tg.approvalAsked(ap(), 'PM')
     const msg = api.sent.at(-1)!
     expect(msg.body['text']).toContain('PM pede aprovação\n\nLinear · delete_issue\nMotivo: duplicada')
@@ -127,5 +144,121 @@ describe('Telegram', () => {
     api.push({ message: { message_id: 6, chat: stranger, text: 'hackeado', reply_to_message: { message_id: asked.id } } })
     await settle()
     expect(answered).toEqual([['c1', 'Sexta que vem']])
+  })
+
+  it('accepts new tasks only from the paired chat and keeps acknowledgement replies on their destination', async () => {
+    await pair()
+    api.push({ message: { message_id: 10, chat: stranger, text: 'do not route this' } })
+    api.push({ message: { message_id: 11, chat: me, text: 'company X meetings' } })
+    await settle()
+    expect(received).toEqual([{ text: 'company X meetings', reply: undefined }])
+    const ack = api.sent.at(-1)!
+    api.push({ message: { message_id: 12, chat: me, text: 'next week too', reply_to_message: { message_id: ack.id } } })
+    await settle()
+    expect(received.at(-1)?.reply).toEqual({ workspaceId: 'default', conversationId: 'company', agentId: 'calendar' })
+  })
+
+  it('blocks new tasks when incoming messages are off but still accepts replies to agent questions', async () => {
+    await pair()
+    incomingEnabled = false
+    api.push({ message: { message_id: 40, chat: me, text: 'a new task' } })
+    await settle()
+    expect(received).toHaveLength(0)
+    expect(api.sent.at(-1)!.body['text']).toContain('Enviar mensagens aos agentes')
+    await tg.questionAsked({ id: 'q', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: '', at: 0, run: { status: 'waiting_input', steps: [], question: 'When?' } }, 'PM', '#company')
+    const question = api.sent.at(-1)!
+    api.push({ message: { message_id: 41, chat: me, text: 'Friday', reply_to_message: { message_id: question.id } } })
+    await settle()
+    expect(answered).toEqual([['c1', 'Friday']])
+  })
+
+  it('keeps completed-response replies working with incoming messages off', async () => {
+    await pair()
+    incomingEnabled = false
+    await tg.finished({ id: 'done', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Result', at: 0 }, 'PM', '#company')
+    const finished = api.sent.at(-1)!
+    api.push({ message: { message_id: 42, chat: me, text: 'more detail', reply_to_message: { message_id: finished.id } } })
+    await settle()
+    expect(received.at(-1)?.reply).toMatchObject({ conversationId: 'c1', agentId: 'a1', messageId: 'done' })
+  })
+
+  it('sends full completed replies in replyable parts and restores destinations after restart', async () => {
+    await pair()
+    const msg: Message = { id: 'done', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'x'.repeat(8000), at: 0, run: { status: 'done', steps: [] } }
+    const before = api.sent.length
+    await tg.finished(msg, 'PM', '#company')
+    const parts = api.sent.slice(before)
+    expect(parts.length).toBeGreaterThan(1)
+    // First part has the agent/channel header.
+    expect(String(parts[0]!.body['text'])).toMatch(/^PM \(#company\):\n\n/)
+    // Continuation parts have the "continuing message" header.
+    for (let i = 1; i < parts.length; i++) {
+      expect(String(parts[i]!.body['text'])).toMatch(/^PM \(#company\):\ncontinuando mensagem...\n/)
+    }
+    // No part exceeds Telegram's limit.
+    for (const p of parts) {
+      expect(String(p.body['text']).length).toBeLessThanOrEqual(4000)
+    }
+    // Stripping headers, the parts reconstruct the original message.
+    const contents = parts.map((p, i) => {
+      const text = String(p.body['text'])
+      return i === 0 ? text.replace(/^PM \(#company\):\n\n/, '') : text.replace(/^PM \(#company\):\ncontinuando mensagem...\n/, '')
+    })
+    expect(contents.join('')).toBe('x'.repeat(8000))
+    tg.stop()
+    tg = makeBot()
+    await tg.start()
+    api.push({ message: { message_id: 21, chat: me, text: 'continue', reply_to_message: { message_id: parts[0]!.id } } })
+    await settle()
+    expect(received.at(-1)?.reply).toEqual({ workspaceId: 'default', conversationId: 'c1', agentId: 'a1', messageId: 'done' })
+  })
+
+  it('does not reroute unknown reply IDs and reports dispatch failure without a success acknowledgement', async () => {
+    await pair()
+    api.push({ message: { message_id: 30, chat: me, text: 'reply', reply_to_message: { message_id: 99999 } } })
+    await settle()
+    expect(received).toHaveLength(0)
+    receiveError = true
+    api.push({ message: { message_id: 31, chat: me, text: 'new task' } })
+    await settle()
+    expect(api.sent.at(-1)!.body['text']).toContain('Não consegui enviar')
+  })
+
+  it('keeps emoji intact when splitting a long completed reply', async () => {
+    await pair()
+    const text = '📅'.repeat(4000)
+    const before = api.sent.length
+    await tg.finished({ id: 'emoji', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text, at: 0 }, 'PM', '#company')
+    const parts = api.sent.slice(before).map((p) => String(p.body['text']))
+    expect(parts.length).toBeGreaterThan(1)
+    // First part has the header.
+    expect(parts[0]).toMatch(/^PM \(#company\):\n\n/)
+    // Continuation parts have the "continuing message" header.
+    for (let i = 1; i < parts.length; i++) {
+      expect(parts[i]).toMatch(/^PM \(#company\):\ncontinuando mensagem...\n/)
+    }
+    // No part exceeds Telegram's limit and none ends with a surrogate half.
+    for (const p of parts) {
+      expect(p.length).toBeLessThanOrEqual(4000)
+      expect(!/[\uD800-\uDBFF]$/.test(p)).toBe(true)
+    }
+    // Stripping continuation headers, the parts reconstruct the original message.
+    const contents = parts.map((p, i) => {
+      return i === 0 ? p : p.replace(/^PM \(#company\):\ncontinuando mensagem...\n/, '')
+    })
+    expect(contents.join('')).toBe(`PM (#company):\n\n${text}`)
+  })
+
+  it('clears stored destinations on unpair and token replacement', async () => {
+    await pair()
+    await tg.questionAsked({ id: 'q', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: '', at: 0, run: { status: 'waiting_input', steps: [], question: 'When?' } }, 'PM', '#company')
+    expect(store.has('telegram:replies')).toBe(true)
+    await tg.unpair()
+    expect(store.has('telegram:replies')).toBe(false)
+    await pair()
+    await tg.approvalAsked(ap(), 'PM')
+    expect(store.has('telegram:replies')).toBe(true)
+    await tg.setToken('NEW_TOKEN')
+    expect(store.has('telegram:replies')).toBe(false)
   })
 })

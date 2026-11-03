@@ -46,6 +46,35 @@ beforeEach(() => {
 })
 
 describe('Runner', () => {
+  it('honors Telegram triage without rewriting the human message or routing again', async () => {
+    const r = runner()
+    await r.send('c1', 'Check the next meetings', [], { agentId: 'a2' })
+    await r.idle()
+    expect(agentMessages().map((m) => m.author)).toEqual([{ kind: 'agent', id: 'a2' }])
+    expect(db.messages().find((m) => m.author.kind === 'me')?.text).toBe('Check the next meetings')
+    expect(db.messages().some((m) => m.author.kind === 'system')).toBe(false)
+  })
+
+  it('does not consume a different agent’s pending question for a new triaged task', async () => {
+    const r = runner()
+    db.saveMessage({ id: 'pending', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: '', at: 1, run: { status: 'waiting_input', steps: [], question: 'Another question' } })
+    await r.send('c1', 'A new task', [], { agentId: 'a1' })
+    await r.idle()
+    expect(db.message('pending')?.run?.status).toBe('waiting_input')
+    expect(agentMessages().at(-1)?.author).toEqual({ kind: 'agent', id: 'a1' })
+  })
+
+  it('keeps an explicit Telegram reply on its agent and quotes the original message', async () => {
+    const r = runner()
+    db.saveMessage({ id: 'old', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Original meeting dates', at: 0, run: { status: 'done', steps: [] } })
+    db.saveMessage({ id: 'pending', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: '', at: 1, run: { status: 'waiting_input', steps: [], question: 'Another question' } })
+    await r.send('c1', 'Check those again', [], { agentId: 'a1', messageId: 'old' })
+    await r.idle()
+    expect(agentMessages().at(-1)?.author).toEqual({ kind: 'agent', id: 'a1' })
+    expect(db.message('pending')?.run?.status).toBe('waiting_input')
+    expect(claude.turns[0]!.prompt).toContain('Original meeting dates')
+  })
+
   it('answers in a DM, streams deltas and records a receipt that matches the agent usage', async () => {
     const r = runner()
     await r.send('d1', 'oi')
