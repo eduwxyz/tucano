@@ -413,8 +413,12 @@ describe('Cursor config', () => {
     expect(() => readFileSync(join(b.workspace, '.cursor', 'mcp.json'))).toThrow()
   })
 
-  it('names a workspace and finds its worker socket the way the CLI does', () => {
+  it('names a workspace the way the CLI does', () => {
     expect(cursorSlug('/Users/x/Library/Application Support/Tucano/cursor/ab12/workspace')).toBe('Users-x-Library-Application-Support-Tucano-cursor-ab12-workspace')
+  })
+
+  // The worker's socket is a Unix socket: on Windows the turn doesn't look for it.
+  it.skipIf(process.platform === 'win32')('finds its worker socket the way the CLI does', () => {
     // short: under <data>/projects
     expect(cursorWorkerSocket('/t/w', '/t/d')).toBe(join('/t/d', 'projects', 't-w', 'worker.sock'))
     // long: cut to 83 characters plus a hash (the CLI's rule, checked against a real run)
