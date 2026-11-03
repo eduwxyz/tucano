@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type Delegated, type Delegation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, REQUEST_BUDGET, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type Delegated, type Delegation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
@@ -22,13 +22,13 @@ import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
-import { briefFor, CHAMAR, chamarTool, colleaguesOf, DELEGAR, delegarTool, MAX_DELEGATION_DEPTH, MAX_DELEGATIONS, MAX_TEAM_ROUNDS, resultsTask, settled, teamOf } from './delegation'
+import { briefFor, colleaguesOf, DELEGAR, delegarTool, requestCap, MAX_DELEGATION_DEPTH, MAX_DELEGATIONS, MAX_TEAM_ROUNDS, resultsTask, settled, teamOf } from './delegation'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
-const MAX_DEPTH = 6 // agent replies chained by @mentions from one human message
+const MAX_DEPTH = 3 // agent replies chained from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
@@ -122,7 +122,7 @@ export interface RoutineEvent {
 }
 
 type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
-type TurnOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; delegation?: Delegation; round?: number; reportOf?: string }
+type TurnOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; delegation?: Delegation; round?: number; reportOf?: string; root?: string }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -131,6 +131,7 @@ export class Runner {
   private controllers = new Map<string, Control>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
+  private budget = REQUEST_BUDGET // settings.requestBudget, as of the latest turn
 
   constructor(private deps: RunnerDeps) {}
 
@@ -162,11 +163,10 @@ export class Runner {
       this.update(asked, { run: { ...asked.run!, status: 'done' } })
       const task = asked.run?.delegation
       const by = asked.author.kind === 'agent' ? asked.author.id : undefined
-      // Whoever asked, member or not: an agent called in by a mention may ask too.
-      const asker = by ? db.agent(by) : undefined
+      const asker = by ? (task ? db.agent(by) : members.find((a) => a.id === by)) : undefined
       if (task && asker && !asker.archived && responders.length === 0 && !this.paused) delegate = asker
       else if (task) this.settle(task.from) // nobody goes on with it: its manager gets what there is
-      else if (asker && !asker.archived && responders.length === 0) responders = [asker]
+      else if (asker && responders.length === 0) responders = [asker]
     }
     if (delegate) return this.follow(delegate, conv, { delegation: asked!.run!.delegation, work: asked!.run!.work })
 
@@ -420,16 +420,16 @@ export class Runner {
   // A turn whose message shows up at once, before it leaves the queue: a team's task must never look
   // settled while the turn that goes on with it waits for a slot. On a task, it's asked the task again
   // (`then` after it), since what it was handed isn't in the conversation.
-  private follow(agent: Agent, conv: Conversation, opts: { delegation?: Delegation; then?: string | ((me: string) => string); task?: string; work?: string; round?: number; reportOf?: string; existing?: Message }): void {
+  private follow(agent: Agent, conv: Conversation, opts: { delegation?: Delegation; then?: string | ((me: string) => string); task?: string; work?: string; round?: number; reportOf?: string; root?: string; existing?: Message }): void {
     const delegation = opts.delegation && { ...opts.delegation, reported: undefined }
     const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now() }
     // Nothing of what it was before (a question, an approval card) while it waits its turn.
-    this.update(msg, { text: '', run: { status: 'working', depth: 1, steps: [{ id: randomUUID(), label: L('Na fila', 'Queued'), status: 'running' }], ...(delegation ? { delegation } : {}), ...(opts.round ? { round: opts.round } : {}), ...(opts.reportOf ? { reportOf: opts.reportOf } : {}) } })
+    this.update(msg, { text: '', run: { status: 'working', depth: 1, steps: [{ id: randomUUID(), label: L('Na fila', 'Queued'), status: 'running' }], ...(delegation ? { delegation } : {}), ...(opts.round ? { round: opts.round } : {}), ...(opts.reportOf ? { reportOf: opts.reportOf } : {}), ...(opts.root ? { root: opts.root } : {}) } })
     this.enqueue(async () => {
       const me = (await this.deps.settings()).workspaceName
       const then = typeof opts.then === 'function' ? opts.then(me) : opts.then
       const task = opts.task ?? (delegation ? briefFor(delegation, this.deps.db.agent(delegation.by), me, then) : then)
-      return this.execute(agent, conv, { depth: 1, existing: msg, task, work: opts.work, delegation, round: opts.round, reportOf: opts.reportOf })
+      return this.execute(agent, conv, { depth: 1, existing: msg, task, work: opts.work, delegation, round: opts.round, reportOf: opts.reportOf, root: opts.root })
     })
   }
 
@@ -437,8 +437,12 @@ export class Runner {
   private dispatch(manager: Agent, conv: Conversation, msg: Message, stopped: boolean): void {
     const { db } = this.deps
     const all = msg.run?.delegated ?? []
-    const go = stopped || this.paused ? [] : all.flatMap((t) => (db.agent(t.agentId) && !db.agent(t.agentId)!.archived ? [t] : []))
-    if (go.length < all.length && this.paused && !stopped) this.post(conv.id, L(`Os agentes estão pausados: o que **${manager.name}** delegou não foi entregue.`, `The agents are paused: what **${manager.name}** delegated wasn't handed out.`))
+    const root = msg.run?.root ?? msg.id
+    // The reply that delegated may have spent the rest of the request's budget itself.
+    const capped = requestCap(db.requestSpent(root), this.budget)
+    const go = stopped || this.paused || capped ? [] : all.flatMap((t) => (db.agent(t.agentId) && !db.agent(t.agentId)!.archived ? [t] : []))
+    if (go.length < all.length && !stopped && (this.paused || capped))
+      this.post(conv.id, this.paused ? L(`Os agentes estão pausados: o que **${manager.name}** delegou não foi entregue.`, `The agents are paused: what **${manager.name}** delegated wasn't handed out.`) : L(`${capped} O que **${manager.name}** delegou não foi entregue.`, `${capped} What **${manager.name}** delegated wasn't handed out.`))
     // In a channel the work happens there, in the open. Anywhere else (the person's DM stays theirs, like
     // a DM in Slack), in a DM between the two agents: the request opens there, and the answer is given there.
     const placed = go.map((t) => {
@@ -455,8 +459,8 @@ export class Runner {
         db.saveMessage(ask)
         this.deps.emit({ type: 'message', message: ask })
       }
-      const delegation: Delegation = { id: t.id, ...(t.kind ? { kind: t.kind } : {}), by: manager.id, from: msg.id, task: t.task, ...(t.doneWhen ? { doneWhen: t.doneWhen } : {}), chain: [...(above?.chain ?? []), manager.id], since: msg.at }
-      this.follow(target, where, { delegation, work: msg.run?.work })
+      const delegation: Delegation = { id: t.id, by: manager.id, from: msg.id, task: t.task, ...(t.doneWhen ? { doneWhen: t.doneWhen } : {}), chain: [...(above?.chain ?? []), manager.id], root, since: msg.at }
+      this.follow(target, where, { delegation, root, work: msg.run?.work })
     }
     if (!placed.length && above) this.settle(above.from)
   }
@@ -507,8 +511,10 @@ export class Runner {
       return
     }
     const round = (head.run.round ?? 0) + 1
+    const root = head.run.root ?? head.id
+    const capped = requestCap(db.requestSpent(root), this.budget)
     const results = fresh.map((message) => ({ agent: db.agent(message.author.kind === 'agent' ? message.author.id : ''), message, elsewhere: message.conversationId !== head.conversationId }))
-    this.follow(manager!, conv!, { delegation: head.run.delegation, round, reportOf: head.id, work: head.run.work, then: (me) => resultsTask(me, results, round) })
+    this.follow(manager!, conv!, { delegation: head.run.delegation, round, reportOf: head.id, root, work: head.run.work, then: (me) => resultsTask(me, results, round, capped) })
   }
 
   private enqueue(job: () => Promise<unknown>): void {
@@ -557,6 +563,7 @@ export class Runner {
   private async turn(agent: Agent, conv: Conversation, opts: TurnOpts): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
+    this.budget = settings.requestBudget ?? REQUEST_BUDGET
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
     const model = modelInfo(agent.modelId)
     // The model this reply runs on: the agent's, or its reserve once the main one's subscription is out.
@@ -574,7 +581,7 @@ export class Runner {
     // "Try again" passes no task: it repeats the one of the reply it's redoing.
     const task = opts.task ?? opts.existing?.run?.task
     // A team's task stays one with every reply on it, and so does a manager's count of rounds.
-    const again = { ...(task ? { task } : {}), ...(opts.delegation ? { delegation: opts.delegation } : {}), ...(opts.round ? { round: opts.round } : {}), ...(opts.reportOf ? { reportOf: opts.reportOf } : {}) }
+    const again = { ...(task ? { task } : {}), ...(opts.delegation ? { delegation: opts.delegation } : {}), ...(opts.round ? { round: opts.round } : {}), ...(opts.reportOf ? { reportOf: opts.reportOf } : {}), ...(opts.root ? { root: opts.root } : {}) }
     msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
@@ -671,12 +678,13 @@ export class Runner {
     const routines = this.deps.gateway ? this.deps.routines : undefined
     const skills = this.deps.gateway ? this.deps.skills : undefined
     const mySkills = skills?.forAgent(agent.id) ?? []
-    // Its team, minus whoever is above it on this task; past MAX_DELEGATION_DEPTH levels, nobody.
+    // Who it can hand work to: anyone but whoever is above it on this task, its team first; past
+    // MAX_DELEGATION_DEPTH levels, nobody. The Tuca builds agents: it hands work to no one.
     const chain = [...(opts.delegation?.chain ?? []), agent.id]
-    const team = this.deps.gateway && chain.length <= MAX_DELEGATION_DEPTH ? teamOf(agent, db.agents()).filter((a) => !chain.includes(a.id)) : []
-    // Anyone else it may call for help, under the same limits.
-    // The Tuca builds agents and names them with @ while it does: it calls no one.
     const colleagues = this.deps.gateway && agent.kind !== 'tuca' && chain.length <= MAX_DELEGATION_DEPTH ? colleaguesOf(agent, db.agents()).filter((a) => !chain.includes(a.id)) : []
+    const team = teamOf(agent, colleagues)
+    const others = colleagues.filter((a) => !team.includes(a))
+    const root = opts.root ?? opts.delegation?.root // the request this reply belongs to, when it's part of one
     const delegated: Delegated[] = []
 
     const control: Control = { ctl: new AbortController() }
@@ -737,7 +745,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, DELEGAR, CHAMAR, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, DELEGAR, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
@@ -792,8 +800,7 @@ export class Runner {
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(builds ? [PROPOR_AGENTE] : []),
-      ...(team.length ? [delegarTool(team)] : []),
-      ...(colleagues.length ? [chamarTool(colleagues)] : []),
+      ...(colleagues.length ? [delegarTool([...team, ...others])] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -857,35 +864,28 @@ export class Runner {
           )
         }
 
-        // delegar (a task for the team) and chamar_colega (a colleague's help): either way the other agent works
-        // after this reply ends, and this agent is called again with what came back.
-        if ((name === DELEGAR && team.length) || (name === CHAMAR && colleagues.length)) {
-          const colega = name === CHAMAR
+        // The other agent works after this reply ends, and this agent is called again with what came back.
+        if (name === DELEGAR && colleagues.length) {
           const handle = typeof args['agente'] === 'string' ? args['agente'].trim().replace(/^@/, '').toLowerCase() : ''
-          const pedido = (typeof args[colega ? 'pedido' : 'tarefa'] === 'string' ? (args[colega ? 'pedido' : 'tarefa'] as string) : '').trim()
-          const doneWhen = !colega && typeof args['pronto_quando'] === 'string' ? args['pronto_quando'].trim() : ''
-          // As they are now: someone may have left the team, or been archived, since the turn started.
-          const now = db.agents()
-          const pool = (colega ? colleaguesOf(db.agent(agent.id) ?? agent, now) : teamOf(db.agent(agent.id) ?? agent, now)).filter((a) => !chain.includes(a.id))
-          const target = pool.find((a) => a.handle === handle)
-          const offered = (colega ? colleagues : team).map((a) => a.handle).join(', ')
-          if (!target)
-            return textResult(
-              colega ? L(`@${handle} não é um colega que você pode chamar agora. Use um destes: ${offered}.`, `@${handle} isn't a colleague you can call now. Use one of these: ${offered}.`) : L(`@${handle} não está na sua equipe. Use um destes: ${offered}.`, `@${handle} isn't on your team. Use one of these: ${offered}.`),
-              true
-            )
-          if (!pedido) return textResult(colega ? L('Faltou o pedido.', 'Missing the request.') : L('Faltou a tarefa.', 'Missing the task.'), true)
+          const tarefa = typeof args['tarefa'] === 'string' ? args['tarefa'].trim() : ''
+          const doneWhen = typeof args['pronto_quando'] === 'string' ? args['pronto_quando'].trim() : ''
+          // As they are now: someone may have been archived since the turn started.
+          const target = colleaguesOf(agent, db.agents()).find((a) => a.handle === handle && !chain.includes(a.id))
+          if (!target) return textResult(L(`Não dá pra delegar a @${handle} agora. Use um destes: ${colleagues.map((a) => a.handle).join(', ')}.`, `You can't delegate to @${handle} now. Use one of these: ${colleagues.map((a) => a.handle).join(', ')}.`), true)
+          if (!tarefa) return textResult(L('Faltou a tarefa.', 'Missing the task.'), true)
+          const capped = requestCap(db.requestSpent(root ?? msg.id), this.budget)
+          if (capped) return textResult(L(`${capped} Não delegue mais: responda a ${settings.workspaceName} com o que tem.`, `${capped} Don't delegate any more: answer ${settings.workspaceName} with what you have.`), true)
           if ((opts.round ?? 0) >= MAX_TEAM_ROUNDS)
-            return textResult(L(`Você já foi chamado de volta ${opts.round} vezes seguidas. Não peça mais nada: responda a ${settings.workspaceName} com o que tem.`, `You've been called back ${opts.round} times in a row. Don't ask anyone for more: answer ${settings.workspaceName} with what you have.`), true)
-          if (delegated.some((t) => t.agentId === target.id)) return textResult(L(`Você já chamou ${target.name} nesta resposta: junte tudo num pedido só.`, `You already called ${target.name} in this reply: put it all in one request.`), true)
-          if (delegated.length >= MAX_DELEGATIONS) return textResult(L(`Já são ${MAX_DELEGATIONS} pedidos nesta resposta, o máximo. Encerre agora; dá pra pedir mais quando as respostas voltarem.`, `That's ${MAX_DELEGATIONS} requests in this reply, the most. End now; you can ask for more when the answers come back.`), true)
-          delegated.push({ id: randomUUID(), agentId: target.id, task: pedido, ...(colega ? { kind: 'colega' as const } : {}), ...(doneWhen ? { doneWhen } : {}) })
+            return textResult(L(`Você já mandou trabalho de volta ${opts.round} vezes seguidas. Não delegue mais: responda a ${settings.workspaceName} com o que tem.`, `You've sent work back ${opts.round} times in a row. Don't delegate any more: answer ${settings.workspaceName} with what you have.`), true)
+          if (delegated.some((t) => t.agentId === target.id)) return textResult(L(`Você já delegou a ${target.name} nesta resposta: junte tudo numa tarefa só.`, `You already delegated to ${target.name} in this reply: put it all in one task.`), true)
+          if (delegated.length >= MAX_DELEGATIONS) return textResult(L(`Já são ${MAX_DELEGATIONS} tarefas nesta resposta, o máximo. Encerre agora; dá pra delegar mais quando os resultados voltarem.`, `That's ${MAX_DELEGATIONS} tasks in this reply, the most. End now; you can delegate more when the results come back.`), true)
+          delegated.push({ id: randomUUID(), agentId: target.id, task: tarefa, ...(doneWhen ? { doneWhen } : {}) })
           msg.run = { ...msg.run!, delegated: [...delegated] }
-          addSteps({ id: randomUUID(), label: colega ? L(`Chamou ${target.name}`, `Called ${target.name}`) : L(`Delegou a ${target.name}`, `Delegated to ${target.name}`), detail: pedido.replace(/\s+/g, ' ').slice(0, 240), status: 'done' })
+          addSteps({ id: randomUUID(), label: L(`Delegou a ${target.name}`, `Delegated to ${target.name}`), detail: tarefa.replace(/\s+/g, ' ').slice(0, 240), status: 'done' })
           return textResult(
             L(
-              `${colega ? 'Pedido enviado a' : 'Tarefa entregue a'} ${target.name}: começa quando você encerrar a resposta. Se for chamar mais alguém, faça agora; depois encerre com uma frase dizendo o que pediu a quem. A resposta volta pra você numa nova mensagem.`,
-              `${colega ? 'Request sent to' : 'Task handed to'} ${target.name}: it starts when you end your reply. If you'll call anyone else, do it now; then end with one sentence saying what you asked of whom. The answer comes back to you in a new message.`
+              `Tarefa entregue a ${target.name}: começa quando você encerrar a resposta. Se for delegar a mais alguém, faça agora; depois encerre com uma frase dizendo o que mandou pra quem. O resultado volta pra você numa nova mensagem.`,
+              `Task handed to ${target.name}: it starts when you end your reply. If you'll delegate to anyone else, do it now; then end with one sentence saying what you sent to whom. The result comes back to you in a new message.`
             )
           )
         }
@@ -1274,10 +1274,8 @@ export class Runner {
               routines: routines?.forAgent(agent.id),
               skills: skills && mySkills,
               publish: repos,
-              team: team.length ? team : undefined,
+              team: colleagues.length ? { team, others } : undefined,
               delegatedBy: opts.delegation ? db.agent(opts.delegation.by) : undefined,
-              colleague: opts.delegation?.kind === 'colega',
-              colleagues: colleagues.filter((a) => !team.includes(a)),
               builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
             }),
             prompt: blocks.join('\n\n'),
@@ -1369,7 +1367,7 @@ export class Runner {
       )
     }
 
-    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, delegation: opts.delegation, round: opts.round, reportOf: opts.reportOf, delegated: delegated.length ? delegated : undefined }
+    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, delegation: opts.delegation, round: opts.round, reportOf: opts.reportOf, root, delegated: delegated.length ? delegated : undefined }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
@@ -1618,15 +1616,12 @@ export class Runner {
     this.enqueue(() => this.execute(agent, conv, { depth: 1, work: asked.run?.work, task: back }))
   }
 
-  // An agent that mentions another agent hands it the turn, in this conversation,
+  // An agent that mentions another agent of the conversation hands it the turn,
   // up to MAX_DEPTH replies in a row without a human message in between.
   // Whether the conversation goes on with another agent.
   private chain(agent: Agent, conv: Conversation, msg: Message, depth: number): boolean {
-    if (this.paused || agent.kind === 'tuca') return false
-    // In a channel, any active agent, member or not, answers next. The person's DM stays theirs: no one else
-    // is called into it. In a DM between two agents, the other one.
-    const reachable = conv.kind === 'channel' ? colleaguesOf(agent, this.deps.db.agents()) : this.members(conv).filter((a) => a.id !== agent.id)
-    const next = mentioned(msg.text, reachable).slice(0, MAX_MENTIONS)
+    if (this.paused) return false
+    const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
     if (next.length === 0) return false
     if (depth >= MAX_DEPTH) {
       this.post(conv.id, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))

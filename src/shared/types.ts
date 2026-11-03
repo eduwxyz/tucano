@@ -173,25 +173,25 @@ export interface Run {
   round?: number // how many times in a row this agent got its team's results back without a human message
   reportOf?: string // the message whose delegated work this reply reports on, once it came back
   released?: boolean // what it delegated came back, but it wasn't called with it (paused, stopped, archived)
+  root?: string // on a reply that delegated or reports back: the message that started the request (see Delegation.root)
 }
 
-// A task one agent (the manager) handed another with `delegar`. Every reply of the delegate on it carries
+// A task one agent handed another with `delegar` (its team, or a colleague whose answer it needs). Every reply of the delegate on it carries
 // the same id; once all of the manager's message's tasks are settled, the manager gets the results back.
 export interface Delegation {
   id: string
-  kind?: 'colega' // a colleague's help asked with chamar_colega; unset: a task handed to the team with delegar
   by: string // the agent that delegated
   from: string // its message that delegated: the batch this task belongs to
   task: string // what it was asked, in the manager's words
   doneWhen?: string
   chain: string[] // the agents above it, top first; `by` is the last
+  root: string // the message that started it all: everything one request sets off shares its budget
   since: number // `at` of the manager's message: what the delegate sees of the conversation starts there
   reported?: boolean // its result already went back to `by`
 }
 
 export interface Delegated {
   id: string
-  kind?: 'colega'
   agentId: string
   conversationId?: string // where it runs, once handed out: the DM between the two agents, or the channel it came from
   task: string
@@ -242,6 +242,7 @@ export interface Settings {
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
+  requestBudget?: number // counted tokens one request may spend across every agent it reaches with delegar; default REQUEST_BUDGET
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
@@ -355,6 +356,7 @@ export const MAX_AGENT_ROUTINES = 10
 export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
 
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
+export const REQUEST_BUDGET = 1_000_000 // counted tokens: past it, a request hands no more work out and reports with what it has
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops

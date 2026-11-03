@@ -142,7 +142,7 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Mencione um agente')
   })
 
-  it('an agent mentioning another hands it the turn, and the chain stops at depth 6', async () => {
+  it('an agent mentioning another hands it the turn, and the chain stops at depth 3', async () => {
     // Every reply mentions the other agent: a ping-pong that must stop.
     const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
     const r = runner(pingPong)
@@ -154,10 +154,7 @@ describe('Runner', () => {
     expect(replies.map((m) => [(m.author as { id: string }).id, m.run?.depth])).toEqual([
       ['a1', 1],
       ['a2', 2],
-      ['a1', 3],
-      ['a2', 4],
-      ['a1', 5],
-      ['a2', 6]
+      ['a1', 3]
     ])
     expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
   })

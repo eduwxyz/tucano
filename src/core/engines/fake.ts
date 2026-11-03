@@ -132,15 +132,14 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
   }
 }
 
-// "delegue a @dev: X; chame @ana: Y": a task for the team, or a colleague's help, through the gateway.
+// "delegue a @dev: X; chame @ana: Y": one task each, through the gateway's delegar.
 const DELEGUE = /delegue (?:a|ao|à|pra|pro|para|to) @[\w-]/i
 const CHAME = /chame @[\w-]/i
-const CAME_BACK = /Voltou o que você pediu|What you asked of your team/
+const CAME_BACK = /Voltou o que você delegou|What you delegated is back/
 async function delegateAll(url: string, text: string): Promise<string> {
   const sent: string[] = []
   for (const m of text.matchAll(/(delegue (?:a|ao|à|pra|pro|para|to)|chame) @([\w-]+):?\s*([^;\n]+)/gi)) {
-    const colega = m[1]!.toLowerCase() === 'chame'
-    const r = (await callTool(url, colega ? 'chamar_colega' : 'delegar', { agente: m[2]!, [colega ? 'pedido' : 'tarefa']: m[3]!.trim() })) as { isError?: boolean }
+    const r = (await callTool(url, 'delegar', { agente: m[2]!, tarefa: m[3]!.trim() })) as { isError?: boolean }
     // A refusal names the handle with @: said back without it, so it calls no one.
     sent.push(r.isError ? `${m[2]} (${textOf(r).replace(/@/g, '')})` : m[2]!)
   }

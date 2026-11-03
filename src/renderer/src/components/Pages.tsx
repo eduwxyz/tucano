@@ -38,6 +38,7 @@ import {
   EFFORTS,
   ENGINES,
   MAX_AGENT_ROUTINES,
+  REQUEST_BUDGET,
   RUN_BUDGET_PCT,
   routineCap,
   RUN_STALL_MINUTES,
@@ -1911,6 +1912,14 @@ export function SettingsPage(): ReactNode {
                   max={100}
                   value={settings.runBudgetPct ?? RUN_BUDGET_PCT}
                   onChange={(n) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(n))) })}
+                />
+              </Field>
+              <Field label={L('Teto por pedido delegado (milhões de tokens)', 'Ceiling per delegated request (millions of tokens)')} hint={L('Somando todos os agentes que um pedido envolve. Chegou nele, ninguém delega mais e o agente te dá o retorno com o que tem.', 'Adding up every agent a request reaches. When it hits it, no one delegates any more and the agent reports back with what it has.')}>
+                <NumberInput
+                  min={0.1}
+                  step={0.5}
+                  value={(settings.requestBudget ?? REQUEST_BUDGET) / 1_000_000}
+                  onChange={(n) => updateSettings({ requestBudget: Math.max(100_000, Math.round(n * 1_000_000)) })}
                 />
               </Field>
               <Field label={L('Travado depois de (minutos sem sinal)', 'Stalled after (minutes without a sign)')} hint={L('Sem texto nem ferramenta terminando. Trabalho longo que anda não é cortado.', 'No text and no tool finishing. Long work that’s moving isn’t cut off.')}>

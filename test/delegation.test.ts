@@ -88,14 +88,14 @@ describe('delegation', () => {
     // The delegate never sees the person's DM.
     expect(turnsOf('dev')[0]!.prompt).not.toContain('só entre nós')
     expect(turnsOf('dev')[0]!.prompt).toContain('<tarefa>\nescrever o post\n</tarefa>')
-    expect(turnsOf('dev')[0]!.system).toContain('chefe (@chefe) delegou a você')
+    expect(turnsOf('dev')[0]!.system).toContain('num pedido que chefe (@chefe) te passou')
     expect(turnsOf('chefe')[0]!.system).toContain('## Sua equipe')
-    expect(turnsOf('dev')[0]!.system).not.toContain('## Sua equipe')
+    expect(turnsOf('dev')[0]!.system).not.toContain('Você coordena estes agentes')
 
     // Back to the manager, in the person's DM, with what each one wrote.
     expect(back!.run).toMatchObject({ status: 'done', round: 1 })
     const resumed = turnsOf('chefe').at(-1)!
-    expect(resumed.prompt).toContain('Voltou o que você pediu à equipe e aos colegas')
+    expect(resumed.prompt).toContain('Voltou o que você delegou')
     expect(resumed.prompt).toContain('dev (@dev) terminou')
     expect(resumed.prompt).toContain('<resposta>\nFeito: revisar os números\n</resposta>')
     // A report back: told to say who did what, what was decided and applied, and what's left.
@@ -117,13 +117,13 @@ describe('delegation', () => {
     expect(db.conversations().some((c) => c.kind === 'agents')).toBe(false)
   })
 
-  it('refuses someone outside the team, and nothing goes out', async () => {
-    db.saveAgent(agent('chefe', { team: ['dev'] }))
+  it('refuses an agent that is archived, and nothing goes out', async () => {
+    db.saveAgent(agent('ana', { archived: true }))
     const r = runner()
     await r.send('dm', 'delegue a @ana: revisar os números')
     await r.idle()
     expect(said('dm').map(by)).toEqual(['chefe'])
-    expect(said('dm')[0]!.text).toContain('não está na sua equipe')
+    expect(said('dm')[0]!.text).toContain('Não dá pra delegar a')
     expect(said('dm')[0]!.run?.delegated).toBeUndefined()
   })
 
@@ -162,7 +162,7 @@ describe('delegation', () => {
     expect(withLead[2]!.run).toMatchObject({ round: 1, delegation: { by: 'chefe' } })
     expect(said(pair('lead', 'dev'))[1]!.run?.delegation).toMatchObject({ by: 'lead', chain: ['chefe', 'lead'] })
     expect(said('dm')[1]!.run?.round).toBe(1)
-    expect(turnsOf('dev')[0]!.system).not.toContain('## Sua equipe')
+    expect(turnsOf('dev')[0]!.system).not.toMatch(/- (chefe|lead) \(@/) // never the ones above it
   })
 
   it('tells you when the work came back but nobody reports on it', async () => {
@@ -178,6 +178,33 @@ describe('delegation', () => {
     await r.idle()
     expect(db.messages().filter((m) => m.conversationId === 'dm' && m.author.kind === 'system').at(-1)?.text).toContain('o trabalho foi parado')
     expect(db.message(head.id)!.run).toMatchObject({ released: true, delegated: [{ agentId: 'dev' }] })
+  })
+
+  it('one request shares a token budget: past it, nothing more goes out and the lead reports with what it has', async () => {
+    settings.requestBudget = 100_000
+    const r = runner()
+    await r.send('dm', 'delegue a @dev: escrever o post')
+    await r.idle()
+    const head = said('dm')[0]!
+    // Everything the request set off counts: here, a big reply from dev pushes it past the cap.
+    const dev = said(pair('chefe', 'dev'))[1]!
+    expect(dev.run?.root).toBe(head.id)
+    db.addReceipt({ messageId: dev.id, agentId: 'dev', engine: 'claude', model: 'sonnet', inputTokens: 200_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, at: Date.now() })
+    expect(db.requestSpent(head.id)).toBeGreaterThan(200_000)
+
+    // A retry brings the result back again: the lead is told the cap is spent, and can't delegate.
+    db.saveMessage({ ...dev, run: { ...dev.run!, status: 'failed' } })
+    r.retry(dev.id)
+    await r.idle()
+    const back = turnsOf('chefe').at(-1)!
+    expect(back.prompt).toContain('Este pedido já gastou')
+    expect(back.prompt).toContain('Não delegue mais')
+    expect(back.system).toContain('## Sua equipe e seus colegas')
+
+    // A new request from the lead's report turn would be refused too.
+    await r.send('dm', 'delegue a @ana: revisar')
+    await r.idle()
+    expect(said('dm').findLast((m) => m.run?.delegated)!.run?.delegated).toMatchObject([{ agentId: 'ana' }]) // a new request has its own budget
   })
 
   it('hands nothing out while the agents are paused', async () => {
@@ -213,12 +240,14 @@ describe('delegation', () => {
     await r.send('dm', 'chame @ana: quanto deu a receita da semana?')
     await r.idle()
     expect(said('dm').map(by)).toEqual(['chefe', 'chefe'])
-    expect(said('dm')[0]!.run?.steps.map((s) => s.label)).toContain('Chamou ana')
+    expect(said('dm')[0]!.run?.steps.map((s) => s.label)).toContain('Delegou a ana')
     const withAna = said(pair('chefe', 'ana'))
-    expect(withAna[1]!.run?.delegation).toMatchObject({ kind: 'colega', by: 'chefe', task: 'quanto deu a receita da semana?' })
-    expect(turnsOf('ana')[0]!.system).toContain('chefe (@chefe) chamou você pra ajudar')
+    expect(withAna[1]!.run?.delegation).toMatchObject({ by: 'chefe', task: 'quanto deu a receita da semana?' })
+    expect(turnsOf('ana')[0]!.system).toContain('num pedido que chefe (@chefe) te passou')
+    // Without a team, its colleagues are still there to delegate to.
+    expect(turnsOf('chefe')[0]!.system).toContain('Colegas, pra quando precisar da resposta deles')
     expect(said('dm')[1]!.run?.round).toBe(1)
-    expect(turnsOf('chefe').at(-1)!.prompt).toContain('ana (@ana) terminou. Pedido: quanto deu a receita da semana?')
+    expect(turnsOf('chefe').at(-1)!.prompt).toContain('ana (@ana) terminou. Tarefa: quanto deu a receita da semana?')
   })
 
   it('a delegate calls a teammate during its task, and the manager waits for both', async () => {
@@ -229,13 +258,13 @@ describe('delegation', () => {
     expect(said(pair('chefe', 'dev')).map(by)).toEqual(['chefe', 'dev', 'dev'])
     const withAna = said(pair('dev', 'ana'))
     expect(withAna.map(by)).toEqual(['dev', 'ana'])
-    expect(withAna[1]!.run?.delegation).toMatchObject({ kind: 'colega', by: 'dev', chain: ['chefe', 'dev'] })
+    expect(withAna[1]!.run?.delegation).toMatchObject({ by: 'dev', chain: ['chefe', 'dev'], root: said('dm')[0]!.id })
     expect(said(pair('chefe', 'dev'))[2]!.text).toBe('Feito, com a ajuda: chame @ana: conferir os números')
     // On a task, it may call colleagues but not whoever handed it the task.
     const devSystem = turnsOf('dev')[0]!.system
     expect(devSystem).toContain('- ana (@ana)')
     expect(devSystem).not.toContain('- chefe (@chefe)')
-    expect(devSystem).toContain('fale com eles só com chamar_colega')
+    expect(devSystem).toContain('chame os outros só com delegar')
   })
 
   it('a task tried again by hand stays the same task, and its result goes back again', async () => {

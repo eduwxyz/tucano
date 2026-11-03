@@ -379,6 +379,15 @@ export class Db {
     this.db.prepare('UPDATE agents SET folders = ? WHERE id = ?').run(JSON.stringify(folders), agentId)
   }
 
+  // What one request has spent so far, in counted tokens: the message that started it and every reply that
+  // belongs to it (delegated work, follow-ups, reports), whoever wrote them.
+  requestSpent(root: string): number {
+    const r = this.db
+      .prepare(`SELECT COALESCE(ROUND(SUM(${COUNTED})), 0) AS used FROM receipts WHERE message_id = ? OR message_id IN (SELECT id FROM messages WHERE json_extract(run, '$.root') = ?)`)
+      .get(root, root) as { used: number }
+    return r.used
+  }
+
   usedThisMonth(agentId: string): number {
     const r = this.db
       .prepare(`SELECT COALESCE(ROUND(SUM(${COUNTED})), 0) AS used FROM receipts WHERE agent_id = ? AND at >= ?`)
