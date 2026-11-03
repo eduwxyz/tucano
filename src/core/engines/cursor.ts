@@ -1,14 +1,14 @@
 import { execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { request } from 'node:http'
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { randomBytes } from 'node:crypto'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn, Usage } from './types'
-import { isWin, spawnable } from '../platform'
+import { isWin, osOf, spawnable } from '../platform'
+import type { Os } from '../../shared/types'
 import { L } from '../../shared/lang'
 
 // Cursor's agent CLI (`cursor-agent`, also installed as `agent`). In headless
@@ -19,6 +19,8 @@ import { L } from '../../shared/lang'
 //   when the agent has it). The login stays the person's: it's in the keychain.
 // - a workspace with the agent's instructions (AGENTS.md, which the CLI reads
 //   as the project's rules) and the gateway as the project's MCP server.
+// - a home of its own (see cursorHomeEnv): the CLI reads the person's hooks,
+//   plugins and skills from the home folder, not from CURSOR_CONFIG_DIR.
 // MCP servers load only when approved, and the turn approves only the gateway
 // (`cursor-agent mcp enable`, no --approve-mcps): the person's own servers in
 // ~/.cursor/mcp.json are listed but never load. What Cursor keeps per
@@ -168,21 +170,62 @@ export interface CursorTurnDirs {
   config: string // CURSOR_CONFIG_DIR
   data: string // CURSOR_DATA_DIR
   workspace: string
+  home: string // HOME (USERPROFILE on Windows)
 }
 
-// A folder for one turn: the config dir and the workspace (instructions and the gateway).
-export function cursorTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>): CursorTurnDirs {
+// The CLI reads, from the home folder and not from CURSOR_CONFIG_DIR, the
+// person's hooks (~/.cursor/hooks.json, and the ones in ~/.claude/settings.json,
+// whose format it imports), plugins (~/.claude/plugins, ~/.cursor/plugins) and
+// skills (~/.cursor, ~/.claude, ~/.codex, ~/.agents). Hooks run in headless
+// mode too: commands outside the gateway, handed the turn's prompt and tool
+// calls. So a turn gets an empty home, with only the way to the person's login:
+// - macOS: the keychain, linked in as Library/Keychains (nothing else of ~/Library);
+// - Linux: a file under XDG_CONFIG_HOME (cursor/auth.json), so that stays the person's;
+// - Windows: a file under %APPDATA% (Cursor\auth.json), which stays the person's.
+// What's left out on purpose: hooks an admin set for the machine (/Library,
+// /etc, ProgramData) or for the team, in Cursor's dashboard.
+// The CLI keeps a compile cache in the home; it goes in the app's folder, so
+// each turn doesn't start cold.
+export function cursorHomeEnv(home: string, appDir: string, os: Os = osOf(), realHome = homedir(), env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const set = (v: string | undefined): string | undefined => (v && v.trim() ? v : undefined)
+  return {
+    HOME: home,
+    NODE_COMPILE_CACHE: join(appDir, 'compile-cache'),
+    ...(os === 'linux' ? { XDG_CONFIG_HOME: set(env['XDG_CONFIG_HOME']) ?? join(realHome, '.config') } : {}),
+    ...(os === 'windows'
+      ? {
+          USERPROFILE: home,
+          APPDATA: set(env['APPDATA']) ?? join(realHome, 'AppData', 'Roaming'),
+          LOCALAPPDATA: set(env['LOCALAPPDATA']) ?? join(realHome, 'AppData', 'Local')
+        }
+      : {})
+  }
+}
+
+// A folder for one turn: the config dir, the workspace (instructions and the
+// gateway) and the home (on macOS, with the keychain linked in).
+export function cursorTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, os: Os = osOf(), realHome = homedir()): CursorTurnDirs {
   const root = join(appDir, randomBytes(8).toString('hex'))
   const config = join(root, 'config')
   const data = join(root, 'd') // short: the worker's socket path is built from it
   const workspace = join(root, 'workspace')
+  const home = join(root, 'home')
   mkdirSync(config, { recursive: true })
   mkdirSync(data, { recursive: true })
   mkdirSync(join(workspace, '.cursor'), { recursive: true })
+  mkdirSync(home, { recursive: true })
+  if (os === 'mac') {
+    mkdirSync(join(home, 'Library'), { recursive: true })
+    try {
+      symlinkSync(join(realHome, 'Library', 'Keychains'), join(home, 'Library', 'Keychains'))
+    } catch {
+      // without it the CLI says it isn't signed in, and the turn shows that
+    }
+  }
   writeFileSync(join(config, 'cli-config.json'), JSON.stringify(cursorConfig(turn), null, 2))
   writeFileSync(join(workspace, 'AGENTS.md'), turn.system)
   if (turn.mcpUrl) writeFileSync(join(workspace, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { url: turn.mcpUrl } } }, null, 2))
-  return { root, config, data, workspace }
+  return { root, config, data, workspace, home }
 }
 
 // How Cursor names a workspace's folder: its real path, as a slug.
@@ -227,6 +270,23 @@ function stopWorker(socket: string): Promise<void> {
   })
 }
 
+// The end of a turn: the worker quits, and the turn's folder goes: the config,
+// the workspace, the home, and what Cursor kept for it (the transcript, the
+// approval, the socket). The home's link to the keychain goes as a link: what
+// it points to stays. With a long data path the socket sits in the temp folder
+// instead, in a folder named after this turn's workspace alone.
+export async function cursorCleanup(dirs: CursorTurnDirs): Promise<void> {
+  const socket = cursorWorkerSocket(dirs.workspace, dirs.data)
+  await stopWorker(socket)
+  const gone = dirname(socket).startsWith(dirs.root) ? [dirs.root] : [dirs.root, dirname(socket)]
+  for (const dir of gone)
+    try {
+      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    } catch {
+      // a rare leftover is a small dead folder; harmless
+    }
+}
+
 const quiet = (bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<number> =>
   new Promise((resolve) => {
     const s = spawnable(bin, args)
@@ -245,7 +305,7 @@ export function cursorEngine(bin: () => string | undefined, appDir: string, shel
       const model = turn.model.includes('/') ? turn.model.slice(turn.model.indexOf('/') + 1) : turn.model
       const dirs = cursorTurnDirs(appDir, turn)
       // CURSOR_API_KEY may live in the person's shell, which an app opened from Finder doesn't get.
-      const env: NodeJS.ProcessEnv = { ...process.env, ...(await shellEnv()), CURSOR_CONFIG_DIR: dirs.config, CURSOR_DATA_DIR: dirs.data, NO_OPEN_BROWSER: '1' }
+      const env: NodeJS.ProcessEnv = { ...process.env, ...(await shellEnv()), ...cursorHomeEnv(dirs.home, appDir), CURSOR_CONFIG_DIR: dirs.config, CURSOR_DATA_DIR: dirs.data, NO_OPEN_BROWSER: '1' }
       try {
         if (turn.mcpUrl && (await quiet(path, ['mcp', 'enable', GATEWAY_NAME], dirs.workspace, env)) !== 0) {
           yield { type: 'error', message: L('O Cursor não aceitou as ferramentas do Tucano (cursor-agent mcp enable).', "Cursor didn't take Tucano's tools (cursor-agent mcp enable).") }
@@ -273,19 +333,7 @@ export function cursorEngine(bin: () => string | undefined, appDir: string, shel
         }
         if (refused && !turn.signal.aborted) yield* run(undefined, turn.prompt + imagesLeftOut())
       } finally {
-        // The worker quits, and the turn's folder goes: the config, the workspace,
-        // and what Cursor kept for it (the transcript, the approval, the socket).
-        // With a long data path the socket sits in the temp folder instead, in a
-        // folder named after this turn's workspace alone.
-        const socket = cursorWorkerSocket(dirs.workspace, dirs.data)
-        await stopWorker(socket)
-        const gone = dirname(socket).startsWith(dirs.root) ? [dirs.root] : [dirs.root, dirname(socket)]
-        for (const dir of gone)
-          try {
-            if (existsSync(dir)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-          } catch {
-            // a rare leftover is a small dead folder; harmless
-          }
+        await cursorCleanup(dirs)
       }
     }
   }

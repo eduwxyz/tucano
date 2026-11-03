@@ -1,12 +1,12 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
 import { geminiArgs, geminiEnv, geminiHome, geminiParser } from '../src/core/engines/gemini'
-import { cursorArgs, cursorConfig, cursorEngine, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
+import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
@@ -413,6 +413,46 @@ describe('Cursor config', () => {
     expect(() => readFileSync(join(b.workspace, '.cursor', 'mcp.json'))).toThrow()
   })
 
+  // The CLI reads hooks, plugins and skills from the home folder: a turn gets one of its own.
+  it("gives each turn an empty home, with only the way to the person's login", () => {
+    const real = join('/h', 'eduar')
+    const turnHome = join('/t', 'home')
+    const app = join('/app', 'cursor')
+    const mac = cursorHomeEnv(turnHome, app, 'mac', real, {})
+    expect(mac).toEqual({ HOME: turnHome, NODE_COMPILE_CACHE: join(app, 'compile-cache') })
+    // Linux: the login is a file under XDG_CONFIG_HOME, which stays the person's.
+    expect(cursorHomeEnv(turnHome, app, 'linux', real, {})['XDG_CONFIG_HOME']).toBe(join(real, '.config'))
+    expect(cursorHomeEnv(turnHome, app, 'linux', real, { XDG_CONFIG_HOME: '/x/conf' })['XDG_CONFIG_HOME']).toBe('/x/conf')
+    expect(cursorHomeEnv(turnHome, app, 'linux', real, {})['HOME']).toBe(turnHome)
+    // Windows: the home is USERPROFILE; the login is under %APPDATA%, which stays the person's.
+    const win = cursorHomeEnv(turnHome, app, 'windows', real, { APPDATA: 'C:/Users/e/AppData/Roaming' })
+    expect(win['USERPROFILE']).toBe(turnHome)
+    expect(win['APPDATA']).toBe('C:/Users/e/AppData/Roaming')
+    expect(win['LOCALAPPDATA']).toBe(join(real, 'AppData', 'Local'))
+    expect(cursorHomeEnv(turnHome, app, 'windows', real, {})['APPDATA']).toBe(join(real, 'AppData', 'Roaming'))
+  })
+
+  // Symlinks need privileges on Windows; the link is only made on macOS.
+  it.skipIf(process.platform === 'win32')('links only the keychain into the home on macOS, and the cleanup leaves what it points to', async () => {
+    const real = mkdtempSync(join(tmpdir(), 'cu-real-'))
+    mkdirSync(join(real, 'Library', 'Keychains'), { recursive: true })
+    writeFileSync(join(real, 'Library', 'Keychains', 'login.keychain-db'), 'secret')
+    mkdirSync(join(real, '.claude'), { recursive: true })
+    const appDir = mkdtempSync(join(tmpdir(), 'cu-'))
+    const dirs = cursorTurnDirs(appDir, { system: 'x', mcpUrl: undefined, web: false }, 'mac', real)
+    expect(dirs.home.startsWith(dirs.root)).toBe(true)
+    expect(readdirSync(dirs.home)).toEqual(['Library'])
+    expect(readdirSync(join(dirs.home, 'Library'))).toEqual(['Keychains'])
+    expect(lstatSync(join(dirs.home, 'Library', 'Keychains')).isSymbolicLink()).toBe(true)
+    expect(readFileSync(join(dirs.home, 'Library', 'Keychains', 'login.keychain-db'), 'utf8')).toBe('secret')
+    await cursorCleanup(dirs)
+    expect(existsSync(dirs.root)).toBe(false)
+    expect(readFileSync(join(real, 'Library', 'Keychains', 'login.keychain-db'), 'utf8')).toBe('secret')
+    // Elsewhere the home stays empty.
+    const linux = cursorTurnDirs(appDir, { system: 'x', mcpUrl: undefined, web: false }, 'linux', real)
+    expect(readdirSync(linux.home)).toEqual([])
+  })
+
   it('names a workspace the way the CLI does', () => {
     expect(cursorSlug('/Users/x/Library/Application Support/Tucano/cursor/ab12/workspace')).toBe('Users-x-Library-Application-Support-Tucano-cursor-ab12-workspace')
   })
@@ -469,6 +509,22 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"images='"$
     writeFileSync(p, 'x')
     return [{ block: 0, path: p, mime: 'image/png' }]
   }
+
+  it("runs the CLI with the turn's home, and the turn's folder goes afterwards", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tucano-cursor-cli-'))
+    const bin = join(dir, 'cursor-agent')
+    writeFileSync(bin, `#!/bin/sh\n[ "$1" = mcp ] && exit 0\ncat >/dev/null\necho '{"type":"result","subtype":"success","is_error":false,"result":"'"$HOME|$CURSOR_CONFIG_DIR"'","usage":{"inputTokens":1,"outputTokens":1}}'\n`, { mode: 0o755 })
+    const app = mkdtempSync(join(tmpdir(), 'tucano-cursor-app-'))
+    const turn = { model: 'auto', effort: 'medium' as const, system: 'You are Iris.', prompt: 'Hi', cwd: app, signal: new AbortController().signal }
+    const out: EngineEvent[] = []
+    for await (const ev of cursorEngine(() => bin, app).run(turn)) out.push(ev)
+    const done = out.find((e) => e.type === 'done')
+    const [home, config] = (done && done.type === 'done' ? done.text : '').split('|')
+    expect(home).not.toBe(homedir())
+    expect(home!.startsWith(app)).toBe(true)
+    expect(home).toBe(join(dirname(config!), 'home'))
+    expect(existsSync(dirname(config!))).toBe(false)
+  })
 
   it('sends the images along when the CLI takes them', async () => {
     const done = (await reply(fakeCli(true), picture())).find((e) => e.type === 'done')

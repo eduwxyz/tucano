@@ -87,7 +87,7 @@ Give an agent the apps on your computer, such as Notes, Calendar or Spotify, eac
 |---|---|---|
 | [Claude Code](https://code.claude.com) | Claude Pro or Max, or your company's login | Reads only the `env` block and `apiKeyHelper` of your `~/.claude/settings.json`; hooks, plugins and permissions stay out |
 | [Codex](https://github.com/openai/codex) | ChatGPT Plus, Pro or Business | Runs with a home of its own, so your skills, `AGENTS.md` and plugins don't leak in; you sign in once inside Tucano |
-| [Cursor CLI](https://cursor.com/cli) | Your Cursor account (`cursor-agent login`) | Cursor's own file reads, writes and shell stay off, and only Tucano's tools load, not your `~/.cursor/mcp.json` servers; each reply adds about 10k tokens of Cursor's own prompt |
+| [Cursor CLI](https://cursor.com/cli) | Your Cursor account (`cursor-agent login`) | Runs with a home of its own, so your hooks, plugins, skills and `~/.cursor/mcp.json` servers don't load; Cursor's own file reads, writes and shell stay off; each reply adds about 10k tokens of Cursor's own prompt |
 | [OpenCode](https://opencode.ai) | The providers you configured | Uses the models you have logins for |
 | [Pi](https://pi.dev) | The providers you configured | Uses the models you have logins for |
 
