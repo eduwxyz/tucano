@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
 import { describeSchedule, MAX_AGENT_ROUTINES, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
+import { cleanLook } from './agent-look'
 import type { Db } from './db'
 
 const FENCE = 'tucano-team'
@@ -21,6 +22,8 @@ interface TeamFile {
     name: string
     role: string
     color: AgentColor
+    customColor?: string
+    avatar?: Agent['avatar'] // the drawn one; a picture stays on its computer
     instructions: string
     model: string
     effort: Effort
@@ -52,6 +55,8 @@ export function exportTeam(db: Db): string {
       name: a.name,
       role: a.role,
       color: a.color,
+      ...(a.customColor ? { customColor: a.customColor } : {}),
+      ...(a.avatar ? { avatar: a.avatar } : {}),
       instructions: a.instructions,
       model: a.modelId,
       effort: a.effort,
@@ -130,6 +135,8 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
       handle: a.handle,
       role: a.role ?? '',
       color: a.color ?? 'sky',
+      customColor: a.customColor,
+      avatar: a.avatar,
       instructions: a.instructions ?? '',
       modelId: modelInfo(a.model)?.id ? a.model : 'sonnet',
       effort: a.effort ?? 'medium',
@@ -142,7 +149,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
       web: a.web,
       archived: false
     }
-    db.saveAgent(agent)
+    db.saveAgent(cleanLook(agent))
     added.agents++
   }
   const byHandle = (h: string): string | undefined => db.agents().find((x) => x.handle === h)?.id
