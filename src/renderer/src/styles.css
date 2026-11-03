@@ -1432,6 +1432,28 @@ h3 {
   display: flex;
   gap: 8px;
 }
+.looks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.look {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition: box-shadow 0.12s;
+}
+.look:hover {
+  box-shadow: inset 0 0 0 1px var(--text-3);
+}
+.look.is-active {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
 .swatch {
   width: 26px;
   height: 26px;
@@ -6645,6 +6667,15 @@ kbd {
 }
 
 /* An agent's own color and picture */
+/* A drawn avatar (Open Bot Avatar): the character itself, no tile behind it */
+.avatar--drawn {
+  overflow: visible;
+}
+.avatar__drawn {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
 .avatar__photo {
   width: 100%;
   height: 100%;

@@ -42,7 +42,7 @@ import {
   isTeam
 } from '../store'
 import { HarnessList, ModelPicker, usableEngines } from './Harness'
-import { ColorPicker, JevKey, LanguagePicker, ModelSelect, PicturePicker, Toggle } from './Pages'
+import { ColorPicker, JevKey, LanguagePicker, LookPicker, ModelSelect, Toggle } from './Pages'
 import { Splash } from './Splash'
 import { Composer, MessageList } from './Conversation'
 import { draftAgent, UseDraft } from './Tuca'
@@ -841,8 +841,8 @@ function MakeAgent(p: {
           <ColorPicker agent={agent} patch={patch} />
         </div>
         <div className="onb__field">
-          <span>{L('Foto ou ícone', 'Photo or icon')}</span>
-          <PicturePicker agent={agent} patch={patch} />
+          <span>{L('Aparência', 'Look')}</span>
+          <LookPicker agent={agent} patch={patch} />
         </div>
         <div className="onb__field">
           <span>{L('Modelo', 'Model')}</span>

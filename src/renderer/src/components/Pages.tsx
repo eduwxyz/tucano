@@ -61,7 +61,7 @@ import {
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
-import { AgentAvatar, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
 import { useWorkspaceList } from './Workspaces'
 
@@ -166,13 +166,24 @@ export function ColorPicker({ agent, patch }: { agent: Pick<Agent, 'color' | 'cu
   )
 }
 
-// A picture over the face, scaled down here; taken off the same way.
-export function PicturePicker({ agent, patch }: { agent: Pick<Agent, 'name' | 'color' | 'customColor' | 'picture'>; patch: (p: Partial<Agent>) => void }): ReactNode {
+// How an agent looks, here and in the onboarding: the face, a drawn character or a picture
+// of the person's own (scaled down here). One at a time.
+export function LookPicker({ agent, patch }: { agent: Pick<Agent, 'name' | 'color' | 'customColor' | 'picture' | 'avatar'>; patch: (p: Partial<Agent>) => void }): ReactNode {
   const [error, setError] = useState('')
+  const base = { name: agent.name || '?', color: agent.color, customColor: agent.customColor }
   return (
     <>
+      <div className="looks">
+        <button type="button" className={`look ${!agent.picture && !agent.avatar ? 'is-active' : ''}`} title={L('Rosto padrão', 'Default face')} onClick={() => patch({ avatar: undefined, picture: undefined })}>
+          <AgentAvatar agent={base} size={30} />
+        </button>
+        {AVATARS.map((a) => (
+          <button key={a.id} type="button" className={`look ${!agent.picture && agent.avatar?.id === a.id ? 'is-active' : ''}`} title={a.name} onClick={() => patch({ avatar: a, picture: undefined })}>
+            <AgentAvatar agent={{ ...base, avatar: a }} size={30} />
+          </button>
+        ))}
+      </div>
       <div className="row row--center">
-        <AgentAvatar agent={{ ...agent, name: agent.name || '?' }} size={40} />
         <label className="btn btn--sm">
           {L('Enviar imagem', 'Upload image')}
           <input
@@ -182,14 +193,17 @@ export function PicturePicker({ agent, patch }: { agent: Pick<Agent, 'name' | 'c
             onChange={(e) => {
               const file = e.target.files?.[0]
               e.target.value = ''
-              if (file) pictureFrom(file).then((picture) => (setError(''), patch({ picture })), () => setError(L('Não consegui abrir essa imagem.', "I couldn't open that image.")))
+              if (file) pictureFrom(file).then((picture) => (setError(''), patch({ picture, avatar: undefined })), () => setError(L('Não consegui abrir essa imagem.', "I couldn't open that image.")))
             }}
           />
         </label>
         {agent.picture && (
-          <button type="button" className="btn btn--sm btn--ghost" onClick={() => patch({ picture: undefined })}>
-            {L('Tirar', 'Remove')}
-          </button>
+          <>
+            <AgentAvatar agent={{ ...base, picture: agent.picture }} size={30} />
+            <button type="button" className="btn btn--sm btn--ghost" onClick={() => patch({ picture: undefined })}>
+              {L('Tirar a imagem', 'Remove the image')}
+            </button>
+          </>
         )}
       </div>
       {error && <span className="field__error">{error}</span>}
@@ -328,9 +342,10 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <Field label={L('Cor', 'Color')}>
                 <ColorPicker agent={draft} patch={patch} />
               </Field>
-              <Field label={L('Foto ou ícone', 'Photo or icon')}>
-                <PicturePicker agent={draft} patch={patch} />
-              </Field>
+              <div className="field">
+                <span className="field__label">{L('Aparência', 'Look')}</span>
+                <LookPicker agent={draft} patch={patch} />
+              </div>
             </Card>
           )}
 

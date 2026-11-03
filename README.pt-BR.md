@@ -257,3 +257,5 @@ Leia o [CONTRIBUTING.md](CONTRIBUTING.md) antes de abrir um pull request (o cód
 [Apache-2.0](LICENSE). O Tucano não é afiliado à Anthropic, à OpenAI nem a nenhuma das ferramentas a que ele se conecta.
 
 Os apps do computador rodam sobre o [agent-desktop](https://github.com/vercel-labs/agent-desktop), da Vercel Labs (Apache-2.0), instalado à parte. Obrigado!
+
+Os avatares desenhados dos agentes vêm do [Open Bot Avatar](https://github.com/DominikScholz/open-bot-avatar), de Dominik Scholz (MIT), com a galeria dele. Obrigado!

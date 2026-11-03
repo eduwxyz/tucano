@@ -1,4 +1,5 @@
 // Domain types shared by the core (utility process) and the renderer.
+import type { AvatarDefinition } from 'open-bot-avatar'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -57,6 +58,7 @@ export interface Agent {
   color: AgentColor
   customColor?: string // a color of the person's own (#rrggbb), over `color`
   picture?: string // a small picture (data URL), over the face
+  avatar?: AvatarDefinition // a drawn character (open-bot-avatar), over the face; a picture wins over it
   instructions: string
   modelId: string
   // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
