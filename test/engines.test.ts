@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { geminiArgs, geminiEnv, geminiHome, geminiParser } from '../src/core/engines/gemini'
+import { detectGeminiCliModels, geminiArgs, geminiEnv, geminiHome, geminiModels, geminiParser } from '../src/core/engines/gemini'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
@@ -301,6 +301,26 @@ describe('Gemini config', () => {
     const a = geminiHome(appDir, { system: 'a', mcpUrl: undefined, web: false }, userHome)
     const b = geminiHome(appDir, { system: 'b', mcpUrl: undefined, web: false }, userHome)
     expect(a).not.toBe(b)
+  })
+
+  it('lists default models when no bin path is provided', () => {
+    const list = geminiModels()
+    expect(list).toContain('gemini/gemini-3.8-flash')
+    expect(list).toContain('gemini/gemini-3.1-pro-preview')
+  })
+
+  it('dynamically extracts models from an installed @google/gemini-cli package', () => {
+    const root = mkdtempSync(join(tmpdir(), 'gemini-pkg-'))
+    const bundle = join(root, 'node_modules', '@google', 'gemini-cli', 'bundle')
+    mkdirSync(bundle, { recursive: true })
+    writeFileSync(
+      join(bundle, 'chunk-models.js'),
+      'var defs = { "gemini-3.9-flash": { isVisible: true }, "gemini-4-pro": { isVisible: true }, "internal-hidden": { isVisible: false } };'
+    )
+    const bin = join(root, 'gemini.cmd')
+    writeFileSync(bin, '@ECHO off')
+    expect(detectGeminiCliModels(bin)).toEqual(['gemini/gemini-3.9-flash', 'gemini/gemini-4-pro'])
+    expect(geminiModels(bin)).toEqual(['gemini/gemini-3.9-flash', 'gemini/gemini-4-pro'])
   })
 })
 
