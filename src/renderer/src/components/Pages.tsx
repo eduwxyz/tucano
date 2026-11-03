@@ -1514,7 +1514,7 @@ function TeamCard(): ReactNode {
 }
 
 // The phone (spec §19): a Telegram bot of the user's own, paired with a code.
-function PhoneCard({ info, finished }: { info?: TelegramInfo; finished?: boolean }): ReactNode {
+function PhoneCard({ info, finished, incoming }: { info?: TelegramInfo; finished?: boolean; incoming?: boolean }): ReactNode {
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1572,10 +1572,17 @@ function PhoneCard({ info, finished }: { info?: TelegramInfo; finished?: boolean
           </button>
         </div>
       )}
-      <div className="row row--center phone-finished">
+      <div className="row row--center phone-option">
+        <div className="grow">
+          <strong>{L('Enviar mensagens aos agentes', 'Send messages to agents')}</strong>
+          <p className="hint">{L('Envie uma mensagem ao seu bot e a IA a encaminhará ao canal e agente adequados.', 'Send a message to your bot, and AI will forward it to the appropriate channel and agent.')}</p>
+        </div>
+        <Toggle label={L('Enviar mensagens aos agentes', 'Send messages to agents')} on={incoming === true} onChange={(v) => updateSettings({ telegramIncomingMessages: v })} />
+      </div>
+      <div className="row row--center phone-option">
         <div className="grow">
           <strong>{L('Receber todas as respostas concluídas', 'Receive all finished replies')}</strong>
-          <p className="hint">{L('Receba notificações dos seus agentes sempre que concluírem uma tarefa. Envie uma mensagem ao seu bot e ele a encaminhará ao canal e agente adequados.', 'Receive notifications from your agents whenever they complete a task. Send a message to your bot, and it will forward it to the appropriate channel and agent.')}</p>
+          <p className="hint">{L('Receba notificações dos seus agentes sempre que concluírem uma tarefa. Responda à mensagem para continuar a conversa.', 'Receive notifications from your agents whenever they complete a task. Reply to the message to continue the conversation.')}</p>
         </div>
         <Toggle label={L('Receber todas as respostas concluídas', 'Receive all finished replies')} on={finished === true} onChange={(v) => updateSettings({ telegramFinishedMessages: v })} />
       </div>
@@ -1748,7 +1755,7 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
-        {pane('integracoes') && <PhoneCard info={settings.telegram} finished={settings.telegramFinishedMessages} />}
+        {pane('integracoes') && <PhoneCard info={settings.telegram} finished={settings.telegramFinishedMessages} incoming={settings.telegramIncomingMessages} />}
 
         {pane('modelos') && (
           <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', 'A small model summarizes what leaves each conversation’s window and, from the same stretch, picks what’s worth remembering about you.')}>

@@ -29,6 +29,7 @@ export interface TelegramDeps {
   approval(id: string): Approval | undefined
   answer(conversationId: string, text: string): void // a reply to a question, as if I wrote it in the app
   receive?(text: string, reply?: PhoneTarget): Promise<PhoneTarget> // triage before posting; replies bypass triage
+  canReceive?(): boolean // only new tasks; approvals and replies are independent
   changed(): void // the bot or the pairing changed: settings show it
   fetch?: Fetch
 }
@@ -175,8 +176,8 @@ export class Telegram {
         this.deps.changed()
         await this.send(
           L(
-            'Pronto: este chat recebe as aprovações, as perguntas dos agentes e o fim das rotinas. Mande uma tarefa e a IA escolhe o canal e o agente. Pra continuar uma conversa, responda à mensagem dela.',
-            "Done: this chat gets approvals, agents' questions and routine results. Send a task and AI picks its channel and agent. To continue a conversation, reply to its message."
+            'Pronto: este chat recebe as aprovações, as perguntas dos agentes e o fim das rotinas. No app, você pode ativar o envio de tarefas e o recebimento de todas as respostas concluídas separadamente. Pra continuar uma conversa, responda à mensagem dela.',
+            "Done: this chat gets approvals, agents' questions and routine results. In the app, you can separately enable sending tasks and receiving all finished replies. To continue a conversation, reply to its message."
           )
         )
         return
@@ -186,6 +187,8 @@ export class Telegram {
       const reply = m.reply_to_message && this.questions.get(m.reply_to_message.message_id)
       if (m.reply_to_message && !reply) {
         await this.send(L('Não reconheço essa mensagem. Mande uma nova tarefa sem responder, ou responda a uma mensagem recente do agente.', 'I do not recognize that message. Send a new task without replying, or reply to a recent agent message.'))
+      } else if (!reply && this.deps.canReceive?.() === false) {
+        await this.send(L('Para enviar novas tarefas, ative “Enviar mensagens aos agentes” em Configurações → Celular e GitHub. Você ainda pode responder às perguntas e usar os botões de aprovação.', 'To send new tasks, enable “Send messages to agents” in Settings → Phone and GitHub. You can still reply to questions and use approval buttons.'), { reply_to_message_id: m.message_id })
       } else if (this.deps.receive || reply) {
         try {
           const destination = this.deps.receive ? await this.deps.receive(m.text, reply || undefined) : reply!

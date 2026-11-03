@@ -79,6 +79,7 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
   defaultLimit: 2_000_000,
   approvalTtlHours: 24,
   telegramFinishedMessages: false,
+  telegramIncomingMessages: false,
   theme: 'system',
   language: langOf(process.env['TUCANO_LOCALE'])
 }
@@ -475,6 +476,7 @@ telegram = new Telegram({
   decide: (id, decision, reason) => runner.decide(id, decision, reason),
   approval: (id) => db.approval(id),
   answer: (conversationId, text) => void runner.send(conversationId, text),
+  canReceive: () => settings().telegramIncomingMessages === true,
   receive: async (text, reply) => {
     const s = await ready.then(settings)
     const channels: PhoneChannel[] = db.conversations().filter((c) => c.kind === 'channel').map((c) => ({

@@ -3,6 +3,10 @@
 Pair your bot in **Settings → Phone and GitHub**. Only the paired Telegram chat
 can send tasks, answer questions or act on approvals.
 
+- Enable **Send messages to agents** to send new tasks from Telegram. It is
+  **off by default** and independent of finished-reply notifications. When it
+  is off, replies to known agent messages and approval buttons still work;
+  new tasks are not posted or sent to AI triage.
 - Send a new message such as “on company X, check the dates of the next 3
   meetings”. Before posting anything, the configured router model sees the
   message and the available channels, topics and agents (including their roles
@@ -21,7 +25,7 @@ can send tasks, answer questions or act on approvals.
   parts rather than being truncated. It does not forward streaming drafts,
   stopped/failed runs, or re-send answered questions as completed tasks.
 - Approvals, high-risk confirmation, agent questions and existing routine
-  notices are independent of this switch and continue as before.
+  notices are independent of both switches and continue as before.
 - Reply to a question, completed response, or delivery acknowledgement to stay
   with its channel and agent instead of running new-message triage. Replies to
   completed responses also give the agent the original message as quoted

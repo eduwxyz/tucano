@@ -47,6 +47,7 @@ describe('Telegram', () => {
   let approvals: Map<string, Approval>
   let received: { text: string; reply?: PhoneTarget }[]
   let receiveError: boolean
+  let incomingEnabled: boolean
   const makeBot = (): Telegram => new Telegram({
     secrets: { get: async (k) => store.get(k), set: async (k, v) => void (v === undefined ? store.delete(k) : store.set(k, v)) },
     decide: async (id, d, reason) => {
@@ -55,6 +56,7 @@ describe('Telegram', () => {
     },
     approval: (id) => approvals.get(id),
     answer: (conv, text) => answered.push([conv, text]),
+    canReceive: () => incomingEnabled,
     receive: async (text, reply) => {
       received.push({ text, reply })
       if (receiveError) throw new Error('deleted channel')
@@ -74,6 +76,7 @@ describe('Telegram', () => {
     approvals = new Map()
     received = []
     receiveError = false
+    incomingEnabled = true
     tg = makeBot()
   })
   afterEach(() => tg.stop())
@@ -105,6 +108,7 @@ describe('Telegram', () => {
 
   it('sends an approval with buttons, and a tap decides it', async () => {
     await pair()
+    incomingEnabled = false
     await tg.approvalAsked(ap(), 'PM')
     const msg = api.sent.at(-1)!
     expect(msg.body['text']).toContain('PM pede aprovação\n\nLinear · delete_issue\nMotivo: duplicada')
@@ -152,6 +156,30 @@ describe('Telegram', () => {
     api.push({ message: { message_id: 12, chat: me, text: 'next week too', reply_to_message: { message_id: ack.id } } })
     await settle()
     expect(received.at(-1)?.reply).toEqual({ workspaceId: 'default', conversationId: 'company', agentId: 'calendar' })
+  })
+
+  it('blocks new tasks when incoming messages are off but still accepts replies to agent questions', async () => {
+    await pair()
+    incomingEnabled = false
+    api.push({ message: { message_id: 40, chat: me, text: 'a new task' } })
+    await settle()
+    expect(received).toHaveLength(0)
+    expect(api.sent.at(-1)!.body['text']).toContain('Enviar mensagens aos agentes')
+    await tg.questionAsked({ id: 'q', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: '', at: 0, run: { status: 'waiting_input', steps: [], question: 'When?' } }, 'PM', '#company')
+    const question = api.sent.at(-1)!
+    api.push({ message: { message_id: 41, chat: me, text: 'Friday', reply_to_message: { message_id: question.id } } })
+    await settle()
+    expect(answered).toEqual([['c1', 'Friday']])
+  })
+
+  it('keeps completed-response replies working with incoming messages off', async () => {
+    await pair()
+    incomingEnabled = false
+    await tg.finished({ id: 'done', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Result', at: 0 }, 'PM', '#company')
+    const finished = api.sent.at(-1)!
+    api.push({ message: { message_id: 42, chat: me, text: 'more detail', reply_to_message: { message_id: finished.id } } })
+    await settle()
+    expect(received.at(-1)?.reply).toMatchObject({ conversationId: 'c1', agentId: 'a1', messageId: 'done' })
   })
 
   it('sends full completed replies in replyable parts and restores destinations after restart', async () => {
