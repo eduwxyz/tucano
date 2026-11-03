@@ -62,6 +62,20 @@ keychain. `test/remote-controller.test.ts` imports the production main process w
 and network boundaries, checking multi-environment transitions, concurrent/failed switching,
 late response isolation, offline startup, deep links, rename and forgetting.
 
+The renderer journeys cover zero, two and twenty saved environments, separate selection and
+pairing views, keyboard focus, invalid-field associations, measured light/dark text contrast,
+360px reflow and a 550×425 CSS viewport (the layout equivalent of a 1100×850 window at 200%
+zoom). They also exercise an incoming pairing link during another request and an acknowledged
+message send with text/images, navigation, failure and explicit retry. Browser bridge fixtures
+are synthetic and do not establish a real VPS connection.
+
+`test/session-drafts.test.ts` and `test/preload-drafts.test.ts` cover in-memory draft snapshots
+scoped to a profile and verified server identity, including identical conversation IDs across
+Local/Personal/Work and late unload after forgetting. Unsent drafts stay in process memory,
+never browser storage or the VPS. Quitting the app still clears them; this is not a durable
+outbox. A failed send acknowledgment keeps the draft for review and does not resend it
+automatically, because the server may already have received the message.
+
 ## Unsigned macOS packaging check
 
 The macOS CI job packages the built app with signing, notarization and publishing disabled,
@@ -103,8 +117,13 @@ actual Mac with an authorized disposable Linux VPS:
    must not be bypassed.
 8. Revoke the Mac device on the VPS. Confirm RPC and reconnect fail, and a fresh one-use pairing
    link is required. Confirm tokens are absent from the app/server logs.
-9. Exercise service stop/start/update and uninstall using disposable data. Verify the documented
-   retention behavior before deleting anything.
+9. Pair a second independent VPS as Work while the first is Personal. Use the same conversation
+   ID in both test workspaces. Leave different text/image drafts in Local, Personal and Work;
+   switch between them, confirm each draft returns only to its own environment, and verify
+   the permission warnings name the server account. Check a pending send or image conversion
+   cannot be silently discarded by switching. Review an uncertain send before retrying.
+10. Exercise service stop/start/update and uninstall using disposable data, including a custom
+    TUCANO_DATA path. Verify the documented retention behavior before deleting anything.
 
 Automated local success is evidence for the protocol and SSH implementation, not a substitute
 for those macOS packaging, Keychain, service boot, public-network, and real-deployment checks.
