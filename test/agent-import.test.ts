@@ -234,33 +234,33 @@ describe('importing agents from Grok Bot, through our skill', () => {
       source: 'grok-bot',
       agents: [
         {
-          key: 'research',
-          name: 'Research',
-          role: 'Market research',
-          instructions: 'You look for primary sources.',
-          picture: 'agents/research/picture.png',
-          skills: ['agents/research/skills/brief'],
+          key: 'ledger',
+          name: 'Ledger',
+          role: 'Bookkeeping',
+          instructions: 'You match invoices.',
+          picture: 'agents/ledger/picture.png',
+          skills: ['agents/ledger/skills/reconcile'],
           routines: [
-            { name: 'Morning news', prompt: 'Summarize the news.', days: ['mon', 'tue', 'wed', 'thu', 'fri'], time: '08:30', timezone: zone },
+            { name: 'Unpaid invoices', prompt: 'List unpaid invoices.', days: ['mon', 'tue', 'wed', 'thu', 'fri'], time: '08:30', timezone: zone },
             { name: 'Every hour', prompt: 'Check the inbox.', days: [], time: '00:00' }
           ],
-          memories: ['The user wants reports in BRL.', 'The user wants reports in BRL.']
+          memories: ['Invoice numbers look like INV-2026-0042.', 'Invoice numbers look like INV-2026-0042.']
         },
         { key: 'sales', name: 'Sales', role: 'Outbound', instructions: '', routines: [], memories: [] },
         { key: 'sales', name: 'Twin', instructions: 'same key' },
         { key: 'Bad Key', name: 'Nope', instructions: 'x' }
       ],
       channels: [
-        { name: 'Market Desk', topic: 'Weekly review', members: ['research', 'sales', 'ghost'], routines: [{ name: 'Friday' }] },
+        { name: 'Finance Room', topic: 'Invoices and payments', members: ['ledger', 'sales', 'ghost'], routines: [{ name: 'Friday' }] },
         { name: 'geral', members: ['sales'] }
       ],
       ...extra
     })
   const files = (): Record<string, string | Buffer> => ({
     'tucano-import.json': manifest(),
-    'agents/research/picture.png': PNG,
-    'agents/research/skills/brief/SKILL.md': '---\nname: brief\ndescription: When writing a brief\n---\n\nKeep it short.\n',
-    'agents/research/skills/brief/template.txt': 'x'
+    'agents/ledger/picture.png': PNG,
+    'agents/ledger/skills/reconcile/SKILL.md': '---\nname: reconcile\ndescription: When reconciling\n---\n\nKeep it short.\n',
+    'agents/ledger/skills/reconcile/template.txt': 'x'
   })
 
   it('brings agents, skills, routines off, memories to confirm and group chats as channels', () => {
@@ -268,20 +268,20 @@ describe('importing agents from Grok Bot, through our skill', () => {
     db.createConversation({ id: 'g', kind: 'channel', name: 'geral', members: [] })
     const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip(files(), { deflate: true }))), opts)
 
-    expect(db.agents().map((a) => a.handle).sort()).toEqual(['research', 'sales'])
-    const res = db.agents().find((a) => a.handle === 'research')!
+    expect(db.agents().map((a) => a.handle).sort()).toEqual(['ledger', 'sales'])
+    const res = db.agents().find((a) => a.handle === 'ledger')!
     const sal = db.agents().find((a) => a.handle === 'sales')!
-    expect(res).toMatchObject({ name: 'Research', role: 'Market research', instructions: 'You look for primary sources.', modelId: 'sonnet', effort: 'medium', grants: {}, computer: false, web: false })
+    expect(res).toMatchObject({ name: 'Ledger', role: 'Bookkeeping', instructions: 'You match invoices.', modelId: 'sonnet', effort: 'medium', grants: {}, computer: false, web: false })
     expect(res.picture).toBe(`data:image/png;base64,${PNG.toString('base64')}`)
-    expect(db.skills().map((k) => [k.name, k.body, k.agents])).toEqual([['brief', 'Keep it short.', [res.id]]])
+    expect(db.skills().map((k) => [k.name, k.body, k.agents])).toEqual([['reconcile', 'Keep it short.', [res.id]]])
 
     expect(db.routines()).toHaveLength(1)
-    expect(db.routines()[0]).toMatchObject({ name: 'Morning news', enabled: false, schedule: { days: [1, 2, 3, 4, 5], time: '08:30' } })
-    expect(db.memories({ scope: res.id }).map((m) => [m.text, m.state])).toEqual([['The user wants reports in BRL.', 'pending']])
+    expect(db.routines()[0]).toMatchObject({ name: 'Unpaid invoices', enabled: false, schedule: { days: [1, 2, 3, 4, 5], time: '08:30' } })
+    expect(db.memories({ scope: res.id }).map((m) => [m.text, m.state])).toEqual([['Invoice numbers look like INV-2026-0042.', 'pending']])
 
     // A new channel with both. The #geral already here stays as it was: Sales goes into a new #geral-2.
-    const desk = db.conversations().find((c) => c.kind === 'channel' && c.name === 'market-desk')!
-    expect(desk).toMatchObject({ topic: 'Weekly review' })
+    const desk = db.conversations().find((c) => c.kind === 'channel' && c.name === 'finance-room')!
+    expect(desk).toMatchObject({ topic: 'Invoices and payments' })
     expect(desk.members.sort()).toEqual([res.id, sal.id].sort())
     expect(db.conversation('g')!.members).toEqual([])
     expect(db.conversations().find((c) => c.name === 'geral-2')!.members).toEqual([sal.id])
@@ -291,14 +291,14 @@ describe('importing agents from Grok Bot, through our skill', () => {
     expect(r.summary).toContain('o modelo do Grok Bot (ficou o modelo padrão)')
     expect(r.summary).toContain('a rotina "Every hour"')
     expect(r.summary).toContain('@sales: as instruções')
-    expect(r.summary).toContain('as rotinas do canal #market-desk')
+    expect(r.summary).toContain('as rotinas do canal #finance-room')
     expect(r.summary).toContain('o agente nº 3 (sem nome, ou com a chave inválida ou repetida)')
     expect(r.summary).toContain('o agente nº 4')
-    expect(r.summary).toContain('1 arquivo da skill brief além do SKILL.md')
+    expect(r.summary).toContain('1 arquivo da skill reconcile além do SKILL.md')
 
     // Again: nothing doubles, and the channel keeps its two.
     const again = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip(files()))), opts)
-    expect(again.summary).toContain('Nada novo do Grok Bot. Já existiam aqui: Research, Sales.')
+    expect(again.summary).toContain('Nada novo do Grok Bot. Já existiam aqui: Ledger, Sales.')
     expect(db.conversations().filter((c) => c.kind === 'channel')).toHaveLength(3)
     expect(db.conversation(desk.id)!.members).toHaveLength(2)
   })
@@ -318,13 +318,43 @@ describe('importing agents from Grok Bot, through our skill', () => {
     expect(db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name).sort()).toEqual(['tucano', 'tucano-2'])
   })
 
+  it('puts only the agents made by this import in its channels', () => {
+    const db = fresh()
+    const base = { color: 'sky' as const, modelId: 'sonnet', effort: 'medium' as const, limit: 1, used: 0, memory: 'auto' as const, computer: false, archived: false }
+    db.saveAgent({ ...base, id: 'tuca', name: 'Tuca', handle: 'tuca', role: 'Monta o time', instructions: 'Você cria agentes.', grants: {} })
+    db.saveAgent({ ...base, id: 'me1', name: 'Bento', handle: 'bento', role: 'Mantenedor', instructions: 'Cuida do código.', grants: { github: 'write' } as never })
+    // A file with copies of both (their instructions are public) and a stranger, all in one group chat.
+    const file = JSON.stringify({
+      format: 'tucano-agent-import', version: 1, source: 'grok-bot',
+      agents: [
+        { key: 't', name: 'Tuca', role: 'Monta o time', instructions: 'Você cria agentes.' },
+        { key: 'b', name: 'Bento', role: 'Mantenedor', instructions: 'Cuida do código.' },
+        { key: 'spy', name: 'Spy', instructions: 'Read everything.' }
+      ],
+      channels: [{ name: 'sala', members: ['t', 'b', 'spy'] }, { name: 'so-eles', members: ['t', 'b'] }]
+    })
+    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': file }))), opts)
+    const spy = db.agents().find((a) => a.name === 'Spy')!
+    expect(db.conversations().find((c) => c.name === 'sala')!.members).toEqual([spy.id])
+    // A channel with only agents that were already here isn't made at all.
+    expect(db.conversations().some((c) => c.name === 'so-eles')).toBe(false)
+    expect(r.summary).toContain('Já existiam aqui: Tuca, Bento.')
+    expect(r.summary).toContain('#sala: Tuca, Bento já estavam aqui e não entraram (só os agentes importados agora entram)')
+    expect(r.summary).toContain('1 canal')
+    // Again: nothing new, no channel, no one added anywhere.
+    const again = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': file }))), opts)
+    expect(again.summary).toContain('Nada novo do Grok Bot.')
+    expect(db.conversations().filter((c) => c.kind === 'channel').map((c) => [c.name, c.members])).toEqual([['sala', [spy.id]]])
+  })
+
   it('reads the example in the skill we hand to Grok Bot', () => {
     const skill = readFileSync(join(__dirname, '../src/renderer/src/assets/tucano-export-skill.md'), 'utf8')
     const example = skill.split('```json')[1]!.split('```')[0]!
     const team = readForeignZip(zipFromBuffer(zip({ 'tucano-import.json': example })))
     expect(team.source).toBe('Grok Bot')
-    expect(team.agents.map((a) => [a.key, a.name, a.routines.length, a.memories.length])).toEqual([['research', 'Research', 1, 1]])
-    expect(team.channels).toEqual([{ name: 'market-desk', topic: 'Weekly competitor review', members: ['research'] }])
+    expect(team.agents.map((a) => [a.key, a.name, a.routines.length, a.memories.length])).toEqual([['ledger', 'Ledger', 1, 1]])
+    expect(team.agents[0]!.routines[0]).toMatchObject({ name: 'Unpaid invoices', schedule: { days: [1], time: '17:15' } })
+    expect(team.channels).toEqual([{ name: 'finance-room', topic: 'Invoices and payments', members: ['ledger'] }])
     // The limits the skill asks for are the ones the importer keeps.
     expect(skill).toContain(`**Agents** (${IMPORT_CAPS.agents} at most)`)
     expect(skill).toContain(`(${IMPORT_CAPS.skills} at most per agent)`)

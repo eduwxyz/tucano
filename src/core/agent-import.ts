@@ -501,12 +501,16 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
   }
 
   // Group chats become channels of their own: an imported agent never joins one that's already here,
-  // where it would read the conversation. One made by an earlier import of the same file (same name,
-  // or the name with a number, and the same agents) stays as it is.
+  // where it would read the conversation. And only the agents made by this import go in: one that was
+  // already here (it may only look the same, like a copy of Tuca) is never put in a room with a stranger
+  // by a file. Imported again, the channel has no one new and is skipped.
+  const made = new Set(added.agents)
   let channels = 0
   for (const c of team.channels) {
-    const members = [...new Set(c.members.flatMap((k) => byKey.get(k) ?? []))]
+    const mapped = [...new Set(c.members.flatMap((k) => byKey.get(k) ?? []))]
+    const members = mapped.filter((id) => made.has(id))
     if (!members.length) continue
+    const kept = mapped.filter((id) => !made.has(id)).map((id) => db.agent(id)?.name).filter(Boolean)
     const all = db.conversations().filter((x) => x.kind === 'channel')
     const base = c.name.slice(0, 54) // room for "-<number>" within a channel name's 60
     const same = (x: { name: string; members: string[] }): boolean =>
@@ -515,6 +519,7 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
     let name = c.name
     for (let i = 2; all.some((x) => x.name === name); i++) name = `${base}-${i}`
     if (name !== c.name) left.push(L(`o canal #${c.name} já existia: os agentes entraram no #${name}, novo`, `#${c.name} already existed: the agents went into a new #${name}`))
+    if (kept.length) left.push(L(`#${name}: ${kept.join(', ')} já ${kept.length > 1 ? 'estavam' : 'estava'} aqui e não ${kept.length > 1 ? 'entraram' : 'entrou'} (só os agentes importados agora entram)`, `#${name}: ${kept.join(', ')} ${kept.length > 1 ? 'were' : 'was'} already here and stayed out (only the agents imported now go in)`))
     db.createConversation({ id: randomUUID(), kind: 'channel', name, topic: c.topic, members })
     channels++
   }

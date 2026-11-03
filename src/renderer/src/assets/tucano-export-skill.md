@@ -69,26 +69,26 @@ bring them all. Then write the agents' files, and `tucano-import.json` once thos
   "source": "grok-bot",
   "agents": [
     {
-      "key": "research",
-      "name": "Research",
-      "role": "Market research",
-      "instructions": "You look for primary sources and write short briefs with links…",
-      "picture": "agents/research/picture.png",
-      "skills": ["agents/research/skills/brief"],
+      "key": "ledger",
+      "name": "Ledger",
+      "role": "Bookkeeping",
+      "instructions": "You match each invoice against the bank statement and flag the ones that don't add up…",
+      "picture": "agents/ledger/picture.png",
+      "skills": ["agents/ledger/skills/reconcile"],
       "routines": [
         {
-          "name": "Morning news",
-          "prompt": "Summarize yesterday's news about our competitors.",
-          "days": ["mon", "tue", "wed", "thu", "fri"],
-          "time": "08:30",
-          "timezone": "America/Sao_Paulo"
+          "name": "Unpaid invoices",
+          "prompt": "List the invoices still unpaid, with who owes each and since when.",
+          "days": ["mon"],
+          "time": "17:15",
+          "timezone": "Europe/Lisbon"
         }
       ],
-      "memories": ["The user wants reports in BRL."]
+      "memories": ["Invoice numbers look like INV-2026-0042."]
     }
   ],
   "channels": [
-    { "name": "market-desk", "topic": "Weekly competitor review", "members": ["research"] }
+    { "name": "finance-room", "topic": "Invoices and payments", "members": ["ledger"] }
   ]
 }
 ```
