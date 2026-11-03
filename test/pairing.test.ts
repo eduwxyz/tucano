@@ -339,6 +339,9 @@ describe('the commands on the server machine', () => {
     const out = run(['pair', '--url', 'https://tucano.example.com'], open(), 'http://127.0.0.1:9000').out
     const link = parsePairLink(/(tucano:\/\/pair\?\S+)/.exec(out)![1]!)
     expect(link).toMatchObject({ ok: true, link: { reach: { via: 'url', url: 'https://tucano.example.com' }, name: 'tucano.example.com' } })
+    expect(out).toContain('In a browser: https://tucano.example.com/?pair=')
+    expect(out).not.toContain('In a browser: http://127.0.0.1:9000')
+    expect(out).toContain('not both')
     const ssh = parsePairLink(/(tucano:\/\/pair\?\S+)/.exec(run(['pair', '--ssh=me@h.io'], open(), 'http://127.0.0.1:9000').out)![1]!)
     expect(ssh).toMatchObject({ ok: true, link: { remotePort: 9000 } })
   })
@@ -351,6 +354,35 @@ describe('the commands on the server machine', () => {
       expect(out).not.toContain('Pairing code')
       expect(existsSync(file()) ? JSON.parse(readFileSync(file(), 'utf8')).pending : []).toHaveLength(0) // no code was made
     }
+  })
+
+  it('pair rejects unknown, duplicated and incomplete options before making a code', () => {
+    for (const args of [
+      ['--host', 'me@vps.example.com'], ['--lable', 'My Mac'], ['unexpected'],
+      ['--label'], ['--label='], ['--label', '--ssh', 'me@vps.example.com'],
+      ['--ssh', 'me@vps.example.com', '--ssh=other@vps.example.com'],
+      ['--label=Mac', '--label=Other']
+    ]) {
+      const { code, out } = run(['pair', ...args])
+      expect(code, args.join(' ')).toBe(2)
+      expect(out).not.toContain('Pairing code')
+      expect(existsSync(file())).toBe(false)
+    }
+  })
+
+  it('command help never generates a code or revokes an existing device', () => {
+    const p = open()
+    const { token } = p.enroll('My Mac')
+    const before = readFileSync(file(), 'utf8')
+    for (const args of [['pair', '--help'], ['pair', '-h'], ['revoke', '--all', '--help'], ['devices', '--help']]) {
+      const { code, out } = run(args, p)
+      expect(code).toBe(0)
+      expect(out).toContain('Usage: tucano-server')
+      expect(out).toContain('TUCANO_DATA')
+      expect(out).not.toContain('Pairing code:')
+      expect(readFileSync(file(), 'utf8')).toBe(before)
+    }
+    expect(p.check(token)).toBeDefined()
   })
 
   it('devices says who is paired, or that nobody is', () => {
@@ -372,6 +404,17 @@ describe('the commands on the server machine', () => {
     expect(p.check(token)).toBeUndefined()
     p.enroll('Other')
     expect(run(['revoke', '--all'], p).out).toContain('Revoked 1 device.')
+  })
+
+  it('refuses extra or misspelled arguments rather than revoking a different target', () => {
+    const p = open()
+    const { token } = p.enroll('My Mac')
+    for (const args of [['revoke', '--all', 'My Mac'], ['revoke', 'My', 'Mac'], ['revoke', '--al'], ['devices', '--unknown']]) {
+      expect(run(args, p).code).toBe(2)
+      expect(p.check(token)).toBeDefined()
+    }
+    expect(run(['revoke', 'My Mac'], p).code).toBe(0)
+    expect(p.check(token)).toBeUndefined()
   })
 
   it('answer help, and refuse what they do not know', () => {

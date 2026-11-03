@@ -98,12 +98,30 @@ test('fresh install writes private user service and SSH pairing instructions', t
   assert.match(output, /Pairing code/)
   assert.match(output, /ssh=tucano-test%40vps.example.com%3A2222/)
   assert.match(output, /ssh -N -L 17337:127.0.0.1:7399 -p 2222 tucano-test@vps.example.com/)
+  assert.match(output, /top environment selector → Add environment/)
+  assert.match(output, /app OR a browser, not both/)
+  assert.match(output, /IdentityFile\/ProxyJump are not used/)
+  assert.doesNotMatch(output, /Settings → Servers/)
   const unit = readFileSync(f.unit, 'utf8')
   assert.match(unit, /Restart=on-failure/)
   assert.match(unit, /UMask=0077/)
   assert.match(unit, /StandardOutput=null/)
   assert.equal(statSync(f.unit).mode & 0o077, 0)
   assert.match(f.calls(), /systemctl --user enable tucano.service/)
+})
+
+test('installer help explains the machine, ports and app path without changing the service', t => {
+  const f = fixture(t)
+  const english = f.ok(['--help'])
+  assert.match(english, /Run on the Linux server/)
+  assert.match(english, /not the SSH port/)
+  assert.match(english, /top environment selector → Add environment/)
+  const portuguese = f.ok(['--help'], { LANG: 'pt_BR.UTF-8' })
+  assert.match(portuguese, /Uso: sh install-server.sh/)
+  assert.match(portuguese, /seletor de ambientes no topo → Adicionar ambiente/)
+  assert.match(portuguese, /não a porta SSH/)
+  assert.equal(f.calls(), '')
+  assert.ok(!existsSync(f.app))
 })
 
 test('sudo target user cannot inherit runner XDG directories or session bus', t => {
@@ -139,6 +157,74 @@ test('updates preserve port and device state without issuing codes; keep two rel
   assert.deepEqual(readdirSync(join(f.app, 'versions')).sort(), ['2.0.0', '3.0.0'])
   assert.equal(readFileSync(join(f.data, 'device-state'), 'utf8'), 'keep-token')
   assert.equal(readFileSync(join(f.data, 'pair-calls'), 'utf8'), 'pair\n')
+})
+
+test('custom data directory survives an ordinary update and uninstall with retention', t => {
+  const f = fixture(t), data = join(f.home, 'personal data')
+  f.ok([], { TUCANO_DATA: data })
+  writeFileSync(join(data, 'device-state'), 'keep-token')
+  f.pack('2.0.0')
+  const output = f.ok()
+  assert.doesNotMatch(output, /Pairing code/)
+  assert.ok(readFileSync(join(f.bin, 'tucano-server'), 'utf8').includes(`TUCANO_DATA='${data}'`))
+  assert.ok(readFileSync(f.unit, 'utf8').includes(`Environment="TUCANO_DATA=${data}"`))
+  assert.ok(!existsSync(f.data))
+  const removed = f.ok(['--uninstall'])
+  assert.ok(removed.includes('The data is still in ' + data))
+  assert.ok(removed.includes(`TUCANO_DATA='${data}'`))
+  assert.equal(readFileSync(join(data, 'device-state'), 'utf8'), 'keep-token')
+  assert.ok(!existsSync(f.app))
+  // The wrapper is gone after uninstall; a later purge explicitly names the retained data.
+  f.ok(['--uninstall', '--purge'], { TUCANO_DATA: data })
+  assert.ok(!existsSync(data))
+})
+
+test('explicit data override wins over the installed path', t => {
+  const f = fixture(t), oldData = join(f.home, 'old data'), newData = join(f.home, 'new data')
+  f.ok(['--no-service'], { TUCANO_DATA: oldData })
+  f.pack('2.0.0')
+  f.ok(['--no-service', '--pair'], { TUCANO_DATA: newData })
+  assert.ok(readFileSync(join(f.bin, 'tucano-server'), 'utf8').includes(`TUCANO_DATA='${newData}'`))
+  assert.ok(existsSync(join(newData, 'server-id')))
+  assert.ok(existsSync(join(oldData, 'server-id')))
+  f.ok(['--uninstall'])
+  assert.ok(existsSync(newData))
+  assert.ok(existsSync(oldData))
+})
+
+test('explicit purge uses the retained custom data path, not the default workspace', t => {
+  const f = fixture(t), data = join(f.home, 'personal data')
+  f.ok(['--no-service'], { TUCANO_DATA: data })
+  mkdirSync(f.data)
+  writeFileSync(join(f.data, 'server-id'), 'other-workspace')
+  f.ok(['--uninstall', '--purge'])
+  assert.ok(!existsSync(data))
+  assert.equal(readFileSync(join(f.data, 'server-id'), 'utf8'), 'other-workspace')
+})
+
+test('malformed installed data paths fail before changing or uninstalling the service', t => {
+  const f = fixture(t)
+  f.ok()
+  const command = join(f.bin, 'tucano-server')
+  const original = readFileSync(command, 'utf8')
+  const release = readlinkSync(join(f.app, 'current'))
+  const unit = readFileSync(f.unit, 'utf8')
+  for (const data of ['relative', f.home + '/../elsewhere', f.app + '/data', f.home + '/bad%data', f.home + "/bad'quote"]) {
+    writeFileSync(command, original.replaceAll(`TUCANO_DATA='${f.data}'`, `TUCANO_DATA='${data}'`))
+    const before = f.calls()
+    for (const args of [[], ['--uninstall', '--purge']]) {
+      f.bad(args)
+      assert.equal(f.calls(), before)
+      assert.equal(readlinkSync(join(f.app, 'current')), release)
+      assert.equal(readFileSync(f.unit, 'utf8'), unit)
+      assert.ok(existsSync(join(f.data, 'server-id')))
+    }
+  }
+  // An unparseable wrapper is not sourced, and cannot silently choose the default database.
+  const marker = join(f.root, 'must-not-run')
+  writeFileSync(command, `#!/bin/sh\ntouch '${marker}'\nTUCANO_DATA=unquoted\n`)
+  assert.match(f.bad(), /Cannot read the installed data directory/)
+  assert.ok(!existsSync(marker))
 })
 
 test('same-version reinstall does not overwrite the active release', t => {
@@ -191,6 +277,7 @@ test('direct HTTPS/Tailscale pairing forwards --url and does not print SSH instr
     const output = f.ok(['--no-service', '--pair', '--url', url], { SSH_CONNECTION: '1.2.3.4 1234 5.6.7.8 22' })
     assert.ok(output.includes('url=' + encodeURIComponent(url)))
     assert.ok(output.includes(url + '/?pair=AAAA-BBBB-CCCC'))
+    assert.ok(output.includes('Another code: tucano-server pair --label "My Mac" --url ' + url))
     assert.doesNotMatch(output, /ssh -N|opens the SSH tunnel/)
   }
   assert.match(f.bad(['--host', 'vps', '--url', 'https://example.com']), /not both/)

@@ -51,14 +51,44 @@ say() { if [ -n "$PT" ]; then echo "$1"; else echo "$2"; fi; }
 fail() { say "$1" "$2" >&2; exit 1; }
 
 usage() {
+  if [ -n "$PT" ]; then
+    cat <<'EOF'
+Uso: sh install-server.sh [opções]
+
+Rode no servidor Linux, como o usuário do serviço (não como root).
+--host descreve o destino do pareamento; não instala em outra máquina.
+
+  --label NOME     nome do dispositivo na lista de pareados (padrão: My computer)
+  --host ENDEREÇO  host[:porta] ou usuário@host[:porta] SSH; padrão: endereço desta sessão SSH
+  --url ENDEREÇO   URL HTTPS (inclusive Tailscale Serve), no lugar de --host; não configura o proxy
+  --port N         porta do serviço Tucano nesta máquina, não a porta SSH (padrão: 7337)
+  --pair           gerar código de pareamento também numa atualização
+  --no-pair        não gerar código na primeira instalação
+  --desktop        ativar desktop Linux opcional (exige ferramentas já instaladas)
+  --no-desktop     desativar desktop; a primeira instalação não usa desktop por padrão
+  --no-service     só instalar: não configurar systemd nem iniciar nada
+  --uninstall      remover serviço, programa e comando; manter os dados
+  --purge          com --uninstall: apagar também conversas, memória e chaves
+  --help           mostrar esta ajuda sem instalar
+
+O código vale 5 minutos e funciona uma vez: use no app OU no navegador.
+No app, abra o seletor de ambientes no topo → Adicionar ambiente.
+SSH exige host verificado e chave autorizada disponível no ssh-agent do Mac.
+Use o host real: aliases e IdentityFile/ProxyJump do SSH config não são usados pelo app.
+EOF
+    return
+  fi
   cat <<'EOF'
 Usage: sh install-server.sh [options]
 
-  --label NAME     a name for the device the first pairing code is for (default: My computer)
-  --host ADDRESS   the address your computer reaches this machine at over SSH (host, or host:port); default: the
+Run on the Linux server as its service user (not root).
+--host describes the pairing destination; it does not install on a remote machine.
+
+  --label NAME     the device name in the paired-device list (default: My computer)
+  --host ADDRESS   SSH host[:port] or user@host[:port]; default: the
                    address you are logged in at now, when this runs over SSH
   --url ADDRESS    HTTPS URL (including Tailscale Serve) for direct pairing (instead of --host); does not configure a proxy
-  --port N         the port the server listens on, on this machine only (default: 7337)
+  --port N         the Tucano service port on this machine, not the SSH port (default: 7337)
   --pair           make a pairing code even on an update
   --no-pair        don't make one on a first install
   --desktop        enable the optional Linux virtual desktop (requires preinstalled desktop tools)
@@ -66,6 +96,12 @@ Usage: sh install-server.sh [options]
   --no-service     install only: no systemd service, nothing started
   --uninstall      remove the service, the program and the tucano-server command; the data stays
   --purge          with --uninstall: delete the data too (conversations, memory, keys)
+  --help           show this help without installing
+
+The code lasts 5 minutes and works once: use it in the app OR a browser.
+In the app, open the top environment selector → Add environment.
+SSH needs a verified host and an authorized key available to the Mac's ssh-agent.
+Use the real host: SSH config aliases and IdentityFile/ProxyJump are not used by the app.
 EOF
 }
 
@@ -109,6 +145,17 @@ fi
 if [ -z "$PORT_GIVEN" ] && [ -f "$BIN/tucano-server" ]; then
   KEPT=$(sed -n "s/.*TUCANO_PORT='\\([0-9][0-9]*\\)'.*/\\1/p" "$BIN/tucano-server" | head -1)
   if [ -n "$KEPT" ]; then PORT=$KEPT; fi
+fi
+
+# The generated command is also the service's data-path record. Read its exact
+# assignment, never execute/source it, and validate the recovered path below.
+# Falling back to a fresh database here would silently change the environment.
+if [ -z "${TUCANO_DATA:-}" ] && [ -f "$BIN/tucano-server" ]; then
+  KEPT_DATA=$(sed -n "s/^TUCANO_DATA='\([^']*\)' TUCANO_PORT='[0-9][0-9]*' exec .*/\1/p" "$BIN/tucano-server")
+  [ -n "$KEPT_DATA" ] || fail \
+    "Não consegui ler a pasta de dados instalada. Confira o comando $BIN/tucano-server e informe TUCANO_DATA explicitamente." \
+    "Cannot read the installed data directory. Inspect $BIN/tucano-server and set TUCANO_DATA explicitly."
+  DATA=$KEPT_DATA
 fi
 case "$PORT" in '' | *[!0-9]*) fail "A porta tem que ser um número." "The port has to be a number." ;; esac
 { [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ]; } || fail "Use uma porta entre 1024 e 65535." "Use a port between 1024 and 65535."
@@ -194,7 +241,7 @@ if [ -n "$UNINSTALL" ]; then
       say "Não apaguei $DATA: não parece uma pasta de dados do Tucano." "Not deleting $DATA: it doesn't look like Tucano's data."
     fi
   else
-    say "Os dados continuam em $DATA (apague com --uninstall --purge)." "The data is still in $DATA (delete it with --uninstall --purge)."
+    say "Os dados continuam em $DATA. Para apagá-los depois, rode o instalador com TUCANO_DATA='$DATA' e --uninstall --purge." "The data is still in $DATA. To delete it later, run the installer with TUCANO_DATA='$DATA' and --uninstall --purge."
   fi
   exit 0
 fi
@@ -493,19 +540,19 @@ if [ -n "$PAIR" ]; then
   echo "  $CODE"
   echo
   if [ -n "$APPLINK" ]; then
-    say "No app do Tucano no Mac: Configurações → Servidores → Adicionar, e cole este link:" "In the Tucano app on your Mac: Settings → Servers → Add, and paste this link:"
+    say "No app do Tucano no Mac, abra o seletor de ambientes no topo → Adicionar ambiente e cole este link:" "In the Tucano app on your Mac, open the top environment selector → Add environment and paste this link:"
     echo
     echo "  $APPLINK"
     echo
     if [ -z "$URL_GIVEN" ]; then
-    say "(o app abre o túnel SSH sozinho; o ssh do seu Mac tem que entrar nesta máquina como $(id -un).)" "(the app opens the SSH tunnel itself; your Mac's ssh has to be able to log in to this machine as $(id -un).)"
+    say "O app abre o túnel SSH. Antes de parear, verifique o host no Terminal e carregue a chave autorizada no ssh-agent do Mac. Use o host real; aliases e IdentityFile/ProxyJump do SSH config não são usados." "The app opens the SSH tunnel. Before pairing, verify the host in Terminal and load the authorized key into the Mac's ssh-agent. Use the real host; SSH config aliases and IdentityFile/ProxyJump are not used."
     fi
     echo
   fi
   if [ -n "$URL_GIVEN" ]; then
     say "No navegador:" "In a browser:"
     echo "  ${URL_GIVEN%/}/?pair=$CODE"
-    say "Configure um proxy HTTPS ou Tailscale Serve HTTPS separadamente; o serviço continua em 127.0.0.1." "Configure an HTTPS proxy or Tailscale Serve HTTPS separately; the service still listens on 127.0.0.1."
+    say "Configure o proxy HTTPS ou Tailscale Serve HTTPS separadamente; --url não muda onde o serviço escuta." "Configure the HTTPS proxy or Tailscale Serve HTTPS separately; --url does not change where the service listens."
   else
   say "Ou, sem o app, em um navegador: abra um túnel SSH até este servidor e abra o link:" "Or, without the app, in a browser: open an SSH tunnel to this server, then open the link:"
   echo
@@ -524,5 +571,13 @@ if [ -n "$PAIR" ]; then
   echo "  http://127.0.0.1:17337/?pair=$CODE"
   fi
   echo
-  say "Outro código: tucano-server pair --label \"Nome\" --ssh $(id -un)@endereco. Quem está pareado: tucano-server devices. Tirar o acesso: tucano-server revoke <id>." "Another code: tucano-server pair --label \"Name\" --ssh $(id -un)@address. Who is paired: tucano-server devices. Take access away: tucano-server revoke <id>."
+  say "Use este código no app OU no navegador, não nos dois. No app, dê ao ambiente um nome como Pessoal ou Trabalho e revise o destino antes de confirmar." "Use this code in the app OR a browser, not both. In the app, name the environment Personal or Work and review the destination before confirming."
+  if [ -n "$URL_GIVEN" ]; then
+    say "Outro código: tucano-server pair --label \"Meu Mac\" --url $URL_GIVEN" "Another code: tucano-server pair --label \"My Mac\" --url $URL_GIVEN"
+  elif [ -n "$REACH" ]; then
+    say "Outro código: tucano-server pair --label \"Meu Mac\" --ssh $REACH" "Another code: tucano-server pair --label \"My Mac\" --ssh $REACH"
+  else
+    say "Outro código: tucano-server pair --label \"Meu Mac\" --ssh $(id -un)@endereco" "Another code: tucano-server pair --label \"My Mac\" --ssh $(id -un)@address"
+  fi
+  say "Quem está pareado: tucano-server devices. Tirar o acesso: tucano-server revoke <id>." "Who is paired: tucano-server devices. Take access away: tucano-server revoke <id>."
 fi

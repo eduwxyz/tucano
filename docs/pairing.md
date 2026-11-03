@@ -4,21 +4,71 @@ The server doesn't hand its own token to every browser. Each device is **paired*
 one-time code for a token of its own, so you can see who is signed in and take one device's access
 away without touching the others.
 
-## Pair a device
+## Choose the command and destination
 
-On the machine the server runs on:
+Run pairing commands **on the VPS, as the Linux user that runs the service**. For an installer
+installation, use `tucano-server` (or `~/.local/bin/tucano-server` if it is not on your PATH).
+It remembers the installed service's data directory and port. For a source build, replace
+`tucano-server` with `node out/main/server.js`, run from the built checkout, and use the same
+`TUCANO_DATA` and `TUCANO_PORT` as the running server. A code made against another data folder
+will not work on your service.
+
+Prepare the route before making a five-minute code:
+
+- **SSH:** the app manages a tunnel; no HTTPS setup or public Tucano port is needed. Follow
+  [Prepare SSH on the Mac](#prepare-ssh-on-the-mac) first.
+- **Direct HTTPS:** configure a reverse proxy or Tailscale Serve HTTPS to the server's
+  `127.0.0.1:7337` first. Use its root origin, such as `https://tucano.example.com`, with no
+  path, query or embedded password. The certificate must be trusted by the Mac. `--url` only
+  describes this route; it does not configure the proxy, DNS, firewall or certificate.
+- **Browser over SSH:** open a tunnel in your own terminal and keep it running. The app's
+  managed tunnel is not a browser-sharing feature. See [Reaching it](server.md#reaching-it).
+
+### Prepare SSH on the Mac
+
+The VPS account must already authorize your public key. Verify the host fingerprint through
+your provider, then connect once from the Mac's Terminal with the **same real hostname/IP and
+SSH port** you will put in the link. Accept the host key only after verifying the fingerprint:
 
 ```sh
-node out/main/server.js pair --label "My Mac"
+ssh -F /dev/null -p 22 tucano@vps.example.com
+```
+
+Run the following in a separate Mac terminal, not on the VPS, using your actual private-key path:
+
+```sh
+ssh-add ~/.ssh/id_ed25519
+ssh-add -l
+ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -p 22 tucano@vps.example.com true
+```
+
+The last command should finish without a password or host-key prompt. It is a useful check of
+key-based access, not a test of the Tucano service. Tucano uses OpenSSH without reading your SSH
+config files: aliases, `IdentityFile`, `ProxyJump`, `ProxyCommand` and custom known-hosts paths
+are not applied. Use the real host and put non-default keys in the agent available to Tucano.
+The app does not prompt for SSH passwords or key passphrases and never accepts a host key for
+you. Do not remove a changed host key until you have verified why it changed. For a route that
+requires your own SSH config, manage a local tunnel yourself and use its loopback URL, or use HTTPS.
+
+## Pair a device
+
+On the VPS, generate a new code:
+
+```sh
+tucano-server pair --label "My Mac"
 ```
 
 It prints a code like `K7QM-2XPD-9TWH` and a link, `http://127.0.0.1:7337/?pair=K7QM-2XPD-9TWH`. With
 `--ssh` (or `--url`) it also prints the link that pairs the **Mac app**:
 
 ```sh
-node out/main/server.js pair --label "My VPS" --ssh you@203.0.113.7
-# tucano://pair?v=1&code=K7QM-2XPD-9TWH&ssh=you%40203.0.113.7&name=My+VPS
+tucano-server pair --label "My Mac" --ssh you@203.0.113.7
+# tucano://pair?v=1&code=K7QM-2XPD-9TWH&ssh=you%40203.0.113.7&name=My+Mac
 ```
+
+`--label` names the **device** in the VPS's device list. Set the separate **environment name**
+to **Personal** or **Work** when confirming the link in the app. The generated link initially
+suggests the device label, but renaming the environment does not change the device's label.
 
 - `--ssh user@host[:port]` is how the app reaches this machine: it opens an SSH tunnel to the server's own
   loopback, so no port is open to the internet. The user is the one you sign in to the server as.
@@ -32,6 +82,9 @@ node out/main/server.js pair --label "My VPS" --ssh you@203.0.113.7
 About the code:
 
 - It works **once**, for **one device**, for **5 minutes**.
+- Use it in the Mac app **or** a browser, not both. Opening the browser link consumes the code;
+  run the pairing command again for the app or another browser. Generate a fresh code if setup
+  took longer than five minutes. Neither an expired code nor a new code stops the server.
 - **In a browser:** open the link (through your SSH tunnel, Tailscale Serve HTTPS or HTTPS proxy: use the address
   you reach the server at). The browser trades the code for its own token, kept in a cookie, and the
   address bar goes back to `/`.
@@ -47,16 +100,17 @@ saved server is offline. Choose **This computer** or a named VPS. Add any number
 servers, for example **Personal**, **Work**, and **Staging**. Each entry shows its destination,
 transport and connection state. Rename an entry without pairing again.
 
-1. Run `tucano-server pair --label "My Mac" --ssh you@your-vps` on that VPS, or use
+1. Prepare and verify SSH or HTTPS as described above. Run `tucano-server pair --label "My Mac" --ssh you@your-vps` on that VPS, or use
    `--url https://tucano.example.com` for HTTPS/Tailscale.
-2. Open the `tucano://pair?...` link in the installed app, or paste it into **Connections**.
+2. Open the `tucano://pair?...` link in the installed app, or click the **environment selector
+   at the top** (initially **This computer**) and paste it under **Add environment**.
    In development, paste the link; protocol registration belongs to the installed application.
 3. Review the destination, optionally name the environment, and click **Pair and connect**.
    Opening a link alone never runs SSH or redeems a code. Manual SSH/address and code fields
    are available too.
-4. For SSH, first verify the VPS host fingerprint through its provider and connect in Terminal.
-   Load the authorized key into `ssh-agent`. The app uses key/agent authentication with strict
-   host checking, not password prompts, automatic trust, or arbitrary SSH config commands.
+4. Confirm the top selector shows the intended environment before creating agents or connecting
+   tools. On a fresh VPS, complete setup and sign the harnesses in on that VPS. Repeat separately
+   for the other VPS; **This computer** continues to use your local workspace.
 
 Selection changes the workspace on screen; it does not copy agents, messages, connectors, keys or
 files between servers. Personal and Work are separate server instances/databases, not folders with
@@ -80,6 +134,24 @@ Connection loss is visible. Use **Reconnect** after fixing the service/network; 
 not replayed automatically, since an action might already have run. A failed switch keeps the prior
 connected environment. **Forget** removes only that computer's saved connection/token; revoke the
 device on the VPS to invalidate its server-side access.
+
+### Recover a connection
+
+| What you see | What to do |
+| --- | --- |
+| Invalid, expired or already-used pairing code | Generate a fresh code on the correct VPS/service account and pair again. Do not open its browser link first if pairing the app. |
+| Unknown or changed SSH host key | Verify the host fingerprint with the provider, then connect in Terminal to the exact host and SSH port. Never disable host checking. |
+| SSH key authentication failed | Authorize the matching public key on the VPS and load your private key into the Mac's SSH agent. Check the explicit host, user and port without SSH config aliases. |
+| Service unavailable or connection lost | Check `systemctl --user status tucano.service` on that VPS and the network route, then choose **Reconnect**. A normal restart does not require pairing again. |
+| Device token expired or revoked | Generate a fresh code on the VPS and pair again. If a code was consumed before a failed save, make another one. |
+| Server identity unavailable | Update the VPS to a build supporting `/identity`; the desktop will not send a saved token to an unidentified older server. |
+| Server identity changed | Check whether the VPS/data folder was replaced and verify its SSH host key or HTTPS certificate. Re-pair deliberately only after confirming the new destination. |
+| Keychain/secret storage unavailable | Unlock or restore the operating system's protected storage, then retry. The app does not fall back to plaintext token storage. |
+
+Failed requests are not replayed automatically. Check the workspace before repeating a write,
+because the server may have completed it before the connection failed. Revoking a device does
+not stop its VPS or delete agents/data. To stop remote work, pause it in that environment or stop
+the service on that VPS.
 
 The existing [browser and Linux computer](server.md) run on the selected VPS. Browser takeover is
 controlled from the live browser panel, not by opening a browser on the Mac. The optional
@@ -127,10 +199,17 @@ would sign you out of the other. A token is only good on the server that made it
 ## See and revoke
 
 ```sh
-node out/main/server.js devices            # id, label, paired, last seen
-node out/main/server.js revoke <id|label>  # one device
-node out/main/server.js revoke --all       # every device, and the codes not used yet
+tucano-server devices             # id, label, paired, last seen
+tucano-server revoke DEVICE_ID     # the exact device ID from that list
+tucano-server revoke "My Mac"      # every device with this label; quote spaces
+tucano-server revoke --all         # every device, and the codes not used yet
 ```
+
+Prefer the exact ID if multiple devices have the same label. For a lost Mac, run the revoke
+command through another authorized SSH session on each affected VPS; forgetting a profile on
+another computer does not revoke the lost Mac. Pairing again adds/replaces the local profile but
+does not automatically revoke an older server-side device token. Review `devices` and revoke
+stale entries explicitly.
 
 A revoked device is refused on its next request, and a page it already has open is cut within half a
 minute. The refusal also takes its cookie back, so a page left open doesn't go on being counted as

@@ -13,37 +13,61 @@ import { DEFAULT_PORT, formatPairLink, parseServerUrl, parseSshTarget, type Reac
 import { CODE_TTL_MS, type Pairing } from './pairing'
 
 const USAGE = [
-  'Usage: node out/main/server.js [command]',
+  'Usage: tucano-server [command]',
+  'From a source checkout: node out/main/server.js [command]',
   '',
   '  (no command)              start the server',
-  '  pair [--label "My Mac"]   make a one-time code to pair a browser or the app',
+  '  pair [--label "My Mac"]   make a one-time code; label identifies the device, not the VPS',
   '       [--ssh you@host[:port]]   also print the link for the Mac app, to reach this server by an SSH tunnel',
   '       [--url https://…]         or the link for the app to reach it at an address (HTTPS, including Tailscale Serve)',
   '  devices                   list the paired devices',
-  '  revoke <id|label>         take one device\'s access away',
-  '  revoke --all              take every device\'s access away, and drop the codes not used yet'
+  '  revoke <id|label>         revoke an exact ID, or all devices with this label (quote spaces)',
+  '  revoke --all              take every device\'s access away, and drop the codes not used yet',
+  '',
+  'Run commands on the VPS as its service user, with the same TUCANO_DATA as the service.',
+  'The installed command remembers its data directory and service port.',
+  'SSH needs a verified known host and an authorized key available to ssh-agent.',
+  'Use a real host/IP: the app does not read SSH config aliases, IdentityFile or ProxyJump.',
+  '--url only chooses the pairing address; configure and verify HTTPS separately.',
+  'Open the app\'s top environment selector, add an environment, then review and confirm the link.'
 ]
 
-function flag(args: string[], name: string): string | undefined {
-  const i = args.findIndex((a) => a === name || a.startsWith(`${name}=`))
-  const a = args[i]
-  if (a === undefined) return undefined
-  return a === name ? args[i + 1] : a.slice(name.length + 1)
+function pairOptions(args: string[], say: (line: string) => void): Record<string, string> | undefined {
+  const options: Record<string, string> = {}
+  for (let i = 0; i < args.length; i++) {
+    const argument = args[i]!
+    const equal = argument.indexOf('=')
+    const name = equal < 0 ? argument : argument.slice(0, equal)
+    if (!['--label', '--ssh', '--url'].includes(name)) {
+      say(`Unknown pairing option: ${name}. See pair --help.`)
+      return undefined
+    }
+    if (name in options) {
+      say(`${name} was given twice.`)
+      return undefined
+    }
+    const value = equal < 0 ? args[++i] : argument.slice(equal + 1)
+    if (!value?.trim() || value.startsWith('-')) {
+      say(`${name} needs a value.`)
+      return undefined
+    }
+    options[name] = value
+  }
+  return options
 }
 
 // How the app reaches this server, from --ssh or --url: undefined when neither is given, null (after saying
 // why) when what was given isn't valid.
-function reachOf(args: string[], say: (line: string) => void): Reach | undefined | null {
-  const named = (name: string): boolean => args.some((a) => a === name || a.startsWith(`${name}=`))
-  const ssh = flag(args, '--ssh')
-  const url = flag(args, '--url')
-  if (!named('--ssh') && !named('--url')) return undefined
-  if (named('--ssh') && named('--url')) {
+function reachOf(options: Record<string, string>, say: (line: string) => void): Reach | undefined | null {
+  const ssh = options['--ssh']
+  const url = options['--url']
+  if (ssh === undefined && url === undefined) return undefined
+  if (ssh !== undefined && url !== undefined) {
     say('Give --ssh or --url, not both.')
     return null
   }
-  if (named('--ssh')) {
-    const r = ssh === undefined ? undefined : parseSshTarget(ssh)
+  if (ssh !== undefined) {
+    const r = parseSshTarget(ssh)
     if (!r) say('--ssh wants user@host or user@host:port (the user you sign in to this machine as, and the address you reach it at).')
     return r ?? null
   }
@@ -58,7 +82,8 @@ const count = (n: number): string => `${n} device${n === 1 ? '' : 's'}`
 export function cli(argv: string[], pairing: Pairing, base: string, say: (line: string) => void): number | undefined {
   const [cmd, ...args] = argv
   if (cmd === undefined) return undefined
-  if (cmd === 'help' || cmd === '--help' || cmd === '-h') {
+  if (cmd === 'help' || cmd === '--help' || cmd === '-h' ||
+    (['pair', 'devices', 'revoke'].includes(cmd) && args.some(a => a === '--help' || a === '-h'))) {
     for (const l of USAGE) say(l)
     return 0
   }
@@ -74,9 +99,11 @@ export function cli(argv: string[], pairing: Pairing, base: string, say: (line: 
 
 function run(cmd: string, args: string[], pairing: Pairing, base: string, say: (line: string) => void): number {
   if (cmd === 'pair') {
-    const label = flag(args, '--label')
+    const options = pairOptions(args, say)
+    if (!options) return 2
+    const label = options['--label']
     // Checked before the code is made, so a typo doesn't use one up.
-    const reach = reachOf(args, say)
+    const reach = reachOf(options, say)
     if (reach === null) return 2
     const { code, expires } = pairing.invite(label)
     say(`Pairing code: ${code}`)
@@ -85,12 +112,18 @@ function run(cmd: string, args: string[], pairing: Pairing, base: string, say: (
       const name = label?.trim() || (reach.via === 'ssh' ? reach.host : new URL(reach.url).hostname)
       say(`For the Mac app: ${formatPairLink({ code, reach, remotePort: Number(new URL(base).port) || DEFAULT_PORT, name })}`)
     }
-    say(`In a browser: ${base}/?pair=${code}`)
-    say('Through a tunnel or a proxy, use the address you reach the server at instead of that one.')
+    say(`In a browser: ${reach?.via === 'url' ? reach.url : base}/?pair=${code}`)
+    if (reach?.via === 'url') say('The URL must already reach this server; this command does not configure the route.')
+    else say('Through a tunnel, use its local address and port instead of the server address above.')
+    say('Use this code in the app OR a browser, not both. Generate a separate code for each device.')
     return 0
   }
 
   if (cmd === 'devices') {
+    if (args.length) {
+      say('devices takes no arguments. See devices --help.')
+      return 2
+    }
     const list = pairing.list()
     if (!list.length) {
       say('No paired devices. Make a code with: pair')
@@ -102,15 +135,15 @@ function run(cmd: string, args: string[], pairing: Pairing, base: string, say: (
   }
 
   if (cmd === 'revoke') {
-    if (args.includes('--all')) {
+    if (args.length !== 1 || (args[0]!.startsWith('-') && args[0] !== '--all')) {
+      say('Say which: revoke <id|label> (quote labels with spaces; see devices), or revoke --all.')
+      return 2
+    }
+    if (args[0] === '--all') {
       say(`Revoked ${count(pairing.revokeAll())}.`)
       return 0
     }
-    const which = args.find((a) => !a.startsWith('--'))
-    if (!which) {
-      say('Say which: revoke <id|label> (see devices), or revoke --all.')
-      return 2
-    }
+    const which = args[0]!
     const n = pairing.revoke(which)
     say(n ? `Revoked ${count(n)}.` : `No device with the id or label "${which}".`)
     return n ? 0 : 1

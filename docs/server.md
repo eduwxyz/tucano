@@ -1,8 +1,12 @@
 # Tucano on a server
 
-Tucano can run on a server you own, such as a VPS or a machine at home. On a server, routines keep running when your computer sleeps, and you use Tucano from a browser, on any computer or phone. The server runs Tucano's core on plain Node and serves the app's own screens to the browser. Nothing goes through a Tucano service: the server is yours, and so are the data and the logins on it.
+Tucano can run on a server you own, such as a VPS or a machine at home. On a server, routines keep running when your computer sleeps. Connect from the Tucano desktop app or from a browser on any computer or phone. The server runs Tucano's core on plain Node and serves the app's own screens to the browser. Nothing goes through a Tucano-hosted service: the server is yours, and so are the data and the logins on it.
 
 Status: **new and experimental.** The core, the screens and the agents work in a browser, tested on Linux (Debian 12, Node 24) and macOS. A real agent turn on a server has only been tested with the test engine so far.
+
+### Local, Personal and Work
+
+Keep **This computer** for local work, and pair a separate VPS as **Personal** and another as **Work** using the desktop app's top environment selector. Each VPS needs its own installation, Linux service user, data and harness sign-ins. Pairing does not move your local agents or credentials to a server, and switching environments does not merge their data. Start with SSH unless you already maintain an HTTPS route; a graphical Linux desktop is optional, not a pairing prerequisite.
 
 ## What you need
 
@@ -16,23 +20,47 @@ Status: **new and experimental.** The core, the screens and the agents work in a
 
 ## Before the server release is published
 
-The one-command URL below works once a release includes the new server assets. While reviewing
-this PR, use the Server workflow's `tucano-server` artifact, or build the package yourself:
+The one-command URL below downloads the **latest published release**, not this branch or PR.
+Use it only when that release includes this server and desktop connection support. Before then,
+use the Server workflow's `tucano-server` artifact from the revision you are testing, or build
+from a reviewed checkout of that revision with Node 24+:
 
 ```sh
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
 npm run build
 sh scripts/pack-server.sh dist-server
-TUCANO_TARBALL="$PWD/dist-server/tucano-server.tar.gz" sh install-server.sh --host user@your-vps
 ```
 
-Run the installer on the Linux server as its service user. Copy the script, archive and matching
-`.sha256` file there first if building on another machine. Do not point the production installer at
-an unreviewed archive.
+If building on your Mac or another machine, copy the installer from that same revision, archive
+and matching checksum to the VPS:
+
+```sh
+scp install-server.sh dist-server/tucano-server.tar.gz dist-server/tucano-server.tar.gz.sha256 tucano@vps.example.com:~/
+ssh tucano@vps.example.com
+```
+
+Then, **in the VPS SSH session**, run:
+
+```sh
+TUCANO_TARBALL="$HOME/tucano-server.tar.gz" sh "$HOME/install-server.sh" --label "My Mac" --host tucano@vps.example.com
+```
+
+Replace the user/host with your own. For a build made on the VPS itself, use
+`TUCANO_TARBALL="$PWD/dist-server/tucano-server.tar.gz" sh install-server.sh --label "My Mac" --host tucano@vps.example.com`
+from the checkout instead. `--host` describes where the Mac connects; it **does not install on a remote machine**.
+Use a desktop build with the same connection feature. To test the desktop from the matching
+checkout on the Mac, install with `npm ci` **without** `ELECTRON_SKIP_BINARY_DOWNLOAD`, then run
+`npm run dev`. Paste the link into the top environment selector; opening `tucano://` links requires
+an installed app. Development uses its own local data folder, separate from an installed Tucano.
+Do not point the installer at an unreviewed archive. The workflow artifact contains the archive
+and checksum, not the installer or the Mac app.
 
 ## Install with one command
 
-As the user that will run Tucano, not root. On a new VPS, make that user once (`adduser tucano && loginctl enable-linger tucano`), then sign in over SSH as `tucano`:
+Run this **on the Linux VPS**, as the user that will run Tucano, not root. On a new VPS,
+an administrator first creates that account (`sudo adduser tucano`), enables it to run services
+after logout (`sudo loginctl enable-linger tucano`), and authorizes your Mac's SSH public key for
+that account. Creating the account alone does not grant SSH access. Then sign in over SSH as `tucano`:
 
 ```bash
 curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install-server.sh | sh -s -- --label "My Mac"
@@ -46,9 +74,23 @@ It needs `curl`, `tar`, a SHA-256 utility (`sha256sum` or `shasum`), and a worki
 - adds the `tucano-server` command to `~/.local/bin` (`pair`, `devices`, `revoke`; see [pairing.md](pairing.md));
 - prints a pairing code, the link that pairs the Mac app, and the `ssh` command for a browser.
 
-The link names the address your computer reaches the server at. Run over SSH, the script takes it from your login; to say it yourself, use `--host vps.example.com` (or `--host vps.example.com:2222`, or `--host user@vps.example.com`). The service journal holds neither a token nor a pairing code. Treat the code and `tucano://pair` link printed in your terminal as temporary secrets: each works once, for five minutes.
+The link names the address your computer reaches the server at. Run over SSH, the script takes it from your login; to say it yourself, use `--host vps.example.com` (or `--host vps.example.com:2222`, or `--host user@vps.example.com`). Check the generated destination, especially behind NAT or a jump host: the server-side login address may not be reachable from your Mac. The app needs the real hostname/IP and an authorized key; it does not use SSH config aliases or jump hosts. Prepare [Mac SSH access](pairing.md#prepare-ssh-on-the-mac) before redeeming the code. The service journal holds neither a token nor a pairing code. Treat the code and `tucano://pair` link printed in your terminal as temporary secrets: each works once, for five minutes. Use a separate code for the Mac app and each browser.
+
+In the Mac app, click the **environment selector at the top** (initially **This computer**), find **Add environment**, paste the link, name the environment **Personal** or **Work**, review the destination and click **Pair and connect**. If the code expires while preparing SSH, run `tucano-server pair --label "My Mac" --ssh tucano@vps.example.com` on the VPS for a fresh one. If the command is not on your PATH, use `~/.local/bin/tucano-server`.
 
 Run the same command again to **update**: the data in `~/.tucano-server` stays, paired devices keep working, and the current and previous releases are kept. A failed service restart restores the previous program, command and unit and reports a failure. This is a binary rollback, not a database backup: back up the data folder before upgrading. `sh -s -- --uninstall` removes the service and the program (the data stays; add `--purge` to delete it too). `sh -s -- --help` lists the rest: `--port`, `--no-service`, `--pair` (a new code on an update).
+
+The installer remembers a custom `TUCANO_DATA` from its installed command when updating or
+uninstalling, together with the service port and desktop option. An explicit `TUCANO_DATA`
+override still takes precedence; changing it selects a different workspace without moving data.
+If that stored path cannot be read safely, the installer stops rather than silently creating a
+fresh workspace. If you used custom `TUCANO_HOME`, `TUCANO_BIN` or `XDG_CONFIG_HOME`, provide
+those **same location overrides** so the installer can find the right program, command and unit.
+Set installer variables on the `sh` side of a download pipe, not only on `curl`; for example:
+`curl -fsSL …/install-server.sh | TUCANO_DATA=/your/data/path sh -s -- --no-pair`.
+After uninstalling without purge, the command containing that path is gone. To delete retained
+custom data later, pass its `TUCANO_DATA` explicitly with `--uninstall --purge`, as the uninstall
+message shows. Purge permanently deletes conversations, files and keys; back them up first if needed.
 
 ### Direct pairing without SSH
 
@@ -62,11 +104,11 @@ curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install-se
 
 For Tailscale direct access, use Tailscale Serve HTTPS forwarding to `127.0.0.1:7337` and pair with the resulting `https://<machine>.<tailnet>.ts.net` URL. The Mac rejects all non-loopback HTTP URLs, including `100.64.0.0/10` and `*.ts.net`: an address alone does not prove an encrypted route.
 
-In the Mac app, open **Settings → Servers → Add**, paste the `tucano://pair` link, and confirm. The app exchanges the code for a separate device token. SSH mode uses your Mac's existing SSH access; direct mode uses the URL. To check or remove access, run `tucano-server devices` or `tucano-server revoke <id>`. See [pairing.md](pairing.md) for keychain storage, expiration and reconnect behavior.
+In the Mac app's top environment selector, use **Add environment**, paste the `tucano://pair` link, and confirm. The app exchanges the code for a separate device token. SSH mode uses your Mac's key-based SSH access; direct mode uses the URL with a trusted TLS certificate. Neither mode bypasses certificate or host-key checks. To check or remove access, run `tucano-server devices` or `tucano-server revoke <id>`. See [pairing.md](pairing.md) for keychain storage, expiration and reconnect behavior.
 
 ### Optional computer on the VPS
 
-Each VPS can optionally provide a private Linux virtual desktop for its agents. The default remains a headless server listening only on loopback. Use separate Linux users/VPSs, data folders and device pairings for personal and work environments; enabling a desktop on one server does not enable it on another.
+Each VPS can optionally provide a Linux graphical session shared by that server's agents. The default remains a headless server listening only on loopback. Use separate Linux users/VPSs, data folders and device pairings for personal and work environments; enabling a desktop on one server does not enable it on another.
 
 An administrator must first install the desktop prerequisites on that VPS. Example for Debian/Ubuntu, run manually after reviewing it:
 
@@ -87,6 +129,9 @@ Run these as the same user who installed Tucano:
 systemctl --user status tucano.service
 journalctl --user -u tucano.service -n 50 --no-pager
 loginctl show-user "$USER" -p Linger
+# Stop/start without deleting data or pairing:
+systemctl --user stop tucano.service
+systemctl --user start tucano.service
 ```
 
 If there is no user session, install `dbus-user-session` on Debian/Ubuntu and log in over SSH again. An administrator can run `loginctl enable-linger tucano` so this user's service survives logout and starts at boot. `sudo -u` alone may not create a user session. The installer clears another user's inherited XDG/session-bus settings when invoked through a cross-user `sudo`; an ordinary SSH login is the simplest setup.
@@ -109,6 +154,11 @@ cd ~/.local/share/tucano-server
 ln -sfn versions/<previous-release-directory> current
 systemctl --user restart tucano.service
 ```
+
+An unavailable service needs **Reconnect** in the app after it is running again, not a new install
+or pairing code. An expired/revoked device token does require a fresh code. **Forget** in the app
+only removes the saved connection on that computer; use `tucano-server devices` and
+`tucano-server revoke <id>` on the VPS to revoke access. See [pairing recovery](pairing.md#recover-a-connection).
 
 The harness (Claude Code, Codex…) is installed and signed in on the server as that user; see below.
 
@@ -150,7 +200,7 @@ Codex is signed in from Tucano's **Settings › Models**, like on a desktop. On 
 
 By default the server only listens on the server itself (`127.0.0.1`), because anyone who has the token controls your agents. Pick one of these ways to reach it:
 
-- **SSH tunnel**, the simplest: run `ssh -L 7337:127.0.0.1:7337 you@your-server`, then open the pairing link on your computer (or pair the Mac app: [pairing.md](pairing.md)).
+- **SSH tunnel**, the simplest: the Mac app opens its own tunnel when paired over SSH. For a browser instead, run `ssh -N -L 17337:127.0.0.1:7337 you@your-server` on your computer, keep that terminal open, and use `http://127.0.0.1:17337/?pair=YOUR-CODE` with a fresh code. Use a different local port for a second server. See [pairing.md](pairing.md).
 - **Tailscale Serve HTTPS**: keep Tucano bound to `127.0.0.1`, expose it through Tailscale Serve with HTTPS, then pair using `https://<machine>.<tailnet>.ts.net`. Do not send pairing codes or tokens over plaintext HTTP to a tailnet address.
 - **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Turn off response buffering for `/events`, which is a live event stream. For example, with Caddy:
 
@@ -230,6 +280,6 @@ To update a source install, run `git pull && npm ci && npm run build && sudo sys
 
 ## Installer regression checks
 
-`node --test scripts/installer-test.mjs` runs without a build, network, root privileges or a real systemd session. It tests fresh installs, inherited sudo XDG settings, custom paths, updates, same-version reinstall, rollback on restart failure, checksums, unsafe archives/paths, SSH/direct link forwarding, uninstall/purge behavior, and optional desktop prerequisite checks, quoting, preference preservation and disabling. Service/network commands are mocks, so this is not evidence of a live VPS or Mac connection.
+`node --test scripts/installer-test.mjs` runs without a build, network, root privileges or a real systemd session. It tests fresh installs, inherited sudo XDG settings, custom data-path preservation and explicit overrides, malformed stored paths, updates, same-version reinstall, rollback on restart failure, checksums, unsafe archives/paths, SSH/direct link forwarding, uninstall/purge behavior, and optional desktop prerequisite checks, quoting, preference preservation and disabling. Service/network commands are mocks, so this is not evidence of a live VPS or Mac connection.
 
 The Server GitHub Actions job additionally builds the real package and tests a user service on Ubuntu: startup, pairing, process restart, update with the retained port, and uninstall with data preservation. The full app/server connection suite lives separately in `scripts/server-e2e.mjs`.
