@@ -23,6 +23,10 @@ can send tasks, answer questions or act on approvals.
   `#general`/`#geral`, or the first channel when neither exists. The channel's
   first active member is the fallback speaker if AI cannot select one. Empty
   channels cannot run tasks; the bot reports that delivery failed.
+- Long messages (code diffs, large outputs) are split into multiple Telegram
+  messages without cutting words — the split prefers line breaks, then word
+  boundaries. Each continuation part repeats the agent/channel reference with a
+  "continuing message…" notice, and every part stays replyable.
 - Copy the pairing code with the copy button next to it in Settings.
 - **Receive all finished replies** is **off by default**. Enabling it mirrors
   completed agent replies from channels and DMs, even when started in the app.

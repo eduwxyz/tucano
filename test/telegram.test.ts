@@ -188,12 +188,27 @@ describe('Telegram', () => {
     const before = api.sent.length
     await tg.finished(msg, 'PM', '#company')
     const parts = api.sent.slice(before)
-    expect(parts).toHaveLength(3)
-    expect(parts.map((p) => p.body['text']).join('')).toBe(`PM (#company):\n\n${msg.text}`)
+    expect(parts.length).toBeGreaterThan(1)
+    // First part has the agent/channel header.
+    expect(String(parts[0]!.body['text'])).toMatch(/^PM \(#company\):\n\n/)
+    // Continuation parts have the "continuing message" header.
+    for (let i = 1; i < parts.length; i++) {
+      expect(String(parts[i]!.body['text'])).toMatch(/^PM \(#company\):\ncontinuando mensagem...\n/)
+    }
+    // No part exceeds Telegram's limit.
+    for (const p of parts) {
+      expect(String(p.body['text']).length).toBeLessThanOrEqual(4000)
+    }
+    // Stripping headers, the parts reconstruct the original message.
+    const contents = parts.map((p, i) => {
+      const text = String(p.body['text'])
+      return i === 0 ? text.replace(/^PM \(#company\):\n\n/, '') : text.replace(/^PM \(#company\):\ncontinuando mensagem...\n/, '')
+    })
+    expect(contents.join('')).toBe('x'.repeat(8000))
     tg.stop()
     tg = makeBot()
     await tg.start()
-    api.push({ message: { message_id: 21, chat: me, text: 'continue', reply_to_message: { message_id: parts[1]!.id } } })
+    api.push({ message: { message_id: 21, chat: me, text: 'continue', reply_to_message: { message_id: parts[0]!.id } } })
     await settle()
     expect(received.at(-1)?.reply).toEqual({ workspaceId: 'default', conversationId: 'c1', agentId: 'a1', messageId: 'done' })
   })
@@ -215,8 +230,23 @@ describe('Telegram', () => {
     const before = api.sent.length
     await tg.finished({ id: 'emoji', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text, at: 0 }, 'PM', '#company')
     const parts = api.sent.slice(before).map((p) => String(p.body['text']))
-    expect(parts.join('')).toBe(`PM (#company):\n\n${text}`)
-    expect(parts.every((p) => p.length <= 3500 && !/[\uD800-\uDBFF]$/.test(p))).toBe(true)
+    expect(parts.length).toBeGreaterThan(1)
+    // First part has the header.
+    expect(parts[0]).toMatch(/^PM \(#company\):\n\n/)
+    // Continuation parts have the "continuing message" header.
+    for (let i = 1; i < parts.length; i++) {
+      expect(parts[i]).toMatch(/^PM \(#company\):\ncontinuando mensagem...\n/)
+    }
+    // No part exceeds Telegram's limit and none ends with a surrogate half.
+    for (const p of parts) {
+      expect(p.length).toBeLessThanOrEqual(4000)
+      expect(!/[\uD800-\uDBFF]$/.test(p)).toBe(true)
+    }
+    // Stripping continuation headers, the parts reconstruct the original message.
+    const contents = parts.map((p, i) => {
+      return i === 0 ? p : p.replace(/^PM \(#company\):\ncontinuando mensagem...\n/, '')
+    })
+    expect(contents.join('')).toBe(`PM (#company):\n\n${text}`)
   })
 
   it('clears stored destinations on unpair and token replacement', async () => {

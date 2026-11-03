@@ -14,7 +14,7 @@ const CHAT = 'telegram:chat'
 const REPLIES = 'telegram:replies'
 const POLL_SECONDS = 50
 const RETRY_MS = 15_000
-const MAX_TEXT = 3_500 // Telegram allows 4096 per message
+const MAX_TEXT = 4_000 // Telegram allows 4096 per message
 
 type Fetch = typeof fetch
 type Update = {
@@ -263,15 +263,20 @@ export class Telegram {
 
   async finished(msg: Message, agentName: string, where: string, workspaceId = 'default'): Promise<void> {
     if (!this.chat || !msg.text.trim()) return
-    const text = `${agentName} (${where}):\n\n${msg.text}`
-    // Do not silently truncate results; every part remains replyable.
-    for (let offset = 0; offset < text.length;) {
-      let end = Math.min(offset + MAX_TEXT, text.length)
-      // Keep UTF-16 surrogate pairs together at Telegram's message boundary.
-      if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!)) end--
-      const id = await this.send(text.slice(offset, end))
-      if (id) await this.remember(id, { workspaceId, conversationId: msg.conversationId, agentId: msg.author.kind === 'agent' ? msg.author.id : undefined, messageId: msg.id })
-      offset = end
+    const header = `${agentName} (${where}):\n\n`
+    const continuationPrefix = `${agentName} (${where}):\n${L('continuando mensagem...', 'continuing message...')}`
+    const target = { workspaceId, conversationId: msg.conversationId, agentId: msg.author.kind === 'agent' ? msg.author.id : undefined, messageId: msg.id }
+
+    // Split into Telegram-safe parts without cutting words; continuation parts
+    // get the agent/channel header plus a "continuing message…" notice.
+    // Reserve room on the first part for the header.
+    const parts = splitMessage(msg.text, MAX_TEXT - header.length, continuationPrefix)
+    const firstPart = header + parts[0]
+    const id = await this.send(firstPart)
+    if (id) await this.remember(id, target)
+    for (let i = 1; i < parts.length; i++) {
+      const partId = await this.send(parts[i]!)
+      if (partId) await this.remember(partId!, target)
     }
   }
 
@@ -285,7 +290,48 @@ function approvalText(ap: Approval): string {
   return `${ap.connectorName} · ${ap.tool}${ap.why ? `\n${L('Motivo', 'Reason')}: ${ap.why}` : ''}\n\n${args.length > 1500 ? `${args.slice(0, 1500)}…` : args}`
 }
 
-const clip = (s: string): string => (s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}…` : s)
+const clip = (s: string): string => (s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) : s)
+
+// Splits text into Telegram-safe parts without cutting words.
+// Prefers line breaks, falls back to word boundaries.
+// Continuation parts (after the first) get a prefix header prepended.
+function splitMessage(text: string, maxLen: number, prefix = ''): string[] {
+  const parts: string[] = []
+  let remaining = text
+  let first = true
+
+  while (remaining.length > 0) {
+    const prefixLen = prefix ? prefix.length + 1 : 0
+    const available = first ? maxLen : maxLen - prefixLen
+
+    if (remaining.length <= available) {
+      parts.push(first ? remaining : (prefix ? `${prefix}\n${remaining}` : remaining))
+      break
+    }
+
+    // Find split point: prefer a line break, then the last space (never cut a word).
+    let splitAt = available
+    const newlineIdx = remaining.lastIndexOf('\n', available)
+    if (newlineIdx !== -1 && newlineIdx > 0) {
+      splitAt = newlineIdx + 1 // include the newline
+    } else {
+      const spaceIdx = remaining.lastIndexOf(' ', available)
+      if (spaceIdx !== -1 && spaceIdx > 0) {
+        splitAt = spaceIdx
+      }
+    }
+    // Never split a UTF-16 surrogate pair (emoji).
+    if (splitAt > 1 && splitAt < remaining.length && /[\uD800-\uDBFF]/.test(remaining[splitAt - 1]!)) {
+      splitAt--
+    }
+
+    parts.push(first ? remaining.slice(0, splitAt) : (prefix ? `${prefix}\n${remaining.slice(0, splitAt)}` : remaining.slice(0, splitAt)))
+    remaining = remaining.slice(splitAt)
+    first = false
+  }
+
+  return parts
+}
 
 // Strip inline markdown formatting for clean Telegram plain-text delivery.
 // Keeps line breaks, list indentation and code-block separation intact.
