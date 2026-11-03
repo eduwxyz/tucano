@@ -29,6 +29,7 @@ import {
   unpairTelegram,
   setGithubToken,
   exportTeam,
+  importAgents,
   importTeam,
   backupNow,
   openBackups,
@@ -63,6 +64,7 @@ import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
+import exportSkill from '../assets/tucano-export-skill.md?raw'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
   return (
@@ -1472,8 +1474,23 @@ function GithubCard({ info }: { info?: { user?: string; error?: string } }): Rea
 }
 
 // The team as a file, and backups of everything.
+const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
+  // Grok Bot has no export: one of the person's agents there runs this skill and writes our .zip.
+  const grokSkill = (): void => {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([exportSkill], { type: 'text/markdown' }))
+    a.download = 'SKILL.md'
+    a.click()
+    URL.revokeObjectURL(a.href)
+    setNote(
+      L(
+        'Baixei o SKILL.md. No Grok Bot, dê a skill a um dos seus agentes (ou cole o texto numa conversa com ele) e peça: "Exporte meus agentes pro Tucano". Ele te devolve um .zip, que você abre em "Importar de outro app…". É experimental: ainda não foi testada dentro do Grok Bot, então confira o resumo da importação.',
+        'I downloaded SKILL.md. In Grok Bot, give the skill to one of your agents (or paste its text in a chat with it) and ask: "Export my agents to Tucano". It gives you back a .zip, which you open with "Import from another app…". It\'s experimental: it hasn\'t been tried inside Grok Bot yet, so check the import summary.'
+      )
+    )
+  }
   const download = (): void => {
     void exportTeam().then((md) => {
       const a = document.createElement('a')
@@ -1483,16 +1500,31 @@ function TeamCard(): ReactNode {
       URL.revokeObjectURL(a.href)
     })
   }
+  const failed = (e: unknown): void => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
   const upload = (file?: File): void => {
     if (!file) return
+    void file.text().then(importTeam).then(setNote, failed)
+  }
+  // Another app's export: on the desktop the core reads the file where it is; in a browser it goes up whole.
+  const fromApp = (file?: File): void => {
+    if (!file) return
+    setNote(L('Lendo o arquivo…', 'Reading the file…'))
+    const path = window.tucano.pathOf?.(file)
+    if (path) return void importAgents({ path }).then(setNote, failed)
+    if (file.size > MAX_UPLOAD) return setNote(L('Arquivo grande demais pra mandar pelo navegador. Importe no app do computador, ou exporte sem os arquivos.', 'File too big to send through the browser. Import it in the desktop app, or export without the files.'))
     void file
-      .text()
-      .then(importTeam)
-      .then(setNote, (e: unknown) => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
+      .arrayBuffer()
+      .then((b) => {
+        const bytes = new Uint8Array(b)
+        let bin = ''
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+        return importAgents({ data: btoa(bin) })
+      })
+      .then(setNote, failed)
   }
   return (
-    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. And a copy of everything once a day (the last 7).')}>
-      <div className="row">
+    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot and Grok Bot come in too, with no connector and web search off. And a copy of everything once a day (the last 7).')}>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
         <button className="btn btn--sm" onClick={download}>
           {L('Exportar time', 'Export team')}
         </button>
@@ -1500,7 +1532,33 @@ function TeamCard(): ReactNode {
           {L('Importar time…', 'Import team…')}
           <input type="file" accept=".md,text/markdown" hidden onChange={(e) => upload(e.target.files?.[0])} />
         </label>
-        <span className="grow" />
+        <label
+          className="btn btn--sm"
+          title={L(
+            'OpenBot: Configurações do servidor → Transfer → Export from this server, com os arquivos. Grok Bot: o .zip feito com a skill do Tucano.',
+            "OpenBot: Server settings → Transfer → Export from this server, with the files. Grok Bot: the .zip made with Tucano's skill."
+          )}
+        >
+          {L('Importar de outro app…', 'Import from another app…')}
+          <input
+            type="file"
+            accept=".zip,application/zip"
+            hidden
+            onChange={(e) => {
+              fromApp(e.target.files?.[0])
+              e.target.value = ''
+            }}
+          />
+        </label>
+        <button
+          className="btn btn--sm"
+          onClick={grokSkill}
+          title={L('Experimental: a skill que exporta seus agentes do Grok Bot pro Tucano. Ainda não foi testada dentro do Grok Bot.', "Experimental: the skill that exports your agents from Grok Bot to Tucano. It hasn't been tried inside Grok Bot yet.")}
+        >
+          {L('Skill pro Grok Bot (experimental)', 'Skill for Grok Bot (experimental)')}
+        </button>
+      </div>
+      <div className="row" style={{ marginTop: 8 }}>
         <button className="btn btn--sm" onClick={() => void backupNow().then((f) => setNote(L(`Backup feito: ${f.split('/').pop()}`, `Backup done: ${f.split('/').pop()}`)))}>
           {L('Fazer backup agora', 'Back up now')}
         </button>
@@ -1508,7 +1566,7 @@ function TeamCard(): ReactNode {
           {L('Abrir pasta', 'Open folder')}
         </button>
       </div>
-      {note && <p className="small muted">{note}</p>}
+      {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
     </Card>
   )
 }

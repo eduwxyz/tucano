@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 // The page asks for a port to the core; it arrives here and is handed to the
 // page through window.postMessage, the only way to pass a port across
@@ -10,6 +10,8 @@ ipcRenderer.on('core:port', (event) => {
 contextBridge.exposeInMainWorld('tucano', {
   connect: (): void => ipcRenderer.send('core:connect'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
+  // A picked file's path, so the core reads a big .zip in parts instead of through the page.
+  pathOf: (file: File): string => webUtils.getPathForFile(file),
   // A click on a notification opens its conversation.
   onNavigate: (cb: (conversationId: string) => void): void => {
     ipcRenderer.on('navigate', (_e, id: unknown) => typeof id === 'string' && cb(id))
