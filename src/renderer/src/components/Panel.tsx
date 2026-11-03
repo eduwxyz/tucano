@@ -368,6 +368,7 @@ export function SidePanel(): ReactNode {
   const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId) : undefined))
   const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
   const [reload, setReload] = useState(0)
+  const previewUnavailable = !!window.tucano.remoteMode || window.tucano.servicePreviews === false
   if (!panel) return null
 
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? L(`Navegador de ${browserName ?? 'agente'}`, `${browserName ?? 'Agent'}'s browser`) : '')
@@ -376,11 +377,11 @@ export function SidePanel(): ReactNode {
       <header className="side-panel__head">
         <Icon name={panel.kind === 'service' || panel.kind === 'browser' ? 'globe' : 'edit'} size={14} />
         <strong className="side-panel__title">{title}</strong>
-        {service?.url && <code className="side-panel__url">{reachable(service.url)}</code>}
+        {service?.url && <code className="side-panel__url">{previewUnavailable ? service.url : reachable(service.url)}</code>}
         {panel.kind === 'browser' && <LiveBadge agentId={panel.agentId} />}
         <span className="grow" />
         {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} />}
-        {service?.url && (
+        {service?.url && !previewUnavailable && (
           <>
             <button className="icon-btn" title={L('Recarregar', 'Reload')} onClick={() => setReload((n) => n + 1)}>
               <Icon name="clock" size={14} />
@@ -397,7 +398,7 @@ export function SidePanel(): ReactNode {
       <div className="side-panel__body">
         {artifact && <ArtifactView artifact={artifact} />}
         {panel.kind === 'service' &&
-          (service?.running && service.url ? (
+          (service?.running && service.url ? previewUnavailable ? <p className="empty">{L('A visualização automática deste serviço remoto está desativada. Para abrir sua página separadamente, encaminhe essa porta por SSH ou use uma URL HTTPS configurada no servidor. Conectar ao Tucano não encaminha as portas dos serviços.', 'Automatic preview of this remote service is disabled. To open its page separately, forward that port over SSH or use an HTTPS URL configured on the server. Connecting to Tucano does not forward service ports.')}</p> : (
             // Same origin is the service's own (127.0.0.1:port), not the app's.
             <iframe key={reload} src={reachable(service.url)} sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals" title={service.name} />
           ) : (

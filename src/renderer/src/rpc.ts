@@ -1,9 +1,35 @@
 import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../shared/rpc'
 import type { UpdateState } from '../../shared/types'
+import type { Reach } from '../../shared/pairlink'
+import type { DraftApi } from '../../shared/drafts'
+
+export type RemoteState = {
+  active: string | null
+  profiles: { id: string; name: string; reach: Reach; remotePort: number }[]
+  status: 'local' | 'connecting' | 'connected' | 'error'
+  error?: string
+  pairLink?: string
+  pairLinkId?: number
+  switching?: boolean
+}
+
+export type RemoteApi = {
+  state: () => Promise<RemoteState>
+  onState: (cb: (state: RemoteState) => void) => () => void
+  pair: (link: string) => Promise<void>
+  select: (id: string | null) => Promise<void>
+  forget: (id: string) => Promise<void>
+  rename?: (id: string, name: string) => Promise<void>
+}
 
 declare global {
   interface Window {
     tucano: {
+      remote?: RemoteApi
+      remoteMode?: boolean
+      drafts?: DraftApi
+      servicePreviews?: boolean
+      clientPlatform?: 'mac' | 'windows' | 'linux'
       connect: () => void
       pickFolder: () => Promise<string | null>
       onNavigate: (cb: (conversationId: string) => void) => void

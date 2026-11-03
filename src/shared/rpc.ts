@@ -44,7 +44,7 @@ export interface Api {
   loginAccount(p: { id: string }): { opened: boolean; command: string }
   removeAccount(p: { id: string }): void
   installEngine(p: { engine: EngineId }): { opened: boolean; command: string; needsNode?: boolean } // needsNode: an npm install with no npm here
-  desktopStatus(): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> // agent-desktop, for the person's apps
+  desktopStatus(): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean; desktopEnabled?: boolean; desktopReady?: boolean }> // agent-desktop, for the person's apps
   installedApps(): Promise<{ name: string; bundleId?: string; path?: string; icon?: string }[]> // the person's installed apps (a Mac's), kept on disk
   openApps(): Promise<{ name: string; bundleId?: string }[]> // the apps with windows right now
   installDesktop(): { opened: boolean; command: string; needsNode?: boolean }

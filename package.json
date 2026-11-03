@@ -14,10 +14,13 @@
     "server": "node out/main/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "test:server": "node scripts/server-e2e.mjs",
     "dist": "sh scripts/dist.sh",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "install-app": "npm run dist && sh scripts/install-app.sh",
-    "release": "sh scripts/release.sh"
+    "release": "sh scripts/release.sh",
+    "test:installer": "node --test scripts/installer-test.mjs",
+    "test:connections": "node scripts/connections-e2e.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
@@ -46,6 +49,14 @@
   },
   "build": {
     "appId": "dev.tucano.app",
+    "protocols": [
+      {
+        "name": "Tucano pairing",
+        "schemes": [
+          "tucano"
+        ]
+      }
+    ],
     "productName": "Tucano",
     "toolsets": {
       "appimage": "1.0.3"

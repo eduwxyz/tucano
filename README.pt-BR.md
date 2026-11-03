@@ -29,7 +29,7 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
 - **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
 - **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
-- **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
+- **Suas máquinas, seus dados.** Conversas, memória, logins e arquivos ficam no seu computador ou num servidor seu. Não existe serviço hospedado pelo Tucano.
 
 ## O que ele faz
 
@@ -130,7 +130,7 @@ curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh
 
 Ele baixa a última versão e abre. No Mac, coloca o Tucano em **Aplicativos**; no Linux, instala o .deb pelo apt (pede a sua senha) ou, sem apt, o AppImage em `~/.local/bin`, com um atalho no menu de aplicativos. Rodado no Windows (no Git Bash, por exemplo), ele indica o comando do PowerShell acima.
 
-**Num servidor** (uma VPS, pras rotinas continuarem rodando com o seu computador dormindo): o Tucano também roda sem janela, e você usa pelo navegador. Veja [docs/server.md](docs/server.md) (em inglês). É experimental.
+**Num servidor** (uma VPS, pras rotinas continuarem rodando com o seu computador dormindo): o Tucano também roda sem janela. Use pelo navegador ou pareie VPSs independentes como **Pessoal** e **Trabalho** no seletor de ambientes no topo do app, mantendo **Este computador** pro trabalho local. Cada ambiente tem seus próprios agentes, dados e logins. Veja [docs/server.md](docs/server.md) (em inglês) pra instalação, pareamento SSH/HTTPS e instruções da versão ainda não publicada. É experimental.
 
 A partir da 0.1.2, o Tucano se atualiza sozinho: baixa a versão nova em segundo plano e mostra **Reiniciar** na barra lateral quando ela está pronta (ou ela entra na próxima vez que você fechar o app). As versões anteriores se atualizam pelo mesmo download ou comando. No Linux, o AppImage e o .deb também se atualizam sozinhos; o .deb pede a sua senha pra instalar a atualização. No Windows também, sem aviso nenhum.
 

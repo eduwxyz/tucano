@@ -47,7 +47,7 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
     try {
       const { conversationId } = await createFromDraft(message.id)
       navigate({ kind: 'conversation', id: conversationId })
-      if (d.task) sendMessage(conversationId, d.task)
+      if (d.task) await sendMessage(conversationId, d.task)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
