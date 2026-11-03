@@ -10,10 +10,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-[ -f out/main/server.js ] && [ -f out/main/core.js ] && [ -f out/renderer/index.html ] || {
+if ! { [ -f out/main/server.js ] && [ -f out/main/core.js ] && [ -f out/renderer/index.html ]; }; then
   echo "Nothing built yet: run npm run build first." >&2
   exit 1
-}
+fi
 
 OUT="${1:-dist-server}"
 VERSION=$(node -p "require('./package.json').version")
@@ -30,7 +30,8 @@ echo "$VERSION" > "$PKG/VERSION"
 
 # On a Mac, tar adds ._ files and extended attributes (COPYFILE_DISABLE, --no-xattrs), which GNU tar on the
 # server would warn about on every unpack.
-if tar --no-xattrs -cf /dev/null -T /dev/null 2>/dev/null; then
+echo probe > "$STAGE/probe"
+if tar --no-xattrs -cf /dev/null -C "$STAGE" probe 2>/dev/null; then
   COPYFILE_DISABLE=1 tar --no-xattrs -czf "$OUT/tucano-server.tar.gz" -C "$STAGE" tucano-server
 else
   COPYFILE_DISABLE=1 tar -czf "$OUT/tucano-server.tar.gz" -C "$STAGE" tucano-server
