@@ -495,7 +495,7 @@ export class Db {
   // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
   recentMessages(conversationId: string, limit: number, threadId?: string | null): Message[] {
     const where = threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?'
-    const args = threadId ? [conversationId, threadId, limit] : [conversationId, limit]
+    const args = typeof threadId === 'string' ? [conversationId, threadId, limit] : [conversationId, limit]
     const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ?${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
   }

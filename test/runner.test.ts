@@ -284,8 +284,8 @@ describe('ask_user through the gateway', () => {
     expect(asked?.run?.steps.map((s) => s.label)).toEqual(['Pensou', 'Perguntou a você', 'Respondeu'])
     expect(claude.turns[0]?.mcpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[a-f0-9]{48}$/)
 
-    // No mention and two agents in the channel, but Lia asked: she answers, not the router.
-    await r.send('c1', 'até sexta')
+    // No mention and two agents in the channel, but Lia asked in this thread: she answers, not the router.
+    await r.send('c1', 'até sexta', [], asked!.threadId)
     await r.idle()
     expect(db.message(asked!.id)?.run?.status).toBe('done')
     const replies = agentMessages()

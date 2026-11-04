@@ -167,7 +167,7 @@ describe('who answers in a thread', () => {
 })
 
 describe('questions in threads', () => {
-  it("a question waits in its thread: my next message answers it there, even written outside; another thread doesn't", async () => {
+  it("a question waits in its thread: my next message there answers it; another thread or outside threads doesn't", async () => {
     const root = put('c1', { kind: 'me' }, 'RAIZ')
     const other = put('c1', { kind: 'me' }, 'OUTRA RAIZ')
     const r = runner()
@@ -182,12 +182,30 @@ describe('questions in threads', () => {
     await r.idle()
     expect(db.message(asked.id)?.run?.status).toBe('waiting_input')
 
-    // My next message outside threads does, and goes in the question's thread, back to Lia.
-    await r.send('c1', 'até sexta')
+    // Nor does a new subject written outside threads: it stays outside, in a thread of its own.
+    await r.send('c1', '@theo assunto novo: revisa o PR 50')
+    await r.idle()
+    const outside = mine().at(-1)!
+    expect(outside.threadId).toBeUndefined()
+    expect(db.message(asked.id)?.run?.status).toBe('waiting_input')
+    expect(replies().at(-1)).toMatchObject({ threadId: outside.id, author: { id: 'a2' } })
+
+    // My next message in its thread does, back to Lia.
+    await r.send('c1', 'até sexta', [], root.id)
     await r.idle()
     expect(mine().at(-1)?.threadId).toBe(root.id)
     expect(db.message(asked.id)?.run?.status).toBe('done')
     expect(replies().at(-1)).toMatchObject({ threadId: root.id, author: { id: 'a1' } })
+  })
+
+  it('a question outside threads (from before them) is still answered outside', async () => {
+    const r = runner()
+    const asked = put('c1', { kind: 'agent', id: 'a1' }, 'Qual o prazo?')
+    db.saveMessage({ ...asked, run: { status: 'waiting_input', depth: 1, steps: [] } })
+    await r.send('c1', 'até sexta')
+    await r.idle()
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(replies().at(-1)).toMatchObject({ author: { id: 'a1' } })
   })
 })
 

@@ -153,11 +153,10 @@ export class Runner {
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
     // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
     const root = threadId ? db.message(threadId) : undefined
-    let thread = root?.conversationId === conv.id ? (root.threadId ?? root.id) : undefined
-    // A question an agent left waiting is answered by my next message, even one written
-    // outside its thread: the message goes in that thread.
+    const thread = root?.conversationId === conv.id ? (root.threadId ?? root.id) : undefined
+    // A question an agent left waiting is answered by my next message in its thread. What I
+    // write outside threads stays outside: it only answers a question that is outside too.
     const asked = this.pendingQuestion(conv.id, thread)
-    thread ??= asked?.threadId
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // Every answer goes in the thread of what it answers: a message of mine outside one opens it.
@@ -350,10 +349,10 @@ export class Runner {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
   }
 
-  // The question waiting for me: in a thread, that thread's; outside threads, the latest anywhere.
+  // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
   private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
     return this.deps.db
-      .recentMessages(conversationId, 50, threadId)
+      .recentMessages(conversationId, 50, threadId ?? null)
       .reverse()
       .find((m) => m.run?.status === 'waiting_input')
   }
