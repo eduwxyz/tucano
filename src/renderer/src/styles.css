@@ -6041,8 +6041,15 @@ kbd {
 .cal__col {
   position: relative;
   border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  background-image: linear-gradient(color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
   cursor: cell;
+}
+.cal__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  pointer-events: none;
 }
 .cal__col.is-today {
   background-color: color-mix(in srgb, var(--accent) 3%, transparent);
