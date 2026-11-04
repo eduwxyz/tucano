@@ -595,6 +595,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 setDraft((d) => ({ ...d, ...patch }))
                 patchAgent(draft.id, patch)
               }}
+              ssh={!!draft.ssh}
+              onSsh={(on) => {
+                setDraft((d) => ({ ...d, ssh: on }))
+                patchAgent(draft.id, { ssh: on })
+              }}
             />
           )}
 
@@ -829,7 +834,7 @@ const COMPUTER_CHOICES = (): { value: ComputerChoice; label: string }[] => [
   { value: 'mac', label: L('Este computador', 'This computer') }
 ]
 
-function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void }): ReactNode {
+function ComputerCard({ agentId, kind, onChange, ssh, onSsh }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void; ssh: boolean; onSsh: (on: boolean) => void }): ReactNode {
   const info = useStore((s) => computerOf(s, agentId))
   const [confirmErase, setConfirmErase] = useState(false)
   const [confirmMac, setConfirmMac] = useState(false)
@@ -887,6 +892,32 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
               {L('Cancelar', 'Cancel')}
             </button>
           </div>
+        </div>
+      )}
+      {kind === 'linux' && (
+        <div className="ssh-share">
+          <label className="check">
+            <input type="checkbox" checked={ssh} onChange={(e) => onSsh(e.target.checked)} />
+            <span>
+              <strong>{L('Usar o SSH da minha máquina', 'Use my machine’s SSH')}</strong>
+              <span className="muted small">
+                {' '}
+                {L(
+                  '· as suas chaves assinam por ele, pelo seu agente SSH, sem serem copiadas. O seu ~/.ssh/config, o known_hosts e as chaves públicas vão junto, pros nomes de host funcionarem.',
+                  '· your keys sign for it, through your SSH agent, without being copied. Your ~/.ssh config, known_hosts and public keys go along, so host names work.'
+                )}
+              </span>
+            </span>
+          </label>
+          {ssh && (
+            <p className="muted small ssh-share__warn">
+              {L(
+                'Tudo o que ele fizer por SSH sai com a sua identidade, nos servidores em que a sua chave entra. Ligar ou desligar reinicia o computador dele (o que ele instalou fica).',
+                'Everything it does over SSH goes out as you, on the servers your key gets into. Turning it on or off restarts its computer (what it installed stays).'
+              )}
+            </p>
+          )}
+          {ssh && info?.ssh && <p className="field__error">{info.ssh}</p>}
         </div>
       )}
       {kind === 'mac' && (

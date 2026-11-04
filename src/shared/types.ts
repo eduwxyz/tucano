@@ -80,6 +80,9 @@ export interface Agent {
   memory: MemoryMode
   computer: boolean // has a computer (spec §13): see computerKind for which
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
+  // Its Linux computer uses the person's SSH agent: their keys sign for it, but never leave their machine.
+  // Their ~/.ssh config, known_hosts and public keys are copied in, so host names work. Off unless they turn it on.
+  ssh?: boolean
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
@@ -642,6 +645,7 @@ export interface ComputerInfo {
   folder: string // /work, on the Mac (on a Mac computer: its default working folder)
   services: Service[]
   kind?: ComputerKind
+  ssh?: string // why the person's SSH can't be shared now, when the agent asks for it
 }
 
 export type ArtifactKind = 'image' | 'video' | 'markdown' | 'html' | 'pdf' | 'csv' | 'text' | 'file'
