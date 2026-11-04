@@ -451,7 +451,7 @@ const github: GitHub = new GitHub({
 })
 
 githubRef = github
-const computers = new Computers({ db, dataDir, emit, shoot, gitRemote: (agentId) => github.gitRemote(agentId) })
+const computers = new Computers({ db, dataDir, emit, shoot, gitRemote: (agentId) => github.gitRemote(agentId), setup: () => settings().computerSetup })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.

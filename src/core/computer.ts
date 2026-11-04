@@ -12,11 +12,16 @@ import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import { PROJECTS_DIR, type Agent, type Artifact, type ArtifactKind, type ComputerInfo, type LentFolder, type Service } from '../shared/types'
 import type { Db } from './db'
+import { lastLines } from './engines/cli'
 import { textResult, type ToolDef } from './gateway'
 import { MacComputer, macTools } from './mac'
 import { isWin, osOf } from './platform'
 
 export const IMAGE = 'node:22-bookworm'
+// The base a new computer starts from when the person set up what it comes with: IMAGE, with their
+// setup script run once. Tagged by the script, so a new script makes a new base.
+export const BASE = 'tucano-base'
+export const baseTag = (script: string): string => `${BASE}:${createHash('sha256').update(script.trim()).digest('hex').slice(0, 12)}`
 // Containers of another data directory (tests, a second install) never collide.
 const prefixOf = (dataDir: string, name: string): string => `${name}-${createHash('sha1').update(dataDir).digest('hex').slice(0, 6)}`
 export const PORTS = [3000, 3001, 4173, 5000, 5173, 8000, 8080, 8501, 8888]
@@ -352,6 +357,7 @@ export interface ComputerDeps {
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
   gitRemote?: (agentId: string) => string | undefined // the app's GitHub proxy for this agent (spec §22)
+  setup?: () => string | undefined // what every new computer comes with (Settings): a bash script
 }
 
 export class Computers {
@@ -359,6 +365,7 @@ export class Computers {
   private gitSet = new Set<string>() // computers whose git already goes through the proxy, this session
   private ports = new Map<string, Record<number, number>>()
   private starting = new Map<string, Promise<void>>()
+  private bases = new Map<string, Promise<string>>() // base images being made, by tag
   private prefix: string
   private legacy: string
   private adopted = new Set<string>()
@@ -480,11 +487,16 @@ export class Computers {
       if (r.code !== 0) return this.fail(agentId, r.stderr)
     } else {
       const saved = (await docker(['image', 'inspect', this.stateImage(agentId)], { timeoutMs: 15_000 })).code === 0
-      const image = saved ? this.stateImage(agentId) : IMAGE
       if (!saved && (await docker(['image', 'inspect', IMAGE], { timeoutMs: 15_000 })).code !== 0) {
         this.set(agentId, { state: 'starting', detail: L('Baixando o sistema do computador (só na primeira vez, alguns minutos)…', "Downloading the computer's system (only the first time, a few minutes)…") })
         const pull = await docker(['pull', IMAGE], { timeoutMs: 30 * 60_000 })
         if (pull.code !== 0) return this.fail(agentId, pull.stderr)
+      }
+      let image = this.stateImage(agentId)
+      if (!saved) {
+        const base = await this.base(agentId)
+        if (typeof base !== 'string') return this.fail(agentId, base.error)
+        image = base
       }
       this.set(agentId, { state: 'starting', detail: L('Montando o computador…', 'Setting up the computer…') })
       const folder = this.folder(agentId)
@@ -522,6 +534,44 @@ export class Computers {
     await this.readPorts(agentId)
     await this.pointGit(agentId)
     this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
+  }
+
+  // The image a new computer starts from: IMAGE, or the base made from the person's setup script, made the
+  // first time it's needed (once for every computer after it) and kept. A script that fails says why.
+  private async base(agentId: string): Promise<string | { error: string }> {
+    const script = this.deps.setup?.()?.trim()
+    if (!script) return IMAGE
+    const tag = baseTag(script)
+    if ((await docker(['image', 'inspect', tag], { timeoutMs: 15_000 })).code === 0) return tag
+    let making = this.bases.get(tag)
+    if (!making) {
+      making = this.makeBase(tag, script).finally(() => this.bases.delete(tag))
+      this.bases.set(tag, making)
+    }
+    this.set(agentId, { state: 'starting', detail: L('Instalando o que você configurou pros computadores (só na primeira vez, alguns minutos)…', 'Installing what you set up for the computers (only the first time, a few minutes)…') })
+    try {
+      return await making
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  private async makeBase(tag: string, script: string): Promise<string> {
+    const prep = `tucano-prep-${tag.split(':')[1]}`
+    await docker(['rm', '-f', prep], { timeoutMs: 30_000 })
+    const run = await docker(['run', '--name', prep, '-e', 'DEBIAN_FRONTEND=noninteractive', IMAGE, 'bash', '-c', `set -e\n${script}`], { timeoutMs: 30 * 60_000 })
+    if (run.code !== 0) {
+      await docker(['rm', '-f', prep], { timeoutMs: 30_000 })
+      const said = lastLines(`${run.stdout}\n${run.stderr}`, 6)
+      throw new Error(L(`A preparação do computador falhou (Configurações › Agentes › Computador dos agentes):\n${said}`, `The computer setup failed (Settings › Agents › Agents’ computer):\n${said}`))
+    }
+    const commit = await docker(['commit', prep, tag], { timeoutMs: 10 * 60_000 })
+    await docker(['rm', '-f', prep], { timeoutMs: 30_000 })
+    if (commit.code !== 0) throw new Error(commit.stderr.trim() || L('Não consegui guardar o computador preparado.', "I couldn't save the set-up computer."))
+    // The bases of scripts no longer in use go, so they don't pile up on the disk (one in use stays).
+    const old = await docker(['image', 'ls', BASE, '--format', '{{.Repository}}:{{.Tag}}'], { timeoutMs: 15_000 })
+    for (const t of old.stdout.split('\n').map((x) => x.trim()).filter((x) => x && x !== tag)) await docker(['image', 'rm', t], { timeoutMs: 60_000 })
+    return tag
   }
 
   // GitHub, by any of its URL forms, goes through the app's proxy, which adds the

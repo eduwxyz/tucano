@@ -1127,6 +1127,7 @@ export class Runner {
               memories: promptMemories,
               canRemember,
               hasComputer: !!computers,
+              computerSetup: settings.computerSetup,
               browser: !!browser,
               apps: apps ? agent.apps : undefined,
               offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
