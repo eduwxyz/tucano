@@ -79,4 +79,20 @@ describe('an agent does one thing at a time', () => {
     expect(of('dev').map((m) => m.run?.status)).toEqual(['done', 'done'])
     expect(of('dev')[1]!.id).toBe(queued!.id) // the queued reply is the one that answered
   })
+
+  it('stopping a reply that is still queued cancels it: it never starts', async () => {
+    const engines: Record<EngineId, Engine> = { claude: slow, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+    const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'aq-w-')), gateway })
+    await r.send('c', '@dev revisa o PR 12')
+    await until(() => turns.length === 1)
+    db.saveMessage({ id: 'old', conversationId: 'c', author: { kind: 'me' }, text: 'o build de ontem', at: 1 })
+    await r.send('c', '@dev depois olha o build', [], 'old')
+    const queued = of('dev').find((m) => m.run?.steps[0]?.label === 'Na fila')!
+    r.stop(queued.id)
+    expect(db.message(queued.id)!.run).toMatchObject({ status: 'stopped', steps: [{ label: 'Cancelado' }] })
+    releaseOldest()
+    await r.idle()
+    expect(turns).toHaveLength(1) // dev's second never ran
+    expect(db.message(queued.id)!.run?.status).toBe('stopped')
+  })
 })
