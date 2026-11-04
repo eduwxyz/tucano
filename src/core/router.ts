@@ -5,6 +5,7 @@
 import { L } from '../shared/lang'
 import type { Agent, Connector, Message } from '../shared/types'
 import type { Engine, Usage } from './engines/types'
+import type { ThreadDigest } from './memory'
 
 export const ROUTER_HISTORY = 10
 export const MAX_ROUTED = 2
@@ -45,26 +46,32 @@ export function describeAgent(a: Agent, connectors: Connector[] = []): string {
 
 export const REPLY_JSON = (): string => L('Responda só com o JSON.', 'Reply with the JSON only.')
 
-// `thread`: the message that started the thread the last message is in; `messages` are then its replies.
-export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; thread?: Message }): string {
-  const { messages, agents, me, connectors = [], thread } = opts
+// `thread`: the message that started the thread the last message is in; `messages` are then
+// that thread, and `threads` the conversation's other threads, a line each (who took what).
+export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; thread?: Message; threads?: ThreadDigest[] }): string {
+  const { messages, agents, me, connectors = [], thread, threads = [] } = opts
   const roster = agents.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`)
   const said = (m: Message): boolean => !!m.text.trim() && m.author.kind !== 'system'
-  const recent = messages.filter(said).slice(-ROUTER_HISTORY)
-  const lines = [...(thread && said(thread) ? [thread] : []), ...recent]
-    .map((m) => {
-      const author =
-        m.author.kind === 'me'
-          ? me
-          : m.author.kind === 'routine'
-            ? L(`rotina de ${me}`, `${me}'s routine`)
-            : (agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent'))
-      return `[${author}] ${m.text.trim().slice(0, 600)}`
+  const name = (m: Message): string =>
+    m.author.kind === 'me'
+      ? me
+      : m.author.kind === 'routine'
+        ? L(`rotina de ${me}`, `${me}'s routine`)
+        : (agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent'))
+  const recent = messages.filter((m) => said(m) && m.id !== thread?.id).slice(-ROUTER_HISTORY)
+  const lines = [...(thread && said(thread) ? [thread] : []), ...recent].map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`)
+  // Who answered what elsewhere, so a follow-up goes to whoever handled the subject.
+  const others = threads
+    .filter((t) => t.root && said(t.root))
+    .map((t) => {
+      const who = t.agents.map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent')).join(', ')
+      return `- [${name(t.root!)}] ${t.root!.text.replace(/\s+/g, ' ').trim().slice(0, 200)} → ${who || L('sem resposta', 'no reply')}`
     })
   return [
     L('Agentes no canal:', 'Agents in the channel:'),
     ...roster,
     '',
+    ...(others.length ? [L('Outras threads recentes (outros assuntos, só contexto: quem respondeu cada uma):', 'Other recent threads (other subjects, context only: who answered each):'), ...others, ''] : []),
     thread
       ? L('Thread (a primeira mensagem abriu a thread; a última é a que precisa de resposta):', 'Thread (the first message started it; the last one is the one that needs an answer):')
       : L('Conversa (a última é a que precisa de resposta):', 'Conversation (the last one is the one that needs an answer):'),
@@ -107,6 +114,7 @@ export async function route(opts: {
   me: string
   connectors?: Connector[]
   thread?: Message
+  threads?: ThreadDigest[]
   cwd: string
 }): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()
