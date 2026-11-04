@@ -746,6 +746,11 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.topbar__role {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .topbar__actions {
   display: flex;
   align-items: center;
@@ -1790,6 +1795,13 @@ h3 {
 .profile-card__name {
   font-size: 16px;
   margin-top: 8px;
+}
+.profile-card__role {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 .profile-card__rows {
   width: 100%;

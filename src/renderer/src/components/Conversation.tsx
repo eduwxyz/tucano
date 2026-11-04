@@ -137,7 +137,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           <div className="topbar__title">
             {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
             <h1>{title}</h1>
-            {dmAgent && <span className="tag">{dmAgent.role}</span>}
+            {dmAgent?.role && (
+              <span className="tag topbar__role" title={dmAgent.role}>
+                {dmAgent.role}
+              </span>
+            )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
           </div>
           <div className="topbar__actions">
