@@ -1017,7 +1017,9 @@ export class Runner {
       return t.cls === 'sensitive' || rules.mode === 'ask'
     }
     for (const c of this.deps.connectors?.list() ?? []) {
-      if (c.status !== 'connected') continue
+      // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
+      // (a refused token, a sign-in to finish) takes them away.
+      if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id]) && gate(kindsOf(t), agent.actionRules, settings.actionRules, startAbove).mode !== 'off') exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
@@ -1681,7 +1683,7 @@ ${note}`,
               computerOff,
               browser: !!browser,
               apps: apps ? agent.apps : undefined,
-              offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
+              offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
               macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
               web: agent.web !== false,
               routines: routines?.forAgent(agent.id),
