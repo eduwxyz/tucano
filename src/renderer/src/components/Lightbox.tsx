@@ -1,4 +1,4 @@
-// An image the size of the window: the wheel zooms where the pointer is, dragging moves it
+// An image or video the size of the window: the wheel zooms where the pointer is, dragging moves it
 // and the arrows go through the others.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
@@ -16,6 +16,8 @@ export function Lightbox(): ReactNode {
   const stage = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const dragged = useRef(false)
+  const video = useRef(false) // its controls keep the arrows and the wheel, and zoom doesn't apply
+  video.current = !!item?.video
 
   useEffect(() => setView(FIT), [item?.url])
   const zoomBy = (factor: number, at?: { x: number; y: number }): void =>
@@ -43,7 +45,7 @@ export function Lightbox(): ReactNode {
         '0': () => setView(FIT)
       }
       const act = keys[e.key]
-      if (!act) return
+      if (!act || (video.current && e.key !== 'Escape')) return
       e.preventDefault()
       e.stopPropagation() // Esc here is for this, not for what's behind it
       act()
@@ -57,6 +59,7 @@ export function Lightbox(): ReactNode {
     const el = stage.current
     if (!el) return
     const onWheel = (e: WheelEvent): void => {
+      if (video.current) return
       e.preventDefault()
       zoomBy(Math.exp(-e.deltaY * 0.002), { x: e.clientX, y: e.clientY })
     }
@@ -72,9 +75,13 @@ export function Lightbox(): ReactNode {
         <strong className="lightbox__title">{item.title}</strong>
         {many && <span className="small">{box.index + 1} / {box.items.length}</span>}
         <span className="grow" />
-        <button className="icon-btn" title={L('Afastar (−)', 'Zoom out (−)')} aria-label={L('Afastar', 'Zoom out')} onClick={() => zoomBy(1 / 1.4)}>−</button>
-        <span className="small lightbox__zoom">{Math.round(view.scale * 100)}%</span>
-        <button className="icon-btn" title={L('Aproximar (+)', 'Zoom in (+)')} aria-label={L('Aproximar', 'Zoom in')} onClick={() => zoomBy(1.4)}>+</button>
+        {!item.video && (
+          <>
+            <button className="icon-btn" title={L('Afastar (−)', 'Zoom out (−)')} aria-label={L('Afastar', 'Zoom out')} onClick={() => zoomBy(1 / 1.4)}>−</button>
+            <span className="small lightbox__zoom">{Math.round(view.scale * 100)}%</span>
+            <button className="icon-btn" title={L('Aproximar (+)', 'Zoom in (+)')} aria-label={L('Aproximar', 'Zoom in')} onClick={() => zoomBy(1.4)}>+</button>
+          </>
+        )}
         <button className="icon-btn" title={L('Fechar (Esc)', 'Close (Esc)')} aria-label={L('Fechar', 'Close')} onClick={closeLightbox}>
           <Icon name="x" size={16} />
         </button>
@@ -87,7 +94,7 @@ export function Lightbox(): ReactNode {
           dragged.current = false
         }}
         onPointerDown={(e) => {
-          if (view.scale === 1) return
+          if (view.scale === 1 || item.video) return
           drag.current = { x: e.clientX - view.x, y: e.clientY - view.y, moved: false }
         }}
         onPointerMove={(e) => {
@@ -103,17 +110,21 @@ export function Lightbox(): ReactNode {
           drag.current = null
         }}
       >
-        <img
-          src={item.url}
-          alt={item.title}
-          draggable={false}
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
-          onDoubleClick={(e) => {
-            if (view.scale > 1) return setView(FIT)
-            const img = e.currentTarget
-            zoomBy(Math.max(1.5, img.naturalWidth / img.clientWidth), { x: e.clientX, y: e.clientY })
-          }}
-        />
+        {item.video ? (
+          <video src={item.url} controls autoPlay />
+        ) : (
+          <img
+            src={item.url}
+            alt={item.title}
+            draggable={false}
+            style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+            onDoubleClick={(e) => {
+              if (view.scale > 1) return setView(FIT)
+              const img = e.currentTarget
+              zoomBy(Math.max(1.5, img.naturalWidth / img.clientWidth), { x: e.clientX, y: e.clientY })
+            }}
+          />
+        )}
       </div>
       {many && (
         <>

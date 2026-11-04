@@ -1,5 +1,5 @@
 import { L } from '../../../shared/lang'
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
   archiveAgent,
@@ -18,12 +18,13 @@ import {
   type Agent,
   type View
 } from '../store'
+import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { call } from '../rpc'
-import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
+import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
-import { AgentAvatar, Icon, TucaMark, type IconName } from './ui'
+import { AgentAvatar, Icon, TucaMark, useJustEnded, type IconName } from './ui'
 
 // The wiki stays lit on any of its pages.
 const same = (a: View | null, b: View): boolean => (b.kind === 'wiki' ? a?.kind === 'wiki' : JSON.stringify(a) === JSON.stringify(b))
@@ -34,7 +35,11 @@ function NavItem({ view, icon, label, badge }: { view: View; icon: IconName; lab
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate(view)}>
       <Icon name={icon} />
       <span className="nav-item__label">{label}</span>
-      {badge ? <span className="badge">{badge}</span> : null}
+      {badge ? (
+        <span key={badge} className="badge">
+          {badge}
+        </span>
+      ) : null}
     </button>
   )
 }
@@ -59,9 +64,31 @@ function Section({ id, label, unread = 0, action, children }: { id: string; labe
           {label}
         </FoldToggle>
         {/* A closed section still says when something in it is waiting. */}
-        {!open && unread > 0 && <span className="badge badge--soft">{unread}</span>}
+        {!open && unread > 0 && (
+          <span key={unread} className="badge badge--soft">
+            {unread}
+          </span>
+        )}
         {action}
       </div>
+      {children}
+    </div>
+  )
+}
+
+// A group folds like the sections, in the same list (Fold.tsx), and keeps showing the channel you're in.
+function GroupFold({ id, label, unread, head, naming, children }: { id: string; label: string; unread: number; head: HTMLAttributes<HTMLDivElement>; naming?: ReactNode; children: ReactNode }): ReactNode {
+  const { open, toggle } = useFold(`group:${id}`)
+  return (
+    <div className={`channel-group ${open ? '' : 'is-folded'}`}>
+      {naming || (
+        <div className="channel-group__head" {...head}>
+          <FoldToggle open={open} onToggle={toggle}>
+            {label}
+          </FoldToggle>
+          {!open && unread > 0 && <span className="badge badge--soft">{unread}</span>}
+        </div>
+      )}
       {children}
     </div>
   )
@@ -84,6 +111,49 @@ export function Sidebar(): ReactNode {
     e.preventDefault()
     setMenu({ x: e.clientX, y: e.clientY, items })
   }
+  // The order and groups are the person's: the core only keeps them.
+  const layout = s.settings.channelLayout
+  const arranged = arrange(channels, layout)
+  const whole: ChannelLayout = { loose: arranged.loose.map((c) => c.id), groups: arranged.groups.map((g) => ({ ...g, channels: g.channels.map((c) => c.id) })) }
+  const saveLayout = (next: ChannelLayout): void => updateSettings({ channelLayout: next })
+  const [naming, setNaming] = useState<string | null>(null)
+  const newGroup = (channelId: string): void => {
+    const id = crypto.randomUUID()
+    saveLayout(moveChannel(channels, addGroup(layout, { id, name: L('Novo grupo', 'New group') }), channelId, { group: id }))
+    setNaming(id)
+  }
+  const dragged = useRef<string | null>(null)
+  const accept = (e: React.DragEvent): void => {
+    if (dragged.current) e.preventDefault()
+  }
+  const dropOn = (to: { group?: string; before?: string }) => ({
+    onDragEnter: accept,
+    onDragOver: accept,
+    onDrop: (e: React.DragEvent): void => {
+      const id = dragged.current
+      if (!id) return
+      e.preventDefault()
+      e.stopPropagation()
+      dragged.current = null
+      saveLayout(moveChannel(channels, layout, id, to))
+    }
+  })
+  const channelRow = (c: (typeof channels)[number], group?: string): ReactNode => (
+    <div
+      key={c.id}
+      draggable
+      onDragStart={(e) => {
+        dragged.current = c.id
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', c.name)
+      }}
+      onDragEnd={() => (dragged.current = null)}
+      onContextMenu={(e) => open(e, channelMenu(c))}
+      {...dropOn({ group, before: c.id })}
+    >
+      <ChannelItem id={c.id} name={c.name} unread={c.unread} />
+    </div>
+  )
   // The wiki's curator reads every conversation; one can be kept out (a personal DM, say).
   const wikiItem = (id: string, on: boolean): MenuItem => ({
     label: on ? L('Não guardar na wiki', "Don't keep in the wiki") : L('Voltar a guardar na wiki', 'Keep in the wiki again'),
@@ -97,13 +167,25 @@ export function Sidebar(): ReactNode {
     ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
     wikiItem(c.id, c.wikiCapture !== false),
     'separator',
+    { label: L('Mover para cima', 'Move up'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
+    { label: L('Mover para baixo', 'Move down'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
+    ...arranged.groups.filter((g) => !g.channels.includes(c)).map((g): MenuItem => ({ label: L(`Mover para ${g.name}`, `Move to ${g.name}`), onClick: () => saveLayout(moveChannel(channels, layout, c.id, { group: g.id })) })),
+    ...(arranged.groups.some((g) => g.channels.includes(c)) ? [{ label: L('Tirar do grupo', 'Take out of the group'), onClick: () => saveLayout(moveChannel(channels, layout, c.id, {})) }] : []),
+    { label: L('Novo grupo com este canal', 'New group with this channel'), icon: 'plus', onClick: () => newGroup(c.id) },
+    'separator',
     {
       label: L('Excluir canal…', 'Delete channel…'),
       icon: 'trash',
       danger: true,
-      onClick: () => {
-        if (confirm(L(`Excluir #${c.name}?\n\nAs mensagens e as rotinas que postam nele vão junto. Os agentes continuam existindo. Não dá pra desfazer.`, `Delete #${c.name}?\n\nIts messages and the routines that post in it go too. The agents stay. This can't be undone.`))) void deleteConversation(c.id)
-      }
+      onClick: () =>
+        void confirmDialog({
+          title: L(`Excluir #${c.name}?`, `Delete #${c.name}?`),
+          body: L('As mensagens e as rotinas que postam nele vão junto. Os agentes continuam no time. Não dá pra desfazer.', "Its messages and the routines that post in it go too. The agents stay on the team. This can't be undone."),
+          confirm: L(`Excluir #${c.name}`, `Delete #${c.name}`),
+          danger: true
+        }).then((ok) => {
+          if (ok) void deleteConversation(c.id)
+        })
     }
   ]
   const dmMenu = (id: string, agentId: string, agentName: string): MenuItem[] => [
@@ -115,9 +197,15 @@ export function Sidebar(): ReactNode {
       label: L('Apagar a conversa…', 'Delete the conversation…'),
       icon: 'trash',
       danger: true,
-      onClick: () => {
-        if (confirm(L(`Apagar a conversa com ${agentName}?\n\nAs mensagens e as rotinas desta DM vão junto. ${agentName} continua existindo.`, `Delete the conversation with ${agentName}?\n\nThe messages and routines of this DM go too. ${agentName} stays.`))) void deleteConversation(id)
-      }
+      onClick: () =>
+        void confirmDialog({
+          title: L(`Apagar a conversa com ${agentName}?`, `Delete the conversation with ${agentName}?`),
+          body: L(`As mensagens e as rotinas desta DM vão junto. ${agentName} continua no time. Não dá pra desfazer.`, `The messages and routines of this DM go too. ${agentName} stays on the team. This can't be undone.`),
+          confirm: L('Apagar a conversa', 'Delete the conversation'),
+          danger: true
+        }).then((ok) => {
+          if (ok) void deleteConversation(id)
+        })
     }
   ]
   const agentMenu = (agentId: string, agentName: string): MenuItem[] => [
@@ -126,11 +214,15 @@ export function Sidebar(): ReactNode {
     'separator',
     {
       label: L('Arquivar…', 'Archive…'),
-      icon: 'trash',
-      danger: true,
-      onClick: () => {
-        if (confirm(L(`Arquivar ${agentName}?\n\nSai da barra lateral e para de responder; as rotinas dele desligam. O histórico e os recibos ficam, e dá pra reativar em "Arquivados", no fim da lista de agentes.`, `Archive ${agentName}?\n\nIt leaves the sidebar and stops replying; its routines turn off. History and receipts stay, and you can bring it back from "Archived", at the end of the agent list.`))) void archiveAgent(agentId, true)
-      }
+      icon: 'archive',
+      onClick: () =>
+        void confirmDialog({
+          title: L(`Arquivar ${agentName}?`, `Archive ${agentName}?`),
+          body: L('Sai da barra lateral e para de responder; as rotinas dele desligam. O histórico e os recibos ficam, e dá pra reativar em "Arquivados", no fim da lista de agentes.', 'It leaves the sidebar and stops replying; its routines turn off. History and receipts stay, and you can reactivate it from "Archived", at the end of the agent list.'),
+          confirm: L(`Arquivar ${agentName}`, `Archive ${agentName}`)
+        }).then((ok) => {
+          if (ok) void archiveAgent(agentId, true)
+        })
     }
   ]
 
@@ -183,10 +275,45 @@ export function Sidebar(): ReactNode {
             </button>
           }
         >
-          {channels.map((c) => (
-            <div key={c.id} onContextMenu={(e) => open(e, channelMenu(c))}>
-              <ChannelItem id={c.id} name={c.name} unread={c.unread} />
-            </div>
+          {arranged.loose.map((c) => channelRow(c))}
+          {/* Dropped here, a channel goes last among those in no group. */}
+          <div className="channel-drop" {...dropOn({})} />
+          {arranged.groups.map((g) => (
+            <GroupFold
+              key={g.id}
+              id={g.id}
+              label={g.name}
+              unread={g.channels.reduce((n, c) => n + (c.unread ?? 0), 0)}
+              head={{
+                ...dropOn({ group: g.id }),
+                onContextMenu: (e) =>
+                  open(e, [
+                    { label: L('Renomear', 'Rename'), icon: 'edit', onClick: () => setNaming(g.id) },
+                    { label: L('Desfazer o grupo', 'Ungroup'), icon: 'trash', onClick: () => saveLayout(removeGroup(whole, g.id)) }
+                  ])
+              }}
+              naming={
+                naming === g.id && (
+                  <input
+                    className="channel-group__name"
+                    autoFocus
+                    defaultValue={g.name}
+                    aria-label={L('Nome do grupo', 'Group name')}
+                    onFocus={(e) => e.target.select()}
+                    onBlur={(e) => {
+                      saveLayout(renameGroup(whole, g.id, e.target.value.trim() || g.name))
+                      setNaming(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') e.currentTarget.value = g.name
+                      if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur()
+                    }}
+                  />
+                )
+              }
+            >
+              {g.channels.map((c) => channelRow(c, g.id))}
+            </GroupFold>
           ))}
         </Section>
 
@@ -259,10 +386,17 @@ function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: 
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
       <span className="nav-item__label">{name}</span>
-      {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
-      {unread ? <span className="badge badge--soft">{unread}</span> : null}
+      <LiveDot working={working} />
+      {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )
+}
+
+// Working: the dot pulses. Just finished: it turns green for a moment and fades out, instead of vanishing.
+function LiveDot({ working }: { working: boolean }): ReactNode {
+  const done = useJustEnded(working, 1500)
+  if (!working && !done) return null
+  return <span className={`pulse ${done ? 'is-done' : ''}`} title={working ? L('Trabalhando', 'Working') : undefined} />
 }
 
 function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: number }): ReactNode {
@@ -273,8 +407,8 @@ function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: numb
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
-      {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
-      {unread ? <span className="badge badge--soft">{unread}</span> : null}
+      <LiveDot working={working} />
+      {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )
 }
@@ -314,7 +448,7 @@ function AgentItem({ id }: { id: string }): ReactNode {
           <Icon name="laptop" size={13} />
         </span>
       )}
-      {pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title={L('Orçamento acima de 80%', 'Budget above 80%')} />}
+      {pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title={pct >= 1 ? L('Bateu o limite do mês', 'Hit the monthly limit') : L('Já usou mais de 80% do limite', 'Over 80% of the limit used')} />}
     </button>
   )
 }

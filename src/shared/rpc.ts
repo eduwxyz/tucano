@@ -1,6 +1,6 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
-import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport } from './types'
+import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -40,6 +40,14 @@ export interface Api {
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
+  voiceStatus(): Promise<VoiceStatus>
+  transcribe(p: { id: string; audio: string }): Promise<{ text: string }> // a WAV in base64; turned into text on this machine
+  cancelTranscribe(p: { id: string }): void
+  voiceDownload(p: { model: VoiceModelId }): void // in the background; 'voice' events say how it goes
+  voiceCancelDownload(): void
+  voiceRemoveModel(p: { model: VoiceModelId }): void
+  localPath(p: { messageId: string; path: string }): LocalInfo | null // what a path this agent cited can do; null: it stays text
+  openLocal(p: { messageId: string; path: string; how: 'open' | 'reveal' }): void
   loginEngine(p: { engine: EngineId }): { opened: boolean; command: string } // not opened: no terminal to open, the person runs the command
   addAccount(p: { engine: AccountEngine; name: string }): Account
   loginAccount(p: { id: string }): { opened: boolean; command: string }
@@ -53,6 +61,7 @@ export interface Api {
   addConnector(p: { input: ConnectorInput }): Promise<string>
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
+  setConnectorToken(p: { id: string; token: string }): Promise<void>
   authorizeConnector(p: { id: string }): Promise<{ url?: string }> // url: on a server, the page to open in the person's browser
   finishConnectorAuth(p: { url: string }): Promise<boolean> // on a server: the address the authorization page ended on
   harnessMcps(): Promise<HarnessMcp[]> // the MCP servers set up in Claude Code, Codex and OpenCode
@@ -138,6 +147,7 @@ export type Params<M extends Method> = Parameters<Api[M]>[0]
 export type Result<M extends Method> = Awaited<ReturnType<Api[M]>>
 
 export type CoreEvent =
+  | { type: 'voice' } // dictation's model: downloading, done, removed
   | { type: 'message'; message: Message }
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
   | { type: 'agent'; agent: Agent }

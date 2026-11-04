@@ -102,6 +102,39 @@ describe('OAuth signed in from a page on another machine (Tucano as a server)', 
 
   it('says what went wrong with an address that is no answer', async () => {
     await expect(connectors.finishOAuthFromUrl('não é um endereço')).rejects.toThrow()
-    await expect(connectors.finishOAuthFromUrl('http://127.0.0.1:1/oauth/callback?error=access_denied')).rejects.toThrow(/access_denied/)
+    await expect(connectors.finishOAuthFromUrl('http://127.0.0.1:1/oauth/callback?error=access_denied')).rejects.toThrow(/recusou o acesso.*Permitir/)
+    await expect(connectors.finishOAuthFromUrl('http://127.0.0.1:1/oauth/callback?error=server_error')).rejects.toThrow(/server_error/)
+  })
+})
+
+describe('a connector with a token', () => {
+  it('asks for the token, not for a browser, and takes it without being removed', async () => {
+    let seen: string | undefined
+    const srv = createServer((req, res) => {
+      seen = req.headers.authorization
+      res.writeHead(401).end()
+    })
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve))
+    const id = await connectors.add({ kind: 'remote', name: 'Demo', url: `http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp`, auth: 'token' })
+    await connectors.connect(id)
+    expect(connectors.get(id)).toMatchObject({ status: 'error' })
+    await connectors.setToken(id, ' abc ')
+    expect(seen).toBe('Bearer abc')
+    await expect(connectors.setToken(id, '  ')).rejects.toThrow()
+    srv.close()
+  })
+
+  it('a token saved during a connection attempt is the one tried next', async () => {
+    const seen: (string | undefined)[] = []
+    const srv = createServer((req, res) => {
+      seen.push(req.headers.authorization)
+      res.writeHead(401).end()
+    })
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve))
+    const id = await connectors.add({ kind: 'remote', name: 'Demo', url: `http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp`, auth: 'token' })
+    void connectors.connect(id)
+    await connectors.setToken(id, 'new')
+    expect(seen.at(-1)).toBe('Bearer new')
+    srv.close()
   })
 })

@@ -294,6 +294,8 @@ describe('routine retries', () => {
   let turns: number
   let waits: number[]
   let notes: string[]
+  let fullTexts: (string | undefined)[]
+  let doneText: string
   let onWait: () => void
 
   beforeEach(async () => {
@@ -304,13 +306,15 @@ describe('routine retries', () => {
     turns = 0
     waits = []
     notes = []
+    fullTexts = []
+    doneText = 'Feito.'
     onWait = () => {}
     const flaky: Engine = {
       id: 'claude',
       async *run() {
         turns++
         if (turns <= failures) yield { type: 'error', message: `o provedor caiu (${turns})` }
-        else yield { type: 'done', text: 'Feito.', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+        else yield { type: 'done', text: doneText, usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
     const engines: Record<EngineId, Engine> = { claude: flaky, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
@@ -322,7 +326,7 @@ describe('routine retries', () => {
       emit: () => {},
       now: () => clock,
       wait: async (ms) => (waits.push(ms), onWait()),
-      notify: (_title, body) => notes.push(body)
+      notify: (_title, shortText, _conversationId, fullText) => (notes.push(shortText), fullTexts.push(fullText))
     })
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-retry-w-')), gateway, routines })
   })
@@ -351,6 +355,21 @@ describe('routine retries', () => {
     expect(notes).toEqual(['Feito.'])
   })
 
+  it('a long result: the notification stays short, and the whole reply goes along for the phone', async () => {
+    failures = 0
+    doneText = `## Notícias de hoje\n\n${Array.from({ length: 5 }, (_, i) => `- Item ${i + 1}: ${'texto '.repeat(20).trim()}`).join('\n')}`
+    await fire()
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.length).toBeLessThanOrEqual(140)
+    expect(fullTexts).toEqual([doneText])
+  })
+
+  it('a failed routine sends only the short outcome to the phone', async () => {
+    failures = 99
+    await fire()
+    expect(fullTexts).toEqual([undefined])
+  })
+
   it('after the third failure it stops, says it tried three times, and notifies once', async () => {
     failures = 99
     await fire()
@@ -360,7 +379,7 @@ describe('routine retries', () => {
     expect(reply!.run).toMatchObject({ status: 'failed' })
     expect(reply!.run!.error).toBe('o provedor caiu (3). Tentei 3 vezes.')
     expect(notes).toHaveLength(1)
-    expect(notes[0]).toBe('Falhou: o provedor caiu (3). Tentei 3 vezes.')
+    expect(notes[0]).toBe('o provedor caiu (3). Abra pra resolver.') // the headline, and what to do
   })
 
   it('waiting, the reply says when the next try is', async () => {

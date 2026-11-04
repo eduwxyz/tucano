@@ -81,7 +81,7 @@ export function AppsCard({ apps, onChange }: { apps: AgentApp[]; onChange: (apps
               ? L('Falta a permissão de Acessibilidade: libere o Tucano em Ajustes → Privacidade e Segurança → Acessibilidade.', 'The Accessibility permission is missing: allow Tucano in Settings → Privacy & Security → Accessibility.')
               : os === 'linux'
                 ? L('O serviço de acessibilidade do Linux (AT-SPI) não respondeu: sem ele não dá pra ler os apps.', "Linux's accessibility service (AT-SPI) didn't answer: without it the apps can't be read.")
-                : L('O Windows não deixou ler os apps agora.', "Windows didn't let the apps be read just now.")}
+                : L('O Windows não deixou ler os apps agora. Clique em Verificar de novo em alguns segundos.', "Windows didn't let the apps be read just now. Click Check again in a few seconds.")}
             {os !== 'mac' && status.suggestion && <small className="apps-setup__how">{status.suggestion}</small>}
           </span>
           {os === 'mac' && (
@@ -126,7 +126,7 @@ export function AppsCard({ apps, onChange }: { apps: AgentApp[]; onChange: (apps
         <AppPicker all={all} has={has} onPick={(n) => add(n)} onClose={() => setPicking(false)} />
       ) : (
         <button className="btn btn--sm apps-add" onClick={() => setPicking(true)}>
-          <Icon name="plus" size={14} /> {apps.length ? L('Liberar outro app', 'Give another app') : L('Liberar um app', 'Give an app')}
+          <Icon name="plus" size={14} /> {apps.length ? L('Liberar outro app', 'Allow another app') : L('Liberar um app', 'Allow an app')}
         </button>
       )}
     </div>
@@ -143,7 +143,7 @@ function AppPicker({ all, has, onPick, onClose }: { all: InstalledApp[] | null; 
   const tile = (a: InstalledApp): ReactNode => {
     const given = has(a.name)
     return (
-      <button key={a.bundleId ?? a.name} className={`app-tile ${given ? 'is-given' : ''}`} disabled={given} onClick={() => onPick(a.name)} title={given ? L('Já liberado', 'Already given') : a.name}>
+      <button key={a.bundleId ?? a.name} className={`app-tile ${given ? 'is-given' : ''}`} disabled={given} onClick={() => onPick(a.name)} title={given ? L('Já liberado', 'Already allowed') : a.name}>
         <span className="app-tile__ic">
           <AppIcon app={a} size={40} />
           {given && (

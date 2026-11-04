@@ -272,7 +272,7 @@ Receitas que os agentes seguem pra um tipo de tarefa ("como rodar os testes do C
 - Um bot do próprio usuário (criado no @BotFather): o token vai em Configurações, conferido com o Telegram e guardado no cofre do Mac. O app busca as mensagens do bot (long polling), então nada precisa chegar no Mac.
 - **Pareamento:** o app mostra um código; só o chat que mandar `/start <código>` fica com o bot. Mensagens e toques de outros chats são ignorados.
 - **O que chega:** cada aprovação, com Aprovar/Recusar (alto risco pede um segundo toque); cada pergunta de agente (`ask_user`), que eu respondo respondendo à mensagem, e a resposta entra na conversa como se eu tivesse escrito; o fim das rotinas e os avisos de limite.
-- O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo), e a tela diz isso. Desligado até eu colar um token.
+- O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo) e as respostas das rotinas, e a tela diz isso. Desligado até eu colar um token.
 
 ### 20. Boletim e custo por tarefa (M12)
 

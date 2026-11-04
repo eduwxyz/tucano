@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { geminiArgs, geminiEnv, geminiHome, geminiParser } from '../src/core/engines/gemini'
+import { detectGeminiCliModels, geminiArgs, geminiEnv, geminiHome, geminiModels, geminiParser } from '../src/core/engines/gemini'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
@@ -278,20 +278,32 @@ describe('Gemini config', () => {
     const appDir = mkdtempSync(join(tmpdir(), 'gh-'))
     const home = geminiHome(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }, userHome)
     expect(home.startsWith(appDir)).toBe(true)
-    const s = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')) as Record<string, unknown>
-    expect(s['mcpServers']).toEqual({ tucano: { httpUrl: 'http://127.0.0.1:1/mcp/x' } })
-    expect(s['coreTools']).toEqual([]) // no built-in tools, no web
-    expect((s['experimental'] as Record<string, unknown>)['skills']).toEqual({ enabled: false })
+    // the CLI reads $GEMINI_CLI_HOME/.gemini/, so nothing goes at the root
+    const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
+    expect(existsSync(join(home, 'settings.json'))).toBe(false)
+    expect(s['mcpServers']).toEqual({ tucano: { url: 'http://127.0.0.1:1/mcp/x', type: 'http', trust: true } })
+    expect(existsSync(join(home, '.gemini', 'oauth_creds.json'))).toBe(true)
+    expect(existsSync(join(home, 'oauth_creds.json'))).toBe(false)
+    // keys as the CLI reads them: tools.core, not the old flat coreTools
+    expect(s['tools']).toEqual({ core: [], discoveryCommand: '', callCommand: '' }) // no built-in tools, no web, no discovered tools
+    expect(s['coreTools']).toBeUndefined()
+    expect(s['mcp']).toEqual({ allowed: ['tucano'] })
+    expect(s['skills']).toEqual({ enabled: false })
+    expect(s['agents']).toEqual({ overrides: { codebase_investigator: { enabled: false }, cli_help: { enabled: false } } })
     expect((s['privacy'] as Record<string, unknown>)['usageStatisticsEnabled']).toBe(false)
+    // nothing a working folder could turn into a command or a request: hooks, telemetry
+    expect(s['hooksConfig']).toEqual({ enabled: false })
+    expect(s['telemetry']).toEqual({ enabled: false, logPrompts: false })
     // the agent's instructions are the system prompt, and the login is brought in
     expect(readFileSync(join(home, 'system.md'), 'utf8')).toBe('You are Iris.')
-    expect(geminiEnv(home, { PATH: '/x' })).toEqual({ PATH: '/x', GEMINI_CLI_HOME: home, GEMINI_SYSTEM_MD: join(home, 'system.md') })
+    // the turn's settings are also the system settings, applied over the working folder's
+    expect(geminiEnv(home, { PATH: '/x' })).toEqual({ PATH: '/x', GEMINI_CLI_HOME: home, GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, '.gemini', 'settings.json'), GEMINI_SYSTEM_MD: join(home, 'system.md') })
   })
 
   it('turns on only the web search when the agent has the web', () => {
     const home = geminiHome(mkdtempSync(join(tmpdir(), 'gh2-')), { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'gu2-')))
-    const s = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')) as Record<string, unknown>
-    expect(s['coreTools']).toEqual(['google_web_search'])
+    const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
+    expect(s['tools']).toEqual({ core: ['google_web_search'], discoveryCommand: '', callCommand: '' })
     expect(s['mcpServers']).toBeUndefined()
   })
 
@@ -301,6 +313,26 @@ describe('Gemini config', () => {
     const a = geminiHome(appDir, { system: 'a', mcpUrl: undefined, web: false }, userHome)
     const b = geminiHome(appDir, { system: 'b', mcpUrl: undefined, web: false }, userHome)
     expect(a).not.toBe(b)
+  })
+
+  it('lists default models when no bin path is provided', () => {
+    const list = geminiModels()
+    expect(list).toContain('gemini/gemini-3.8-flash')
+    expect(list).toContain('gemini/gemini-3.1-pro-preview')
+  })
+
+  it('dynamically extracts models from an installed @google/gemini-cli package', () => {
+    const root = mkdtempSync(join(tmpdir(), 'gemini-pkg-'))
+    const bundle = join(root, 'node_modules', '@google', 'gemini-cli', 'bundle')
+    mkdirSync(bundle, { recursive: true })
+    writeFileSync(
+      join(bundle, 'chunk-models.js'),
+      'var defs = { "gemini-3.9-flash": { isVisible: true }, "gemini-4-pro": { isVisible: true }, "internal-hidden": { isVisible: false } };'
+    )
+    const bin = join(root, 'gemini.cmd')
+    writeFileSync(bin, '@ECHO off')
+    expect(detectGeminiCliModels(bin)).toEqual(['gemini/gemini-3.9-flash', 'gemini/gemini-4-pro'])
+    expect(geminiModels(bin)).toEqual(['gemini/gemini-3.9-flash', 'gemini/gemini-4-pro'])
   })
 })
 

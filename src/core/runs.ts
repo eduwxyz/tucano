@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
+import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, REQUEST_BUDGET, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type Delegated, type Delegation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
@@ -1182,7 +1183,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${detail}${approval.why ? `: ${approval.why}` : ''}`, conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${toolLabel(current.name)} · ${hit.connector.name}${approval.why ? `: ${approval.why}` : ''}`, conv.id, 'approval')
           return textResult(
             L(
               `Pedido de aprovação criado. A ação ainda NÃO foi executada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -1254,6 +1255,7 @@ export class Runner {
     let progress = { tokens: 0, cacheRead: 0 }
     let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'> } | null = null
     let error: string | null = null
+    let thrown: unknown // what the engine threw, if it did: a bug reads differently from a CLI's own words
 
     // Images I attached: every message says which it had; the newest go in as images.
     const ids = new Set(history.map((m) => m.id))
@@ -1330,6 +1332,7 @@ export class Runner {
           }
         } catch (e) {
           error = e instanceof Error ? e.message : String(e)
+          thrown = e
         }
         // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
         // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
@@ -1347,6 +1350,7 @@ export class Runner {
         const to = `${engineLabel}${account ? ` (${account.name})` : ''}`
         addSteps({ id: randomUUID(), label: L('Foi pro modelo reserva', 'Moved to the reserve model'), detail: L(`${from} está sem limite agora; segue no ${to}`, `${from} is out of quota for now; going on with ${to}`), status: 'done' })
         error = null
+        thrown = undefined
         progress = { tokens: 0, cacheRead: 0 }
       }
     } finally {
@@ -1415,7 +1419,9 @@ export class Runner {
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question')
       else if (!approval && !delegated.length && !opts.delegation && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done')
     } else {
-      save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: error ?? L('O motor terminou sem resposta.', 'The engine ended without a reply.') } })
+      // What happened and what to do; the CLI's own words go folded under it.
+      const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
+      save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: failure.text, ...(failure.detail ? { errorDetail: failure.detail } : {}) } })
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
     const st = msg.run?.status

@@ -36,6 +36,22 @@ function namesIn(body: string): Set<string> {
   return out
 }
 
+// A history that grew into a log: the sections named like one, and how many entries each has.
+const LOG_HEADING = /^#{2,4}\s*(hist[óo]rico|history|registro|log|atualiza[çc][õo]es|updates|andamento|progress)\b/i
+export const LOG_ITEMS = 8
+export function logSections(body: string): { section: string; items: number }[] {
+  const out: { section: string; items: number }[] = []
+  let current: { section: string; items: number } | null = null
+  for (const line of body.split('\n')) {
+    if (/^#{1,4}\s/.test(line)) {
+      current = LOG_HEADING.test(line) ? { section: line.replace(/^#+\s*/, '').trim(), items: 0 } : null
+      if (current) out.push(current)
+    } else if (current && /^\s*[-*]\s+\S/.test(line)) current.items++
+  }
+  return out
+}
+const readsLikeLog = (body: string): number => Math.max(0, ...logSections(body).map((s) => s.items))
+
 // What can be found without a model.
 export function lint(wiki: Wiki, owner?: string): Found[] {
   const pages = wiki
@@ -69,38 +85,45 @@ export function lint(wiki: Wiki, owner?: string): Found[] {
       seen.set(k, s)
     }
   for (const [k, s] of seen) if (s.pages.length >= 3) out.push({ key: `missing:${k}`, kind: 'missing', name: s.name, pages: s.pages, text: L(`**${s.name}** aparece em ${list(s.pages)}, e não tem página.`, `**${s.name}** shows up in ${list(s.pages)}, and has no page.`) })
+  // a history that grew into a diary of what was done
+  for (const p of pages) {
+    const n = readsLikeLog(p.body)
+    if (n >= LOG_ITEMS) out.push({ key: `log:${p.title.toLowerCase()}`, kind: 'log', pages: [p.title], text: L(`${link(p.title)} tem ${n} entradas no histórico: parece um registro do que foi feito. Vale resumir no que vale hoje.`, `${link(p.title)} has ${n} history entries: it reads like a record of what was done. Worth condensing into what holds today.`) })
+  }
   return out
 }
 
 export const reviewSystem = (): string =>
   L(
     `Você revisa a wiki de um time: páginas em Markdown ligadas por [[Título]]. Leia as páginas e procure só problemas reais:
-- "contradicao": duas páginas (ou uma página consigo mesma) dizem coisas diferentes sobre o mesmo fato (um valor, uma data, um contato, uma situação);
-- "desatualizada": uma página diz algo que outra, mais nova, mostra que já mudou (ex.: "aguardando resposta" numa página, "contrato assinado" em outra);
-- "duplicada": duas páginas sobre a mesma coisa (mesma pessoa, mesmo projeto) com títulos diferentes;
-- "ligacao": uma página sem ninguém ligando pra ela, que deveria ser citada em outra (diga onde).
+- "contradiction": duas páginas (ou uma página consigo mesma) dizem coisas diferentes sobre o mesmo fato (um valor, uma data, um contato, uma situação);
+- "stale": uma página diz algo que outra, mais nova, mostra que já mudou (ex.: "aguardando resposta" numa página, "contrato assinado" em outra);
+- "duplicate": duas páginas sobre a mesma coisa (mesma pessoa, mesmo projeto) com títulos diferentes;
+- "link": uma página sem ninguém ligando pra ela, que deveria ser citada em outra (diga onde);
+- "log": uma página que virou um diário do que foi feito (um histórico longo de ações, passos, tentativas e conversas) em vez de dizer como as coisas estão. A correção é um "replace" que troca a seção inteira por poucas linhas com o estado atual, mantendo só os marcos e todo fato que ainda vale, sem perder nenhum.
 Para cada problema, proponha a correção como mudanças:
 - "replace": troque um trecho exato ("old" tem que estar na página, letra por letra) pelo certo ("new");
 - "append": acrescente um trecho numa seção de uma página.
 Corrija pelo que é mais novo ou tem fonte; na dúvida, não troque: só aponte, sem mudanças. Pra duplicadas, fique com a página que mais páginas ligam (ou a mais completa), leve pra ela todo fato que só a outra tem, sem perder nenhum, e na outra deixe só "Ver [[Título]]". Não invente nada que não esteja nas páginas. Pouco e certo: se nada estiver errado, a lista vem vazia.
 
 Responda só com JSON:
-{"achados": [{"tipo": "contradicao"|"desatualizada"|"duplicada"|"ligacao", "paginas": ["Título"], "explicacao": "uma frase, com [[links]]", "mudancas": [{"op": "replace"|"append", "pagina": "Título", "secao": "Seção", "texto": "markdown", "old": "trecho exato", "new": "trecho novo"}]}]}`,
+{"findings": [{"kind": "contradiction"|"stale"|"duplicate"|"link"|"log", "pages": ["Título"], "explanation": "uma frase, com [[links]]", "changes": [{"op": "replace"|"append", "page": "Título", "section": "Seção", "text": "markdown", "old": "trecho exato", "new": "trecho novo"}]}]}`,
     `You review a team's wiki: Markdown pages linked with [[Title]]. Read the pages and look only for real problems:
-- "contradicao": two pages (or a page and itself) say different things about the same fact (an amount, a date, a contact, a status);
-- "desatualizada": a page says something another, newer one shows has changed (e.g. "waiting for an answer" on one page, "contract signed" on another);
-- "duplicada": two pages about the same thing (same person, same project) under different titles;
-- "ligacao": a page nothing links to, that another one should mention (say where).
+- "contradiction": two pages (or a page and itself) say different things about the same fact (an amount, a date, a contact, a status);
+- "stale": a page says something another, newer one shows has changed (e.g. "waiting for an answer" on one page, "contract signed" on another);
+- "duplicate": two pages about the same thing (same person, same project) under different titles;
+- "link": a page nothing links to, that another one should mention (say where);
+- "log": a page that turned into a diary of what was done (a long history of actions, steps, attempts and conversations) instead of saying how things stand. The fix is a "replace" that swaps the whole section for a few lines with the current state, keeping only the milestones and every fact that still holds, losing none.
 For each problem, write the fix as changes:
 - "replace": swap an exact passage ("old" must be on the page, letter by letter) for the right one ("new");
 - "append": add a passage under a section of a page.
 Fix toward what's newer or has a source; when unsure, don't swap: just point it out, with no changes. For duplicates, keep the page more pages link to (or the fuller one), bring into it every fact only the other has, losing none, and leave just "See [[Title]]" in the other. Don't make up anything the pages don't say. Little and right: if nothing is wrong, the list is empty.
 
 Reply with JSON only:
-{"achados": [{"tipo": "contradicao"|"desatualizada"|"duplicada"|"ligacao", "paginas": ["Title"], "explicacao": "one sentence, with [[links]]", "mudancas": [{"op": "replace"|"append", "pagina": "Title", "secao": "Section", "texto": "markdown", "old": "exact passage", "new": "new passage"}]}]}`
+{"findings": [{"kind": "contradiction"|"stale"|"duplicate"|"link"|"log", "pages": ["Title"], "explanation": "one sentence, with [[links]]", "changes": [{"op": "replace"|"append", "page": "Title", "section": "Section", "text": "markdown", "old": "exact passage", "new": "new passage"}]}]}`
   )
 
-const KINDS: Record<string, WikiFinding['kind']> = { contradicao: 'contradiction', contradiction: 'contradiction', desatualizada: 'stale', stale: 'stale', duplicada: 'duplicate', duplicate: 'duplicate', ligacao: 'link', link: 'link' }
+const KINDS: Record<string, WikiFinding['kind']> = { contradicao: 'contradiction', contradiction: 'contradiction', desatualizada: 'stale', stale: 'stale', duplicada: 'duplicate', duplicate: 'duplicate', ligacao: 'link', link: 'link', registro: 'log', log: 'log' }
 
 export function parseReview(text: string, wiki: Wiki): Found[] {
   const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
@@ -175,6 +198,9 @@ export class WikiReviewer {
         if (!orphan.pages.length) this.found = this.found.filter((f) => f !== orphan)
         else if (linked.size) Object.assign(orphan, { key: `orphan:${[...orphan.pages].sort().join('|').toLowerCase()}`, text: L(`Nenhuma página liga pra ${orphan.pages.map(link).join(', ')}.`, `No page links to ${orphan.pages.map(link).join(', ')}.`) })
       }
+      // a page the model already proposed condensing isn't also listed by the count of its entries
+      const condensed = new Set(asked.filter((f) => f.kind === 'log').flatMap((f) => f.pages.map((t) => t.toLowerCase())))
+      this.found = this.found.filter((f) => f.kind !== 'log' || !condensed.has(f.pages[0]!.toLowerCase()))
       this.found.push(...asked)
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e)
@@ -187,8 +213,10 @@ export class WikiReviewer {
     const since = Number(wiki.getMeta('reviewed_at') ?? 0)
     const all = wiki.list()
     const changed = all.filter((p) => p.updatedAt > since).sort((a, b) => b.updatedAt - a.updatedAt)
-    if (!changed.length) return []
-    const picked = new Map<string, WikiPage>()
+    // pages that read like a log go in even if nothing changed: the model proposes condensing them
+    const logs = all.map((p) => wiki.page(p.title)).filter((pg): pg is WikiPage => !!pg && readsLikeLog(pg.body) >= LOG_ITEMS)
+    if (!changed.length && !logs.length) return []
+    const picked = new Map<string, WikiPage>(logs.map((pg) => [pg.title.toLowerCase(), pg]))
     const add = (t: string): void => {
       if (picked.has(t.toLowerCase())) return
       const pg = wiki.page(t)
@@ -212,6 +240,7 @@ export class WikiReviewer {
       L('## Páginas', '## Pages'),
       ...shown.map((p) => `### [[${p.title}]] (${p.kind}, ${L('atualizada em', 'updated')} ${date(p.updatedAt)})\n${p.body.slice(0, PAGE_CHARS)}`),
       ...(orphans.length ? [L('## Páginas sem ninguém ligando pra elas', '## Pages nothing links to'), orphans.join(', ')] : []),
+      ...(logs.length ? [L('## Páginas com cara de registro (veja se é o caso de condensar)', '## Pages that read like a log (see whether to condense them)'), logs.map((p) => link(p.title)).join(', ')] : []),
       L('Responda só com o JSON.', 'Reply with the JSON only.')
     ].join('\n\n')
     return parseReview(await this.deps.llm(reviewSystem(), prompt), wiki)

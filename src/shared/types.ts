@@ -1,5 +1,6 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
+import type { ChannelLayout } from './channel-layout'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -29,7 +30,8 @@ export interface UpdateState {
   next?: string // the newer version, while it downloads and once it's ready
   percent?: number
   checkedAt?: number
-  error?: string
+  error?: string // what went wrong, for people
+  errorKind?: 'offline' | 'other' // 'other': the app can be downloaded by hand from the releases page
 }
 
 export interface EngineStatus {
@@ -158,7 +160,8 @@ export interface Run {
   steps: Step[]
   receipt?: Receipt
   approvalId?: string
-  error?: string
+  error?: string // what happened and what to do, for people (src/shared/errors.ts)
+  errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   question?: string // asked with ask_user; answered by the next human message here
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
@@ -230,12 +233,39 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
 }
 
+// Dictation with whisper-cli. Unset paths are looked for in the usual places.
+export interface VoiceSettings {
+  bin?: string
+  model?: string
+  detect?: boolean // I speak other languages: whisper finds out which, instead of using the app's
+  hidden?: boolean // no microphone button in the message field
+}
+
+export type VoiceModelId = 'recommended' | 'light' // the models the app downloads by itself
+
+export interface VoiceStatus {
+  bin?: string
+  model?: string
+  ready: boolean
+  ownModel?: VoiceModelId // the model in use is one the app downloaded
+  downloaded?: VoiceModelId[]
+  downloading?: { model: VoiceModelId; received: number; total: number }
+  error?: string // the last download failed
+}
+
+export interface LocalInfo {
+  kind: 'image' | 'video' | 'pdf' | 'folder' | 'file'
+  url?: string // to see it here: images and videos
+}
+
 export interface Settings {
   workspaceName: string
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  voice?: VoiceSettings
+  channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
@@ -886,7 +916,7 @@ export interface WikiChange {
 export interface WikiFinding {
   id: string
   at: number
-  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link'
+  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' // log: a page that reads like a record of what was done
   pages: string[] // the pages it is about
   text: string // what's wrong, in a sentence (Markdown, with [[links]])
   name?: string // broken, missing: the page it would take

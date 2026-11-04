@@ -40,7 +40,23 @@
 
   --radius: 9px;
   --radius-lg: 14px;
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Motion: one set of beats for the whole app. Instant answers a press, fast is a
+     hover, base a small change (a chevron, a toggle, a menu), enter something
+     arriving, slow a step or a bar, data a chart drawing itself, loop a pulse. */
+  --dur-instant: 80ms;
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-enter: 240ms;
+  --dur-slow: 400ms;
+  --dur-data: 700ms;
+  --dur-loop: 1.4s;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease: var(--ease-out); /* alias */
+  /* What a control eases on hover, focus and press. */
+  --transition-ui: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
   --font: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   color-scheme: light;
@@ -138,6 +154,8 @@ button {
   padding: 0;
   cursor: pointer;
   text-align: inherit;
+  /* Hover, focus and press ease the same everywhere; a class with its own transition wins. */
+  transition: var(--transition-ui);
 }
 input,
 textarea,
@@ -150,13 +168,21 @@ select {
   padding: 7px 10px;
   width: 100%;
   outline: none;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 input:focus,
 textarea:focus,
 select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* The keyboard's focus wears the fields' ring, on buttons and links too. */
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible,
+[role='switch']:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
 }
 textarea {
   resize: vertical;
@@ -219,9 +245,12 @@ h3 {
 }
 .link {
   color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: var(--transition-ui), text-decoration-color var(--dur-fast) var(--ease-out);
 }
 .link:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 ::-webkit-scrollbar {
   width: 10px;
@@ -254,12 +283,116 @@ h3 {
   box-shadow: var(--shadow-panel);
 }
 .main > * {
-  animation: view-in 0.22s var(--ease) both;
+  animation: rise var(--dur-enter) var(--ease-out) both;
 }
-@keyframes view-in {
+
+/* ---------- motion: the few moves everything uses ---------- */
+/* Their knobs don't inherit: a step that slides sideways mustn't send its messages sideways too. */
+@property --rise {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 4px;
+}
+@property --rise-x {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@property --pop-y {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 4px;
+}
+@property --pop-scale {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0.98;
+}
+@property --pulse-min {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0.3;
+}
+@property --halo-scale {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 2.5;
+}
+@property --halo-from {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0.35;
+}
+@property --flash-spread {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@property --happy-y {
+  syntax: '<length-percentage>';
+  inherits: false;
+  initial-value: -20%;
+}
+/* Something arriving: up a few pixels (--rise), or across (--rise-x), from clear. */
+@keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translate(var(--rise-x, 0), var(--rise, 4px));
+  }
+}
+/* Something opening over the page (a window, a menu, a badge): from a bit smaller. */
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(var(--pop-y, 4px)) scale(var(--pop-scale, 0.98));
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+/* Alive by opacity alone: down to --pulse-min and back (it moves nothing, so it stays with reduced motion). */
+@keyframes fade-pulse {
+  50% {
+    opacity: var(--pulse-min, 0.3);
+  }
+}
+/* A ring leaving a dot (the dot's ::after, background: inherit): it grows and fades. */
+@keyframes halo {
+  from {
+    opacity: var(--halo-from, 0.35);
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(var(--halo-scale, 2.5));
+  }
+}
+/* Once, to say "this is new": a tint that holds and goes (--flash). */
+@keyframes flash {
+  0%,
+  40% {
+    background-color: var(--flash, var(--accent-soft));
+    box-shadow: 0 0 0 var(--flash-spread, 0) var(--flash, var(--accent-soft));
+  }
+}
+/* A field that won't take what was typed: no, no. */
+@keyframes shake {
+  25% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+/* A check drawn by its own pen (stroke-dasharray on the path). */
+@keyframes draw {
+  from {
+    stroke-dashoffset: var(--draw-length, 26);
   }
 }
 
@@ -344,7 +477,7 @@ h3 {
 }
 .fold-toggle svg {
   flex-shrink: 0;
-  transition: transform 0.15s var(--ease);
+  transition: transform var(--dur-base) var(--ease-out);
 }
 .fold-toggle[aria-expanded='true'] svg {
   transform: rotate(90deg);
@@ -352,6 +485,10 @@ h3 {
 /* What's folded goes, except where you are: the row you're in never disappears from under you. */
 .is-folded .nav-item:not(.is-active) {
   display: none;
+}
+/* A row that shows up (a new one, or its section unfolding) rises into place. */
+.section .nav-item {
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
 }
 .nav-item {
   width: 100%;
@@ -362,7 +499,7 @@ h3 {
   border-radius: 8px;
   color: var(--text-2);
   min-height: 31px;
-  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .nav-item:hover {
   background: var(--hover);
@@ -405,6 +542,10 @@ h3 {
   line-height: 18px;
   min-width: 18px;
   text-align: center;
+  /* A new count pops in (the badge is keyed by its number, so it pops on each one). */
+  --pop-scale: 0.6;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
 }
 .badge--soft {
   background: var(--accent);
@@ -425,12 +566,13 @@ h3 {
   height: 7px;
   border-radius: 50%;
   background: var(--accent);
-  animation: pulse 1.2s ease-in-out infinite;
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
+  transition: background-color var(--dur-base) var(--ease-out);
 }
-@keyframes pulse {
-  50% {
-    opacity: 0.3;
-  }
+/* Just finished: green for a moment, then it fades out instead of vanishing. */
+.pulse.is-done {
+  background: var(--ok);
+  animation: fade var(--dur-enter) var(--ease-in) 1.2s reverse forwards;
 }
 .inline-form {
   display: flex;
@@ -449,6 +591,7 @@ h3 {
   place-items: center;
   border-radius: 6px;
   color: var(--text-2);
+  transition: var(--transition-ui);
 }
 .icon-btn:hover {
   background: var(--hover);
@@ -512,7 +655,7 @@ h3 {
 .c-graphite .avatar__eyes i { animation-duration: 5.3s; animation-delay: 2.8s; }
 /* At work: the eyes read, left to right, and come back. */
 .avatar.is-busy .avatar__eyes {
-  animation: read 1.8s var(--ease) infinite;
+  animation: read 1.8s var(--ease-out) infinite;
 }
 @keyframes read {
   0%,
@@ -525,6 +668,36 @@ h3 {
   55% {
     transform: translate(14%, 8%);
   }
+}
+/* Just finished: one happy squint (eyes squashed into arcs), then back to blinking. */
+.avatar.is-happy .avatar__eyes i {
+  animation: happy 500ms var(--ease-out);
+}
+@keyframes happy {
+  30%,
+  70% {
+    transform: scaleY(0.4) translateY(var(--happy-y, -20%));
+    border-radius: 50% 50% 12% 12%;
+  }
+}
+/* The Tuca at work: his lower beak goes, as if muttering. Done: the same squint. */
+.avatar--tuca .tuca__jaw {
+  transform-origin: 53px 57px;
+}
+.avatar--tuca.is-busy .tuca__jaw {
+  animation: chew 1.2s var(--ease-in-out) infinite;
+}
+@keyframes chew {
+  50% {
+    transform: rotate(7deg);
+  }
+}
+.avatar--tuca .tuca__eye {
+  transform-origin: 38px 47px;
+}
+.avatar--tuca.is-happy .tuca__eye {
+  --happy-y: 0;
+  animation: happy 500ms var(--ease-out);
 }
 .c-sky { --agent: var(--c-sky); }
 .c-indigo { --agent: var(--c-indigo); }
@@ -636,10 +809,36 @@ h3 {
   font-weight: 500;
   font-size: 13px;
   white-space: nowrap;
-  transition: background 0.12s, border-color 0.12s;
+  transition: var(--transition-ui);
 }
 .btn:hover {
   background: var(--hover);
+}
+/* A press answers at once: buttons give a little under the pointer; rows that span
+   the width darken instead (a whole row shrinking reads as a glitch). */
+.btn:active:not(:disabled),
+.icon-btn:active,
+.segmented button:active,
+.days button:active,
+.cal-nav button:active:not(:disabled),
+.onb-chip:active {
+  transform: scale(0.97);
+  transition-duration: var(--dur-instant);
+}
+.nav-item:active:not(.is-active),
+.member:active,
+.search__hit:active,
+.mention-menu__item:active,
+.table__row--btn:active,
+.usage-agent:active {
+  background-color: var(--active);
+  transition-duration: var(--dur-instant);
+}
+.menu__item:active {
+  background-color: color-mix(in srgb, var(--accent) 86%, #000);
+}
+.menu__item.is-danger:active {
+  background-color: color-mix(in srgb, var(--danger) 86%, #000);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -685,12 +884,20 @@ h3 {
   overflow: hidden;
   user-select: none;
 }
+/* Held, the light fills the button in 1.5s (linear: it's a clock) and the approval
+   goes on transitionend; let go and it drains back. */
 .btn--hold::before {
   content: '';
   position: absolute;
   inset: 0;
-  width: var(--hold, 0%);
   background: rgba(255, 255, 255, 0.28);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.btn--hold.is-holding::before {
+  transform: scaleX(1);
+  transition: transform 1.5s linear;
 }
 .btn--hold span {
   position: relative;
@@ -699,6 +906,7 @@ h3 {
   color: var(--ok);
   font-size: 12.5px;
   font-weight: 500;
+  animation: fade var(--dur-fast) var(--ease-out) backwards;
 }
 
 /* ---------- conversation ---------- */
@@ -741,7 +949,7 @@ h3 {
 .sleeping-toucan__z {
   fill: var(--text-3);
   font-family: var(--font);
-  animation: drift 3.2s var(--ease) infinite;
+  animation: drift 3.2s var(--ease-out) infinite;
 }
 .sleeping-toucan__z--2 {
   animation-delay: 1.6s;
@@ -776,13 +984,13 @@ h3 {
 }
 /* What just arrived comes in, lightly. */
 .msg:nth-last-child(-n + 2) {
-  animation: msg-in 0.26s var(--ease) both;
+  --rise: 6px;
+  animation: rise var(--dur-enter) var(--ease-out) both;
 }
-@keyframes msg-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
+/* A reply's text, arriving after its steps, rises in on its own. */
+.msg--agent:nth-last-child(-n + 2) .md {
+  --rise: 4px;
+  animation: rise var(--dur-base) var(--ease-out) backwards;
 }
 .msg--grouped {
   padding-top: 1px;
@@ -873,6 +1081,15 @@ h3 {
   right: 6px;
   background: var(--code-bg);
 }
+/* Copied: the check pops in green. */
+.md-code__copy.is-copied {
+  color: var(--ok);
+}
+.md-code__copy.is-copied .icon {
+  --pop-scale: 0.6;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring);
+}
 .md table {
   display: block; /* a wide table scrolls by itself, with its words whole */
   overflow-x: auto;
@@ -926,36 +1143,6 @@ h3 {
   color: var(--text-3);
   margin-top: 4px;
 }
-.typing {
-  display: flex;
-  gap: 4px;
-  padding: 8px 0;
-}
-.typing i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-3);
-  animation: typing 1s infinite ease-in-out;
-}
-.typing i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.typing i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-@keyframes typing {
-  0%,
-  80%,
-  100% {
-    opacity: 0.25;
-    transform: translateY(0);
-  }
-  40% {
-    opacity: 1;
-    transform: translateY(-3px);
-  }
-}
 
 /* run steps: one quiet line, alive while working; the list opens on a click */
 .steps {
@@ -971,7 +1158,7 @@ h3 {
   margin-left: -7px;
   border-radius: 8px;
   color: var(--text-3);
-  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+  transition: var(--transition-ui);
 }
 .steps__toggle:hover {
   background: var(--hover);
@@ -979,26 +1166,42 @@ h3 {
 }
 .steps__chev {
   display: inline-flex;
-  transition: transform 0.18s var(--ease);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+/* Done: the label crossfades from the shimmer to the count, the chevron comes back. */
+.steps__chev,
+.steps__summary,
+.steps__failed {
+  animation: fade var(--dur-base) var(--ease-out) backwards;
 }
 .steps.is-open .steps__chev {
   transform: rotate(90deg);
 }
 .steps__pulse {
+  position: relative;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 0 var(--accent-soft);
-  animation: alive 1.4s var(--ease) infinite;
 }
-@keyframes alive {
-  70% {
-    box-shadow: 0 0 0 6px transparent;
-  }
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
+/* The live dots ring outward: a ::after that grows and fades (transform and opacity, no repaint). */
+.steps__pulse::after,
+.cal-watch__chip > i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  pointer-events: none;
+  animation: halo var(--dur-loop) var(--ease-out) infinite;
+}
+/* Finished: the pulse becomes a green check, with a small bounce. */
+.steps__done {
+  display: inline-flex;
+  color: var(--ok);
+  --pop-scale: 0.5;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
 }
 .steps__elapsed {
   font-variant-numeric: tabular-nums;
@@ -1015,7 +1218,7 @@ h3 {
   margin: 4px 0 6px 3px;
   padding: 2px 0 2px 14px;
   border-left: 2px solid var(--border);
-  animation: view-in 0.2s var(--ease) both;
+  animation: rise var(--dur-base) var(--ease-out) both;
 }
 .step {
   display: flex;
@@ -1030,6 +1233,7 @@ h3 {
   display: grid;
   place-items: center;
   flex: none;
+  transition: background-color var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out);
 }
 .step--done .step__icon {
   background: var(--ok-soft);
@@ -1095,7 +1299,7 @@ h3 {
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   opacity: 0;
-  transition: opacity 0.15s var(--ease);
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .msg:hover .receipt__line,
 .receipt:has(.receipt__table) .receipt__line {
@@ -1127,6 +1331,7 @@ h3 {
 
 /* approval card */
 .approval {
+  position: relative;
   margin: 10px 0 4px;
   max-width: 560px;
   border: 1px solid var(--border-strong);
@@ -1135,6 +1340,44 @@ h3 {
   padding: 12px 14px;
   background: var(--panel);
   box-shadow: var(--shadow);
+  transition: border-left-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
+/* A request (or a question) arriving: it rises in, rings twice to be seen, and goes quiet. */
+.approval--pending,
+.question:not(.is-answered) {
+  --rise: 6px;
+  animation: rise 280ms var(--ease-out) backwards;
+}
+.approval--pending::after,
+.question:not(.is-answered)::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 4px var(--ring, var(--warn-soft));
+  opacity: 0;
+  pointer-events: none;
+  --pulse-min: 1;
+  animation: fade-pulse 800ms var(--ease-in-out) 280ms 2;
+}
+.approval--pending::after {
+  inset: -1px -1px -1px -3px;
+}
+.approval--pending .approval__badge .icon {
+  animation: nudge var(--dur-slow) var(--ease-spring) 280ms backwards;
+}
+@keyframes nudge {
+  from {
+    transform: rotate(-8deg);
+  }
+}
+/* Decided: the badge pops into its new word and color. */
+.approval--approved .approval__badge,
+.approval--refused .approval__badge,
+.approval--expired .approval__badge {
+  --pop-scale: 0.8;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
 }
 .approval--approved {
   border-left-color: var(--ok);
@@ -1219,7 +1462,7 @@ h3 {
   border-radius: 20px;
   background: var(--panel);
   box-shadow: var(--shadow);
-  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .composer:focus-within {
   border-color: var(--border-strong);
@@ -1258,6 +1501,8 @@ h3 {
   box-shadow: var(--shadow-lg);
   padding: 4px;
   z-index: 10;
+  transform-origin: bottom left;
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
 }
 .mention-menu__item {
   width: 100%;
@@ -1266,6 +1511,7 @@ h3 {
   gap: 8px;
   padding: 6px 8px;
   border-radius: 6px;
+  transition: var(--transition-ui);
 }
 .mention-menu__item.is-active,
 .mention-menu__item:hover {
@@ -1362,6 +1608,7 @@ h3 {
 }
 .field.has-error input {
   border-color: var(--danger);
+  animation: shake 280ms var(--ease-out);
 }
 /* A field right after a loose hint line needs air, or its label reads as part of the hint. */
 .hint + .field {
@@ -1404,7 +1651,7 @@ h3 {
   border-radius: 10px;
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--border);
-  transition: box-shadow 0.12s;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
 }
 .look:hover {
   box-shadow: inset 0 0 0 1px var(--text-3);
@@ -1418,7 +1665,7 @@ h3 {
   border-radius: 8px;
   background: var(--agent);
   box-shadow: 0 0 0 2px var(--panel), 0 0 0 2px transparent;
-  transition: box-shadow 0.12s;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
 }
 .swatch.is-active {
   box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--agent);
@@ -1478,6 +1725,7 @@ h3 {
   border-radius: 6px;
   color: var(--text-2);
   white-space: nowrap;
+  transition: var(--transition-ui);
 }
 .segmented button.is-active {
   background: var(--panel);
@@ -1573,12 +1821,14 @@ h3 {
   overflow: hidden;
   width: 100%;
 }
+/* The fill is full width, scaled to the share (transform: no layout on each change). */
 .budget__fill {
   display: block;
+  width: 100%;
   height: 100%;
-  border-radius: 6px;
   background: var(--ok);
-  transition: width 0.4s ease;
+  transform-origin: left;
+  transition: transform var(--dur-slow) var(--ease-out), background-color var(--dur-base) var(--ease-out);
 }
 .budget--warn .budget__fill {
   background: var(--warn);
@@ -1590,6 +1840,9 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.stack-list > * {
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
 }
 .stack-list .approval {
   max-width: 640px;
@@ -1614,6 +1867,9 @@ h3 {
 }
 .table__row:last-child {
   border-bottom: 0;
+}
+.table > .table__row {
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
 }
 .table__row--btn:hover {
   background: var(--hover);
@@ -1645,7 +1901,7 @@ h3 {
 .chev {
   display: inline-flex;
   color: var(--text-3);
-  transition: transform 0.15s;
+  transition: transform var(--dur-base) var(--ease-out);
 }
 .chev.is-open {
   transform: rotate(90deg);
@@ -1690,7 +1946,7 @@ h3 {
   border-radius: 10px;
   background: var(--border-strong);
   position: relative;
-  transition: background 0.15s;
+  transition: background-color var(--dur-base) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .toggle::after {
   content: '';
@@ -1701,7 +1957,8 @@ h3 {
   height: 14px;
   border-radius: 50%;
   background: #fff;
-  transition: transform 0.15s;
+  transform-origin: left;
+  transition: transform var(--dur-base) var(--ease-out);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 .toggle.is-on {
@@ -1709,6 +1966,14 @@ h3 {
 }
 .toggle.is-on::after {
   transform: translateX(14px);
+  transform-origin: right;
+}
+/* Pressed, the knob stretches toward where it's going. */
+.toggle:active::after {
+  transform: scaleX(1.15);
+}
+.toggle.is-on:active::after {
+  transform: translateX(14px) scaleX(1.15);
 }
 .key-row {
   display: flex;
@@ -1731,9 +1996,15 @@ h3 {
   flex-shrink: 0;
 }
 
+/* An error arrives calm: it rises in on a red tint that fades, no shake. */
 .note--error {
   color: var(--danger);
   white-space: pre-wrap;
+  border-radius: 4px;
+  --rise: 4px;
+  --flash: var(--danger-soft);
+  --flash-spread: 4px;
+  animation: rise var(--dur-base) var(--ease-out) backwards, flash 1.2s var(--ease-out);
 }
 .warn-text {
   color: var(--warn);
@@ -1744,20 +2015,19 @@ h3 {
 }
 
 .system-line.is-pending p {
-  animation: pulse-text 1.4s ease-in-out infinite;
-}
-@keyframes pulse-text {
-  50% {
-    opacity: 0.45;
-  }
+  --pulse-min: 0.45;
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
 }
 .question {
+  position: relative;
+  --ring: var(--accent-soft);
   margin-top: 8px;
   border: 1px solid var(--accent);
   background: var(--accent-soft);
   border-radius: var(--radius);
   padding: 10px 12px;
   max-width: 560px;
+  transition: border-color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
 }
 .question p {
   margin: 2px 0 0;
@@ -1800,6 +2070,9 @@ h3 {
 
 /* ---------- memory ---------- */
 .summary {
+  --rise: 0;
+  --rise-x: 16px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
   margin: 0 20px;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -1825,6 +2098,7 @@ h3 {
   background: var(--active);
 }
 .memory-chip {
+  animation: rise var(--dur-base) var(--ease-out) backwards;
   margin-top: 8px;
   display: flex;
   align-items: center;
@@ -1912,7 +2186,11 @@ h3 {
   flex: 1;
   min-width: 0;
 }
+/* The side panel slides in from its edge. */
 .side-panel {
+  --rise: 0;
+  --rise-x: 16px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
   width: min(48%, 760px);
   min-width: 360px;
   display: flex;
@@ -2087,12 +2365,8 @@ h3 {
   height: 6px;
   border-radius: 50%;
   background: currentColor;
-  animation: live-pulse 1.4s ease-in-out infinite;
-}
-@keyframes live-pulse {
-  50% {
-    opacity: 0.25;
-  }
+  --pulse-min: 0.25;
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
 }
 .url-bar {
   display: flex;
@@ -2153,15 +2427,17 @@ h3 {
   color: var(--text-3);
   font-size: 12.5px;
 }
+/* As big as the screen and moved by transform (translate in % of itself, so of the
+   screen): its top-left corner is where the agent points. No layout while it glides. */
 .screen__cursor {
   position: absolute;
+  inset: 0;
   z-index: 2;
   pointer-events: none;
   line-height: 1;
   transition:
-    left 0.55s cubic-bezier(0.3, 0.7, 0.2, 1),
-    top 0.55s cubic-bezier(0.3, 0.7, 0.2, 1),
-    opacity 0.6s;
+    transform var(--dur-slow) cubic-bezier(0.3, 0.7, 0.2, 1),
+    opacity var(--dur-data) var(--ease-out);
 }
 .screen__cursor.is-idle {
   opacity: 0;
@@ -2198,7 +2474,7 @@ h3 {
   border-radius: 50%;
   border: 2px solid var(--agent);
   opacity: 0;
-  animation: screen-ripple 0.9s ease-out 0.45s;
+  animation: screen-ripple var(--dur-data) var(--ease-out) var(--dur-slow);
 }
 @keyframes screen-ripple {
   0% {
@@ -2811,12 +3087,15 @@ table.csv th {
   display: flex;
   gap: 6px;
 }
+/* The step you're on is longer: it stretches (scaleX) and the ones after it move
+   over (translate), so the row never lays out again. */
 .onb__dots span {
   width: 22px;
   height: 4px;
   border-radius: 2px;
   background: var(--border-strong);
-  transition: background 0.3s, width 0.3s;
+  transform-origin: left;
+  transition: background-color var(--dur-slow) var(--ease-out), opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out);
 }
 .onb__dots span.is-done {
   background: var(--accent);
@@ -2824,7 +3103,10 @@ table.csv th {
 }
 .onb__dots span.is-now {
   background: var(--accent);
-  width: 36px;
+  transform: scaleX(1.6364); /* 36px */
+}
+.onb__dots span.is-now ~ span {
+  transform: translateX(14px);
 }
 .onb__scroll {
   flex: 1;
@@ -2836,12 +3118,41 @@ table.csv th {
   width: 100%;
   margin: auto; /* centered when it fits, scrolls from the top when it doesn't */
   padding: 28px 40px 48px;
-  animation: onb-in 0.35s ease both;
+  /* Forward comes in from the right, back from the left (data-dir). */
+  --rise: 0;
+  --rise-x: 12px;
+  animation: rise var(--dur-slow) var(--ease-out) both;
 }
-@keyframes onb-in {
-  from {
+.onb__stage[data-dir='back'] {
+  --rise-x: -12px;
+}
+/* The end of the introduction: the Tuca cheers, then the channel opens. */
+.onb-cheer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  animation: fade var(--dur-base) var(--ease-out) both;
+}
+.onb-cheer .avatar--tuca {
+  animation: cheer 650ms var(--ease-out) both;
+}
+@keyframes cheer {
+  0% {
     opacity: 0;
-    transform: translateY(8px);
+    transform: scale(0.4) rotate(-12deg);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.08) rotate(8deg);
+  }
+  70% {
+    transform: scale(1) rotate(-5deg);
+  }
+  100% {
+    transform: none;
   }
 }
 .onb__split {
@@ -3072,7 +3383,7 @@ table.csv th {
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
 }
 .onb-engine.is-ready {
   border-color: var(--ok);
@@ -3142,7 +3453,7 @@ table.csv th {
   font-size: 12px;
   color: var(--text-2);
   line-height: 1.35;
-  transition: border-color 0.15s, transform 0.15s;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--ease-out);
 }
 .onb-template:hover {
   transform: translateY(-1px);
@@ -3229,7 +3540,7 @@ table.csv th {
   border-radius: 999px;
   border: 1px dashed var(--border-strong);
   color: var(--text-3);
-  transition: all 0.2s;
+  transition: border-color var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
 }
 .onb-power.is-on {
   border: 1px solid var(--ok);
@@ -3250,7 +3561,7 @@ table.csv th {
   margin: 0;
 }
 .onb-card .avatar {
-  transition: background 0.25s;
+  transition: background-color var(--dur-enter) var(--ease-out);
 }
 
 /* powers */
@@ -3382,6 +3693,8 @@ table.csv th {
   padding: 0 8px 8px;
 }
 .getting__bar {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -3410,6 +3723,21 @@ table.csv th {
 .getting__bar.is-all .getting__label {
   color: var(--ok);
 }
+/* All done: one gentle shine crosses the bar. */
+.getting__bar.is-all::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--ok) 22%, transparent) 50%, transparent 70%);
+  transform: translateX(-100%);
+  pointer-events: none;
+  animation: shine 1.2s var(--ease-in-out) 300ms forwards;
+}
+@keyframes shine {
+  to {
+    transform: translateX(100%);
+  }
+}
 .getting__track {
   height: 4px;
   border-radius: 2px;
@@ -3418,10 +3746,11 @@ table.csv th {
 }
 .getting__track span {
   display: block;
+  width: 100%;
   height: 100%;
   background: var(--accent);
-  border-radius: 2px;
-  transition: width 0.5s ease;
+  transform-origin: left;
+  transition: transform var(--dur-slow) var(--ease-out), background-color var(--dur-base) var(--ease-out);
 }
 .getting__bar.is-all .getting__track span {
   background: var(--ok);
@@ -3438,7 +3767,8 @@ table.csv th {
   border-radius: 14px;
   box-shadow: var(--shadow-lg);
   z-index: 40;
-  animation: onb-in 0.2s ease both;
+  transform-origin: bottom left;
+  animation: pop var(--dur-base) var(--ease-out) both;
 }
 .getting__head {
   display: flex;
@@ -3488,6 +3818,14 @@ table.csv th {
 .getting__list li.is-done .getting__check {
   background: var(--ok);
   border-color: var(--ok);
+  --pop-scale: 0.5;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
+}
+/* Its check draws itself, a beat after the circle lands. */
+.getting__check path {
+  stroke-dasharray: 26;
+  animation: draw 300ms var(--ease-out) 120ms backwards;
 }
 .getting__foot {
   display: flex;
@@ -3528,12 +3866,7 @@ table.csv th {
   font-size: 12px;
   color: rgba(255, 253, 248, 0.75);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-  animation: splash-fade 0.6s ease 1.5s both;
-}
-@keyframes splash-fade {
-  from {
-    opacity: 0;
-  }
+  animation: fade var(--dur-data) var(--ease-out) 1.5s both;
 }
 .sp-black {
   position: absolute;
@@ -3999,6 +4332,8 @@ table.csv th {
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
+  transform-origin: top left;
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
 }
 .menu__item {
   display: flex;
@@ -4009,6 +4344,7 @@ table.csv th {
   border-radius: 6px;
   font-size: 13px;
   color: var(--text);
+  transition: var(--transition-ui);
 }
 .menu__item .icon {
   color: var(--text-2);
@@ -4047,6 +4383,13 @@ table.csv th {
   display: grid;
   place-items: center;
   background: rgba(10, 10, 12, 0.35);
+  animation: fade var(--dur-base) var(--ease-out) backwards;
+}
+/* Every window opens the same way: the shade fades, the card pops. */
+.modal__card,
+.form-modal,
+.search {
+  animation: pop var(--dur-base) var(--ease-out) backwards;
 }
 .modal__card {
   width: min(460px, calc(100vw - 32px));
@@ -4080,6 +4423,14 @@ table.csv th {
 }
 .modal__input input {
   margin-left: 4px;
+}
+/* Saved empty: the field says no (a short shake) and stays red until you type. */
+.modal__input.is-shaking {
+  animation: shake 280ms var(--ease-out);
+}
+.modal__input.is-invalid input {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
 }
 .member-list {
   display: flex;
@@ -4142,7 +4493,7 @@ table.csv th {
   font-size: 13.5px;
   color: var(--text-2);
   border-bottom: 2px solid transparent;
-  transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 .tabs button:hover {
   color: var(--text);
@@ -4276,7 +4627,7 @@ kbd {
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
   opacity: 0;
-  transition: opacity 0.12s;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .composer__image:hover .composer__image-x {
   opacity: 1;
@@ -4293,8 +4644,10 @@ kbd {
   background: var(--accent-soft);
   backdrop-filter: blur(2px);
   pointer-events: none;
+  animation: fade var(--dur-fast) var(--ease-out) backwards;
 }
 .drop-overlay__card {
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4428,7 +4781,28 @@ kbd {
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+  /* Status that only fades stays alive: an opacity pulse moves nothing on screen. */
+  .pulse:not(.is-done),
+  .live-badge i,
+  .system-line.is-pending p {
+    animation-duration: var(--dur-loop) !important;
+    animation-iteration-count: infinite !important;
+  }
+  .shimmer {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .pulse.is-done {
+    animation-duration: var(--dur-enter) !important;
+    animation-delay: 1.2s !important;
+  }
+  /* Holding to approve is a clock, not decoration: it keeps its 1.5s. */
+  .btn--hold.is-holding::before {
+    transition-duration: 1.5s !important;
   }
 }
 
@@ -4539,7 +4913,7 @@ kbd {
   display: flex;
   align-items: flex-end;
   border-radius: 5px 5px 0 0;
-  transition: background 0.15s var(--ease);
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 .usage-chart__day.is-hover {
   background: var(--hover);
@@ -4551,7 +4925,7 @@ kbd {
   border-radius: 4px 4px 0 0;
   overflow: hidden;
   transform-origin: bottom;
-  animation: usage-grow 0.6s var(--ease) both;
+  animation: usage-grow var(--dur-data) var(--ease-out) both;
 }
 .usage-chart__stack {
   animation-delay: calc(var(--i, 0) * 12ms);
@@ -4606,17 +4980,12 @@ kbd {
   font-size: 12px;
   pointer-events: none;
   z-index: 2;
-  animation: usage-tip-in 0.12s var(--ease);
+  --rise: 2px;
+  animation: rise var(--dur-fast) var(--ease-out);
 }
 .usage-tip.is-left {
   left: auto;
   right: calc(100% - var(--x) + 16px);
-}
-@keyframes usage-tip-in {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
 }
 .usage-tip__total {
   color: var(--text-2);
@@ -4694,7 +5063,7 @@ kbd {
 .usage-ring__fill {
   stroke: var(--accent);
   stroke-linecap: round;
-  transition: stroke-dashoffset 0.8s var(--ease);
+  transition: stroke-dashoffset var(--dur-data) var(--ease-out);
 }
 .usage-ring.is-warn .usage-ring__fill {
   stroke: var(--warn);
@@ -4719,7 +5088,7 @@ kbd {
   text-align: left;
   color: inherit;
   cursor: pointer;
-  transition: background 0.15s var(--ease);
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 .usage-agent + .usage-agent {
   box-shadow: 0 -1px 0 var(--border);
@@ -4734,7 +5103,7 @@ kbd {
 .usage-agent > .icon {
   color: var(--text-3);
   opacity: 0;
-  transition: opacity 0.15s var(--ease);
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .usage-agent:hover > .icon {
   opacity: 1;
@@ -4787,7 +5156,7 @@ kbd {
 .usage-meter__fill {
   background: var(--ok);
   min-width: 3px;
-  animation: usage-fill 0.8s var(--ease) both;
+  animation: usage-fill var(--dur-data) var(--ease-out) both;
   transform-origin: left;
 }
 .usage-meter__proj {
@@ -4936,10 +5305,6 @@ kbd {
 .status-dot.is-danger {
   background: var(--danger);
 }
-.status-dot.is-live {
-  background: var(--accent);
-  animation: alive 1.4s ease-in-out infinite;
-}
 
 /* ---------- sheet: the cleaner page ---------- */
 .sheet {
@@ -5027,7 +5392,7 @@ kbd {
   background: none;
   color: var(--text-3);
   font-size: 13.5px;
-  transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 .tabs-line > button:hover {
   color: var(--text);
@@ -5146,7 +5511,7 @@ kbd {
   max-height: 0;
   opacity: 0;
   overflow: hidden;
-  transition: max-height 0.18s var(--ease), opacity 0.15s var(--ease), margin 0.18s var(--ease);
+  transition: max-height var(--dur-base) var(--ease-out), opacity var(--dur-fast) var(--ease-out), margin var(--dur-base) var(--ease-out);
 }
 .read-line:hover .read-line__meta,
 .read-line:focus-within .read-line__meta,
@@ -5259,7 +5624,7 @@ kbd {
   background: none;
   padding: 3px;
   border-radius: 9px;
-  transition: opacity 0.15s var(--ease), background 0.15s var(--ease);
+  transition: opacity var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
 .cal-people button:hover {
   background: var(--hover);
@@ -5299,16 +5664,16 @@ kbd {
   color: var(--text);
 }
 .cal-watch__chip > i {
+  position: relative;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--ok);
-  animation: watch 2.2s ease-in-out infinite;
 }
-@keyframes watch {
-  50% {
-    box-shadow: 0 0 0 4px var(--ok-soft);
-  }
+/* Watching is calmer than working: a slower ring (the halo above). */
+.cal-watch__chip > i::after {
+  --halo-scale: 2.4;
+  animation-duration: 2.2s;
 }
 .cal-watch__chip.is-dim {
   opacity: 0.4;
@@ -5426,14 +5791,9 @@ kbd {
   background: color-mix(in srgb, var(--agent) 14%, var(--panel));
   color: color-mix(in srgb, var(--agent) 60%, var(--text));
   box-shadow: inset 2.5px 0 0 var(--agent);
-  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), opacity 0.15s var(--ease);
-  animation: cal-in 0.3s var(--ease) both;
-}
-@keyframes cal-in {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
+  transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+  --rise: 3px;
+  animation: rise var(--dur-enter) var(--ease-out) both;
 }
 .cal__ev:hover {
   transform: translateY(-1px);
@@ -5475,7 +5835,8 @@ kbd {
 }
 .cal__ev.is-live {
   background: color-mix(in srgb, var(--agent) 20%, var(--panel));
-  animation: cal-live 1.6s ease-in-out infinite;
+  /* Clipped (overflow: hidden), so its ring stays a box-shadow, on the shared beat. */
+  animation: cal-live var(--dur-loop) var(--ease-in-out) infinite;
 }
 @keyframes cal-live {
   50% {
@@ -5593,13 +5954,7 @@ kbd {
   border-radius: 14px;
   background: var(--panel);
   box-shadow: 0 0 0 1px rgba(60, 40, 20, 0.08), var(--shadow-lg);
-  animation: cal-pop 0.16s var(--ease);
-}
-@keyframes cal-pop {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.98);
-  }
+  animation: pop var(--dur-base) var(--ease-out);
 }
 .cal-pop__top {
   display: flex;
@@ -5672,7 +6027,7 @@ kbd {
   border: 0;
   border-radius: 3px;
   background: var(--border-strong);
-  transition: transform 0.12s var(--ease);
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 .cal-pop__runs button:hover {
   transform: scale(1.35);
@@ -5710,7 +6065,6 @@ kbd {
   overflow-y: auto;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  animation: cal-pop 0.18s var(--ease);
 }
 .form-modal .card {
   margin: 0;
@@ -5718,14 +6072,8 @@ kbd {
 
 /* A message opened from elsewhere (a routine's run) flashes once. */
 .messages > .is-flash {
-  animation: flash 1.8s var(--ease);
+  animation: flash 1.8s var(--ease-out);
   border-radius: 12px;
-}
-@keyframes flash {
-  0%,
-  40% {
-    background: var(--accent-soft);
-  }
 }
 
 .sheet .page__scroll {
@@ -5803,7 +6151,7 @@ kbd {
   color: var(--text-3);
   opacity: 0;
   transform: translateX(-4px);
-  transition: opacity 0.15s var(--ease), transform 0.15s var(--ease);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--ease-out);
 }
 .skill-line:hover > .icon {
   opacity: 1;
@@ -6259,7 +6607,7 @@ kbd {
   font-size: 12.5px;
   color: var(--text-3);
   opacity: 0;
-  transition: opacity 0.15s var(--ease);
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .rep-problems button:hover .rep-problems__go {
   opacity: 1;
@@ -6362,7 +6710,7 @@ kbd {
     z-index: 60;
     padding-top: env(safe-area-inset-top);
     transform: translateX(-102%);
-    transition: transform 0.22s var(--ease);
+    transition: transform var(--dur-enter) var(--ease-out);
     box-shadow: var(--shadow-panel);
   }
   .app.is-nav-open .sidebar {
@@ -6376,7 +6724,7 @@ kbd {
     background: rgba(0, 0, 0, 0.35);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.2s var(--ease);
+    transition: opacity var(--dur-base) var(--ease-out);
   }
   .app.is-nav-open .nav-shade {
     opacity: 1;
@@ -6587,7 +6935,8 @@ kbd {
 .lightbox__stage.is-zoomed:active {
   cursor: grabbing;
 }
-.lightbox__stage img {
+.lightbox__stage img,
+.lightbox__stage video {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -6619,6 +6968,22 @@ kbd {
 }
 [data-os='mac'] .lightbox__bar {
   padding-left: 84px; /* the window's buttons are here */
+}
+.local-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.local-link code {
+  color: inherit;
 }
 
 /* An agent's own color and picture */
@@ -6716,6 +7081,34 @@ kbd {
   margin-top: 4px;
 }
 
+/* Dictation */
+.voice-btn {
+  touch-action: none;
+}
+.voice-btn.is-recording,
+.voice-btn.is-recording:hover {
+  color: #fff;
+  background: var(--danger);
+}
+
+/* Channel groups */
+.channel-group__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.channel-group__name {
+  width: calc(100% - 16px);
+  margin: 4px 8px;
+  font-size: 12px;
+}
+.channel-drop {
+  height: 6px;
+}
+
 
 /* The wiki: what you and the team know, as linked pages */
 
@@ -6723,60 +7116,55 @@ kbd {
 .wk-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; border-top: 1px solid var(--border); }
 .wk-watch { margin: -4px 32px 12px; }
 .wk-watch__chip span:not(.wk-spin) { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wk-watch__chip--pending > i { background: var(--accent); animation-name: wk-watch-accent; }
-.wk-watch__chip--care > i { background: var(--warn); animation-name: wk-watch-warn; }
-@keyframes wk-watch-accent { 50% { box-shadow: 0 0 0 4px var(--accent-soft); } }
-@keyframes wk-watch-warn { 50% { box-shadow: 0 0 0 4px var(--warn-soft); } }
+.wk-watch__chip--pending > i { background: var(--accent); }
+.wk-watch__chip--care > i { background: var(--warn); }
 .wk-watch .wk-spin { width: 9px; height: 9px; color: var(--text-3); }
 .wk-foot { gap: 20px; }
 .wk-foot .text-btn { display: inline-flex; align-items: center; gap: 6px; }
 .wk-foot .grow { flex: 1; }
 
-.wk-search-btn { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 7px 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text-3); font: inherit; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+.wk-search-btn { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 7px 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text-3); font: inherit; cursor: pointer; transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 .wk-search-btn:hover { border-color: var(--border-strong); color: var(--text); }
 .wk-search-btn kbd, .wk-palette kbd { font: 600 10.5px var(--font); color: var(--text-3); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; background: var(--bg); }
 .wk-icon-btn { width: 30px; padding: 0; justify-content: center; }
 .wk-kinds { display: flex; gap: 2px; padding-right: 12px; margin-right: 4px; border-right: 1px solid var(--border); }
-.wk-kinds button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border: 0; border-radius: 7px; background: none; font: 500 12.5px var(--font); color: var(--text-2); cursor: pointer; transition: opacity 0.15s, background 0.15s; }
+.wk-kinds button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border: 0; border-radius: 7px; background: none; font: 500 12.5px var(--font); color: var(--text-2); cursor: pointer; transition: opacity var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out); }
 .wk-kinds button:hover { background: var(--hover); }
 .wk-kinds button i { width: 8px; height: 8px; border-radius: 50%; background: var(--k); }
 .wk-kinds button.is-on { background: color-mix(in srgb, var(--k) 14%, transparent); color: var(--text); font-weight: 600; }
 .wk-kinds button.is-dim { opacity: 0.45; }
 
-.wk-panel { position: absolute; z-index: 3; top: 12px; right: 12px; bottom: 12px; width: 560px; max-width: calc(100% - 24px); overflow-y: auto; background: var(--panel); border-radius: 18px; box-shadow: 0 0 0 1px var(--border), 0 24px 60px -20px rgba(40, 25, 10, 0.28), 0 8px 20px -12px rgba(40, 25, 10, 0.18); animation: wk-slide 0.34s var(--ease) both; }
-@keyframes wk-slide { from { opacity: 0; transform: translateX(24px); } }
+.wk-panel { position: absolute; z-index: 3; top: 12px; right: 12px; bottom: 12px; width: 560px; max-width: calc(100% - 24px); overflow-y: auto; background: var(--panel); border-radius: 18px; box-shadow: 0 0 0 1px var(--border), 0 24px 60px -20px rgba(40, 25, 10, 0.28), 0 8px 20px -12px rgba(40, 25, 10, 0.18); --rise: 0; --rise-x: 24px; animation: rise var(--dur-slow) var(--ease-out) both; }
 .wk-panel__close { position: sticky; top: 14px; float: right; margin: 14px 14px -44px 0; z-index: 2; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; border: 0; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: blur(6px); color: var(--text-3); cursor: pointer; }
 .wk-panel__close:hover { background: var(--hover); color: var(--text); }
 
-.wk-drop { position: absolute; inset: 12px; z-index: 5; display: grid; place-items: center; border-radius: 18px; border: 2px dashed var(--accent); background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(4px); pointer-events: none; animation: wk-fade 0.15s both; }
+.wk-drop { position: absolute; inset: 12px; z-index: 5; display: grid; place-items: center; border-radius: 18px; border: 2px dashed var(--accent); background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(4px); pointer-events: none; animation: rise var(--dur-fast) var(--ease-out) both; }
 .wk-drop div { display: grid; justify-items: center; gap: 8px; color: var(--accent); }
 .wk-drop b { font-size: 18px; color: var(--text); }
 .wk-drop small { color: var(--text-2); }
-@keyframes wk-fade { from { opacity: 0; transform: translateY(4px); } }
 
 /* pills, people, little badges */
 .wk-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border-radius: 12px; border: 0; background: color-mix(in srgb, var(--k) 12%, transparent); color: color-mix(in srgb, var(--k) 78%, var(--text)); font: 600 12px var(--font); white-space: nowrap; }
 .wk-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--k); }
 .wk-pill--sm { height: 21px; font-size: 11.5px; padding: 0 8px 0 7px; }
 .wk-pill--ghost { --k: var(--text-3); background: transparent; border: 1px dashed var(--border-strong); color: var(--text-3); }
-button.wk-pill { cursor: pointer; transition: background 0.15s, box-shadow 0.15s; }
+button.wk-pill { cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
 button.wk-pill:hover { background: color-mix(in srgb, var(--k) 20%, transparent); }
 button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(in srgb, var(--k) 20%, transparent); }
 .wk-who { display: inline-grid; place-items: center; flex: none; border-radius: 50%; background: var(--primary); color: var(--primary-text); font-weight: 700; }
 .wk-who--curator { background: linear-gradient(135deg, var(--accent), #f2a65a); color: #fff; }
 .wk-badge-file { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: color-mix(in srgb, var(--k) 13%, transparent); color: color-mix(in srgb, var(--k) 85%, var(--text)); font: 800 9.5px var(--font); letter-spacing: 0.03em; }
 .wk-badge-file--icon { --k: var(--text-3); color: var(--text-2); background: var(--hover); }
-.wk-spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; display: inline-block; animation: wk-spin 0.8s linear infinite; vertical-align: -1px; }
-@keyframes wk-spin { to { transform: rotate(360deg); } }
+.wk-spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; display: inline-block; animation: spin 0.8s linear infinite; vertical-align: -1px; }
 .wk-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
 /* links in the text, and what they point to */
-.wiki-link { display: inline; padding: 0 2px; margin: 0; border-radius: 4px; background: transparent; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; border: 0; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 3px; text-decoration-thickness: 1.5px; transition: background 0.12s, text-decoration-color 0.12s; }
+.wiki-link { display: inline; padding: 0 2px; margin: 0; border-radius: 4px; background: transparent; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; border: 0; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 3px; text-decoration-thickness: 1.5px; transition: background-color var(--dur-fast) var(--ease-out), text-decoration-color var(--dur-fast) var(--ease-out); }
 .wiki-link:hover { background: var(--accent-soft); text-decoration-color: var(--accent); }
 .wiki-link.is-missing { color: var(--text-2); text-decoration-style: dashed; text-decoration-color: var(--text-3); }
 .wiki-link--source { display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; text-decoration: none; color: var(--text-3); font-weight: 500; font-size: 0.78em; vertical-align: 1px; border-radius: 6px; background: var(--hover); }
 .wiki-link--source:hover { color: var(--text); background: var(--active); }
-.wk-peek { position: fixed; z-index: 60; width: 320px; padding: 14px 16px; border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); display: grid; gap: 6px; justify-items: start; animation: wk-fade 0.16s var(--ease) both; pointer-events: none; }
+.wk-peek { position: fixed; z-index: 60; width: 320px; padding: 14px 16px; border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); display: grid; gap: 6px; justify-items: start; animation: pop var(--dur-fast) var(--ease-out) both; pointer-events: none; }
 .wk-peek b { font-size: 15px; }
 .wk-peek p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .wk-peek small { color: var(--text-3); font-size: 11.5px; }
@@ -6785,25 +7173,24 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-canvas { position: absolute; inset: 0; cursor: grab; touch-action: none; user-select: none; background-image: radial-gradient(circle, color-mix(in srgb, var(--text-3) 32%, transparent) 1px, transparent 1.3px); }
 .wk-canvas.is-panning { cursor: grabbing; }
 .wk-canvas > svg { display: block; position: absolute; inset: 0; }
-.wk-canvas__edges line { stroke: color-mix(in srgb, var(--text-3) 45%, transparent); stroke-width: 1.3; transition: opacity 0.25s, stroke 0.25s; }
+.wk-canvas__edges line { stroke: color-mix(in srgb, var(--text-3) 45%, transparent); stroke-width: 1.3; transition: opacity var(--dur-enter) var(--ease-out), stroke var(--dur-enter) var(--ease-out); }
 .wk-canvas__edges line.is-hot { stroke: var(--accent); stroke-width: 2; }
 .wk-canvas__edges line.is-dim { opacity: 0.18; }
-.wk-node { cursor: pointer; transition: opacity 0.25s; animation: wk-pop 0.6s var(--ease) both; animation-delay: calc(var(--i) * 22ms); }
-@keyframes wk-pop { from { opacity: 0; } }
+.wk-node { cursor: pointer; transition: opacity var(--dur-enter) var(--ease-out); animation: fade var(--dur-data) var(--ease-out) both; animation-delay: calc(var(--i) * 22ms); }
 .wk-node__hit { fill: transparent; }
 .wk-node__dot { fill: var(--k); stroke: var(--bg); stroke-width: 2.5; }
-.wk-node__halo { fill: var(--k); opacity: 0; transition: opacity 0.2s; }
+.wk-node__halo { fill: var(--k); opacity: 0; transition: opacity var(--dur-base) var(--ease-out); }
 .wk-node:hover .wk-node__halo, .wk-node.is-lit .wk-node__halo { opacity: 0.16; }
-.wk-node.is-sel .wk-node__halo { opacity: 0.22; animation: wk-breathe 2.6s ease-in-out infinite; }
+.wk-node.is-sel .wk-node__halo { opacity: 0.22; animation: wk-breathe 2.6s var(--ease-in-out) infinite; }
 @keyframes wk-breathe { 50% { opacity: 0.08; } }
-.wk-node__ping { fill: none; stroke: var(--accent); stroke-width: 1.5; animation: wk-ping 2s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+.wk-node__ping { fill: none; stroke: var(--accent); stroke-width: 1.5; animation: wk-ping 2s var(--ease-out) infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes wk-ping { from { opacity: 0.9; transform: scale(1); } to { opacity: 0; transform: scale(1.9); } }
-.wk-node text { font: 500 12px var(--font); fill: var(--text-2); paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; pointer-events: none; transition: fill 0.2s; }
+.wk-node text { font: 500 12px var(--font); fill: var(--text-2); paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; pointer-events: none; transition: fill var(--dur-base) var(--ease-out); }
 .wk-node.is-lit text, .wk-node.is-sel text { fill: var(--text); font-weight: 650; }
 .wk-node.is-dim { opacity: 0.2; }
 .wk-node.is-missing .wk-node__dot { fill: var(--bg); stroke: var(--text-3); stroke-dasharray: 2.5 2.5; stroke-width: 1.4; }
 .wk-node.is-missing text { fill: var(--text-3); font-style: italic; }
-.wk-zoom { position: absolute; bottom: 16px; z-index: 2; display: flex; border-radius: 10px; background: var(--panel); box-shadow: 0 0 0 1px var(--border), var(--shadow); overflow: hidden; transition: right 0.34s var(--ease); }
+.wk-zoom { position: absolute; bottom: 16px; z-index: 2; display: flex; border-radius: 10px; background: var(--panel); box-shadow: 0 0 0 1px var(--border), var(--shadow); overflow: hidden; transition: right var(--dur-slow) var(--ease-out); }
 .wk-zoom button { width: 32px; height: 30px; border: 0; background: none; color: var(--text-2); font: 500 16px var(--font); cursor: pointer; display: grid; place-items: center; }
 .wk-zoom button + button { border-left: 1px solid var(--border); }
 .wk-zoom button:hover { background: var(--hover); color: var(--text); }
@@ -6812,7 +7199,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-empty > * { max-width: 540px; }
 .wk-empty__art { width: 360px; max-width: 100%; overflow: visible; margin-bottom: 6px; }
 .wk-empty__art line { stroke: var(--border-strong); stroke-width: 1.4; stroke-dasharray: 3 4; }
-.wk-empty__art circle { animation: wk-float 5s ease-in-out infinite; animation-delay: calc(var(--i) * -0.8s); }
+.wk-empty__art circle { animation: wk-float 5s var(--ease-in-out) infinite; animation-delay: calc(var(--i) * -0.8s); }
 @keyframes wk-float { 50% { transform: translateY(-5px); } }
 .wk-empty h2 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
 .wk-empty p { margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.6; }
@@ -6820,7 +7207,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 
 /* search */
 .wk-palette-back { align-items: flex-start; padding-top: 12vh; }
-.wk-palette { width: min(640px, 92vw); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); overflow: hidden; animation: wk-fade 0.16s var(--ease) both; }
+.wk-palette { width: min(640px, 92vw); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); overflow: hidden; animation: pop var(--dur-base) var(--ease-out) both; }
 .wk-palette__input { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); color: var(--text-3); }
 .wk-palette__input input, .wk-palette__input input:focus { flex: 1; border: 0; outline: 0; box-shadow: none; padding: 0; background: transparent; font: inherit; font-size: 17px; color: var(--text); }
 .wk-palette__list { max-height: 56vh; overflow-y: auto; padding: 8px; }
@@ -6838,7 +7225,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-palette__new b { color: var(--text); }
 
 /* settings */
-.wk-settings { width: min(560px, 94vw); display: grid; gap: 4px; padding: 22px 24px 24px; background: var(--panel); border-radius: 18px; box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); animation: wk-fade 0.18s var(--ease) both; max-height: 88vh; overflow-y: auto; }
+.wk-settings { width: min(560px, 94vw); display: grid; gap: 4px; padding: 22px 24px 24px; background: var(--panel); border-radius: 18px; box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); animation: pop var(--dur-base) var(--ease-out) both; max-height: 88vh; overflow-y: auto; }
 .wk-settings header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .wk-settings h2 { margin: 0; font-size: 19px; }
 .wk-settings section { display: grid; gap: 10px; padding: 14px 0; border-top: 1px solid var(--border); }
@@ -6899,7 +7286,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 
 .wk-add { display: grid; gap: 10px; }
 .wk-add__tile { display: grid; gap: 6px; align-content: start; padding: 16px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel); }
-.wk-add__tile--file { cursor: pointer; border-style: dashed; border-width: 1.5px; transition: border-color 0.15s, background 0.15s; }
+.wk-add__tile--file { cursor: pointer; border-style: dashed; border-width: 1.5px; transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out); }
 .wk-add__tile--file:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 4%, var(--panel)); }
 .wk-add__tile b { font-size: 14px; margin-top: 4px; }
 .wk-add__tile small { color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
@@ -6964,18 +7351,18 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 /* the editor */
 .wiki-editor { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; padding: 0 32px 24px; }
 .wiki-editor__head { display: grid; gap: 12px; }
-.wiki-editor__title { font-size: 30px; font-weight: 700; letter-spacing: -0.025em; padding: 4px 0; border: 0; border-bottom: 2px solid var(--border); background: transparent; color: var(--text); outline: 0; transition: border-color 0.2s; }
+.wiki-editor__title { font-size: 30px; font-weight: 700; letter-spacing: -0.025em; padding: 4px 0; border: 0; border-bottom: 2px solid var(--border); background: transparent; color: var(--text); outline: 0; transition: border-color var(--dur-base) var(--ease-out); }
 .wiki-editor__title:focus { border-color: var(--k, var(--accent)); }
 .wiki-editor__kinds { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .wiki-editor__kind { width: 140px; height: 24px; padding: 0 10px; border-radius: 12px; border: 1px dashed var(--border-strong); background: transparent; font: inherit; font-size: 12px; color: var(--text); }
 .wiki-editor__panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.wiki-editor__text { resize: none; padding: 18px 20px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel); font: 13.5px/1.65 var(--mono); color: var(--text); outline: 0; transition: border-color 0.15s, box-shadow 0.15s; }
+.wiki-editor__text { resize: none; padding: 18px 20px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel); font: 13.5px/1.65 var(--mono); color: var(--text); outline: 0; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
 .wiki-editor__text:focus { border-color: var(--border-strong); box-shadow: var(--shadow); }
 .wiki-editor__preview { overflow: auto; padding: 18px 24px; border-radius: 14px; border: 1px dashed var(--border); }
 
 /* in the conversation */
 .wiki-chip .wiki-link { margin-right: 4px; }
-.wiki-keep { display: inline-block; margin: 2px 0 0; font-size: 12px; opacity: 0; transition: opacity 0.15s; }
+.wiki-keep { display: inline-block; margin: 2px 0 0; font-size: 12px; opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
 .msg:hover .wiki-keep, .wiki-keep:has(.field__error) { opacity: 1; }
 
 @media (max-width: 900px) {
@@ -7000,3 +7387,170 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-import__stats span { display: grid; gap: 2px; padding: 14px 16px; border-radius: 14px; background: var(--hover); color: var(--text-2); font-size: 12.5px; }
 .wk-import__stats b { font-size: 26px; letter-spacing: -0.02em; color: var(--text); }
 .wiki-link--file { cursor: default; }
+
+/* Copy pass: an approval's plain arguments, and the exact details folded under it */
+.approval__args {
+  margin: 0 0 8px;
+  color: var(--text-2);
+}
+.approval__args p {
+  margin: 0 0 2px;
+  overflow-wrap: anywhere;
+}
+.approval .fold-toggle,
+.msg__body .note > .fold-toggle {
+  margin: 2px 0 6px;
+}
+
+/* Toasts and the core-down banner */
+.toasts {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(440px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 8px 10px 14px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-text);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: auto;
+  animation: toast-in var(--dur-enter, 240ms) var(--ease-out, var(--ease)) both;
+}
+.toast.is-leaving {
+  animation: toast-out 160ms ease-in both;
+}
+.toast__text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  overflow-wrap: anywhere;
+}
+.toast__close {
+  flex: none;
+  color: inherit;
+  opacity: 0.7;
+}
+.toast__close:hover {
+  /* the toast's own text color, faint: shows on the dark toast and on the light one in dark mode */
+  background: color-mix(in srgb, var(--primary-text) 14%, transparent);
+  color: inherit;
+  opacity: 1;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+  }
+}
+.core-down {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 10px 10px 10px 16px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  line-height: 1.4;
+  animation: toast-in var(--dur-enter, 240ms) var(--ease-out, var(--ease)) both;
+}
+.core-down .btn {
+  flex: none;
+}
+/* The app fades in once the core answers. */
+.app {
+  animation: app-in 200ms var(--ease-out, var(--ease)) both;
+}
+@keyframes app-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (max-width: 640px) {
+  .core-down {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .toast.is-leaving,
+  .core-down,
+  .app {
+    animation: none;
+  }
+}
+/* A group's channels sit a step in, along a thin line, so it's clear where the group ends. */
+.channel-group > [draggable] {
+  position: relative;
+  padding-left: 14px;
+}
+.channel-group > [draggable]::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 3px;
+  bottom: 3px;
+  width: 1px;
+  background: var(--border-strong);
+}
+.channel-group > [draggable] .nav-item {
+  padding-left: 12px;
+}
+
+/* Dictation: turning it on, over the microphone and in Settings */
+.voice-wrap { position: relative; display: inline-flex; }
+.voice-btn.is-off { opacity: 0.55; }
+.voice-btn.is-off:hover { opacity: 1; }
+.voice-btn.is-loading { opacity: 1; color: var(--accent); }
+.voice-pop { position: absolute; z-index: 30; left: -8px; bottom: calc(100% + 10px); width: 360px; display: grid; gap: 8px; padding: 16px 16px 14px; border-radius: 14px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); text-align: left; }
+.voice-pop > b { font-size: 14px; padding-right: 24px; }
+.voice-pop p { margin: 0; line-height: 1.45; }
+.voice-pop__close { position: absolute; top: 8px; right: 8px; }
+.voice-pop__hide { justify-self: start; font-size: 12px; color: var(--text-3); }
+.voice-setup { display: grid; gap: 10px; justify-items: start; }
+.voice-setup__choices { display: grid; gap: 6px; width: 100%; }
+.voice-choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
+.voice-choice small { color: var(--text-2); font-size: 12px; }
+.voice-choice:hover { border-color: var(--border-strong); }
+.voice-choice.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.voice-setup__bar { width: 100%; height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; }
+.voice-setup__bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.25s; }
+.voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
+.voice-on { display: grid; gap: 8px; }
+.voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
+.voice-advanced { display: grid; gap: 10px; }
+.voice-advanced summary { cursor: pointer; }
+.voice-pop > .btn { justify-self: start; }
+.voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
+@keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
+.voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
+.voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }

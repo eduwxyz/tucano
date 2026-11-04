@@ -3,6 +3,7 @@
 // between conversations. The core decides what to do; this file only drives the
 // page and reports back. "Assumir" shows the same window so I can log in.
 import { BrowserWindow, session, type WebContents } from 'electron'
+import { L } from '../shared/lang'
 import { POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
 import type { BrowserOp, BrowserReply as Reply } from '../shared/types'
 
@@ -28,9 +29,16 @@ const KEYS: Record<string, { code: string; char?: string }> = {
 export class Browsers {
   private wins = new Map<string, BrowserWindow>()
   private reopening = new Map<string, Promise<void>>()
+  private titles = new Map<string, string>() // "Lia's browser · close the window to hand it back", from the core
   private quitting = false
 
   constructor(private onShown: (agentId: string, shown: boolean) => void) {}
+
+  // "{page} — Lia's browser · close the window to hand it back".
+  private titled(agentId: string, page: string): string {
+    const own = this.titles.get(agentId) ?? L('Navegador', 'Browser')
+    return page ? `${page} — ${own}` : own
+  }
 
   quit(): void {
     this.quitting = true
@@ -55,8 +63,13 @@ export class Browsers {
       width: W,
       height: H,
       useContentSize: true,
-      title: 'Navegador',
+      title: L('Navegador', 'Browser'),
       webPreferences: { partition: this.partition(agentId), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+    })
+    // The page's own title would hide whose browser this is and how to hand it back: it goes in front.
+    win.on('page-title-updated', (e, title) => {
+      e.preventDefault()
+      win.setTitle(this.titled(agentId, title))
     })
     // New tabs open in place while the agent drives; as real windows while I do.
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -114,7 +127,8 @@ export class Browsers {
 
     switch (op) {
       case 'show':
-        if (typeof args['title'] === 'string') win.setTitle(args['title'])
+        if (typeof args['title'] === 'string') this.titles.set(agentId, args['title'])
+        win.setTitle(this.titled(agentId, wc.getTitle()))
         win.show()
         win.focus()
         return here()
@@ -124,7 +138,7 @@ export class Browsers {
         return { url: wc.getURL(), title: wc.getTitle(), shown: false }
       case 'open': {
         const url = String(args['url'] ?? '')
-        if (!/^https?:\/\//.test(url)) throw new Error('Só endereços http e https.')
+        if (!/^https?:\/\//.test(url)) throw new Error(L('Só endereços http e https.', 'Only http and https addresses.'))
         await Promise.race([
           wc.loadURL(url).catch((e: Error) => {
             // A redirect or a page that changes itself aborts the first load; the page still comes.
@@ -139,7 +153,7 @@ export class Browsers {
         return { ...(await iso<Reply>(SNAPSHOT)), shown: win.isVisible() }
       case 'click': {
         const at = typeof args['ref'] === 'number' ? await iso<{ x: number; y: number } | null>(POINT(args['ref'], false)) : { x: Number(args['x']), y: Number(args['y']) }
-        if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) throw new Error('Esse elemento não está mais na página. Leia a página de novo.')
+        if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) throw new Error(L('Esse elemento não está mais na página. Leia a página de novo.', "That element isn't on the page anymore. Read the page again."))
         await wait(80) // after scrolling it into view
         this.click(wc, at.x, at.y)
         await this.settle(wc)
@@ -149,10 +163,10 @@ export class Browsers {
         const ref = Number(args['ref'])
         const text = String(args['text'] ?? '')
         const at = await iso<{ x: number; y: number; select: boolean } | null>(POINT(ref, false))
-        if (!at) throw new Error('Esse campo não está mais na página. Leia a página de novo.')
+        if (!at) throw new Error(L('Esse campo não está mais na página. Leia a página de novo.', "That field isn't on the page anymore. Read the page again."))
         if (at.select) {
           const r = await iso<true | string[]>(PICK(ref, text))
-          if (r !== true) throw new Error(`Essa lista não tem "${text}". As opções são: ${r.join(', ')}.`)
+          if (r !== true) throw new Error(L(`Essa lista não tem "${text}". As opções são: ${r.join(', ')}.`, `That list has no "${text}". The options are: ${r.join(', ')}.`))
         } else {
           await wait(80)
           this.click(wc, at.x, at.y)
@@ -167,7 +181,7 @@ export class Browsers {
       }
       case 'key': {
         const key = String(args['key'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
-        if (!KEYS[key]) throw new Error(`Tecla desconhecida. Use uma destas: ${Object.keys(KEYS).join(', ')}.`)
+        if (!KEYS[key]) throw new Error(L(`Tecla desconhecida. Use uma destas: ${Object.keys(KEYS).join(', ')}.`, `Unknown key. Use one of these: ${Object.keys(KEYS).join(', ')}.`))
         this.key(wc, key)
         await this.settle(wc)
         return { ...here(), frame: await this.frame(win) }

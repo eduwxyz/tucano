@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm'
 import { call } from '../rpc'
 import { agentById, navigate, updateSettings, useStore, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
 import { Sheet, Toggle } from './Pages'
+import { confirmDialog } from './Dialogs'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
 const DEFAULT_KINDS = (): string[] => [L('Pessoa', 'Person'), L('Projeto', 'Project'), L('Assunto', 'Topic'), L('Decisão', 'Decision')]
@@ -996,7 +997,14 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
                 className="btn btn--sm"
                 onClick={() =>
                   void pick().then((p) => {
-                    if (p && confirm(L(`Usar ${p} como a pasta da wiki?\n\nAs páginas da pasta atual continuam lá; a wiki passa a mostrar o que está na nova.`, `Use ${p} as the wiki's folder?\n\nThe pages in the current folder stay there; the wiki shows what's in the new one.`))) move(p)
+                    if (!p) return
+                    void confirmDialog({
+                      title: L('Trocar a pasta da wiki?', "Change the wiki's folder?"),
+                      body: L(`A wiki passa a mostrar o que está em ${p}. As páginas da pasta atual continuam lá.`, `The wiki will show what's in ${p}. The pages in the current folder stay there.`),
+                      confirm: L('Usar essa pasta', 'Use this folder')
+                    }).then((ok) => {
+                      if (ok) move(p)
+                    })
                   })
                 }
               >
@@ -1186,10 +1194,11 @@ const FINDING_LABEL: Record<WikiFinding['kind'], () => string> = {
   link: () => L('Falta ligar', 'Missing link'),
   broken: () => L('Página por escrever', 'Page to write'),
   missing: () => L('Sem página', 'No page'),
-  orphan: () => L('Ninguém liga pra elas', 'Nothing links to them')
+  orphan: () => L('Ninguém liga pra elas', 'Nothing links to them'),
+  log: () => L('Parece um registro', 'Reads like a log')
 }
-const FINDING_TONE: Record<WikiFinding['kind'], 'danger' | 'warn' | 'calm'> = { contradiction: 'danger', stale: 'warn', duplicate: 'warn', link: 'calm', broken: 'calm', missing: 'calm', orphan: 'calm' }
-const FINDING_ORDER: WikiFinding['kind'][] = ['contradiction', 'stale', 'duplicate', 'link', 'broken', 'missing', 'orphan']
+const FINDING_TONE: Record<WikiFinding['kind'], 'danger' | 'warn' | 'calm'> = { contradiction: 'danger', stale: 'warn', duplicate: 'warn', link: 'calm', broken: 'calm', missing: 'calm', orphan: 'calm', log: 'warn' }
+const FINDING_ORDER: WikiFinding['kind'][] = ['contradiction', 'stale', 'duplicate', 'log', 'link', 'broken', 'missing', 'orphan']
 
 function WikiReviewPane(): ReactNode {
   const rev = useStore((s) => s.wikiRev)
@@ -1225,6 +1234,7 @@ function WikiReviewPane(): ReactNode {
               ['danger', L('Não batem', "Don't agree"), L('Duas páginas dizendo coisas diferentes sobre o mesmo valor, data ou prazo.', 'Two pages saying different things about the same amount, date or deadline.')],
               ['warn', L('Desatualizada', 'Out of date'), L('"Aguardando resposta" numa página, "contrato assinado" em outra.', '"Waiting for an answer" on one page, "contract signed" on another.')],
               ['warn', L('Repetida', 'Duplicate'), L('Duas páginas sobre a mesma pessoa ou o mesmo projeto. Ela junta, sem perder nada.', 'Two pages about the same person or project. It merges them, losing nothing.')],
+              ['warn', L('Parece um registro', 'Reads like a log'), L('Um histórico que virou diário do que foi feito. Ela resume no que vale hoje.', 'A history that turned into a diary of what was done. It condenses it into what holds today.')],
               ['calm', L('Solta', 'Loose'), L('Links pra páginas que não existem, nomes sem página, páginas que ninguém cita.', 'Links to missing pages, names with no page, pages nothing cites.')]
             ] as const
           ).map(([tone, t, d]) => (
@@ -1602,10 +1612,14 @@ function WikiPageView({ title, data }: { title: string; data: WikiData | null })
     )
   const missing = new Set(page.missing.map((t) => t.toLowerCase()))
   const cited = sourcesIn(page.body)
-  const remove = (): void => {
-    if (!confirm(L(`Apagar "${page.title}"? Dá pra restaurar pelo histórico.`, `Delete "${page.title}"? It can be restored from the history.`))) return
-    void call('wikiRemove', { title: page.title }).then(() => navigate({ kind: 'wiki' }))
-  }
+  const remove = (): void =>
+    void confirmDialog({
+      title: L(`Apagar “${page.title}”?`, `Delete “${page.title}”?`),
+      body: L('Dá pra restaurar pelo histórico.', 'It can be restored from the history.'),
+      confirm: L(`Apagar “${page.title}”`, `Delete “${page.title}”`)
+    }).then((ok) => {
+      if (ok) void call('wikiRemove', { title: page.title }).then(() => navigate({ kind: 'wiki' }))
+    })
   const kindOf = (t: string): string => data?.pages.find((p) => p.title === t)?.kind ?? ''
   return (
     <article className="wk-page" style={{ ['--k' as string]: kindColor(page.kind) }}>

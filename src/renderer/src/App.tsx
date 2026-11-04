@@ -13,6 +13,7 @@ import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
 import { Onboarding } from './components/Onboarding'
 import { Dialogs } from './components/Dialogs'
+import { CoreDown, Toasts } from './components/Toast'
 import { Icon } from './components/ui'
 
 export function App(): ReactNode {
@@ -54,13 +55,21 @@ export function App(): ReactNode {
     return () => window.removeEventListener('keydown', keys)
   }, [intro, mac])
 
-  if (!view) return <div className="boot" />
+  // The core may stop before the app shows: the banner says so even then.
+  if (!view)
+    return (
+      <div className="boot">
+        <CoreDown />
+      </div>
+    )
   // Dialogs too: connecting a tool from the introduction may open one (on a server).
   if (intro)
     return (
       <>
         <Onboarding />
         <Dialogs />
+        <Toasts />
+        <CoreDown />
       </>
     )
   if (view.kind === 'tuca')
@@ -68,6 +77,8 @@ export function App(): ReactNode {
       <>
         <Onboarding build from={view.from} />
         <Dialogs />
+        <Toasts />
+        <CoreDown />
       </>
     )
 
@@ -95,6 +106,8 @@ export function App(): ReactNode {
       </main>
       <Dialogs />
       <Lightbox />
+      <Toasts />
+      <CoreDown />
     </div>
   )
 }

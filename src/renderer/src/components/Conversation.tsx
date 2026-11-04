@@ -1,7 +1,9 @@
-import { L } from '../../../shared/lang'
+import { L, lang, locale } from '../../../shared/lang'
 import { CODE_SPANS } from '../../../shared/types'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import Markdown from 'react-markdown'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import Markdown, { defaultUrlTransform } from 'react-markdown'
+import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
+import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import {
@@ -17,12 +19,14 @@ import {
   modelById,
   navigate,
   openDm,
+  openTuca,
   removeRoutine,
   retryRun,
   continueRun,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
+  setTab,
   stopRun,
   summarizeNow,
   useStore,
@@ -36,12 +40,63 @@ import {
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
-  isTeam
+  isTeam,
+  cancelTranscribe,
+  transcribe,
+  voiceStatus
 } from '../store'
-import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
+import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd, useJustEnded } from './ui'
+import { canRecord, NoSound, record, type Recording } from '../voice'
+import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal } from './Tuca'
+import { FoldToggle } from './Fold'
+
+// Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
+export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
+  const [open, setOpen] = useState(initiallyOpen)
+  return (
+    <div className="note">
+      <FoldToggle open={open} onToggle={() => setOpen(!open)}>
+        {label}
+      </FoldToggle>
+      {open && children}
+    </div>
+  )
+}
+
+// A tool's name as words: "create_issue" → "create issue", "getPullRequest" → "get pull request".
+export const toolWords = (name: string): string =>
+  name
+    .replace(/^mcp__[^_]+__/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_\-.]+/g, ' ')
+    .trim()
+    .toLowerCase()
+
+// An approval's arguments a person can read at a glance: the plain values, named in words.
+// Nested ones stay in the exact details.
+function argSummary(args: Record<string, unknown>): { shown: [string, string][]; more: boolean } {
+  const plain = (v: unknown): string | undefined =>
+    typeof v === 'string' ? (v.length > 160 ? `${v.slice(0, 160)}…` : v) : typeof v === 'number' || typeof v === 'boolean' ? String(v) : Array.isArray(v) && v.every((x) => typeof x === 'string' || typeof x === 'number') ? v.join(', ') : undefined
+  const all = Object.entries(args).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  const shown = all
+    .map(([k, v]): [string, string | undefined] => [toolWords(k), plain(v)])
+    .filter((e): e is [string, string] => !!e[1]?.trim())
+    .slice(0, 5)
+  // What the glance leaves out (a long text cut, a nested value, a sixth field) is said, not hidden.
+  return { shown, more: shown.length < all.length || all.some(([, v]) => typeof v === 'string' && v.length > 160) }
+}
+
+// "Vale até as 14:30." / "Good until 2:30 PM.", with the day when it isn't today.
+function until(at: number): string {
+  const d = new Date(at)
+  const hm = d.toLocaleTimeString(locale(), lang() === 'en' ? { hour: 'numeric', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' })
+  if (d.toDateString() === new Date().toDateString()) return L(`Vale até as ${hm}.`, `Good until ${hm}.`)
+  const day = d.toLocaleDateString(locale(), { day: 'numeric', month: 'short' }).replace('.', '')
+  return L(`Vale até ${day}, às ${hm}.`, `Good until ${day}, ${hm}.`)
+}
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
@@ -56,8 +111,23 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
   const focus = useStore((s) => (s.view?.kind === 'conversation' && s.view.id === id ? s.view.message : undefined))
   const [showSummary, setShowSummary] = useState(false)
+  const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
 
-  if (!conv) return <div className="empty">{L('Conversa não encontrada.', 'Conversation not found.')}</div>
+  if (!conv)
+    return (
+      <div className="empty">
+        <p>{L('Essa conversa não existe mais: pode ter sido apagada.', 'This conversation no longer exists: it may have been deleted.')}</p>
+        {firstChannel ? (
+          <button className="btn btn--primary btn--sm" onClick={() => navigate({ kind: 'conversation', id: firstChannel.id })}>
+            {L(`Voltar pra #${firstChannel.name}`, `Back to #${firstChannel.name}`)}
+          </button>
+        ) : (
+          <button className="btn btn--primary btn--sm" onClick={openTuca}>
+            {L('Falar com o Tuca', 'Talk to Tuca')}
+          </button>
+        )}
+      </div>
+    )
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
   const pair = conv.kind === 'agents' ? members : undefined
 
@@ -110,7 +180,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {showSummary && <SummaryPanel conv={conv} messages={messages} onClose={() => setShowSummary(false)} />}
 
         <MessageList messages={messages} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem para ${dmAgent.name}`, `Message ${dmAgent.name}`) : pair ? L(`Mensagem para ${title}`, `Message ${title}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : pair ? L(`Mensagem pra ${title}`, `Message ${title}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
       </section>
       <SidePanel />
     </div>
@@ -120,6 +190,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 export function MessageList({ messages, conversationId, empty, focus }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string }): ReactNode {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  // In a DM, whose it is (for the empty state).
+  const dmName = useStore((s) => {
+    const c = s.conversations.find((x) => x.id === conversationId)
+    return c?.kind === 'dm' && c.members[0] ? agentById(s, c.members[0])?.name : undefined
+  })
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once.
   useEffect(() => {
@@ -164,7 +239,7 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
         <div className="empty">
           <Icon name="spark" size={22} />
           <p>{L('Nada por aqui ainda.', 'Nothing here yet.')}</p>
-          <p className="muted">{L('Mencione um agente com @ ou escreva e deixe o router decidir quem responde.', 'Mention an agent with @, or just write and let the router decide who replies.')}</p>
+          <p className="muted">{dmName ? L(`Escreva o que precisa: ${dmName} sempre responde aqui.`, `Write what you need: ${dmName} always replies here.`) : L('Escreva e quem estiver no canal responde. Pra chamar alguém, use @.', 'Write and whoever is in the channel replies. To call on someone, use @.')}</p>
         </div>
       </div>
     )
@@ -194,6 +269,9 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
     </div>
   )
 }
+
+const AGENT_PLUGINS = [remarkGfm, remarkLocalPaths]
+const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
 
 // What an agent handed out from this message, each with how it's going and a way to where it happens
 // (the DM between the two agents). Your DM only shows this line; the work itself stays there.
@@ -262,6 +340,9 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
       s.messages.findLast((m) => m.conversationId === message.conversationId && m.run?.browser && m.author.kind === 'agent' && m.author.id === agent?.id)?.id === message.id
   )
 
+  // The same object between renders, or every link would start over.
+  const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id) }), [message.id])
+
   if (message.author.kind === 'system') {
     return (
       <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`}>
@@ -307,7 +388,11 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run && <RunSteps message={message} />}
         {message.text ? (
           <div className="md">
-            <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+            {agent && message.run?.status !== 'working' ? (
+              <Markdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{highlightMentions(message.text)}</Markdown>
+            ) : (
+              <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+            )}
           </div>
         ) : null}
         {attached.length > 0 && (
@@ -337,6 +422,13 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run?.status === 'stopped' && <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>}
         {message.run?.status === 'interrupted' && <div className="note">{L('Interrompido: o app fechou no meio da resposta.', 'Interrupted: the app closed in the middle of the reply.')}</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
+        {message.run?.errorDetail && (
+          <Details label={L('Detalhes', 'Details')}>
+            <div className="mono small" style={{ whiteSpace: 'pre-wrap' }}>
+              {message.run.errorDetail}
+            </div>
+          </Details>
+        )}
         {message.run?.status === 'paused' && (
           <>
             <div className="note">{L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}</div>
@@ -345,9 +437,15 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
             </button>
           </>
         )}
-        {message.run && ['failed', 'stopped', 'interrupted', 'limit_reached'].includes(message.run.status) && (
+        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it. */}
+        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             {L('Tentar de novo', 'Try again')}
+          </button>
+        )}
+        {message.run?.status === 'limit_reached' && agent && agent.used >= agent.limit && (
+          <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
+            {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
         )}
         {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && <KeepInWiki messageId={message.id} />}
@@ -402,7 +500,7 @@ function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
     <div className="md-code">
       <pre ref={ref}>{children}</pre>
       <button
-        className="icon-btn icon-btn--sm md-code__copy"
+        className={`icon-btn icon-btn--sm md-code__copy ${copied ? 'is-copied' : ''}`}
         title={L(copied ? 'Copiado' : 'Copiar', copied ? 'Copied' : 'Copy')}
         aria-label={L(copied ? 'Copiado' : 'Copiar código', copied ? 'Copied' : 'Copy code')}
         onClick={() =>
@@ -564,6 +662,8 @@ function RunSteps({ message }: { message: Message }): ReactNode {
   const [open, setOpen] = useState(false)
   const working = run.status === 'working'
   const now = useNow(working)
+  // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
+  const justDone = useJustEnded(working, 1600) && run.status === 'done'
 
   if (run.steps.length === 0 && !working) return null
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
@@ -575,15 +675,28 @@ function RunSteps({ message }: { message: Message }): ReactNode {
       <button className="steps__toggle" onClick={() => setOpen(!open)}>
         {working ? (
           <span className="steps__pulse" />
+        ) : justDone ? (
+          <span className="steps__done">
+            <Icon name="check" size={12} />
+          </span>
         ) : (
           <span className="steps__chev">
             <Icon name="chevron" size={12} />
           </span>
         )}
         {working ? (
-          <span className="shimmer">{current ? `${current.label}…` : L('Pensando…', 'Thinking…')}</span>
+          <span className="shimmer">
+            {current
+              ? `${current.label}…`
+              : now - message.at > 60_000
+                ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
+                : run.steps.length === 0
+                  ? L('Lendo o pedido…', 'Reading the request…')
+                  : L('Pensando…', 'Thinking…')}
+          </span>
         ) : (
-          <span>
+          <span className="steps__summary">
+            {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
             {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
             {total > 0 && ` · ${duration(total)}`}
           </span>
@@ -663,27 +776,17 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const me = useStore((s) => s.me)
   const [refusing, setRefusing] = useState(false)
   const [reason, setReason] = useState('')
-  const [hold, setHold] = useState(0)
-  const timer = useRef<number | null>(null)
-
-  const startHold = (): void => {
-    const started = performance.now()
-    const tick = (): void => {
-      const p = Math.min(1, (performance.now() - started) / 1500)
-      setHold(p)
-      if (p >= 1) {
-        timer.current = null
-        decideApproval(approval.id, 'approved')
-        return
-      }
-      timer.current = requestAnimationFrame(tick)
+  const summary = argSummary(approval.args)
+  // Hold to approve: CSS fills the button in 1.5s (.is-holding); the approval goes when
+  // that fill ends while still held. Letting go drains it back. Space or Enter hold too.
+  const [holding, setHolding] = useState(false)
+  const startHold = (): void => setHolding(true)
+  const cancelHold = (): void => setHolding(false)
+  const holdFilled = (e: React.TransitionEvent<HTMLButtonElement>): void => {
+    if (holding && e.propertyName === 'transform' && e.pseudoElement === '::before') {
+      setHolding(false)
+      decideApproval(approval.id, 'approved')
     }
-    timer.current = requestAnimationFrame(tick)
-  }
-  const cancelHold = (): void => {
-    if (timer.current) cancelAnimationFrame(timer.current)
-    timer.current = null
-    setHold(0)
   }
 
   const decided = approval.state !== 'pending'
@@ -730,20 +833,34 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           </>
         ) : (
           <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer usar', 'wants to use')} <strong>{approval.tool.replace(/_/g, ' ')}</strong> {L('no', 'in')} {approval.connectorName}
+            {agent?.name ?? L('Agente', 'Agent')} {L('quer usar', 'wants to use')} <strong>{toolWords(approval.tool)}</strong> {L('no', 'in')} {approval.connectorName}
           </>
         )}
       </div>
       {approval.why && <p className="approval__why">{approval.why}</p>}
-      <div className="approval__call">
-        <code>
-          {approval.connectorName} · {approval.tool}
-        </code>
-        <pre>{JSON.stringify(approval.args, null, 2)}</pre>
-      </div>
+      {/* The title already says it all for an access request, an app or the browser. */}
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && summary.shown.length > 0 && (
+        <div className="approval__args small">
+          {summary.shown.map(([k, v], i) => (
+            <p key={i}>
+              <span className="muted">{k}:</span> {v}
+            </p>
+          ))}
+          {summary.more && <p className="muted">{L('Tem mais nos detalhes exatos.', 'There’s more in the exact details.')}</p>}
+        </div>
+      )}
+      {/* High risk: what is being approved shows in full, not behind a click. */}
+      <Details label={L('Ver detalhes exatos', 'See exact details')} initiallyOpen={approval.highRisk && !decided}>
+        <div className="approval__call">
+          <code>
+            {approval.connectorName} · {approval.tool}
+          </code>
+          <pre>{JSON.stringify(approval.args, null, 2)}</pre>
+        </div>
+      </Details>
       <p className="approval__bound">
         {L('A aprovação cobre só esta chamada, com estes valores. Se mudar qualquer coisa, o agente pede de novo.', 'The approval covers only this call, with these values. If anything changes, the agent asks again.')}
-        {!decided && L(` Expira ${time(approval.expiresAt)}.`, ` Expires ${time(approval.expiresAt)}.`)}
+        {!decided && ` ${until(approval.expiresAt)}`}
       </p>
 
       {decided ? (
@@ -781,13 +898,16 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         <div className="row">
           {approval.highRisk ? (
             <button
-              className="btn btn--primary btn--hold"
+              className={`btn btn--primary btn--hold ${holding ? 'is-holding' : ''}`}
               onPointerDown={startHold}
               onPointerUp={cancelHold}
               onPointerLeave={cancelHold}
-              style={{ ['--hold' as string]: `${hold * 100}%` }}
+              onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && !e.repeat && (e.preventDefault(), startHold())}
+              onKeyUp={(e) => (e.key === ' ' || e.key === 'Enter') && cancelHold()}
+              onBlur={cancelHold}
+              onTransitionEnd={holdFilled}
             >
-              <span>{hold > 0 ? L('Segure…', 'Hold…') : L('Segure para aprovar', 'Hold to approve')}</span>
+              <span>{holding ? L('Segure…', 'Hold…') : L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
             </button>
           ) : (
             <>
@@ -795,7 +915,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
                 {L('Aprovar', 'Approve')}
               </button>
               {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (
-                <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa ${approval.tool} no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses ${approval.tool} in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
+                <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}
@@ -848,13 +968,245 @@ async function prepareImage(file: File): Promise<Attached | string> {
     const url = blob === file ? src : await dataUrlOf(blob)
     return { name: file.name || L('imagem', 'image'), mime: blob.type, data: url.slice(url.indexOf(',') + 1), url }
   } catch {
-    return L(`Não consegui abrir ${file.name}.`, `Couldn't open ${file.name}.`)
+    return L(`Não deu pra abrir ${file.name}. Tente salvar de novo ou mandar outra imagem.`, `${file.name} couldn't be opened. Try saving it again or send another image.`)
   }
 }
 
 // One draft per conversation, kept while the app runs: leaving a channel doesn't
 // lose the message you were typing.
 const drafts = new Map<string, { text: string; images: Attached[] }>()
+
+type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing'
+type DictationControls = { press: () => void; release: () => void; stop: () => void; cancel: () => void; startedAt: () => number }
+
+const NOT_READY = (): string => L('Para ditar, clique no microfone e ative o ditado.', 'To dictate, click the microphone and turn dictation on.')
+const SHORT_MS = 300
+const HOLD_MS = 400 // held at least this long, letting go ends it (push to talk); a click starts it, the next one ends it
+
+// Click to record, click again to transcribe (or hold and let go). The text goes to the field to be reviewed, never sent:
+// dictation gets names wrong, and a message sets an agent working.
+function useDictation(insert: (text: string) => void, setNote: (note: string) => void, conversationId: string): [DictationState, DictationControls] {
+  const [state, setState] = useState<DictationState>('idle')
+  const rec = useRef<Recording | null>(null)
+  const startedAt = useRef(0)
+  const job = useRef<string | null>(null)
+  const released = useRef(false)
+  const attempt = useRef(0) // a microphone that opens after this one was given up on gets closed
+  const platform = useStore((s) => s.platform)
+
+  const cancel = (): void => {
+    released.current = true
+    rec.current?.cancel()
+    rec.current = null
+    if (job.current) void cancelTranscribe(job.current)
+    job.current = null
+    setState('idle')
+  }
+
+  const stop = (): void => {
+    released.current = true
+    const r = rec.current
+    if (!r) return
+    rec.current = null
+    if (Date.now() - startedAt.current < SHORT_MS) {
+      r.cancel()
+      setState('idle')
+      setNote(L('Curto demais: clique, fale e clique de novo.', 'Too short: click, speak, and click again.'))
+      return
+    }
+    setState('transcribing')
+    const id = crypto.randomUUID()
+    job.current = id
+    void r
+      .stop()
+      .then((audio) => transcribe(id, audio))
+      .then(
+        (said) => {
+          if (job.current !== id) return
+          if (said) insert(said)
+          else setNote(L('Não ouvi nada nessa gravação.', "I didn't hear anything in that recording."))
+        },
+        (e: unknown) => {
+          if (job.current !== id) return
+          if (e instanceof NoSound)
+            setNote(
+              platform === 'mac'
+                ? L('Não chegou som do microfone. Confira qual está em uso em Ajustes do Sistema › Som.', 'No sound came from the microphone. Check which one is in use in System Settings › Sound.')
+                : L('Não chegou som do microfone. Confira qual está em uso nas configurações de som do sistema.', 'No sound came from the microphone. Check which one is in use in the system’s sound settings.')
+            )
+          else setNote(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
+        }
+      )
+      .finally(() => {
+        if (job.current !== id) return
+        job.current = null
+        setState('idle')
+      })
+  }
+
+  const start = (): void => {
+    if (state !== 'idle') return
+    released.current = false
+    const mine = ++attempt.current
+    setNote('')
+    setState('starting')
+    void voiceStatus()
+      .then((status) => {
+        if (!status.ready) throw new Error(NOT_READY())
+        return record()
+      })
+      .then(
+        (r) => {
+          if (mine !== attempt.current) return r.cancel()
+          // Let go while the microphone was still opening: nothing to record.
+          if (released.current) {
+            r.cancel()
+            setState('idle')
+            return
+          }
+          rec.current = r
+          startedAt.current = Date.now()
+          setState('recording')
+        },
+        (e: unknown) => {
+          if (mine !== attempt.current) return
+          setState('idle')
+          const name = e instanceof Error ? e.name : ''
+          setNote(
+            name === 'NotAllowedError'
+              ? platform === 'mac'
+                ? L('O microfone está bloqueado. Libere o Tucano em Ajustes do Sistema › Privacidade e Segurança › Microfone.', 'The microphone is blocked. Allow Tucano in System Settings › Privacy & Security › Microphone.')
+                : L('O microfone está bloqueado. Libere o Tucano nas configurações de privacidade do sistema.', 'The microphone is blocked. Allow Tucano in the system’s privacy settings.')
+            : name === 'NotFoundError' ? L('Não encontrei um microfone.', "I couldn't find a microphone.")
+            : e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)
+          )
+        }
+      )
+  }
+
+  useEffect(() => cancel, [conversationId]) // leaving the conversation drops what's going on
+
+  // The key can be let go anywhere, and no event reaches the field after the window loses focus.
+  // A press starts it, or ends one going on. Let go after holding it a while ends it too.
+  const pressedAt = useRef(0)
+  const toggled = useRef(false) // this press ended a recording: its release does nothing
+  const press = (): void => {
+    if (state === 'recording' || state === 'starting') return (toggled.current = true), stop()
+    if (state !== 'idle') return
+    toggled.current = false
+    pressedAt.current = Date.now()
+    start()
+  }
+  const release = (): void => {
+    if (toggled.current || !pressedAt.current) return
+    const held = Date.now() - pressedAt.current
+    pressedAt.current = 0
+    if (held >= HOLD_MS) stop()
+  }
+
+  const listening = state === 'starting' || state === 'recording'
+  useEffect(() => {
+    if (!listening) return
+    // the key can be let go anywhere; Esc drops it from anywhere
+    const up = (e: KeyboardEvent): void => {
+      if (e.code === 'Space') release()
+    }
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') cancel()
+    }
+    // held when the window lost focus: no release will come, so that's the end of it
+    const blur = (): void => {
+      if (pressedAt.current && Date.now() - pressedAt.current >= HOLD_MS) release()
+    }
+    document.addEventListener('keyup', up)
+    document.addEventListener('keydown', esc)
+    window.addEventListener('blur', blur)
+    return () => {
+      document.removeEventListener('keyup', up)
+      document.removeEventListener('keydown', esc)
+      window.removeEventListener('blur', blur)
+    }
+  }, [listening])
+
+  return [state, { press, release, stop, cancel, startedAt: () => startedAt.current }]
+}
+
+function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
+  const platform = useStore((s) => s.platform)
+  const hidden = useStore((s) => !!s.settings.voice?.hidden)
+  const status = useVoice()
+  const [open, setOpen] = useState(false)
+  // Once it's turned on from the balloon, the balloon says how to use it, then gets out of the way.
+  if (!canRecord() || hidden || !status) return null // no secure context, or the person hid it
+  if (!status.ready)
+    return (
+      <span className="voice-wrap">
+        <button
+          className={`icon-btn voice-btn is-off ${status.downloading ? 'is-loading' : ''}`}
+          aria-label={L('Ditar mensagens', 'Dictate messages')}
+          aria-expanded={open}
+          title={status.downloading ? L('Baixando o modelo de voz…', 'Downloading the voice model…') : L('Ditar mensagens: ativar', 'Dictate messages: turn on')}
+          onClick={() => setOpen(!open)}
+        >
+          <Icon name="mic" size={15} />
+        </button>
+        {open && <VoicePopover status={status} onClose={() => setOpen(false)} />}
+      </span>
+    )
+  if (open)
+    return (
+      <span className="voice-wrap">
+        <button className="icon-btn voice-btn" aria-label={L('Ditar mensagens', 'Dictate messages')} onClick={() => setOpen(false)}>
+          <Icon name="mic" size={15} />
+        </button>
+        <VoicePopover status={status} onClose={() => setOpen(false)} />
+      </span>
+    )
+  if (state === 'transcribing')
+    return (
+      <button className="btn btn--xs" title={L('Cancelar', 'Cancel')} onClick={controls.cancel}>
+        {L('Transcrevendo…', 'Transcribing…')} <Icon name="x" size={11} />
+      </button>
+    )
+  const on = state === 'recording'
+  return (
+    <span className="voice-wrap">
+      <button
+        className={`icon-btn voice-btn ${on ? 'is-recording' : ''}`}
+        aria-label={on ? L('Terminar e transcrever', 'Finish and transcribe') : L('Falar', 'Speak')}
+        aria-pressed={on}
+        title={on ? L('Clique para terminar (Esc cancela)', 'Click to finish (Esc cancels)') : L(`Clique para falar, e de novo para terminar (${platform === 'mac' ? '⌥' : 'Ctrl+'}Espaço)`, `Click to speak, and again to finish (${platform === 'mac' ? '⌥' : 'Ctrl+'}Space)`)}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          controls.press()
+        }}
+        onPointerUp={controls.release}
+        onPointerCancel={controls.cancel}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <Icon name="mic" size={15} />
+      </button>
+      {on && <RecordingClock since={controls.startedAt()} />}
+    </span>
+  )
+}
+
+// While it records: for how long, and how to end it.
+function RecordingClock({ since }: { since: number }): ReactNode {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 500)
+    return () => clearInterval(t)
+  }, [])
+  const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
+  return (
+    <span className="voice-clock" aria-live="off">
+      <i />
+      {Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}
+      <span className="muted"> · {L('clique para terminar', 'click to finish')}</span>
+    </span>
+  )
+}
 
 export function Composer({ conversationId, members, placeholder }: { conversationId: string; members: Agent[]; placeholder: string }): ReactNode {
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
@@ -867,6 +1219,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
   const [active, setActive] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const platform = useStore((s) => s.platform)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
   const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
@@ -974,6 +1327,19 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
     })
   }
 
+  const insert = (said: string): void => {
+    const el = ref.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? start
+    setText((cur) => {
+      const before = cur.slice(0, start)
+      const glue = before && !/\s$/.test(before) ? ' ' : ''
+      return `${before}${glue}${said}${cur.slice(end)}`
+    })
+    el?.focus()
+  }
+  const [voice, voiceControls] = useDictation(insert, setNote, conversationId)
+
   const submit = (): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
@@ -1055,6 +1421,12 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             void addFiles(files)
           }}
           onKeyDown={(e) => {
+            if (e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
+              e.preventDefault()
+              if (!e.repeat) voiceControls.press()
+              return
+            }
+            if (e.key === 'Escape' && voice !== 'idle') return voiceControls.cancel()
             if (mention && options.length > 0) {
               if (e.key === 'ArrowDown') return (e.preventDefault(), setActive((active + 1) % options.length))
               if (e.key === 'ArrowUp') return (e.preventDefault(), setActive((active - 1 + options.length) % options.length))
@@ -1068,6 +1440,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
           }}
         />
         <div className="composer__bar">
+          <VoiceButton controls={voiceControls} state={voice} />
           <button className="icon-btn" title={L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
             <Icon name="image" size={15} />
           </button>
@@ -1083,7 +1456,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             }}
           />
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : isDm ? L('O agente sempre responde na DM', 'The agent always replies in a DM') : L('@ chama um agente · sem menção, o router decide', '@ calls an agent · without a mention, the router decides'))}
+            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((m) => stopRun(m.id))}>
