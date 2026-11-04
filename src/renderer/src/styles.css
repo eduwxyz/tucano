@@ -7944,3 +7944,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
 .voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
 .voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+
+/* Sharing the person's SSH with the agent's Linux computer. */
+.ssh-share {
+  margin-top: 12px;
+}
+.ssh-share__warn {
+  margin: 6px 0 0 26px;
+}

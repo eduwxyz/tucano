@@ -731,6 +731,8 @@ const api: Api = {
     // A Linux computer starts right away when turned on (the first time downloads the system) and stops when
     // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
     if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})
+    // Its SSH turned on or off: the computer is made again now (keeping what it installed), with or without it.
+    else if (linux(clean) && !!clean.ssh !== !!before?.ssh) void computers.ensure(clean.id).catch(() => {})
     if (linux(before) && !linux(clean))
       void computers.stopLinux(clean.id).then(() => {
         if (mac(clean)) db.removeServices(clean.id) // the container's services don't exist on the Mac
