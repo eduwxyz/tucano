@@ -40,13 +40,17 @@ describe('Jev router', () => {
     const body = api.body()
     expect(body.model).toBe('jev-latest')
     expect(body.questions.who.type).toBe('choice')
-    expect(Object.keys(body.questions.who.criteria)).toEqual(['lia', 'nina', '__ninguem'])
+    expect(Object.keys(body.questions.who.criteria)).toEqual(['lia', 'nina', '__todos', '__ninguem'])
     expect(body.state).toContain('[Edu] o build quebrou')
   })
 
   it('calls a second agent only when it is close, and nobody when that wins', async () => {
     expect(await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: typesafe({ lia: 0.5, theo: 0.35, nina: 0.15 }).f })).toMatchObject({ agents: [lia, theo] })
     expect(await routeJev({ key: 'k', messages, agents: [lia, nina], me: 'Edu', fetch: typesafe({ lia: 0.2, nina: 0.1, __ninguem: 0.7 }).f })).toMatchObject({ agents: [], reason: 'Jev, 70%' })
+  })
+
+  it('calls every agent when the message is for the whole group, like a greeting', async () => {
+    expect(await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: typesafe({ lia: 0.1, nina: 0.1, theo: 0.05, __todos: 0.75 }).f })).toMatchObject({ agents: [lia, nina, theo], reason: 'Jev, 75%' })
   })
 
   it('says what went wrong instead of guessing', async () => {

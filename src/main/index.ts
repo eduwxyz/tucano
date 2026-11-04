@@ -77,7 +77,7 @@ type CoreRequest =
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -225,7 +225,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     if (sound) chirp(sound)
     if (!Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
-    n.on('click', () => showWindow(msg.conversationId, msg.page))
+    n.on('click', () => showWindow(msg.conversationId, msg.page, msg.threadId))
     n.show()
   } else if (msg.type === 'busy') {
     if (msg.busy && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension')
@@ -322,17 +322,17 @@ ipcMain.on('core:connect', (event) => {
 })
 
 // Brings the window back (closing it keeps the app and its routines running),
-// optionally opening a conversation.
+// optionally opening a conversation (and a thread in it).
 // The app's own window; agents' browsers are windows too, hidden, and never count as it.
 let mainWindow: BrowserWindow | null = null
 
-function showWindow(conversationId?: string, page?: 'skills'): void {
+function showWindow(conversationId?: string, page?: 'skills', threadId?: string): void {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
   if (!conversationId && !page) return
-  const go = (): void => (page ? win.webContents.send('navigate-page', page) : win.webContents.send('navigate', conversationId))
+  const go = (): void => (page ? win.webContents.send('navigate-page', page) : win.webContents.send('navigate', conversationId, threadId))
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go)
   else go()
 }
