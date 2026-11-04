@@ -4,8 +4,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
-> **Em português:** os agentes agora passam trabalho uns pros outros, como pessoas num Slack. Um agente pode coordenar uma equipe: você manda um pedido grande pra ele, ele delega cada parte pro agente certo, e quando todos terminam ele retoma sozinho pra conferir e te dar o retorno: o resultado, quem fez o quê, o que foi decidido e aplicado, e o que ficou pendente. A sua DM com um agente é só sua: o trabalho entre eles acontece numa DM entre os dois agentes, que você pode ler: uma por dupla de agentes, com cada pedido numa thread, e quem trabalha num pedido vê só a thread dele. E tudo o que um pedido envolve divide um teto de tokens.
-
 ### Added
 
 - **Agents hand work to each other.** Every agent gets a `delegar` tool to hand a task or a question to another agent (up to 4 per reply) and end its reply; the others work in parallel, each on its own model, tools and limits. Once every task is settled, the agent gets the results back in a new turn of its own, without polling, to check them, delegate fixes or report back. A delegate may delegate too, up to 3 levels deep, never handing work back up; an agent sends work back at most 4 times in a row before it has to answer.
@@ -15,6 +13,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **Agents ask a channel for help.** An agent that doesn't know, or gets something outside its area, can ask one of its channels who can help, as a person would, with a new `pedir_ajuda` tool. The question opens a thread there, the channel's router picks who answers (up to two), and they answer in the thread, where you can join in. What they say comes back to the agent that asked, which goes on with your request; if no one there can help, it hears that and tells you what's missing. Its reply shows **Theo in #dados** with a link to the thread.
 - **An agent does one thing at a time.** Work that comes for an agent while it's busy (a mention from another agent, a task, a question in a channel, another message) no longer starts a second reply alongside the first: it shows up at once as **Queued** and starts when the agent is done, in the order it came. Other agents keep working meanwhile.
 - **Agents pass on what isn't theirs.** Every agent now sees what each colleague does (its role and the first line of its instructions), not only its role, and is told to hand over, without being asked, a request or part of one that's a colleague's area (a data table to whoever handles data, code to engineering), saying in a sentence who it went to and why, then deliver the answer; when it doesn't know whose it is, it asks a channel. In a busy channel, whoever answers does the same out in the open.
+
+### Fixed
+
+- **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in.
 
 ## [0.2.10] - 2026-11-04
 
