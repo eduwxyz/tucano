@@ -1500,7 +1500,7 @@ h3 {
   box-shadow: none;
 }
 /* The field's text is drawn by the copy behind it (Composer), so a @handle can take its agent's color.
-   Both lay out the same: same padding, font and wrapping. */
+   Both lay out the same: the copy takes the field's size, padding and type from the script. */
 .composer__field {
   position: relative;
 }
@@ -1516,8 +1516,6 @@ h3 {
   position: absolute;
   top: 0;
   left: 0;
-  bottom: 0;
-  padding: 13px 16px 4px;
   overflow: hidden;
   white-space: pre-wrap;
   overflow-wrap: break-word;

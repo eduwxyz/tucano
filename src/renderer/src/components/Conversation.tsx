@@ -1141,6 +1141,8 @@ function RecordingClock({ since }: { since: number }): ReactNode {
   )
 }
 
+const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'word-spacing', 'tab-size', 'text-transform', 'text-indent', 'padding']
+
 export function Composer({ conversationId, members, placeholder }: { conversationId: string; members: Agent[]; placeholder: string }): ReactNode {
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -1228,21 +1230,40 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
     }
   }, [])
 
-  useLayoutEffect(() => {
+  // The field grows with its text, up to a point; on a narrower window the same text takes more lines.
+  const fit = (): void => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
     followField()
-  }, [text])
+  }
+  useLayoutEffect(fit, [text])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let width = el.clientWidth
+    const watch = new ResizeObserver(() => {
+      if (el.clientWidth === width) return // only a new width changes the lines; fit's own height doesn't
+      width = el.clientWidth
+      fit()
+    })
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [])
 
   // The text shows from a copy behind the field, where an agent's @handle wears its color; the field
-  // on top keeps the caret and the selection. Same width (a scrollbar takes some) and same scroll.
+  // on top keeps the caret and the selection. The copy takes the field's type as computed (a phone
+  // gets 16 px, and a field doesn't inherit letter spacing), its width (a scrollbar takes some) and
+  // its size and its scroll, so both break the lines in the same places and scroll as far.
   const followField = (): void => {
     const el = ref.current
     const m = mirror.current
     if (!el || !m) return
+    const field = getComputedStyle(el)
+    for (const p of TYPE) m.style.setProperty(p, field.getPropertyValue(p))
     m.style.width = `${el.clientWidth}px`
+    m.style.height = `${el.clientHeight}px`
     m.scrollTop = el.scrollTop
   }
   const painted = splitMentions(text).map((p, i) => {
