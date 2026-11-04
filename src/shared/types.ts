@@ -206,6 +206,7 @@ export interface Delegation {
   root: string // the message that started it all: everything one request sets off shares its budget
   since: number // `at` of the manager's message: what the delegate sees of the conversation starts there
   reported?: boolean // its result already went back to `by`
+  asked?: string // it answers a question `by` asked in this channel (pedir_ajuda), picked by the router, not named
 }
 
 export interface Delegated {
@@ -214,6 +215,11 @@ export interface Delegated {
   conversationId?: string // where it runs, once handed out: the DM between the two agents, or the channel it came from
   task: string
   doneWhen?: string
+  // Asked in a channel, of whoever can help (pedir_ajuda): the channel. agentId is '' until the router picks.
+  askedIn?: string
+  threadId?: string // the thread the question opened there
+  nobody?: boolean // no one there could help
+  reported?: boolean // `nobody` already went back to the one who asked
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.

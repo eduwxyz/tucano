@@ -7413,8 +7413,9 @@ kbd {
 }
 .handoff {
   display: flex;
+  flex-wrap: wrap; /* in a narrow thread panel the link goes to the next line instead of being cut */
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);

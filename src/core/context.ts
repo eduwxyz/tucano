@@ -29,14 +29,15 @@ export function systemPrompt(opts: {
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   team?: { team: Agent[]; others: Agent[] } // who it can hand work to with delegar: the ones it coordinates, and the rest
   delegatedBy?: Agent // the agent whose task this reply works on
+  askedIn?: string // that task is a question it asked in this channel, and this agent was picked to answer
   together?: { before: Agent[]; after: Agent[] } // called with others at once: who answered before it, who answers after
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, together, wiki } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, askedIn, together, wiki } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const other = conversation.kind === 'agents' ? peers[0] : undefined
   const where = delegatedBy
-    ? delegatedWhere(me, delegatedBy)
+    ? delegatedWhere(me, delegatedBy, askedIn)
     : conversation.kind === 'agents'
       ? L(
           `Você está numa DM com ${other ? `${other.name} (@${other.handle}), outro agente` : 'outro agente'}, onde vocês trabalham juntos. ${me} pode ler e escrever aqui.`,

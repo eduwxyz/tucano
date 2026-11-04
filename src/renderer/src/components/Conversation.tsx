@@ -317,8 +317,12 @@ function Handoffs({ message }: { message: Message }): ReactNode {
   const deleted = useStore((s) => items.map((t) => !!t.conversationId && !s.conversations.some((c) => c.id === t.conversationId)))
   // A task that waits for my approval elsewhere: its card shows here too, so I decide without leaving.
   const waiting = useStore((s) => latest.map((m) => (m?.run?.status === 'waiting_approval' && m.run.approvalId ? s.approvals.find((a) => a.id === m.run!.approvalId && a.state === 'pending') : undefined)))
-  const stateOf = (m: Message | undefined, gone: boolean): { label: string; tone: string } => {
+  // A question asked in a channel: where, for its label and its link.
+  const channels = useStore((s) => items.map((t) => (t.askedIn ? s.conversations.find((c) => c.id === t.askedIn)?.name : undefined)))
+  const stateOf = (m: Message | undefined, gone: boolean, t: (typeof items)[number]): { label: string; tone: string } => {
     if (!m && gone) return { label: L('conversa apagada', 'conversation deleted'), tone: '' }
+    if (t.nobody) return { label: L('ninguém pôde ajudar', 'no one could help'), tone: '' }
+    if (t.askedIn && !t.agentId) return { label: L('procurando quem ajuda', 'looking for help'), tone: 'tag--warn' }
     const st = m?.run?.status
     if (!m || st === 'working') return { label: L('trabalhando', 'working'), tone: 'tag--warn' }
     if (st === 'waiting_input') return { label: L('te perguntou algo', 'asked you something'), tone: 'tag--warn' }
@@ -332,7 +336,7 @@ function Handoffs({ message }: { message: Message }): ReactNode {
     <div className="handoffs">
       {items.map((t, i) => {
         const agent = agents[i]
-        const state = stateOf(latest[i], deleted[i]!)
+        const state = stateOf(latest[i], deleted[i]!, t)
         const elsewhere = t.conversationId && t.conversationId !== message.conversationId && !deleted[i]
         const approval = elsewhere ? waiting[i] : undefined
         return (
@@ -340,11 +344,20 @@ function Handoffs({ message }: { message: Message }): ReactNode {
             <div className="handoff" title={t.task}>
               <Icon name="send" size={12} />
               {agent && <AgentAvatar agent={agent} size={16} />}
-              <span className="handoff__who">{agent?.name ?? L('agente removido', 'removed agent')}</span>
+              <span className="handoff__who">
+                {agent?.name ?? (t.askedIn ? '' : L('agente removido', 'removed agent'))}
+                {t.askedIn && `${agent ? L(' em ', ' in ') : ''}#${channels[i] ?? '?'}`}
+              </span>
               <span className="handoff__task">{t.task}</span>
               <span className={`tag ${state.tone}`}>{state.label}</span>
               {elsewhere && (
-                <button className="link handoff__open" onClick={() => navigate({ kind: 'conversation', id: t.conversationId! })}>
+                <button
+                  className="link handoff__open"
+                  onClick={() => {
+                    navigate({ kind: 'conversation', id: t.conversationId! })
+                    if (t.threadId) openThread(t.threadId)
+                  }}
+                >
                   {L('abrir conversa', 'open conversation')}
                 </button>
               )}

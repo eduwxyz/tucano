@@ -24,7 +24,7 @@ import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
-import { briefFor, colleaguesOf, DELEGAR, delegarTool, requestCap, MAX_DELEGATION_DEPTH, MAX_DELEGATIONS, MAX_TEAM_ROUNDS, resultsTask, settled, teamOf } from './delegation'
+import { briefFor, colleaguesOf, DELEGAR, delegarTool, PEDIR_AJUDA, pedirAjudaTool, requestCap, MAX_DELEGATION_DEPTH, MAX_DELEGATIONS, MAX_TEAM_ROUNDS, resultsTask, settled, teamOf } from './delegation'
 import { actionLabel, actionVerb, chainMode, COMPUTADOR, gate, shellActions, toolActions, type ActionKind, type ActionRules } from '../shared/actions'
 
 const MAX_CONCURRENT = 4
@@ -431,42 +431,90 @@ export class Runner {
 
   // The router reads the conversation, threads included, and the thread it picks for.
   private async routeAndRun(conv: Conversation, members: Agent[], threadId?: string): Promise<void> {
-    const { db, engines } = this.deps
     this.routing++
     const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
       this.update(note, { text: L(`Não consegui escolher quem responde (${why}). Mencione um agente com **@nome**.`, `I couldn't pick who answers (${why}). Mention an agent with **@name**.`), run: undefined })
     try {
-      const settings = await this.deps.settings()
-      const input = {
-        messages: [...new Map([...db.recentMessages(conv.id, 20), ...(threadId ? db.recentMessages(conv.id, 60, threadId) : [])].map((m) => [m.id, m])).values()].sort((a, b) => a.at - b.at),
-        thread: threadId ? db.message(threadId) : undefined,
-        agents: members,
-        me: settings.workspaceName,
-        connectors: this.deps.connectors?.list()
-      }
-
-      // Jev first when chosen; if it fails, Haiku decides, so the channel never goes quiet.
-      let fellBack = ''
-      if (settings.routerModel === JEV_MODEL) {
-        const key = await this.deps.jev?.key()
-        const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
-        fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
-      }
-
-      const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
-      const status = settings.engines[model.engine]
-      if (!status.installed || !status.loggedIn) return fail(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
-
-      const cwd = join(this.deps.workDir, '_router')
-      mkdirSync(cwd, { recursive: true })
-      const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
-      if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
+      const r = await this.pick(conv, members, threadId, note.id)
       if ('error' in r) return fail(r.error)
-      this.routed(conv, note, r.agents, `${r.reason}${fellBack}`)
+      this.routed(conv, note, r.agents, r.reason)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
+    } finally {
+      this.routing--
+      this.checkIdle()
+    }
+  }
+
+  // Who of `members` should answer the conversation's last message (in `threadId`, when given): Jev or the
+  // router model. Its cost goes on `receiptOn`.
+  private async pick(conv: Conversation, members: Agent[], threadId: string | undefined, receiptOn: string): Promise<{ agents: Agent[]; reason: string } | { error: string }> {
+    const { db, engines } = this.deps
+    const settings = await this.deps.settings()
+    const input = {
+      messages: [...new Map([...db.recentMessages(conv.id, 20), ...(threadId ? db.recentMessages(conv.id, 60, threadId) : [])].map((m) => [m.id, m])).values()].sort((a, b) => a.at - b.at),
+      thread: threadId ? db.message(threadId) : undefined,
+      agents: members,
+      me: settings.workspaceName,
+      connectors: this.deps.connectors?.list()
+    }
+
+    // Jev first when chosen; if it fails, Haiku decides, so the channel never goes quiet.
+    let fellBack = ''
+    if (settings.routerModel === JEV_MODEL) {
+      const key = await this.deps.jev?.key()
+      const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
+      if (!('error' in j)) return { agents: j.agents, reason: `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s` }
+      fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
+    }
+
+    const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+    const status = settings.engines[model.engine]
+    if (!status.installed || !status.loggedIn) return { error: L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`) }
+
+    const cwd = join(this.deps.workDir, '_router')
+    mkdirSync(cwd, { recursive: true })
+    const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
+    if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: receiptOn, agentId: 'router', engine: model.engine, at: Date.now() })
+    if ('error' in r) return { error: r.error }
+    return { agents: r.agents, reason: `${r.reason}${fellBack}` }
+  }
+
+  // A question an agent asked a channel (pedir_ajuda): posted there, opening a thread; the router picks who
+  // can help, and each one picked answers in the thread as a task of that agent's, so what they say comes
+  // back to it like any delegated result. Nobody fit: it hears that, and goes on without.
+  private async askAround(asker: Agent, head: Message, t: Delegated): Promise<void> {
+    const { db, emit } = this.deps
+    const channel = db.conversation(t.askedIn!)
+    const place = (next: Delegated[]): void => {
+      const cur = db.message(head.id)
+      if (cur?.run) this.update(cur, { run: { ...cur.run, delegated: (cur.run.delegated ?? []).flatMap((x) => (x.id === t.id ? next : [x])) } })
+    }
+    if (!channel) {
+      place([{ ...t, nobody: true }])
+      return this.settle(head.id)
+    }
+    const q: Message = { id: randomUUID(), conversationId: channel.id, author: { kind: 'agent', id: asker.id }, text: t.task, at: Date.now() }
+    db.saveMessage(q)
+    emit({ type: 'message', message: q })
+    const chain = [...(head.run?.delegation?.chain ?? []), asker.id]
+    const members = this.members(channel).filter((a) => !chain.includes(a.id) && a.kind !== 'tuca')
+    this.routing++
+    try {
+      const r = members.length ? await this.pick(channel, members, q.id, q.id).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) })) : { agents: [], reason: '' }
+      const helpers = 'error' in r ? [] : r.agents
+      if (!helpers.length) {
+        this.post(channel.id, q.id, L(`Ninguém aqui pôde ajudar${'error' in r ? ` (${r.error})` : ''}. **${asker.name}** segue sem isso.`, `No one here could help${'error' in r ? ` (${r.error})` : ''}. **${asker.name}** goes on without it.`))
+        place([{ ...t, conversationId: channel.id, threadId: q.id, nobody: true }])
+        return this.settle(head.id)
+      }
+      const root = head.run?.root ?? head.id
+      const tasks: Delegated[] = helpers.map((h) => ({ id: randomUUID(), agentId: h.id, conversationId: channel.id, threadId: q.id, askedIn: channel.id, task: t.task }))
+      place(tasks)
+      helpers.forEach((h, i) =>
+        this.follow(h, channel, { delegation: { id: tasks[i]!.id, by: asker.id, from: head.id, task: t.task, chain, root, since: q.at, asked: channel.name }, root, work: head.run?.work, threadId: q.id })
+      )
     } finally {
       this.routing--
       this.checkIdle()
@@ -503,17 +551,18 @@ export class Runner {
     const root = msg.run?.root ?? msg.id
     // The reply that delegated may have spent the rest of the request's budget itself.
     const capped = requestCap(db.requestSpent(root), this.budget)
-    const go = stopped || this.paused || capped ? [] : all.flatMap((t) => (db.agent(t.agentId) && !db.agent(t.agentId)!.archived ? [t] : []))
+    const go = stopped || this.paused || capped ? [] : all.flatMap((t) => (t.askedIn || (db.agent(t.agentId) && !db.agent(t.agentId)!.archived) ? [t] : []))
+    const asks = go.filter((t) => t.askedIn)
     if (go.length < all.length && !stopped && (this.paused || capped))
       this.post(conv.id, msg.threadId, this.paused ? L(`Os agentes estão pausados: o que **${manager.name}** delegou não foi entregue.`, `The agents are paused: what **${manager.name}** delegated wasn't handed out.`) : L(`${capped} O que **${manager.name}** delegou não foi entregue.`, `${capped} What **${manager.name}** delegated wasn't handed out.`))
     // In a channel the work happens there, in the open. Anywhere else (the person's DM stays theirs, like
     // a DM in Slack), in a DM between the two agents: the request opens there, and the answer is given there.
-    const placed = go.map((t) => {
+    const placed = go.filter((t) => !t.askedIn).map((t) => {
       const target = db.agent(t.agentId)!
       const where = conv.kind === 'channel' ? conv : this.pair(manager, target, root, t.task)
       return { t: { ...t, conversationId: where.id }, target, where }
     })
-    this.update(msg, { run: { ...msg.run!, delegated: placed.length ? placed.map((p) => p.t) : undefined } })
+    this.update(msg, { run: { ...msg.run!, delegated: placed.length || asks.length ? [...placed.map((p) => p.t), ...asks] : undefined } })
     const above = msg.run?.delegation
     for (const { t, target, where } of placed) {
       if (where.id !== conv.id) {
@@ -525,7 +574,8 @@ export class Runner {
       const delegation: Delegation = { id: t.id, by: manager.id, from: msg.id, task: t.task, ...(t.doneWhen ? { doneWhen: t.doneWhen } : {}), chain: [...(above?.chain ?? []), manager.id], root, since: msg.at }
       this.follow(target, where, { delegation, root, work: msg.run?.work, ...(where.id === conv.id && msg.threadId ? { threadId: msg.threadId } : {}) })
     }
-    if (!placed.length && above) this.settle(above.from)
+    for (const t of asks) void this.askAround(manager, msg, t)
+    if (!placed.length && !asks.length && above) this.settle(above.from)
   }
 
   // The DM between two agents for one request: made when one first asks the other for something in it, and
@@ -556,14 +606,16 @@ export class Runner {
     const latest = tasks.map((t) => replies.filter((m) => m.run!.delegation!.id === t.id).at(-1))
     // A task whose conversation the person deleted has nothing left to wait for, or to report.
     const gone = (t: Delegated): boolean => !!t.conversationId && !db.conversation(t.conversationId)
-    if (!latest.every((m, i) => settled(m) || (!m && gone(tasks[i]!)))) return
+    if (!latest.every((m, i) => settled(m) || (!m && (gone(tasks[i]!) || !!tasks[i]!.nobody)))) return
     const fresh = latest.filter((m): m is Message => !!m && !m.run!.delegation!.reported)
-    if (!fresh.length) return
+    const unanswered = tasks.filter((t) => t.nobody && !t.reported)
+    if (!fresh.length && !unanswered.length) return
+    if (unanswered.length) this.update(head, { run: { ...head.run, delegated: tasks.map((t) => (t.nobody ? { ...t, reported: true } : t)) } })
     for (const m of fresh) this.update(m, { run: { ...m.run!, delegation: { ...m.run!.delegation!, reported: true } } })
 
     const manager = db.agent(head.author.id)
     const conv = db.conversation(head.conversationId)
-    const stopped = fresh.every((m) => m.run!.status === 'stopped')
+    const stopped = fresh.length > 0 && fresh.every((m) => m.run!.status === 'stopped')
     const resume = !!manager && !manager.archived && !!conv && !this.paused && !stopped
     if (!resume) {
       // Nobody reports back, so the person hears why here, where they asked.
@@ -583,7 +635,7 @@ export class Runner {
     const root = head.run.root ?? head.id
     const capped = requestCap(db.requestSpent(root), this.budget)
     const results = fresh.map((message) => ({ agent: db.agent(message.author.kind === 'agent' ? message.author.id : ''), message, elsewhere: message.conversationId !== head.conversationId }))
-    this.follow(manager!, conv!, { delegation: head.run.delegation, round, reportOf: head.id, root, work: head.run.work, threadId: head.threadId, then: (me) => resultsTask(me, results, round, capped) })
+    this.follow(manager!, conv!, { delegation: head.run.delegation, round, reportOf: head.id, root, work: head.run.work, threadId: head.threadId, then: (me) => resultsTask(me, results, round, capped, unanswered.map((t) => ({ task: t.task, where: db.conversation(t.askedIn!)?.name ?? '?' }))) })
   }
 
   private enqueue(job: () => Promise<unknown>): void {
@@ -832,6 +884,11 @@ export class Runner {
     const chain = [...(opts.delegation?.chain ?? []), agent.id]
     const colleagues = this.deps.gateway && agent.kind !== 'tuca' && chain.length <= MAX_DELEGATION_DEPTH ? colleaguesOf(agent, db.agents()).filter((a) => !chain.includes(a.id)) : []
     const team = teamOf(agent, colleagues)
+    // Where it can ask who can help: its channels with someone else in them who isn't above it on this task.
+    const askable =
+      this.deps.gateway && agent.kind !== 'tuca' && chain.length <= MAX_DELEGATION_DEPTH
+        ? db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id) && c.members.some((id) => !chain.includes(id) && !!db.agent(id) && !db.agent(id)!.archived && db.agent(id)!.kind !== 'tuca'))
+        : []
     const others = colleagues.filter((a) => !team.includes(a))
     const root = opts.root ?? opts.delegation?.root // the request this reply belongs to, when it's part of one
     const delegated: Delegated[] = []
@@ -897,7 +954,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, DELEGAR, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, DELEGAR, PEDIR_AJUDA, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     // The rules for actions that matter (Settings, and this agent's page), read again at each call.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     // On a task, the agents above it in the chain count too: the strictest rule wins.
@@ -993,6 +1050,7 @@ ${note}`,
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(builds ? [PROPOR_AGENTE] : []),
       ...(colleagues.length ? [delegarTool([...team, ...others])] : []),
+      ...(askable.length ? [pedirAjudaTool(askable)] : []),
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -1079,6 +1137,30 @@ ${note}`,
             L(
               `Tarefa entregue a ${target.name}: começa quando você encerrar a resposta. Se for delegar a mais alguém, faça agora; depois encerre com uma frase dizendo o que mandou pra quem. O resultado volta pra você numa nova mensagem.`,
               `Task handed to ${target.name}: it starts when you end your reply. If you'll delegate to anyone else, do it now; then end with one sentence saying what you sent to whom. The result comes back to you in a new message.`
+            )
+          )
+        }
+
+        // A question to a channel: posted after this reply ends, where the router picks who answers.
+        if (name === PEDIR_AJUDA && askable.length) {
+          const canal = typeof args['canal'] === 'string' ? args['canal'].trim().replace(/^#/, '').toLowerCase() : ''
+          const pergunta = typeof args['pergunta'] === 'string' ? args['pergunta'].trim() : ''
+          const channel = askable.find((c) => c.name.toLowerCase() === canal)
+          if (!channel) return textResult(L(`Não dá pra perguntar em #${canal}. Use um destes: ${askable.map((c) => c.name).join(', ')}.`, `You can't ask in #${canal}. Use one of these: ${askable.map((c) => c.name).join(', ')}.`), true)
+          if (!pergunta) return textResult(L('Faltou a pergunta.', 'Missing the question.'), true)
+          const capped = requestCap(db.requestSpent(root ?? msg.id), this.budget)
+          if (capped) return textResult(L(`${capped} Não pergunte mais: responda a ${settings.workspaceName} com o que tem.`, `${capped} Don't ask any more: answer ${settings.workspaceName} with what you have.`), true)
+          if ((opts.round ?? 0) >= MAX_TEAM_ROUNDS)
+            return textResult(L(`Você já mandou trabalho de volta ${opts.round} vezes seguidas. Responda a ${settings.workspaceName} com o que tem.`, `You've sent work back ${opts.round} times in a row. Answer ${settings.workspaceName} with what you have.`), true)
+          if (delegated.some((t) => t.askedIn === channel.id)) return textResult(L(`Você já perguntou em #${channel.name} nesta resposta: junte tudo numa pergunta só.`, `You already asked in #${channel.name} in this reply: put it all in one question.`), true)
+          if (delegated.length >= MAX_DELEGATIONS) return textResult(L(`Já são ${MAX_DELEGATIONS} tarefas e perguntas nesta resposta, o máximo. Encerre agora.`, `That's ${MAX_DELEGATIONS} tasks and questions in this reply, the most. End now.`), true)
+          delegated.push({ id: randomUUID(), agentId: '', askedIn: channel.id, task: pergunta })
+          msg.run = { ...msg.run!, delegated: [...delegated] }
+          addSteps({ id: randomUUID(), label: L(`Perguntou em #${channel.name}`, `Asked in #${channel.name}`), detail: pergunta.replace(/\s+/g, ' ').slice(0, 240), status: 'done' })
+          return textResult(
+            L(
+              `Pergunta feita em #${channel.name}: sai quando você encerrar a resposta, numa thread lá, e quem puder ajudar responde. A resposta volta pra você numa nova mensagem. Encerre agora com uma frase dizendo onde perguntou.`,
+              `Question asked in #${channel.name}: it goes out when you end your reply, in a thread there, and whoever can help answers. The answer comes back to you in a new message. End now with one sentence saying where you asked.`
             )
           )
         }
@@ -1559,6 +1641,7 @@ ${note}`,
               publish: repos,
               team: colleagues.length ? { team, others } : undefined,
               delegatedBy: opts.delegation ? db.agent(opts.delegation.by) : undefined,
+              askedIn: opts.delegation?.asked,
               together: opts.together && {
                 before: opts.together.slice(0, opts.together.indexOf(agent.id)).flatMap((id) => db.agent(id) ?? []),
                 after: opts.together.slice(opts.together.indexOf(agent.id) + 1).flatMap((id) => db.agent(id) ?? [])
