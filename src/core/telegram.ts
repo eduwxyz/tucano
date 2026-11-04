@@ -226,7 +226,7 @@ export class Telegram {
   }
 
   async notice(title: string, body: string): Promise<void> {
-    await this.send(`${title}\n\n${body}`)
+    for (const chunk of splitIntoChunks(`${title}\n\n${body}`, MAX_TEXT)) await this.send(chunk)
   }
 }
 
@@ -236,3 +236,21 @@ function approvalText(ap: Approval): string {
 }
 
 const clip = (s: string): string => (s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}…` : s)
+
+// Cuts at the last line break that fits, and drops it; a line longer than maxLength is cut at maxLength.
+export function splitIntoChunks(text: string, maxLength: number): string[] {
+  const chunks: string[] = []
+  let remaining = text
+
+  while (remaining.length > maxLength) {
+    const lineBreak = remaining.lastIndexOf('\n', maxLength)
+    const endsAtLineBreak = lineBreak > 0
+    const end = endsAtLineBreak ? lineBreak : maxLength
+
+    chunks.push(remaining.slice(0, end))
+    remaining = remaining.slice(endsAtLineBreak ? end + 1 : end)
+  }
+
+  chunks.push(remaining)
+  return chunks
+}

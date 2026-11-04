@@ -20,6 +20,7 @@ import {
   addConnector,
   authorizeConnector,
   reconnectConnector,
+  setConnectorToken,
   removeConnector,
   updateTool,
   updateSettings,
@@ -29,6 +30,7 @@ import {
   unpairTelegram,
   setGithubToken,
   exportTeam,
+  importAgents,
   importTeam,
   backupNow,
   openBackups,
@@ -65,8 +67,9 @@ import { voiceRefusal } from '../../../shared/voice'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { ApprovalCard } from './Conversation'
-import { AgentAvatar, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
+import exportSkill from '../assets/tucano-export-skill.md?raw'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
   return (
@@ -169,13 +172,24 @@ export function ColorPicker({ agent, patch }: { agent: Pick<Agent, 'color' | 'cu
   )
 }
 
-// A picture over the face, scaled down here; taken off the same way.
-export function PicturePicker({ agent, patch }: { agent: Pick<Agent, 'name' | 'color' | 'customColor' | 'picture'>; patch: (p: Partial<Agent>) => void }): ReactNode {
+// How an agent looks, here and in the onboarding: the face, a drawn character or a picture
+// of the person's own (scaled down here). One at a time.
+export function LookPicker({ agent, patch }: { agent: Pick<Agent, 'name' | 'color' | 'customColor' | 'picture' | 'avatar'>; patch: (p: Partial<Agent>) => void }): ReactNode {
   const [error, setError] = useState('')
+  const base = { name: agent.name || '?', color: agent.color, customColor: agent.customColor }
   return (
     <>
+      <div className="looks">
+        <button type="button" className={`look ${!agent.picture && !agent.avatar ? 'is-active' : ''}`} title={L('Rosto padrão', 'Default face')} onClick={() => patch({ avatar: undefined, picture: undefined })}>
+          <AgentAvatar agent={base} size={30} />
+        </button>
+        {AVATARS.map((a) => (
+          <button key={a.id} type="button" className={`look ${!agent.picture && agent.avatar?.id === a.id ? 'is-active' : ''}`} title={a.name} onClick={() => patch({ avatar: a, picture: undefined })}>
+            <AgentAvatar agent={{ ...base, avatar: a }} size={30} />
+          </button>
+        ))}
+      </div>
       <div className="row row--center">
-        <AgentAvatar agent={{ ...agent, name: agent.name || '?' }} size={40} />
         <label className="btn btn--sm">
           {L('Enviar imagem', 'Upload image')}
           <input
@@ -185,14 +199,17 @@ export function PicturePicker({ agent, patch }: { agent: Pick<Agent, 'name' | 'c
             onChange={(e) => {
               const file = e.target.files?.[0]
               e.target.value = ''
-              if (file) pictureFrom(file).then((picture) => (setError(''), patch({ picture })), () => setError(L('Não consegui abrir essa imagem.', "I couldn't open that image.")))
+              if (file) pictureFrom(file).then((picture) => (setError(''), patch({ picture, avatar: undefined })), () => setError(L('Não consegui abrir essa imagem.', "I couldn't open that image.")))
             }}
           />
         </label>
         {agent.picture && (
-          <button type="button" className="btn btn--sm btn--ghost" onClick={() => patch({ picture: undefined })}>
-            {L('Tirar', 'Remove')}
-          </button>
+          <>
+            <AgentAvatar agent={{ ...base, picture: agent.picture }} size={30} />
+            <button type="button" className="btn btn--sm btn--ghost" onClick={() => patch({ picture: undefined })}>
+              {L('Tirar a imagem', 'Remove the image')}
+            </button>
+          </>
         )}
       </div>
       {error && <span className="field__error">{error}</span>}
@@ -331,9 +348,10 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <Field label={L('Cor', 'Color')}>
                 <ColorPicker agent={draft} patch={patch} />
               </Field>
-              <Field label={L('Foto ou ícone', 'Photo or icon')}>
-                <PicturePicker agent={draft} patch={patch} />
-              </Field>
+              <div className="field">
+                <span className="field__label">{L('Aparência', 'Look')}</span>
+                <LookPicker agent={draft} patch={patch} />
+              </div>
             </Card>
           )}
 
@@ -577,6 +595,36 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             </Card>
           )}
 
+          {pane('memoria') && (
+            <Card
+              title="Wiki"
+              lead={L('A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas.', 'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages.')}
+            >
+              <div className="segmented segmented--wide" role="radiogroup" aria-label="Wiki">
+                {([['read', L('Lê a wiki', 'Reads the wiki')], ['none', L('Sem acesso', 'No access')]] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    role="radio"
+                    aria-checked={(draft.wiki ?? 'read') === value}
+                    className={(draft.wiki ?? 'read') === value ? 'is-active' : ''}
+                    onClick={() => {
+                      if (isNew) return patch({ wiki: value })
+                      setDraft((d) => ({ ...d, wiki: value }))
+                      patchAgent(draft.id, { wiki: value })
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="muted small">
+                <button className="link" onClick={() => navigate({ kind: 'wiki' })}>
+                  {L('Abrir a wiki', 'Open the wiki')}
+                </button>
+              </p>
+            </Card>
+          )}
+
           {pane('perfil') && (
             <Card title={L('Harness e modelo', 'Harness and model')} lead={L('O agente roda num dos harnesses que você usa, como você o configurou: no seu plano, no gateway da empresa ou no seu provedor.', 'The agent runs on one of the harnesses you use, the way you set it up: on your plan, your company’s gateway or your provider.')}>
               <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
@@ -595,15 +643,18 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 </p>
               )}
               <div className="grid2">
-                <Field label={L('Esforço de raciocínio', 'Reasoning effort')} hint={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
-                  <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
-                    {EFFORTS.map((ef) => (
-                      <option key={ef.id} value={ef.id}>
-                        {ef.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                {/* Cursor's models carry the effort in the name (…-high, …-xhigh): no separate pick. */}
+                {engine !== 'cursor' && (
+                  <Field label={L('Esforço de raciocínio', 'Reasoning effort')} hint={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
+                    <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
+                      {EFFORTS.map((ef) => (
+                        <option key={ef.id} value={ef.id}>
+                          {ef.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
                 <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you.`)}>
                   <NumberInput
                     min={0}
@@ -990,6 +1041,30 @@ const STATUS = (): Record<Connector['status'], { label: string; tone: string }> 
 
 const address = (c: Connector): string => (c.kind === 'remote' ? (c.url ?? '') : [c.command, ...(c.args ?? [])].join(' '))
 
+// The token of a connector, set or replaced without removing it (which would lose the agents' access).
+function ConnectorToken({ id }: { id: string }): ReactNode {
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = (): void => {
+    setBusy(true)
+    setError(null)
+    setConnectorToken(id, token)
+      .then(() => setToken(''))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="row">
+      <input className="grow" type="password" value={token} placeholder={L('Token (substitui o atual)', 'Token (replaces the current one)')} onChange={(e) => setToken(e.target.value)} />
+      <button className="btn btn--sm" disabled={busy || !token.trim()} onClick={save}>
+        {L('Salvar token', 'Save token')}
+      </button>
+      {error && <span className="note note--error">{error}</span>}
+    </div>
+  )
+}
+
 export function ConnectorsPage(): ReactNode {
   const connectors = useStore((s) => s.connectors)
   const agents = useStore((s) => s.agents)
@@ -1060,6 +1135,7 @@ export function ConnectorsPage(): ReactNode {
                     </p>
                   )}
                   {c.error && <p className="note note--error">{c.error}</p>}
+                  {c.kind === 'remote' && c.auth === 'token' && <ConnectorToken id={c.id} />}
                   <div className="row connector__actions">
                     {c.status === 'needs_auth' && (
                       <button className="btn btn--primary btn--sm" onClick={() => authorizeConnector(c.id)}>
@@ -1458,8 +1534,23 @@ function GithubCard({ info }: { info?: { user?: string; error?: string } }): Rea
 }
 
 // The team as a file, and backups of everything.
+const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
+  // Grok Bot has no export: one of the person's agents there runs this skill and writes our .zip.
+  const grokSkill = (): void => {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([exportSkill], { type: 'text/markdown' }))
+    a.download = 'SKILL.md'
+    a.click()
+    URL.revokeObjectURL(a.href)
+    setNote(
+      L(
+        'Baixei o SKILL.md. No Grok Bot, dê a skill a um dos seus agentes (ou cole o texto numa conversa com ele) e peça: "Exporte meus agentes pro Tucano". Ele te devolve um .zip, que você abre em "Importar de outro app…". É experimental: ainda não foi testada dentro do Grok Bot, então confira o resumo da importação.',
+        'I downloaded SKILL.md. In Grok Bot, give the skill to one of your agents (or paste its text in a chat with it) and ask: "Export my agents to Tucano". It gives you back a .zip, which you open with "Import from another app…". It\'s experimental: it hasn\'t been tried inside Grok Bot yet, so check the import summary.'
+      )
+    )
+  }
   const download = (): void => {
     void exportTeam().then((md) => {
       const a = document.createElement('a')
@@ -1469,16 +1560,31 @@ function TeamCard(): ReactNode {
       URL.revokeObjectURL(a.href)
     })
   }
+  const failed = (e: unknown): void => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
   const upload = (file?: File): void => {
     if (!file) return
+    void file.text().then(importTeam).then(setNote, failed)
+  }
+  // Another app's export: on the desktop the core reads the file where it is; in a browser it goes up whole.
+  const fromApp = (file?: File): void => {
+    if (!file) return
+    setNote(L('Lendo o arquivo…', 'Reading the file…'))
+    const path = window.tucano.pathOf?.(file)
+    if (path) return void importAgents({ path }).then(setNote, failed)
+    if (file.size > MAX_UPLOAD) return setNote(L('Arquivo grande demais pra mandar pelo navegador. Importe no app do computador, ou exporte sem os arquivos.', 'File too big to send through the browser. Import it in the desktop app, or export without the files.'))
     void file
-      .text()
-      .then(importTeam)
-      .then(setNote, (e: unknown) => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
+      .arrayBuffer()
+      .then((b) => {
+        const bytes = new Uint8Array(b)
+        let bin = ''
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+        return importAgents({ data: btoa(bin) })
+      })
+      .then(setNote, failed)
   }
   return (
-    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. And a copy of everything once a day (the last 7).')}>
-      <div className="row">
+    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot and Grok Bot come in too, with no connector and web search off. And a copy of everything once a day (the last 7).')}>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
         <button className="btn btn--sm" onClick={download}>
           {L('Exportar time', 'Export team')}
         </button>
@@ -1486,7 +1592,33 @@ function TeamCard(): ReactNode {
           {L('Importar time…', 'Import team…')}
           <input type="file" accept=".md,text/markdown" hidden onChange={(e) => upload(e.target.files?.[0])} />
         </label>
-        <span className="grow" />
+        <label
+          className="btn btn--sm"
+          title={L(
+            'OpenBot: Configurações do servidor → Transfer → Export from this server, com os arquivos. Grok Bot: o .zip feito com a skill do Tucano.',
+            "OpenBot: Server settings → Transfer → Export from this server, with the files. Grok Bot: the .zip made with Tucano's skill."
+          )}
+        >
+          {L('Importar de outro app…', 'Import from another app…')}
+          <input
+            type="file"
+            accept=".zip,application/zip"
+            hidden
+            onChange={(e) => {
+              fromApp(e.target.files?.[0])
+              e.target.value = ''
+            }}
+          />
+        </label>
+        <button
+          className="btn btn--sm"
+          onClick={grokSkill}
+          title={L('Experimental: a skill que exporta seus agentes do Grok Bot pro Tucano. Ainda não foi testada dentro do Grok Bot.', "Experimental: the skill that exports your agents from Grok Bot to Tucano. It hasn't been tried inside Grok Bot yet.")}
+        >
+          {L('Skill pro Grok Bot (experimental)', 'Skill for Grok Bot (experimental)')}
+        </button>
+      </div>
+      <div className="row" style={{ marginTop: 8 }}>
         <button className="btn btn--sm" onClick={() => void backupNow().then((f) => setNote(L(`Backup feito: ${f.split('/').pop()}`, `Backup done: ${f.split('/').pop()}`)))}>
           {L('Fazer backup agora', 'Back up now')}
         </button>
@@ -1494,7 +1626,7 @@ function TeamCard(): ReactNode {
           {L('Abrir pasta', 'Open folder')}
         </button>
       </div>
-      {note && <p className="small muted">{note}</p>}
+      {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
     </Card>
   )
 }
@@ -1560,7 +1692,7 @@ function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
       )}
       {(error || info?.error) && <p className="note note--error">{error || L(`O Telegram não está respondendo: ${info?.error}`, `Telegram isn't responding: ${info?.error}`)}</p>}
       <p className="hint">
-        <Icon name="shield" size={13} /> {L('O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo). O token fica no cofre do sistema. Uma ação de alto risco pede dois toques.', 'Telegram receives the text of approvals and questions (tool, arguments, reason). The token stays in the system’s vault. A high-risk action takes two taps.')}
+        <Icon name="shield" size={13} /> {L('O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo) e as respostas das rotinas. O token fica no cofre do sistema. Uma ação de alto risco pede dois toques.', 'Telegram receives the text of approvals and questions (tool, arguments, reason) and the routines’ replies. The token stays in the system’s vault. A high-risk action takes two taps.')}
       </p>
     </Card>
   )

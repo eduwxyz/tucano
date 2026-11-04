@@ -1,8 +1,11 @@
 import { L } from '../../../shared/lang'
 import { CODE_SPANS } from '../../../shared/types'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import Markdown from 'react-markdown'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import Markdown, { defaultUrlTransform } from 'react-markdown'
+import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
+import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
+import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import {
   agentById,
   conversationTitle,
@@ -186,6 +189,9 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
   )
 }
 
+const AGENT_PLUGINS = [remarkGfm, remarkLocalPaths]
+const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
+
 function MessageRow({ message, grouped }: { message: Message; grouped: boolean }): ReactNode {
   const me = useStore((s) => s.me)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
@@ -198,6 +204,9 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
       !(s.panel?.kind === 'browser' && s.panel.agentId === agent?.id) &&
       s.messages.findLast((m) => m.conversationId === message.conversationId && m.run?.browser && m.author.kind === 'agent' && m.author.id === agent?.id)?.id === message.id
   )
+
+  // The same object between renders, or every link would start over.
+  const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id) }), [message.id])
 
   if (message.author.kind === 'system') {
     return (
@@ -238,7 +247,11 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run && <RunSteps message={message} />}
         {message.text ? (
           <div className="md">
-            <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>{highlightMentions(message.text)}</Markdown>
+            {agent && message.run?.status !== 'working' ? (
+              <Markdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{highlightMentions(message.text)}</Markdown>
+            ) : (
+              <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+            )}
           </div>
         ) : null}
         {attached.length > 0 && (
@@ -253,6 +266,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run?.agentDraft && <AgentProposal message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
+        {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">
             {message.run.artifactIds.map((aid) => (
@@ -278,6 +292,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
             {L('Tentar de novo', 'Try again')}
           </button>
         )}
+        {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && <KeepInWiki messageId={message.id} />}
         {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
       </div>
     </article>
@@ -314,7 +329,7 @@ function RoutineMessage({ message }: { message: Message }): ReactNode {
           </div>
         )}
         <div className="md">
-          <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>{highlightMentions(message.text)}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
         </div>
       </div>
     </article>
@@ -463,6 +478,7 @@ function QuestionCard({ question, answered }: { question: string; answered: bool
 // A @handle in code is not bolded (CODE_SPANS, the core's rule too): the box shows and copies the real text.
 const boldMentions = (t: string): string => t.replace(/(^|\s)@([a-z0-9_-]{2,32})/gi, '$1**@$2**')
 const highlightMentions = (text: string): string => {
+  text = wikiLinks(text)
   let out = ''
   let last = 0
   for (const m of text.matchAll(CODE_SPANS)) {
