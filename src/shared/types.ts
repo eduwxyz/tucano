@@ -201,6 +201,9 @@ export interface Message {
   run?: Run
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
+  // Sent while this agent was still on my last message: it waits and goes with that reply's follow-up. Not
+  // stored: it lives as long as the reply it waits for, and the app forgets it with that reply.
+  queued?: string
 }
 
 // Dictation with whisper-cli. Unset paths are looked for in the usual places.

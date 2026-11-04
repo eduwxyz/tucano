@@ -125,12 +125,17 @@ export interface RoutineEvent {
 }
 
 type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
+// An agent answering in a conversation: replies running there, their thread, and my messages waiting for them.
+type Line = { n: number; threadId?: string; waiting: string[]; steered?: boolean }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
+  // Who is answering where right now (agent + conversation), the thread it answers in, and my messages
+  // that came in meanwhile: they wait, and go together in one follow-up once it's done.
+  private working = new Map<string, Line>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
 
@@ -157,6 +162,18 @@ export class Runner {
     // A question an agent left waiting is answered by my next message in its thread. What I
     // write outside threads stays outside: it only answers a question that is outside too.
     const asked = this.pendingQuestion(conv.id, thread)
+
+    // The agent is still on my last message here: this one is almost always more of the same (a detail, a
+    // correction). It goes in that reply's thread and waits, instead of starting a reply of its own.
+    const line = asked || this.paused ? undefined : this.lineFor(conv, body, thread)
+    if (line) {
+      const waiting: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(line.threadId ? { threadId: line.threadId } : {}) }
+      for (const img of pictures) this.keepImage(waiting, img)
+      db.saveMessage(waiting)
+      line.waiting.push(waiting.id)
+      emit({ type: 'message', message: { ...waiting, queued: line.agentId } })
+      return
+    }
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // Every answer goes in the thread of what it answers: a message of mine outside one opens it.
@@ -456,7 +473,91 @@ export class Runner {
   }
 
   // `threadId`: the reply goes in that thread (an existing reply keeps its own).
+  // Where my next message to one agent waits: that agent is answering in this conversation right now, and the
+  // message goes to it alone (named, or the DM's or the channel's only agent), outside threads or in its thread.
+  private lineFor(conv: Conversation, body: string, thread: string | undefined): (Line & { agentId: string }) | undefined {
+    const members = this.members(conv)
+    const named = mentioned(body, members).slice(0, MAX_MENTIONS)
+    const to = named.length ? named : conv.kind === 'dm' || members.length === 1 ? members : []
+    if (to.length !== 1) return undefined
+    const w = this.working.get(`${to[0]!.id}:${conv.id}`)
+    if (!w || (thread && thread !== w.threadId)) return undefined
+    return Object.assign(w, { agentId: to[0]!.id })
+  }
+
+  // My message waiting in line: the agent stops what it's doing and starts again with it, now.
+  steer(messageId: string): void {
+    const { db } = this.deps
+    const m = db.message(messageId)
+    if (!m) return
+    for (const [key, w] of this.working) {
+      if (!w.waiting.includes(messageId)) continue
+      w.steered = true
+      const agentId = key.slice(0, key.lastIndexOf(':'))
+      const live = db
+        .recentMessages(m.conversationId, 60)
+        .reverse()
+        .find((x) => x.author.kind === 'agent' && x.author.id === agentId && x.run?.status === 'working')
+      if (live) this.stop(live.id)
+      return
+    }
+  }
+
+  // A reply, and what came in for it while it ran: my messages that waited go together in one follow-up.
   private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }): Promise<Message> {
+    const key = `${agent.id}:${conv.id}`
+    const w: Line = this.working.get(key) ?? { n: 0, waiting: [] }
+    w.n++
+    w.threadId = opts.existing ? opts.existing.threadId : opts.threadId
+    this.working.set(key, w)
+    let msg: Message | undefined
+    try {
+      msg = await this.turn(agent, conv, opts)
+      return msg
+    } finally {
+      if (--w.n === 0) {
+        this.working.delete(key)
+        if (w.waiting.length) void this.followUp(agent, conv, w, msg)
+      }
+    }
+  }
+
+  // One reply for the messages that waited: they're read together, as what they nearly always are, more of
+  // the same request. Steered, it knows it was cut short and what it had done.
+  private async followUp(agent: Agent, conv: Conversation, w: Line, last: Message | undefined): Promise<void> {
+    const { db, emit } = this.deps
+    for (const id of w.waiting) {
+      const m = db.message(id)
+      if (m) emit({ type: 'message', message: m }) // no longer waiting
+    }
+    const current = db.agent(agent.id)
+    if (!current || current.archived || this.paused) return
+    const me = (await this.deps.settings()).workspaceName
+    const n = w.waiting.length
+    const more = n === 1 ? L('uma mensagem', 'one message') : L(`${n} mensagens`, `${n} messages`)
+    const steps = (last?.run?.steps ?? [])
+      .filter((s) => s.status !== 'running' && !['Pensou', 'Pensando', 'Parado', 'Thought', 'Thinking', 'Stopped'].includes(s.label))
+      .slice(-40)
+      .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : ''}`)
+    const task = w.steered
+      ? [
+          L(
+            `${me} te interrompeu: mandou ${more}, logo acima, enquanto você trabalhava, e pediu que você parasse e levasse em conta agora. Leia o pedido e as mensagens novas juntos, como uma coisa só.`,
+            `${me} interrupted you: they sent ${more}, right above, while you were working, and asked you to stop and take it into account now. Read the request and the new messages together, as one thing.`
+          ),
+          steps.length ? `${L('O que você já tinha feito', 'What you had already done')}:\n${steps.join('\n')}` : '',
+          L('Continue com o rumo novo, sem refazer o que já está feito e ainda vale.', "Go on in the new direction, without redoing what's already done and still holds.")
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : L(
+          `Enquanto você respondia, ${me} mandou ${more}, logo depois da sua resposta acima. Leia como continuação do mesmo pedido: responda o que elas acrescentam ou mudam, numa resposta só, sem repetir o que você já disse. Se mudam algo que você respondeu, corrija.`,
+          `While you were answering, ${me} sent ${more}, right after your reply above. Read them as more of the same request: answer what they add or change, in one reply, without repeating what you already said. If they change something you answered, correct it.`
+        )
+    this.enqueue(() => this.execute(current, conv, { depth: 1, task, work: last?.run?.work, threadId: w.threadId }))
+  }
+
+  private async turn(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
