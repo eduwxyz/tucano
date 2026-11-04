@@ -2,6 +2,32 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [0.2.10] - 2026-11-04
+
+> **Em português:** chegaram as threads: cada resposta a uma mensagem, e o que ela dispara, fica na thread dela, que abre na lateral. Na conversa aparecem só as mensagens que abriram uma thread, com quem participou, quantas respostas e o que espera por você. E um "bom dia" pro grupo agora chama todos os agentes. Também dá pra ditar mensagens: clique no microfone, fale e clique de novo, e o texto cai no campo pra você revisar. Tudo roda no seu computador, sem internet, e o modelo baixa com um clique. Os canais podem ser arrastados e organizados em grupos que recolhem, e um caminho de arquivo na mensagem de um agente vira link. O token de um conector pode ser trocado sem remover o conector. Os erros agora dizem o que aconteceu e o que fazer. E uma leva de correções: os agentes no Gemini passam a ler as configurações do Tucano, o modelo reserva entra no limite de 5 horas do Claude Code, as rotinas mandam a resposta inteira pro Telegram e, no Windows, o Tucano não trava mais a atualização de outros apps. Obrigado à Rayanne, ao Gabriel, ao Alan, ao Cleiton e ao Kayo!
+
+### Added
+
+- **Threads.** Every answer to a message, and what it sets off (routing notes, questions, approvals, replies between agents), goes in the thread of that message, and you can reply there too. The conversation shows the messages that started a thread, each with a pill: who took part, how many replies, when, what's new and what waits on you. The thread opens on the side, and Esc closes it. An agent reads the conversation's recent messages plus the whole thread it replies in. A question waits in its thread and is answered from inside it, while what you write in the channel stays in the channel. Notifications open the thread, and an answer from Telegram goes back to it. Your existing messages stay in the conversation as they were. ([#101](https://github.com/eduwxyz/tucano/pull/101))
+- **A greeting reaches everyone.** A message meant for the whole group, like a "good morning", can call every agent in the channel, past the usual two. ([#101](https://github.com/eduwxyz/tucano/pull/101))
+- **Dictation.** Click the microphone in the message field, or press ⌥ Space on a Mac and Ctrl+Space elsewhere, speak, and click again; holding it and letting go works too, and Esc cancels. The audio becomes text on this computer, offline, with [whisper.cpp](https://github.com/ggml-org/whisper.cpp), and the text stays in the field for you to review; it's never sent on its own. `whisper-cli` comes inside the app, and the first click offers a model to download (Recommended, 574 MB, or Light, 190 MB), checked before it's kept. **Settings › General › Dictation** switches or removes the model and hides the microphone, and a whisper you installed yourself still works. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#60](https://github.com/eduwxyz/tucano/pull/60))
+- **Reorder and group channels.** Drag a channel, or use **Move up** and **Move down** in its menu, and put channels in groups that fold, like the sidebar's sections. Removing a group never deletes a channel. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#77](https://github.com/eduwxyz/tucano/pull/77))
+- **File paths in agents' messages are links,** when the file exists and that agent can reach it: an image or video opens in the app, a folder or PDF in the system, anything else is shown in the file manager, and nothing is run. The app's data, other agents' folders and places like `.ssh` never become links. Off on a server, and on Windows for now. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#61](https://github.com/eduwxyz/tucano/pull/61))
+- **Change a connector's token without removing it.** A connector that signs in with a token has a field to save a new one, which reconnects, and a refused token no longer offers a browser sign-in that can't work for it. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#80](https://github.com/eduwxyz/tucano/pull/80), [#99](https://github.com/eduwxyz/tucano/pull/99))
+
+### Changed
+
+- **Errors in plain words.** A failure says what happened and what to do (signed out, plan limit and when it frees up, offline, a missing command, a full disk, a service down), with the raw text folded underneath. Actions that fail show a toast, the app warns when its core stops, confirmations use the app's own dialog, and approvals show tool names as words with a short summary of the arguments. ([#96](https://github.com/eduwxyz/tucano/pull/96))
+- **Gemini models come from your Gemini CLI,** read from the installed package, so newer ones show up; the fixed list stays as a fallback. Thanks [@simionatoambrosio](https://github.com/simionatoambrosio)! ([#90](https://github.com/eduwxyz/tucano/pull/90))
+- **The wiki keeps knowledge, not a record of the task.** The curator leaves out what an agent did and keeps what changed (a new phone number replaces the old one on its page), and the review flags pages that read like a log and offers to condense them. ([#95](https://github.com/eduwxyz/tucano/pull/95))
+
+### Fixed
+
+- **Agents on Gemini pick up Tucano's settings,** so they reach Tucano's tools and follow the access you gave them. Thanks [@simionatoambrosio](https://github.com/simionatoambrosio)! ([#89](https://github.com/eduwxyz/tucano/pull/89))
+- On Windows, Tucano no longer **keeps other Electron apps' `app.asar` open** while listing apps, which made their updates fail (T3 Code, Obsidian, Bruno…). Thanks [@kayotimoteo](https://github.com/kayotimoteo) for the diagnosis! ([#97](https://github.com/eduwxyz/tucano/issues/97), [#98](https://github.com/eduwxyz/tucano/pull/98))
+- The **reserve model takes over on Claude Code's 5-hour and weekly limits**; it only knew the general limit message. Thanks [@eialanjones](https://github.com/eialanjones)! ([#88](https://github.com/eduwxyz/tucano/pull/88))
+- A **routine's whole reply goes to Telegram**, split between lines into several messages, instead of the 140-character summary; the desktop notification stays short. Thanks [@cleitoncsalvagni](https://github.com/cleitoncsalvagni)! ([#84](https://github.com/eduwxyz/tucano/pull/84))
+
 ## [0.2.9] - 2026-11-03
 
 > **Em português:** o Tucano agora tem uma wiki: o que você e o seu time sabem, em páginas ligadas, que os agentes consultam antes de responder e citam. Um curador lê as conversas e os documentos que você traz (PDF, Word, planilha, link ou anotação) e escreve nas páginas, citando de onde veio; mudar uma página que já existe espera a sua aprovação, se você quiser. A wiki é uma pasta de Markdown que o Obsidian abre, aparece como um mapa que você arrasta, e uma revisão aponta o que não bate, o que ficou velho e o que está repetido. Já tem um cofre do Obsidian? Ele entra como está, com pastas, links e anexos. E dá pra trazer agentes do OpenBot e do Grok Bot.
@@ -185,6 +211,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.10]: https://github.com/eduwxyz/tucano/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/eduwxyz/tucano/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/eduwxyz/tucano/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/eduwxyz/tucano/compare/v0.2.6...v0.2.7
