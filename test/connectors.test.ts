@@ -124,6 +124,21 @@ describe('a connector with a token', () => {
     srv.close()
   })
 
+  it("says the token was refused whatever the server writes with its 401, like Linear's", async () => {
+    const srv = createServer((_req, res) => {
+      res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"invalid_token","error_description":"Missing or invalid access token"}')
+    })
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp`
+    const withToken = await connectors.add({ kind: 'remote', name: 'Linear', url, auth: 'token' })
+    await connectors.connect(withToken)
+    expect(connectors.get(withToken)).toMatchObject({ status: 'error', error: expect.stringMatching(/recusou o token|refused the token/) })
+    const withNone = await connectors.add({ kind: 'remote', name: 'Other', url })
+    await connectors.connect(withNone)
+    expect(connectors.get(withNone)).toMatchObject({ status: 'error', error: expect.stringMatching(/pede autorização|asks for authorization/) })
+    srv.close()
+  })
+
   it('a token saved during a connection attempt is the one tried next', async () => {
     const seen: (string | undefined)[] = []
     const srv = createServer((req, res) => {

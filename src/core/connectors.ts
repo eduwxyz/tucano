@@ -5,7 +5,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
@@ -217,7 +217,10 @@ export class ConnectorManager {
     try {
       await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS })
     } catch (e) {
-      const refused = e instanceof UnauthorizedError || (e instanceof Error && /unauthorized|401/i.test(e.message))
+      // A 401 without a sign-in flow comes back as the server's own body ("invalid_token" on
+      // Linear's), so its status says it, not its text.
+      const refused =
+        e instanceof UnauthorizedError || (e instanceof StreamableHTTPError && e.code === 401) || (e instanceof Error && /unauthorized|401/i.test(e.message))
       if (refused && c.auth === 'token') {
         // With a token there is no browser to go to: the server refused it, or there is none yet.
         await client.close().catch(() => {})
