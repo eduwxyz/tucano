@@ -136,7 +136,7 @@ export interface RoutineEvent {
   body: string // the item itself, clipped
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'same_error' | 'stall' | 'computer' }
+type Control = { ctl: AbortController; reason?: 'stopped' | 'steered' | 'limit' | 'budget' | 'loop' | 'errors' | 'same_error' | 'stall' | 'computer' }
 type TurnOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; delegation?: Delegation; round?: number; reportOf?: string; root?: string; threadId?: string; together?: string[] }
 // An agent answering in a conversation: replies running there, their thread, and my messages waiting for them.
 type Line = { n: number; threadId?: string; waiting: string[]; steered?: boolean }
@@ -284,7 +284,7 @@ export class Runner {
   retry(messageId: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
-    if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status)) return
+    if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status) || msg.run.steered) return
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
@@ -735,7 +735,11 @@ export class Runner {
         .reverse()
         // The reply actually running, not one queued behind it.
         .find((x) => x.author.kind === 'agent' && x.author.id === agentId && x.run?.status === 'working' && this.controllers.has(x.id))
-      if (live) this.stop(live.id)
+      const c = live && this.controllers.get(live.id)
+      if (c) {
+        c.reason = 'steered'
+        c.ctl.abort()
+      }
       return
     }
   }
@@ -1795,7 +1799,10 @@ ${note}`,
     }
 
     const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, delegation: opts.delegation, round: opts.round, reportOf: opts.reportOf, root, delegated: delegated.length ? delegated : undefined }
-    if (control.reason === 'stopped') {
+    if (control.reason === 'steered') {
+      // Not a failure: the reply right after picks up with the new direction.
+      save({ run: { ...base, ...again, status: 'stopped', steered: true, steps: closeThinking('done', L('Parado', 'Stopped')) } })
+    } else if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'same_error' || control.reason === 'stall') {
       const why = {

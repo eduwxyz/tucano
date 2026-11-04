@@ -175,6 +175,7 @@ export interface Run {
   steps: Step[]
   receipt?: Receipt
   approvalId?: string
+  steered?: boolean // stopped by "Orientar agora": the reply right after it carries on
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
