@@ -54,7 +54,7 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
 - O router só decide quem fala. Ele **não** concede permissão nem altera grants.
 - O router roda num motor e modelo pequenos, configuráveis (default: Claude Code + Haiku, com `--json-schema`). Gera recibo próprio, atribuído ao workspace.
 - **Jev (opcional):** em Configurações, o router pode ser o Jev, o modelo de decisão da TypeSafe, com a chave do usuário. A pergunta vai como uma escolha tipada entre os handles do canal e "ninguém" (com o mesmo texto que o Haiku lê como estado); um segundo agente é chamado quando ganha pelo menos 30%. Decide em menos de 1 s, contra ~17 s medidos com o Haiku. É a única exceção a "sem chave de API": cada decisão manda as últimas 10 mensagens do canal pra TypeSafe e é cobrada lá, e a tela diz isso. A chave é conferida em `/v1/models` antes de ser guardada, fica cifrada no cofre do sistema e o renderer só sabe se ela existe. Se o Jev falhar (sem chave, recusada, limite, fora do ar), o Haiku decide e a mensagem do router diz por quê.
-- Mensagens de agente **nunca** passam pelo router. Um agente pode @mencionar outro, o que dispara um run dele. A profundidade da cadeia é limitada a 3 por mensagem humana original.
+- Mensagens de agente **nunca** passam pelo router. Um agente pode @mencionar outro, o que dispara um run dele. A profundidade da cadeia é limitada por mensagem humana original: 3 por padrão, ajustável em Configurações → Agentes → Limites (de 1 a 10).
 
 ### 3. Run
 
@@ -355,7 +355,7 @@ Quem chega de outro app de agentes traz o time em vez de montar de novo, sem que
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.
 2. **Router:** num canal com dois agentes de papéis distintos ("engenharia", "conteúdo"), uma pergunta de código sem menção é respondida só pelo agente de engenharia. Uma mensagem tipo "bom dia" pode não ter resposta. A decisão do router aparece num step discreto.
 3. **Menção:** `@a @b` dispara os dois sem chamar o router.
-4. **Anti-loop:** dois agentes se mencionando mutuamente param na profundidade 3.
+4. **Anti-loop:** dois agentes se mencionando mutuamente param na profundidade 3 por padrão (ajustável em Configurações → Agentes → Limites, de 1 a 10).
 5. **Grants:** um agente com `read` no GitHub MCP lista issues, mas não vê a ferramenta de criar issue (o `tools/list` do gateway no log não a contém). Uma chamada forçada a uma ferramenta não permitida (teste com motor fake) é rejeitada pelo gateway.
 6. **Aprovação:** com `read_write`, o pedido "mergeia o PR X" gera um card. Recusar com motivo faz o agente responder considerando o motivo. Aprovar executa a chamada com exatamente os argumentos mostrados.
 7. **Aprovação sobrevive a reinício:** fecho o app com uma aprovação pendente, reabro, aprovo, e o run continua.

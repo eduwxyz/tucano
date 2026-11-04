@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -29,7 +29,6 @@ const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
-const MAX_DEPTH = 3 // agent replies chained from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
@@ -1264,7 +1263,7 @@ export class Runner {
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
-      else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
+      else if (!approval && !this.chain(agent, conv, msg, opts.depth, chainDepthCap(settings.chainDepth)) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
     } else {
       // What happened and what to do; the CLI's own words go folded under it.
       const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
@@ -1484,14 +1483,14 @@ export class Runner {
   }
 
   // An agent that mentions another agent of the conversation hands it the turn,
-  // up to MAX_DEPTH replies in a row without a human message in between.
+  // up to the limit set in Settings (chainDepth) without a human message in between.
   // Whether the conversation goes on with another agent.
-  private chain(agent: Agent, conv: Conversation, msg: Message, depth: number): boolean {
+  private chain(agent: Agent, conv: Conversation, msg: Message, depth: number, limit: number): boolean {
     if (this.paused) return false
     const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
     if (next.length === 0) return false
-    if (depth >= MAX_DEPTH) {
-      this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
+    if (depth >= limit) {
+      this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: ${limit === 1 ? 'foi 1 resposta seguida' : `foram ${limit} respostas seguidas`}. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${limit === 1 ? '1 reply' : `${limit} replies`} in a row. Send a message to go on.`))
       return false
     }
     for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))

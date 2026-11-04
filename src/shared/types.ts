@@ -250,6 +250,7 @@ export interface Settings {
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
+  chainDepth?: number // agent replies in a row from one human message; default CHAIN_DEPTH
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
@@ -366,6 +367,10 @@ export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: st
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops
 export const ERRORS_STOP = 8 // tool calls failing in a row
+export const CHAIN_DEPTH = 3 // agent replies chained from one human message before Tucano stops them
+export const MAX_CHAIN_DEPTH = 10
+// Agents mentioning each other can't loop and burn tokens with nobody watching: a whole number from 1 to MAX_CHAIN_DEPTH, whatever reached the core.
+export const chainDepthCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.min(MAX_CHAIN_DEPTH, Math.max(1, Math.round(n as number))) : CHAIN_DEPTH)
 
 // What a reply counts against limits: a token read from the cache costs about a
 // tenth of a new one, so it counts a tenth.

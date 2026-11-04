@@ -157,6 +157,43 @@ describe('Runner', () => {
       ['a1', 3]
     ])
     expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
+    expect(db.messages().at(-1)?.text).toContain('foram 3 respostas seguidas')
+  })
+
+  it('the chain goes as far as the limit set in Settings', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 5
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5])
+    expect(db.messages().at(-1)?.text).toContain('foram 5 respostas seguidas')
+  })
+
+  it('a limit below 1 is raised to 1', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 0
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1])
+    expect(db.messages().at(-1)?.text).toContain('foi 1 resposta seguida')
+  })
+
+  it('a limit above 10 is brought down to 10', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 50
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(db.messages().at(-1)?.text).toContain('foram 10 respostas seguidas')
   })
 
   it('does not hand the turn for a handle quoted inside a code block', async () => {
