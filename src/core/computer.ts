@@ -189,8 +189,16 @@ export const noDockerAccess = (): string =>
 // No docker command at all: spawn fails before Docker can say anything.
 export const dockerMissing = (): string =>
   L('O Docker não está instalado neste computador. Instale o Docker (docs.docker.com/get-docker).', "Docker isn't installed on this computer. Install Docker (docs.docker.com/get-docker).")
+// A quick docker call that never answered: the daemon is stuck (on Linux, a service that fails to start
+// behind its socket leaves every docker command waiting).
+const NO_ANSWER = 'docker: no answer within'
+export const dockerStuck = (): string =>
+  osOf() === 'linux'
+    ? L('O Docker não está respondendo. Reinicie o serviço (sudo systemctl restart docker) ou o Docker Desktop.', "Docker isn't answering. Restart the service (sudo systemctl restart docker) or Docker Desktop.")
+    : L('O Docker não está respondendo. Reinicie o Docker Desktop.', "Docker isn't answering. Restart Docker Desktop.")
 // What a failed docker call says about Docker itself, if anything.
 export function dockerProblem(stderr: string): string | undefined {
+  if (stderr.includes(NO_ANSWER)) return dockerStuck()
   if (/spawn docker ENOENT/i.test(stderr)) return dockerMissing()
   if (/permission denied[^\n]*docker\.sock/i.test(stderr)) return noDockerAccess()
   if (/daemon|connect to the docker/i.test(stderr)) return noDocker()
@@ -329,7 +337,13 @@ function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: num
     child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout = (stdout + d).slice(-2_000_000)))
     child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr = (stderr + d).slice(-200_000)))
     const kill = (): void => void child.kill('SIGKILL')
-    const timer = opts.timeoutMs ? setTimeout(kill, opts.timeoutMs) : null
+    let late = false // killed by the timeout, not by the caller
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          late = true
+          kill()
+        }, opts.timeoutMs)
+      : null
     opts.signal?.addEventListener('abort', kill, { once: true })
     child.on('error', (e) => {
       stderr += e.message
@@ -337,7 +351,7 @@ function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: num
     child.on('close', (code) => {
       if (timer) clearTimeout(timer)
       opts.signal?.removeEventListener('abort', kill)
-      resolve({ code: code ?? -1, stdout, stderr })
+      resolve({ code: code ?? -1, stdout, stderr: late ? `${stderr}\n${NO_ANSWER} ${Math.round(opts.timeoutMs! / 1000)}s` : stderr })
     })
     child.stdin.on('error', () => {})
     child.stdin.end(opts.stdin ?? '')

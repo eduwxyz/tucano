@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
 import { dockerProblem } from '../src/core/computer'
 import { Db } from '../src/core/db'
-import { fakeEngine } from '../src/core/engines/fake'
+import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway, textResult } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
@@ -52,6 +52,7 @@ describe('a computer whose Docker is off', () => {
     expect(dockerProblem('Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?')).toContain('não está rodando')
     expect(dockerProblem('permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock')).toContain('usermod')
     expect(dockerProblem('spawn docker ENOENT')).toContain('não está instalado')
+    expect(dockerProblem('\ndocker: no answer within 15s')).toContain('não está respondendo') // stuck: every docker command waits
     expect(dockerProblem('Error: No such container: tucano-lia')).toBeUndefined() // Docker is fine: the box just isn't there yet
   })
 
@@ -63,6 +64,30 @@ describe('a computer whose Docker is off', () => {
     expect(reply().run).toMatchObject({ status: 'failed' })
     expect(reply().run!.error).toContain('meu computador não está funcionando')
     expect(reply().run!.error).toContain(NO_DOCKER)
+  })
+
+  it('the same error from different calls stops the reply at the third, whatever broke', async () => {
+    // An engine that tries one command after another, each different, as a stuck agent does.
+    const tries: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        for (const command of ['git status', 'ls /work', 'cat config.yaml', 'glab auth status', 'curl gitlab.com', 'echo hi']) {
+          if (turn.signal.aborted) return
+          await callTool(turn.mcpUrl!, 'bash', { command }).catch(() => null)
+          yield { type: 'text', delta: '.' }
+        }
+        if (!turn.signal.aborted) yield { type: 'done', text: 'fim', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+      }
+    }
+    const engines: Record<EngineId, Engine> = { claude: tries, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+    const ran: string[] = []
+    const computers = { call: async (_a: Agent, _n: string, args: Record<string, unknown>) => (ran.push(String(args['command'])), { result: textResult('fatal: o serviço não respondeu', true) }) }
+    const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'cd-w-')), gateway, computers })
+    await r.send('dm', 'confere o gitlab')
+    await r.idle()
+    expect(ran).toEqual(['git status', 'ls /work', 'cat config.yaml'])
+    expect(reply().run).toMatchObject({ status: 'failed' })
+    expect(reply().run!.error).toContain('o mesmo erro voltou 3 vezes')
   })
 
   it('still off at the next message: no computer tools, and the agent is told why', async () => {

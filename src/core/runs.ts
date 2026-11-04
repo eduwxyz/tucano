@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, SAME_ERROR_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -124,7 +124,7 @@ export interface RoutineEvent {
   body: string // the item itself, clipped
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
+type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'same_error' | 'stall' | 'computer' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -585,6 +585,7 @@ export class Runner {
     const stallMs = (settings.runStallMinutes ?? RUN_STALL_MINUTES) * 60_000
     const seen = new Map<string, { result: string; n: number }>()
     let failing = 0 // tool calls failing in a row
+    const failedWith = new Map<string, Set<string>>() // an error's text → the different calls that got it
     let inFlight = 0 // a tool running has its own timeout, so it isn't silence
     let acted = false // called a tool or searched the web: a failed turn then isn't redone on the reserve model
     let lastSign = Date.now()
@@ -1090,7 +1091,17 @@ export class Runner {
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0
+          // The same failure from different calls (any command, any file): what's broken is around them.
+          // The same call failing again is the loop check's, above, which warns first.
+          let sameError = 0
+          if (r.isError) {
+            const calls = failedWith.get(resultText(r)) ?? new Set<string>()
+            calls.add(`${name} ${canonical(callArgs)}`)
+            failedWith.set(resultText(r), calls)
+            sameError = calls.size
+          }
           if (n >= REPEAT_STOP) halt('loop')
+          else if (sameError >= SAME_ERROR_STOP) halt('same_error')
           else if (failing >= ERRORS_STOP) halt('errors')
           else if (n === REPEAT_WARN) {
             addSteps({ id: randomUUID(), label: L('Repetiu a mesma chamada', 'Repeated the same call'), detail: L(`${n}× com o mesmo resultado`, `${n}× with the same result`), status: 'error' })
@@ -1246,10 +1257,11 @@ export class Runner {
     const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
-    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
+    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'same_error' || control.reason === 'stall') {
       const why = {
         loop: L(`repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`, `I repeated the same thing, with the same result, ${REPEAT_STOP} times. It looked like a loop`),
         errors: L(`${ERRORS_STOP} ferramentas falharam seguidas`, `${ERRORS_STOP} tools failed in a row`),
+        same_error: L(`o mesmo erro voltou ${SAME_ERROR_STOP} vezes, de chamadas diferentes, então tentar de novo não ia adiantar. O erro está nos passos acima`, `the same error came back ${SAME_ERROR_STOP} times, from different calls, so trying again wouldn't help. The error is in the steps above`),
         stall: L(`fiquei ${Math.round(stallMs / 60_000)} minutos sem nenhum sinal, travado`, `I went ${Math.round(stallMs / 60_000)} minutes without any sign of life, stuck`)
       }[control.reason]
       save({
