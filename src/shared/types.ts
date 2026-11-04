@@ -282,6 +282,9 @@ export interface LocalInfo {
 
 export interface Settings {
   workspaceName: string
+  // A script (bash, as root) every new Linux computer is set up with: the tools the agents use (glab, the
+  // Databricks CLI…). Run once into a base image, which each new computer starts from.
+  computerSetup?: string
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
