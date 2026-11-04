@@ -343,6 +343,27 @@ describe('what a thread message sets off stays in the thread', () => {
 })
 
 describe('the database', () => {
+  it("opens a database whose migrations ran in another order (a test build's), adding what it lacks", () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'next.db')
+    // Made before main's thread summaries: the team's migrations took their slots, so the version is
+    // one short and the request column, now last, is already there.
+    new Db(file).close()
+    const raw = new DatabaseSync(file)
+    const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
+    raw.exec(`ALTER TABLE messages DROP COLUMN thread_summary; PRAGMA user_version = ${user_version - 1};`)
+    raw.exec("INSERT INTO conversations (id, kind, name, created_at) VALUES ('c1', 'channel', 'geral', 1)")
+    raw.exec("INSERT INTO messages (id, conversation_id, author_kind, text, at) VALUES ('m1', 'c1', 'me', 'oi', 1)")
+    raw.close()
+
+    const reopened = new Db(file)
+    reopened.setThreadSummary('m1', 'o que a thread cobriu', 1)
+    expect(reopened.message('m1')?.threadSummary?.text).toBe('o que a thread cobriu')
+    reopened.close()
+    const check = new DatabaseSync(file)
+    expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(user_version)
+    check.close()
+  })
+
   it('an existing database gains thread_id and thread_summary, and messages round-trip them', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'old.db')
     // A database from before threads, with a message in it: the schema back to before the threads'

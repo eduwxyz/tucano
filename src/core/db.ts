@@ -302,18 +302,23 @@ export class Db {
   private migrate(): void {
     const { user_version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
     this.created = user_version === 0
+    // A test build that took branches in another order than main may have added a column before its
+    // migration's turn, or skipped one that moved behind its version: the column already there is left
+    // alone, and the one missing is added after.
+    const ADD = /ALTER TABLE (\w+) ADD COLUMN (\w+)[^;]*;/g
+    const has = (table: string, column: string): boolean => (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column)
     for (let v = user_version; v < MIGRATIONS.length; v++) {
       this.tx(() => {
-        this.db.exec(MIGRATIONS[v]!)
+        this.db.exec(user_version ? MIGRATIONS[v]!.replace(ADD, (sql, table: string, column: string) => (has(table, column) ? '' : sql)) : MIGRATIONS[v]!)
         this.db.exec(`PRAGMA user_version = ${v + 1}`)
       })
     }
+    if (user_version) {
+      for (const m of MIGRATIONS) for (const [sql, table, column] of m.matchAll(ADD)) if (!has(table!, column!)) this.db.exec(sql)
+    }
     // Columns added by name, not by position: a database another build already moved past
     // this list's length (a branch with a migration of its own) still gets them.
-    for (const [table, column, type] of COLUMNS) {
-      const has = (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column)
-      if (!has) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
-    }
+    for (const [table, column, type] of COLUMNS) if (!has(table, column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
   }
 
   // Nested calls join the outer transaction.
