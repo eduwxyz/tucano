@@ -144,6 +144,7 @@ type Line = { n: number; threadId?: string; waiting: string[]; steered?: boolean
 export class Runner {
   private queue: { job: () => Promise<unknown>; agentId?: string }[] = []
   private busy = new Set<string>() // agents with a reply running: their next one waits
+  private dropped = new Set<string>() // queued replies stopped before they started
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
@@ -267,9 +268,16 @@ export class Runner {
 
   stop(messageId: string): void {
     const c = this.controllers.get(messageId)
-    if (!c) return
-    c.reason = 'stopped'
-    c.ctl.abort()
+    if (c) {
+      c.reason = 'stopped'
+      c.ctl.abort()
+      return
+    }
+    // Still waiting its turn (queued behind its agent's work, or a task not started): it won't start.
+    const m = this.deps.db.message(messageId)
+    if (m?.author.kind !== 'agent' || m.run?.status !== 'working') return
+    this.dropped.add(messageId)
+    this.update(m, { run: { ...m.run, status: 'stopped', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, label: L('Cancelado', 'Cancelled'), status: 'error' as const } : s)) } })
   }
 
   // Runs the same agent again in place of a reply that didn't finish.
@@ -785,6 +793,8 @@ export class Runner {
 
   private async turn(agent: Agent, conv: Conversation, opts: TurnOpts): Promise<Message> {
     const { db, emit, engines } = this.deps
+    // Stopped while it waited: it ends as it is, and what waits on it (a manager) goes on.
+    if (opts.existing && this.dropped.delete(opts.existing.id)) return db.message(opts.existing.id) ?? opts.existing
     const settings = await this.deps.settings()
     this.budget = settings.requestBudget ?? REQUEST_BUDGET
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
