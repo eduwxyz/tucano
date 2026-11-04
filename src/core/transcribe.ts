@@ -1,38 +1,132 @@
-// Dictation: audio from the window, turned into text on this machine with whisper-cli. Nothing is
-// bundled or downloaded (a model is hundreds of MB), and the audio leaves no file behind.
+// Dictation: audio from the window, turned into text on this machine with whisper-cli. The
+// program comes inside the app (scripts/whisper.mjs); the model, hundreds of MB, is downloaded
+// when the person turns dictation on. One already installed (Homebrew, a path in Settings) is
+// used as is. The audio leaves no file behind.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { L } from '../shared/lang'
-import type { VoiceSettings, VoiceStatus } from '../shared/types'
+import type { VoiceModelId, VoiceSettings, VoiceStatus } from '../shared/types'
+import { encodeWav } from '../shared/wav'
 import { executableNames, isWin, killTree } from './platform'
 
 export const MAX_AUDIO_BASE64 = 30_000_000 // about 15 minutes of 16 kHz mono
 const TIMEOUT_MS = 5 * 60_000
 
+// The two the app offers. Pinned by size and SHA-256: a download that doesn't match is thrown away.
+export const VOICE_MODELS: Record<VoiceModelId, { file: string; bytes: number; sha256: string }> = {
+  recommended: { file: 'ggml-large-v3-turbo-q5_0.bin', bytes: 574_041_195, sha256: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2' },
+  light: { file: 'ggml-small-q5_1.bin', bytes: 190_085_487, sha256: 'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb' }
+}
+const MODEL_URL = (file: string): string => `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${file}`
+
 const BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin']
 const MODEL_DIRS = (home: string): string[] => [join(home, '.cache', 'whisper-cpp'), '/opt/homebrew/share/whisper-cpp', '/usr/local/share/whisper-cpp']
 
-const findBin = (path: string | undefined): string | undefined =>
-  [...(path ?? '').split(delimiter).filter(Boolean), ...BIN_DIRS].flatMap((d) => executableNames('whisper-cli').map((name) => join(d, name))).find((f) => existsSync(f))
+export interface VoicePlaces {
+  bundled?: string // the folder with the whisper-cli that came with the app
+  models: string // where the app keeps the models it downloads
+}
 
-// The best one there: turbo is what's fast enough to dictate with.
-function findModel(home: string): string | undefined {
-  const all = MODEL_DIRS(home).flatMap((dir) => {
-    try {
-      return readdirSync(dir).filter((f) => /^ggml-.*\.bin$/.test(f)).map((f) => join(dir, f))
-    } catch {
-      return []
-    }
-  })
+const findBin = (path: string | undefined, bundled?: string): string | undefined =>
+  [...(bundled ? [bundled] : []), ...(path ?? '').split(delimiter).filter(Boolean), ...BIN_DIRS].flatMap((d) => executableNames('whisper-cli').map((name) => join(d, name))).find((f) => existsSync(f))
+
+const modelsIn = (dir: string): string[] => {
+  try {
+    return readdirSync(dir).filter((f) => /^ggml-.*\.bin$/.test(f)).map((f) => join(dir, f))
+  } catch {
+    return []
+  }
+}
+
+// The best one there: the app's own first, and turbo before the rest, since it's what's fast enough to dictate with.
+function findModel(home: string, own?: string): string | undefined {
+  const mine = own ? modelsIn(own) : []
+  const all = [...mine, ...MODEL_DIRS(home).flatMap(modelsIn)]
   return all.find((f) => f.includes('turbo')) ?? all.sort().at(-1)
 }
 
-export function voiceStatus(voice: VoiceSettings | undefined, env: NodeJS.ProcessEnv = process.env, home = homedir()): VoiceStatus {
-  const bin = voice?.bin ? (existsSync(voice.bin) ? voice.bin : undefined) : findBin(env['PATH'] ?? env['Path'])
-  const model = voice?.model ? (existsSync(voice.model) ? voice.model : undefined) : findModel(home)
-  return { bin, model, ready: !!bin && !!model }
+// Which of the app's models is downloaded, if any.
+export const downloaded = (dir: string): VoiceModelId[] => (Object.keys(VOICE_MODELS) as VoiceModelId[]).filter((id) => existsSync(join(dir, VOICE_MODELS[id].file)))
+
+export function voiceStatus(voice: VoiceSettings | undefined, env: NodeJS.ProcessEnv = process.env, home = homedir(), places?: VoicePlaces): VoiceStatus {
+  const bin = voice?.bin ? (existsSync(voice.bin) ? voice.bin : undefined) : findBin(env['PATH'] ?? env['Path'], places?.bundled)
+  const model = voice?.model ? (existsSync(voice.model) ? voice.model : undefined) : findModel(home, places?.models)
+  const ownModel = places ? (Object.keys(VOICE_MODELS) as VoiceModelId[]).find((id) => model === join(places.models, VOICE_MODELS[id].file)) : undefined
+  return { bin, model, ready: !!bin && !!model, ...(ownModel ? { ownModel } : {}), ...(places ? { downloaded: downloaded(places.models) } : {}) }
+}
+
+// The model, fetched once: to a .part file, hashed on the way, and moved into place only if it's
+// the file it should be. One download at a time; a new one replaces what's going on.
+export class ModelDownload {
+  progress: { model: VoiceModelId; received: number; total: number } | null = null
+  error: string | null = null
+  private abort: AbortController | null = null
+
+  constructor(
+    private dir: string,
+    private changed: () => void,
+    private fetcher: typeof fetch = fetch,
+    private models: Record<VoiceModelId, { file: string; bytes: number; sha256: string }> = VOICE_MODELS, // tests use small ones
+    private downloaded: () => void = () => {}
+  ) {}
+
+  async start(id: VoiceModelId): Promise<void> {
+    const m = this.models[id]
+    this.cancel()
+    const abort = new AbortController()
+    this.abort = abort
+    this.error = null
+    this.progress = { model: id, received: 0, total: m.bytes }
+    this.changed()
+    mkdirSync(this.dir, { recursive: true })
+    const part = join(this.dir, `${m.file}.part`)
+    let last = 0
+    try {
+      const res = await this.fetcher(MODEL_URL(m.file), { signal: abort.signal, redirect: 'follow' })
+      if (!res.ok || !res.body) throw new Error(L(`O download respondeu ${res.status}.`, `The download answered ${res.status}.`))
+      const hash = createHash('sha256')
+      const out = createWriteStream(part)
+      const reader = res.body.getReader()
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          hash.update(value)
+          if (!out.write(value)) await new Promise((r) => out.once('drain', r))
+          this.progress.received += value.length
+          // a few updates a second are enough for a bar
+          if (Date.now() - last > 250) (last = Date.now()), this.changed()
+        }
+      } finally {
+        await new Promise<void>((r) => out.end(r))
+      }
+      if (this.progress.received !== m.bytes || hash.digest('hex') !== m.sha256) throw new Error(L('O arquivo baixado não é o esperado. Tente de novo.', "The downloaded file isn't the expected one. Try again."))
+      renameSync(part, join(this.dir, m.file))
+      this.downloaded()
+    } catch (e) {
+      rmSync(part, { force: true })
+      if (!abort.signal.aborted) this.error = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (this.abort === abort) {
+        this.abort = null
+        this.progress = null
+      }
+      this.changed()
+    }
+  }
+
+  cancel(): void {
+    this.abort?.abort()
+  }
+
+  // A model the app downloaded, gone; one installed some other way isn't the app's to delete.
+  remove(id: VoiceModelId): void {
+    rmSync(join(this.dir, this.models[id].file), { force: true })
+    this.changed()
+  }
 }
 
 // What whisper prints for silence, not words.
@@ -44,11 +138,20 @@ export const cleanTranscript = (out: string): string =>
     .filter((l) => l && !NOT_SPEECH.test(l))
     .join(' ')
 
+// The first run of whisper on a Mac builds its GPU programs, which takes a while (14 s here);
+// the system keeps them after that. Done once with a second of silence, right after the model
+// arrives, so the person's first dictation is as quick as the rest.
+export async function warmUp(transcriber: Transcriber, status: VoiceStatus): Promise<void> {
+  if (!status.ready) return
+  const silence = Buffer.from(encodeWav(new Float32Array(16_000), 16_000)).toString('base64')
+  await transcriber.transcribe(`warm-${Date.now()}`, silence, status, 'en').catch(() => {})
+}
+
 export class Transcriber {
   private running = new Map<string, { proc: ChildProcess; cancelled: boolean }>()
 
   async transcribe(id: string, base64: string, status: VoiceStatus, language: string | undefined): Promise<string> {
-    if (!status.bin || !status.model) throw new Error(L('O whisper-cli ou o modelo não foi encontrado. Veja em Configurações.', "whisper-cli or its model wasn't found. See Settings."))
+    if (!status.bin || !status.model) throw new Error(L('O ditado ainda não está ativado. Veja em Configurações › Geral.', "Dictation isn't turned on yet. See Settings › General."))
     if (base64.length > MAX_AUDIO_BASE64) throw new Error(L('Esse áudio é longo demais.', 'That recording is too long.'))
     const dir = mkdtempSync(join(tmpdir(), 'tucano-voz-'))
     try {

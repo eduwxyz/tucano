@@ -57,7 +57,7 @@ const localKey = randomBytes(32).toString('hex')
 function startCore(): UtilityProcess {
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: 'tucano-core',
-    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
+    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
   })
   child.on('message', (msg: CoreRequest) => handleCore(child, msg))
   child.on('exit', (code) => {
@@ -91,6 +91,8 @@ ipcMain.on('viewing', (_e, id: unknown) => {
 // you, two notes when the work is done. Never more than one at a time.
 let chirpedAt = 0
 const resource = (name: string): string => (app.isPackaged ? join(process.resourcesPath, name) : join(app.getAppPath(), 'build', name))
+// Dictation's whisper-cli, packed with the app (scripts/whisper.mjs); in development, the one built for this machine.
+const whisperDir = (): string => (app.isPackaged ? join(process.resourcesPath, 'whisper') : join(app.getAppPath(), 'build', 'whisper', `${({ darwin: 'mac', win32: 'win' } as Record<string, string>)[process.platform] ?? process.platform}-${process.arch}`))
 // The system's own player: afplay on a Mac; on Windows .NET's SoundPlayer, with nothing
 // to install; on Linux PipeWire's or PulseAudio's, else ALSA's.
 const player = ((): ((file: string) => [string, string[]]) | null => {

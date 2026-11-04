@@ -205,12 +205,19 @@ export interface VoiceSettings {
   bin?: string
   model?: string
   detect?: boolean // I speak other languages: whisper finds out which, instead of using the app's
+  hidden?: boolean // no microphone button in the message field
 }
+
+export type VoiceModelId = 'recommended' | 'light' // the models the app downloads by itself
 
 export interface VoiceStatus {
   bin?: string
   model?: string
   ready: boolean
+  ownModel?: VoiceModelId // the model in use is one the app downloaded
+  downloaded?: VoiceModelId[]
+  downloading?: { model: VoiceModelId; received: number; total: number }
+  error?: string // the last download failed
 }
 
 export interface LocalInfo {

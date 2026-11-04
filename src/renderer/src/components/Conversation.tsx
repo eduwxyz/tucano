@@ -44,6 +44,7 @@ import {
   voiceStatus
 } from '../store'
 import { canRecord, NoSound, record, type Recording } from '../voice'
+import { useVoice, VoicePopover } from './VoiceSetup'
 import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
@@ -801,7 +802,7 @@ const drafts = new Map<string, { text: string; images: Attached[] }>()
 type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing'
 type DictationControls = { start: () => void; stop: () => void; cancel: () => void }
 
-const NOT_READY = (): string => L('Falta o whisper-cli ou o modelo: veja como instalar em Configurações › Geral.', 'whisper-cli or its model is missing: see how to install them in Settings › General.')
+const NOT_READY = (): string => L('Para ditar, clique no microfone e ative o ditado.', 'To dictate, click the microphone and turn dictation on.')
 const SHORT_MS = 300
 
 // Hold to record, release to transcribe. The text goes to the field to be reviewed, never sent:
@@ -928,10 +929,35 @@ function useDictation(insert: (text: string) => void, setNote: (note: string) =>
 
 function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
   const platform = useStore((s) => s.platform)
-  const voice = useStore((s) => s.settings.voice)
-  const [ready, setReady] = useState(false)
-  useEffect(() => void voiceStatus().then((status) => setReady(status.ready)), [voice])
-  if (!canRecord() || !ready) return null // no secure context, or nothing to transcribe with: Settings says how to install it
+  const hidden = useStore((s) => !!s.settings.voice?.hidden)
+  const status = useVoice()
+  const [open, setOpen] = useState(false)
+  // Once it's turned on from the balloon, the balloon says how to use it, then gets out of the way.
+  if (!canRecord() || hidden || !status) return null // no secure context, or the person hid it
+  if (!status.ready)
+    return (
+      <span className="voice-wrap">
+        <button
+          className={`icon-btn voice-btn is-off ${status.downloading ? 'is-loading' : ''}`}
+          aria-label={L('Ditar mensagens', 'Dictate messages')}
+          aria-expanded={open}
+          title={status.downloading ? L('Baixando o modelo de voz…', 'Downloading the voice model…') : L('Ditar mensagens: ativar', 'Dictate messages: turn on')}
+          onClick={() => setOpen(!open)}
+        >
+          <Icon name="mic" size={15} />
+        </button>
+        {open && <VoicePopover status={status} onClose={() => setOpen(false)} />}
+      </span>
+    )
+  if (open)
+    return (
+      <span className="voice-wrap">
+        <button className="icon-btn voice-btn" aria-label={L('Ditar mensagens', 'Dictate messages')} onClick={() => setOpen(false)}>
+          <Icon name="mic" size={15} />
+        </button>
+        <VoicePopover status={status} onClose={() => setOpen(false)} />
+      </span>
+    )
   if (state === 'transcribing')
     return (
       <button className="btn btn--xs" title={L('Cancelar', 'Cancel')} onClick={controls.cancel}>

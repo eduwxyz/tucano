@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { cleanTranscript, Transcriber, voiceStatus } from '../src/core/transcribe'
+import { executableNames } from '../src/core/platform'
+import { cleanTranscript, ModelDownload, Transcriber, voiceStatus } from '../src/core/transcribe'
 import { voiceRefusal } from '../src/shared/voice'
 import { encodeWav } from '../src/shared/wav'
 
@@ -108,5 +110,58 @@ describe('encodeWav', () => {
     expect(v.getUint32(24, true)).toBe(16_000)
     expect(v.getUint32(40, true)).toBe(6)
     expect([v.getInt16(44, true), v.getInt16(46, true), v.getInt16(48, true)]).toEqual([0, 0x7fff, -0x7fff])
+  })
+})
+
+describe('turning dictation on: the model download', () => {
+  const body = Buffer.from('ggml model bytes, for a test')
+  const sha = createHash('sha256').update(body).digest('hex')
+  const models = { recommended: { file: 'ggml-test-turbo.bin', bytes: body.length, sha256: sha }, light: { file: 'ggml-test-small.bin', bytes: body.length, sha256: '0'.repeat(64) } }
+  const serve = (bytes: Buffer, status = 200) =>
+    (async () => new Response(new ReadableStream({ start: (c) => (c.enqueue(new Uint8Array(bytes.subarray(0, 10))), c.enqueue(new Uint8Array(bytes.subarray(10))), c.close()) }), { status })) as unknown as typeof fetch
+
+  it('downloads, checks the hash, and the status finds it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'voice-'))
+    const changes: number[] = []
+    const d = new ModelDownload(dir, () => changes.push(d.progress?.received ?? -1), serve(body), models)
+    await d.start('recommended')
+    expect(existsSync(join(dir, 'ggml-test-turbo.bin'))).toBe(true)
+    expect(existsSync(join(dir, 'ggml-test-turbo.bin.part'))).toBe(false)
+    expect(d.progress).toBeNull()
+    expect(d.error).toBeNull()
+    expect(changes.at(-1)).toBe(-1) // the last word: done
+    // the app's bundled program and its own model folder come first
+    const bundled = join(dir, 'bin')
+    mkdirSync(bundled)
+    writeFileSync(join(bundled, executableNames('whisper-cli')[0]!), '')
+    const st = voiceStatus(undefined, { PATH: '' }, join(dir, 'nohome'), { bundled, models: dir })
+    expect(st).toMatchObject({ ready: true, bin: join(bundled, executableNames('whisper-cli')[0]!), model: join(dir, 'ggml-test-turbo.bin') })
+  })
+
+  it("throws away a file that isn't the one expected, and says so", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'voice-'))
+    const d = new ModelDownload(dir, () => {}, serve(body), models)
+    await d.start('light') // its hash doesn't match
+    expect(readdirSync(dir)).toEqual([])
+    expect(d.error).toMatch(/esperado|expected/)
+    const d2 = new ModelDownload(dir, () => {}, serve(body, 404), models)
+    await d2.start('recommended')
+    expect(d2.error).toMatch(/404/)
+    expect(readdirSync(dir)).toEqual([])
+  })
+
+  it('a cancelled download leaves nothing behind and no error', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'voice-'))
+    const never = (async (_u: string, init: RequestInit) =>
+      new Response(new ReadableStream({ start: (c) => (c.enqueue(new Uint8Array(body.subarray(0, 5))), init.signal!.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')))) }))) as unknown as typeof fetch
+    const d = new ModelDownload(dir, () => {}, never, models)
+    const going = d.start('recommended')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(d.progress).toMatchObject({ model: 'recommended', received: 5 })
+    d.cancel()
+    await going
+    expect(d.error).toBeNull()
+    expect(d.progress).toBeNull()
+    expect(readdirSync(dir)).toEqual([])
   })
 })

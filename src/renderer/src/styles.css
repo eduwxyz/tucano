@@ -6999,3 +6999,28 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .channel-group > [draggable] .nav-item {
   padding-left: 12px;
 }
+
+/* Dictation: turning it on, over the microphone and in Settings */
+.voice-wrap { position: relative; display: inline-flex; }
+.voice-btn.is-off { opacity: 0.55; }
+.voice-btn.is-off:hover { opacity: 1; }
+.voice-btn.is-loading { opacity: 1; color: var(--accent); }
+.voice-pop { position: absolute; z-index: 30; left: -8px; bottom: calc(100% + 10px); width: 360px; display: grid; gap: 8px; padding: 16px 16px 14px; border-radius: 14px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); text-align: left; }
+.voice-pop > b { font-size: 14px; padding-right: 24px; }
+.voice-pop p { margin: 0; line-height: 1.45; }
+.voice-pop__close { position: absolute; top: 8px; right: 8px; }
+.voice-pop__hide { justify-self: start; font-size: 12px; color: var(--text-3); }
+.voice-setup { display: grid; gap: 10px; justify-items: start; }
+.voice-setup__choices { display: grid; gap: 6px; width: 100%; }
+.voice-choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
+.voice-choice small { color: var(--text-2); font-size: 12px; }
+.voice-choice:hover { border-color: var(--border-strong); }
+.voice-choice.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.voice-setup__bar { width: 100%; height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; }
+.voice-setup__bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.25s; }
+.voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
+.voice-on { display: grid; gap: 8px; }
+.voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
+.voice-advanced { display: grid; gap: 10px; }
+.voice-advanced summary { cursor: pointer; }
+.voice-pop > .btn { justify-self: start; }
