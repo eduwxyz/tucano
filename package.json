@@ -83,7 +83,7 @@
       "notarize": false,
       "extendInfo": {
         "NSAppleEventsUsageDescription": "Tucano opens the Terminal for you when you ask it to.",
-        "NSMicrophoneUsageDescription": "Tucano listens only while you hold the microphone button, to turn what you say into text on this computer."
+        "NSMicrophoneUsageDescription": "Tucano listens only while you dictate, from your click on the microphone until the next one, to turn what you say into text on this computer."
       }
     },
     "win": {

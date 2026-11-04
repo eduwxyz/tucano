@@ -7024,3 +7024,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-advanced { display: grid; gap: 10px; }
 .voice-advanced summary { cursor: pointer; }
 .voice-pop > .btn { justify-self: start; }
+.voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
+@keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
+.voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
+.voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }

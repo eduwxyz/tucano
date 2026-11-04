@@ -78,7 +78,7 @@ export function VoicePopover({ status, onClose }: { status: VoiceStatus; onClose
       {status.ready ? (
         <>
           <b>{L('Pronto para ditar', 'Ready to dictate')}</b>
-          <p className="small muted">{L(`Segure o microfone, ou ${key}, e fale. Ao soltar, o texto aparece aqui para você revisar. Na primeira vez, o sistema pede para liberar o microfone.`, `Hold the microphone, or ${key.replace('Espaço', 'Space')}, and speak. When you let go, the text shows up here to review. The first time, the system asks to allow the microphone.`)}</p>
+          <p className="small muted">{L(`Clique no microfone, ou ${key}, e fale. Clique de novo para terminar: o texto aparece aqui para você revisar. Na primeira vez, o sistema pede para liberar o microfone.`, `Click the microphone, or ${key.replace('Espaço', 'Space')}, and speak. Click again to finish: the text shows up here to review. The first time, the system asks to allow the microphone.`)}</p>
           <button className="btn btn--sm" onClick={onClose}>
             {L('Entendi', 'Got it')}
           </button>

@@ -1755,7 +1755,7 @@ function VoiceCard(): ReactNode {
   const choice = (id: VoiceModelId) => VOICE_CHOICES().find((c) => c.id === id)!
   const other = status?.ownModel === 'recommended' ? 'light' : 'recommended'
   return (
-    <Card title={L('Ditado', 'Dictation')} lead={L('Fale em vez de digitar: segure o microfone no campo de mensagem, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros. O áudio vira texto neste computador, sem internet, e o texto fica no campo para você revisar antes de enviar.', 'Speak instead of typing: hold the microphone in the message field, or ⌥ Space on a Mac and Ctrl+Space elsewhere. The audio becomes text on this computer, offline, and the text stays in the field for you to review before sending.')}>
+    <Card title={L('Ditado', 'Dictation')} lead={L('Fale em vez de digitar: clique no microfone do campo de mensagem, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros, e clique de novo para terminar. O áudio vira texto neste computador, sem internet, e o texto fica no campo para você revisar antes de enviar.', 'Speak instead of typing: click the microphone in the message field, or ⌥ Space on a Mac and Ctrl+Space elsewhere, and click again to finish. The audio becomes text on this computer, offline, and the text stays in the field for you to review before sending.')}>
       {status && !status.ready && <VoiceSetup status={status} />}
       {status?.ready && (
         <div className="voice-on">

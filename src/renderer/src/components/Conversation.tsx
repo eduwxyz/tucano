@@ -800,12 +800,13 @@ async function prepareImage(file: File): Promise<Attached | string> {
 const drafts = new Map<string, { text: string; images: Attached[] }>()
 
 type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing'
-type DictationControls = { start: () => void; stop: () => void; cancel: () => void }
+type DictationControls = { press: () => void; release: () => void; stop: () => void; cancel: () => void; startedAt: () => number }
 
 const NOT_READY = (): string => L('Para ditar, clique no microfone e ative o ditado.', 'To dictate, click the microphone and turn dictation on.')
 const SHORT_MS = 300
+const HOLD_MS = 400 // held at least this long, letting go ends it (push to talk); a click starts it, the next one ends it
 
-// Hold to record, release to transcribe. The text goes to the field to be reviewed, never sent:
+// Click to record, click again to transcribe (or hold and let go). The text goes to the field to be reviewed, never sent:
 // dictation gets names wrong, and a message sets an agent working.
 function useDictation(insert: (text: string) => void, setNote: (note: string) => void, conversationId: string): [DictationState, DictationControls] {
   const [state, setState] = useState<DictationState>('idle')
@@ -833,7 +834,7 @@ function useDictation(insert: (text: string) => void, setNote: (note: string) =>
     if (Date.now() - startedAt.current < SHORT_MS) {
       r.cancel()
       setState('idle')
-      setNote(L('Segure para falar.', 'Hold to speak.'))
+      setNote(L('Curto demais: clique, fale e clique de novo.', 'Too short: click, speak, and click again.'))
       return
     }
     setState('transcribing')
@@ -884,7 +885,6 @@ function useDictation(insert: (text: string) => void, setNote: (note: string) =>
           if (released.current) {
             r.cancel()
             setState('idle')
-            setNote(L('Segure para falar.', 'Hold to speak.'))
             return
           }
           rec.current = r
@@ -910,21 +910,48 @@ function useDictation(insert: (text: string) => void, setNote: (note: string) =>
   useEffect(() => cancel, [conversationId]) // leaving the conversation drops what's going on
 
   // The key can be let go anywhere, and no event reaches the field after the window loses focus.
+  // A press starts it, or ends one going on. Let go after holding it a while ends it too.
+  const pressedAt = useRef(0)
+  const toggled = useRef(false) // this press ended a recording: its release does nothing
+  const press = (): void => {
+    if (state === 'recording' || state === 'starting') return (toggled.current = true), stop()
+    if (state !== 'idle') return
+    toggled.current = false
+    pressedAt.current = Date.now()
+    start()
+  }
+  const release = (): void => {
+    if (toggled.current || !pressedAt.current) return
+    const held = Date.now() - pressedAt.current
+    pressedAt.current = 0
+    if (held >= HOLD_MS) stop()
+  }
+
   const listening = state === 'starting' || state === 'recording'
   useEffect(() => {
     if (!listening) return
+    // the key can be let go anywhere; Esc drops it from anywhere
     const up = (e: KeyboardEvent): void => {
-      if (e.code === 'Space') stop()
+      if (e.code === 'Space') release()
+    }
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') cancel()
+    }
+    // held when the window lost focus: no release will come, so that's the end of it
+    const blur = (): void => {
+      if (pressedAt.current && Date.now() - pressedAt.current >= HOLD_MS) release()
     }
     document.addEventListener('keyup', up)
-    window.addEventListener('blur', stop)
+    document.addEventListener('keydown', esc)
+    window.addEventListener('blur', blur)
     return () => {
       document.removeEventListener('keyup', up)
-      window.removeEventListener('blur', stop)
+      document.removeEventListener('keydown', esc)
+      window.removeEventListener('blur', blur)
     }
   }, [listening])
 
-  return [state, { start, stop, cancel }]
+  return [state, { press, release, stop, cancel, startedAt: () => startedAt.current }]
 }
 
 function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
@@ -966,21 +993,41 @@ function VoiceButton({ controls, state }: { controls: DictationControls; state: 
     )
   const on = state === 'recording'
   return (
-    <button
-      className={`icon-btn voice-btn ${on ? 'is-recording' : ''}`}
-      aria-label={L('Segure para falar', 'Hold to speak')}
-      aria-pressed={on}
-      title={L(`Segure para falar (${platform === 'mac' ? '⌥' : 'Ctrl+'}Espaço)`, `Hold to speak (${platform === 'mac' ? '⌥' : 'Ctrl+'}Space)`)}
-      onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture(e.pointerId)
-        controls.start()
-      }}
-      onPointerUp={controls.stop}
-      onPointerCancel={controls.cancel}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      <Icon name="mic" size={15} />
-    </button>
+    <span className="voice-wrap">
+      <button
+        className={`icon-btn voice-btn ${on ? 'is-recording' : ''}`}
+        aria-label={on ? L('Terminar e transcrever', 'Finish and transcribe') : L('Falar', 'Speak')}
+        aria-pressed={on}
+        title={on ? L('Clique para terminar (Esc cancela)', 'Click to finish (Esc cancels)') : L(`Clique para falar, e de novo para terminar (${platform === 'mac' ? '⌥' : 'Ctrl+'}Espaço)`, `Click to speak, and again to finish (${platform === 'mac' ? '⌥' : 'Ctrl+'}Space)`)}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          controls.press()
+        }}
+        onPointerUp={controls.release}
+        onPointerCancel={controls.cancel}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <Icon name="mic" size={15} />
+      </button>
+      {on && <RecordingClock since={controls.startedAt()} />}
+    </span>
+  )
+}
+
+// While it records: for how long, and how to end it.
+function RecordingClock({ since }: { since: number }): ReactNode {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 500)
+    return () => clearInterval(t)
+  }, [])
+  const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
+  return (
+    <span className="voice-clock" aria-live="off">
+      <i />
+      {Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}
+      <span className="muted"> · {L('clique para terminar', 'click to finish')}</span>
+    </span>
   )
 }
 
@@ -1199,7 +1246,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
           onKeyDown={(e) => {
             if (e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
               e.preventDefault()
-              if (!e.repeat) voiceControls.start()
+              if (!e.repeat) voiceControls.press()
               return
             }
             if (e.key === 'Escape' && voice !== 'idle') return voiceControls.cancel()
