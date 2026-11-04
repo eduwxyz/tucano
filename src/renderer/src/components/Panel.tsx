@@ -368,7 +368,7 @@ export function SidePanel(): ReactNode {
   const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId) : undefined))
   const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
   const [reload, setReload] = useState(0)
-  if (!panel) return null
+  if (!panel || panel.kind === 'thread') return null // a thread is drawn by its conversation
 
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? L(`Navegador de ${browserName ?? 'agente'}`, `${browserName ?? 'Agent'}'s browser`) : '')
   return (

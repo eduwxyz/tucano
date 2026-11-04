@@ -113,7 +113,8 @@ export function consolidationPrompt(opts: { summary?: string; messages: Message[
     summary?.trim() || L('(ainda não há)', '(none yet)'),
     '',
     L('Trecho que vai sair da janela:', 'Stretch about to leave the window:'),
-    ...messages.map((m, i) => `(${i + 1}) [${author(m)}] ${m.text.trim().slice(0, 4000)}`),
+    // Thread replies are folded in too, marked, since the channel's window leaves them out.
+    ...messages.map((m, i) => `(${i + 1}) [${author(m)}${m.threadId ? L(' · numa thread', ' · in a thread') : ''}] ${m.text.trim().slice(0, 4000)}`),
     '',
     L(`Memórias sobre ${me}:`, `Memories about ${me}:`),
     ...(memories.length ? memories.map((m) => `- [${m.id}] ${m.text}`) : [none]),
@@ -148,6 +149,24 @@ export function parseConsolidation(text: string): { summary: string; ops: Op[] }
     else if (o['op'] === 'confirm' && id) ops.push({ op: 'confirm', id })
   }
   return { summary: summary.trim(), ops }
+}
+
+// A reply in a thread: the message that started it, then the replies before this one.
+// The root goes in however old it is; the replies are capped like the conversation's window.
+// What an agent reads before replying: the conversation's recent messages, threads included
+// (every answer goes in the thread of what it answers, so the threads are the conversation),
+// and the whole thread it replies in, however old. `until`: what the summary already covers.
+export function contextWindow(db: Pick<Db, 'message' | 'recentMessages'>, before: Message, limit: number, until = 0): Message[] {
+  const recent = db
+    .recentMessages(before.conversationId, limit + 40)
+    .filter((m) => m.id !== before.id && m.at <= before.at && m.at > until)
+    .slice(-limit)
+  if (!before.threadId) return recent
+  const seen = new Set(recent.map((m) => m.id))
+  const thread = [db.message(before.threadId), ...db.recentMessages(before.conversationId, limit + 40, before.threadId)].filter(
+    (m): m is Message => !!m && m.id !== before.id && m.at <= before.at && !seen.has(m.id)
+  )
+  return [...recent, ...thread].sort((a, b) => a.at - b.at)
 }
 
 // For matching a new memory against forgotten and existing ones.
@@ -190,14 +209,10 @@ export class Memories {
     return rankMemories(out, query, limit)
   }
 
-  // What a turn sees of the conversation: the summary and every message after it.
+  // What a turn sees of the conversation: the summary and every message after it,
+  // outside threads. A reply in a thread sees the summary and that thread instead.
   window(conv: Conversation, before: Message): { summary?: string; messages: Message[] } {
-    const until = conv.summaryUntil ?? 0
-    const messages = this.deps.db
-      .recentMessages(conv.id, MAX_AFTER + 40)
-      .filter((m) => m.id !== before.id && m.at <= before.at && m.at > until)
-      .slice(-MAX_AFTER)
-    return { summary: conv.summary, messages }
+    return { summary: conv.summary, messages: contextWindow(this.deps.db, before, MAX_AFTER, conv.summaryUntil ?? 0) }
   }
 
   // ---------- short term: consolidation ----------
