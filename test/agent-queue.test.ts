@@ -59,7 +59,9 @@ describe('an agent does one thing at a time', () => {
 
     await r.send('c', '@dev revisa o PR 12')
     await until(() => turns.length === 1)
-    await r.send('c', '@dev depois olha o build')
+    // Another subject, in another thread: work of its own for dev, not more of the same.
+    db.saveMessage({ id: 'old', conversationId: 'c', author: { kind: 'me' }, text: 'o build de ontem', at: 1 })
+    await r.send('c', '@dev depois olha o build', [], 'old')
     await r.send('c', '@ana quantos pedidos ontem?')
     await until(() => turns.length === 2)
 
