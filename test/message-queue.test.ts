@@ -109,10 +109,16 @@ describe('messages sent while the agent is still answering', () => {
     const other = { id: 'outra', conversationId: 'dm', author: { kind: 'me' as const }, text: 'assunto velho', at: 1 }
     db.saveMessage(other)
     await r.send('dm', 'sobre aquilo', [], 'outra')
-    await until(() => turns.length === 2) // a reply of its own, at once
-    expect(mine().at(-1)!.threadId).toBe('outra')
+    expect(mine().at(-1)!.threadId).toBe('outra') // not moved into the busy reply's thread
+    expect(events.find((m) => m.id === mine().at(-1)!.id)?.queued).toBeUndefined()
+    // Teo does one thing at a time: it's a reply of its own, once the first is done.
+    release()
+    await until(() => turns.length === 2)
+    expect(turns[1]!.prompt).toContain('sobre aquilo')
+    expect(turns[1]!.prompt).not.toContain('Enquanto você respondia')
     release()
     await r.idle()
     expect(turns).toHaveLength(2)
+    expect(replies().map((m) => m.threadId)).toEqual([mine().find((m) => m.text === 'primeiro assunto')!.id, 'outra'])
   })
 })

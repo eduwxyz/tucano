@@ -719,7 +719,8 @@ export class Runner {
       const live = db
         .recentMessages(m.conversationId, 60)
         .reverse()
-        .find((x) => x.author.kind === 'agent' && x.author.id === agentId && x.run?.status === 'working')
+        // The reply actually running, not one queued behind it.
+        .find((x) => x.author.kind === 'agent' && x.author.id === agentId && x.run?.status === 'working' && this.controllers.has(x.id))
       if (live) this.stop(live.id)
       return
     }
@@ -779,7 +780,7 @@ export class Runner {
           `Enquanto você respondia, ${me} mandou ${more}, logo depois da sua resposta acima. Leia como continuação do mesmo pedido: responda o que elas acrescentam ou mudam, numa resposta só, sem repetir o que você já disse. Se mudam algo que você respondeu, corrija.`,
           `While you were answering, ${me} sent ${more}, right after your reply above. Read them as more of the same request: answer what they add or change, in one reply, without repeating what you already said. If they change something you answered, correct it.`
         )
-    this.enqueue(() => this.execute(current, conv, { depth: 1, task, work: last?.run?.work, threadId: w.threadId }))
+    this.start(current, conv, { depth: 1, task, work: last?.run?.work, threadId: w.threadId })
   }
 
   private async turn(agent: Agent, conv: Conversation, opts: TurnOpts): Promise<Message> {
