@@ -78,7 +78,9 @@ if (os === 'mac') {
     run('curl', ['-fsSL', '-o', file, `https://github.com/ggml-org/whisper.cpp/releases/download/${BUILD}/${pre.file}`])
     const got = createHash('sha256').update(readFileSync(file)).digest('hex')
     if (got !== pre.sha256) throw new Error(`${pre.file}: SHA-256 ${got}, expected ${pre.sha256}`)
-    run('tar', ['-xf', file, '-C', tmp])
+    // Windows' own unzip: the tar first on a runner's PATH is Git's, which reads "C:" as a host and opens no .zip
+    if (os === 'win') run('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${file}' -DestinationPath '${tmp}' -Force`])
+    else run('tar', ['-xf', file, '-C', tmp])
     // the program and the libraries it loads from its own folder; not the tests, benchmarks or server
     const from = readdirSync(tmp, { withFileTypes: true }).find((e) => e.isDirectory())
     if (!from) throw new Error(`${pre.file} has no folder`)
