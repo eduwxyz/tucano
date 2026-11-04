@@ -85,7 +85,7 @@ export interface RoutineDeps {
   connectors?: { call(id: string, tool: string, args: Record<string, unknown>): Promise<CallToolResult>; list(): Connector[] }
   blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
   emit: (e: CoreEvent) => void
-  notify?: (title: string, body: string, conversationId: string) => void
+  notify?: (title: string, shortText: string, conversationId: string, fullText?: string) => void
   now?: () => number
   wait?: (ms: number) => Promise<void> // between tries (tests skip it)
 }
@@ -348,7 +348,9 @@ export class Routines {
         if (!reply) return
         const latest = this.deps.db.routine(id)
         if (latest) this.store({ ...latest, lastAt: this.now(), lastMessageId: reply.id })
-        this.deps.notify?.(`${agentName(this.deps.db, r.agentId)} · ${r.name}`, outcome(reply), r.conversationId)
+        const title = `${agentName(this.deps.db, r.agentId)} · ${r.name}`
+        const fullText = reply.run?.status === 'done' ? reply.text.trim() : ''
+        this.deps.notify?.(title, outcome(reply), r.conversationId, fullText || undefined)
       })
       .catch((e: unknown) => console.error('[routines]', e))
       .finally(() => {

@@ -1688,7 +1688,7 @@ function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
       )}
       {(error || info?.error) && <p className="note note--error">{error || L(`O Telegram não está respondendo: ${info?.error}`, `Telegram isn't responding: ${info?.error}`)}</p>}
       <p className="hint">
-        <Icon name="shield" size={13} /> {L('O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo). O token fica no cofre do sistema. Uma ação de alto risco pede dois toques.', 'Telegram receives the text of approvals and questions (tool, arguments, reason). The token stays in the system’s vault. A high-risk action takes two taps.')}
+        <Icon name="shield" size={13} /> {L('O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo) e as respostas das rotinas. O token fica no cofre do sistema. Uma ação de alto risco pede dois toques.', 'Telegram receives the text of approvals and questions (tool, arguments, reason) and the routines’ replies. The token stays in the system’s vault. A high-risk action takes two taps.')}
       </p>
     </Card>
   )
