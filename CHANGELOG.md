@@ -4,8 +4,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
-> **Em português:** os agentes agora passam trabalho uns pros outros, como pessoas num Slack. Um agente pode coordenar uma equipe: você manda um pedido grande pra ele, ele delega cada parte pro agente certo, e quando todos terminam ele retoma sozinho pra conferir e te dar o retorno: o resultado, quem fez o quê, o que foi decidido e aplicado, e o que ficou pendente. A sua DM com um agente é só sua: o trabalho entre eles acontece numa DM entre os dois agentes, que você pode ler: uma por dupla de agentes, com cada pedido numa thread, e quem trabalha num pedido vê só a thread dele. E tudo o que um pedido envolve divide um teto de tokens.
-
 ### Added
 
 - **Agents hand work to each other.** Every agent gets a `delegar` tool to hand a task or a question to another agent (up to 4 per reply) and end its reply; the others work in parallel, each on its own model, tools and limits. Once every task is settled, the agent gets the results back in a new turn of its own, without polling, to check them, delegate fixes or report back. A delegate may delegate too, up to 3 levels deep, never handing work back up; an agent sends work back at most 4 times in a row before it has to answer.
@@ -31,6 +29,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **Messages in a row go together.** What you send while an agent is still on your last message no longer starts a reply of its own: it goes in that reply's thread, marked **Waiting**, and once the agent is done it answers everything that came in, in one reply, reading it as more of the same request. **Steer now** on a waiting message stops the agent and starts it again with it in hand, without redoing what's done. A message in another thread, or an answer to the agent's question, still gets its own reply.
+
+### Fixed
+
+- **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in.
 
 ## [0.2.10] - 2026-11-04
 

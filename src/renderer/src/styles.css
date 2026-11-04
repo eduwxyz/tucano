@@ -756,6 +756,11 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.topbar__role {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .topbar__actions {
   display: flex;
   align-items: center;
@@ -1884,6 +1889,13 @@ h3 {
 .profile-card__name {
   font-size: 16px;
   margin-top: 8px;
+}
+.profile-card__role {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 .profile-card__rows {
   width: 100%;
@@ -6134,8 +6146,15 @@ kbd {
 .cal__col {
   position: relative;
   border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  background-image: linear-gradient(color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
   cursor: cell;
+}
+.cal__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  pointer-events: none;
 }
 .cal__col.is-today {
   background-color: color-mix(in srgb, var(--accent) 3%, transparent);

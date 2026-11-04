@@ -742,7 +742,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             <AgentAvatar agent={{ ...draft, name: draft.name || '?' }} size={72} />
             <strong className="profile-card__name">{draft.name || L('Sem nome', 'No name')}</strong>
             <span className="muted">@{draft.handle || 'handle'}</span>
-            {draft.role && <span className="tag">{draft.role}</span>}
+            {draft.role && <p className="profile-card__role">{draft.role}</p>}
             <div className="profile-card__rows">
               <div>
                 <span className="muted small">{L('Motor', 'Engine')}</span>

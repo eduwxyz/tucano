@@ -1,6 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
 import { actionLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
-import { CODE_SPANS } from '../../../shared/types'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform, type ExtraProps } from 'react-markdown'
 import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
@@ -16,6 +15,7 @@ import {
   decideMemory,
   describeSchedule,
   editSummary,
+  editThreadSummary,
   ENGINES,
   forgetMemory,
   modelById,
@@ -35,6 +35,7 @@ import {
   setTab,
   stopRun,
   summarizeNow,
+  summarizeThreadNow,
   useStore,
   SUMMARY_MAX_AFTER,
   SUMMARY_WINDOW,
@@ -156,7 +157,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <Icon name="hash" />
             )}
             <h1>{title}</h1>
-            {dmAgent && <span className="tag">{dmAgent.role}</span>}
+            {dmAgent?.role && (
+              <span className="tag topbar__role" title={dmAgent.role}>
+                {dmAgent.role}
+              </span>
+            )}
             {pair && !conv.topic && <span className="topbar__topic">{L('DM entre agentes: você lê e pode responder aqui', 'DM between agents: you can read and answer here')}</span>}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
           </div>
@@ -698,6 +703,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   const root = useStore((s) => s.messages.find((m) => m.id === rootId))
   const replies = useStore((s) => s.messages.filter((m) => m.threadId === rootId))
   const agents = useStore((s) => s.agents)
+  const [showSummary, setShowSummary] = useState(false)
   const said = replies.filter((m) => m.author.kind !== 'system' && m.run?.status !== 'working').length
   const replying = [...new Set(replies.flatMap((m) => (m.run?.status === 'working' && m.author.kind === 'agent' ? [m.author.id] : [])))].map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent'))
   // Open, the thread is seen as it goes; closed, up to when it closed.
@@ -736,12 +742,24 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
         <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
         <span className="side-panel__where">{L(`em ${title}`, `in ${title}`)}</span>
         <span className="grow" />
+        {root && (
+          <button
+            className={`icon-btn ${showSummary ? 'is-active' : ''}`}
+            title={L('O que esta thread já cobriu', 'What this thread has covered')}
+            aria-label={L('Resumo da thread', 'Thread summary')}
+            aria-pressed={showSummary}
+            onClick={() => setShowSummary(!showSummary)}
+          >
+            <Icon name="book" size={14} />
+          </button>
+        )}
         <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
           <Icon name="x" size={14} />
         </button>
       </header>
       {root?.conversationId === conv.id ? (
         <>
+          {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
           <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
           <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
@@ -774,52 +792,99 @@ function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
 }
 
 function SummaryPanel({ conv, messages, onClose }: { conv: Conversation; messages: Message[]; onClose: () => void }): ReactNode {
-  const [text, setText] = useState(conv.summary ?? '')
+  const since = messages.filter((m) => m.author.kind !== 'system' && m.text.trim() && m.at > (conv.summaryUntil ?? 0)).length
+  return (
+    <SummaryBox
+      title={L('Resumo da conversa', 'Conversation summary')}
+      summary={conv.summary}
+      at={conv.summaryAt}
+      ready={since > SUMMARY_WINDOW}
+      notYet={L(`As últimas ${SUMMARY_WINDOW} mensagens sempre vão inteiras; ainda não há o que resumir.`, `The last ${SUMMARY_WINDOW} messages always go in full; nothing to summarize yet.`)}
+      empty={L(`Quando passar de ${SUMMARY_MAX_AFTER} mensagens, o que sair da janela vira um resumo aqui.`, `Past ${SUMMARY_MAX_AFTER} messages, what leaves the window becomes a summary here.`)}
+      hint={L(
+        `Numa thread, os agentes leem só a thread. Este resumo vai pras respostas fora de threads, como as das rotinas: elas recebem ${conv.summary ? 'este resumo e ' : ''}as ${since} mensagens ${conv.summary ? 'desde ele' : 'da conversa'}.`,
+        `In a thread, agents read only the thread. This summary goes to replies outside threads, like routines': they get ${conv.summary ? 'this summary and ' : ''}the ${since} messages ${conv.summary ? 'since it' : 'of the conversation'}.`
+      )}
+      onSummarize={() => summarizeNow(conv.id)}
+      onSave={(text) => editSummary(conv.id, text)}
+      onClose={onClose}
+    />
+  )
+}
+
+// A thread's own summary: made once it's quiet for a while (or grows long), and where the
+// memories about me in it come from.
+function ThreadSummaryPanel({ root, replies, onClose }: { root: Message; replies: Message[]; onClose: () => void }): ReactNode {
+  const s = root.threadSummary
+  const since = [root, ...replies].filter((m) => m.author.kind !== 'system' && m.text.trim() && m.at > (s?.until ?? 0)).length
+  return (
+    <SummaryBox
+      title={L('Resumo da thread', 'Thread summary')}
+      summary={s?.text}
+      at={s?.at}
+      ready={since > 0}
+      notYet={L('Nada novo desde o resumo.', 'Nothing new since the summary.')}
+      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', 'Once the thread is quiet for a few minutes, what was said becomes a summary here, and the memories about you come from it.')}
+      hint={L(
+        `Os agentes de outras threads acham esta por ele, quando procuram. Aqui, eles recebem a thread inteira até ${SUMMARY_MAX_AFTER} respostas; passando disso, este resumo e as mais recentes.`,
+        `Agents in other threads find this one by it when they search. Here, they get the whole thread up to ${SUMMARY_MAX_AFTER} replies; past that, this summary and the newest ones.`
+      )}
+      onSummarize={() => summarizeThreadNow(root.id)}
+      onSave={(text) => editThreadSummary(root.id, text)}
+      onClose={onClose}
+    />
+  )
+}
+
+function SummaryBox(p: {
+  title: string
+  summary?: string
+  at?: number
+  ready: boolean // there's something new to summarize
+  notYet: string // why not, when there isn't
+  empty: string
+  hint: string
+  onSummarize: () => void
+  onSave: (text: string) => void
+  onClose: () => void
+}): ReactNode {
+  const [text, setText] = useState(p.summary ?? '')
   const [asked, setAsked] = useState<number | null>(null)
-  useEffect(() => setText(conv.summary ?? ''), [conv.summary, conv.summaryAt])
+  useEffect(() => setText(p.summary ?? ''), [p.summary, p.at])
   useEffect(() => {
     if (asked === null) return
     const t = setTimeout(() => setAsked(null), 120_000) // give up waiting; the core logs failures
     return () => clearTimeout(t)
   }, [asked])
-  const busy = asked !== null && (conv.summaryAt ?? 0) < asked
-  const since = messages.filter((m) => m.author.kind !== 'system' && m.text.trim() && m.at > (conv.summaryUntil ?? 0)).length
-  const changed = text.trim() !== (conv.summary ?? '').trim()
+  const busy = asked !== null && (p.at ?? 0) < asked
+  const changed = text.trim() !== (p.summary ?? '').trim()
 
   return (
     <div className="summary">
       <div className="summary__head">
-        <strong>{L('Resumo da conversa', 'Conversation summary')}</strong>
-        <span className="muted small">{conv.summaryAt ? L(`atualizado ${time(conv.summaryAt)}`, `updated ${time(conv.summaryAt)}`) : L('ainda não há', 'none yet')}</span>
+        <strong>{p.title}</strong>
+        <span className="muted small">{p.at ? L(`atualizado ${time(p.at)}`, `updated ${time(p.at)}`) : L('ainda não há', 'none yet')}</span>
         <span className="grow" />
         <button
           className="btn btn--sm"
-          disabled={busy || since <= SUMMARY_WINDOW}
-          title={since <= SUMMARY_WINDOW ? L(`As últimas ${SUMMARY_WINDOW} mensagens sempre vão inteiras; ainda não há o que resumir.`, `The last ${SUMMARY_WINDOW} messages always go in full; nothing to summarize yet.`) : undefined}
+          disabled={busy || !p.ready}
+          title={p.ready ? undefined : p.notYet}
           onClick={() => {
             setAsked(Date.now())
-            summarizeNow(conv.id)
+            p.onSummarize()
           }}
         >
           {busy ? L('Resumindo…', 'Summarizing…') : L('Resumir agora', 'Summarize now')}
         </button>
-        <button className="icon-btn" title={L('Fechar', 'Close')} onClick={onClose}>
+        <button className="icon-btn" title={L('Fechar', 'Close')} onClick={p.onClose}>
           <Icon name="x" size={14} />
         </button>
       </div>
-      {conv.summary !== undefined || changed ? (
-        <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} />
-      ) : (
-        <p className="muted small">
-          {L(`Quando passar de ${SUMMARY_MAX_AFTER} mensagens, o que sair da janela vira um resumo aqui, e os agentes recebem o resumo mais as mensagens recentes.`, `Past ${SUMMARY_MAX_AFTER} messages, what leaves the window becomes a summary here, and agents get the summary plus the recent messages.`)}
-        </p>
-      )}
+      {p.summary !== undefined || changed ? <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} /> : <p className="muted small">{p.empty}</p>}
       <div className="row row--between">
-        <span className="hint">
-          {L(`Os agentes recebem ${conv.summary ? 'este resumo e ' : ''}as ${since} mensagens ${conv.summary ? 'desde ele' : 'da conversa'}.`, `Agents get ${conv.summary ? 'this summary and ' : ''}the ${since} messages ${conv.summary ? 'since it' : 'of the conversation'}.`)}
-        </span>
+        <span className="hint">{p.hint}</span>
         {changed && (
-          <button className="btn btn--sm btn--primary" onClick={() => editSummary(conv.id, text)}>
+          <button className="btn btn--sm btn--primary" onClick={() => p.onSave(text)}>
             {L('Salvar resumo', 'Save summary')}
           </button>
         )}

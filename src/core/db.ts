@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { cleanRules } from '../shared/actions'
-import { CACHE_READ_WEIGHT, routineCap, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
+import { CACHE_READ_WEIGHT, routineCap, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ThreadSummary, type ToolClass, type Trigger } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -251,6 +251,9 @@ const MIGRATIONS = [
   `
   ALTER TABLE messages ADD COLUMN thread_id TEXT;
   CREATE INDEX messages_by_thread ON messages (conversation_id, thread_id, at);
+  `,
+  `
+  ALTER TABLE messages ADD COLUMN thread_summary TEXT;
   `,
   `
   ALTER TABLE agents ADD COLUMN team TEXT NOT NULL DEFAULT '[]';
@@ -518,7 +521,8 @@ export class Db {
       at: Number(r['at']),
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
-      threadId: r['thread_id'] ? str(r['thread_id']) : undefined
+      threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
+      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {})
     }
   }
 
@@ -532,6 +536,31 @@ export class Db {
     const args = typeof threadId === 'string' ? [conversationId, threadId, limit] : [conversationId, limit]
     const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ?${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
+  }
+
+  // A thread's summary, on its first message; leave `until` out to keep it (a hand edit).
+  setThreadSummary(rootId: string, text: string, until?: number): void {
+    const kept = until ?? this.message(rootId)?.threadSummary?.until ?? 0
+    this.db.prepare('UPDATE messages SET thread_summary = ? WHERE id = ?').run(JSON.stringify({ text, until: kept, at: Date.now() } satisfies ThreadSummary), rootId)
+  }
+
+  // The messages that started a thread with replies in it.
+  threadRoots(conversationId: string): Set<string> {
+    const rows = this.db.prepare('SELECT DISTINCT thread_id FROM messages WHERE conversation_id = ? AND thread_id IS NOT NULL').all(conversationId) as Row[]
+    return new Set(rows.map((r) => str(r['thread_id'])))
+  }
+
+  // Threads quiet since `before`, active after `since`, with something said after their summary.
+  quietThreads(before: number, since: number): { id: string; conversationId: string; last: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.id, r.conversation_id, MAX(m.at) AS last, COALESCE(json_extract(r.thread_summary, '$.until'), 0) AS until
+         FROM messages r JOIN messages m ON m.thread_id = r.id
+         WHERE r.thread_id IS NULL AND m.author_kind != 'system'
+         GROUP BY r.id HAVING last < ? AND last > ? AND last > until ORDER BY last`
+      )
+      .all(before, since) as Row[]
+    return rows.map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']), last: Number(r['last']) }))
   }
 
   // Oldest first.
