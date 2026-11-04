@@ -119,12 +119,39 @@ describe("what the agent sees", () => {
 
     const prompt = agentTurns()[0]!.prompt
     expect(prompt).toContain('RESUMO DO CANAL')
-    expect(prompt).toContain('Você está respondendo numa thread em #lancamento, aberta por Edu.')
+    expect(prompt).toContain('Você está respondendo NESTA thread em #lancamento, aberta por Edu.')
     expect(prompt).toContain('RAIZ: o plano de lançamento')
     expect(prompt).toContain('RESPOSTA ANTIGA na thread')
     expect(prompt).toContain('OUTRO ASSUNTO depois')
     expect(prompt).toContain('@lia e a data?')
     expect(prompt.indexOf('RAIZ')).toBeLessThan(prompt.indexOf('RESPOSTA ANTIGA'))
+    // The other subject is context, apart and before: never read as part of this thread.
+    expect(prompt.indexOf('Outros assuntos em #lancamento')).toBeLessThan(prompt.indexOf('OUTRO ASSUNTO depois'))
+    expect(prompt.indexOf('OUTRO ASSUNTO depois')).toBeLessThan(prompt.indexOf('NESTA thread'))
+  })
+
+  it('other threads go apart, one subject each, with how they ended; this thread is what it answers', async () => {
+    const a = put('d1', { kind: 'me' }, 'ASSUNTO A: revisa o PR 12')
+    put('d1', { kind: 'agent', id: 'a1' }, 'PR 12 revisado, dois comentários.', a.id)
+    const b = put('d1', { kind: 'me' }, 'ASSUNTO B: quantos pedidos ontem?')
+    put('d1', { kind: 'agent', id: 'a1' }, '42 pedidos ontem.', b.id)
+    put('d1', { kind: 'me' }, 'B2: e anteontem?', b.id)
+    put('d1', { kind: 'agent', id: 'a1' }, '38 anteontem.', b.id)
+    const c = put('d1', { kind: 'me' }, 'ASSUNTO C: escreve o post do lançamento')
+    const r = runner()
+    await r.send('d1', 'C2: curto, pro LinkedIn', [], c.id)
+    await r.idle()
+    const blocks = agentTurns()[0]!.blocks!
+    const at = (text: string): number => blocks.findIndex((x) => x.includes(text))
+    // One block per other subject: what opened it, and its last message.
+    expect(blocks[at('ASSUNTO B')]).toContain('↳ 3 mensagens na thread; a última, de Lia')
+    expect(blocks[at('ASSUNTO B')]).toContain('38 anteontem.')
+    expect(at('B2: e anteontem?')).toBe(-1) // what happened inside it stays there
+    expect(at('ASSUNTO A')).toBeLessThan(at('NESTA thread'))
+    expect(at('ASSUNTO B')).toBeLessThan(at('NESTA thread'))
+    // Then this thread, whole, under its own heading.
+    expect(at('NESTA thread')).toBeLessThan(at('ASSUNTO C'))
+    expect(at('ASSUNTO C')).toBeLessThan(at('C2: curto, pro LinkedIn'))
   })
 
   it("a new message: the agent reads what was said in the earlier threads, so it doesn't start from zero", async () => {
