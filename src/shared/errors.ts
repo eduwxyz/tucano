@@ -45,6 +45,8 @@ const DOWN = new RegExp(
   "i"
 );
 const BUSY = /SQLITE_BUSY|database is locked/i;
+// Claude Code's "response exceeded the 32000 output token maximum": one model call wrote more than it may.
+const TOO_LONG = /exceeded the (\d+) output token maximum/i;
 // When the plan frees up again, as the CLI said it: "resets 5pm", "will reset at 3pm",
 // "try again in 6.5s". Up to the end of the sentence; "try again later" says no time.
 const RESETS =
@@ -90,6 +92,14 @@ export function friendly(e: unknown, ctx: FriendlyContext = {}): Friendly {
       }. ${L("Tente de novo mais tarde.", "Try again later.")}`
     );
   }
+  const cap = TOO_LONG.exec(raw)?.[1];
+  if (cap)
+    return mapped(
+      L(
+        `A resposta ficou longa demais pra uma mensagem só: passou de ${Number(cap).toLocaleString("pt-BR")} tokens, contando o raciocínio. Peça em partes (um trecho, uma seção, uma tabela de cada vez) ou baixe o esforço do agente na página dele, e mande de novo.`,
+        `The reply got too long for one message: it went past ${Number(cap).toLocaleString("en-US")} tokens, thinking included. Ask for it in parts (a section, a table at a time) or lower the agent's effort on its page, and send it again.`
+      )
+    );
   const missing = MISSING.exec(raw)?.[1];
   if (missing) {
     const node = /^(npx|npm|node)(\.cmd|\.exe)?$/i.test(missing);

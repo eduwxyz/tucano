@@ -167,11 +167,16 @@ export function claudeParser(): Parser {
   }
 }
 
+// What one model call may write, thinking included. Claude Code's own default (32k) cuts a lead's long report
+// or a big table short with an API error; it caps this at each model's own maximum, so it's safe to ask for more.
+// The person's own setting (their Claude Code settings.json `env`) still wins.
+export const MAX_OUTPUT_TOKENS = '64000'
+
 // Without CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC the CLI makes one more model call after the
 // reply (its post-turn summary) and only then sends `result` and exits: about 2.5 s on every
 // reply, at times over 10 s. Nobody reads that summary here, and the CLI runs one reply and goes.
 export function claudeEnv(p: Provider, account?: string): NodeJS.ProcessEnv {
-  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), MCP_TOOL_TIMEOUT: '900000' }
+  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_MAX_OUTPUT_TOKENS: MAX_OUTPUT_TOKENS, ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), MCP_TOOL_TIMEOUT: '900000' }
 }
 
 export function claudeEngine(bin: () => string | undefined, provider: () => Promise<Provider> = async () => userProvider()): Engine {

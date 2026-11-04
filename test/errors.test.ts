@@ -99,6 +99,17 @@ describe("errors in people’s words", () => {
     ).toMatch(/^O serviço do Claude Code está fora do ar ou sobrecarregado/);
   });
 
+  it("says a reply got too long for one message, and what to do", () => {
+    const f = friendly(
+      "API Error: Claude's response exceeded the 32000 output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.",
+      { engine: "Claude Code" }
+    );
+    expect(f.text).toContain("A resposta ficou longa demais pra uma mensagem só");
+    expect(f.text).toContain("32.000 tokens");
+    expect(f.text).toContain("Peça em partes");
+    expect(f.detail).toContain("CLAUDE_CODE_MAX_OUTPUT_TOKENS"); // the CLI's own words, folded under it
+  });
+
   it("lets an error written for people through as it is", () => {
     expect(friendly(new UserError("O token do bot não vale mais."))).toEqual({
       text: "O token do bot não vale mais.",
