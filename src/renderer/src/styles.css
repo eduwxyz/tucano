@@ -1032,6 +1032,18 @@ h3 {
 .msg--me + .msg--agent {
   margin-top: 6px;
 }
+/* My message waiting for the agent to finish the last one. */
+.msg--me .md:has(+ .queued) {
+  opacity: 0.75;
+}
+.queued {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
 .msg__head {
   display: flex;
   align-items: baseline;

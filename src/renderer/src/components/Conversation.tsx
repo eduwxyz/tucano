@@ -28,6 +28,7 @@ import {
   removeRoutine,
   retryRun,
   continueRun,
+  steer,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
@@ -369,6 +370,30 @@ function ReportBasis({ id }: { id: string }): ReactNode {
 }
 
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
+// My message sent while the agent was still on my last one: it waits for that reply and goes with its
+// follow-up. "Orientar agora" stops the agent and starts it again with this in hand.
+function QueuedNote({ message }: { message: Message }): ReactNode {
+  const agent = useStore((s) => (message.queued ? agentById(s, message.queued) : undefined))
+  const [sent, setSent] = useState(false)
+  const who = agent?.name ?? L('o agente', 'the agent')
+  return (
+    <div className="queued">
+      <span className="queued__text">{L(`Na fila · vai junto quando ${who} terminar`, `Waiting · goes along when ${who} is done`)}</span>
+      <button
+        className="btn btn--ghost btn--sm"
+        disabled={sent}
+        title={L(`${who} para o que está fazendo e recomeça já com esta mensagem`, `${who} stops what it's doing and starts again with this message`)}
+        onClick={() => {
+          setSent(true)
+          steer(message.id)
+        }}
+      >
+        {sent ? L('Orientando…', 'Steering…') : L('Orientar agora', 'Steer now')}
+      </button>
+    </div>
+  )
+}
+
 function MessageRow({ message, grouped, replies }: { message: Message; grouped: boolean; replies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
@@ -440,6 +465,7 @@ function MessageRow({ message, grouped, replies }: { message: Message; grouped: 
             )}
           </div>
         ) : null}
+        {message.queued && <QueuedNote message={message} />}
         {attached.length > 0 && (
           <div className="artifacts artifacts--mine">
             {attached.map((a) => (
