@@ -6620,6 +6620,7 @@ kbd {
 }
 [data-os='mac'] .lightbox__bar {
   padding-left: 84px; /* the window's buttons are here */
+}
 .local-link {
   display: inline;
   padding: 0;
@@ -6971,3 +6972,20 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-import__stats span { display: grid; gap: 2px; padding: 14px 16px; border-radius: 14px; background: var(--hover); color: var(--text-2); font-size: 12.5px; }
 .wk-import__stats b { font-size: 26px; letter-spacing: -0.02em; color: var(--text); }
 .wiki-link--file { cursor: default; }
+/* A group's channels sit a step in, along a thin line, so it's clear where the group ends. */
+.channel-group > [draggable] {
+  position: relative;
+  padding-left: 14px;
+}
+.channel-group > [draggable]::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 3px;
+  bottom: 3px;
+  width: 1px;
+  background: var(--border-strong);
+}
+.channel-group > [draggable] .nav-item {
+  padding-left: 12px;
+}
