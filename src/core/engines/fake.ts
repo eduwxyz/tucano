@@ -61,6 +61,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           await callTool(turn.mcpUrl, 'ask_user', { question: L('Pra quando você precisa disso?', 'When do you need this by?') })
           reply = L('Te mandei uma pergunta.', 'I sent you a question.')
         } else reply = L(`Feito: ${task.slice(0, 120)}`, `Done: ${task.slice(0, 120)}`)
+      } else if (turn.mcpUrl && ASK_AROUND.test(last) && !CAME_BACK.test(turn.prompt)) {
+        const [, canal, pergunta] = ASK_AROUND.exec(last)!
+        const r = (await callTool(turn.mcpUrl, 'pedir_ajuda', { canal: canal!, pergunta: pergunta!.trim() })) as { isError?: boolean }
+        reply = r.isError ? textOf(r) : L(`Perguntei em #${canal}. A resposta volta aqui.`, `I asked in #${canal}. The answer comes back here.`)
       } else if (turn.mcpUrl && (DELEGUE.test(last) || CHAME.test(last))) {
         reply = await delegateAll(turn.mcpUrl, last)
       } else if (/pe[çc]a pr[oa] (\w+)/i.test(last)) {
@@ -138,6 +142,8 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
 // "delegue a @dev: X; chame @ana: Y": one task each, through the gateway's delegar.
 const DELEGUE = /delegue (?:a|ao|à|pra|pro|para|to) @[\w-]/i
 const CHAME = /chame @[\w-]/i
+// "pergunte em #dados: qual a mediana?": the question goes to the channel, through pedir_ajuda.
+const ASK_AROUND = /pergunte em #([\w-]+):\s*(.+)/i
 const CAME_BACK = /Voltou o que você delegou|What you delegated is back/
 async function delegateAll(url: string, text: string): Promise<string> {
   const sent: string[] = []

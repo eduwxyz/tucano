@@ -5,7 +5,7 @@
 // own, to check them, send corrections or report to the person. Nobody polls.
 // Everything one request sets off shares a token budget (`requestBudget`).
 import { L } from '../shared/lang'
-import { REQUEST_BUDGET, type Agent, type Delegation, type Message, type RunStatus } from '../shared/types'
+import { REQUEST_BUDGET, type Agent, type Conversation, type Delegation, type Message, type RunStatus } from '../shared/types'
 import type { ToolDef } from './gateway'
 
 export const DELEGAR = 'delegar'
@@ -25,6 +25,28 @@ export function colleaguesOf(agent: Agent, agents: Agent[]): Agent[] {
 // The ones it coordinates, among them.
 export function teamOf(agent: Agent, colleagues: Agent[]): Agent[] {
   return colleagues.filter((a) => agent.team?.includes(a.id))
+}
+
+export const PEDIR_AJUDA = 'pedir_ajuda'
+
+// Asking a channel instead of someone by name, as a person would: "anyone know X?". It opens a thread there,
+// the router picks who can help, and what they answer comes back like a delegated task's result.
+export function pedirAjudaTool(channels: Pick<Conversation, 'name'>[]): ToolDef {
+  return {
+    name: PEDIR_AJUDA,
+    description: L(
+      'Pergunta num canal quem pode ajudar, como uma pessoa faria ("alguém sabe X?"): use quando você não sabe a resposta, ou o pedido não é da sua área, e não sabe quem sabe (se sabe, use delegar). Abre uma thread no canal; quem puder ajudar responde lá, e a resposta volta pra você numa nova mensagem, como uma tarefa delegada. Escreva a pergunta com o contexto que alguém de fora precisa. Depois ENCERRE a sua resposta com uma frase dizendo onde perguntou.',
+      'Asks a channel who can help, as a person would ("anyone know X?"): use it when you don’t know the answer, or the request isn’t your area, and you don’t know who does (if you do, use delegar). It opens a thread in the channel; whoever can help answers there, and the answer comes back to you in a new message, like a delegated task. Write the question with the context someone outside needs. Then END your reply with one sentence saying where you asked.'
+    ),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        canal: { type: 'string', enum: channels.map((c) => c.name), description: L('O canal onde perguntar, sem o #.', 'The channel to ask in, without the #.') },
+        pergunta: { type: 'string', description: L('A pergunta, com o contexto que quem responder precisa.', 'The question, with the context whoever answers needs.') }
+      },
+      required: ['canal', 'pergunta']
+    }
+  }
 }
 
 export function delegarTool(reachable: Agent[]): ToolDef {
@@ -100,7 +122,12 @@ export function togetherSection(me: string, before: Agent[], after: Agent[]): st
 }
 
 // What a delegate is told about where it is, in its system prompt.
-export function delegatedWhere(me: string, by: Pick<Agent, 'name' | 'handle'>): string {
+export function delegatedWhere(me: string, by: Pick<Agent, 'name' | 'handle'>, asked?: string): string {
+  if (asked)
+    return L(
+      `${by.name} (@${by.handle}) perguntou em #${asked} quem pode ajudar, e você foi chamado pra responder. A sua resposta volta pra ${by.name}, que continua o pedido de ${me}. Se outro agente já respondeu na thread, acrescente só o que falta, ou concorde em uma frase.`,
+      `${by.name} (@${by.handle}) asked in #${asked} who can help, and you were called to answer. Your reply goes back to ${by.name}, who goes on with ${me}'s request. If another agent already answered in the thread, add only what's missing, or agree in one sentence.`
+    )
   return L(
     `Você está trabalhando num pedido que ${by.name} (@${by.handle}) te passou. A sua resposta volta pra ${by.name}, que continua de onde parou e responde a ${me}.`,
     `You're working on a request ${by.name} (@${by.handle}) handed you. Your reply goes back to ${by.name}, who picks up where they left off and answers ${me}.`
@@ -111,7 +138,7 @@ export function delegatedWhere(me: string, by: Pick<Agent, 'name' | 'handle'>): 
 export function briefFor(d: Delegation, by: Pick<Agent, 'name' | 'handle'> | undefined, me: string, then?: string): string {
   const who = by ? `${by.name} (@${by.handle})` : L('O agente que chamou você', 'The agent that called you')
   return [
-    L(`${who} te passou isto:`, `${who} handed you this:`),
+    d.asked ? L(`${who} perguntou em #${d.asked}:`, `${who} asked in #${d.asked}:`) : L(`${who} te passou isto:`, `${who} handed you this:`),
     `<${L('tarefa', 'task')}>\n${d.task}\n</${L('tarefa', 'task')}>`,
     d.doneWhen && L(`Pronto quando: ${d.doneWhen}`, `Done when: ${d.doneWhen}`),
     L(
@@ -169,7 +196,7 @@ export function reportGuide(me: string): string {
 // What an agent's turn is asked when the work it handed out comes back.
 // `elsewhere`: the reply was written in another conversation (the DM between the two agents), so it goes in
 // here in full, clipped; one written here is already in the transcript. `capped`: the request's budget is spent.
-export function resultsTask(me: string, results: { agent: Pick<Agent, 'name' | 'handle'> | undefined; message: Message; elsewhere?: boolean }[], round: number, capped?: string): string {
+export function resultsTask(me: string, results: { agent: Pick<Agent, 'name' | 'handle'> | undefined; message: Message; elsewhere?: boolean }[], round: number, capped?: string, unanswered: { task: string; where: string }[] = []): string {
   const stop = capped ?? (round >= MAX_TEAM_ROUNDS ? L(`Você já mandou trabalho de volta ${round} vezes seguidas.`, `You've sent work back ${round} times in a row.`) : undefined)
   return [
     L('Voltou o que você delegou:', 'What you delegated is back:'),
@@ -183,6 +210,10 @@ export function resultsTask(me: string, results: { agent: Pick<Agent, 'name' | '
         return `${head}\n${L('Resposta', 'Reply')}:\n<${L('resposta', 'reply')}>\n${said || L('(sem texto)', '(no text)')}\n</${L('resposta', 'reply')}>`
       })
       .join('\n\n'),
+    unanswered.length > 0 &&
+      unanswered
+        .map((u) => L(`- Ninguém em #${u.where} pôde ajudar com: ${u.task.replace(/\s+/g, ' ').slice(0, 240)}`, `- No one in #${u.where} could help with: ${u.task.replace(/\s+/g, ' ').slice(0, 240)}`))
+        .join('\n'),
     results.some((r) => !r.elsewhere) && L('As respostas sem texto aqui estão acima, na conversa.', 'The replies without their text here are above, in the conversation.'),
     stop
       ? L(`${stop} Não delegue mais: dê a ${me} o retorno com o que tem.`, `${stop} Don't delegate any more: give ${me} the report with what you have.`)

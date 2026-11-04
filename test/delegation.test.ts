@@ -170,6 +170,43 @@ describe('delegation', () => {
     expect(turnsOf('ana')[0]!.prompt).toContain(replies[0]!.text.slice(0, 20))
   })
 
+  it('asks a channel who can help: a thread opens there, the router picks who answers, and it comes back', async () => {
+    db.createConversation({ id: 'dados', kind: 'channel', name: 'dados', members: ['chefe', 'dev', 'ana'] })
+    const r = runner()
+    await r.send('dm', 'pergunte em #dados: qual a mediana de 3, 9 e 4?')
+    await r.idle()
+
+    // In the channel: the question, by the one who asked, opening a thread; the one picked answers in it.
+    const [q, ...rest] = db.messages().filter((m) => m.conversationId === 'dados')
+    expect(q).toMatchObject({ author: { kind: 'agent', id: 'chefe' }, text: 'qual a mediana de 3, 9 e 4?' })
+    expect(q!.threadId).toBeUndefined()
+    const answer = rest.find((m) => m.author.kind === 'agent')!
+    expect(by(answer)).toBe('ana') // Dados, picked by the router for a question about numbers
+    expect(answer.threadId).toBe(q!.id)
+    expect(answer.run?.delegation).toMatchObject({ by: 'chefe', asked: 'dados', reported: true })
+    expect(turnsOf('ana')[0]!.system).toContain('perguntou em #dados quem pode ajudar')
+
+    // On the one who asked: the task is the one picked, there; then it goes on with the answer.
+    const [head, back] = said('dm')
+    expect(head!.run!.delegated).toEqual([expect.objectContaining({ agentId: 'ana', askedIn: 'dados', conversationId: 'dados', threadId: q!.id })])
+    expect(head!.run!.steps.map((s) => s.label)).toContain('Perguntou em #dados')
+    expect(turnsOf('chefe').at(-1)!.prompt).toContain('Voltou o que você delegou')
+    expect(turnsOf('chefe').at(-1)!.prompt).toContain('Feito: qual a mediana de 3, 9 e 4?')
+    expect(back!.run?.reportOf).toBe(head!.id)
+  })
+
+  it('when no one in the channel can help, it says so there, and the one who asked goes on without', async () => {
+    db.createConversation({ id: 'dados', kind: 'channel', name: 'dados', members: ['chefe', 'dev', 'ana'] })
+    const r = runner()
+    await r.send('dm', 'pergunte em #dados: ok, alguém sabe o CNPJ da empresa?') // the fake router passes on an "ok"
+    await r.idle()
+    const thread = db.messages().filter((m) => m.conversationId === 'dados')
+    expect(thread.some((m) => m.author.kind === 'system' && /Ninguém aqui pôde ajudar/.test(m.text))).toBe(true)
+    const [head] = said('dm')
+    expect(head!.run!.delegated).toEqual([expect.objectContaining({ askedIn: 'dados', nobody: true, reported: true })])
+    expect(turnsOf('chefe').at(-1)!.prompt).toContain('Ninguém em #dados pôde ajudar com: ok, alguém sabe o CNPJ')
+  })
+
   it('in a channel, the team works in the open, there', async () => {
     db.createConversation({ id: 'c', kind: 'channel', name: 'geral', members: ['chefe'] })
     const r = runner()
