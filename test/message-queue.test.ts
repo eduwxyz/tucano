@@ -122,3 +122,37 @@ describe('messages sent while the agent is still answering', () => {
     expect(replies().map((m) => m.threadId)).toEqual([mine().find((m) => m.text === 'primeiro assunto')!.id, 'outra'])
   })
 })
+
+describe('a message waiting for an agent on a task someone handed it', () => {
+  it('goes with the follow-up, which stays that task: the answer goes back to the manager', async () => {
+    db.saveAgent({ id: 'chefe', name: 'Chefe', handle: 'chefe', role: 'Manager', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
+    db.createConversation({ id: 'dm-chefe', kind: 'dm', name: 'chefe', members: ['chefe'] })
+    turns = []
+    events = []
+    gates = []
+    // Chefe is the usual fake (it delegates); Teo works until it's let go.
+    const fast = fakeEngine('claude', { delayMs: 1 })
+    const mixed: Engine = { id: 'claude', run: (t) => (t.system.startsWith('Você é Teo') ? slow.run(t) : fast.run(t)) }
+    const engines: Record<EngineId, Engine> = { claude: mixed, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+    const r = new Runner({ db, engines, settings: async () => settings, emit: (e) => e.type === 'message' && events.push(e.message), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
+
+    await r.send('dm-chefe', 'delegue a @teo: revisar o PR 12')
+    await until(() => turns.length === 1) // Teo on the task, in the DM between the two
+    const pairDm = db.conversations().find((c) => c.kind === 'agents')!.id
+    const ask = db.messages().find((m) => m.conversationId === pairDm && m.author.kind === 'agent')!
+    await r.send(pairDm, 'na verdade é o PR 13', [], ask.id)
+    expect(turns).toHaveLength(1) // it waits
+
+    release()
+    await until(() => turns.length === 2)
+    expect(turns[1]!.prompt).toContain('<tarefa>\nrevisar o PR 12\n</tarefa>') // still the task
+    expect(turns[1]!.prompt).toContain('na verdade é o PR 13')
+    release()
+    await r.idle()
+    const teo = db.messages().filter((m) => m.author.kind === 'agent' && m.author.id === 'teo')
+    expect(teo.at(-1)!.run?.delegation).toMatchObject({ by: 'chefe', reported: true })
+    // Chefe heard back twice: the first answer, then the corrected one.
+    const chefe = db.messages().filter((m) => m.conversationId === 'dm-chefe' && m.author.kind === 'agent')
+    expect(chefe.filter((m) => m.run?.reportOf)).toHaveLength(2)
+  })
+})

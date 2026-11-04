@@ -709,7 +709,13 @@ export class Runner {
     const members = this.members(conv)
     const named = mentioned(body, members).slice(0, MAX_MENTIONS)
     const to = named.length ? named : conv.kind === 'dm' || members.length === 1 ? members : []
-    if (to.length !== 1) return undefined
+    if (to.length !== 1) {
+      // Written, without naming anyone, in a thread an agent is working in right now (its task in the DM
+      // between two agents, or in a channel): it's for that agent.
+      if (!thread || named.length) return undefined
+      for (const [key, w] of this.working) if (key.endsWith(`:${conv.id}`) && w.threadId === thread) return Object.assign(w, { agentId: key.slice(0, key.lastIndexOf(':')) })
+      return undefined
+    }
     const w = this.working.get(`${to[0]!.id}:${conv.id}`)
     if (!w || (thread && thread !== w.threadId)) return undefined
     return Object.assign(w, { agentId: to[0]!.id })
@@ -788,6 +794,9 @@ export class Runner {
           `Enquanto você respondia, ${me} mandou ${more}, logo depois da sua resposta acima. Leia como continuação do mesmo pedido: responda o que elas acrescentam ou mudam, numa resposta só, sem repetir o que você já disse. Se mudam algo que você respondeu, corrija.`,
           `While you were answering, ${me} sent ${more}, right after your reply above. Read them as more of the same request: answer what they add or change, in one reply, without repeating what you already said. If they change something you answered, correct it.`
         )
+    // On a task someone handed it, it stays that task: what it answers now goes back to them too.
+    const onTask = last?.run?.delegation
+    if (onTask) return this.follow(current, conv, { delegation: onTask, then: task, work: last?.run?.work, root: last?.run?.root, threadId: w.threadId })
     this.start(current, conv, { depth: 1, task, work: last?.run?.work, threadId: w.threadId })
   }
 
