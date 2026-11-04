@@ -232,12 +232,17 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
     if (el && stick.current) el.scrollTop = el.scrollHeight
   })
 
-  // A thread opens on the message that started it: the replies follow below.
+  // A thread opens at its latest message, like Slack: the message that started it is a scroll up.
+  // Once more on the next frame, for what lays out a little late (code blocks, images).
   useLayoutEffect(() => {
     const el = ref.current
     if (!lead || !el) return
-    el.scrollTop = 0
-    stick.current = el.scrollHeight - el.clientHeight < 60
+    stick.current = true
+    el.scrollTop = el.scrollHeight
+    const frame = requestAnimationFrame(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight
+    })
+    return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
