@@ -1,5 +1,6 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
+import type { ActionRules } from './actions'
 import type { ChannelLayout } from './channel-layout'
 import { L, lang, type Lang } from './lang'
 
@@ -83,6 +84,7 @@ export interface Agent {
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
+  actionRules?: ActionRules // what it does about a commit, a push, a PR…: over settings.actionRules, kind by kind; unset kinds follow them
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   // The agents it coordinates: it may hand them tasks with `delegar`, and their results come back to it.
   team?: string[]
@@ -286,6 +288,7 @@ export interface Settings {
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
+  actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app

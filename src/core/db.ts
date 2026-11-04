@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import { cleanRules } from '../shared/actions'
 import { CACHE_READ_WEIGHT, routineCap, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
@@ -260,6 +261,9 @@ const MIGRATIONS = [
   `
 ]
 
+// Checked on every start, after MIGRATIONS: [table, column, type].
+const COLUMNS: [string, string, string][] = [['agents', 'action_rules', "TEXT NOT NULL DEFAULT '{}'"]]
+
 type Row = Record<string, unknown>
 
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
@@ -297,6 +301,12 @@ export class Db {
         this.db.exec(MIGRATIONS[v]!)
         this.db.exec(`PRAGMA user_version = ${v + 1}`)
       })
+    }
+    // Columns added by name, not by position: a database another build already moved past
+    // this list's length (a branch with a migration of its own) still gets them.
+    for (const [table, column, type] of COLUMNS) {
+      const has = (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column)
+      if (!has) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
     }
   }
 
@@ -359,6 +369,7 @@ export class Db {
       ...(r['avatar'] ? { avatar: JSON.parse(str(r['avatar'])) as Agent['avatar'] } : {}),
       ...(r['wiki'] === 'none' || r['wiki'] === 'read' ? { wiki: r['wiki'] } : {}),
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
+      ...(str(r['action_rules']) && str(r['action_rules']) !== '{}' ? { actionRules: cleanRules(JSON.parse(str(r['action_rules']))) } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       team: JSON.parse(str(r['team']) || '[]') as string[],
       archived: r['archived'] === 1,
@@ -378,14 +389,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, custom_color, picture, avatar, wiki, team, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, action_rules, archived, kind, custom_color, picture, avatar, wiki, team, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
            limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki, team = excluded.team`
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki, team = excluded.team`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, JSON.stringify((a.team ?? []).filter((id) => id !== a.id)), Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, JSON.stringify((a.team ?? []).filter((id) => id !== a.id)), Date.now())
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
