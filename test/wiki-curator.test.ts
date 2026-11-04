@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Agent, Message, Settings } from '../src/shared/types'
 import { applyOp, Wiki } from '../src/core/wiki'
-import { parseCuration, WikiCurator } from '../src/core/wiki-curator'
+import { curatorSystem, parseCuration, WikiCurator } from '../src/core/wiki-curator'
 
 const fresh = (): Wiki => {
   const root = mkdtempSync(join(tmpdir(), 'tucano-wiki-'))
@@ -155,6 +155,47 @@ describe('the curator', () => {
     expect(calls).toHaveLength(2)
     expect(calls[1]).toContain('15 de janeiro')
     expect(calls[1]).not.toContain('Começa dia 12')
+  })
+
+  it("drops a change the model itself says won't matter in three months", () => {
+    const out = parseCuration(JSON.stringify({ guardar: true, mudancas: [
+      { op: 'append', pagina: 'Reforma do apto 302', secao: 'Situação', texto: 'Contrato assinado em 05/11.', lasting: true },
+      { op: 'append', pagina: 'Marcos Lima', secao: 'Histórico', texto: '- 03/11: a Lia mandou o e-mail de confirmação.', lasting: false },
+      { op: 'append', pagina: 'Marcos Lima', secao: 'Contato', texto: '- Prefere WhatsApp.' }
+    ] }))!
+    expect(out.ops.map((o) => o.text)).toEqual(['Contrato assinado em 05/11.', '- Prefere WhatsApp.'])
+  })
+
+  it('shows the model the pages the stretch names, even after a long reply', async () => {
+    const { w, curator, say, calls } = setup(() => JSON.stringify({ guardar: false, mudancas: [] }))
+    w.save({ title: 'Rogério', kind: 'Pessoa', body: 'Engenheiro da construtora. Telefone (41) 3333-2222.', ...by })
+    say('m1', 'me', 'Rascunha um e-mail pedindo a visita técnica.', 1)
+    say('m2', 'lia', `Rascunho: ${'Bom dia, preciso marcar a visita técnica no apartamento. '.repeat(20)}`, 2)
+    say('m3', 'me', 'Anota aí: o Rogério mudou de telefone, agora é (41) 98888-7777.', 3)
+    say('m4', 'lia', 'Anotado.', 4)
+    await curator.read('c')
+    expect(calls[0]).toContain('### [[Rogério]]')
+  })
+
+  it('a swap aimed at the wrong page goes to the one that has the passage, or becomes an addition', async () => {
+    const reply = JSON.stringify({ guardar: true, titulo_fonte: 'Telefone novo', mudancas: [
+      { op: 'replace', pagina: 'Rogério', old: '(41) 3333-2222', new: '(41) 98888-7777' },
+      { op: 'replace', pagina: 'Rogério', secao: 'Contato', old: 'texto que não existe', new: 'Responde de manhã.' }
+    ] })
+    const { w, curator, say } = setup(() => reply, { wikiEdits: 'auto' })
+    w.save({ title: 'Rogério', kind: 'Pessoa', body: 'Engenheiro da [[Construtora Alpha]].', ...by })
+    w.save({ title: 'Construtora Alpha', kind: 'Assunto', body: 'Contato: [[Rogério]], (41) 3333-2222.', ...by })
+    say('m1', 'me', 'O Rogério mudou de telefone, agora é (41) 98888-7777, e ele prefere ser chamado de manhã cedo.', 1)
+    say('m2', 'lia', 'Anotado o telefone novo do Rogério, e que ele responde melhor de manhã.', 2)
+    await curator.read('c')
+    expect(w.page('Construtora Alpha')!.body).toContain('(41) 98888-7777')
+    expect(w.page('Rogério')!.body).toContain('Responde de manhã.')
+    expect(w.changes('conflict')).toHaveLength(0)
+  })
+
+  it('tells the model the wiki is knowledge, not a record of tasks', () => {
+    expect(curatorSystem()).toMatch(/registro da tarefa|record of the task/)
+    expect(curatorSystem()).toMatch(/"lasting"/)
   })
 
   it('reads the model leniently', () => {

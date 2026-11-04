@@ -26,40 +26,46 @@ export interface CuratorDeps {
 
 export const curatorSystem = (): string =>
   L(
-    `Você é o curador da wiki de um time. A wiki guarda o que vale lembrar por muito tempo, em páginas ligadas por [[Título]]: pessoas, clientes, projetos, assuntos e decisões.
+    `Você é o curador da wiki de um time. A wiki guarda o que vale lembrar por muito tempo, em páginas ligadas por [[Título]]: pessoas, clientes, projetos, assuntos e decisões. Ela é um retrato de como as coisas estão, não um diário do que foi feito.
 
-Você recebe as regras da wiki (o esquema), o índice das páginas, algumas páginas que podem ter a ver, e um trecho novo (uma conversa ou uma mensagem). Decida se o trecho traz algo durável:
+Você recebe as regras da wiki (o esquema), o índice das páginas, algumas páginas que podem ter a ver, e um trecho novo (uma conversa ou uma mensagem). Decida se o trecho traz conhecimento durável:
 - uma decisão ("vamos fechar com a Construtora Alpha");
 - um fato que continua valendo sobre uma pessoa, um cliente ou um projeto (contato, preferência, prazo, valor, situação);
-- o resultado de um trabalho ou de uma pesquisa (um roteiro, uma comparação, um orçamento);
+- o resultado de um trabalho ou de uma pesquisa, o próprio resultado (um roteiro, uma comparação, um orçamento);
 - algo que a pessoa pediu pra guardar ("guarda isso", "anota na wiki").
-Não guarde: conversa fiada, perguntas sem resposta, o que só importa nesta conversa, tarefas em andamento sem conclusão.
+
+Conhecimento, não registro. Os agentes contam o que fizeram ("enviei o e-mail", "procurei na agenda", "rodei os testes", "criei o rascunho", "não achei o arquivo"). Isso é o registro da tarefa, não conhecimento: não guarde as ações, os passos, as tentativas, os erros nem as ferramentas usadas. Quando uma ação mudou algo que continua valendo, guarde o que mudou, não a ação: "marquei a reunião com o Marcos dia 12" vira "Reunião com [[Marcos Lima]] em 12/01" na página certa; "mandei o orçamento pro Marcos" vira "Orçamento enviado em 03/11" na situação do projeto.
+Não guarde também: conversa fiada, perguntas sem resposta, o que só importa nesta conversa, tarefas em andamento sem conclusão.
 
 Se valer, escreva as mudanças:
 - "create": uma página nova, inteira, no formato do esquema (uma frase de resumo no começo; seções com ##; [[links]] pras outras páginas). Só crie se não houver página sobre isso no índice.
-- "append": acrescente um trecho curto numa seção de uma página que existe (a seção é criada se faltar). Prefira isso a reescrever.
-- "replace": troque um trecho exato que ficou errado ou velho. "old" tem que estar na página, letra por letra.
+- "replace": troque um trecho exato que ficou errado ou velho. "old" tem que estar na página, letra por letra. Quando um fato mudou (a situação, um prazo, um valor), atualize o que a página diz em vez de acrescentar mais uma linha.
+- "append": acrescente um trecho curto numa seção de uma página que existe (a seção é criada se faltar), pra um fato novo. Um histórico só leva marcos (contrato assinado, obra começou), não cada conversa.
 Escreva só o que é novo: o que já está numa página (inclusive em outra) não se repete; ligue com [[link]]. Não invente nem complete. Datas no formato dd/mm. Pouco e certo é melhor que muito.
+Em cada mudança, diga em "lasting" se ela ainda vai importar daqui a três meses, pra alguém que nunca viu esta conversa. Se não, "lasting": false, e ela não entra.
 
 Responda só com JSON:
-{"guardar": true|false, "motivo": "uma frase", "titulo_fonte": "título curto do trecho", "mudancas": [{"op": "create"|"append"|"replace", "pagina": "Título", "tipo": "Pessoa|Projeto|Assunto|Decisão", "secao": "Histórico", "texto": "markdown", "old": "trecho exato", "new": "trecho novo"}]}`,
-    `You curate a team's wiki. The wiki keeps what's worth remembering for a long time, as pages linked with [[Title]]: people, clients, projects, topics and decisions.
+{"worth": true|false, "reason": "uma frase", "source_title": "título curto do trecho", "changes": [{"op": "create"|"append"|"replace", "page": "Título", "kind": "Pessoa|Projeto|Assunto|Decisão", "section": "Situação", "text": "markdown", "old": "trecho exato", "new": "trecho novo", "lasting": true|false}]}`,
+    `You curate a team's wiki. The wiki keeps what's worth remembering for a long time, as pages linked with [[Title]]: people, clients, projects, topics and decisions. It's a picture of how things stand, not a diary of what was done.
 
-You get the wiki's rules (the schema), the page index, a few pages that may be related, and a new stretch (a conversation or a message). Decide if the stretch brings something lasting:
+You get the wiki's rules (the schema), the page index, a few pages that may be related, and a new stretch (a conversation or a message). Decide if the stretch brings lasting knowledge:
 - a decision ("we're going with Alpha Builders");
 - a fact that keeps holding about a person, a client or a project (contact, preference, deadline, price, status);
-- the result of a piece of work or research (a plan, a comparison, a quote);
+- the result of a piece of work or research, the result itself (a plan, a comparison, a quote);
 - something the person asked to keep ("save this", "put it in the wiki").
-Don't keep: small talk, unanswered questions, what matters only in this conversation, tasks in progress with no outcome.
+
+Knowledge, not a record. Agents tell what they did ("I sent the email", "I checked the calendar", "I ran the tests", "I made the draft", "I couldn't find the file"). That's the record of the task, not knowledge: don't keep the actions, the steps, the attempts, the errors or the tools used. When an action changed something that keeps holding, keep what changed, not the action: "I booked the meeting with Mark on the 12th" becomes "Meeting with [[Mark Lee]] on Jan 12" on the right page; "I sent Mark the quote" becomes "Quote sent on Nov 3" in the project's status.
+Don't keep either: small talk, unanswered questions, what matters only in this conversation, tasks in progress with no outcome.
 
 If it's worth it, write the changes:
 - "create": a new page, whole, in the schema's format (a summary sentence first; ## sections; [[links]] to other pages). Only create it if no page in the index is about it.
-- "append": add a short passage under a section of an existing page (the section is made if missing). Prefer this to rewriting.
-- "replace": swap an exact passage that became wrong or old. "old" must be on the page, letter by letter.
+- "replace": swap an exact passage that became wrong or old. "old" must be on the page, letter by letter. When a fact changed (the status, a deadline, a price), update what the page says instead of adding one more line.
+- "append": add a short passage under a section of an existing page (the section is made if missing), for a new fact. A history only takes milestones (contract signed, work started), not every conversation.
 Write only what is new: what a page already says (even another page) isn't repeated; link to it with [[link]]. Don't make things up or fill gaps. Dates written out, like Jan 12 or Nov 3 (never 12/01). Little and right beats a lot.
+For each change, say in "lasting" whether it will still matter three months from now, to someone who never saw this conversation. If not, "lasting": false, and it stays out.
 
 Reply with JSON only:
-{"guardar": true|false, "motivo": "one sentence", "titulo_fonte": "short title of the stretch", "mudancas": [{"op": "create"|"append"|"replace", "pagina": "Title", "tipo": "Person|Project|Topic|Decision", "secao": "History", "texto": "markdown", "old": "exact passage", "new": "new passage"}]}`
+{"worth": true|false, "reason": "one sentence", "source_title": "short title of the stretch", "changes": [{"op": "create"|"append"|"replace", "page": "Title", "kind": "Person|Project|Topic|Decision", "section": "Status", "text": "markdown", "old": "exact passage", "new": "new passage", "lasting": true|false}]}`
   )
 
 // Lenient: models sometimes wrap the JSON in a fence or add a word around it.
@@ -89,6 +95,8 @@ export function parseOps(list: unknown): WikiOp[] {
     if (!page || !['create', 'append', 'replace'].includes(op)) continue
     if (op === 'replace' && !str(o['old'])) continue
     if (op !== 'replace' && !str(o['texto'] ?? o['text'])) continue
+    // the model's own word that this won't matter in three months: a record of the task, not knowledge
+    if (o['lasting'] === false) continue
     ops.push({
       op: op as WikiOp['op'],
       page,
@@ -228,9 +236,13 @@ export class WikiCurator {
     const text = p.text ?? this.excerpt(p.messages)
     const plain = p.plain ?? p.messages.map((m) => m.text).join(' ')
     // The pages it may touch: the ones the words of the stretch find.
+    // The pages it may touch: first the ones the stretch names ("o Rogério mudou de telefone"),
+    // then what a search finds in its end, the newest part; a long reply up front can't crowd them out.
     const words = ftsQuery(plain, true)
-    const related = words ? wiki.search(plain.slice(0, 600), 4) : []
-    const pages = related.map((h) => wiki.page(h.title)).filter((x): x is NonNullable<typeof x> => !!x)
+    const low = plain.toLowerCase()
+    const named = wiki.list().filter((p) => p.title.length >= 3 && new RegExp(`(^|[^\\p{L}\\p{N}])${p.title.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(low)).map((p) => p.title)
+    const found = words ? wiki.search(plain.slice(-600), 4).map((h) => h.title) : []
+    const pages = [...new Set([...named, ...found])].slice(0, 6).map((t) => wiki.page(t)).filter((x): x is NonNullable<typeof x> => !!x)
     // What already waits for approval on those pages, so it isn't proposed twice or fought over.
     const titles = new Set(pages.map((pg) => pg.title))
     const waiting = wiki.changes('pending').flatMap((c) => c.ops.filter((o) => titles.has(o.page)).map((o) => `- [[${o.page}]] ${o.op}${o.section ? ` (${o.section})` : ''}: ${o.op === 'replace' ? `"${o.old}" → "${o.new}"` : (o.text ?? '').slice(0, 300)}`))
@@ -255,7 +267,16 @@ export class WikiCurator {
     if (!out || (!out.worth && !p.force) || !out.ops.length) return []
     const source = p.source ?? wiki.addSource({ title: out.title, text, kind: p.kind === 'document' ? 'file' : p.kind, origin: { conversationId: p.conversationId, messageIds: p.messages.map((m) => m.id) }, by: 'auto' })
     const cite = ` ([[${source.file}|${L('fonte', 'source')}]])`
-    const ops = out.ops.map((o): WikiOp => (o.op === 'append' ? { ...o, text: `${o.text}${cite}` } : o.op === 'create' ? { ...o, text: `${o.text}\n\n${L('Fontes', 'Sources')}: [[${source.file}|${source.title}]]` } : o.op === 'replace' && o.new ? { ...o, new: `${o.new}${cite}` } : o))
+    // A swap whose passage isn't on that page: on the one page that has it, it goes there; on none, it
+    // becomes an addition to the page named, so approving it can't fail.
+    const fitted = out.ops.map((o): WikiOp => {
+      if (o.op !== 'replace' || wiki.page(o.page)?.body.includes(o.old!)) return o
+      const holders = wiki.list().filter((p) => wiki.page(p.title)?.body.includes(o.old!))
+      if (holders.length === 1) return { ...o, page: holders[0]!.title }
+      const { old: _old, new: text = '', ...rest } = o
+      return { ...rest, op: 'append', text }
+    })
+    const ops = fitted.filter((o) => o.op !== 'append' || o.text).map((o): WikiOp => (o.op === 'append' ? { ...o, text: `${o.text}${cite}` } : o.op === 'create' ? { ...o, text: `${o.text}\n\n${L('Fontes', 'Sources')}: [[${source.file}|${source.title}]]` } : o.op === 'replace' && o.new ? { ...o, new: `${o.new}${cite}` } : o))
     // New pages go in now; changes to existing ones go in or wait, as the settings say.
     const exists = (t: string): boolean => !!wiki.page(t)
     const creates = ops.filter((o) => o.op === 'create' && !exists(o.page))
