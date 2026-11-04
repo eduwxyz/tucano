@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { appOfWindow, desktopDirs, execArgs, iconFile, parseDesktopEntry, parseWinApps, parseWinOpen } from '../src/core/apps-os'
 
 describe('Linux application menu', () => {
@@ -83,5 +83,36 @@ describe('Windows Start menu', () => {
     expect(appOfWindow({ pid: 2, name: 'Notepad', path: 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2409.9.0_x64__8wekyb3d8bbwe\\Notepad\\Notepad.exe' }, apps)?.name).toBe('Bloco de Notas')
     expect(appOfWindow({ pid: 3, name: 'obs64', desc: 'OBS Studio' }, apps)).toBeUndefined()
     expect(parseWinOpen(JSON.stringify({ pid: 3, name: 'obs64' }))).toEqual([{ pid: 3, name: 'obs64' }])
+  })
+})
+
+describe('diskExists (#97)', () => {
+  afterEach(() => {
+    vi.doUnmock('node:module')
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it("is node:fs's existsSync outside Electron, which doesn't open .asar archives", async () => {
+    const fs = await import('node:fs')
+    const { diskExists } = await import('../src/core/apps-os')
+    expect(diskExists).toBe(fs.existsSync)
+  })
+
+  it("inside Electron, asks original-fs, so other apps' app.asar isn't left open", async () => {
+    const calls: string[] = []
+    vi.doMock('node:module', async (orig) => ({
+      ...(await orig<typeof import('node:module')>()),
+      createRequire: () => (id: string) => {
+        if (id !== 'original-fs') throw new Error(id)
+        return { existsSync: (p: string) => (calls.push(p), p.endsWith('app.asar')) }
+      }
+    }))
+    vi.stubGlobal('process', { ...process, versions: { ...process.versions, electron: '39.0.0' } })
+    const { isChromium, parseWinApps } = await import('../src/core/apps-os')
+    expect(isChromium('/opt/Obsidian/obsidian')).toBe(true)
+    expect(calls).toEqual(['/opt/Obsidian/resources/app.asar'])
+    expect(parseWinApps(JSON.stringify([{ name: 'Obsidian', path: 'o.lnk', exe: 'C:\\Obsidian\\Obsidian.exe' }]))[0]?.chromium).toBe(true)
+    expect(calls[1]).toBe('C:\\Obsidian\\resources\\app.asar')
   })
 })

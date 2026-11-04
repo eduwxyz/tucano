@@ -167,6 +167,13 @@ export function claudeParser(): Parser {
   }
 }
 
+// Without CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC the CLI makes one more model call after the
+// reply (its post-turn summary) and only then sends `result` and exits: about 2.5 s on every
+// reply, at times over 10 s. Nobody reads that summary here, and the CLI runs one reply and goes.
+export function claudeEnv(p: Provider, account?: string): NodeJS.ProcessEnv {
+  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), MCP_TOOL_TIMEOUT: '900000' }
+}
+
 export function claudeEngine(bin: () => string | undefined, provider: () => Promise<Provider> = async () => userProvider()): Engine {
   return {
     id: 'claude',
@@ -178,7 +185,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       }
       // The gateway's token goes in the environment, never in the arguments (other processes can read those).
       const p = await provider()
-      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, ...p.env, ...(turn.account ? { CLAUDE_CONFIG_DIR: turn.account } : {}), MCP_TOOL_TIMEOUT: '900000' } })
+      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: claudeEnv(p, turn.account) })
     }
   }
 }
