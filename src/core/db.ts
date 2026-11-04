@@ -250,6 +250,9 @@ const MIGRATIONS = [
   `
   ALTER TABLE agents ADD COLUMN team TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE conversations ADD COLUMN pair INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN request TEXT;
   `
 ]
 
@@ -417,7 +420,8 @@ export class Db {
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
-      ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {})
+      ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {}),
+      ...(r['request'] ? { request: str(r['request']) } : {})
     }))
   }
 
@@ -433,7 +437,7 @@ export class Db {
 
   createConversation(c: Omit<Conversation, 'unread'>): void {
     this.tx(() => {
-      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, pair, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(c.id, c.kind === 'agents' ? 'channel' : c.kind, c.name, c.topic ?? null, c.kind === 'agents' ? 1 : 0, Date.now())
+      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, pair, request, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(c.id, c.kind === 'agents' ? 'channel' : c.kind, c.name, c.topic ?? null, c.kind === 'agents' ? 1 : 0, c.request ?? null, Date.now())
       for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(c.id, m)
     })
   }

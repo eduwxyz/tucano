@@ -532,6 +532,16 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A DM between agents: the two names stay whole, the task gives way. */
+.nav-item--pair .nav-item__label {
+  flex: none;
+  max-width: 60%;
+}
+.nav-item--pair .nav-item__role {
+  flex: 1;
+  max-width: none;
+  text-align: right;
+}
 .badge {
   background: var(--danger);
   color: #fff;

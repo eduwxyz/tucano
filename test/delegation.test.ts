@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
+import { requestRunning, type Agent, type EngineId, type Message, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
@@ -106,6 +106,45 @@ describe('delegation', () => {
     expect(back!.text).toContain('- **dev** · escrever o post: Feito: escrever o post')
     expect(turnsOf('chefe')).toHaveLength(3)
     expect(notes.filter((n) => n.kind === 'done').map((n) => n.title)).toEqual(['chefe terminou', 'chefe terminou'])
+  })
+
+  it('opens one DM between the agents per request: a new request starts clean, and the old one can be deleted', async () => {
+    const r = runner()
+    await r.send('dm', 'delegue a @dev: escrever o post')
+    await r.idle()
+    const [head] = said('dm')
+    const first = pair('chefe', 'dev')
+    expect(db.conversation(first)).toMatchObject({ kind: 'agents', topic: 'escrever o post', request: head!.id })
+
+    await r.send('dm', 'delegue a @dev: corrigir o bug')
+    await r.idle()
+    const pairs = db.conversations().filter((c) => c.kind === 'agents')
+    expect(pairs).toHaveLength(2)
+    const second = pairs.find((c) => c.id !== first)!
+    expect(second.topic).toBe('corrigir o bug')
+    expect(said(second.id).map((m) => m.text)).toEqual(['corrigir o bug', 'Feito: corrigir o bug'])
+    // The second task never reads the first one's work.
+    expect(turnsOf('dev')[1]!.prompt).toContain('corrigir o bug')
+    expect(turnsOf('dev')[1]!.prompt).not.toContain('escrever o post')
+
+    // Both requests are over: either DM can go, and the lead's report stays in the person's DM.
+    expect(requestRunning(db.conversation(first)!, db.messages())).toBe(false)
+    db.deleteConversation(first)
+    expect(db.conversation(first)).toBeUndefined()
+    expect(said('dm').filter((m) => m.run?.reportOf)).toHaveLength(2)
+  })
+
+  it('a DM between agents can’t be deleted while its request is still going, anywhere it reached', () => {
+    const conv = { id: 'p', kind: 'agents' as const, name: 'chefe-dev', members: ['chefe', 'dev'], request: 'pedido' }
+    const msg = (extra: Partial<Message>): Message => ({ id: 'm', conversationId: 'outra', author: { kind: 'agent', id: 'ana' }, text: '', at: 1, ...extra })
+    expect(requestRunning(conv, [])).toBe(false)
+    expect(requestRunning(conv, [msg({ conversationId: 'p', run: { status: 'waiting_input', steps: [] } })])).toBe(true)
+    // Another agent of the same request, in another DM, still working: the lead still needs this one.
+    expect(requestRunning(conv, [msg({ run: { status: 'working', steps: [], root: 'pedido' } })])).toBe(true)
+    // The lead's own message that started it, waiting on an approval.
+    expect(requestRunning(conv, [msg({ id: 'pedido', run: { status: 'waiting_approval', steps: [] } })])).toBe(true)
+    // Another request, or this one done: nothing holds it.
+    expect(requestRunning(conv, [msg({ run: { status: 'working', steps: [], root: 'outro' } }), msg({ conversationId: 'p', run: { status: 'done', steps: [] } })])).toBe(false)
   })
 
   it('in a channel, the team works in the open, there', async () => {

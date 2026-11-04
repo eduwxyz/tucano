@@ -149,7 +149,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
             )}
             <h1>{title}</h1>
             {dmAgent && <span className="tag">{dmAgent.role}</span>}
-            {pair && <span className="topbar__topic">{L('DM entre agentes: você lê e pode responder aqui', 'DM between agents: you can read and answer here')}</span>}
+            {pair && !conv.topic && <span className="topbar__topic">{L('DM entre agentes: você lê e pode responder aqui', 'DM between agents: you can read and answer here')}</span>}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
           </div>
           <div className="topbar__actions">
@@ -279,7 +279,10 @@ function Handoffs({ message }: { message: Message }): ReactNode {
   const items = message.run!.delegated!
   const latest = useStore((s) => items.map((t) => s.messages.findLast((m) => m.run?.delegation?.id === t.id && m.run.delegation.from === message.id)))
   const agents = useStore((s) => items.map((t) => agentById(s, t.agentId)))
-  const stateOf = (m: Message | undefined): { label: string; tone: string } => {
+  // The person deleted the DM it ran in, once the request was over: what it said is gone with it.
+  const deleted = useStore((s) => items.map((t) => !!t.conversationId && !s.conversations.some((c) => c.id === t.conversationId)))
+  const stateOf = (m: Message | undefined, gone: boolean): { label: string; tone: string } => {
+    if (!m && gone) return { label: L('conversa apagada', 'conversation deleted'), tone: '' }
     const st = m?.run?.status
     if (!m || st === 'working') return { label: L('trabalhando', 'working'), tone: 'tag--warn' }
     if (st === 'waiting_input') return { label: L('te perguntou algo', 'asked you something'), tone: 'tag--warn' }
@@ -293,8 +296,8 @@ function Handoffs({ message }: { message: Message }): ReactNode {
     <div className="handoffs">
       {items.map((t, i) => {
         const agent = agents[i]
-        const state = stateOf(latest[i])
-        const elsewhere = t.conversationId && t.conversationId !== message.conversationId
+        const state = stateOf(latest[i], deleted[i]!)
+        const elsewhere = t.conversationId && t.conversationId !== message.conversationId && !deleted[i]
         return (
           <div key={t.id} className="handoff" title={t.task}>
             <Icon name="send" size={12} />

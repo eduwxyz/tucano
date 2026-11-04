@@ -451,7 +451,7 @@ export class Runner {
     // a DM in Slack), in a DM between the two agents: the request opens there, and the answer is given there.
     const placed = go.map((t) => {
       const target = db.agent(t.agentId)!
-      const where = conv.kind === 'channel' ? conv : this.pair(manager, target)
+      const where = conv.kind === 'channel' ? conv : this.pair(manager, target, root, t.task)
       return { t: { ...t, conversationId: where.id }, target, where }
     })
     this.update(msg, { run: { ...msg.run!, delegated: placed.length ? placed.map((p) => p.t) : undefined } })
@@ -469,12 +469,16 @@ export class Runner {
     if (!placed.length && above) this.settle(above.from)
   }
 
-  // The DM between two agents, made the first time one asks the other for something.
-  private pair(a: Agent, b: Agent): Conversation {
+  // The DM between two agents for one request: made when one first asks the other for something in it, and
+  // used again only by that request (a later round). It holds that work and nothing older, so the agent
+  // reads no other request's history, and the person can delete it once it's done.
+  private pair(a: Agent, b: Agent, request: string, task: string): Conversation {
     const { db, emit } = this.deps
-    const found = db.conversations().find((c) => c.kind === 'agents' && c.members.length === 2 && c.members.includes(a.id) && c.members.includes(b.id))
+    const found = db.conversations().find((c) => c.kind === 'agents' && c.request === request && c.members.length === 2 && c.members.includes(a.id) && c.members.includes(b.id))
     if (found) return found
-    const conv: Conversation = { id: randomUUID(), kind: 'agents', name: `${a.handle}-${b.handle}`, members: [a.id, b.id] }
+    const line = task.replace(/\s+/g, ' ').trim()
+    const topic = line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line
+    const conv: Conversation = { id: randomUUID(), kind: 'agents', name: `${a.handle}-${b.handle}`, topic, members: [a.id, b.id], request }
     db.createConversation(conv)
     emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
     return db.conversation(conv.id)!
@@ -491,8 +495,10 @@ export class Runner {
     const places = [...new Set(tasks.map((t) => t.conversationId ?? head.conversationId))]
     const replies = places.flatMap((c) => db.recentMessages(c, 400)).filter((m) => m.run?.delegation?.from === from).sort((a, b) => a.at - b.at)
     const latest = tasks.map((t) => replies.filter((m) => m.run!.delegation!.id === t.id).at(-1))
-    if (!latest.every(settled)) return
-    const fresh = (latest as Message[]).filter((m) => !m.run!.delegation!.reported)
+    // A task whose conversation the person deleted has nothing left to wait for, or to report.
+    const gone = (t: Delegated): boolean => !!t.conversationId && !db.conversation(t.conversationId)
+    if (!latest.every((m, i) => settled(m) || (!m && gone(tasks[i]!)))) return
+    const fresh = latest.filter((m): m is Message => !!m && !m.run!.delegation!.reported)
     if (!fresh.length) return
     for (const m of fresh) this.update(m, { run: { ...m.run!, delegation: { ...m.run!.delegation!, reported: true } } })
 
