@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm'
 import { call } from '../rpc'
 import { agentById, navigate, updateSettings, useStore, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
 import { Sheet, Toggle } from './Pages'
+import { confirmDialog } from './Dialogs'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
 const DEFAULT_KINDS = (): string[] => [L('Pessoa', 'Person'), L('Projeto', 'Project'), L('Assunto', 'Topic'), L('Decisão', 'Decision')]
@@ -996,7 +997,14 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
                 className="btn btn--sm"
                 onClick={() =>
                   void pick().then((p) => {
-                    if (p && confirm(L(`Usar ${p} como a pasta da wiki?\n\nAs páginas da pasta atual continuam lá; a wiki passa a mostrar o que está na nova.`, `Use ${p} as the wiki's folder?\n\nThe pages in the current folder stay there; the wiki shows what's in the new one.`))) move(p)
+                    if (!p) return
+                    void confirmDialog({
+                      title: L('Trocar a pasta da wiki?', "Change the wiki's folder?"),
+                      body: L(`A wiki passa a mostrar o que está em ${p}. As páginas da pasta atual continuam lá.`, `The wiki will show what's in ${p}. The pages in the current folder stay there.`),
+                      confirm: L('Usar essa pasta', 'Use this folder')
+                    }).then((ok) => {
+                      if (ok) move(p)
+                    })
                   })
                 }
               >
@@ -1604,10 +1612,14 @@ function WikiPageView({ title, data }: { title: string; data: WikiData | null })
     )
   const missing = new Set(page.missing.map((t) => t.toLowerCase()))
   const cited = sourcesIn(page.body)
-  const remove = (): void => {
-    if (!confirm(L(`Apagar "${page.title}"? Dá pra restaurar pelo histórico.`, `Delete "${page.title}"? It can be restored from the history.`))) return
-    void call('wikiRemove', { title: page.title }).then(() => navigate({ kind: 'wiki' }))
-  }
+  const remove = (): void =>
+    void confirmDialog({
+      title: L(`Apagar “${page.title}”?`, `Delete “${page.title}”?`),
+      body: L('Dá pra restaurar pelo histórico.', 'It can be restored from the history.'),
+      confirm: L(`Apagar “${page.title}”`, `Delete “${page.title}”`)
+    }).then((ok) => {
+      if (ok) void call('wikiRemove', { title: page.title }).then(() => navigate({ kind: 'wiki' }))
+    })
   const kindOf = (t: string): string => data?.pages.find((p) => p.title === t)?.kind ?? ''
   return (
     <article className="wk-page" style={{ ['--k' as string]: kindColor(page.kind) }}>

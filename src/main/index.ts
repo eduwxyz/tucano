@@ -62,7 +62,11 @@ function startCore(): UtilityProcess {
   child.on('message', (msg: CoreRequest) => handleCore(child, msg))
   child.on('exit', (code) => {
     console.error(`[main] core exited with code ${code}`)
-    if (core === child) core = null
+    if (core !== child) return
+    core = null
+    // Not while quitting: the window would say so on its way out. Reloading the page
+    // connects again, and connecting starts a new core.
+    if (!quitting && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('core:down')
   })
   return child
 }
@@ -73,7 +77,7 @@ type CoreRequest =
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -158,7 +162,10 @@ function stillOpen(): void {
   new Notification({
     ...noteIcon(),
     title: L(`O ${NAME} continua aberto`, `${NAME} is still open`),
-    body: L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano perto do relógio ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon by the clock or open Tucano again.'),
+    body:
+      process.platform === 'win32'
+        ? L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano na bandeja, perto do relógio (talvez dentro da setinha ^), ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon in the tray by the clock (maybe inside the little ^ arrow), or open Tucano again.')
+        : L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano perto do relógio ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon by the clock or open Tucano again.'),
     silent: true
   }).show()
 }
@@ -176,9 +183,25 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
             "This Linux has no keyring open (GNOME Keyring or KWallet), and Tucano doesn't keep passwords unencrypted. Open or enable KWallet, or install gnome-keyring, log in again and try once more."
           )
         )
-      if (!safeStorage.isEncryptionAvailable()) throw new Error(L('O cofre do sistema não está disponível.', "The system's vault isn't available."))
-      const data =
-        msg.op === 'encrypt' ? safeStorage.encryptString(msg.data).toString('base64') : safeStorage.decryptString(Buffer.from(msg.data, 'base64'))
+      if (!safeStorage.isEncryptionAvailable())
+        throw new Error(
+          process.platform === 'darwin'
+            ? L('O Tucano não conseguiu usar as Chaves do macOS. Reinicie o Tucano e, se o Mac pedir, clique em Permitir.', "Tucano couldn't use the macOS Keychain. Restart Tucano and, if the Mac asks, click Allow.")
+            : process.platform === 'win32'
+              ? L('O Tucano não conseguiu usar a proteção de dados do Windows. Reinicie o Tucano e entre de novo na sua conta do Windows se continuar.', "Tucano couldn't use Windows data protection. Restart Tucano, and sign in to Windows again if it keeps happening.")
+              : L('O Tucano não conseguiu usar o chaveiro do sistema. Reinicie o Tucano e tente de novo.', "Tucano couldn't use the system's keyring. Restart Tucano and try again.")
+        )
+      let data: string
+      if (msg.op === 'encrypt') data = safeStorage.encryptString(msg.data).toString('base64')
+      else {
+        try {
+          data = safeStorage.decryptString(Buffer.from(msg.data, 'base64'))
+        } catch (e) {
+          // Saved under another key (the system's changed, or the data came from another computer).
+          console.error('[main] decrypt', e)
+          throw new Error(L('Não consegui abrir as credenciais salvas (a chave do sistema mudou). Conecte de novo.', "I couldn't open the saved credentials (the system's key changed). Connect again."))
+        }
+      }
       child.postMessage({ type: 'secret-result', id: msg.id, data })
     } catch (e) {
       child.postMessage({ type: 'secret-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
@@ -202,7 +225,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     if (sound) chirp(sound)
     if (!Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
-    n.on('click', () => showWindow(msg.conversationId))
+    n.on('click', () => showWindow(msg.conversationId, msg.page))
     n.show()
   } else if (msg.type === 'busy') {
     if (msg.busy && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension')
@@ -241,7 +264,7 @@ const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms)
 // Loads the page in a hidden window with its own throwaway session (no cookies
 // from anything else) and captures it.
 async function screenshot(o: { url: string; width: number; height: number; fullPage: boolean }): Promise<Buffer> {
-  if (!/^https?:\/\//.test(o.url)) throw new Error('só http e https')
+  if (!/^https?:\/\//.test(o.url)) throw new Error(L('Só dá pra capturar endereços http e https.', 'Only http and https addresses can be captured.'))
   const win = new BrowserWindow({
     show: false,
     width: o.width,
@@ -251,7 +274,7 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   try {
-    await Promise.race([win.loadURL(o.url), wait(30_000).then(() => Promise.reject(new Error('a página não carregou em 30 s')))])
+    await Promise.race([win.loadURL(o.url), wait(30_000).then(() => Promise.reject(new Error(L('A página não carregou em 30 s. Confira o endereço ou tente de novo.', "The page didn't load in 30 s. Check the address or try again."))))])
     await wait(1200) // fonts, charts and client-side rendering
     if (o.fullPage) {
       const h = Number(await win.webContents.executeJavaScript('Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)'))
@@ -303,13 +326,13 @@ ipcMain.on('core:connect', (event) => {
 // The app's own window; agents' browsers are windows too, hidden, and never count as it.
 let mainWindow: BrowserWindow | null = null
 
-function showWindow(conversationId?: string): void {
+function showWindow(conversationId?: string, page?: 'skills'): void {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
-  if (!conversationId) return
-  const go = (): void => win.webContents.send('navigate', conversationId)
+  if (!conversationId && !page) return
+  const go = (): void => (page ? win.webContents.send('navigate-page', page) : win.webContents.send('navigate', conversationId))
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go)
   else go()
 }

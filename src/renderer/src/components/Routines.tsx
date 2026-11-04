@@ -550,7 +550,8 @@ function Popover({ occ, rect, now, onClose, onEdit }: { occ: Occ; rect: DOMRect;
       {r?.trigger?.kind === 'webhook' && <Hook token={r.trigger.token} />}
       {r?.trigger?.kind === 'poll' && r.trigger.error && (
         <p className="cal-pop__error" title={r.trigger.error}>
-          {L('A última olhada falhou', 'The last check failed')}: {r.trigger.error}
+          {L(`Não deu pra ler o ${connector?.name ?? 'conector'}: confira se ele está conectado em Conectores.`, `Couldn’t read ${connector?.name ?? 'the connector'}: check that it’s connected in Connectors.`)}
+          <span className="muted small"> ({r.trigger.error})</span>
         </p>
       )}
       {history.length > 0 && (
@@ -569,7 +570,7 @@ function Popover({ occ, rect, now, onClose, onEdit }: { occ: Occ; rect: DOMRect;
       <div className="cal-pop__acts">
         {confirm ? (
           <>
-            <span className="small">{L('Apagar a rotina?', 'Delete the routine?')}</span>
+            <span className="small">{L(`Apagar “${occ.name}”? As respostas que ela já gerou ficam nas conversas.`, `Delete “${occ.name}”? The replies it already produced stay in the conversations.`)}</span>
             <span className="grow" />
             <button className="btn btn--sm btn--ghost" onClick={() => setConfirm(false)}>
               {L('Cancelar', 'Cancel')}
@@ -644,7 +645,12 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
     const x = withArgs(t)
     if (!x) return
     setPreview(L('Olhando…', 'Checking…'))
-    checkTrigger(x).then(setPreview, (e: unknown) => setPreview(`${L('Falhou', 'Failed')}: ${e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)}`))
+    const name = x.kind === 'poll' ? connectors.find((c) => c.id === x.connectorId)?.name : undefined
+    checkTrigger(x).then(setPreview, (e: unknown) =>
+      setPreview(
+        `${L(`Não deu pra ler o ${name ?? 'conector'}: confira se ele está conectado em Conectores.`, `Couldn’t read ${name ?? 'the connector'}: check that it’s connected in Connectors.`)} (${e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)})`
+      )
+    )
   }
 
   const save = async (): Promise<void> => {

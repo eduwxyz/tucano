@@ -4,6 +4,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L, locale } from '../shared/lang'
+import { firstSentence } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import { describeSchedule, MAX_AGENT_ROUTINES, nextRun, routineCap, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
@@ -385,7 +386,8 @@ export async function retrying(
     const wait = RETRY_WAITS_MS[i]!
     const base = reply.run.error ?? ''
     const min = Math.round(wait / 60_000)
-    note(reply, `${plain(base)}. ${L(`Tento de novo em ${min} min (tentativa ${i + 2} de ${tries}).`, `Trying again in ${min} min (try ${i + 2} of ${tries}).`)}`)
+    // The headline only: the rest of the error says "try again later", and this is the later.
+    note(reply, `${firstSentence(plain(base))} ${L(`Tento de novo em ${min} min (tentativa ${i + 2} de ${tries}).`, `Trying again in ${min} min (try ${i + 2} of ${tries}).`)}`)
     await deps.wait(wait)
     const now = deps.db.message(reply.id)
     if (now?.run?.status !== 'failed' || !deps.enabled()) {
@@ -415,7 +417,8 @@ export function outcome(reply: Message): string {
     case 'paused':
       return L('Pausou no teto da resposta. Abra pra continuar.', "Paused at the reply's cap. Open it to go on.")
     case 'failed':
-      return `${L('Falhou', 'Failed')}: ${reply.run.error ?? L('erro desconhecido', 'unknown error')}`
+      // The headline only (what happened); the rest is in the conversation.
+      return `${reply.run.error ? firstSentence(reply.run.error) : L('Falhou.', 'Failed.')} ${L('Abra pra resolver.', 'Open it to fix it.')}`
     case 'stopped':
       return L('Foi interrompida.', 'Was interrupted.')
   }

@@ -30,7 +30,8 @@ export interface UpdateState {
   next?: string // the newer version, while it downloads and once it's ready
   percent?: number
   checkedAt?: number
-  error?: string
+  error?: string // what went wrong, for people
+  errorKind?: 'offline' | 'other' // 'other': the app can be downloaded by hand from the releases page
 }
 
 export interface EngineStatus {
@@ -156,7 +157,8 @@ export interface Run {
   steps: Step[]
   receipt?: Receipt
   approvalId?: string
-  error?: string
+  error?: string // what happened and what to do, for people (src/shared/errors.ts)
+  errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   question?: string // asked with ask_user; answered by the next human message here
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply

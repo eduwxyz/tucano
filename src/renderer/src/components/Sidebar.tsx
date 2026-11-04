@@ -20,11 +20,11 @@ import {
 } from '../store'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { call } from '../rpc'
-import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
+import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
-import { AgentAvatar, Icon, TucaMark, type IconName } from './ui'
+import { AgentAvatar, Icon, TucaMark, useJustEnded, type IconName } from './ui'
 
 // The wiki stays lit on any of its pages.
 const same = (a: View | null, b: View): boolean => (b.kind === 'wiki' ? a?.kind === 'wiki' : JSON.stringify(a) === JSON.stringify(b))
@@ -35,7 +35,11 @@ function NavItem({ view, icon, label, badge }: { view: View; icon: IconName; lab
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate(view)}>
       <Icon name={icon} />
       <span className="nav-item__label">{label}</span>
-      {badge ? <span className="badge">{badge}</span> : null}
+      {badge ? (
+        <span key={badge} className="badge">
+          {badge}
+        </span>
+      ) : null}
     </button>
   )
 }
@@ -60,7 +64,11 @@ function Section({ id, label, unread = 0, action, children }: { id: string; labe
           {label}
         </FoldToggle>
         {/* A closed section still says when something in it is waiting. */}
-        {!open && unread > 0 && <span className="badge badge--soft">{unread}</span>}
+        {!open && unread > 0 && (
+          <span key={unread} className="badge badge--soft">
+            {unread}
+          </span>
+        )}
         {action}
       </div>
       {children}
@@ -167,9 +175,15 @@ export function Sidebar(): ReactNode {
       label: L('Excluir canal…', 'Delete channel…'),
       icon: 'trash',
       danger: true,
-      onClick: () => {
-        if (confirm(L(`Excluir #${c.name}?\n\nAs mensagens e as rotinas que postam nele vão junto. Os agentes continuam existindo. Não dá pra desfazer.`, `Delete #${c.name}?\n\nIts messages and the routines that post in it go too. The agents stay. This can't be undone.`))) void deleteConversation(c.id)
-      }
+      onClick: () =>
+        void confirmDialog({
+          title: L(`Excluir #${c.name}?`, `Delete #${c.name}?`),
+          body: L('As mensagens e as rotinas que postam nele vão junto. Os agentes continuam no time. Não dá pra desfazer.', "Its messages and the routines that post in it go too. The agents stay on the team. This can't be undone."),
+          confirm: L(`Excluir #${c.name}`, `Delete #${c.name}`),
+          danger: true
+        }).then((ok) => {
+          if (ok) void deleteConversation(c.id)
+        })
     }
   ]
   const dmMenu = (id: string, agentId: string, agentName: string): MenuItem[] => [
@@ -181,9 +195,15 @@ export function Sidebar(): ReactNode {
       label: L('Apagar a conversa…', 'Delete the conversation…'),
       icon: 'trash',
       danger: true,
-      onClick: () => {
-        if (confirm(L(`Apagar a conversa com ${agentName}?\n\nAs mensagens e as rotinas desta DM vão junto. ${agentName} continua existindo.`, `Delete the conversation with ${agentName}?\n\nThe messages and routines of this DM go too. ${agentName} stays.`))) void deleteConversation(id)
-      }
+      onClick: () =>
+        void confirmDialog({
+          title: L(`Apagar a conversa com ${agentName}?`, `Delete the conversation with ${agentName}?`),
+          body: L(`As mensagens e as rotinas desta DM vão junto. ${agentName} continua no time. Não dá pra desfazer.`, `The messages and routines of this DM go too. ${agentName} stays on the team. This can't be undone.`),
+          confirm: L('Apagar a conversa', 'Delete the conversation'),
+          danger: true
+        }).then((ok) => {
+          if (ok) void deleteConversation(id)
+        })
     }
   ]
   const agentMenu = (agentId: string, agentName: string): MenuItem[] => [
@@ -192,11 +212,15 @@ export function Sidebar(): ReactNode {
     'separator',
     {
       label: L('Arquivar…', 'Archive…'),
-      icon: 'trash',
-      danger: true,
-      onClick: () => {
-        if (confirm(L(`Arquivar ${agentName}?\n\nSai da barra lateral e para de responder; as rotinas dele desligam. O histórico e os recibos ficam, e dá pra reativar em "Arquivados", no fim da lista de agentes.`, `Archive ${agentName}?\n\nIt leaves the sidebar and stops replying; its routines turn off. History and receipts stay, and you can bring it back from "Archived", at the end of the agent list.`))) void archiveAgent(agentId, true)
-      }
+      icon: 'archive',
+      onClick: () =>
+        void confirmDialog({
+          title: L(`Arquivar ${agentName}?`, `Archive ${agentName}?`),
+          body: L('Sai da barra lateral e para de responder; as rotinas dele desligam. O histórico e os recibos ficam, e dá pra reativar em "Arquivados", no fim da lista de agentes.', 'It leaves the sidebar and stops replying; its routines turn off. History and receipts stay, and you can reactivate it from "Archived", at the end of the agent list.'),
+          confirm: L(`Arquivar ${agentName}`, `Archive ${agentName}`)
+        }).then((ok) => {
+          if (ok) void archiveAgent(agentId, true)
+        })
     }
   ]
 
@@ -350,10 +374,17 @@ function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: 
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
       <span className="nav-item__label">{name}</span>
-      {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
-      {unread ? <span className="badge badge--soft">{unread}</span> : null}
+      <LiveDot working={working} />
+      {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )
+}
+
+// Working: the dot pulses. Just finished: it turns green for a moment and fades out, instead of vanishing.
+function LiveDot({ working }: { working: boolean }): ReactNode {
+  const done = useJustEnded(working, 1500)
+  if (!working && !done) return null
+  return <span className={`pulse ${done ? 'is-done' : ''}`} title={working ? L('Trabalhando', 'Working') : undefined} />
 }
 
 function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: number }): ReactNode {
@@ -364,8 +395,8 @@ function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: numb
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
-      {working && <span className="pulse" title={L('Trabalhando', 'Working')} />}
-      {unread ? <span className="badge badge--soft">{unread}</span> : null}
+      <LiveDot working={working} />
+      {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )
 }
@@ -387,7 +418,7 @@ function AgentItem({ id }: { id: string }): ReactNode {
           <Icon name="laptop" size={13} />
         </span>
       )}
-      {pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title={L('Orçamento acima de 80%', 'Budget above 80%')} />}
+      {pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title={pct >= 1 ? L('Bateu o limite do mês', 'Hit the monthly limit') : L('Já usou mais de 80% do limite', 'Over 80% of the limit used')} />}
     </button>
   )
 }

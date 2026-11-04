@@ -4,6 +4,7 @@
 // reach this Mac. It answers only the chat paired with a code shown in the app.
 import { randomInt } from 'node:crypto'
 import { L } from '../shared/lang'
+import { offline, UserError } from '../shared/errors'
 import type { Approval, Message, TelegramInfo } from '../shared/types'
 import type { Secrets } from './secrets'
 
@@ -13,6 +14,16 @@ const CHAT = 'telegram:chat'
 const POLL_SECONDS = 50
 const RETRY_MS = 15_000
 const MAX_TEXT = 3_500 // Telegram allows 4096 per message
+
+// Telegram's refusal, in what to do: the token was revoked, or another app reads the same bot.
+export const refused = (status: number, description?: string): UserError =>
+  new UserError(
+    status === 401
+      ? L('O token do bot não vale mais. Cole um novo do @BotFather.', "The bot's token isn't valid anymore. Paste a new one from @BotFather.")
+      : status === 409
+        ? L('Outro app está lendo este bot (outro Tucano ou um webhook). Feche o outro ou troque o token.', 'Another app is reading this bot (another Tucano, or a webhook). Close the other one or change the token.')
+        : L(`O Telegram recusou: ${description ?? status}.`, `Telegram refused: ${description ?? status}.`)
+  )
 
 type Fetch = typeof fetch
 type Update = {
@@ -112,7 +123,7 @@ export class Telegram {
       signal: signal ?? AbortSignal.timeout(15_000)
     })
     const body = (await res.json().catch(() => null)) as { ok?: boolean; result?: unknown; description?: string } | null
-    if (!body?.ok) throw new Error(body?.description ?? `Telegram ${res.status}`)
+    if (!body?.ok) throw refused(res.status, body?.description)
     return body.result
   }
 
@@ -127,7 +138,7 @@ export class Telegram {
             signal: AbortSignal.any([ctl.signal, AbortSignal.timeout((POLL_SECONDS + 10) * 1000)])
           })
           const body = (await res.json()) as { ok: boolean; result?: Update[]; description?: string }
-          if (!body.ok) throw new Error(body.description ?? `Telegram ${res.status}`)
+          if (!body.ok) throw refused(res.status, body.description)
           for (const u of body.result ?? []) {
             this.offset = u.update_id + 1
             await this.handle(u).catch((e: unknown) => console.error('[telegram]', e))
@@ -138,7 +149,13 @@ export class Telegram {
           }
         } catch (e) {
           if (ctl.signal.aborted) return
-          const why = e instanceof Error ? e.message : String(e)
+          // Telegram said no (and why), or it didn't answer at all: the loop asks again in a moment.
+          const why =
+            e instanceof UserError
+              ? e.message
+              : offline(e)
+                ? L('Sem internet; tento de novo sozinho.', 'No internet; I’ll try again on my own.')
+                : L('O Telegram não respondeu direito; tento de novo sozinho.', 'Telegram didn’t answer properly; I’ll try again on my own.')
           if (why !== this.error) {
             this.error = why
             this.deps.changed()

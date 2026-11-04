@@ -12,6 +12,7 @@ import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
+import { friendly } from '../shared/errors'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
 import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
@@ -28,7 +29,7 @@ import { fakeEngine } from './engines/fake'
 import { DesktopApps, macApps, SELF } from './apps'
 import { linuxApps, windowsApps, type SystemApp } from './apps-os'
 import type { Engine } from './engines/types'
-import { ConnectorManager } from './connectors'
+import { ConnectorManager, notAuthorized } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
@@ -245,8 +246,9 @@ function toPhone(e: CoreEvent): void {
 }
 
 // Desktop notification, and the same on the phone.
-const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string): void => {
-  toMain({ type: 'notify', title, body: shortText, conversationId, sound: settings().sounds !== false })
+// `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
+const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills' } = {}): void => {
+  toMain({ type: 'notify', title, body: shortText, conversationId, ...more, sound: settings().sounds !== false })
   void telegram?.notice(title, fullText ?? shortText)
 }
 
@@ -256,7 +258,7 @@ type ToMain =
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -428,10 +430,7 @@ const connectors = new ConnectorManager({
 gateway.route('/oauth/callback', async (url) => {
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state') ?? ''
-  if (!code) {
-    const why = url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? L('sem código', 'no code')
-    return L(`Autorização não concluída: ${why}.`, `Authorization not completed: ${why}.`)
-  }
+  if (!code) return notAuthorized(url)
   return (await connectors.finishOAuth(state, code))
     ? L('Conector autorizado. Pode fechar esta aba e voltar pro Tucano.', 'Connector authorized. You can close this tab and go back to Tucano.')
     : L('Esse pedido de autorização expirou. Tente de novo pelo app.', 'This authorization request expired. Try again from the app.')
@@ -465,7 +464,8 @@ const routines = new Routines({
   notify: notifyAll
 })
 
-const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, body) })
+// A proposal waits for a decision: the knock at the door, and a click opens Skills.
+const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, body, undefined, undefined, { kind: 'approval', page: 'skills' }) })
 // The wiki's folder is the truth (Markdown, as Obsidian opens it); TUCANO_WIKI points it elsewhere.
 // The default folder keeps wiki.db; another folder gets an index of its own, so going back finds the old one.
 const wikiHome = join(dataDir, 'wiki')
@@ -1182,7 +1182,8 @@ function handle(port: MessagePortMain, req: Request): void {
       (result) => reply({ result }),
       (e: unknown) => {
         console.error(`[core] ${req.method}`, e)
-        reply({ error: e instanceof Error ? e.message : String(e) })
+        // The page shows it as it comes: in people's words, the raw text stays in the log above.
+        reply({ error: friendly(e).text })
       }
     )
 }

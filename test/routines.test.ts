@@ -379,7 +379,7 @@ describe('routine retries', () => {
     expect(reply!.run).toMatchObject({ status: 'failed' })
     expect(reply!.run!.error).toBe('o provedor caiu (3). Tentei 3 vezes.')
     expect(notes).toHaveLength(1)
-    expect(notes[0]).toBe('Falhou: o provedor caiu (3). Tentei 3 vezes.')
+    expect(notes[0]).toBe('o provedor caiu (3). Abra pra resolver.') // the headline, and what to do
   })
 
   it('waiting, the reply says when the next try is', async () => {
