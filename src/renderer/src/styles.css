@@ -6587,7 +6587,8 @@ kbd {
 .lightbox__stage.is-zoomed:active {
   cursor: grabbing;
 }
-.lightbox__stage img {
+.lightbox__stage img,
+.lightbox__stage video {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -6619,6 +6620,21 @@ kbd {
 }
 [data-os='mac'] .lightbox__bar {
   padding-left: 84px; /* the window's buttons are here */
+.local-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.local-link code {
+  color: inherit;
 }
 
 /* An agent's own color and picture */

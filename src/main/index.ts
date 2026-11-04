@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto'
+import { verifyLocalUrl } from '../core/local-paths'
 import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -50,10 +52,12 @@ const browsers = new Browsers((agentId, shown) => core?.postMessage({ type: 'bro
 
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
+const localKey = randomBytes(32).toString('hex')
+
 function startCore(): UtilityProcess {
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: 'tucano-core',
-    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_LOCALE: systemLocale ?? '' }
+    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
   })
   child.on('message', (msg: CoreRequest) => handleCore(child, msg))
   child.on('exit', (code) => {
@@ -67,6 +71,7 @@ type CoreRequest =
   | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
+  | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string }
   | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
@@ -178,6 +183,10 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     }
   } else if (msg.type === 'open') {
     if (/^https?:\/\//.test(msg.url)) void shell.openExternal(msg.url)
+  } else if (msg.type === 'open_local') {
+    // Never openPath on what isn't a folder or a PDF: that would run an app or a script.
+    if (msg.how === 'open') void shell.openPath(msg.path)
+    else shell.showItemInFolder(msg.path)
   } else if (msg.type === 'wiki_dir') {
     wikiFolder = normalize(msg.path)
   } else if (msg.type === 'open_path') {
@@ -257,6 +266,16 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
 
 function serveArtifact(req: Request): Promise<Response> | Response {
   const u = new URL(req.url)
+  if (u.host === 'local') {
+    // A file the core checked and signed for the window: see resolveLocal.
+    const path = verifyLocalUrl(localKey, u)
+    if (!path) return new Response('not found', { status: 404 })
+    return net.fetch(pathToFileURL(path).toString(), { headers: req.headers }).then((r) => {
+      const headers = new Headers(r.headers)
+      headers.set('Content-Security-Policy', 'sandbox')
+      return new Response(r.body, { status: r.status, headers })
+    })
+  }
   const [id = '', name = ''] = u.pathname.slice(1).split('/')
   const dir = join(dataDir(), 'artifacts', id)
   const file = normalize(join(dir, decodeURIComponent(name)))

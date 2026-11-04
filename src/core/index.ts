@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
+import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
 import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
@@ -251,6 +252,7 @@ const notifyAll = (title: string, body: string, conversationId?: string): void =
 type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
+  | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
   | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
@@ -373,6 +375,21 @@ const chrome =
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
+
+// Out of the environment before anything starts: commands the agents run inherit it.
+const localKey = process.env['TUCANO_LOCAL_KEY']
+delete process.env['TUCANO_LOCAL_KEY']
+
+// What the author of a message reaches, for the paths it cites. An agent on this Mac reaches what
+// its commands do; any other, only its own files. Not on a server, where the page isn't on this
+// computer, and not on Windows yet, where paths don't look like this.
+function localReach(messageId: string): LocalReach | undefined {
+  const message = db.message(messageId)
+  if (serverMode || isWin || message?.author.kind !== 'agent') return undefined
+  const agent = db.agent(message.author.id)
+  if (!agent) return undefined
+  return { agentId: agent.id, own: computers.folder(agent.id), dataRoot: dataDir, limited: isLimited(agent) }
+}
 
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
 // The person's own apps, through agent-desktop (none on a server: no screen there).
@@ -747,6 +764,18 @@ const api: Api = {
   },
   // Everything that only made sense there goes too: replies still running stop,
   // its routines, its pending approvals.
+  localPath: ({ messageId, path }) => {
+    const reach = localReach(messageId)
+    const found = reach && resolveLocal(path, reach)
+    if (!found) return null
+    return { kind: found.kind, ...((found.kind === 'image' || found.kind === 'video') && localKey ? { url: localUrl(localKey, found.path) } : {}) }
+  },
+  openLocal: ({ messageId, path, how }) => {
+    const reach = localReach(messageId)
+    const found = reach && resolveLocal(path, reach)
+    if (found) toMain({ type: 'open_local', path: found.path, how: how === 'open' && (found.kind === 'folder' || found.kind === 'pdf') ? 'open' : 'reveal' })
+  },
+
   deleteConversation: ({ id }) => {
     if (!db.conversation(id)) return
     for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)

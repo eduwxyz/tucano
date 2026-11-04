@@ -199,6 +199,11 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
 }
 
+export interface LocalInfo {
+  kind: 'image' | 'video' | 'pdf' | 'folder' | 'file'
+  url?: string // to see it here: images and videos
+}
+
 export interface Settings {
   workspaceName: string
   context: string

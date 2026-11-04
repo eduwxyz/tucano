@@ -1,7 +1,9 @@
 import { L } from '../../../shared/lang'
 import { CODE_SPANS } from '../../../shared/types'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import Markdown from 'react-markdown'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import Markdown, { defaultUrlTransform } from 'react-markdown'
+import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
+import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import {
@@ -183,6 +185,9 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
   )
 }
 
+const AGENT_PLUGINS = [remarkGfm, remarkLocalPaths]
+const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
+
 function MessageRow({ message, grouped }: { message: Message; grouped: boolean }): ReactNode {
   const me = useStore((s) => s.me)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
@@ -195,6 +200,9 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
       !(s.panel?.kind === 'browser' && s.panel.agentId === agent?.id) &&
       s.messages.findLast((m) => m.conversationId === message.conversationId && m.run?.browser && m.author.kind === 'agent' && m.author.id === agent?.id)?.id === message.id
   )
+
+  // The same object between renders, or every link would start over.
+  const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id) }), [message.id])
 
   if (message.author.kind === 'system') {
     return (
@@ -235,7 +243,11 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run && <RunSteps message={message} />}
         {message.text ? (
           <div className="md">
-            <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+            {agent && message.run?.status !== 'working' ? (
+              <Markdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{highlightMentions(message.text)}</Markdown>
+            ) : (
+              <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+            )}
           </div>
         ) : null}
         {attached.length > 0 && (
