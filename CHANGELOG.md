@@ -8,6 +8,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **Agents' computers come set up.** **Settings › Agents › Agents' computer** takes a bash script every new Linux computer is set up with, so agents stop spending turns installing (and getting wrong) the same tools on each one. It runs once into a base image that every computer made after it starts from, in seconds; the agent is told what's already there. Ready-made, tested lines add the basics (jq, unzip, ssh, psql), GitHub CLI, GitLab CLI (glab), the Databricks CLI and the AWS CLI. A setup that fails says why, with its last lines, and the computer doesn't start half-done.
 
+### Fixed
+
+- **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in.
+
 ## [0.2.10] - 2026-11-04
 
 > **Em português:** chegaram as threads: cada resposta a uma mensagem, e o que ela dispara, fica na thread dela, que abre na lateral. Na conversa aparecem só as mensagens que abriram uma thread, com quem participou, quantas respostas e o que espera por você. E um "bom dia" pro grupo agora chama todos os agentes. Também dá pra ditar mensagens: clique no microfone, fale e clique de novo, e o texto cai no campo pra você revisar. Tudo roda no seu computador, sem internet, e o modelo baixa com um clique. Os canais podem ser arrastados e organizados em grupos que recolhem, e um caminho de arquivo na mensagem de um agente vira link. O token de um conector pode ser trocado sem remover o conector. Os erros agora dizem o que aconteceu e o que fazer. E uma leva de correções: os agentes no Gemini passam a ler as configurações do Tucano, o modelo reserva entra no limite de 5 horas do Claude Code, as rotinas mandam a resposta inteira pro Telegram e, no Windows, o Tucano não trava mais a atualização de outros apps. Obrigado à Rayanne, ao Gabriel, ao Alan, ao Cleiton e ao Kayo!
