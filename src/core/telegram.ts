@@ -36,7 +36,7 @@ export interface TelegramDeps {
   secrets: Pick<Secrets, 'get' | 'set'>
   decide(approvalId: string, decision: 'approved' | 'refused', reason?: string): Promise<void>
   approval(id: string): Approval | undefined
-  answer(conversationId: string, text: string): void // a reply to a question, as if I wrote it in the app
+  answer(conversationId: string, text: string, threadId?: string): void // a reply to a question, as if I wrote it in the app (in its thread)
   changed(): void // the bot or the pairing changed: settings show it
   fetch?: Fetch
 }
@@ -48,7 +48,7 @@ export class Telegram {
   private error?: string
   private loop?: AbortController
   private offset = 0
-  private questions = new Map<number, string>() // Telegram message id → conversation it asked from
+  private questions = new Map<number, { conversationId: string; threadId?: string }>() // Telegram message id → where it was asked
 
   constructor(private deps: TelegramDeps) {}
 
@@ -184,9 +184,9 @@ export class Telegram {
         return
       }
       if (m.chat.id !== this.chat.id) return
-      const conv = m.reply_to_message && this.questions.get(m.reply_to_message.message_id)
-      if (conv) {
-        this.deps.answer(conv, m.text)
+      const asked = m.reply_to_message && this.questions.get(m.reply_to_message.message_id)
+      if (asked) {
+        this.deps.answer(asked.conversationId, m.text, asked.threadId)
         await this.send(L('Mandei a sua resposta.', 'I sent your answer.'), { reply_to_message_id: m.message_id })
       } else {
         await this.send(L('Pra responder a um agente, responda à mensagem da pergunta (deslize pro lado). Aprovações têm botões.', "To answer an agent, reply to the question's message (swipe it sideways). Approvals have buttons."))
@@ -239,7 +239,7 @@ export class Telegram {
       L(`${agentName} pergunta (${where}):\n\n${msg.run.question}\n\nResponda a esta mensagem.`, `${agentName} asks (${where}):\n\n${msg.run.question}\n\nReply to this message.`),
       { reply_markup: { force_reply: true, input_field_placeholder: L('Sua resposta', 'Your answer') } }
     )
-    if (id) this.questions.set(id, msg.conversationId)
+    if (id) this.questions.set(id, { conversationId: msg.conversationId, ...(msg.threadId ? { threadId: msg.threadId } : {}) })
   }
 
   async notice(title: string, body: string): Promise<void> {

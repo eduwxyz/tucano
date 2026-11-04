@@ -975,6 +975,7 @@ h3 {
   max-width: none;
 }
 .msg {
+  position: relative;
   display: grid;
   grid-template-columns: 34px 1fr;
   gap: 12px;
@@ -2394,6 +2395,297 @@ h3 {
 /* the agent's browser, live */
 .side-panel--browser {
   width: min(56%, 920px);
+}
+/* a thread: the message that started it, set apart, then its replies */
+.side-panel--thread {
+  width: min(42%, 560px);
+}
+.side-panel__where {
+  font-size: 12.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-panel--thread .messages {
+  padding-top: 14px;
+}
+.side-panel--thread .msg {
+  padding-inline: 16px;
+}
+.side-panel--thread .system-line {
+  padding: 4px 16px 4px 62px;
+}
+.side-panel--thread .composer-wrap {
+  padding-inline: 16px;
+}
+/* The root sits on the panel's paper, like the conversation it came from. */
+.thread__lead {
+  display: grid;
+  gap: 4px;
+}
+.thread__lead > .msg {
+  margin-inline: 10px;
+  padding: 10px 12px;
+  width: auto;
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-panel);
+  animation: none;
+}
+.thread__lead > .msg .msg__reply {
+  display: none;
+}
+/* Mine too reads as the thread's heading here: my face and name, no bubble. */
+.thread__lead > .msg--me {
+  grid-template-columns: 34px 1fr;
+}
+.thread__lead > .msg--me .msg__gutter {
+  display: block;
+}
+.thread__lead > .msg--me .msg__head {
+  display: flex;
+}
+.thread__lead > .msg--me .msg__body {
+  justify-self: stretch;
+  max-width: none;
+  align-items: stretch;
+}
+.thread__lead > .msg--me .md {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+.thread__divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 26px 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.thread__divider::before,
+.thread__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.thread__divider span {
+  --pop-scale: 0.9;
+  --pop-y: 0;
+  animation: pop var(--dur-base) var(--ease-out) backwards;
+}
+
+/* A router's note: what it did, and why, quietly, on one line. */
+.system-line__why {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.system-line__why::before {
+  content: '· ';
+}
+.system-line > p {
+  flex-shrink: 0;
+}
+.system-line > .muted {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* A reply's receipt and "Guardar na wiki", on one quiet line that shows on hover. */
+.msg__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 14px;
+  margin-top: 4px;
+}
+.msg__meta .receipt,
+.msg__meta .wiki-keep {
+  margin: 0;
+}
+
+/* The message whose thread is open on the side, lit, so the two sides read as one. */
+.msg.is-thread-open::before {
+  content: '';
+  position: absolute;
+  inset: 0 12px;
+  z-index: -1;
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  opacity: 0.55;
+  animation: fade var(--dur-enter) var(--ease-out) backwards;
+}
+.msg {
+  isolation: isolate;
+}
+
+/* "Reply in thread" shows on hover: by my bubble, or at the corner of an agent's reply. */
+.msg__reply {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: var(--transition-ui);
+}
+.msg--me .msg__body {
+  position: relative;
+}
+.msg--me .msg__reply {
+  top: 6px;
+  right: calc(100% + 6px);
+}
+.msg:hover .msg__reply,
+.msg__reply:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .msg__reply {
+    opacity: 1;
+  }
+}
+.thread-link {
+  --rise: 3px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 3px 9px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgba(60, 40, 20, 0.04);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: var(--transition-ui);
+}
+.thread-link:hover,
+.thread-link.is-open {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.thread-link.is-open {
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.thread-link__faces {
+  display: inline-flex;
+}
+.thread-link__faces > * {
+  border-radius: 28%;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.thread-link.is-open .thread-link__faces > * {
+  box-shadow: none;
+}
+.thread-link__faces > * + * {
+  margin-left: -5px;
+}
+.thread-link__count {
+  color: var(--accent);
+  font-weight: 600;
+  /* Keyed by the count: each new reply pops it in. */
+  --pop-scale: 0.85;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
+}
+.thread-link__when {
+  display: inline-grid;
+  color: var(--text-3);
+}
+/* "há 2 min" gives way to "Ver thread" on hover, in the same spot. */
+.thread-link__ago,
+.thread-link__see {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.thread-link__see {
+  opacity: 0;
+  transform: translateY(3px);
+  color: var(--text);
+}
+.thread-link:hover .thread-link__ago {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+.thread-link:hover .thread-link__see {
+  opacity: 1;
+  transform: none;
+}
+.thread-link > .icon {
+  margin-left: -3px;
+  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.thread-link:hover > .icon {
+  transform: translateX(2px);
+  color: var(--text-2);
+}
+/* New since I last had it open: a dot, and how many. */
+.thread-link__dot {
+  width: 7px;
+  height: 7px;
+  margin: 0 -2px 0 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  --pop-scale: 0.4;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
+}
+.thread-link__fresh {
+  font-weight: 500;
+}
+/* Something waits on me in there: said in the warning's color, with a quiet pulse. */
+.thread-link.is-asking {
+  border-color: transparent;
+  background: var(--warn-soft);
+}
+.thread-link__asks {
+  color: var(--warn);
+  font-weight: 600;
+}
+.thread-link__asks::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
+}
+/* With no reply yet, what the system did, small and quiet. */
+.thread-note {
+  --rise: 3px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  transition: var(--transition-ui);
+}
+.thread-note:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.thread-note.is-pending span {
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
 }
 .live-badge {
   display: inline-flex;
