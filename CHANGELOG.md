@@ -6,6 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in.
 - **An agent stops at once when its computer can't run.** With Docker off, out of reach or not installed, every command and file read failed, and the agent tried tool after tool, spending tokens to find out the same thing. Now the first call that finds Docker down ends the reply, which says what to do (start Docker, join the docker group, install it) and can be tried again. While Docker stays off, the next replies don't get the computer's tools at all: the agent is told it's down and says so in a sentence, answering what it can without it.
 - **The same error three times ends a reply.** When different calls (another command, another file) keep getting the very same error, what's broken is around them, so the reply stops at the third and shows the error, instead of trying for minutes. A Docker that doesn't answer at all now counts as down too, like one that's off.
 

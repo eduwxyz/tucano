@@ -201,6 +201,14 @@ export interface Message {
   run?: Run
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
+  threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+}
+
+// A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.
+export interface ThreadSummary {
+  text: string
+  until: number
+  at: number
 }
 
 // Dictation with whisper-cli. Unset paths are looked for in the usual places.

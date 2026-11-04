@@ -746,6 +746,11 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.topbar__role {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .topbar__actions {
   display: flex;
   align-items: center;
@@ -1120,6 +1125,26 @@ h3 {
 .md a {
   color: var(--accent);
 }
+/* An agent's @handle in a message: its chip, in its color, that opens its profile. */
+/* Inline, not flex: its text then sits on the line's baseline, like the words around it. */
+.mention {
+  display: inline;
+  white-space: nowrap;
+  padding: 2px 5px 2px 2px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--agent, var(--accent)) 75%, var(--text));
+  background: color-mix(in srgb, var(--agent, var(--accent)) 14%, transparent);
+  transition: var(--transition-ui);
+}
+.mention:hover {
+  background: color-mix(in srgb, var(--agent, var(--accent)) 24%, transparent);
+}
+.mention .avatar {
+  vertical-align: middle;
+  margin-right: 4px;
+}
 /* A long link or word breaks instead of pushing the message out of the conversation. */
 .md {
   max-width: 100%;
@@ -1480,6 +1505,35 @@ h3 {
 .composer textarea:focus {
   box-shadow: none;
 }
+/* The field's text is drawn by the copy behind it (Composer), so a @handle can take its agent's color.
+   Both lay out the same: the copy takes the field's size, padding and type from the script. */
+.composer__field {
+  position: relative;
+}
+.composer__field textarea {
+  position: relative;
+  color: transparent;
+  caret-color: var(--text);
+}
+.composer__field textarea::placeholder {
+  color: var(--text-3);
+}
+.composer__mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--text);
+  pointer-events: none;
+}
+.composer__mirror mark {
+  color: color-mix(in srgb, var(--agent, var(--accent)) 75%, var(--text));
+  background: color-mix(in srgb, var(--agent, var(--accent)) 16%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent, var(--accent)) 16%, transparent);
+  border-radius: 3px;
+}
 .composer__bar {
   display: flex;
   align-items: center;
@@ -1791,6 +1845,13 @@ h3 {
 .profile-card__name {
   font-size: 16px;
   margin-top: 8px;
+}
+.profile-card__role {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 .profile-card__rows {
   width: 100%;
@@ -6041,8 +6102,15 @@ kbd {
 .cal__col {
   position: relative;
   border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  background-image: linear-gradient(color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
   cursor: cell;
+}
+.cal__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  pointer-events: none;
 }
 .cal__col.is-today {
   background-color: color-mix(in srgb, var(--accent) 3%, transparent);
