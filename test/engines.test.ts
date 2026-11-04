@@ -278,11 +278,12 @@ describe('Gemini config', () => {
     const appDir = mkdtempSync(join(tmpdir(), 'gh-'))
     const home = geminiHome(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }, userHome)
     expect(home.startsWith(appDir)).toBe(true)
-    const s = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')) as Record<string, unknown>
-    const dotS = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
-    expect(s['mcpServers']).toEqual({ tucano: { url: 'http://127.0.0.1:1/mcp/x', type: 'http', trust: true, httpUrl: 'http://127.0.0.1:1/mcp/x' } })
-    expect(dotS['mcpServers']).toEqual(s['mcpServers'])
+    // the CLI reads $GEMINI_CLI_HOME/.gemini/, so nothing goes at the root
+    const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
+    expect(existsSync(join(home, 'settings.json'))).toBe(false)
+    expect(s['mcpServers']).toEqual({ tucano: { url: 'http://127.0.0.1:1/mcp/x', type: 'http', trust: true } })
     expect(existsSync(join(home, '.gemini', 'oauth_creds.json'))).toBe(true)
+    expect(existsSync(join(home, 'oauth_creds.json'))).toBe(false)
     expect(s['coreTools']).toEqual([]) // no built-in tools, no web
     expect((s['experimental'] as Record<string, unknown>)['skills']).toEqual({ enabled: false })
     expect((s['privacy'] as Record<string, unknown>)['usageStatisticsEnabled']).toBe(false)
@@ -293,7 +294,7 @@ describe('Gemini config', () => {
 
   it('turns on only the web search when the agent has the web', () => {
     const home = geminiHome(mkdtempSync(join(tmpdir(), 'gh2-')), { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'gu2-')))
-    const s = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')) as Record<string, unknown>
+    const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
     expect(s['coreTools']).toEqual(['google_web_search'])
     expect(s['mcpServers']).toBeUndefined()
   })

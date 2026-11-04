@@ -106,11 +106,9 @@ export function geminiHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
   mkdirSync(dot, { recursive: true })
 
   // The person's login stays theirs: link the OAuth credentials and the account
-  // marker into .gemini/ where the CLI looks, and at the root for compatibility.
-  for (const f of ['oauth_creds.json', 'google_accounts.json']) {
-    linkOrCopy(join(userHome, f), join(dot, f))
-    linkOrCopy(join(userHome, f), join(home, f))
-  }
+  // marker into .gemini/, where the CLI looks (an env-based key or company
+  // gateway needs nothing here).
+  for (const f of ['oauth_creds.json', 'google_accounts.json']) linkOrCopy(join(userHome, f), join(dot, f))
 
   // The agent is Tucano's: its instructions are the system prompt (GEMINI_SYSTEM_MD
   // points the CLI at this file, see geminiEnv).
@@ -118,7 +116,7 @@ export function geminiHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
 
   const settings: Record<string, unknown> = {
     // The app's gateway is the only MCP server; its tools reach the model.
-    ...(turn.mcpUrl ? { mcpServers: { [GATEWAY_NAME]: { url: turn.mcpUrl, type: 'http', trust: true, httpUrl: turn.mcpUrl } } } : {}),
+    ...(turn.mcpUrl ? { mcpServers: { [GATEWAY_NAME]: { url: turn.mcpUrl, type: 'http', trust: true } } } : {}),
     // No built-in tools (shell, files, memory); only web search, and only when
     // the agent has the web. coreTools is the allow-list of built-ins.
     coreTools: turn.web ? [GEMINI_WEB] : [],
@@ -130,9 +128,7 @@ export function geminiHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
     ui: { showMemoryUsage: false },
     general: { checkpointing: { enabled: false } }
   }
-  const serialized = JSON.stringify(settings, null, 2)
-  writeFileSync(join(dot, 'settings.json'), serialized)
-  writeFileSync(join(home, 'settings.json'), serialized)
+  writeFileSync(join(dot, 'settings.json'), JSON.stringify(settings, null, 2))
   return home
 }
 
