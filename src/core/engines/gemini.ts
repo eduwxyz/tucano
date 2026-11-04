@@ -1,7 +1,7 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn } from './types'
@@ -183,8 +183,55 @@ export function geminiEngine(bin: () => string | undefined, appDir: string, shel
   }
 }
 
-// The model ids Gemini can run. Without a reliable list from the CLI, the known
-// current models are offered and the person can also type another by name.
-export function geminiModels(): string[] {
-  return ['gemini/gemini-2.5-pro', 'gemini/gemini-2.5-flash', 'gemini/gemini-2.5-flash-lite']
+// Dynamically extracts model definitions from the installed @google/gemini-cli
+// bundle when available, matching what the CLI exposes in `/model`.
+export function detectGeminiCliModels(binPath?: string): string[] {
+  if (!binPath) return []
+  try {
+    const real = realpathSync(binPath)
+    const marker = join('@google', 'gemini-cli')
+    const idx = real.indexOf(marker)
+    const pkgDir =
+      idx !== -1
+        ? real.slice(0, idx + marker.length)
+        : existsSync(join(dirname(real), 'node_modules', '@google', 'gemini-cli'))
+          ? join(dirname(real), 'node_modules', '@google', 'gemini-cli')
+          : undefined
+    if (!pkgDir) return []
+    const bundleDir = join(pkgDir, 'bundle')
+    if (!existsSync(bundleDir)) return []
+    for (const file of readdirSync(bundleDir)) {
+      if (!file.endsWith('.js') || !file.startsWith('chunk-')) continue
+      const content = readFileSync(join(bundleDir, file), 'utf8')
+      if (!content.includes('isVisible')) continue
+      const regex = /"([a-z0-9.-]+)"\s*:\s*\{[^}]*isVisible\s*:\s*true/g
+      let match: RegExpExecArray | null
+      const found: string[] = []
+      while ((match = regex.exec(content)) !== null) {
+        if (match[1]) found.push(match[1])
+      }
+      if (found.length > 0) return [...new Set(found)].map((m) => `gemini/${m}`)
+    }
+  } catch {
+    // not resolvable or readable: use default models
+  }
+  return []
+}
+
+// The model ids Gemini can run. Dynamically discovered from the installed
+// @google/gemini-cli package when present, falling back to known models.
+export function geminiModels(binPath?: string): string[] {
+  const dynamic = detectGeminiCliModels(binPath)
+  if (dynamic.length > 0) return dynamic
+  return [
+    'gemini/gemini-3.1-pro-preview',
+    'gemini/gemini-3-flash-preview',
+    'gemini/gemini-3.8-flash',
+    'gemini/gemini-3.5-flash-lite',
+    'gemini/gemini-2.5-pro',
+    'gemini/gemini-2.5-flash',
+    'gemini/gemini-2.5-flash-lite',
+    'gemini/gemma-4-31b-it',
+    'gemini/gemma-4-26b-a4b-it'
+  ]
 }
