@@ -38,7 +38,9 @@ import {
   type Trigger,
   type ImageUpload,
   type Os,
-  type LocalInfo
+  type LocalInfo,
+  type VoiceModelId,
+  type VoiceStatus
 } from '../../shared/types'
 import { call, connect } from './rpc'
 
@@ -79,6 +81,7 @@ export interface State {
   routines: Routine[]
   skills: Skill[]
   wikiRev: number // goes up when a wiki page changes: the wiki screens read again
+  voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
   platform: Os
   packaged: boolean
   panel: Panel | null // the side panel next to a conversation
@@ -102,6 +105,7 @@ const initials = (name: string): string =>
 let state: State = {
   ready: false,
   wikiRev: 0,
+  voiceRev: 0,
   navOpen: false,
   view: null,
   me: { name: 'Eu', initials: 'EU' },
@@ -263,6 +267,8 @@ function apply(e: CoreEvent): void {
         return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
       case 'wiki':
         return { ...s, wikiRev: s.wikiRev + 1 }
+      case 'voice':
+        return { ...s, voiceRev: s.voiceRev + 1 }
     }
   })
 }
@@ -336,6 +342,12 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 }
 
 export const refreshEngines = (): void => void call('refreshEngines')
+export const voiceStatus = (): Promise<VoiceStatus> => call('voiceStatus')
+export const voiceDownload = (model: VoiceModelId): Promise<void> => call('voiceDownload', { model })
+export const voiceCancelDownload = (): Promise<void> => call('voiceCancelDownload')
+export const voiceRemoveModel = (model: VoiceModelId): Promise<void> => call('voiceRemoveModel', { model })
+export const transcribe = async (id: string, audio: string): Promise<string> => (await call('transcribe', { id, audio })).text
+export const cancelTranscribe = (id: string): Promise<void> => call('cancelTranscribe', { id })
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
 // More logins of Claude Code and Codex, each signed into in a terminal.
 export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })

@@ -200,6 +200,26 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
 }
 
+// Dictation with whisper-cli. Unset paths are looked for in the usual places.
+export interface VoiceSettings {
+  bin?: string
+  model?: string
+  detect?: boolean // I speak other languages: whisper finds out which, instead of using the app's
+  hidden?: boolean // no microphone button in the message field
+}
+
+export type VoiceModelId = 'recommended' | 'light' // the models the app downloads by itself
+
+export interface VoiceStatus {
+  bin?: string
+  model?: string
+  ready: boolean
+  ownModel?: VoiceModelId // the model in use is one the app downloaded
+  downloaded?: VoiceModelId[]
+  downloading?: { model: VoiceModelId; received: number; total: number }
+  error?: string // the last download failed
+}
+
 export interface LocalInfo {
   kind: 'image' | 'video' | 'pdf' | 'folder' | 'file'
   url?: string // to see it here: images and videos
@@ -211,6 +231,7 @@ export interface Settings {
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  voice?: VoiceSettings
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories

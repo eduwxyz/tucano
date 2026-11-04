@@ -38,8 +38,13 @@ import {
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
-  isTeam
+  isTeam,
+  cancelTranscribe,
+  transcribe,
+  voiceStatus
 } from '../store'
+import { canRecord, NoSound, record, type Recording } from '../voice'
+import { useVoice, VoicePopover } from './VoiceSetup'
 import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
@@ -794,6 +799,238 @@ async function prepareImage(file: File): Promise<Attached | string> {
 // lose the message you were typing.
 const drafts = new Map<string, { text: string; images: Attached[] }>()
 
+type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing'
+type DictationControls = { press: () => void; release: () => void; stop: () => void; cancel: () => void; startedAt: () => number }
+
+const NOT_READY = (): string => L('Para ditar, clique no microfone e ative o ditado.', 'To dictate, click the microphone and turn dictation on.')
+const SHORT_MS = 300
+const HOLD_MS = 400 // held at least this long, letting go ends it (push to talk); a click starts it, the next one ends it
+
+// Click to record, click again to transcribe (or hold and let go). The text goes to the field to be reviewed, never sent:
+// dictation gets names wrong, and a message sets an agent working.
+function useDictation(insert: (text: string) => void, setNote: (note: string) => void, conversationId: string): [DictationState, DictationControls] {
+  const [state, setState] = useState<DictationState>('idle')
+  const rec = useRef<Recording | null>(null)
+  const startedAt = useRef(0)
+  const job = useRef<string | null>(null)
+  const released = useRef(false)
+  const attempt = useRef(0) // a microphone that opens after this one was given up on gets closed
+  const platform = useStore((s) => s.platform)
+
+  const cancel = (): void => {
+    released.current = true
+    rec.current?.cancel()
+    rec.current = null
+    if (job.current) void cancelTranscribe(job.current)
+    job.current = null
+    setState('idle')
+  }
+
+  const stop = (): void => {
+    released.current = true
+    const r = rec.current
+    if (!r) return
+    rec.current = null
+    if (Date.now() - startedAt.current < SHORT_MS) {
+      r.cancel()
+      setState('idle')
+      setNote(L('Curto demais: clique, fale e clique de novo.', 'Too short: click, speak, and click again.'))
+      return
+    }
+    setState('transcribing')
+    const id = crypto.randomUUID()
+    job.current = id
+    void r
+      .stop()
+      .then((audio) => transcribe(id, audio))
+      .then(
+        (said) => {
+          if (job.current !== id) return
+          if (said) insert(said)
+          else setNote(L('Não ouvi nada nessa gravação.', "I didn't hear anything in that recording."))
+        },
+        (e: unknown) => {
+          if (job.current !== id) return
+          if (e instanceof NoSound)
+            setNote(
+              platform === 'mac'
+                ? L('Não chegou som do microfone. Confira qual está em uso em Ajustes do Sistema › Som.', 'No sound came from the microphone. Check which one is in use in System Settings › Sound.')
+                : L('Não chegou som do microfone. Confira qual está em uso nas configurações de som do sistema.', 'No sound came from the microphone. Check which one is in use in the system’s sound settings.')
+            )
+          else setNote(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
+        }
+      )
+      .finally(() => {
+        if (job.current !== id) return
+        job.current = null
+        setState('idle')
+      })
+  }
+
+  const start = (): void => {
+    if (state !== 'idle') return
+    released.current = false
+    const mine = ++attempt.current
+    setNote('')
+    setState('starting')
+    void voiceStatus()
+      .then((status) => {
+        if (!status.ready) throw new Error(NOT_READY())
+        return record()
+      })
+      .then(
+        (r) => {
+          if (mine !== attempt.current) return r.cancel()
+          // Let go while the microphone was still opening: nothing to record.
+          if (released.current) {
+            r.cancel()
+            setState('idle')
+            return
+          }
+          rec.current = r
+          startedAt.current = Date.now()
+          setState('recording')
+        },
+        (e: unknown) => {
+          if (mine !== attempt.current) return
+          setState('idle')
+          const name = e instanceof Error ? e.name : ''
+          setNote(
+            name === 'NotAllowedError'
+              ? platform === 'mac'
+                ? L('O microfone está bloqueado. Libere o Tucano em Ajustes do Sistema › Privacidade e Segurança › Microfone.', 'The microphone is blocked. Allow Tucano in System Settings › Privacy & Security › Microphone.')
+                : L('O microfone está bloqueado. Libere o Tucano nas configurações de privacidade do sistema.', 'The microphone is blocked. Allow Tucano in the system’s privacy settings.')
+            : name === 'NotFoundError' ? L('Não encontrei um microfone.', "I couldn't find a microphone.")
+            : e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)
+          )
+        }
+      )
+  }
+
+  useEffect(() => cancel, [conversationId]) // leaving the conversation drops what's going on
+
+  // The key can be let go anywhere, and no event reaches the field after the window loses focus.
+  // A press starts it, or ends one going on. Let go after holding it a while ends it too.
+  const pressedAt = useRef(0)
+  const toggled = useRef(false) // this press ended a recording: its release does nothing
+  const press = (): void => {
+    if (state === 'recording' || state === 'starting') return (toggled.current = true), stop()
+    if (state !== 'idle') return
+    toggled.current = false
+    pressedAt.current = Date.now()
+    start()
+  }
+  const release = (): void => {
+    if (toggled.current || !pressedAt.current) return
+    const held = Date.now() - pressedAt.current
+    pressedAt.current = 0
+    if (held >= HOLD_MS) stop()
+  }
+
+  const listening = state === 'starting' || state === 'recording'
+  useEffect(() => {
+    if (!listening) return
+    // the key can be let go anywhere; Esc drops it from anywhere
+    const up = (e: KeyboardEvent): void => {
+      if (e.code === 'Space') release()
+    }
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') cancel()
+    }
+    // held when the window lost focus: no release will come, so that's the end of it
+    const blur = (): void => {
+      if (pressedAt.current && Date.now() - pressedAt.current >= HOLD_MS) release()
+    }
+    document.addEventListener('keyup', up)
+    document.addEventListener('keydown', esc)
+    window.addEventListener('blur', blur)
+    return () => {
+      document.removeEventListener('keyup', up)
+      document.removeEventListener('keydown', esc)
+      window.removeEventListener('blur', blur)
+    }
+  }, [listening])
+
+  return [state, { press, release, stop, cancel, startedAt: () => startedAt.current }]
+}
+
+function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
+  const platform = useStore((s) => s.platform)
+  const hidden = useStore((s) => !!s.settings.voice?.hidden)
+  const status = useVoice()
+  const [open, setOpen] = useState(false)
+  // Once it's turned on from the balloon, the balloon says how to use it, then gets out of the way.
+  if (!canRecord() || hidden || !status) return null // no secure context, or the person hid it
+  if (!status.ready)
+    return (
+      <span className="voice-wrap">
+        <button
+          className={`icon-btn voice-btn is-off ${status.downloading ? 'is-loading' : ''}`}
+          aria-label={L('Ditar mensagens', 'Dictate messages')}
+          aria-expanded={open}
+          title={status.downloading ? L('Baixando o modelo de voz…', 'Downloading the voice model…') : L('Ditar mensagens: ativar', 'Dictate messages: turn on')}
+          onClick={() => setOpen(!open)}
+        >
+          <Icon name="mic" size={15} />
+        </button>
+        {open && <VoicePopover status={status} onClose={() => setOpen(false)} />}
+      </span>
+    )
+  if (open)
+    return (
+      <span className="voice-wrap">
+        <button className="icon-btn voice-btn" aria-label={L('Ditar mensagens', 'Dictate messages')} onClick={() => setOpen(false)}>
+          <Icon name="mic" size={15} />
+        </button>
+        <VoicePopover status={status} onClose={() => setOpen(false)} />
+      </span>
+    )
+  if (state === 'transcribing')
+    return (
+      <button className="btn btn--xs" title={L('Cancelar', 'Cancel')} onClick={controls.cancel}>
+        {L('Transcrevendo…', 'Transcribing…')} <Icon name="x" size={11} />
+      </button>
+    )
+  const on = state === 'recording'
+  return (
+    <span className="voice-wrap">
+      <button
+        className={`icon-btn voice-btn ${on ? 'is-recording' : ''}`}
+        aria-label={on ? L('Terminar e transcrever', 'Finish and transcribe') : L('Falar', 'Speak')}
+        aria-pressed={on}
+        title={on ? L('Clique para terminar (Esc cancela)', 'Click to finish (Esc cancels)') : L(`Clique para falar, e de novo para terminar (${platform === 'mac' ? '⌥' : 'Ctrl+'}Espaço)`, `Click to speak, and again to finish (${platform === 'mac' ? '⌥' : 'Ctrl+'}Space)`)}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          controls.press()
+        }}
+        onPointerUp={controls.release}
+        onPointerCancel={controls.cancel}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <Icon name="mic" size={15} />
+      </button>
+      {on && <RecordingClock since={controls.startedAt()} />}
+    </span>
+  )
+}
+
+// While it records: for how long, and how to end it.
+function RecordingClock({ since }: { since: number }): ReactNode {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 500)
+    return () => clearInterval(t)
+  }, [])
+  const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
+  return (
+    <span className="voice-clock" aria-live="off">
+      <i />
+      {Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}
+      <span className="muted"> · {L('clique para terminar', 'click to finish')}</span>
+    </span>
+  )
+}
+
 export function Composer({ conversationId, members, placeholder }: { conversationId: string; members: Agent[]; placeholder: string }): ReactNode {
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -805,6 +1042,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
   const [active, setActive] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const platform = useStore((s) => s.platform)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
   const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
@@ -912,6 +1150,19 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
     })
   }
 
+  const insert = (said: string): void => {
+    const el = ref.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? start
+    setText((cur) => {
+      const before = cur.slice(0, start)
+      const glue = before && !/\s$/.test(before) ? ' ' : ''
+      return `${before}${glue}${said}${cur.slice(end)}`
+    })
+    el?.focus()
+  }
+  const [voice, voiceControls] = useDictation(insert, setNote, conversationId)
+
   const submit = (): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
@@ -993,6 +1244,12 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             void addFiles(files)
           }}
           onKeyDown={(e) => {
+            if (e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
+              e.preventDefault()
+              if (!e.repeat) voiceControls.press()
+              return
+            }
+            if (e.key === 'Escape' && voice !== 'idle') return voiceControls.cancel()
             if (mention && options.length > 0) {
               if (e.key === 'ArrowDown') return (e.preventDefault(), setActive((active + 1) % options.length))
               if (e.key === 'ArrowUp') return (e.preventDefault(), setActive((active - 1 + options.length) % options.length))
@@ -1006,6 +1263,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
           }}
         />
         <div className="composer__bar">
+          <VoiceButton controls={voiceControls} state={voice} />
           <button className="icon-btn" title={L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
             <Icon name="image" size={15} />
           </button>

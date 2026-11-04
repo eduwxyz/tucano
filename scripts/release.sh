@@ -57,6 +57,9 @@ IDENTITY="${TUCANO_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | a
 export APPLE_KEYCHAIN_PROFILE="${TUCANO_NOTARY_PROFILE:-tucano}"
 
 npm run build
+# Dictation's whisper-cli, built for each chip and signed with the app (scripts/whisper.mjs).
+node scripts/whisper.mjs mac arm64
+node scripts/whisper.mjs mac x64
 npx electron-builder --mac dmg zip --arm64 --x64 --publish never \
   --config.directories.output="$OUT" \
   --config.mac.identity="$IDENTITY" \

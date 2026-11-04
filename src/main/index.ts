@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
-import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, session, type MediaAccessPermissionRequest, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
@@ -57,7 +57,7 @@ const localKey = randomBytes(32).toString('hex')
 function startCore(): UtilityProcess {
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: 'tucano-core',
-    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
+    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
   })
   child.on('message', (msg: CoreRequest) => handleCore(child, msg))
   child.on('exit', (code) => {
@@ -91,6 +91,8 @@ ipcMain.on('viewing', (_e, id: unknown) => {
 // you, two notes when the work is done. Never more than one at a time.
 let chirpedAt = 0
 const resource = (name: string): string => (app.isPackaged ? join(process.resourcesPath, name) : join(app.getAppPath(), 'build', name))
+// Dictation's whisper-cli, packed with the app (scripts/whisper.mjs); in development, the one built for this machine.
+const whisperDir = (): string => (app.isPackaged ? join(process.resourcesPath, 'whisper') : join(app.getAppPath(), 'build', 'whisper', `${({ darwin: 'mac', win32: 'win' } as Record<string, string>)[process.platform] ?? process.platform}-${process.arch}`))
 // The system's own player: afplay on a Mac; on Windows .NET's SoundPlayer, with nothing
 // to install; on Linux PipeWire's or PulseAudio's, else ALSA's.
 const player = ((): ((file: string) => [string, string[]]) | null => {
@@ -450,6 +452,13 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
     app.exit(0)
   })
 } else if (primary) app.whenReady().then(() => {
+  // Dictation: audio, for the app's own page. A service open in the side panel or anything else asks in vain.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, done, details) => {
+    if (permission !== 'media') return done(true)
+    const media = details as MediaAccessPermissionRequest
+    const own = !!BrowserWindow.fromWebContents(contents) && (media.requestingUrl ?? '').startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'file://')
+    done(own && !!media.mediaTypes?.length && media.mediaTypes.every((t) => t === 'audio'))
+  })
   setMenu()
   protocol.handle('tucano', serveArtifact)
   core = startCore()

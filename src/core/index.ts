@@ -1,6 +1,8 @@
 // The core runs in an Electron utility process: database, engines and runs
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
+import { voiceRefusal } from '../shared/voice'
+import { ModelDownload, Transcriber, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -376,6 +378,14 @@ const chrome =
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
+const transcriber = new Transcriber()
+// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads.
+const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(dataDir, 'voice') }
+const modelDownload = new ModelDownload(voicePlaces.models, () => emit({ type: 'voice' }), fetch, undefined, () => void dictation().then((s) => warmUp(transcriber, s)))
+const dictation = async () => {
+  const s = voiceStatus(settings().voice, await loginEnv(), undefined, voicePlaces)
+  return { ...s, ...(modelDownload.progress ? { downloading: modelDownload.progress } : {}), ...(modelDownload.error ? { error: modelDownload.error } : {}) }
+}
 // Out of the environment before anything starts: commands the agents run inherit it.
 const localKey = process.env['TUCANO_LOCAL_KEY']
 delete process.env['TUCANO_LOCAL_KEY']
@@ -918,7 +928,19 @@ const api: Api = {
     return { ok: true, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
   },
 
+  voiceStatus: () => dictation(),
+  transcribe: async ({ id, audio }) => {
+    const voice = settings().voice
+    return { text: await transcriber.transcribe(id, audio, await dictation(), voice?.detect ? undefined : settings().language) }
+  },
+  voiceDownload: ({ model }) => void modelDownload.start(model),
+  voiceCancelDownload: () => modelDownload.cancel(),
+  voiceRemoveModel: ({ model }) => modelDownload.remove(model),
+  cancelTranscribe: ({ id }) => transcriber.cancel(id),
+
   updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...patch } }) => {
+    const why = voiceRefusal(patch.voice)
+    if (why) throw new Error(why)
     db.setSettings(patch)
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
