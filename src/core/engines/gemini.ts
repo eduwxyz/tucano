@@ -73,7 +73,8 @@ export function geminiArgs(turn: Pick<Turn, 'model'>): string[] {
   return ['-p', '', '--output-format', 'stream-json', '--approval-mode', 'yolo', '-m', turn.model]
 }
 
-const userHomeOf = (): string => process.env['GEMINI_CLI_HOME'] || join(homedir(), '.gemini')
+// GEMINI_CLI_HOME is the CLI's home: its files (login included) live in .gemini/ under it.
+const userHomeOf = (): string => join(process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
 
 // Where the app keeps the Gemini homes, in its data folder.
 export const geminiAppDir = (dataDir: string): string => join(dataDir, 'gemini')
@@ -94,47 +95,61 @@ function linkOrCopy(target: string, at: string): void {
 }
 
 // A home for one turn. Gemini reads settings, context files (GEMINI.md), its MCP
-// servers and its session from the home, so a fresh home per turn keeps a turn
-// to its own tools and leaves no session behind. settings.json gives the gateway
+// servers and its session from the home (under .gemini/), so a fresh home per turn
+// keeps a turn to its own tools and leaves no session behind. settings.json gives the gateway
 // as the only MCP server and turns the built-in tools off; the person's login
 // (OAuth credentials, or an env-based key/gateway) is brought in; the agent's
-// instructions go to a file the CLI reads as the system prompt. The settings
-// nest the way the CLI expects (mcpServers, tools.core/exclude, a quiet UI).
+// instructions go to a file the CLI reads as the system prompt.
 export function geminiHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, userHome = userHomeOf()): string {
   mkdirSync(appDir, { recursive: true })
   const home = join(appDir, randomBytes(8).toString('hex'))
-  mkdirSync(home, { recursive: true })
+  const dot = join(home, '.gemini')
+  mkdirSync(dot, { recursive: true })
 
   // The person's login stays theirs: link the OAuth credentials and the account
-  // marker (an env-based key or company gateway needs nothing here).
-  for (const f of ['oauth_creds.json', 'google_accounts.json']) linkOrCopy(join(userHome, f), join(home, f))
+  // marker into .gemini/, where the CLI looks (an env-based key or company
+  // gateway needs nothing here).
+  for (const f of ['oauth_creds.json', 'google_accounts.json']) linkOrCopy(join(userHome, f), join(dot, f))
 
   // The agent is Tucano's: its instructions are the system prompt (GEMINI_SYSTEM_MD
   // points the CLI at this file, see geminiEnv).
   writeFileSync(join(home, 'system.md'), turn.system)
 
+  // Keys as Gemini CLI 0.28 reads them (older flat keys like coreTools are ignored).
   const settings: Record<string, unknown> = {
     // The app's gateway is the only MCP server; its tools reach the model.
-    ...(turn.mcpUrl ? { mcpServers: { [GATEWAY_NAME]: { httpUrl: turn.mcpUrl } } } : {}),
+    ...(turn.mcpUrl ? { mcpServers: { [GATEWAY_NAME]: { url: turn.mcpUrl, type: 'http', trust: true } } } : {}),
+    // ...and the only one allowed: a server declared anywhere else never starts.
+    mcp: { allowed: [GATEWAY_NAME] },
     // No built-in tools (shell, files, memory); only web search, and only when
-    // the agent has the web. coreTools is the allow-list of built-ins.
-    coreTools: turn.web ? [GEMINI_WEB] : [],
+    // the agent has the web. tools.core is the allow-list of built-ins; no
+    // discovery or call command, so no tools come from running a command.
+    tools: { core: turn.web ? [GEMINI_WEB] : [], discoveryCommand: '', callCommand: '' },
+    // No hooks: a hook is a command the CLI runs around each turn.
+    hooksConfig: { enabled: false },
     // Nothing of Gemini's own that would run behind the app's back or spend
-    // tokens outside the receipts.
-    extensions: { disableAll: true },
-    experimental: { skills: { enabled: false } },
+    // tokens outside the receipts: no skills, no built-in subagents. Extensions
+    // load from the home, which is fresh, so there are none.
+    skills: { enabled: false },
+    agents: { overrides: { codebase_investigator: { enabled: false }, cli_help: { enabled: false } } },
     privacy: { usageStatisticsEnabled: false },
+    telemetry: { enabled: false, logPrompts: false },
     ui: { showMemoryUsage: false },
     general: { checkpointing: { enabled: false } }
   }
-  writeFileSync(join(home, 'settings.json'), JSON.stringify(settings, null, 2))
+  writeFileSync(join(dot, 'settings.json'), JSON.stringify(settings, null, 2))
   return home
 }
 
 // The env a gemini turn runs with: its own home, the system prompt file, and no
 // context-file discovery (the person's GEMINI.md never leaks into the agent).
+// The turn's settings are also the system settings: Gemini applies those last,
+// over a .gemini/settings.json in the working folder (headless, the CLI trusts
+// any folder). That only holds for the keys we set: built-in tools, MCP servers,
+// skills, subagents, tool discovery, hooks and telemetry. A key a newer CLI adds
+// is the folder's until it's set here too.
 export function geminiEnv(home: string, base: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return { ...base, GEMINI_CLI_HOME: home, GEMINI_SYSTEM_MD: join(home, 'system.md') }
+  return { ...base, GEMINI_CLI_HOME: home, GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, '.gemini', 'settings.json'), GEMINI_SYSTEM_MD: join(home, 'system.md') }
 }
 
 // The model is "<provider>/<model>" as the picker lists it; the CLI wants the
