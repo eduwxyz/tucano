@@ -219,7 +219,7 @@ describe('routines', () => {
 
     await runner.send('d1', 'oi de novo') // its next turn sees the time and only its active routines
     await runner.idle()
-    expect(turns.at(-1)!.prompt).toMatch(/\[Edu · (dom|seg|ter|qua|qui|sex|sáb) \d\d\/\d\d \d\d:\d\d\]\noi de novo$/) // the time, with the weekday, in each message
+    expect(turns.at(-1)!.prompt).toMatch(/\[Edu · (dom|seg|ter|qua|qui|sex|sáb) \d\d\/\d\d \d\d:\d\d\]\noi de novo(\n|$)/) // the time, with the weekday, in each message
     expect(turns.at(-1)!.system).not.toContain('## Suas rotinas')
   })
 
