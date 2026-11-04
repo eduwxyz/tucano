@@ -2,6 +2,12 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [Unreleased]
+
+### Fixed
+
+- **Long replies no longer stop with an API error.** A Claude reply that wrote more than 32,000 tokens at once (thinking included: a lead's long report, a big table or file) ended in "Claude's response exceeded the 32000 output token maximum". Tucano now lets one model call write up to 64,000, capped at each model's own maximum; your own `CLAUDE_CODE_MAX_OUTPUT_TOKENS` in Claude Code's settings still wins. If a reply goes past even that, it says so in plain words: ask for it in parts, or lower the agent's effort.
+
 ## [0.2.10] - 2026-11-04
 
 > **Em português:** chegaram as threads: cada resposta a uma mensagem, e o que ela dispara, fica na thread dela, que abre na lateral. Na conversa aparecem só as mensagens que abriram uma thread, com quem participou, quantas respostas e o que espera por você. E um "bom dia" pro grupo agora chama todos os agentes. Também dá pra ditar mensagens: clique no microfone, fale e clique de novo, e o texto cai no campo pra você revisar. Tudo roda no seu computador, sem internet, e o modelo baixa com um clique. Os canais podem ser arrastados e organizados em grupos que recolhem, e um caminho de arquivo na mensagem de um agente vira link. O token de um conector pode ser trocado sem remover o conector. Os erros agora dizem o que aconteceu e o que fazer. E uma leva de correções: os agentes no Gemini passam a ler as configurações do Tucano, o modelo reserva entra no limite de 5 horas do Claude Code, as rotinas mandam a resposta inteira pro Telegram e, no Windows, o Tucano não trava mais a atualização de outros apps. Obrigado à Rayanne, ao Gabriel, ao Alan, ao Cleiton e ao Kayo!

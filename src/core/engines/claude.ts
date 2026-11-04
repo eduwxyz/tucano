@@ -167,6 +167,11 @@ export function claudeParser(): Parser {
   }
 }
 
+// What one model call may write, thinking included. Claude Code's own default (32k) cuts a lead's long report
+// or a big table short with an API error; it caps this at each model's own maximum, so it's safe to ask for more.
+// The person's own setting (their Claude Code settings.json `env`) still wins.
+export const MAX_OUTPUT_TOKENS = '64000'
+
 export function claudeEngine(bin: () => string | undefined, provider: () => Promise<Provider> = async () => userProvider()): Engine {
   return {
     id: 'claude',
@@ -178,7 +183,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       }
       // The gateway's token goes in the environment, never in the arguments (other processes can read those).
       const p = await provider()
-      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, ...p.env, ...(turn.account ? { CLAUDE_CONFIG_DIR: turn.account } : {}), MCP_TOOL_TIMEOUT: '900000' } })
+      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: MAX_OUTPUT_TOKENS, ...p.env, ...(turn.account ? { CLAUDE_CONFIG_DIR: turn.account } : {}), MCP_TOOL_TIMEOUT: '900000' } })
     }
   }
 }
