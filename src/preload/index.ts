@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld('tucano', {
   onNavigate: (cb: (conversationId: string) => void): void => {
     ipcRenderer.on('navigate', (_e, id: unknown) => typeof id === 'string' && cb(id))
   },
+  // …or a screen (a skill proposal opens Skills).
+  onNavigatePage: (cb: (page: 'skills') => void): void => {
+    ipcRenderer.on('navigate-page', (_e, page: unknown) => page === 'skills' && cb(page))
+  },
+  // The core's process ended: the page says so and offers to reload, which starts a new one.
+  onCoreDown: (cb: () => void): void => {
+    ipcRenderer.on('core:down', () => cb())
+  },
   // The conversation on screen: the Mac doesn't notify about the one you're reading.
   viewing: (conversationId: string | null): void => ipcRenderer.send('viewing', conversationId),
   // The app's own updates.

@@ -238,7 +238,8 @@ describe('Runner', () => {
     const r = runner(broken)
     await r.send('d1', 'oi')
     await r.idle()
-    expect(agentMessages()[0]?.run).toMatchObject({ status: 'failed', error: 'usage limit reached' })
+    // In what to do, with the CLI's own words kept as the detail.
+    expect(agentMessages()[0]?.run).toMatchObject({ status: 'failed', error: 'Seu plano do Claude Code chegou no limite. Tente de novo mais tarde.', errorDetail: 'usage limit reached' })
   })
 })
 

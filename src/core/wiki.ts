@@ -9,6 +9,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { basename, join, relative, resolve, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { L, locale } from '../shared/lang'
+import { UserError } from '../shared/errors'
 import type { WikiChange, WikiFinding, WikiHit, WikiImport, WikiOp, WikiPage, WikiPageInfo, WikiSource, WikiVersion } from '../shared/types'
 import type { ToolDef } from './gateway'
 
@@ -20,7 +21,7 @@ const LOG = 'registro.md'
 const CHUNK = 1500 // characters per search chunk: a long page answers with the right part
 const KIND_OTHER = () => L('Outros', 'Other')
 
-export class WikiConflict extends Error {
+export class WikiConflict extends UserError {
   constructor() {
     super(L('Essa página mudou desde que foi aberta. Recarregue e faça a mudança de novo.', 'This page changed since it was opened. Reload it and make the change again.'))
   }

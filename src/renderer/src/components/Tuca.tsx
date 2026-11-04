@@ -9,6 +9,7 @@ import {
   modelInfo,
   navigate,
   newAgentDraft,
+  openDm,
   sendMessage,
   settleDraft,
   slug,
@@ -87,15 +88,20 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
       <div className="draft-card__actions">
         {d.state === 'created' ? (
           <>
-            <span className="tag tag--ok">{L('criado', 'created')}</span>
+            <span className="tag tag--ok">{created ? L(`${created.name} entrou no time`, `${created.name} joined the team`) : L('criado', 'created')}</span>
             {created && (
-              <button className="link" onClick={() => navigate({ kind: 'agent', id: created.id })}>
-                {L('Ver', 'See')} {created.name}
-              </button>
+              <>
+                <button className="btn btn--primary btn--sm" onClick={() => void openDm(created.id)}>
+                  {L('Abrir conversa', 'Open conversation')}
+                </button>
+                <button className="link" onClick={() => navigate({ kind: 'agent', id: created.id })}>
+                  {L('Ver perfil', 'See profile')}
+                </button>
+              </>
             )}
           </>
         ) : d.state === 'dismissed' ? (
-          <span className="tag">{L('descartado', 'dismissed')}</span>
+          <span className="tag">{L('descartado', 'discarded')}</span>
         ) : replaced ? (
           <span className="muted small">{L('Trocada por uma proposta mais nova.', 'Replaced by a newer proposal.')}</span>
         ) : use ? (
@@ -111,7 +117,7 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
               {L('Editar antes', 'Edit first')}
             </button>
             <button className="btn btn--ghost btn--sm" onClick={() => settleDraft(message.id)}>
-              {L('Descartar', 'Dismiss')}
+              {L('Descartar', 'Discard')}
             </button>
           </>
         )}

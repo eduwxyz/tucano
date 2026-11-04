@@ -21,8 +21,10 @@ import {
   installEngine,
   loginEngine,
   modelInfo,
+  navigate,
   openExternal,
   rememberModels,
+  setTab,
   testEngine,
   updateSettings,
   useStore,
@@ -104,7 +106,15 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
 
   // A harness's own card passes just that harness: it's already chosen there, so no select.
   const fixed = engines?.length === 1 && !jev
-  if (!engine && !jev) return <p className="hint hint--warn">{L('Nenhum harness pronto. Veja em Configurações → Modelos.', 'No harness ready. See Settings → Models.')}</p>
+  if (!engine && !jev)
+    return (
+      <p className="hint hint--warn">
+        {L('Nenhum Claude Code ou Codex pronto ainda.', 'No Claude Code or Codex ready yet.')}{' '}
+        <button className="link" onClick={() => (setTab('settings', 'modelos'), navigate({ kind: 'settings' }))}>
+          {L('Configurar', 'Set up')}
+        </button>
+      </p>
+    )
   return (
     <div className="model-picker">
       {!fixed && (
@@ -257,7 +267,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
       </div>
       {manual && !st.loggedIn && (
         <div className="harness__body">
-          <span className="hint">{L('Não achei um terminal pra abrir. Pra entrar, cole no seu terminal:', "Couldn't find a terminal to open. To sign in, paste in your terminal:")}</span>
+          <span className="hint">{L('Não deu pra abrir um terminal daqui. Pra entrar, cole isto no seu terminal:', "A terminal couldn't be opened from here. To sign in, paste this in your terminal:")}</span>
           <code className="harness__cmd">{manual}</code>
         </div>
       )}
@@ -279,7 +289,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
       )}
       {st.warning && <p className="hint hint--warn harness__body">{st.warning}</p>}
       {st.route === 'gateway' && picked && <p className="hint harness__body">{L(`Os agentes usam esse mesmo gateway. A telemetria do ${ENGINES[engine].label} fica desligada, pra nada sair por fora dele.`, `Agents use this same gateway. ${ENGINES[engine].label}'s telemetry stays off, so nothing leaves around it.`)}</p>}
-      {st.soon && st.installed && <p className="hint harness__body">{L(`Já achei a sua configuração. O Tucano ainda não roda agentes no ${ENGINES[engine].label}: chega numa próxima versão.`, `Found your setup. Tucano doesn't run agents on ${ENGINES[engine].label} yet: it's coming in a future version.`)}</p>}
+      {st.soon && st.installed && <p className="hint harness__body">{L(`A sua configuração já foi encontrada. O Tucano ainda não roda agentes no ${ENGINES[engine].label}: chega numa próxima versão.`, `Your setup was found. Tucano doesn't run agents on ${ENGINES[engine].label} yet: it's coming in a future version.`)}</p>}
       {testing && (
         <div className="harness__body">
           <div className="harness__test">
@@ -341,7 +351,7 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
   return (
     <section className="card from-harness">
       <div className="from-harness__head">
-        <strong>{L('Nos seus harnesses', 'In your harnesses')}</strong>
+        <strong>{L('No Claude Code, Codex e outros que você usa', 'In Claude Code, Codex and others you use')}</strong>
         <span className="muted small">{L('Os servidores MCP que você já configurou. Ao adicionar, os agentes passam a usar pelo Tucano, com as permissões e aprovações daqui.', 'The MCP servers you already set up. Once added, agents use them through Tucano, with the permissions and approvals set here.')}</span>
       </div>
       {found.map((m) => (
@@ -400,7 +410,7 @@ export function AccountsCard(): ReactNode {
             </p>
             {manual[a.id] && !a.loggedIn && (
               <>
-                <span className="hint">{L('Não achei um terminal pra abrir. Pra entrar, cole no seu terminal:', "Couldn't find a terminal to open. To sign in, paste in your terminal:")}</span>
+                <span className="hint">{L('Não deu pra abrir um terminal daqui. Pra entrar, cole isto no seu terminal:', "A terminal couldn't be opened from here. To sign in, paste this in your terminal:")}</span>
                 <code className="harness__cmd">{manual[a.id]}</code>
               </>
             )}
@@ -434,7 +444,14 @@ export function AccountsCard(): ReactNode {
           {L('Adicionar e entrar', 'Add and sign in')}
         </button>
       </div>
-      {removing && <p className="hint hint--warn">{L('Os agentes dessa conta voltam pro login de sempre do harness, e o login dela sai deste computador.', 'Its agents go back to the harness’s usual login, and its sign-in leaves this computer.')}</p>}
+      {removing && (
+        <p className="hint hint--warn">
+          {L(
+            `Os agentes dessa conta voltam pro login de sempre do ${ENGINES[accounts.find((a) => a.id === removing)?.engine ?? 'claude'].label}, e o login dela sai deste computador.`,
+            `Its agents go back to ${ENGINES[accounts.find((a) => a.id === removing)?.engine ?? 'claude'].label}’s usual login, and its sign-in leaves this computer.`
+          )}
+        </p>
+      )}
     </div>
   )
 }

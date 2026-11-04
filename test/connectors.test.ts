@@ -102,7 +102,8 @@ describe('OAuth signed in from a page on another machine (Tucano as a server)', 
 
   it('says what went wrong with an address that is no answer', async () => {
     await expect(connectors.finishOAuthFromUrl('não é um endereço')).rejects.toThrow()
-    await expect(connectors.finishOAuthFromUrl('http://127.0.0.1:1/oauth/callback?error=access_denied')).rejects.toThrow(/access_denied/)
+    await expect(connectors.finishOAuthFromUrl('http://127.0.0.1:1/oauth/callback?error=access_denied')).rejects.toThrow(/recusou o acesso.*Permitir/)
+    await expect(connectors.finishOAuthFromUrl('http://127.0.0.1:1/oauth/callback?error=server_error')).rejects.toThrow(/server_error/)
   })
 })
 

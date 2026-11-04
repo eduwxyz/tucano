@@ -2,13 +2,74 @@
 // right-click menu. Which window is open lives in the store, so the sidebar's
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { agentById, archiveAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setTopic, shortcut, useStore, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
 
 export function Dialogs(): ReactNode {
+  return (
+    <>
+      <DialogBody />
+      <ConfirmHost />
+    </>
+  )
+}
+
+// ---------- asking before something is deleted, archived or removed ----------
+// confirmDialog({ title, body, confirm, danger }) opens a small window over the app and
+// resolves true when the person clicks the confirm button (named with the verb and the
+// thing: “Excluir #lancamento”), false on Cancelar, Esc or a click outside. danger is for
+// what can't be undone: red button, and Cancelar holds the focus so Enter doesn't destroy.
+type Ask = { title: string; body?: string; confirm: string; danger?: boolean; resolve: (ok: boolean) => void }
+let asking: Ask | null = null
+const askListeners = new Set<() => void>()
+const setAsking = (a: Ask | null): void => {
+  asking = a
+  askListeners.forEach((l) => l())
+}
+
+export function confirmDialog(o: { title: string; body?: string; confirm: string; danger?: boolean }): Promise<boolean> {
+  asking?.resolve(false)
+  return new Promise((resolve) => setAsking({ ...o, resolve }))
+}
+
+function ConfirmHost(): ReactNode {
+  const ask = useSyncExternalStore(
+    (l) => {
+      askListeners.add(l)
+      return () => askListeners.delete(l)
+    },
+    () => asking
+  )
+  if (!ask) return null
+  const answer = (ok: boolean): void => {
+    if (asking !== ask) return
+    setAsking(null)
+    ask.resolve(ok)
+  }
+  return (
+    <Modal title={ask.title} onClose={() => answer(false)}>
+      {ask.body?.split('\n\n').map((p, i) => (
+        <p key={i} className="small modal__lead">
+          {p}
+        </p>
+      ))}
+      <footer className="modal__foot">
+        <span className="grow" />
+        <button className="btn btn--ghost btn--sm" autoFocus={ask.danger} onClick={() => answer(false)}>
+          {L('Cancelar', 'Cancel')}
+        </button>
+        <button className={`btn btn--sm ${ask.danger ? 'btn--danger' : 'btn--primary'}`} autoFocus={!ask.danger} onClick={() => answer(true)}>
+          {ask.confirm}
+        </button>
+      </footer>
+    </Modal>
+  )
+}
+
+function DialogBody(): ReactNode {
   const dialog = useStore((s) => s.dialog)
   const conv = useStore((s) => (s.dialog && 'id' in s.dialog ? s.conversations.find((c) => c.id === (s.dialog as { id: string }).id) : undefined))
   const close = (): void => openDialog(null)
@@ -24,17 +85,45 @@ export function Dialogs(): ReactNode {
   return <TextDialog title={L(`Tema de #${conv.name}`, `Topic of #${conv.name}`)} label={L('Tema', 'Topic')} value={conv.topic ?? ''} hint={L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')} onSave={(v) => setTopic(conv.id, v)} onClose={close} allowEmpty />
 }
 
+// Open windows, newest last: Esc and Tab belong to the one on top only.
+const openModals: object[] = []
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }): ReactNode {
+  const card = useRef<HTMLDivElement>(null)
+  const close = useRef(onClose)
+  close.current = onClose
   useEffect(() => {
-    const esc = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+    const me = {}
+    openModals.push(me)
+    const before = document.activeElement as HTMLElement | null
+    if (!card.current?.contains(document.activeElement)) card.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus()
+    // Captured before the page's own keys, so an Esc here doesn't also close what's behind.
+    const keys = (e: KeyboardEvent): void => {
+      if (openModals[openModals.length - 1] !== me) return
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation()
+        e.preventDefault()
+        close.current()
+      } else if (e.key === 'Tab' && card.current) {
+        const all = [...card.current.querySelectorAll<HTMLElement>(FOCUSABLE)]
+        if (!all.length) return
+        const [first, last] = [all[0]!, all[all.length - 1]!]
+        const inside = card.current.contains(document.activeElement)
+        if (e.shiftKey && (document.activeElement === first || !inside)) (e.preventDefault(), last.focus())
+        else if (!e.shiftKey && (document.activeElement === last || !inside)) (e.preventDefault(), first.focus())
+      }
     }
-    window.addEventListener('keydown', esc)
-    return () => window.removeEventListener('keydown', esc)
-  }, [onClose])
+    window.addEventListener('keydown', keys, true)
+    return () => {
+      window.removeEventListener('keydown', keys, true)
+      openModals.splice(openModals.indexOf(me), 1)
+      if (before?.isConnected) before.focus()
+    }
+  }, [])
   return (
     <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal__card" role="dialog" aria-label={title}>
+      <div className="modal__card" role="dialog" aria-modal="true" aria-label={title} ref={card}>
         <header className="modal__head">
           <strong>{title}</strong>
           <button className="icon-btn icon-btn--sm" title={L('Fechar', 'Close')} onClick={onClose}>
@@ -58,7 +147,7 @@ function MembersDialog({ id, name, members, onClose }: { id: string; name: strin
   const inRoom = picked.filter((a) => agents.some((x) => x.id === a))
   return (
     <Modal title={L(`Agentes em #${name}`, `Agents in #${name}`)} onClose={onClose}>
-      <p className="muted small modal__lead">{L('Quem está no canal lê a conversa e pode responder. Sem @menção, o router escolhe entre eles.', 'Whoever is in the channel reads the conversation and can reply. Without an @mention, the router picks among them.')}</p>
+      <p className="muted small modal__lead">{L('Quem está no canal lê a conversa e pode responder. Pra chamar alguém específico, use @.', 'Whoever is in the channel reads the conversation and can reply. To call on someone specific, use @.')}</p>
       <div className="member-list">
         {agents.map((a) => {
           const on = picked.includes(a.id)
@@ -96,17 +185,24 @@ function MembersDialog({ id, name, members, onClose }: { id: string; name: strin
 function TextDialog(p: { title: string; label: string; value: string; hint: string; prefix?: string; allowEmpty?: boolean; onSave: (v: string) => Promise<void>; onClose: () => void }): ReactNode {
   const [value, setValue] = useState(p.value)
   const [error, setError] = useState<string | null>(null)
+  // Enter on an empty name: the field shakes and goes red, instead of nothing happening.
+  const [invalid, setInvalid] = useState(false)
+  const [shaking, setShaking] = useState(false)
   const save = (): void => {
-    if (!p.allowEmpty && !value.trim()) return
+    if (!p.allowEmpty && !value.trim()) {
+      setInvalid(true)
+      setShaking(true)
+      return
+    }
     p.onSave(value).then(p.onClose, (e: unknown) => setError(message(e)))
   }
   return (
     <Modal title={p.title} onClose={p.onClose}>
       <label className="field">
         <span className="field__label">{p.label}</span>
-        <span className="row row--center modal__input">
+        <span className={`row row--center modal__input ${invalid ? 'is-invalid' : ''} ${shaking ? 'is-shaking' : ''}`} onAnimationEnd={() => setShaking(false)}>
           {p.prefix && <span className="muted">{p.prefix}</span>}
-          <input autoFocus className="grow" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
+          <input autoFocus className="grow" value={value} onChange={(e) => (setValue(e.target.value), setInvalid(false))} onKeyDown={(e) => e.key === 'Enter' && save()} />
         </span>
         <span className="hint">{p.hint}</span>
       </label>
@@ -186,7 +282,7 @@ function Archived({ onClose }: { onClose: () => void }): ReactNode {
   const agents = useStore((s) => s.agents.filter((a) => a.archived))
   return (
     <Modal title={L('Agentes arquivados', 'Archived agents')} onClose={onClose}>
-      <p className="muted small modal__lead">{L('Não respondem, não rodam rotinas e não aparecem pro router. O histórico e os recibos continuam. Reativado, o agente volta aos canais em que estava; as rotinas dele você liga de novo em Rotinas.', 'They don’t reply, don’t run routines and the router doesn’t see them. History and receipts stay. Brought back, an agent returns to the channels it was in; you turn its routines back on in Routines.')}</p>
+      <p className="muted small modal__lead">{L('Não respondem, não rodam rotinas e não são escolhidos pra responder nos canais. O histórico e os recibos continuam. Reativado, o agente volta aos canais em que estava; as rotinas dele você liga de novo em Rotinas.', 'They don’t reply, don’t run routines and aren’t picked to answer in channels. History and receipts stay. Once reactivated, an agent returns to the channels it was in; you turn its routines back on in Routines.')}</p>
       {agents.length === 0 ? (
         <p className="muted small">{L('Nenhum agente arquivado.', 'No archived agents.')}</p>
       ) : (
@@ -211,7 +307,7 @@ function Archived({ onClose }: { onClose: () => void }): ReactNode {
                 {L('Ver', 'See')}
               </button>
               <button className="btn btn--sm" onClick={() => void archiveAgent(a.id, false)}>
-                {L('Reativar', 'Bring back')}
+                {L('Reativar', 'Reactivate')}
               </button>
             </div>
           ))}
@@ -270,13 +366,13 @@ function Search({ onClose }: { onClose: () => void }): ReactNode {
   }
   return (
     <div className="modal modal--top" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="search" role="dialog" aria-label={L('Ir para', 'Go to')}>
+      <div className="search" role="dialog" aria-label={L('Ir pra', 'Go to')}>
         <div className="search__input">
           <Icon name="spark" size={16} />
           <input
             autoFocus
             value={q}
-            placeholder={L('Ir para um canal, agente ou tela…', 'Go to a channel, agent or page…')}
+            placeholder={L('Ir pra um canal, agente ou tela…', 'Go to a channel, agent or page…')}
             onChange={(e) => {
               setQ(e.target.value)
               setAt(0)

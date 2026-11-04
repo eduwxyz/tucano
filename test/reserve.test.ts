@@ -100,7 +100,7 @@ describe('the reserve model', () => {
       r = runner(claude)
       await r.send('d1', 'oi')
       await r.idle()
-      expect(reply().run).toMatchObject({ status: 'failed', error: 'usage limit reached' })
+      expect(reply().run).toMatchObject({ status: 'failed', error: expect.stringContaining('chegou no limite') as string, errorDetail: 'usage limit reached' })
       expect(codex.turns).toHaveLength(0)
     }
   })

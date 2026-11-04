@@ -10,6 +10,7 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { L } from '../shared/lang'
+import { friendly } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
@@ -20,6 +21,24 @@ const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
 const CONNECT_TIMEOUT_MS = 20_000
 const MAX_STDIO_FAILURES = 3
+
+// The authorization page sent the browser back without a code: why, and what to do.
+export function notAuthorized(url: URL): string {
+  const error = url.searchParams.get('error')
+  if (error === 'access_denied') return L('Você recusou o acesso na página do serviço. Tente de novo e clique em Permitir.', 'You declined access on the service’s page. Try again and click Allow.')
+  const why = url.searchParams.get('error_description') ?? error ?? L('o endereço não tem o código', 'the address has no code')
+  return L(`Autorização não concluída: ${why}. Tente de novo pelo app.`, `Authorization not completed: ${why}. Try again from the app.`)
+}
+
+// Why a server didn't open, in words that say what to do; the SDK's own text otherwise.
+export function connectError(e: unknown): string {
+  const raw = (e instanceof Error ? e.message : String(e)).trim()
+  const f = friendly(raw)
+  if (f.detail === raw) return f.text // a case it knows: no Node.js, no internet, a refused login…
+  if (/ENOENT/.test(raw)) return L('O comando do conector não foi encontrado. Se ele usa npx, instale o Node.js (nodejs.org).', "The connector's command wasn't found. If it uses npx, install Node.js (nodejs.org).")
+  if (/connection closed/i.test(raw)) return L('O servidor fechou logo ao abrir. Confira o comando e os argumentos do conector.', 'The server closed right after opening. Check the connector’s command and arguments.')
+  return raw
+}
 
 export interface ConnectorDeps {
   db: Db
@@ -185,7 +204,11 @@ export class ConnectorManager {
       if (refused && c.auth === 'token') {
         // With a token there is no browser to go to: the server refused it, or there is none yet.
         await client.close().catch(() => {})
-        this.setStatus(id, 'error', L('O servidor recusou. Salve um token válido neste conector.', 'The server refused. Save a valid token on this connector.'))
+        this.setStatus(id, 'error', L('O servidor recusou o token. Salve um token válido neste conector.', 'The server refused the token. Save a valid token on this connector.'))
+      } else if (refused && c.auth !== 'oauth') {
+        // Added with no sign-in at all, and the server asks for one.
+        await client.close().catch(() => {})
+        this.setStatus(id, 'error', L('O servidor pede autorização. Adicione de novo com OAuth ou token.', 'The server asks for authorization. Add it again with OAuth or a token.'))
       } else if (refused) {
         this.setStatus(id, 'needs_auth', interactive ? L('Conclua a autorização no navegador.', 'Finish the authorization in the browser.') : L('Precisa autorizar.', 'Needs authorization.'))
       } else if (e instanceof Error && /dynamic client registration/i.test(e.message)) {
@@ -203,7 +226,7 @@ export class ConnectorManager {
         await client.close().catch(() => {})
         this.setStatus(id, 'error', L(`O servidor não respondeu em ${CONNECT_TIMEOUT_MS / 1000} s. Confira o endereço e a sua rede.`, `The server didn't answer in ${CONNECT_TIMEOUT_MS / 1000} s. Check the address and your network.`))
       } else {
-        this.setStatus(id, 'error', e instanceof Error ? e.message : String(e))
+        this.setStatus(id, 'error', connectError(e))
       }
       return
     }
@@ -282,7 +305,7 @@ export class ConnectorManager {
       throw new Error(L('Isso não parece um endereço. Copie o endereço inteiro da barra do navegador.', "That doesn't look like an address. Copy the whole address from the browser's bar."))
     }
     const code = url.searchParams.get('code')
-    if (!code) throw new Error(L(`Autorização não concluída: ${url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? 'o endereço não tem o código'}.`, `Authorization not completed: ${url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? 'the address has no code'}.`))
+    if (!code) throw new Error(notAuthorized(url))
     return this.finishOAuth(url.searchParams.get('state') ?? '', code)
   }
 

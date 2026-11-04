@@ -21,7 +21,7 @@ describe('the app in English', () => {
     expect(describeSchedule({ days: [1, 3, 5], time: '18:30' })).toBe('Mon, Wed and Fri at 18:30')
     expect(describeSchedule({ days: [0, 1, 2, 3, 4, 5, 6], time: '07:00', once: true })).toBe('Once, at 7:00')
     const failed = { id: 'm', conversationId: 'c', author: { kind: 'agent', id: 'a1' }, text: '', at: 0, run: { status: 'failed', steps: [], error: 'boom' } } as Message
-    expect(outcome(failed)).toBe('Failed: boom')
+    expect(outcome(failed)).toBe('boom. Open it to fix it.')
     expect(MODELS[0]!.hint).toBe('Good for most things')
     expect(EFFORTS.map((e) => e.label)).toEqual(['Low', 'Medium', 'High', 'Max'])
     expect(linuxTools()[0]!.description).toMatch(/^Runs a bash command/)

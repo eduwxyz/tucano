@@ -141,6 +141,7 @@ const ICON = `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="
 
 export function Splash({ onDone }: { onDone: () => void }): ReactNode {
   const root = useRef<HTMLDivElement>(null)
+  const skipRef = useRef<() => void>(onDone)
 
   useEffect(() => {
     const el = root.current
@@ -281,11 +282,21 @@ export function Splash({ onDone }: { onDone: () => void }): ReactNode {
       const a = Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2))
       gsap.to(pupil, { attr: { cx: 66 + Math.cos(a) * 18, cy: -384 + Math.sin(a) * 18 }, duration: 0.2, overwrite: true })
     }
-    const skip = (): void => onDone()
+    // Skipping fades out (and the sound with it) instead of cutting: the same exit as the end, faster.
+    let skipping = false
+    const skip = (): void => {
+      if (skipping) return
+      skipping = true
+      tl.pause()
+      gsap.to(audio, { volume: 0, duration: 0.25 })
+      gsap.to(el, { autoAlpha: 0, duration: 0.25, ease: 'power1.in', onComplete: onDone })
+    }
+    skipRef.current = skip
     window.addEventListener('pointermove', follow)
     window.addEventListener('keydown', skip)
     return () => {
       tl.kill()
+      gsap.killTweensOf([el, audio])
       audio.pause()
       window.removeEventListener('pointermove', follow)
       window.removeEventListener('keydown', skip)
@@ -293,7 +304,7 @@ export function Splash({ onDone }: { onDone: () => void }): ReactNode {
   }, [onDone])
 
   return (
-    <div className="splash" ref={root} onClick={onDone}>
+    <div className="splash" ref={root} onClick={() => skipRef.current()}>
       <div className="splash__scene" dangerouslySetInnerHTML={{ __html: SCENE }} />
       <div className="sp-black">
         <div className="sp-mark">
