@@ -39,6 +39,8 @@ const moved: Moved =
 if (moved === 'old-app-open' || moved === 'keychain-denied') app.setPath('userData', join(app.getPath('temp'), 'tucano-esperando'))
 
 const dataDir = (): string => process.env['TUCANO_DATA'] ?? app.getPath('userData')
+// The wiki's folder, as the core says (an Obsidian vault, say): the one folder outside the app's own it may open.
+let wikiFolder = ''
 
 // tucano://artifact/<id>/<name> serves what agents showed in the chat.
 protocol.registerSchemesAsPrivileged([{ scheme: 'tucano', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
@@ -70,6 +72,7 @@ type CoreRequest =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
+  | { type: 'wiki_dir'; path: string }
   | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
@@ -184,10 +187,12 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     // Never openPath on what isn't a folder or a PDF: that would run an app or a script.
     if (msg.how === 'open') void shell.openPath(msg.path)
     else shell.showItemInFolder(msg.path)
+  } else if (msg.type === 'wiki_dir') {
+    wikiFolder = normalize(msg.path)
   } else if (msg.type === 'open_path') {
     // Only folders the app keeps (an agent's computer, the backups), never an arbitrary path.
     const path = normalize(msg.path)
-    if (path.startsWith(join(dataDir(), 'computers') + sep) || path === join(dataDir(), 'backups')) void shell.openPath(path)
+    if (path.startsWith(join(dataDir(), 'computers') + sep) || path === join(dataDir(), 'backups') || (!!wikiFolder && (path === wikiFolder || path.startsWith(join(wikiFolder, 'fontes', 'arquivos') + sep)))) void shell.openPath(path)
   } else if (msg.type === 'notify') {
     // Already looking at that conversation: nothing to tell.
     if (msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return

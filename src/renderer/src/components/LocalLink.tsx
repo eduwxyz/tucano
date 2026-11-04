@@ -4,6 +4,7 @@ import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { LOCAL_LINK } from '../../../shared/path-text'
 import { localPath, openLightbox, openLocal, useStore, type LocalInfo } from '../store'
+import { WikiLink } from './Wiki'
 
 const known = new Map<string, Promise<LocalInfo | null>>()
 const lookUp = (messageId: string, path: string): Promise<LocalInfo | null> => {
@@ -75,5 +76,6 @@ export const localLinkFor = (messageId: string) =>
     const path = href?.startsWith(LOCAL_LINK) ? decoded(href.slice(LOCAL_LINK.length)) : undefined
     if (path) return <LocalLink messageId={messageId} path={path}>{children}</LocalLink>
     if (href?.startsWith(LOCAL_LINK)) return <>{children}</>
+    if (href?.startsWith('#wiki/')) return <WikiLink href={href}>{children}</WikiLink> // a [[page]] of the wiki
     return <a href={href} {...rest}>{children}</a>
   }

@@ -96,6 +96,17 @@ export class ConnectorManager {
     return id
   }
 
+  // Sets or replaces the token of a connector that signs in with one, and connects with it.
+  async setToken(id: string, token: string): Promise<void> {
+    const c = this.deps.db.connector(id)
+    if (!c || c.kind !== 'remote' || c.auth !== 'token') throw new Error(L('Esse conector não usa token.', "This connector doesn't use a token."))
+    const value = token.trim()
+    if (!value) throw new Error(L('Cole o token.', 'Paste the token.'))
+    await this.deps.secrets.set(key(id, 'token'), value)
+    await this.live.get(id)?.connecting // an attempt under way read the old token: this one comes after it
+    await this.connect(id)
+  }
+
   async remove(id: string): Promise<void> {
     await this.disconnect(id)
     this.live.delete(id)
@@ -170,7 +181,12 @@ export class ConnectorManager {
     try {
       await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS })
     } catch (e) {
-      if (e instanceof UnauthorizedError || (e instanceof Error && /unauthorized|401/i.test(e.message))) {
+      const refused = e instanceof UnauthorizedError || (e instanceof Error && /unauthorized|401/i.test(e.message))
+      if (refused && c.auth === 'token') {
+        // With a token there is no browser to go to: the server refused it, or there is none yet.
+        await client.close().catch(() => {})
+        this.setStatus(id, 'error', L('O servidor recusou. Salve um token válido neste conector.', 'The server refused. Save a valid token on this connector.'))
+      } else if (refused) {
         this.setStatus(id, 'needs_auth', interactive ? L('Conclua a autorização no navegador.', 'Finish the authorization in the browser.') : L('Precisa autorizar.', 'Needs authorization.'))
       } else if (e instanceof Error && /dynamic client registration/i.test(e.message)) {
         // GitHub's MCP server, for one: its OAuth only serves apps registered ahead of time, so a token is the way in.
