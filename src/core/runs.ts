@@ -25,7 +25,7 @@ import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
 import { briefFor, colleaguesOf, DELEGAR, delegarTool, requestCap, MAX_DELEGATION_DEPTH, MAX_DELEGATIONS, MAX_TEAM_ROUNDS, resultsTask, settled, teamOf } from './delegation'
-import { actionLabel, actionMode, actionVerb, COMPUTADOR, gate, shellActions, toolActions, type ActionKind } from '../shared/actions'
+import { actionLabel, actionVerb, chainMode, COMPUTADOR, gate, shellActions, toolActions, type ActionKind, type ActionRules } from '../shared/actions'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -805,7 +805,10 @@ export class Runner {
     const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, DELEGAR, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     // The rules for actions that matter (Settings, and this agent's page), read again at each call.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
-    const rulesNow = async (kinds: ActionKind[]): Promise<ReturnType<typeof gate>> => gate(kinds, db.agent(agent.id)?.actionRules, (await this.deps.settings()).actionRules)
+    // On a task, the agents above it in the chain count too: the strictest rule wins.
+    const aboveRules = (): (ActionRules | undefined)[] => (opts.delegation?.chain ?? []).map((id) => db.agent(id)?.actionRules)
+    const startAbove = aboveRules()
+    const rulesNow = async (kinds: ActionKind[]): Promise<ReturnType<typeof gate>> => gate(kinds, db.agent(agent.id)?.actionRules, (await this.deps.settings()).actionRules, aboveRules())
     // Whether a connector tool waits for me: a sensitive one, or one whose kind asks; never a tool approved for good (not high-risk).
     const waits = (t: ConnectorTool, connectorId: string, rules: ReturnType<typeof gate>, a: Agent = agent): boolean => {
       if (!t.highRisk && a.autoApprove?.includes(`${connectorId}:${t.name}`)) return false
@@ -814,7 +817,7 @@ export class Runner {
     }
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
-      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id]) && gate(kindsOf(t), agent.actionRules, settings.actionRules).mode !== 'off') exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
+      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id]) && gate(kindsOf(t), agent.actionRules, settings.actionRules, startAbove).mode !== 'off') exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
     const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write')
@@ -839,7 +842,7 @@ export class Runner {
         : undefined
     // abrir_pr: when a folder lent to this agent is a GitHub repository it can push to.
     const repos = (this.deps.gateway && this.deps.github?.pushable(agent)) || []
-    const prMode = actionMode('pr', agent.actionRules, settings.actionRules)
+    const prMode = chainMode('pr', agent.actionRules, settings.actionRules, startAbove)
     const prTool: ToolDef | undefined = repos.length && prMode !== 'off'
       ? {
           name: ABRIR_PR,
@@ -866,7 +869,7 @@ export class Runner {
     // bash, told which commands wait for me and which never run, so the agent plans around them.
     const SHELL_KINDS: ActionKind[] = ['commit', 'push', 'pr', 'merge', 'delete', 'publish']
     const withRules = (t: ToolDef): ToolDef => {
-      const by = (m: 'ask' | 'off'): string => SHELL_KINDS.filter((k) => actionMode(k, agent.actionRules, settings.actionRules) === m).map((k) => actionLabel(k).toLowerCase()).join(', ')
+      const by = (m: 'ask' | 'off'): string => SHELL_KINDS.filter((k) => chainMode(k, agent.actionRules, settings.actionRules, startAbove) === m).map((k) => actionLabel(k).toLowerCase()).join(', ')
       const asks = by('ask')
       const never = by('off')
       if (!asks && !never) return t
@@ -903,7 +906,7 @@ ${note}`,
       ...(wiki ? WIKI_TOOLS : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
-        if (!waits(tool, connector.id, gate(kindsOf(tool), agent.actionRules, settings.actionRules))) return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
+        if (!waits(tool, connector.id, gate(kindsOf(tool), agent.actionRules, settings.actionRules, startAbove))) return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
         return {
           name,
           description: `[${connector.name}] ${tool.description}\n${L(
@@ -1041,8 +1044,8 @@ ${note}`,
               addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`${words}: desligado pra este agente`, `${words}: turned off for this agent`), status: 'error' })
               return textResult(
                 L(
-                  `Não rodei: ${words} está desligado pra você (${settings.workspaceName} decide isso em Configurações ou na sua página). Siga sem isso, ou diga a ${settings.workspaceName} o que falta.`,
-                  `I didn't run it: ${words} is turned off for you (${settings.workspaceName} decides that in Settings or on your page). Go on without it, or tell ${settings.workspaceName} what's missing.`
+                  `Não rodei: ${words} está desligado pra você${rules.above ? ' nesta tarefa, pelas regras de quem te passou ela' : ''} (${settings.workspaceName} decide isso em Configurações ou na página de cada agente). Siga sem isso, ou diga o que falta.`,
+                  `I didn't run it: ${words} is turned off for you${rules.above ? ' on this task, by the rules of whoever handed it to you' : ''} (${settings.workspaceName} decides that in Settings or on each agent's page). Go on without it, or say what's missing.`
                 ),
                 true
               )

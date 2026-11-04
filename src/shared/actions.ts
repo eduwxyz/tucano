@@ -71,13 +71,22 @@ export function cleanRules(value: unknown): ActionRules {
 // The agent's own rule wins; then the one in Settings; then the default.
 export const actionMode = (kind: ActionKind, agentRules?: ActionRules, globalRules?: ActionRules): ActionMode => agentRules?.[kind] ?? globalRules?.[kind] ?? DEFAULT_ACTION_MODE[kind]
 
+const STRICTNESS: readonly ActionMode[] = ['auto', 'ask', 'off']
+const stricter = (a: ActionMode, b: ActionMode): ActionMode => (STRICTNESS.indexOf(b) > STRICTNESS.indexOf(a) ? b : a)
+
+// On a task another agent handed out, the strictest rule of everyone in the chain counts: an agent
+// can't get done by delegating what its own rules hold back. `above`: the rules of the agents above.
+export const chainMode = (kind: ActionKind, agentRules?: ActionRules, globalRules?: ActionRules, above: readonly (ActionRules | undefined)[] = []): ActionMode =>
+  above.reduce<ActionMode>((m, r) => stricter(m, actionMode(kind, r, globalRules)), actionMode(kind, agentRules, globalRules))
+
 // One call may be several kinds at once (`git commit && git push`): any "never" stops it,
-// else any "ask" makes it wait; `kinds` are the ones that decided it.
-export function gate(kinds: readonly ActionKind[], agentRules?: ActionRules, globalRules?: ActionRules): { mode: ActionMode; kinds: ActionKind[] } {
+// else any "ask" makes it wait; `kinds` are the ones that decided it. `above`: true when an
+// agent above in the chain made it stricter than the agent's own rule.
+export function gate(kinds: readonly ActionKind[], agentRules?: ActionRules, globalRules?: ActionRules, above: readonly (ActionRules | undefined)[] = []): { mode: ActionMode; kinds: ActionKind[]; above?: true } {
   const unique = [...new Set(kinds)]
   for (const mode of ['off', 'ask'] as const) {
-    const hit = unique.filter((k) => actionMode(k, agentRules, globalRules) === mode)
-    if (hit.length) return { mode, kinds: hit }
+    const hit = unique.filter((k) => chainMode(k, agentRules, globalRules, above) === mode)
+    if (hit.length) return { mode, kinds: hit, ...(hit.some((k) => actionMode(k, agentRules, globalRules) !== mode) ? { above: true as const } : {}) }
   }
   return { mode: 'auto', kinds: unique }
 }

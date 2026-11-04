@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { actionMode, cleanRules, DEFAULT_ACTION_MODE, gate, shellActions, simpleCommands, toolActions } from '../src/shared/actions'
+import { actionMode, chainMode, cleanRules, DEFAULT_ACTION_MODE, gate, shellActions, simpleCommands, toolActions } from '../src/shared/actions'
 
 describe('shellActions', () => {
   it('finds the git actions that matter', () => {
@@ -131,6 +131,15 @@ describe('rules', () => {
     expect(gate(['commit', 'push'], { push: 'off' }, {})).toEqual({ mode: 'off', kinds: ['push'] })
     expect(gate(['commit', 'push'], { commit: 'auto', push: 'auto' }, {})).toEqual({ mode: 'auto', kinds: ['commit', 'push'] })
     expect(gate([], {}, {})).toEqual({ mode: 'auto', kinds: [] })
+  })
+
+  it('on a delegated task, takes the strictest rule of the chain', () => {
+    expect(chainMode('push', { push: 'auto' }, {}, [{ push: 'off' }])).toBe('off')
+    expect(chainMode('push', { push: 'auto' }, {}, [{ push: 'auto' }, {}])).toBe('ask') // the one above follows the default
+    expect(chainMode('push', { push: 'ask' }, { push: 'auto' }, [{}])).toBe('ask')
+    expect(chainMode('push', {}, { push: 'auto' }, [{}])).toBe('auto')
+    expect(gate(['push'], { push: 'auto' }, {}, [{ push: 'off' }])).toEqual({ mode: 'off', kinds: ['push'], above: true })
+    expect(gate(['push'], { push: 'off' }, {}, [{ push: 'off' }])).toEqual({ mode: 'off', kinds: ['push'] })
   })
 
   it('keeps only known kinds and modes', () => {

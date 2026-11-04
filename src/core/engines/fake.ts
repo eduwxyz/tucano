@@ -57,6 +57,11 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const task = delegatedTask(turn.prompt)!
         if (turn.mcpUrl && (DELEGUE.test(task) || CHAME.test(task)) && !CAME_BACK.test(turn.prompt)) reply = await delegateAll(turn.mcpUrl, task)
         else if (CAME_BACK.test(turn.prompt)) reply = L(`Feito, com a ajuda: ${task.slice(0, 120)}`, `Done, with the help: ${task.slice(0, 120)}`)
+        // "rode `git push`" in its task: runs it once; back after a decision on it, it reports.
+        else if (turn.mcpUrl && /rode `([^`]+)`/i.test(task) && !/(aprovou|recusou|não respondeu ao pedido pra) rodar|(approved|turned down|the request for) running/i.test(turn.prompt)) {
+          const r = textOf(await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(task)![1]! }))
+          reply = /NÃO rodou|has NOT run/.test(r) ? L('Pedi aprovação pra rodar o comando.', 'I asked for approval to run the command.') : r
+        }
         else if (turn.mcpUrl && /pergunt|ask/i.test(task) && !/ferramenta ask_user|ask_user tool/.test(turn.prompt)) {
           await callTool(turn.mcpUrl, 'ask_user', { question: L('Pra quando você precisa disso?', 'When do you need this by?') })
           reply = L('Te mandei uma pergunta.', 'I sent you a question.')

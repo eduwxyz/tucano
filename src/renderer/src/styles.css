@@ -7450,6 +7450,10 @@ kbd {
   letter-spacing: 0.04em;
   color: var(--text-2);
 }
+/* A delegated task waiting for my approval: its card right under the task's line. */
+.handoff__item > .approval {
+  margin: 6px 0 4px 20px;
+}
 .report-basis .handoffs {
   margin-top: 4px;
 }
