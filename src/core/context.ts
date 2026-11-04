@@ -2,6 +2,7 @@
 // and a prompt with the conversation transcript. The CLI keeps no session
 // between turns, so everything the agent knows comes from here.
 import { L, lang, locale } from '../shared/lang'
+import { MENTION } from '../shared/mention-text'
 import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Routine, type Settings, type Skill } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { osOf, shellCommand, systemName } from './platform'
@@ -393,7 +394,7 @@ export const LER_THREAD: ToolDef = {
 // code are quoted content, not a call (CODE_SPANS): a prompt shown in a fenced block, say.
 export function mentioned(text: string, agents: Agent[]): Agent[] {
   const found: Agent[] = []
-  for (const m of text.replace(CODE_SPANS, ' ').matchAll(/(^|[^\w@])@([a-z0-9][a-z0-9_-]{1,31})\b/gi)) {
+  for (const m of text.replace(CODE_SPANS, ' ').matchAll(MENTION)) {
     const a = agents.find((x) => x.handle.toLowerCase() === m[2]!.toLowerCase())
     if (a && !found.includes(a)) found.push(a)
   }
