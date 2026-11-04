@@ -2,6 +2,13 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [Unreleased]
+
+### Fixed
+
+- **Claude replies finish about 2 seconds sooner, at times 10.** After each reply Claude Code made one more model call, a summary of the turn that Tucano never reads, and only then said it was done and exited. That call is now off for the Claude Code that Tucano runs, so a reply ends when its text does, and what waits on it (the next agent in line, a team's report) starts right away. Your own Claude Code in the terminal isn't touched.
+- **Agents see what a connector returns, even when it's long.** A result over Claude Code's own cut (about 50 KB, like the comments of a big merge request) was saved to a file the agent can't read, so it called again and again and answered without the data. Tucano now cuts a result at 40 KB, counted in bytes so accents don't push it over, and tells the agent to ask again with pagination or a filter if it needs the rest.
+
 ## [0.2.9] - 2026-11-03
 
 > **Em português:** o Tucano agora tem uma wiki: o que você e o seu time sabem, em páginas ligadas, que os agentes consultam antes de responder e citam. Um curador lê as conversas e os documentos que você traz (PDF, Word, planilha, link ou anotação) e escreve nas páginas, citando de onde veio; mudar uma página que já existe espera a sua aprovação, se você quiser. A wiki é uma pasta de Markdown que o Obsidian abre, aparece como um mapa que você arrasta, e uma revisão aponta o que não bate, o que ficou velho e o que está repetido. Já tem um cofre do Obsidian? Ele entra como está, com pastas, links e anexos. E dá pra trazer agentes do OpenBot e do Grok Bot.
