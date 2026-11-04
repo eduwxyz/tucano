@@ -129,7 +129,8 @@ type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' |
 type TurnOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; delegation?: Delegation; round?: number; reportOf?: string; root?: string; threadId?: string; together?: string[] }
 
 export class Runner {
-  private queue: (() => Promise<unknown>)[] = []
+  private queue: { job: () => Promise<unknown>; agentId?: string }[] = []
+  private busy = new Set<string>() // agents with a reply running: their next one waits
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
@@ -206,7 +207,7 @@ export class Runner {
   // does the same thing twice, and what's left to the others is one short reply each.
   private takeTurns(agents: Agent[], conv: Conversation, threadId: string | undefined): void {
     if (agents.length < 2) {
-      for (const a of agents) this.enqueue(() => this.execute(a, conv, { depth: 1, threadId }))
+      for (const a of agents) this.start(a, conv, { depth: 1, threadId })
       return
     }
     const together = agents.map((a) => a.id)
@@ -216,7 +217,7 @@ export class Runner {
         // Stopped by the person, or everyone paused: the rest don't start.
         if (i + 1 < agents.length && !this.paused && m.run?.status !== 'stopped') next(i + 1)
         return m
-      })
+      }, agents[i]!.id)
     next(0)
   }
 
@@ -253,7 +254,7 @@ export class Runner {
     if (!agent || !conv) return
     // A team's task (or a manager's turn on its results) keeps its place: its manager is waiting on it.
     if (msg.run.delegation || msg.run.round) return this.follow(agent, conv, { existing: msg, task: msg.run.task, delegation: msg.run.delegation, round: msg.run.round, reportOf: msg.run.reportOf, work: msg.run.work })
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }))
+    this.start(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg })
   }
 
   // A reply paused at its budget goes on in a new reply that knows what it did:
@@ -283,7 +284,7 @@ export class Runner {
       .filter(Boolean)
       .join('\n\n')
     if (msg.run.delegation || msg.run.round) return this.follow(agent, conv, { task, delegation: msg.run.delegation, round: msg.run.round, reportOf: msg.run.reportOf, work: msg.run.work, threadId: msg.threadId })
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }))
+    this.start(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId })
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -312,7 +313,8 @@ export class Runner {
         this.execute(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true }).then(resolve, (e: unknown) => {
           resolve(undefined)
           throw e
-        })
+        }),
+        agent.id
       )
     )
   }
@@ -330,7 +332,8 @@ export class Runner {
         this.execute(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true }).then(resolve, (e: unknown) => {
           resolve(undefined)
           throw e
-        })
+        }),
+        agent.id
       )
     )
   }
@@ -513,7 +516,7 @@ export class Runner {
       const then = typeof opts.then === 'function' ? opts.then(me) : opts.then
       const task = opts.task ?? (delegation ? briefFor(delegation, this.deps.db.agent(delegation.by), me, then) : then)
       return this.execute(agent, conv, { depth: 1, existing: msg, task, work: opts.work, delegation, round: opts.round, reportOf: opts.reportOf, root: opts.root })
-    })
+    }, agent.id)
   }
 
   // Hands out the tasks a reply delegated, once that reply is over. Stopped, or with everyone paused, nothing goes.
@@ -610,24 +613,44 @@ export class Runner {
     this.follow(manager!, conv!, { delegation: head.run.delegation, round, reportOf: head.id, root, work: head.run.work, threadId: head.threadId, then: (me) => resultsTask(me, results, round, capped, unanswered.map((t) => ({ task: t.task, where: db.conversation(t.askedIn!)?.name ?? '?' }))) })
   }
 
-  private enqueue(job: () => Promise<unknown>): void {
-    this.queue.push(job)
+  // `agentId`: whose reply the job is. An agent does one thing at a time, like a person: while it's busy,
+  // what else comes for it (a mention, a task, a question in a channel) waits, and goes in the order it came.
+  // Other agents' work goes on meanwhile.
+  private enqueue(job: () => Promise<unknown>, agentId?: string): void {
+    this.queue.push({ job, agentId })
     this.pump()
   }
 
   private pump(): void {
-    while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
-      const job = this.queue.shift()!
+    while (this.active < MAX_CONCURRENT) {
+      const i = this.queue.findIndex((q) => !q.agentId || !this.busy.has(q.agentId))
+      if (i < 0) return
+      const [{ job, agentId }] = this.queue.splice(i, 1) as [{ job: () => Promise<unknown>; agentId?: string }]
+      if (agentId) this.busy.add(agentId)
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
         .catch((e: unknown) => console.error('[runner]', e))
         .finally(() => {
+          if (agentId) this.busy.delete(agentId)
           this.active--
           this.pump()
           if (this.active === 0) this.deps.onBusy?.(false)
           this.checkIdle()
         })
     }
+  }
+
+  // A reply for an agent, in line behind what it's doing. When it's busy, the reply shows up at once as
+  // queued, so it's clear it's coming and in what order.
+  private start(agent: Agent, conv: Conversation, opts: TurnOpts): void {
+    if (this.busy.has(agent.id) && !opts.existing) {
+      const msg: Message = { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
+      this.update(msg, {
+        run: { status: 'working', depth: opts.depth, steps: [{ id: randomUUID(), label: L('Na fila', 'Queued'), detail: L('termina o que está fazendo antes', 'finishing what it is doing first'), status: 'running' }], ...(opts.task ? { task: opts.task } : {}) }
+      })
+      opts = { ...opts, existing: msg }
+    }
+    this.enqueue(() => this.execute(agent, conv, opts), agent.id)
   }
 
   // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
@@ -1728,7 +1751,7 @@ export class Runner {
     if (agent && conv && !agent.archived) {
       // On a team's task, it goes on with the task in hand; a manager keeps its count of rounds.
       if (onTask || msg?.run?.round) this.follow(agent, conv, { delegation: onTask, round: msg?.run?.round, reportOf: msg?.run?.reportOf, work: msg?.run?.work, threadId: msg?.threadId, ...(onTask ? { then: task } : { task }) })
-      else this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }))
+      else this.start(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId })
     } else if (onTask) this.settle(onTask.from)
   }
 
@@ -1758,7 +1781,7 @@ export class Runner {
     this.update(asked, { run: { ...asked.run!, status: 'done' } })
     const back = L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
     if (asked.run?.delegation || asked.run?.round) return this.follow(agent, conv, { delegation: asked.run.delegation, round: asked.run.round, reportOf: asked.run.reportOf, work: asked.run.work, threadId: asked.threadId, ...(asked.run.delegation ? { then: back } : { task: back }) })
-    this.enqueue(() => this.execute(agent, conv, { depth: 1, work: asked.run?.work, threadId: asked.threadId, task: back }))
+    this.start(agent, conv, { depth: 1, work: asked.run?.work, threadId: asked.threadId, task: back })
   }
 
   // An agent that mentions another agent of the conversation hands it the turn,
@@ -1773,7 +1796,7 @@ export class Runner {
       this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
       return false
     }
-    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
+    for (const a of next) this.start(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId })
     return true
   }
 }
