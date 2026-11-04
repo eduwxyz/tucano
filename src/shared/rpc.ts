@@ -77,6 +77,8 @@ export interface Api {
   purgeMemory(p: { id: string }): void // removes even the record that it was forgotten
   editSummary(p: { conversationId: string; text: string }): void
   summarizeNow(p: { conversationId: string }): void
+  editThreadSummary(p: { rootId: string; text: string }): void
+  summarizeThreadNow(p: { rootId: string }): void
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
   browserAction(p: { agentId: string; action: 'show' | 'hide' | 'clear' }): void
