@@ -1120,16 +1120,14 @@ h3 {
   color: var(--accent);
 }
 /* An agent's @handle in a message: its chip, in its color, that opens its profile. */
+/* Inline, not flex: its text then sits on the line's baseline, like the words around it. */
 .mention {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  vertical-align: -3px;
-  padding: 1px 6px 1px 2px;
+  display: inline;
+  white-space: nowrap;
+  padding: 2px 5px 2px 2px;
   border-radius: 999px;
   font: inherit;
   font-weight: 600;
-  line-height: 18px;
   color: color-mix(in srgb, var(--agent, var(--accent)) 75%, var(--text));
   background: color-mix(in srgb, var(--agent, var(--accent)) 14%, transparent);
   transition: var(--transition-ui);
@@ -1138,7 +1136,8 @@ h3 {
   background: color-mix(in srgb, var(--agent, var(--accent)) 24%, transparent);
 }
 .mention .avatar {
-  flex: none;
+  vertical-align: middle;
+  margin-right: 4px;
 }
 /* A long link or word breaks instead of pushing the message out of the conversation. */
 .md {
