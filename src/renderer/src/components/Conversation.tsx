@@ -1,4 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { actionLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
 import { CODE_SPANS } from '../../../shared/types'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
@@ -915,6 +916,16 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   }
 
   const decided = approval.state !== 'pending'
+  // A command on the agent's computer: what it does, in words, and the command itself.
+  const onComputer = approval.connectorId === COMPUTADOR
+  const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
+  // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (!onComputer || kinds.length > 0)
+  const alwaysTitle = onComputer
+    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => actionLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => actionLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
+    : approval.tool === 'abrir_pr'
+      ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} abre PRs sem pedir. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} opens PRs without asking. You can change it on its page.`)
+      : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)
 
   return (
     <div className={`approval approval--${approval.state} ${compact ? 'approval--compact' : ''}`}>
@@ -929,6 +940,10 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         {approval.tool === ACCESS_REQUEST ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('pede acesso ao', 'asks for access to')} <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? L('ler e escrever', 'read and write') : L('ler', 'read')}
+          </>
+        ) : onComputer ? (
+          <>
+            {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{kinds.length ? kinds.map(actionVerb).join(L(' e ', ' and ')) : L('rodar um comando', 'run a command')}</strong> {L('no computador dele', 'on its computer')}
           </>
         ) : approval.tool === 'abrir_pr' ? (
           <>
@@ -964,7 +979,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
       </div>
       {approval.why && <p className="approval__why">{approval.why}</p>}
       {/* The title already says it all for an access request, an app or the browser. */}
-      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && summary.shown.length > 0 && (
+      {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !onComputer && summary.shown.length > 0 && (
         <div className="approval__args small">
           {summary.shown.map(([k, v], i) => (
             <p key={i}>
@@ -1039,8 +1055,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
                 {L('Aprovar', 'Approve')}
               </button>
-              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (
-                <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
+              {canAlways && (
+                <button className="btn" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}

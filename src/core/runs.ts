@@ -24,6 +24,7 @@ import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { actionLabel, actionMode, actionVerb, COMPUTADOR, gate, shellActions, toolActions, type ActionKind } from '../shared/actions'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -625,9 +626,18 @@ export class Runner {
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
     const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    // The rules for actions that matter (Settings, and this agent's page), read again at each call.
+    const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
+    const rulesNow = async (kinds: ActionKind[]): Promise<ReturnType<typeof gate>> => gate(kinds, db.agent(agent.id)?.actionRules, (await this.deps.settings()).actionRules)
+    // Whether a connector tool waits for me: a sensitive one, or one whose kind asks; never a tool approved for good (not high-risk).
+    const waits = (t: ConnectorTool, connectorId: string, rules: ReturnType<typeof gate>, a: Agent = agent): boolean => {
+      if (!t.highRisk && a.autoApprove?.includes(`${connectorId}:${t.name}`)) return false
+      if (rules.kinds.length && rules.mode === 'auto' && !t.highRisk) return false
+      return t.cls === 'sensitive' || rules.mode === 'ask'
+    }
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
-      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
+      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id]) && gate(kindsOf(t), agent.actionRules, settings.actionRules).mode !== 'off') exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
     const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write')
@@ -652,13 +662,17 @@ export class Runner {
         : undefined
     // abrir_pr: when a folder lent to this agent is a GitHub repository it can push to.
     const repos = (this.deps.gateway && this.deps.github?.pushable(agent)) || []
-    const prTool: ToolDef | undefined = repos.length
+    const prMode = actionMode('pr', agent.actionRules, settings.actionRules)
+    const prTool: ToolDef | undefined = repos.length && prMode !== 'off'
       ? {
           name: ABRIR_PR,
-          description: L(
-            `Pede pra abrir uma pull request em ${repos.join(' ou ')} com uma branch agent/* que você já publicou com git push. Vira um pedido de aprovação; aprovada, o app abre a PR e você recebe o link.`,
-            `Asks to open a pull request on ${repos.join(' or ')} from an agent/* branch you already published with git push. It becomes an approval request; once approved, the app opens the PR and you get the link.`
-          ),
+          description:
+            prMode === 'auto'
+              ? L(`Abre uma pull request em ${repos.join(' ou ')} com uma branch agent/* que você já publicou com git push. Devolve o link.`, `Opens a pull request on ${repos.join(' or ')} from an agent/* branch you already published with git push. Returns the link.`)
+              : L(
+                  `Pede pra abrir uma pull request em ${repos.join(' ou ')} com uma branch agent/* que você já publicou com git push. Vira um pedido de aprovação; aprovada, o app abre a PR e você recebe o link.`,
+                  `Asks to open a pull request on ${repos.join(' or ')} from an agent/* branch you already published with git push. It becomes an approval request; once approved, the app opens the PR and you get the link.`
+                ),
           inputSchema: {
             type: 'object',
             properties: {
@@ -672,6 +686,30 @@ export class Runner {
           }
         }
       : undefined
+    // bash, told which commands wait for me and which never run, so the agent plans around them.
+    const SHELL_KINDS: ActionKind[] = ['commit', 'push', 'pr', 'merge', 'delete', 'publish']
+    const withRules = (t: ToolDef): ToolDef => {
+      const by = (m: 'ask' | 'off'): string => SHELL_KINDS.filter((k) => actionMode(k, agent.actionRules, settings.actionRules) === m).map((k) => actionLabel(k).toLowerCase()).join(', ')
+      const asks = by('ask')
+      const never = by('off')
+      if (!asks && !never) return t
+      const note = [
+        asks &&
+          L(
+            `Comandos que fazem isto pedem aprovação de ${settings.workspaceName} antes de rodar: ${asks}. Eles não rodam na hora: viram um pedido com o comando exato; aprovado, o app roda esse comando e você recebe a saída numa nova mensagem. Junte num só comando o que precisa ir junto (ex.: git add -A && git commit -m "…" && git push).`,
+            `Commands that do this ask ${settings.workspaceName} for approval before running: ${asks}. They don't run right away: they become a request with the exact command; once approved, the app runs that command and you get the output in a new message. Put what must go together in one command (e.g. git add -A && git commit -m "…" && git push).`
+          ),
+        never && L(`Nunca rodam pra você: ${never}.`, `Never run for you: ${never}.`)
+      ]
+        .filter(Boolean)
+        .join(' ')
+      return {
+        ...t,
+        description: `${t.description}
+${note}`,
+        inputSchema: { ...t.inputSchema, properties: { ...(t.inputSchema.properties ?? {}), [REASON_PARAM]: { type: 'string', description: L(`Se o comando pede aprovação: por que, em uma frase. Aparece pra ${settings.workspaceName} no pedido.`, `If the command asks for approval: why, in one sentence. ${settings.workspaceName} sees it in the request.`) } } }
+      }
+    }
     const toolDefs: ToolDef[] = [
       ASK_USER,
       ...(accessTool ? [accessTool] : []),
@@ -679,7 +717,7 @@ export class Runner {
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(builds ? [PROPOR_AGENTE] : []),
-      ...(computers ? computerTools(agent) : []),
+      ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
@@ -687,7 +725,7 @@ export class Runner {
       ...(wiki ? WIKI_TOOLS : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
-        if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
+        if (!waits(tool, connector.id, gate(kindsOf(tool), agent.actionRules, settings.actionRules))) return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
         return {
           name,
           description: `[${connector.name}] ${tool.description}\n${L(
@@ -789,6 +827,56 @@ export class Runner {
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
+          // A command that commits, pushes, deletes…: by the rules, it runs, waits for me, or never runs.
+          if (name === 'bash' || name === 'start_service') {
+            const command = typeof args['command'] === 'string' ? args['command'] : ''
+            const kinds = shellActions(command)
+            const rules = await rulesNow(kinds)
+            const words = rules.kinds.map((k) => actionLabel(k).toLowerCase()).join(', ')
+            if (rules.mode === 'off') {
+              addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`${words}: desligado pra este agente`, `${words}: turned off for this agent`), status: 'error' })
+              return textResult(
+                L(
+                  `Não rodei: ${words} está desligado pra você (${settings.workspaceName} decide isso em Configurações ou na sua página). Siga sem isso, ou diga a ${settings.workspaceName} o que falta.`,
+                  `I didn't run it: ${words} is turned off for you (${settings.workspaceName} decides that in Settings or on your page). Go on without it, or tell ${settings.workspaceName} what's missing.`
+                ),
+                true
+              )
+            }
+            if (rules.mode === 'ask') {
+              if (name === 'start_service') return textResult(L(`Esse comando faz ${words}, que pede aprovação: rode com bash, não como serviço.`, `That command does ${words}, which asks for approval: run it with bash, not as a service.`), true)
+              if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+              const { [REASON_PARAM]: why, ...callArgs } = args
+              approval = {
+                id: randomUUID(),
+                hash: approvalHash(COMPUTADOR, 'bash', callArgs),
+                agentId: agent.id,
+                conversationId: conv.id,
+                messageId: msg.id,
+                connectorId: COMPUTADOR,
+                connectorName: L('Computador', 'Computer'),
+                tool: 'bash',
+                args: callArgs,
+                why: typeof why === 'string' ? why.trim() : '',
+                // Deleting is held to approve, like any high-risk action, and never allowed for good from the card.
+                highRisk: kinds.includes('delete'),
+                state: 'pending',
+                createdAt: Date.now(),
+                expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+              }
+              db.createApproval(approval)
+              emit({ type: 'approval', approval })
+              msg.run = { ...msg.run!, approvalId: approval.id }
+              addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail: `${words} · ${command.length > 120 ? `${command.slice(0, 120)}…` : command}`, status: 'done' })
+              this.deps.notify?.(L(`${agent.name} quer ${rules.kinds.map(actionVerb).join(' e ')}`, `${agent.name} wants to ${rules.kinds.map(actionVerb).join(' and ')}`), approval.why || command.slice(0, 120), conv.id, 'approval')
+              return textResult(
+                L(
+                  `Pedido de aprovação criado, com o comando exato. O comando ainda NÃO rodou. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe a saída numa nova mensagem.`,
+                  `Approval request created, with the exact command. The command has NOT run yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the output in a new message.`
+                )
+              )
+            }
+          }
           const t0 = Date.now()
           const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
           const step: Step = { id: randomUUID(), label, detail, status: 'running' }
@@ -931,8 +1019,19 @@ export class Runner {
           const title = typeof args['titulo'] === 'string' ? args['titulo'].trim() : ''
           if (!/^agent\/[A-Za-z0-9._\/-]+$/.test(branch)) return textResult(L('A branch precisa ser agent/<assunto>, já publicada com git push.', 'The branch must be agent/<topic>, already published with git push.'), true)
           if (!title) return textResult(L('Faltou o título.', 'Missing the title.'), true)
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           const prArgs = { repo, head: branch, base: typeof args['base'] === 'string' && args['base'].trim() ? args['base'].trim() : 'main', title, body: typeof args['descricao'] === 'string' ? args['descricao'] : '' }
+          const rules = await rulesNow(['pr'])
+          if (rules.mode === 'off') return textResult(L('Abrir PR está desligado pra você agora.', 'Opening PRs is turned off for you now.'), true)
+          if (rules.mode === 'auto') {
+            try {
+              const pr = await this.openPr(agent, prArgs, msg.run?.work)
+              addSteps({ id: randomUUID(), label: L('Abriu a PR', 'Opened the PR'), detail: `#${pr.number} · ${branch} → ${prArgs.base}`, status: 'done' })
+              return textResult(L(`Abri a PR #${pr.number}: ${pr.url}`, `Opened PR #${pr.number}: ${pr.url}`))
+            } catch (e) {
+              return textResult(L(`A PR não abriu: ${e instanceof Error ? e.message : String(e)}`, `The PR didn't open: ${e instanceof Error ? e.message : String(e)}`), true)
+            }
+          }
+          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           approval = {
             id: randomUUID(),
             hash: approvalHash(GITHUB, ABRIR_PR, prArgs),
@@ -1004,9 +1103,13 @@ export class Runner {
         if (!current || !allowed(current, db.agent(agent.id)?.grants[hit.connector.id])) return textResult(L(`Ferramenta não permitida agora: ${name}`, `Tool not allowed right now: ${name}`), true)
         const detail = `${hit.connector.name} · ${current.name}`
 
-        // "Sempre permitir": a sensitive tool approved for good runs like a write one (never a high-risk one).
-        const always = current.cls === 'sensitive' && !current.highRisk && !!db.agent(agent.id)?.autoApprove?.includes(`${hit.connector.id}:${current.name}`)
-        if (current.cls === 'sensitive' && !always) {
+        // The rules may have changed since the turn started: never stops it, ask makes it wait.
+        const rules = await rulesNow(kindsOf(current))
+        if (rules.mode === 'off') return textResult(L(`Não rodei: ${rules.kinds.map((k) => actionLabel(k).toLowerCase()).join(', ')} está desligado pra você agora.`, `I didn't run it: ${rules.kinds.map((k) => actionLabel(k).toLowerCase()).join(', ')} is turned off for you now.`), true)
+        // "Sempre permitir": a tool approved for good runs without asking (never a high-risk one).
+        const owner = db.agent(agent.id) ?? agent
+        const always = !current.highRisk && !!owner.autoApprove?.includes(`${hit.connector.id}:${current.name}`)
+        if (waits(current, hit.connector.id, rules, owner)) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           const { [REASON_PARAM]: why, ...callArgs } = args
           approval = {
@@ -1281,6 +1384,16 @@ export class Runner {
     return msg
   }
 
+  // Opens the PR with a footer saying who made it and what the work cost so far.
+  private async openPr(agent: Agent | undefined, args: Record<string, unknown>, work: string | undefined): Promise<{ number: number; url: string }> {
+    const cost = work ? this.deps.db.costByWork(0).find((w) => w.work === work) : undefined
+    const footer = L(
+      `\n\n---\nFeita por ${agent?.name ?? 'um agente'} no Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens em ${cost.replies} resposta${cost.replies > 1 ? 's' : ''} até aqui` : ''}.`,
+      `\n\n---\nMade by ${agent?.name ?? 'an agent'} in Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens in ${cost.replies} repl${cost.replies > 1 ? 'ies' : 'y'} so far` : ''}.`
+    )
+    return this.deps.github!.openPr({ ...args, body: `${String(args['body'] ?? '')}${footer}` } as Parameters<GitHub['openPr']>[0])
+  }
+
   // The first decision wins. Approving runs exactly the stored call (after
   // checking the grant again); either way the agent gets a new turn with the outcome.
   // `always` ("Sempre permitir"): from now on this agent uses that tool without asking; never a high-risk one.
@@ -1289,7 +1402,12 @@ export class Runner {
     const ap = db.approval(id)
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason)) return
     const owner = db.agent(ap.agentId)
-    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
+    // For a command or a PR, "sempre permitir" turns that kind of action to "does it alone" on the agent's page.
+    const kinds: ActionKind[] = ap.connectorId === COMPUTADOR ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []
+    if (always && decision === 'approved' && owner && !ap.highRisk && kinds.length) {
+      db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
+      emit({ type: 'agent', agent: db.agent(owner.id)! })
+    } else if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), `${ap.connectorId}:${ap.tool}`] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
     }
@@ -1307,13 +1425,7 @@ export class Runner {
     if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
       if (decision === 'approved') {
         try {
-          const work = db.message(ap.messageId)?.run?.work
-          const cost = work ? db.costByWork(0).find((w) => w.work === work) : undefined
-          const footer = L(
-            `\n\n---\nFeita por ${agent?.name ?? 'um agente'} no Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens em ${cost.replies} resposta${cost.replies > 1 ? 's' : ''} até aqui` : ''}.`,
-            `\n\n---\nMade by ${agent?.name ?? 'an agent'} in Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens in ${cost.replies} repl${cost.replies > 1 ? 'ies' : 'y'} so far` : ''}.`
-          )
-          const pr = await this.deps.github!.openPr({ ...ap.args, body: `${String(ap.args['body'] ?? '')}${footer}` })
+          const pr = await this.openPr(agent, ap.args, db.message(ap.messageId)?.run?.work)
           ok = true
           outcome = L(`Abriu a PR #${pr.number}.`, `Opened PR #${pr.number}.`)
           task = L(`${me} aprovou, e o app abriu a PR #${pr.number}: ${pr.url}\n\nAvise ${me} com o link em uma frase.`, `${me} approved, and the app opened PR #${pr.number}: ${pr.url}\n\nTell ${me} with the link in one sentence.`)
@@ -1330,6 +1442,28 @@ export class Runner {
         task = L(
           `${me} ${decision === 'refused' ? `recusou a PR${reason ? `: "${reason}"` : ''}` : 'não respondeu ao pedido de PR'}. Nada foi aberto. Responda considerando isso.`,
           `${me} ${decision === 'refused' ? `turned down the PR${reason ? `: "${reason}"` : ''}` : "didn't answer the PR request"}. Nothing was opened. Reply with that in mind.`
+        )
+      }
+    } else if (ap.connectorId === COMPUTADOR) {
+      // A command on the agent's computer: the app runs exactly the one approved, and the agent gets its output.
+      const command = String(ap.args['command'] ?? '')
+      const what = L(`rodar \`${command}\``, `running \`${command}\``)
+      if (decision === 'approved' && agent?.computer && this.deps.computers) {
+        const out = await this.deps.computers.call(agent, 'bash', ap.args, { conversationId: ap.conversationId, messageId: ap.messageId })
+        ok = !out.result.isError
+        outcome = ok ? ran : L('Rodou, com erro.', 'Ran, with an error.')
+        task = L(
+          `${me} aprovou ${what}. O app rodou exatamente esse comando${ok ? '' : ' e ele terminou com erro'}. Saída:\n${resultText(out.result)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
+          `${me} approved ${what}. The app ran exactly that command${ok ? '' : ' and it ended with an error'}. Output:\n${resultText(out.result)}\n\nGo on from here and tell ${me} the result.`
+        )
+      } else if (decision === 'approved') {
+        outcome = L('Não executou: o computador desse agente está desligado.', "Didn't run: this agent's computer is off.")
+        task = L(`${me} aprovou ${what}, mas o seu computador está desligado agora. Avise ${me} em uma frase.`, `${me} approved ${what}, but your computer is off right now. Tell ${me} in one sentence.`)
+      } else {
+        outcome = decision === 'refused' ? L('Nada foi rodado.', 'Nothing was run.') : expired
+        task = L(
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi rodado. Responda considerando isso; se fizer sentido, proponha outro caminho.`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was run. Reply with that in mind; if it makes sense, suggest another way.`
         )
       }
     } else if (ap.connectorId === APPS) {

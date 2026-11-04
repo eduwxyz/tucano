@@ -65,6 +65,7 @@ import {
   type VoiceSettings
 } from '../store'
 import { voiceRefusal } from '../../../shared/voice'
+import { ACTION_KINDS, actionHint, actionLabel, actionMode, COMPUTADOR, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
@@ -237,6 +238,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const channels = useStore((s) => s.conversations.filter((c) => c.kind === 'channel'))
   const handles = useStore((s) => s.agents.map((a) => [a.id, a.handle] as const))
   const notes = useStore((s) => (id ? s.memories.filter((m) => m.scope === id && m.state === 'active').length : 0))
+  const globalRules = useStore((s) => s.settings.actionRules)
 
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
   const [chosen, setChosen] = useState<string[]>(() => (id ? channels.filter((c) => c.members.includes(id)).map((c) => c.id) : []))
@@ -491,6 +493,23 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   })}
                 </div>
               )}
+            </Card>
+          )}
+
+          {pane('ferramentas') && (
+            <Card
+              title={L('Aprovações', 'Approvals')}
+              lead={`${L(
+                `O que ${draft.name || 'o agente'} faz sozinho e o que pede sua aprovação antes, com um botão na conversa. Ler e investigar nunca pede. "Padrão" segue Configurações › Agentes.`,
+                `What ${draft.name || 'the agent'} does alone and what asks for your approval first, with a button in the conversation. Reading and looking into things never asks. "Default" follows Settings › Agents.`
+              )}${isNew ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
+            >
+              <ActionRulesList
+                rules={draft.actionRules ?? {}}
+                perAgent
+                inherited={globalRules}
+                onChange={(actionRules) => (isNew ? patch({ actionRules }) : (setDraft((d) => ({ ...d, actionRules })), patchAgent(draft.id, { actionRules })))}
+              />
             </Card>
           )}
 
@@ -964,6 +983,48 @@ function LentFolders({ agentId }: { agentId: string }): ReactNode {
   )
 }
 
+// One row per action that matters, each with what the agent does about it. With `perAgent`
+// (`perAgent`, `inherited`: an agent's page), "Padrão" follows Settings and clears the agent's own rule.
+function ActionRulesList({ rules, perAgent, inherited, onChange }: { rules: ActionRules; perAgent?: boolean; inherited?: ActionRules; onChange: (r: ActionRules) => void }): ReactNode {
+  const set = (k: ActionKind, m: ActionMode | undefined): void => {
+    const next: ActionRules = { ...rules }
+    if (m) next[k] = m
+    else delete next[k]
+    onChange(next)
+  }
+  return (
+    <div className="grants rules">
+      {ACTION_KINDS.map((k) => {
+        const own = rules[k]
+        const fallback = actionMode(k, undefined, inherited)
+        const value: ActionMode | 'default' = perAgent ? (own ?? 'default') : actionMode(k, undefined, rules)
+        const options: (ActionMode | 'default')[] = perAgent ? ['default', 'ask', 'auto', 'off'] : ['ask', 'auto', 'off']
+        return (
+          <div key={k} className="grant">
+            <div className="grant__name">
+              <Icon name="shield" size={15} />
+              <div>
+                <strong>{actionLabel(k)}</strong>
+                <span className="muted small">
+                  {actionHint(k)}
+                  {perAgent && !own ? ` · ${L('padrão', 'default')}: ${modeLabel(fallback).toLowerCase()}` : ''}
+                </span>
+              </div>
+            </div>
+            <div className="segmented" role="radiogroup" aria-label={actionLabel(k)}>
+              {options.map((o) => (
+                <button key={o} role="radio" aria-checked={value === o} className={value === o ? 'is-active' : ''} onClick={() => set(k, o === 'default' ? undefined : o)}>
+                  {o === 'default' ? L('Padrão', 'Default') : modeLabel(o)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function Card({ title, lead, action, children }: { title: string; lead?: string; action?: ReactNode; children: ReactNode }): ReactNode {
   return (
     <div className="card">
@@ -1049,7 +1110,7 @@ function HistoryRow({ id }: { id: string }): ReactNode {
     <div className="table__row">
       {agent && <AgentAvatar agent={agent} size={22} />}
       <span className="grow">
-        {toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
+        {a.connectorId === COMPUTADOR ? shellActions(String(a.args['command'] ?? '')).map(actionLabel).join(', ') || toolWords(a.tool) : toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
       </span>
       {a.outcome && <span className="muted small">{a.outcome}</span>}
       <span className={`tag ${a.state === 'approved' ? 'tag--ok' : a.state === 'refused' ? 'tag--danger' : ''}`}>{a.state === 'approved' ? L('aprovado', 'approved') : a.state === 'refused' ? L('recusado', 'refused') : L('expirado', 'expired')}</span>
@@ -1945,6 +2006,18 @@ export function SettingsPage(): ReactNode {
             </Field>
             {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
             {settings.routerModel === 'jev' && work && <OutsideGateway what={L('cada mensagem sem @menção vai pra TypeSafe escolher quem responde.', 'every message without an @mention goes to TypeSafe to pick who replies.')} />}
+          </Card>
+        )}
+
+        {pane('agentes') && (
+          <Card
+            title={L('Aprovações', 'Approvals')}
+            lead={L(
+              'Pra todos os agentes: o que pede sua aprovação antes, com um botão na conversa, o que eles fazem sozinhos e o que nunca fazem. Na página de cada agente dá pra mudar só pra ele. Ler e investigar nunca pede.',
+              'For every agent: what asks for your approval first, with a button in the conversation, what they do alone and what they never do. On each agent’s page you can change it for that agent only. Reading and looking into things never asks.'
+            )}
+          >
+            <ActionRulesList rules={settings.actionRules ?? {}} onChange={(actionRules) => updateSettings({ actionRules })} />
           </Card>
         )}
 
