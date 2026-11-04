@@ -37,6 +37,7 @@ import {
   type TelegramInfo,
   useStore,
   EFFORTS,
+  anthropicModel,
   ENGINES,
   MAX_AGENT_ROUTINES,
   RUN_BUDGET_PCT,
@@ -668,7 +669,14 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <div className="grid2">
                 {/* Cursor's models carry the effort in the name (…-high, …-xhigh): no separate pick. */}
                 {engine !== 'cursor' && (
-                  <Field label={L('Esforço de raciocínio', 'Reasoning effort')} hint={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
+                  <Field
+                    label={L('Esforço de raciocínio', 'Reasoning effort')}
+                    hint={
+                      engine === 'claude' && !anthropicModel(modelInfo(draft.modelId)?.id ?? draft.modelId)
+                        ? L('Neste modelo, que não é da Anthropic, Baixo e Médio desligam o raciocínio: respostas bem mais rápidas. Alto e Máximo pensam antes de responder.', "On this model, which isn't Anthropic's, Low and Medium turn reasoning off: much faster replies. High and Max think before answering.")
+                        : L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')
+                    }
+                  >
                     <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
                       {EFFORTS.map((ef) => (
                         <option key={ef.id} value={ef.id}>

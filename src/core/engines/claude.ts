@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn } from './types'
 import { L } from '../../shared/lang'
+import { thinkingOff } from '../../shared/types'
 
 export const GATEWAY_NAME = 'tucano'
 const WEB_TOOLS = ['WebSearch', 'WebFetch'] // run on Anthropic's side, on the subscription
@@ -178,7 +179,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       }
       // The gateway's token goes in the environment, never in the arguments (other processes can read those).
       const p = await provider()
-      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, ...p.env, ...(turn.account ? { CLAUDE_CONFIG_DIR: turn.account } : {}), MCP_TOOL_TIMEOUT: '900000' } })
+      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, ...(thinkingOff(turn.model, turn.effort) ? { CLAUDE_CODE_DISABLE_THINKING: '1' } : {}), ...p.env, ...(turn.account ? { CLAUDE_CONFIG_DIR: turn.account } : {}), MCP_TOOL_TIMEOUT: '900000' } })
     }
   }
 }
