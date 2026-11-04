@@ -2,9 +2,11 @@ import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { networkInterfaces } from 'node:os'
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { Forwarder, isPrivate } from '../src/server/forward'
 import { vault } from '../src/server/vault'
+import { WEB } from '../src/server/web'
 
 describe('the server vault', () => {
   it('opens what it sealed, and nothing sealed with another key', () => {
@@ -21,6 +23,17 @@ describe('the server vault', () => {
     b[b.length - 1]! ^= 1
     expect(() => v.open(b.toString('base64'))).toThrow()
     expect(() => vault(randomBytes(16))).toThrow()
+  })
+})
+
+describe('the browser shim', () => {
+  // Plain http on a LAN or Tailscale address is not a secure context: no crypto.randomUUID there.
+  it('gives the screens crypto.randomUUID where the browser leaves it out', () => {
+    const crypto: { getRandomValues: unknown; randomUUID?: () => string } = { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) }
+    runInNewContext(WEB, { window: {}, crypto })
+    const ids = Array.from({ length: 50 }, () => crypto.randomUUID!())
+    for (const id of ids) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })
 

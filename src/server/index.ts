@@ -15,6 +15,7 @@ import { extname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Forwarder, isPrivate } from './forward'
 import { vault } from './vault'
+import { WEB } from './web'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
 const host = process.env['TUCANO_HOST'] || '127.0.0.1'
@@ -204,44 +205,6 @@ const server = createServer((req, res) => {
   if (!path.startsWith(page + sep)) return void res.writeHead(404).end()
   file(res, path)
 })
-
-// window.tucano for a browser: the core's port comes from the event stream and
-// the requests go up by POST; what only the desktop does is left out quietly.
-const WEB = `(() => {
-  window.__TUCANO_WEB__ = true
-  let client = null
-  const connect = () => {
-    const ch = new MessageChannel()
-    const es = new EventSource('./events')
-    let opened = false
-    es.addEventListener('hello', (e) => {
-      if (opened) return location.reload() // a new connection after a drop: start fresh
-      opened = true
-      client = e.data
-      window.postMessage('core:port', '*', [ch.port1])
-    })
-    es.onmessage = (e) => ch.port2.postMessage(JSON.parse(e.data))
-    ch.port2.onmessage = (m) => {
-      fetch('./rpc?c=' + encodeURIComponent(client), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(m.data) }).then((r) => {
-        if (r.status === 410) location.reload()
-      })
-    }
-  }
-  window.tucano = {
-    connect,
-    pickFolder: async () => {
-      const p = prompt('Pasta no servidor (caminho completo) / Folder on the server (full path):')
-      return p && p.trim() ? p.trim() : null
-    },
-    onNavigate: () => {},
-    viewing: () => {},
-    updateState: async () => ({ version: '', status: 'off' }),
-    onUpdate: () => {},
-    checkUpdates: () => {},
-    installUpdate: () => {}
-  }
-})()
-`
 
 process.env['TUCANO_DATA'] = dataDir
 process.env['TUCANO_PACKAGED'] = '1'
