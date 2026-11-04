@@ -1186,10 +1186,11 @@ const FINDING_LABEL: Record<WikiFinding['kind'], () => string> = {
   link: () => L('Falta ligar', 'Missing link'),
   broken: () => L('Página por escrever', 'Page to write'),
   missing: () => L('Sem página', 'No page'),
-  orphan: () => L('Ninguém liga pra elas', 'Nothing links to them')
+  orphan: () => L('Ninguém liga pra elas', 'Nothing links to them'),
+  log: () => L('Parece um registro', 'Reads like a log')
 }
-const FINDING_TONE: Record<WikiFinding['kind'], 'danger' | 'warn' | 'calm'> = { contradiction: 'danger', stale: 'warn', duplicate: 'warn', link: 'calm', broken: 'calm', missing: 'calm', orphan: 'calm' }
-const FINDING_ORDER: WikiFinding['kind'][] = ['contradiction', 'stale', 'duplicate', 'link', 'broken', 'missing', 'orphan']
+const FINDING_TONE: Record<WikiFinding['kind'], 'danger' | 'warn' | 'calm'> = { contradiction: 'danger', stale: 'warn', duplicate: 'warn', link: 'calm', broken: 'calm', missing: 'calm', orphan: 'calm', log: 'warn' }
+const FINDING_ORDER: WikiFinding['kind'][] = ['contradiction', 'stale', 'duplicate', 'log', 'link', 'broken', 'missing', 'orphan']
 
 function WikiReviewPane(): ReactNode {
   const rev = useStore((s) => s.wikiRev)
@@ -1225,6 +1226,7 @@ function WikiReviewPane(): ReactNode {
               ['danger', L('Não batem', "Don't agree"), L('Duas páginas dizendo coisas diferentes sobre o mesmo valor, data ou prazo.', 'Two pages saying different things about the same amount, date or deadline.')],
               ['warn', L('Desatualizada', 'Out of date'), L('"Aguardando resposta" numa página, "contrato assinado" em outra.', '"Waiting for an answer" on one page, "contract signed" on another.')],
               ['warn', L('Repetida', 'Duplicate'), L('Duas páginas sobre a mesma pessoa ou o mesmo projeto. Ela junta, sem perder nada.', 'Two pages about the same person or project. It merges them, losing nothing.')],
+              ['warn', L('Parece um registro', 'Reads like a log'), L('Um histórico que virou diário do que foi feito. Ela resume no que vale hoje.', 'A history that turned into a diary of what was done. It condenses it into what holds today.')],
               ['calm', L('Solta', 'Loose'), L('Links pra páginas que não existem, nomes sem página, páginas que ninguém cita.', 'Links to missing pages, names with no page, pages nothing cites.')]
             ] as const
           ).map(([tone, t, d]) => (

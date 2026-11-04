@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Settings } from '../src/shared/types'
 import { Wiki } from '../src/core/wiki'
-import { lint, parseReview, WikiReviewer } from '../src/core/wiki-review'
+import { lint, logSections, parseReview, WikiReviewer } from '../src/core/wiki-review'
 
 function wiki(): Wiki {
   const root = mkdtempSync(join(tmpdir(), 'tucano-wiki-'))
@@ -98,5 +98,25 @@ describe('a review of the wiki', () => {
     expect(r.status()).toMatchObject({ error: 'sem modelo' })
     expect(r.status().at).toBeUndefined()
     expect(r.status().findings.some((f) => f.kind === 'broken')).toBe(true)
+  })
+
+  it('a history that grew into a log is pointed out, and the model is asked to condense it', async () => {
+    const w = wiki()
+    const diary = Array.from({ length: 9 }, (_, i) => `- ${i + 1}/11: a Lia conferiu a agenda e mandou um lembrete.`).join('\n')
+    w.save({ title: 'Marcos Lima', body: `Cliente.\n\n## Histórico\n${diary}\n\n## Contato\n- (41) 99999-0000`, by: 'me', byName: 'Ana' })
+    expect(logSections(w.page('Marcos Lima')!.body)).toEqual([{ section: 'Histórico', items: 9 }])
+    expect(lint(w).find((f) => f.kind === 'log')).toMatchObject({ pages: ['Marcos Lima'] })
+    // reviewed once: it still goes to the model next time, though it didn't change
+    const prompts: string[] = []
+    const answer = { achados: [{ tipo: 'registro', paginas: ['Marcos Lima'], explicacao: 'O histórico virou um diário.', mudancas: [{ op: 'replace', pagina: 'Marcos Lima', old: diary, new: '- Lembretes de agenda em novembro.' }] }] }
+    const r = new WikiReviewer({ wiki: w, settings: () => ({}) as Settings, llm: async (_s, p) => (prompts.push(p), JSON.stringify(answer)) })
+    w.setMeta('reviewed_at', String(Date.now() + 1000))
+    await r.review()
+    expect(prompts[0]).toContain('cara de registro')
+    expect(prompts[0]).toContain('### [[Marcos Lima]]')
+    const found = r.status().findings.filter((f) => f.kind === 'log')
+    // the model's proposal, with its fix, takes the place of the count
+    expect(found).toHaveLength(1)
+    expect(found[0]!.change).toMatchObject({ state: 'pending', ops: [{ op: 'replace', new: '- Lembretes de agenda em novembro.' }] })
   })
 })

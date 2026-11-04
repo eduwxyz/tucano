@@ -881,7 +881,7 @@ export interface WikiChange {
 export interface WikiFinding {
   id: string
   at: number
-  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link'
+  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' // log: a page that reads like a record of what was done
   pages: string[] // the pages it is about
   text: string // what's wrong, in a sentence (Markdown, with [[links]])
   name?: string // broken, missing: the page it would take
