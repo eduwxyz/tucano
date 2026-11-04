@@ -404,7 +404,12 @@ function MessageRow({ message, grouped, replies }: { message: Message; grouped: 
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
         {agent && message.run?.browser && <BrowserCard agentId={agent.id} big={liveBrowser} />}
-        {message.run?.status === 'stopped' && <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>}
+        {message.run?.status === 'stopped' &&
+          (message.run.steered ? (
+            <div className="note">{L('Parei aqui para seguir a sua orientação: continuo logo abaixo.', 'I stopped here to follow your steer: I carry on right below.')}</div>
+          ) : (
+            <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>
+          ))}
         {message.run?.status === 'interrupted' && <div className="note">{L('Interrompido: o app fechou no meio da resposta.', 'Interrupted: the app closed in the middle of the reply.')}</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
         {message.run?.errorDetail && (
@@ -423,7 +428,7 @@ function MessageRow({ message, grouped, replies }: { message: Message; grouped: 
           </>
         )}
         {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
+        {message.run && !message.run.steered && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             {L('Tentar de novo', 'Try again')}
           </button>

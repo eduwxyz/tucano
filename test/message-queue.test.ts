@@ -94,12 +94,18 @@ describe('messages sent while the agent is still answering', () => {
     const waiting = mine()[1]!
     r.steer(waiting.id)
     await until(() => turns.length === 2)
-    expect(replies()[0]!.run?.status).toBe('stopped')
+    const cut = replies()[0]!
+    expect(cut.run?.status).toBe('stopped')
+    // Not a failure: no failed step, and no "Try again" (the reply after it carries on).
+    expect(cut.run?.steered).toBe(true)
+    expect(cut.run?.steps.some((s) => s.status === 'error')).toBe(false)
+    r.retry(cut.id)
     expect(turns[1]!.prompt).toContain('te interrompeu')
     expect(turns[1]!.prompt).toContain('na verdade é o PR 13')
     release()
     await r.idle()
     expect(replies().at(-1)!.run?.status).toBe('done')
+    expect(turns).toHaveLength(2) // "Try again" on the cut reply did nothing
   })
 
   it('a message in another thread is another subject: it gets its own reply', async () => {
