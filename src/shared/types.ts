@@ -121,6 +121,16 @@ export interface Conversation {
   summaryAt?: number
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
+  // A DM between agents opens for one request (the id of the message that started it) and holds only that
+  // work; its topic is the task. One kept from before this (no request) is the pair's old running DM.
+  request?: string
+}
+
+// A DM between agents can be deleted once its request is over: while any reply of that request is still
+// working, asking or waiting for an approval (here or anywhere else it reached), the lead still needs it.
+export function requestRunning(conv: Conversation, messages: Message[]): boolean {
+  const live = (m: Message): boolean => m.run?.status === 'working' || m.run?.status === 'waiting_input' || m.run?.status === 'waiting_approval'
+  return messages.some((m) => live(m) && (m.conversationId === conv.id || (!!conv.request && (m.id === conv.request || m.run?.root === conv.request))))
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -231,6 +241,7 @@ export interface Message {
   at: number
   run?: Run
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
+  threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
 }
 
 // Dictation with whisper-cli. Unset paths are looked for in the usual places.

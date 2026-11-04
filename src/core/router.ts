@@ -13,19 +13,21 @@ export const routerSystem = (): string =>
   L(
     [
       'Você decide quais agentes de um chat de trabalho devem responder à última mensagem humana.',
-      'Responda SOMENTE com JSON, sem texto em volta, no formato {"handles": ["..."], "reason": "..."}:',
+      'Responda SOMENTE com JSON, sem texto em volta, no formato {"handles": ["..."], "todos": false, "reason": "..."}:',
       `- "handles": de 0 a ${MAX_ROUTED} handles, só da lista de agentes; prefira 1.`,
+      '- "todos": true quando a mensagem é pro grupo todo (um cumprimento, "pessoal", uma pergunta pra todos, uma apresentação): aí todos os agentes respondem.',
       '- "reason": um motivo de até 12 palavras, em português.',
       'Se a mensagem depende de um sistema externo (ex.: Linear, GitHub), prefira quem tem acesso a ele; se ninguém tem, escolha pelo papel.',
-      'Lista vazia quando ninguém precisa responder: cumprimento solto, agradecimento, recado, conversa já encerrada.'
+      'Um cumprimento nunca fica sem resposta. Lista vazia (e "todos" falso) só quando ninguém precisa responder: agradecimento, recado, conversa já encerrada.'
     ].join('\n'),
     [
       'You decide which agents in a work chat should answer the last human message.',
-      'Reply ONLY with JSON, no text around it, in the format {"handles": ["..."], "reason": "..."}:',
+      'Reply ONLY with JSON, no text around it, in the format {"handles": ["..."], "everyone": false, "reason": "..."}:',
       `- "handles": 0 to ${MAX_ROUTED} handles, only from the list of agents; prefer 1.`,
+      '- "everyone": true when the message is for the whole group (a greeting, "everyone", a question for all, an introduction): then every agent answers.',
       '- "reason": a reason of up to 12 words, in English.',
       'If the message depends on an external system (e.g. Linear, GitHub), prefer whoever has access to it; if no one does, choose by role.',
-      "An empty list when no one needs to answer: a passing greeting, a thank-you, a note, a conversation that's already over."
+      "A greeting never goes unanswered. An empty list (and \"everyone\" false) only when no one needs to answer: a thank-you, a note, a conversation that's already over."
     ].join('\n')
   )
 
@@ -43,12 +45,13 @@ export function describeAgent(a: Agent, connectors: Connector[] = []): string {
 
 export const REPLY_JSON = (): string => L('Responda só com o JSON.', 'Reply with the JSON only.')
 
-export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[] }): string {
-  const { messages, agents, me, connectors = [] } = opts
+// `thread`: the message that started the thread the last message is in; `messages` are then its replies.
+export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; thread?: Message }): string {
+  const { messages, agents, me, connectors = [], thread } = opts
   const roster = agents.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`)
-  const lines = messages
-    .filter((m) => m.text.trim() && m.author.kind !== 'system')
-    .slice(-ROUTER_HISTORY)
+  const said = (m: Message): boolean => !!m.text.trim() && m.author.kind !== 'system'
+  const recent = messages.filter(said).slice(-ROUTER_HISTORY)
+  const lines = [...(thread && said(thread) ? [thread] : []), ...recent]
     .map((m) => {
       const author =
         m.author.kind === 'me'
@@ -62,7 +65,9 @@ export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: s
     L('Agentes no canal:', 'Agents in the channel:'),
     ...roster,
     '',
-    L('Conversa (a última é a que precisa de resposta):', 'Conversation (the last one is the one that needs an answer):'),
+    thread
+      ? L('Thread (a primeira mensagem abriu a thread; a última é a que precisa de resposta):', 'Thread (the first message started it; the last one is the one that needs an answer):')
+      : L('Conversa (a última é a que precisa de resposta):', 'Conversation (the last one is the one that needs an answer):'),
     ...lines,
     '',
     REPLY_JSON()
@@ -80,7 +85,10 @@ export function parseRoute(text: string, agents: Agent[]): { agents: Agent[]; re
     return null
   }
   if (!data || typeof data !== 'object') return null
-  const { handles, reason } = data as { handles?: unknown; reason?: unknown }
+  const { handles, reason, todos, everyone } = data as { handles?: unknown; reason?: unknown; todos?: unknown; everyone?: unknown }
+  const why = typeof reason === 'string' ? reason.trim() : ''
+  // A message for the whole group: every agent in the channel answers.
+  if (todos === true || everyone === true) return { agents: [...agents], reason: why }
   if (!Array.isArray(handles)) return null
   const picked: Agent[] = []
   for (const h of handles) {
@@ -88,7 +96,7 @@ export function parseRoute(text: string, agents: Agent[]): { agents: Agent[]; re
     const a = agents.find((x) => x.handle.toLowerCase() === h.replace(/^@/, '').toLowerCase())
     if (a && !picked.includes(a)) picked.push(a)
   }
-  return { agents: picked.slice(0, MAX_ROUTED), reason: typeof reason === 'string' ? reason.trim() : '' }
+  return { agents: picked.slice(0, MAX_ROUTED), reason: why }
 }
 
 export async function route(opts: {
@@ -98,6 +106,7 @@ export async function route(opts: {
   agents: Agent[]
   me: string
   connectors?: Connector[]
+  thread?: Message
   cwd: string
 }): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()

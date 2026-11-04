@@ -12,9 +12,9 @@ contextBridge.exposeInMainWorld('tucano', {
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
   pathOf: (file: File): string => webUtils.getPathForFile(file),
-  // A click on a notification opens its conversation.
-  onNavigate: (cb: (conversationId: string) => void): void => {
-    ipcRenderer.on('navigate', (_e, id: unknown) => typeof id === 'string' && cb(id))
+  // A click on a notification opens its conversation, and the thread it's about.
+  onNavigate: (cb: (conversationId: string, threadId?: string) => void): void => {
+    ipcRenderer.on('navigate', (_e, id: unknown, thread: unknown) => typeof id === 'string' && cb(id, typeof thread === 'string' ? thread : undefined))
   },
   // …or a screen (a skill proposal opens Skills).
   onNavigatePage: (cb: (page: 'skills') => void): void => {

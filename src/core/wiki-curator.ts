@@ -171,11 +171,14 @@ export class WikiCurator {
     wiki.setMark(conversationId, last.at)
   }
 
-  // A message kept on purpose: with the one it answers, if it's a reply.
+  // A message kept on purpose: with the one it answers, if it's a reply (in a thread, my last message there).
   async keepMessage(messageId: string): Promise<WikiChange[]> {
     const m = this.deps.db.message(messageId)
     if (!m) throw new Error(L('Essa mensagem não existe mais.', 'That message no longer exists.'))
-    const before = this.deps.db.messagesAfter(m.conversationId, 0).filter((x) => x.at < m.at && x.author.kind === 'me').at(-1)
+    const before = this.deps.db
+      .messagesAfter(m.conversationId, 0)
+      .filter((x) => x.at < m.at && x.author.kind === 'me' && (x.threadId === m.threadId || x.id === m.threadId))
+      .at(-1)
     return this.curate({ messages: before && m.author.kind !== 'me' ? [before, m] : [m], kind: 'message', conversationId: m.conversationId, force: true })
   }
 

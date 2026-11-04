@@ -248,8 +248,15 @@ const MIGRATIONS = [
   ALTER TABLE conversations ADD COLUMN wiki_capture INTEGER;
   `,
   `
+  ALTER TABLE messages ADD COLUMN thread_id TEXT;
+  CREATE INDEX messages_by_thread ON messages (conversation_id, thread_id, at);
+  `,
+  `
   ALTER TABLE agents ADD COLUMN team TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE conversations ADD COLUMN pair INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN request TEXT;
   `
 ]
 
@@ -417,7 +424,8 @@ export class Db {
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
-      ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {})
+      ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {}),
+      ...(r['request'] ? { request: str(r['request']) } : {})
     }))
   }
 
@@ -433,7 +441,7 @@ export class Db {
 
   createConversation(c: Omit<Conversation, 'unread'>): void {
     this.tx(() => {
-      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, pair, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(c.id, c.kind === 'agents' ? 'channel' : c.kind, c.name, c.topic ?? null, c.kind === 'agents' ? 1 : 0, Date.now())
+      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, pair, request, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(c.id, c.kind === 'agents' ? 'channel' : c.kind, c.name, c.topic ?? null, c.kind === 'agents' ? 1 : 0, c.request ?? null, Date.now())
       for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(c.id, m)
     })
   }
@@ -494,7 +502,8 @@ export class Db {
       text: str(r['text']),
       at: Number(r['at']),
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
-      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined
+      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
+      threadId: r['thread_id'] ? str(r['thread_id']) : undefined
     }
   }
 
@@ -502,8 +511,11 @@ export class Db {
     return (this.db.prepare('SELECT * FROM messages ORDER BY at').all() as Row[]).map((r) => this.toMessage(r))
   }
 
-  recentMessages(conversationId: string, limit: number): Message[] {
-    const rows = this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY at DESC LIMIT ?').all(conversationId, limit) as Row[]
+  // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
+  recentMessages(conversationId: string, limit: number, threadId?: string | null): Message[] {
+    const where = threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?'
+    const args = typeof threadId === 'string' ? [conversationId, threadId, limit] : [conversationId, limit]
+    const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ?${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
   }
 
@@ -526,7 +538,7 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
       .run(
@@ -537,7 +549,8 @@ export class Db {
         m.text,
         m.at,
         m.run ? JSON.stringify(m.run) : null,
-        m.routine ? JSON.stringify(m.routine) : null
+        m.routine ? JSON.stringify(m.routine) : null,
+        m.threadId ?? null
       )
   }
 
