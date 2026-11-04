@@ -409,6 +409,7 @@ export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: st
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops
 export const ERRORS_STOP = 8 // tool calls failing in a row
+export const SAME_ERROR_STOP = 3 // the same error back from different calls: something around it is down, retrying won't help
 
 // What a reply counts against limits: a token read from the cache costs about a
 // tenth of a new one, so it counts a tenth.
