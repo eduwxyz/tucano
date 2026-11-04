@@ -122,14 +122,18 @@ export function geminiHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
     // ...and the only one allowed: a server declared anywhere else never starts.
     mcp: { allowed: [GATEWAY_NAME] },
     // No built-in tools (shell, files, memory); only web search, and only when
-    // the agent has the web. tools.core is the allow-list of built-ins.
-    tools: { core: turn.web ? [GEMINI_WEB] : [] },
+    // the agent has the web. tools.core is the allow-list of built-ins; no
+    // discovery or call command, so no tools come from running a command.
+    tools: { core: turn.web ? [GEMINI_WEB] : [], discoveryCommand: '', callCommand: '' },
+    // No hooks: a hook is a command the CLI runs around each turn.
+    hooksConfig: { enabled: false },
     // Nothing of Gemini's own that would run behind the app's back or spend
     // tokens outside the receipts: no skills, no built-in subagents. Extensions
     // load from the home, which is fresh, so there are none.
     skills: { enabled: false },
     agents: { overrides: { codebase_investigator: { enabled: false }, cli_help: { enabled: false } } },
     privacy: { usageStatisticsEnabled: false },
+    telemetry: { enabled: false, logPrompts: false },
     ui: { showMemoryUsage: false },
     general: { checkpointing: { enabled: false } }
   }
@@ -140,8 +144,10 @@ export function geminiHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
 // The env a gemini turn runs with: its own home, the system prompt file, and no
 // context-file discovery (the person's GEMINI.md never leaks into the agent).
 // The turn's settings are also the system settings: Gemini applies those last,
-// over a .gemini/settings.json in the working folder, so a folder can't turn the
-// built-in tools back on or start an MCP server of its own.
+// over a .gemini/settings.json in the working folder (headless, the CLI trusts
+// any folder). That only holds for the keys we set: built-in tools, MCP servers,
+// skills, subagents, tool discovery, hooks and telemetry. A key a newer CLI adds
+// is the folder's until it's set here too.
 export function geminiEnv(home: string, base: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return { ...base, GEMINI_CLI_HOME: home, GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, '.gemini', 'settings.json'), GEMINI_SYSTEM_MD: join(home, 'system.md') }
 }

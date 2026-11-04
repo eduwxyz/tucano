@@ -285,12 +285,15 @@ describe('Gemini config', () => {
     expect(existsSync(join(home, '.gemini', 'oauth_creds.json'))).toBe(true)
     expect(existsSync(join(home, 'oauth_creds.json'))).toBe(false)
     // keys as the CLI reads them: tools.core, not the old flat coreTools
-    expect(s['tools']).toEqual({ core: [] }) // no built-in tools, no web
+    expect(s['tools']).toEqual({ core: [], discoveryCommand: '', callCommand: '' }) // no built-in tools, no web, no discovered tools
     expect(s['coreTools']).toBeUndefined()
     expect(s['mcp']).toEqual({ allowed: ['tucano'] })
     expect(s['skills']).toEqual({ enabled: false })
     expect(s['agents']).toEqual({ overrides: { codebase_investigator: { enabled: false }, cli_help: { enabled: false } } })
     expect((s['privacy'] as Record<string, unknown>)['usageStatisticsEnabled']).toBe(false)
+    // nothing a working folder could turn into a command or a request: hooks, telemetry
+    expect(s['hooksConfig']).toEqual({ enabled: false })
+    expect(s['telemetry']).toEqual({ enabled: false, logPrompts: false })
     // the agent's instructions are the system prompt, and the login is brought in
     expect(readFileSync(join(home, 'system.md'), 'utf8')).toBe('You are Iris.')
     // the turn's settings are also the system settings, applied over the working folder's
@@ -300,7 +303,7 @@ describe('Gemini config', () => {
   it('turns on only the web search when the agent has the web', () => {
     const home = geminiHome(mkdtempSync(join(tmpdir(), 'gh2-')), { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'gu2-')))
     const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
-    expect(s['tools']).toEqual({ core: ['google_web_search'] })
+    expect(s['tools']).toEqual({ core: ['google_web_search'], discoveryCommand: '', callCommand: '' })
     expect(s['mcpServers']).toBeUndefined()
   })
 
