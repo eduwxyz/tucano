@@ -4,6 +4,7 @@
 // person's language, an icon and how to start it. The Mac's are in apps.ts (macApps).
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { posix } from 'node:path'
 
@@ -123,8 +124,21 @@ export function dataUrl(file: string): string | undefined {
   }
 }
 
+// Whether a file is on disk, without opening it. Inside Electron, node:fs treats any .asar it's
+// asked about as an archive: it opens it and keeps it open in its cache, which on Windows locks
+// other apps' app.asar and breaks their updates (#97). original-fs is the unpatched one. In
+// server mode (plain Node) there's no original-fs, and node:fs is already the plain one.
+export const diskExists: (p: string) => boolean = (() => {
+  if (!process.versions['electron']) return existsSync
+  try {
+    return (createRequire(import.meta.url)('original-fs') as typeof import('node:fs')).existsSync
+  } catch {
+    return existsSync
+  }
+})()
+
 // A program made with Chromium or Electron, by what sits next to it.
-export function isChromium(program: string, exists: (p: string) => boolean = existsSync): boolean {
+export function isChromium(program: string, exists: (p: string) => boolean = diskExists): boolean {
   const dir = dirname(program)
   return ['resources/app.asar', 'resources.pak', 'chrome_100_percent.pak', 'chrome-sandbox', 'v8_context_snapshot.bin', 'libcef.so', 'libcef.dll'].some((f) => exists(join(dir, f)))
 }
@@ -242,7 +256,7 @@ type WinRow = { name?: string; path?: string; exe?: string; id?: string; logo?: 
 // Uninstallers, help files and the like aren't apps a person would give an agent.
 const NOT_AN_APP = /\b(uninstall|desinstalar|deinstall|readme|leia-me|help|ajuda|documentation|release notes|website|license|licen[cç]a)\b/i
 
-export function parseWinApps(json: string, exists: (p: string) => boolean = existsSync): SystemApp[] {
+export function parseWinApps(json: string, exists: (p: string) => boolean = diskExists): SystemApp[] {
   let rows: WinRow[] = []
   try {
     const v = JSON.parse(json.trim() || '[]') as WinRow | WinRow[]
