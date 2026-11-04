@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import type { Agent, Connector, Message } from '../shared/types'
+import type { ThreadDigest } from './memory'
 import { describeAgent, MAX_ROUTED, REPLY_JSON, routerPrompt } from './router'
 
 export const JEV_MODEL = 'jev' // the routerModel value that picks it
@@ -44,6 +45,7 @@ export async function routeJev(opts: {
   me: string
   connectors?: Connector[]
   thread?: Message
+  threads?: ThreadDigest[]
   fetch?: Fetch
 }): Promise<{ agents: Agent[]; reason: string; ms: number } | { error: string; ms: number }> {
   const started = Date.now()
