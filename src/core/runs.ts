@@ -570,35 +570,35 @@ export class Runner {
     // a DM in Slack), in a DM between the two agents: the request opens there, and the answer is given there.
     const placed = go.filter((t) => !t.askedIn).map((t) => {
       const target = db.agent(t.agentId)!
-      const where = conv.kind === 'channel' ? conv : this.pair(manager, target, root, t.task)
-      return { t: { ...t, conversationId: where.id }, target, where }
+      const where = conv.kind === 'channel' ? conv : this.pair(manager, target)
+      // In the DM between the two, the request opens a thread of its own: the manager's message starts it.
+      return { t: { ...t, conversationId: where.id, ...(where.id !== conv.id ? { threadId: randomUUID() } : {}) }, target, where }
     })
     this.update(msg, { run: { ...msg.run!, delegated: placed.length || asks.length ? [...placed.map((p) => p.t), ...asks] : undefined } })
     const above = msg.run?.delegation
     for (const { t, target, where } of placed) {
       if (where.id !== conv.id) {
         // A millisecond earlier than the reply it gets, so it always reads first.
-        const ask: Message = { id: randomUUID(), conversationId: where.id, author: { kind: 'agent', id: manager.id }, text: [t.task, t.doneWhen && `${L('Pronto quando', 'Done when')}: ${t.doneWhen}`].filter(Boolean).join('\n\n'), at: Date.now() - 1 }
+        const ask: Message = { id: t.threadId!, conversationId: where.id, author: { kind: 'agent', id: manager.id }, text: [t.task, t.doneWhen && `${L('Pronto quando', 'Done when')}: ${t.doneWhen}`].filter(Boolean).join('\n\n'), at: Date.now() - 1 }
         db.saveMessage(ask)
         this.deps.emit({ type: 'message', message: ask })
       }
       const delegation: Delegation = { id: t.id, by: manager.id, from: msg.id, task: t.task, ...(t.doneWhen ? { doneWhen: t.doneWhen } : {}), chain: [...(above?.chain ?? []), manager.id], root, since: msg.at }
-      this.follow(target, where, { delegation, root, work: msg.run?.work, ...(where.id === conv.id && msg.threadId ? { threadId: msg.threadId } : {}) })
+      this.follow(target, where, { delegation, root, work: msg.run?.work, ...(where.id === conv.id ? (msg.threadId ? { threadId: msg.threadId } : {}) : { threadId: t.threadId }) })
     }
     for (const t of asks) void this.askAround(manager, msg, t)
     if (!placed.length && !asks.length && above) this.settle(above.from)
   }
 
-  // The DM between two agents for one request: made when one first asks the other for something in it, and
-  // used again only by that request (a later round). It holds that work and nothing older, so the agent
-  // reads no other request's history, and the person can delete it once it's done.
-  private pair(a: Agent, b: Agent, request: string, task: string): Conversation {
+  // The DM between two agents: one per pair, made the first time one asks the other for something, and used
+  // again every time after. Each request is a thread in it, and the agent working on one sees only that
+  // thread (see turn), so it reads no other request's history. (A DM made for a single request, from
+  // before, stays as it was and isn't used again.)
+  private pair(a: Agent, b: Agent): Conversation {
     const { db, emit } = this.deps
-    const found = db.conversations().find((c) => c.kind === 'agents' && c.request === request && c.members.length === 2 && c.members.includes(a.id) && c.members.includes(b.id))
+    const found = db.conversations().find((c) => c.kind === 'agents' && !c.request && c.members.length === 2 && c.members.includes(a.id) && c.members.includes(b.id))
     if (found) return found
-    const line = task.replace(/\s+/g, ' ').trim()
-    const topic = line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line
-    const conv: Conversation = { id: randomUUID(), kind: 'agents', name: `${a.handle}-${b.handle}`, topic, members: [a.id, b.id], request }
+    const conv: Conversation = { id: randomUUID(), kind: 'agents', name: `${a.handle}-${b.handle}`, members: [a.id, b.id] }
     db.createConversation(conv)
     emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
     return db.conversation(conv.id)!
@@ -891,8 +891,14 @@ export class Runner {
     // A delegate working in its manager's channel sees what it was sent and the channel from then on, not what
     // came before. In the DM between the two, it's their own conversation: it sees it as it is.
     const inline = !!opts.delegation && db.message(opts.delegation.from)?.conversationId === conv.id
-    const summary = inline ? undefined : window.summary
-    const history = inline ? window.messages.filter((m) => m.id === opts.delegation!.from || m.at > opts.delegation!.since) : window.messages
+    // In the DM between two agents, each request is its own thread: a reply there sees that thread alone.
+    const ownThread = conv.kind === 'agents' && msg.threadId ? msg.threadId : undefined
+    const summary = inline || ownThread ? undefined : window.summary
+    const history = inline
+      ? window.messages.filter((m) => m.id === opts.delegation!.from || m.at > opts.delegation!.since)
+      : ownThread
+        ? window.messages.filter((m) => m.id === ownThread || m.threadId === ownThread)
+        : window.messages
     // What this reply counts toward: given (a chain, a routine's issue), or an issue named in the message it answers.
     const asked = [...history].reverse().find((m) => m.author.kind === 'me' || m.author.kind === 'routine')
     const work = opts.work ?? opts.existing?.run?.work ?? (asked ? workIn(asked.text) : undefined)

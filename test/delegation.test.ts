@@ -108,29 +108,35 @@ describe('delegation', () => {
     expect(notes.filter((n) => n.kind === 'done').map((n) => n.title)).toEqual(['chefe terminou', 'chefe terminou'])
   })
 
-  it('opens one DM between the agents per request: a new request starts clean, and the old one can be deleted', async () => {
+  it('keeps one DM per pair of agents: each request a thread in it, and the work on one sees only its thread', async () => {
     const r = runner()
     await r.send('dm', 'delegue a @dev: escrever o post')
     await r.idle()
-    const [head] = said('dm')
-    const first = pair('chefe', 'dev')
-    expect(db.conversation(first)).toMatchObject({ kind: 'agents', topic: 'escrever o post', request: head!.id })
-
     await r.send('dm', 'delegue a @dev: corrigir o bug')
     await r.idle()
+
+    // One DM between chefe and dev, used again: not one per request.
     const pairs = db.conversations().filter((c) => c.kind === 'agents')
-    expect(pairs).toHaveLength(2)
-    const second = pairs.find((c) => c.id !== first)!
-    expect(second.topic).toBe('corrigir o bug')
-    expect(said(second.id).map((m) => m.text)).toEqual(['corrigir o bug', 'Feito: corrigir o bug'])
+    expect(pairs).toHaveLength(1)
+    const dm = pairs[0]!.id
+    const [post, bug] = said(dm).filter((m) => by(m) === 'chefe')
+    expect(post!.text).toBe('escrever o post')
+    expect(bug!.text).toBe('corrigir o bug')
+    expect(post!.threadId).toBeUndefined() // each request opens a thread
+    expect(said(dm).filter((m) => m.threadId === bug!.id).map((m) => m.text)).toEqual(['Feito: corrigir o bug'])
+
     // The second task never reads the first one's work.
     expect(turnsOf('dev')[1]!.prompt).toContain('corrigir o bug')
     expect(turnsOf('dev')[1]!.prompt).not.toContain('escrever o post')
 
-    // Both requests are over: either DM can go, and the lead's report stays in the person's DM.
-    expect(requestRunning(db.conversation(first)!, db.messages())).toBe(false)
-    db.deleteConversation(first)
-    expect(db.conversation(first)).toBeUndefined()
+    // The manager's tasks point at their threads.
+    const heads = said('dm').filter((m) => m.run?.delegated?.length)
+    expect(heads.map((m) => m.run!.delegated![0]!.threadId)).toEqual([post!.id, bug!.id])
+
+    // Both requests are over: the DM can go, and the lead's reports stay in the person's DM.
+    expect(requestRunning(db.conversation(dm)!, db.messages())).toBe(false)
+    db.deleteConversation(dm)
+    expect(db.conversation(dm)).toBeUndefined()
     expect(said('dm').filter((m) => m.run?.reportOf)).toHaveLength(2)
   })
 
@@ -248,7 +254,8 @@ describe('delegation', () => {
     expect(said('dm').map(by)).toEqual(['chefe'])
     expect(notes.at(-1)).toMatchObject({ title: 'dev te perguntou', kind: 'question' })
 
-    await r.send(withDev, 'até sexta')
+    // Answered in the request's thread, where the question is.
+    await r.send(withDev, 'até sexta', [], said(withDev)[0]!.id)
     await r.idle()
     expect(said(withDev).map(by)).toEqual(['chefe', 'dev', 'dev'])
     const answered = turnsOf('dev').at(-1)!
