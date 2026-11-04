@@ -241,6 +241,7 @@ export interface Message {
   at: number
   run?: Run
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
+  threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
 }
 
 // Dictation with whisper-cli. Unset paths are looked for in the usual places.

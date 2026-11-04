@@ -11,6 +11,7 @@ export const JEV_MODEL = 'jev' // the routerModel value that picks it
 export const JEV_SECRET = 'typesafe:key'
 const API = 'https://api.typesafe.ai/v1'
 const NOBODY = '__ninguem' // can't clash with a handle: handles never start with "_"
+const EVERYONE = '__todos'
 const SECOND_AT = 0.3 // a second agent is called when the model gives it at least this
 const TIMEOUT_MS = 10_000
 
@@ -42,6 +43,7 @@ export async function routeJev(opts: {
   agents: Agent[]
   me: string
   connectors?: Connector[]
+  thread?: Message
   fetch?: Fetch
 }): Promise<{ agents: Agent[]; reason: string; ms: number } | { error: string; ms: number }> {
   const started = Date.now()
@@ -52,9 +54,13 @@ export async function routeJev(opts: {
   const state = prompt.endsWith(REPLY_JSON()) ? prompt.slice(0, -REPLY_JSON().length).trimEnd() : prompt
   const criteria: Record<string, string> = {}
   for (const a of agents) criteria[a.handle] = describeAgent(a, opts.connectors)
+  criteria[EVERYONE] = L(
+    'Todos: a mensagem é pro grupo todo (um cumprimento, "pessoal", uma pergunta pra todos, uma apresentação).',
+    'Everyone: the message is for the whole group (a greeting, "everyone", a question for all, an introduction).'
+  )
   criteria[NOBODY] = L(
-    'Ninguém: a mensagem não pede nada a nenhum agente (cumprimento solto, agradecimento, recado, conversa já encerrada).',
-    "No one: the message asks nothing of any agent (a passing greeting, a thank-you, a note, a conversation that's already over)."
+    'Ninguém: a mensagem não pede nada a nenhum agente (agradecimento, recado, conversa já encerrada). Nunca um cumprimento.',
+    "No one: the message asks nothing of any agent (a thank-you, a note, a conversation that's already over). Never a greeting."
   )
 
   let res: Response
@@ -89,6 +95,7 @@ export async function routeJev(opts: {
   const probs = who.probabilities ?? {}
   const pct = (h: string): string => `${Math.round((probs[h] ?? 0) * 100)}%`
   if (who.choice === NOBODY) return { agents: [], reason: `Jev, ${pct(NOBODY)}`, ms: ms() }
+  if (who.choice === EVERYONE) return { agents: [...agents], reason: `Jev, ${pct(EVERYONE)}`, ms: ms() }
 
   const first = agents.find((a) => a.handle === who.choice)
   if (!first) return { error: L('o TypeSafe escolheu alguém fora do canal', 'TypeSafe picked someone outside the channel'), ms: ms() }

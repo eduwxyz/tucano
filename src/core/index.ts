@@ -247,7 +247,7 @@ function toPhone(e: CoreEvent): void {
 
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
-const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills' } = {}): void => {
+const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string } = {}): void => {
   toMain({ type: 'notify', title, body: shortText, conversationId, ...more, sound: settings().sounds !== false })
   void telegram?.notice(title, fullText ?? shortText)
 }
@@ -258,7 +258,7 @@ type ToMain =
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -519,7 +519,8 @@ const runner = new Runner({
   wikiCurator: curator,
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
-  notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId)),
+  notify: (title, body, conversationId, kind, threadId) =>
+    kind ? toMain({ type: 'notify', title, body, conversationId, threadId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId, undefined, { threadId }),
   jev: { key: () => secrets.get(JEV_SECRET) },
   github,
   onBusy: (busy) => toMain({ type: 'busy', busy }),
@@ -538,7 +539,7 @@ telegram = new Telegram({
   secrets,
   decide: (id, decision, reason) => runner.decide(id, decision, reason),
   approval: (id) => db.approval(id),
-  answer: (conversationId, text) => void runner.send(conversationId, text),
+  answer: (conversationId, text, threadId) => void runner.send(conversationId, text, [], threadId),
   changed: () => emit({ type: 'settings', settings: settings() })
 })
 
@@ -705,8 +706,8 @@ const api: Api = {
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
 
-  sendMessage: ({ conversationId, text, images }) => {
-    void runner.send(conversationId, text, images)
+  sendMessage: ({ conversationId, text, images, threadId }) => {
+    void runner.send(conversationId, text, images, threadId)
   },
 
   stopRun: ({ messageId }) => runner.stop(messageId),

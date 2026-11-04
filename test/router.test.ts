@@ -32,6 +32,12 @@ describe('parseRoute', () => {
     expect(parseRoute('{"handles":[],"reason":"cumprimento"}', team)).toEqual({ agents: [], reason: 'cumprimento' })
   })
 
+  it('calls every agent when the message is for the whole group, like a greeting, past the cap of two', () => {
+    const three = [...team, agent('a3', 'theo', 'Dados')]
+    expect(parseRoute('{"handles":[],"todos":true,"reason":"cumprimento pro grupo"}', three)).toEqual({ agents: three, reason: 'cumprimento pro grupo' })
+    expect(parseRoute('{"handles":["lia"],"everyone":true,"reason":"greeting"}', three)?.agents).toEqual(three)
+  })
+
   it('drops unknown handles and duplicates, and caps at two', () => {
     const three = [...team, agent('a3', 'theo', 'Dados')]
     expect(parseRoute('{"handles":["ghost","lia","lia","nina","theo"],"reason":""}', three)?.agents).toEqual([lia, nina])

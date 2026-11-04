@@ -275,8 +275,9 @@ export const clock = (at: number): string => {
 // changes between turns (no "now", no closing line), so the next turn starts
 // with the same blocks and reads them from the cache. `task` (to continue after
 // an approval, a routine…) goes last, with the time, since it may come later.
-// `images`: the names of the images attached to each message (by id).
-type TranscriptOpts = { agent: Agent; conversation: Conversation; messages: Message[]; agents: Agent[]; me: string; task?: string; summary?: string; images?: Map<string, string[]> }
+// `images`: the names of the images attached to each message (by id). `thread`: the message
+// that started the thread this reply is in (then `messages` is that thread, root first).
+type TranscriptOpts = { agent: Agent; conversation: Conversation; messages: Message[]; agents: Agent[]; me: string; task?: string; summary?: string; images?: Map<string, string[]>; thread?: Message }
 
 export function transcript(opts: TranscriptOpts): string[] {
   return transcriptBlocks(opts).blocks
@@ -284,7 +285,7 @@ export function transcript(opts: TranscriptOpts): string[] {
 
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
-  const { agent, conversation, messages, agents, me, task, summary, images } = opts
+  const { agent, conversation, messages, agents, me, task, summary, images, thread } = opts
   const name = (m: Message): string | null => {
     if (m.author.kind === 'me') return me
     if (m.author.kind === 'system') return null
@@ -307,9 +308,27 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
   const shown = messages.filter((m) => m.author.kind !== 'system' && body(m))
   const pair = conversation.kind === 'agents' ? conversation.members.map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent')).join(L(' e ', ' and ')) : ''
   const where = conversation.kind === 'dm' ? L(`DM com ${me}`, `DM with ${me}`) : conversation.kind === 'agents' ? L(`DM entre ${pair}`, `DM between ${pair}`) : `#${conversation.name}`
+  // Who started the thread this reply is in.
+  const starter = thread?.author
+  const starterName = starter?.kind === 'agent' ? agents.find((a) => a.id === starter.id)?.name : undefined
+  const by =
+    starter?.kind === 'me'
+      ? L(`por ${me}`, `by ${me}`)
+      : starter?.kind === 'agent'
+        ? starter.id === agent.id
+          ? L('por você', 'by you')
+          : L(`por ${starterName ?? 'um agente'}`, `by ${starterName ?? 'an agent'}`)
+        : starter?.kind === 'routine'
+          ? L(`por uma rotina de ${me}`, `by a routine of ${me}'s`)
+          : L('pelo app', 'by the app')
   const head = [
     summary?.trim() && `${L(`Resumo do que veio antes em ${where}`, `Summary of what came before in ${where}`)}:\n${summary.trim()}`,
-    `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
+    thread
+      ? L(
+          `Você está respondendo numa thread em ${where}, aberta ${by}. Abaixo, a mensagem que abriu a thread e as respostas dela, das mais antigas pras mais novas:`,
+          `You're replying in a thread in ${where}, started ${by}. Below, the message that started the thread and its replies, oldest to newest:`
+        )
+      : `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
   ].filter((b): b is string => !!b)
   const blockOf = new Map(shown.map((m, i) => [m.id, head.length + i]))
   const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${clock(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]

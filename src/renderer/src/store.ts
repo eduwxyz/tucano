@@ -63,6 +63,7 @@ export type View =
 
 export interface State {
   ready: boolean
+  threadSeen: Record<string, number> // thread root id → when I last had it open (what came after is new)
   navOpen: boolean // on a phone, the sidebar slid in over the view
   view: View | null
   me: { name: string; initials: string }
@@ -100,7 +101,8 @@ export interface Toast {
 
 export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
 
-export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
+// `thread`: the replies to a message (its id), next to the conversation.
+export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
 
 const initials = (name: string): string =>
   name
@@ -110,8 +112,19 @@ const initials = (name: string): string =>
     .map((w) => w[0]!.toUpperCase())
     .join('') || 'EU'
 
+// When each thread was last seen, in this window's storage: only a convenience, so it may be empty.
+const SEEN_KEY = 'tucano.threadSeen'
+const loadSeen = (): Record<string, number> => {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, number>
+  } catch {
+    return {}
+  }
+}
+
 let state: State = {
   ready: false,
+  threadSeen: loadSeen(),
   wikiRev: 0,
   voiceRev: 0,
   navOpen: false,
@@ -284,7 +297,10 @@ function apply(e: CoreEvent): void {
 }
 
 export async function start(): Promise<void> {
-  window.tucano.onNavigate((id) => navigate({ kind: 'conversation', id }))
+  window.tucano.onNavigate((id, thread) => {
+    navigate({ kind: 'conversation', id })
+    if (thread) openThread(thread)
+  })
   window.tucano.onNavigatePage?.((page) => navigate({ kind: page }))
   window.tucano.onCoreDown?.(() => {
     disconnect()
@@ -497,8 +513,9 @@ export const setChannelMembers = (id: string, agentIds: string[]): Promise<void>
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
 
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = []): void => {
-  if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}) })
+// `threadId`: a reply in the thread that message started.
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
+  if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
 }
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
@@ -529,6 +546,16 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
+// I've seen this thread up to now (it's open, or was just closed).
+export const seeThread = (rootId: string): void =>
+  set((s) => {
+    const threadSeen = { ...s.threadSeen, [rootId]: Date.now() }
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify(threadSeen))
+    } catch {}
+    return { ...s, threadSeen }
+  })
 export const openLightbox = (items: { url: string; title: string; video?: boolean }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
 export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>
