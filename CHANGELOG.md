@@ -6,6 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in.
 - **Models behind a company gateway answer fast at low and medium effort.** Claude Code asks every call to think, which puts a model that isn't Anthropic's (DeepSeek through a gateway, say) in its slow reasoning mode, so each step took 10 seconds to a minute and the reasoning could even pass the output cap on a plain "oi". Now, on such models, Low and Medium effort turn that off and High and Max keep it; the agent's page says so under the effort. Anthropic's models are unchanged, and your own `CLAUDE_CODE_DISABLE_THINKING` in Claude Code's settings still wins.
 
 ## [0.2.10] - 2026-11-04
