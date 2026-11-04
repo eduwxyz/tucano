@@ -262,6 +262,9 @@ h3 {
   border: 3px solid transparent;
   background-clip: content-box;
 }
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 
 /* ---------- layout ---------- */
 .app {
@@ -921,6 +924,31 @@ h3 {
   overflow-y: auto;
   padding: 24px 0 12px;
 }
+/* "Go to the end": rides the bottom of the list while you read further up. */
+.messages__jump {
+  position: sticky;
+  bottom: 12px;
+  height: 0;
+  display: flex;
+  justify-content: center;
+}
+.messages__jump-btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-100%);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text-2);
+  box-shadow: var(--shadow-panel);
+  transition: var(--transition-ui);
+  --pop-y: 0;
+  animation: pop var(--dur-base) var(--ease-out);
+}
+.messages__jump-btn:hover {
+  color: var(--text);
+}
 .messages--empty {
   display: grid;
   place-items: center;
@@ -1111,6 +1139,15 @@ h3 {
 }
 .md strong {
   font-weight: 600;
+}
+/* A @handle, in a message and as it's typed: the ring makes room without moving the text. */
+.mention,
+.md strong.mention {
+  font-weight: inherit;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  color: var(--accent);
 }
 .md ul,
 .md ol {
@@ -1479,6 +1516,32 @@ h3 {
 }
 .composer textarea:focus {
   box-shadow: none;
+}
+/* The field's text is drawn by the mirror behind it, so a mention can wear its color as it's typed. */
+.composer__field {
+  position: relative;
+}
+.composer__field textarea {
+  position: relative;
+  color: transparent;
+  caret-color: var(--text);
+}
+.composer__field textarea,
+.composer__mirror {
+  scrollbar-gutter: stable;
+}
+.composer__field textarea::placeholder {
+  color: var(--text-3);
+}
+.composer__mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: 13px 16px 4px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--text);
+  pointer-events: none;
 }
 .composer__bar {
   display: flex;
@@ -2441,8 +2504,12 @@ h3 {
 .system-line__why::before {
   content: '· ';
 }
+/* The headline wraps only when it doesn't fit alone; the why takes what's left, or nothing. */
 .system-line > p {
-  flex-shrink: 0;
+  min-width: 0;
+}
+.system-line__why {
+  flex: 1 1 0;
 }
 .system-line > .muted {
   margin-left: auto;

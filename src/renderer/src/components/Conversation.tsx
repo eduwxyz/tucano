@@ -186,6 +186,7 @@ const NO_REPLIES: Message[] = []
 export function MessageList({ messages: all, conversationId, empty, focus, threads, lead }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string; threads?: boolean; lead?: ReactNode }): ReactNode {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const [farFromBottom, setFarFromBottom] = useState(false)
   const { messages, replies } = useMemo(() => {
     if (!threads) return { messages: all, replies: undefined }
     const replies = new Map<string, Message[]>()
@@ -218,6 +219,7 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
 
   useEffect(() => {
     if (!lead) stick.current = true
+    setFarFromBottom(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
 
@@ -225,15 +227,6 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
     const el = ref.current
     if (el && stick.current) el.scrollTop = el.scrollHeight
   })
-
-  // A thread opens on the message that started it: the replies follow below.
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!lead || !el) return
-    el.scrollTop = 0
-    stick.current = el.scrollHeight - el.clientHeight < 60
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   if (messages.length === 0 && empty && !lead) {
     return (
@@ -268,7 +261,9 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
       ref={ref}
       onScroll={(e) => {
         const el = e.currentTarget
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+        const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+        stick.current = fromBottom < 60
+        setFarFromBottom(fromBottom > el.clientHeight / 2)
       }}
     >
       {lead}
@@ -284,6 +279,13 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
           m.author.kind !== 'routine'
         return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
       })}
+      {farFromBottom && (
+        <div className="messages__jump">
+          <button className="messages__jump-btn" title={L('Ir para o fim', 'Go to the end')} aria-label={L('Ir para o fim da conversa', 'Go to the end of the conversation')} onClick={() => ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' })}>
+            <Icon name="down" size={15} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -308,7 +310,7 @@ function MessageRow({ message, grouped, replies }: { message: Message; grouped: 
   )
 
   // The same object between renders, or every link would start over.
-  const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id) }), [message.id])
+  const agentMarkdown = useMemo(() => ({ pre: CodeBlock, strong: MentionOrStrong, a: localLinkFor(message.id) }), [message.id])
 
   if (message.author.kind === 'system') {
     return (
@@ -352,7 +354,7 @@ function MessageRow({ message, grouped, replies }: { message: Message; grouped: 
             {agent && message.run?.status !== 'working' ? (
               <Markdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{highlightMentions(message.text)}</Markdown>
             ) : (
-              <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, strong: MentionOrStrong, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
             )}
           </div>
         ) : null}
@@ -449,7 +451,7 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
           </div>
         )}
         <div className="md">
-          <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, strong: MentionOrStrong, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
         </div>
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
@@ -755,6 +757,14 @@ function QuestionCard({ question, answered }: { question: string; answered: bool
     </div>
   )
 }
+
+// A @handle comes bolded from highlightMentions; here it gets the mention's look.
+const MENTION = /^@[a-z0-9_-]{2,32}$/i
+const MentionOrStrong = ({ children }: { children?: ReactNode }): ReactNode => <strong className={typeof children === 'string' && MENTION.test(children) ? 'mention' : undefined}>{children}</strong>
+
+// The composer's text with each @handle marked, as the message will show it.
+const withMentions = (text: string): ReactNode[] =>
+  text.split(/((?<=^|\s)@[a-z0-9_-]{2,32})/gi).map((part, i) => (i % 2 === 1 ? <mark key={i} className="mention">{part}</mark> : part)).concat('\u200b')
 
 // A @handle in code is not bolded (CODE_SPANS, the core's rule too): the box shows and copies the real text.
 const boldMentions = (t: string): string => t.replace(/(^|\s)@([a-z0-9_-]{2,32})/gi, '$1**@$2**')
@@ -1346,6 +1356,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
   const [active, setActive] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const mirror = useRef<HTMLDivElement>(null) // the text again, behind the field, with the mentions marked
   const platform = useStore((s) => s.platform)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
@@ -1430,6 +1441,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
+    if (mirror.current) mirror.current.scrollTop = el.scrollTop
   }, [text])
 
   const options = mention
@@ -1538,9 +1550,16 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
             ))}
           </div>
         )}
+        <div className="composer__field">
+        <div ref={mirror} className="composer__mirror" aria-hidden>
+          {withMentions(text)}
+        </div>
         <textarea
           ref={ref}
           rows={1}
+          onScroll={(e) => {
+            if (mirror.current) mirror.current.scrollTop = e.currentTarget.scrollTop
+          }}
           value={text}
           placeholder={asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
           onChange={(e) => {
@@ -1572,6 +1591,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
             }
           }}
         />
+        </div>
         <div className="composer__bar">
           <VoiceButton controls={voiceControls} state={voice} />
           <button className="icon-btn" title={L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
