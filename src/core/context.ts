@@ -308,15 +308,12 @@ export const clock = (at: number): string => {
 // with the same blocks and reads them from the cache. `task` (to continue after
 // an approval, a routine…) goes last, with the time, since it may come later.
 // `images`: the names of the images attached to each message (by id). `thread`: the message
-// that started the thread this reply is in: its messages are that thread, and the rest are other subjects.
+// that started the thread this reply is in (then `messages` is that thread, root first).
 type TranscriptOpts = { agent: Agent; conversation: Conversation; messages: Message[]; agents: Agent[]; me: string; task?: string; summary?: string; images?: Map<string, string[]>; thread?: Message }
 
 export function transcript(opts: TranscriptOpts): string[] {
   return transcriptBlocks(opts).blocks
 }
-
-// Another subject in the conversation, shown while replying in a thread: what opened it and how it ended, clipped.
-const SUBJECT_CHARS = 600
 
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
@@ -356,49 +353,17 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
         : starter?.kind === 'routine'
           ? L(`por uma rotina de ${me}`, `by a routine of ${me}'s`)
           : L('pelo app', 'by the app')
-  // In a thread, the rest of the conversation is other subjects, each in a thread of its own and dealt with
-  // there. They go apart, before it, one block each (what opened it and how it ended): mixed in by time,
-  // under this thread's heading, the agent took them for this one, answered them again and lost the thread.
-  const inThread = (m: Message): boolean => !!thread && (m.id === thread.id || m.threadId === thread.id)
-  const here = thread ? shown.filter(inThread) : shown
-  const subjects = new Map<string, Message[]>()
-  for (const m of thread ? shown.filter((x) => !inThread(x)) : []) subjects.set(m.threadId ?? m.id, [...(subjects.get(m.threadId ?? m.id) ?? []), m])
-  const clip = (t: string): string => (t.length > SUBJECT_CHARS ? `${t.slice(0, SUBJECT_CHARS).trimEnd()} …` : t)
-  const elsewhere = [...subjects.values()].map((g) => {
-    const [first, ...rest] = g as [Message, ...Message[]]
-    const last = rest.at(-1)
-    const n = rest.length
-    return {
-      ids: g.map((m) => m.id),
-      text: [
-        `[${name(first)} · ${clock(first.at)}]\n${clip(body(first))}`,
-        last &&
-          L(
-            `↳ ${n === 1 ? '1 resposta' : `${n} mensagens`} na thread; a última, de ${name(last)} · ${clock(last.at)}:\n${clip(body(last))}`,
-            `↳ ${n === 1 ? '1 reply' : `${n} messages`} in the thread; the last, from ${name(last)} · ${clock(last.at)}:\n${clip(body(last))}`
-          )
-      ]
-        .filter(Boolean)
-        .join('\n')
-    }
-  })
   const head = [
     summary?.trim() && `${L(`Resumo do que veio antes em ${where}`, `Summary of what came before in ${where}`)}:\n${summary.trim()}`,
-    elsewhere.length > 0 &&
-      L(
-        `Outros assuntos em ${where}, de antes, cada um na sua thread e tratado lá. Só pra contexto: não responda a eles de novo, nem repita o que já foi dito neles.`,
-        `Other subjects in ${where}, from before, each in its own thread and dealt with there. Context only: don't answer them again, or repeat what was said in them.`
-      )
+    thread
+      ? L(
+          `Você está respondendo numa thread em ${where}, aberta ${by}. Abaixo, a mensagem que abriu a thread e as respostas dela, das mais antigas pras mais novas:`,
+          `You're replying in a thread in ${where}, started ${by}. Below, the message that started the thread and its replies, oldest to newest:`
+        )
+      : `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
   ].filter((b): b is string => !!b)
-  const opening = thread
-    ? L(
-        `Você está respondendo NESTA thread em ${where}, aberta ${by}. Abaixo, a mensagem que abriu a thread e as respostas dela, das mais antigas pras mais novas. É a ela que você responde:`,
-        `You're replying in THIS thread in ${where}, started ${by}. Below, the message that started the thread and its replies, oldest to newest. This is what you answer:`
-      )
-    : `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
-  const start = head.length + elsewhere.length + 1
-  const blockOf = new Map([...elsewhere.flatMap((e, i) => e.ids.map((id) => [id, head.length + i] as const)), ...here.map((m, i) => [m.id, start + i] as const)])
-  const blocks = [...head, ...elsewhere.map((e) => e.text), opening, ...here.map((m) => `[${name(m)} · ${clock(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
+  const blockOf = new Map(shown.map((m, i) => [m.id, head.length + i]))
+  const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${clock(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
   return { blocks, blockOf }
 }
 
