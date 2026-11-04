@@ -533,6 +533,8 @@ export const forgetMemory = (id: string, reason?: string): void => void fire(L('
 export const purgeMemory = (id: string): void => void fire(L('Não consegui apagar a memória.', "I couldn't delete the memory."), 'purgeMemory', { id })
 export const editSummary = (conversationId: string, text: string): void => void fire(L('Não consegui salvar o resumo.', "I couldn't save the summary."), 'editSummary', { conversationId, text })
 export const summarizeNow = (conversationId: string): void => void fire(L('Não consegui resumir a conversa.', "I couldn't summarize the conversation."), 'summarizeNow', { conversationId })
+export const editThreadSummary = (rootId: string, text: string): void => void fire(L('Não consegui salvar o resumo.', "I couldn't save the summary."), 'editThreadSummary', { rootId, text })
+export const summarizeThreadNow = (rootId: string): void => void fire(L('Não consegui resumir a thread.', "I couldn't summarize the thread."), 'summarizeThreadNow', { rootId })
 
 // Saves one field of a stored agent without touching the rest of its page.
 export function patchAgent(agentId: string, patch: Partial<Agent>): void {

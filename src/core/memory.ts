@@ -7,13 +7,19 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
-import { ENGINES, usable, modelInfo, splitForPrompt, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type Settings } from '../shared/types'
+import { ENGINES, usable, modelInfo, splitForPrompt, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type RunStatus, type Settings } from '../shared/types'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import type { ToolDef } from './gateway'
 
 export const WINDOW = SUMMARY_WINDOW
 export const MAX_AFTER = SUMMARY_MAX_AFTER
+// A thread is summarized (and its memories extracted) once it's quiet this long...
+export const THREAD_QUIET_MS = 10 * 60_000
+// ...with this many messages since its summary, at least: a question and its answer alone wait.
+export const THREAD_MIN = 3
+const THREAD_HORIZON_MS = 24 * 60 * 60_000 // threads quiet for longer were swept already (or predate this)
+const SWEEP_BATCH = 3
 const MAX_MEMORY_CHARS = 500
 
 export const BUSCAR_MEMORIAS: ToolDef = {
@@ -99,8 +105,9 @@ const JSON_SHAPE = '{"summary": "...", "memories": [{"op": "add", "text": "...",
 
 type Op = { op: 'add'; text: string; evidence: number[] } | { op: 'update'; id: string; text: string; evidence: number[] } | { op: 'confirm'; id: string }
 
-export function consolidationPrompt(opts: { summary?: string; messages: Message[]; me: string; agents: Agent[]; memories: Memory[]; forgotten: Memory[] }): string {
-  const { summary, messages, me, agents, memories, forgotten } = opts
+// `thread`: the stretch is a thread's, since its summary (not what leaves a conversation's window).
+export function consolidationPrompt(opts: { summary?: string; messages: Message[]; me: string; agents: Agent[]; memories: Memory[]; forgotten: Memory[]; thread?: boolean }): string {
+  const { summary, messages, me, agents, memories, forgotten, thread } = opts
   const author = (m: Message): string =>
     m.author.kind === 'me'
       ? me
@@ -112,9 +119,9 @@ export function consolidationPrompt(opts: { summary?: string; messages: Message[
     L('Resumo atual:', 'Current summary:'),
     summary?.trim() || L('(ainda não há)', '(none yet)'),
     '',
-    L('Trecho que vai sair da janela:', 'Stretch about to leave the window:'),
-    // Thread replies are folded in too, marked, since the channel's window leaves them out.
-    ...messages.map((m, i) => `(${i + 1}) [${author(m)}${m.threadId ? L(' · numa thread', ' · in a thread') : ''}] ${m.text.trim().slice(0, 4000)}`),
+    thread ? L('Mensagens da thread desde o resumo:', "The thread's messages since the summary:") : L('Trecho que vai sair da janela:', 'Stretch about to leave the window:'),
+    // In a conversation's stretch, thread replies are marked: each thread also has its own summary.
+    ...messages.map((m, i) => `(${i + 1}) [${author(m)}${!thread && m.threadId ? L(' · numa thread', ' · in a thread') : ''}] ${m.text.trim().slice(0, 4000)}`),
     '',
     L(`Memórias sobre ${me}:`, `Memories about ${me}:`),
     ...(memories.length ? memories.map((m) => `- [${m.id}] ${m.text}`) : [none]),
@@ -151,22 +158,89 @@ export function parseConsolidation(text: string): { summary: string; ops: Op[] }
   return { summary: summary.trim(), ops }
 }
 
-// A reply in a thread: the message that started it, then the replies before this one.
-// The root goes in however old it is; the replies are capped like the conversation's window.
-// What an agent reads before replying: the conversation's recent messages, threads included
-// (every answer goes in the thread of what it answers, so the threads are the conversation),
-// and the whole thread it replies in, however old. `until`: what the summary already covers.
-export function contextWindow(db: Pick<Db, 'message' | 'recentMessages'>, before: Message, limit: number, until = 0): Message[] {
-  const recent = db
-    .recentMessages(before.conversationId, limit + 40)
-    .filter((m) => m.id !== before.id && m.at <= before.at && m.at > until)
-    .slice(-limit)
-  if (!before.threadId) return recent
-  const seen = new Set(recent.map((m) => m.id))
-  const thread = [db.message(before.threadId), ...db.recentMessages(before.conversationId, limit + 40, before.threadId)].filter(
-    (m): m is Message => !!m && m.id !== before.id && m.at <= before.at && !seen.has(m.id)
-  )
-  return [...recent, ...thread].sort((a, b) => a.at - b.at)
+// Another thread of the conversation, in a line: what opened it, who answered and who is
+// on it now. Only the router reads these: an agent's thread is a conversation of its own.
+export interface ThreadDigest {
+  id: string // the message that opened it
+  root?: Message
+  last?: Message // its newest reply with something said
+  replies: number
+  agents: string[] // who answered in it
+  working: { agentId: string; status: RunStatus }[]
+  at: number // its latest activity
+}
+
+export const MAX_DIGESTS = 12
+const BUSY: RunStatus[] = ['working', 'waiting_input', 'waiting_approval']
+
+// The other threads active in `recent`, oldest activity first, the newest MAX_DIGESTS.
+function digests(db: Pick<Db, 'message'>, recent: Message[], except?: string): ThreadDigest[] {
+  const groups = new Map<string, Message[]>()
+  for (const m of recent) {
+    const key = m.threadId ?? m.id
+    if (key !== except) groups.set(key, [...(groups.get(key) ?? []), m])
+  }
+  return [...groups]
+    .map(([id, ms]): ThreadDigest => {
+      const said = ms.filter((m) => m.id !== id && m.author.kind !== 'system' && m.text.trim())
+      const agents = [...new Set(ms.flatMap((m) => (m.id !== id && m.author.kind === 'agent' ? [m.author.id] : [])))]
+      const working = ms.flatMap((m) => (m.author.kind === 'agent' && m.run && BUSY.includes(m.run.status) ? [{ agentId: m.author.id, status: m.run.status }] : []))
+      return { id, root: ms.find((m) => m.id === id) ?? db.message(id), last: said.at(-1), replies: said.length, agents, working, at: Math.max(...ms.map((m) => m.at)) }
+    })
+    .sort((a, b) => a.at - b.at)
+    .slice(-MAX_DIGESTS)
+}
+
+// What a reply reads of the conversation. In a thread, only that thread: the message that
+// opened it and its newest `limit` replies, with the thread's summary when older ones are
+// left out. The other threads aren't in it (an agent looks them up with buscar_threads);
+// `threads` digests them for the router. Outside threads (a routine, a conversation from
+// before them): the recent messages after `until`, what the conversation's summary covers.
+export function contextWindow(
+  db: Pick<Db, 'message' | 'recentMessages'>,
+  before: Message,
+  limit: number,
+  until = 0
+): { messages: Message[]; threads: ThreadDigest[]; summary?: string } {
+  const recent = db.recentMessages(before.conversationId, limit + 40).filter((m) => m.id !== before.id && m.at <= before.at && m.at > until)
+  if (!before.threadId) return { messages: recent.slice(-limit), threads: [] }
+  const root = db.message(before.threadId)
+  const replies = db.recentMessages(before.conversationId, limit + 2, before.threadId).filter((m) => m.id !== before.id && m.at <= before.at)
+  const omitted = replies.length > limit
+  return {
+    messages: [...(root ? [root] : []), ...replies.slice(-limit)],
+    threads: digests(db, recent, before.threadId),
+    ...(omitted && root?.threadSummary?.text.trim() ? { summary: root.threadSummary.text } : {})
+  }
+}
+
+// One thread found by buscar_threads.
+export interface ThreadHit {
+  id: string
+  conversationId: string
+  root?: Message
+  last?: Message
+  at: number
+}
+
+// buscar_threads: the threads of these conversations that best match the words, by what was
+// said in them and their summaries (a thread just opened has none yet). `except`: the thread
+// the search is made from.
+export function searchThreads(db: Pick<Db, 'message' | 'recentMessages'>, conversationIds: string[], query: string, except?: string, limit = 5): ThreadHit[] {
+  const groups = new Map<string, Message[]>()
+  for (const c of conversationIds)
+    for (const m of db.recentMessages(c, 400)) {
+      const key = m.threadId ?? m.id
+      if (key === except || m.author.kind === 'system' || !m.text.trim()) continue
+      groups.set(key, [...(groups.get(key) ?? []), m])
+    }
+  const docs = [...groups].map(([id, ms]) => {
+    const root = ms.find((m) => m.id === id) ?? db.message(id)
+    const replies = ms.filter((m) => m.id !== id)
+    const text = [root?.text ?? '', root?.threadSummary?.text ?? '', ...replies.map((m) => m.text)].join('\n')
+    return { hit: { id, conversationId: ms[0]!.conversationId, root, last: replies.at(-1), at: ms.at(-1)!.at }, text }
+  })
+  return rank(docs, (d) => d.text, query, limit, (a, b) => b.hit.at - a.hit.at).map((d) => d.hit)
 }
 
 // For matching a new memory against forgotten and existing ones.
@@ -188,6 +262,7 @@ export interface MemoryDeps {
 
 export class Memories {
   private running = new Map<string, Promise<void>>()
+  private swept = new Map<string, number>() // thread → the last activity a sweep already tried
 
   constructor(private deps: MemoryDeps) {}
 
@@ -209,16 +284,18 @@ export class Memories {
     return rankMemories(out, query, limit)
   }
 
-  // What a turn sees of the conversation: the summary and every message after it,
-  // outside threads. A reply in a thread sees the summary and that thread instead.
-  window(conv: Conversation, before: Message): { summary?: string; messages: Message[] } {
-    return { summary: conv.summary, messages: contextWindow(this.deps.db, before, MAX_AFTER, conv.summaryUntil ?? 0) }
+  // What a turn sees of the conversation (contextWindow): in a thread, the thread and its own
+  // summary; outside threads, the conversation's summary and what came after it.
+  window(conv: Conversation, before: Message): { summary?: string; messages: Message[]; threads: ThreadDigest[] } {
+    const w = contextWindow(this.deps.db, before, MAX_AFTER, conv.summaryUntil ?? 0)
+    return before.threadId ? w : { ...w, summary: conv.summary }
   }
 
   // ---------- short term: consolidation ----------
 
-  // Folds what is about to leave the window into the summary and extracts
-  // memories about me from it. One at a time per conversation.
+  // Folds what is about to leave the window into the conversation's summary (for what reads
+  // it: replies outside threads, like a routine's) and extracts memories about me from the
+  // messages outside threads; a thread's come from its own consolidation. One at a time per conversation.
   consolidate(conversationId: string, force = false): Promise<void> {
     const current = this.running.get(conversationId)
     if (current) return current
@@ -274,16 +351,104 @@ export class Memories {
 
     db.setSummary(conv.id, parsed.summary, chunk.at(-1)!.at)
     emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
-    if (settings.memoryLearning !== 'off') this.applyExtraction(parsed.ops, chunk, conv.id, settings.memoryLearning)
+    const threads = db.threadRoots(conv.id)
+    if (settings.memoryLearning !== 'off') this.applyExtraction(parsed.ops, chunk, conv.id, settings.memoryLearning, (m) => !m.threadId && !threads.has(m.id))
   }
 
-  private applyExtraction(ops: Op[], chunk: Message[], conversationId: string, learning: 'approve' | 'auto'): void {
+  // ---------- threads ----------
+
+  // A thread's own summary and the memories in it, in one call. 'grown': only once more than
+  // MAX_AFTER messages follow its summary (the older ones leave the replies' window); 'quiet':
+  // it stopped (sweep), with at least THREAD_MIN messages to read; 'now': asked for. One at a time per thread.
+  consolidateThread(rootId: string, reason: 'grown' | 'quiet' | 'now'): Promise<void> {
+    const key = `thread:${rootId}`
+    const current = this.running.get(key)
+    if (current) return current
+    const p = this.doThread(rootId, reason)
+      .catch((e: unknown) => console.error('[memory]', e))
+      .finally(() => this.running.delete(key))
+    this.running.set(key, p)
+    return p
+  }
+
+  // The threads quiet for THREAD_QUIET_MS with at least THREAD_MIN messages since their summary,
+  // a few per call (the clock calls it every minute), never one with a reply still being
+  // written. Each is tried once per stretch: if it fails, it waits for something new in it.
+  async sweep(now = Date.now()): Promise<void> {
+    const { db } = this.deps
+    const due = db.quietThreads(now - THREAD_QUIET_MS, now - THREAD_HORIZON_MS).filter((t) => {
+      if (this.swept.get(t.id) === t.last) return false
+      const root = db.message(t.id)
+      const since = root?.threadSummary?.until ?? 0
+      const replies = db.recentMessages(t.conversationId, 1000, t.id)
+      if (replies.some((m) => m.run?.status === 'working')) return false
+      return [root, ...replies].filter((m) => m && m.at > since && m.author.kind !== 'system' && m.text.trim()).length >= THREAD_MIN
+    })
+    for (const t of due.slice(0, SWEEP_BATCH)) {
+      this.swept.set(t.id, t.last)
+      await this.consolidateThread(t.id, 'quiet')
+    }
+  }
+
+  private async doThread(rootId: string, reason: 'grown' | 'quiet' | 'now'): Promise<void> {
+    const { db, engines, emit } = this.deps
+    const root = db.message(rootId)
+    if (!root || root.threadId) return
+    const since = root.threadSummary?.until ?? 0
+    const stretch = [root, ...db.recentMessages(root.conversationId, 1000, root.id)].filter((m) => m.at > since && m.author.kind !== 'system' && m.text.trim())
+    if (reason === 'grown' && stretch.length <= MAX_AFTER) return
+    if (reason === 'quiet' && stretch.length < THREAD_MIN) return
+    if (stretch.length === 0) return
+
+    const settings = await this.deps.settings()
+    const model = usable(modelInfo(settings.memoryModel)) ?? modelInfo('haiku')!
+    const status = settings.engines[model.engine]
+    if (!status.installed || !status.loggedIn) return console.log(`[memory] skipped: ${ENGINES[model.engine].label} not ready`)
+
+    const cwd = join(this.deps.workDir, '_memory')
+    mkdirSync(cwd, { recursive: true })
+    const prompt = consolidationPrompt({
+      summary: root.threadSummary?.text,
+      messages: stretch,
+      me: settings.workspaceName,
+      agents: db.agents(),
+      memories: db.memories({ scope: 'me', state: 'active' }),
+      forgotten: db.memories({ scope: 'me', state: 'forgotten' }).slice(-50),
+      thread: true
+    })
+    const started = Date.now()
+    let text = ''
+    let error: string | undefined
+    for await (const ev of engines[model.engine].run({ model: model.id, effort: 'low', system: memorySystem(), prompt, cwd, signal: AbortSignal.timeout(120_000) })) {
+      if (ev.type === 'text') text += ev.delta
+      else if (ev.type === 'done') {
+        text = ev.text || text
+        db.addReceipt({ ...ev.usage, model: model.id, ms: Date.now() - started, messageId: rootId, agentId: 'memory', engine: model.engine, at: Date.now() })
+      } else if (ev.type === 'error') error = ev.message
+    }
+    const parsed = error ? null : parseConsolidation(text)
+    if (!parsed) return console.log(`[memory] thread consolidation failed: ${error ?? 'resposta fora do formato'}`)
+
+    db.setThreadSummary(rootId, parsed.summary, stretch.at(-1)!.at)
+    emit({ type: 'message', message: db.message(rootId)! })
+    if (settings.memoryLearning !== 'off') this.applyExtraction(parsed.ops, stretch, root.conversationId, settings.memoryLearning)
+  }
+
+  editThreadSummary(rootId: string, text: string): void {
+    const root = this.deps.db.message(rootId)
+    if (!root || root.threadId) return
+    this.deps.db.setThreadSummary(rootId, text.trim())
+    this.deps.emit({ type: 'message', message: this.deps.db.message(rootId)! })
+  }
+
+  // `counts`: which messages of the chunk may back a memory (the rest is only read for context).
+  private applyExtraction(ops: Op[], chunk: Message[], conversationId: string, learning: 'approve' | 'auto', counts: (m: Message) => boolean = () => true): void {
     const known = new Map(this.deps.db.memories({ scope: 'me', state: 'active' }).map((m) => [m.id, m]))
     // Only what I said counts as evidence about me (an agent's guess never does).
     const evidence = (nums: number[]): string[] =>
       nums
         .map((n) => chunk[n - 1])
-        .filter((m): m is Message => m?.author.kind === 'me')
+        .filter((m): m is Message => m?.author.kind === 'me' && counts(m))
         .map((m) => m.id)
     for (const op of ops) {
       if (op.op === 'confirm') {
@@ -442,9 +607,14 @@ function matches(term: string, word: string): boolean {
 
 // BM25 over the memories given, best first; ties go to the most recently confirmed.
 export function rankMemories(memories: Memory[], query: string, limit = 5): Memory[] {
+  return rank(memories, (m) => m.text, query, limit, (x, y) => y.confirmedAt - x.confirmedAt)
+}
+
+// BM25 over any items, by their text, best first (at most 10); `tie` orders equal scores.
+function rank<T>(items: T[], text: (t: T) => string, query: string, limit: number, tie: (x: T, y: T) => number): T[] {
   const terms = [...new Set(words(query))]
-  if (!terms.length || !memories.length) return []
-  const docs = memories.map((m) => ({ m, w: words(m.text) }))
+  if (!terms.length || !items.length) return []
+  const docs = items.map((m) => ({ m, w: words(text(m)) }))
   const avg = docs.reduce((n, d) => n + d.w.length, 0) / docs.length || 1
   const k1 = 1.2
   const b = 0.75
@@ -461,7 +631,7 @@ export function rankMemories(memories: Memory[], query: string, limit = 5): Memo
       }, 0)
     }))
     .filter((r) => r.score > 0)
-    .sort((x, y) => y.score - x.score || y.m.confirmedAt - x.m.confirmedAt)
+    .sort((x, y) => y.score - x.score || tie(x.m, y.m))
     .slice(0, Math.min(Math.max(1, Math.floor(limit)), 10))
     .map((r) => r.m)
 }

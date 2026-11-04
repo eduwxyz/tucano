@@ -6,6 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in.
 - **Connectors stay connected.** A local connector whose process ended (a crash, or one that quits when idle) stayed **Disconnected** for good, and its tools went away from the agents, so nothing ever brought it back; and a remote one whose server forgot an idle session failed every call while still showing **Connected**. Now a connection that drops on its own comes back by itself, after a wait that grows from 2 seconds to 5 minutes, and a call on a forgotten session opens a new one and goes through. A connector that's only reconnecting keeps its tools; one that needs you (a refused token, a sign-in to finish) doesn't, and isn't retried.
 
 ## [0.2.10] - 2026-11-04
