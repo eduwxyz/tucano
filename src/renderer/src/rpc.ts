@@ -6,6 +6,7 @@ declare global {
     tucano: {
       connect: () => void
       pickFolder: () => Promise<string | null>
+      pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
       onNavigate: (cb: (conversationId: string) => void) => void
       viewing: (conversationId: string | null) => void
       updateState: () => Promise<UpdateState>

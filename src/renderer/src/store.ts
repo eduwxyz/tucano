@@ -37,7 +37,8 @@ import {
   type UsageReport,
   type Trigger,
   type ImageUpload,
-  type Os
+  type Os,
+  type LocalInfo
 } from '../../shared/types'
 import { call, connect } from './rpc'
 
@@ -52,6 +53,7 @@ export type View =
   | { kind: 'usage' }
   | { kind: 'connectors' }
   | { kind: 'memory' }
+  | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
   | { kind: 'skills' }
   | { kind: 'report' }
@@ -66,7 +68,7 @@ export interface State {
   models: Model[]
   agents: Agent[]
   connectors: Connector[]
-  lightbox: { items: { url: string; title: string }[]; index: number } | null
+  lightbox: { items: { url: string; title: string; video?: boolean }[]; index: number } | null
   conversations: Conversation[]
   messages: Message[]
   approvals: Approval[]
@@ -76,6 +78,7 @@ export interface State {
   browsers: BrowserView[]
   routines: Routine[]
   skills: Skill[]
+  wikiRev: number // goes up when a wiki page changes: the wiki screens read again
   platform: Os
   packaged: boolean
   panel: Panel | null // the side panel next to a conversation
@@ -98,13 +101,14 @@ const initials = (name: string): string =>
 
 let state: State = {
   ready: false,
+  wikiRev: 0,
   navOpen: false,
   view: null,
   me: { name: 'Eu', initials: 'EU' },
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -257,6 +261,8 @@ function apply(e: CoreEvent): void {
         return { ...s, skills: upsert(s.skills, e.skill).sort((a, b) => a.name.localeCompare(b.name)) }
       case 'skill_removed':
         return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
+      case 'wiki':
+        return { ...s, wikiRev: s.wikiRev + 1 }
     }
   })
 }
@@ -402,6 +408,7 @@ export const updateTool = (connectorId: string, name: string, patch: Partial<Pic
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
 export const removeConnector = (id: string): void => void call('removeConnector', { id })
 export const reconnectConnector = (id: string): void => void call('reconnectConnector', { id })
+export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
 // On a server the authorization page comes back to be opened here, then pasted back.
 export const authorizeConnector = (id: string): void =>
   void call('authorizeConnector', { id }).then((r) => r.url && openDialog({ kind: 'oauth', id, url: r.url }))
@@ -444,8 +451,10 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
   void saveAgent({ ...agent, ...patch }, channelIds)
 }
 
+export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
+export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
-export const openLightbox = (items: { url: string; title: string }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
+export const openLightbox = (items: { url: string; title: string; video?: boolean }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
 export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>
   set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
@@ -484,6 +493,7 @@ export const unpairTelegram = (): void => void call('unpairTelegram')
 export const setGithubToken = (token: string | null): Promise<void> => call('setGithubToken', { token })
 export const exportTeam = (): Promise<string> => call('exportTeam')
 export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
+export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)
 export const backupNow = (): Promise<string> => call('backupNow')
 export const openBackups = (): void => void call('openBackups')
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })

@@ -6,7 +6,7 @@ import { L, lang, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -60,6 +60,7 @@ export interface Agent {
   customColor?: string // a color of the person's own (#rrggbb), over `color`
   picture?: string // a small picture (data URL), over the face
   avatar?: AvatarDefinition // a drawn character (open-bot-avatar), over the face; a picture wins over it
+  wiki?: WikiAccess // what it can do with the wiki; 'read' when unset
   instructions: string
   modelId: string
   // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
@@ -115,6 +116,7 @@ export interface Conversation {
   summaryUntil?: number // `at` of the last message the summary covers
   summaryAt?: number
   unread?: number
+  wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -158,6 +160,7 @@ export interface Run {
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   question?: string // asked with ask_user; answered by the next human message here
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
+  wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
   artifactIds?: string[] // files and screenshots shown in this reply
   services?: string[] // services started in this reply, by name, on the author's computer
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
@@ -197,6 +200,11 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
 }
 
+export interface LocalInfo {
+  kind: 'image' | 'video' | 'pdf' | 'folder' | 'file'
+  url?: string // to see it here: images and videos
+}
+
 export interface Settings {
   workspaceName: string
   context: string
@@ -207,6 +215,10 @@ export interface Settings {
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
+  wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
+  wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
+  wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
+  wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
   theme: 'system' | 'light' | 'dark'
@@ -343,7 +355,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
-  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' }
+  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
+  cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 
@@ -775,4 +788,97 @@ export interface Report {
   agents: AgentReport[]
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
+}
+
+// ---------- the wiki ----------
+export type WikiAccess = 'none' | 'read'
+export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
+export interface WikiPageInfo {
+  title: string
+  kind: string // the page's tipo, from its frontmatter
+  summary: string // its first line worth reading
+  updatedAt: number
+  updatedBy: string // 'me', an agent's id, or 'outside' (changed in another app)
+}
+export interface WikiPage extends WikiPageInfo {
+  body: string // the Markdown, without the frontmatter
+  meta: Record<string, string>
+  hash: string // of the file as read: a save made on an older copy is refused
+  links: string[] // the titles it links to
+  missing: string[] // of those, the ones with no page yet
+  backlinks: string[] // the pages that link to it
+  file: string // where it is, inside the wiki's folder
+}
+export interface WikiHit {
+  title: string
+  kind: string
+  snippet: string // the matching part, with **marks**
+}
+export interface WikiVersion {
+  id: number
+  title: string
+  at: number
+  by: string
+  action: 'create' | 'edit' | 'delete'
+  before: string | null
+  after: string | null
+  reason?: string
+}
+export interface WikiSource {
+  id: string
+  file: string // "fontes/<date> <title>", inside the wiki's folder (a [[link]] target)
+  title: string
+  kind: 'conversation' | 'message' | 'note' | 'file' | 'link'
+  origin: { conversationId?: string; messageIds?: string[]; url?: string; original?: string } // original: the file as it came, inside the wiki's folder
+  status?: 'reading' | 'done' | 'failed' // a file, a link or a note while the curator reads it
+  error?: string
+  changes?: number // how many change packages it became
+  addedBy: string // 'me', 'auto' (the curator) or an agent's id
+  addedAt: number
+}
+// One change in a package: write a new page, add under a section of one, or swap an exact passage.
+export interface WikiOp {
+  op: 'create' | 'append' | 'replace'
+  page: string
+  kind?: string // for a new page
+  section?: string // for append: the ## heading it goes under (made if missing)
+  text?: string // create, append
+  old?: string // replace
+  new?: string // replace
+}
+export interface WikiChange {
+  id: string
+  at: number
+  by: string // 'auto' (the curator) or 'me'
+  state: 'pending' | 'applied' | 'refused' | 'conflict' | 'undone'
+  ops: WikiOp[]
+  reason?: string // why the curator thought it worth keeping
+  source?: { id: string; title: string; file: string }
+  decidedAt?: number
+}
+// What a review of the wiki found: something broken, missing or that no longer adds up.
+export interface WikiFinding {
+  id: string
+  at: number
+  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link'
+  pages: string[] // the pages it is about
+  text: string // what's wrong, in a sentence (Markdown, with [[links]])
+  name?: string // broken, missing: the page it would take
+  change?: WikiChange // the fix it suggests, waiting for approval
+}
+// What came in from an Obsidian vault.
+export interface WikiImport {
+  from: string // the vault's name
+  pages: number
+  attachments: number // images, PDFs and the like, copied along
+  skipped: string[] // files already in the wiki, left as they were
+  links: number // links between pages, in the whole wiki now
+  missing: number // links to pages nobody wrote yet
+  kinds: [string, number][] // the kinds the new pages got (their tipo, folder or first tag)
+}
+export interface WikiReview {
+  at?: number // the last review
+  running: boolean
+  error?: string // the last review failed
+  findings: WikiFinding[] // still open
 }
