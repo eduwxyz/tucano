@@ -123,6 +123,13 @@ describe.runIf(process.platform !== 'win32')('what a path can do', () => {
     chmodSync(root, 0o755)
   })
 
+  it('the same, written in other capitals (a Mac doesn’t tell them apart)', () => {
+    file('casa/.ssh/id_rsa')
+    file('dados/notas.png')
+    expect(resolveLocal(join(root, 'casa/.SSH/id_rsa'), reach)).toBeNull()
+    expect(resolveLocal(join(root, 'DADOS/notas.png'), reach)).toBeNull()
+  })
+
   it('expands the home folder', () => {
     expect(resolveLocal('~/p/a.png', reach, (file('p/a.png'), root))?.kind).toBe('image')
   })

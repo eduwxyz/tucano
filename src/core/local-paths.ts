@@ -11,9 +11,11 @@ const VIDEOS = ['.mp4', '.webm', '.mov', '.m4v']
 const NEVER = new Set(['.ssh', '.aws', '.gnupg', '.kube', 'Keychains'])
 
 const inside = (path: string, folder: string): boolean => path === folder || path.startsWith(folder.endsWith(sep) ? folder : folder + sep)
+// The native call, so the name comes back as it is on disk: on a Mac "~/.SSH" is "~/.ssh", and
+// the checks below compare names.
 const real = (p: string): string => {
   try {
-    return realpathSync(p)
+    return realpathSync.native(p)
   } catch {
     return p
   }
@@ -40,7 +42,7 @@ export function resolveLocal(raw: string, reach: LocalReach, home = homedir()): 
   let path: string
   let isFolder: boolean
   try {
-    path = realpathSync(asked)
+    path = realpathSync.native(asked)
     isFolder = statSync(path).isDirectory()
   } catch {
     return null
