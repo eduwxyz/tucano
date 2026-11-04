@@ -1,8 +1,8 @@
 import { L, lang, locale } from '../../../shared/lang'
-import { CODE_SPANS } from '../../../shared/types'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import Markdown, { defaultUrlTransform } from 'react-markdown'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import Markdown, { defaultUrlTransform, type ExtraProps } from 'react-markdown'
 import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
+import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -45,7 +45,7 @@ import {
   transcribe,
   voiceStatus
 } from '../store'
-import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd, useJustEnded } from './ui'
+import { AgentAvatar, Icon, MeAvatar, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
@@ -258,7 +258,8 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
   )
 }
 
-const AGENT_PLUGINS = [remarkGfm, remarkLocalPaths]
+const AGENT_PLUGINS = [remarkGfm, remarkMentions, remarkLocalPaths]
+const PLAIN_PLUGINS = [remarkGfm, remarkMentions]
 const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
 
 function MessageRow({ message, grouped }: { message: Message; grouped: boolean }): ReactNode {
@@ -275,7 +276,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
   )
 
   // The same object between renders, or every link would start over.
-  const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id) }), [message.id])
+  const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
 
   if (message.author.kind === 'system') {
     return (
@@ -317,9 +318,9 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
-              <Markdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{highlightMentions(message.text)}</Markdown>
+              <Markdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{wikiLinks(message.text)}</Markdown>
             ) : (
-              <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+              <Markdown remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</Markdown>
             )}
           </div>
         ) : null}
@@ -411,7 +412,7 @@ function RoutineMessage({ message }: { message: Message }): ReactNode {
           </div>
         )}
         <div className="md">
-          <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
+          <Markdown remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</Markdown>
         </div>
       </div>
     </article>
@@ -557,18 +558,24 @@ function QuestionCard({ question, answered }: { question: string; answered: bool
   )
 }
 
-// A @handle in code is not bolded (CODE_SPANS, the core's rule too): the box shows and copies the real text.
-const boldMentions = (t: string): string => t.replace(/(^|\s)@([a-z0-9_-]{2,32})/gi, '$1**@$2**')
-const highlightMentions = (text: string): string => {
-  text = wikiLinks(text)
-  let out = ''
-  let last = 0
-  for (const m of text.matchAll(CODE_SPANS)) {
-    out += boldMentions(text.slice(last, m.index)) + m[0]
-    last = m.index! + m[0].length
-  }
-  return out + boldMentions(text.slice(last))
+// What remarkMentions marked: an agent's @handle becomes its chip, which opens its profile. A handle
+// no agent has stays as it was written, in bold, as any @ always was.
+function MentionSpan({ node: _, ...props }: ComponentProps<'span'> & ExtraProps): ReactNode {
+  const handle = (props as Record<string, unknown>)['data-mention']
+  if (typeof handle !== 'string') return <span {...props} />
+  return <Mention handle={handle} />
 }
+function Mention({ handle }: { handle: string }): ReactNode {
+  const agent = useStore((s) => s.agents.find((a) => a.handle.toLowerCase() === handle.toLowerCase()))
+  if (!agent) return <strong>@{handle}</strong>
+  return (
+    <button className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name} onClick={() => navigate({ kind: 'agent', id: agent.id })}>
+      <AgentAvatar agent={agent} size={16} />
+      <span>@{agent.handle}</span>
+    </button>
+  )
+}
+const plainMarkdown = { pre: CodeBlock, a: (p: { href?: string; children?: ReactNode }) => <WikiLink href={p.href}>{p.children}</WikiLink>, span: MentionSpan }
 
 // Now, every second while `on`: the clock of a reply at work.
 function useNow(on: boolean): number {
@@ -1145,7 +1152,9 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
   const [active, setActive] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const mirror = useRef<HTMLDivElement>(null)
   const platform = useStore((s) => s.platform)
+  const agents = useStore((s) => s.agents)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
   const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
@@ -1224,7 +1233,28 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
+    followField()
   }, [text])
+
+  // The text shows from a copy behind the field, where an agent's @handle wears its color; the field
+  // on top keeps the caret and the selection. Same width (a scrollbar takes some) and same scroll.
+  const followField = (): void => {
+    const el = ref.current
+    const m = mirror.current
+    if (!el || !m) return
+    m.style.width = `${el.clientWidth}px`
+    m.scrollTop = el.scrollTop
+  }
+  const painted = splitMentions(text).map((p, i) => {
+    const a = 'handle' in p ? agents.find((x) => x.handle.toLowerCase() === p.handle.toLowerCase()) : undefined
+    return a ? (
+      <mark key={i} className={`c-${a.color}`} style={ownColor(a)}>
+        {p.text}
+      </mark>
+    ) : (
+      p.text
+    )
+  })
 
   const options = mention
     ? members.filter((a) => a.handle.startsWith(mention.query.toLowerCase()) || a.name.toLowerCase().startsWith(mention.query.toLowerCase()))
@@ -1331,40 +1361,47 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             ))}
           </div>
         )}
-        <textarea
-          ref={ref}
-          rows={1}
-          value={text}
-          placeholder={asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
-          onChange={(e) => {
-            setText(e.target.value)
-            updateMention(e.target.value, e.target.selectionStart)
-          }}
-          onPaste={(e) => {
-            const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
-            if (!files.length) return
-            e.preventDefault()
-            void addFiles(files)
-          }}
-          onKeyDown={(e) => {
-            if (e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
+        <div className="composer__field">
+          <div ref={mirror} className="composer__mirror" aria-hidden>
+            {painted}
+            {'\n'}
+          </div>
+          <textarea
+            ref={ref}
+            rows={1}
+            onScroll={followField}
+            value={text}
+            placeholder={asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
+            onChange={(e) => {
+              setText(e.target.value)
+              updateMention(e.target.value, e.target.selectionStart)
+            }}
+            onPaste={(e) => {
+              const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
+              if (!files.length) return
               e.preventDefault()
-              if (!e.repeat) voiceControls.press()
-              return
-            }
-            if (e.key === 'Escape' && voice !== 'idle') return voiceControls.cancel()
-            if (mention && options.length > 0) {
-              if (e.key === 'ArrowDown') return (e.preventDefault(), setActive((active + 1) % options.length))
-              if (e.key === 'ArrowUp') return (e.preventDefault(), setActive((active - 1 + options.length) % options.length))
-              if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
-              if (e.key === 'Escape') return setMention(null)
-            }
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault()
-              submit()
-            }
-          }}
-        />
+              void addFiles(files)
+            }}
+            onKeyDown={(e) => {
+              if (e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
+                e.preventDefault()
+                if (!e.repeat) voiceControls.press()
+                return
+              }
+              if (e.key === 'Escape' && voice !== 'idle') return voiceControls.cancel()
+              if (mention && options.length > 0) {
+                if (e.key === 'ArrowDown') return (e.preventDefault(), setActive((active + 1) % options.length))
+                if (e.key === 'ArrowUp') return (e.preventDefault(), setActive((active - 1 + options.length) % options.length))
+                if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
+                if (e.key === 'Escape') return setMention(null)
+              }
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                submit()
+              }
+            }}
+          />
+        </div>
         <div className="composer__bar">
           <VoiceButton controls={voiceControls} state={voice} />
           <button className="icon-btn" title={L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
