@@ -284,18 +284,23 @@ describe('Gemini config', () => {
     expect(s['mcpServers']).toEqual({ tucano: { url: 'http://127.0.0.1:1/mcp/x', type: 'http', trust: true } })
     expect(existsSync(join(home, '.gemini', 'oauth_creds.json'))).toBe(true)
     expect(existsSync(join(home, 'oauth_creds.json'))).toBe(false)
-    expect(s['coreTools']).toEqual([]) // no built-in tools, no web
-    expect((s['experimental'] as Record<string, unknown>)['skills']).toEqual({ enabled: false })
+    // keys as the CLI reads them: tools.core, not the old flat coreTools
+    expect(s['tools']).toEqual({ core: [] }) // no built-in tools, no web
+    expect(s['coreTools']).toBeUndefined()
+    expect(s['mcp']).toEqual({ allowed: ['tucano'] })
+    expect(s['skills']).toEqual({ enabled: false })
+    expect(s['agents']).toEqual({ overrides: { codebase_investigator: { enabled: false }, cli_help: { enabled: false } } })
     expect((s['privacy'] as Record<string, unknown>)['usageStatisticsEnabled']).toBe(false)
     // the agent's instructions are the system prompt, and the login is brought in
     expect(readFileSync(join(home, 'system.md'), 'utf8')).toBe('You are Iris.')
-    expect(geminiEnv(home, { PATH: '/x' })).toEqual({ PATH: '/x', GEMINI_CLI_HOME: home, GEMINI_SYSTEM_MD: join(home, 'system.md') })
+    // the turn's settings are also the system settings, applied over the working folder's
+    expect(geminiEnv(home, { PATH: '/x' })).toEqual({ PATH: '/x', GEMINI_CLI_HOME: home, GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, '.gemini', 'settings.json'), GEMINI_SYSTEM_MD: join(home, 'system.md') })
   })
 
   it('turns on only the web search when the agent has the web', () => {
     const home = geminiHome(mkdtempSync(join(tmpdir(), 'gh2-')), { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'gu2-')))
     const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
-    expect(s['coreTools']).toEqual(['google_web_search'])
+    expect(s['tools']).toEqual({ core: ['google_web_search'] })
     expect(s['mcpServers']).toBeUndefined()
   })
 
