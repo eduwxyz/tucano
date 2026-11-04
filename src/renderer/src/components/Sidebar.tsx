@@ -1,5 +1,5 @@
 import { L } from '../../../shared/lang'
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
   archiveAgent,
@@ -18,6 +18,7 @@ import {
   type Agent,
   type View
 } from '../store'
+import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { call } from '../rpc'
 import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
@@ -67,6 +68,24 @@ function Section({ id, label, unread = 0, action, children }: { id: string; labe
   )
 }
 
+// A group folds like the sections, in the same list (Fold.tsx), and keeps showing the channel you're in.
+function GroupFold({ id, label, unread, head, naming, children }: { id: string; label: string; unread: number; head: HTMLAttributes<HTMLDivElement>; naming?: ReactNode; children: ReactNode }): ReactNode {
+  const { open, toggle } = useFold(`group:${id}`)
+  return (
+    <div className={`channel-group ${open ? '' : 'is-folded'}`}>
+      {naming || (
+        <div className="channel-group__head" {...head}>
+          <FoldToggle open={open} onToggle={toggle}>
+            {label}
+          </FoldToggle>
+          {!open && unread > 0 && <span className="badge badge--soft">{unread}</span>}
+        </div>
+      )}
+      {children}
+    </div>
+  )
+}
+
 const unreadIn = (conversations: { unread?: number }[]): number => conversations.reduce((sum, c) => sum + (c.unread ?? 0), 0)
 
 export function Sidebar(): ReactNode {
@@ -82,6 +101,49 @@ export function Sidebar(): ReactNode {
     e.preventDefault()
     setMenu({ x: e.clientX, y: e.clientY, items })
   }
+  // The order and groups are the person's: the core only keeps them.
+  const layout = s.settings.channelLayout
+  const arranged = arrange(channels, layout)
+  const whole: ChannelLayout = { loose: arranged.loose.map((c) => c.id), groups: arranged.groups.map((g) => ({ ...g, channels: g.channels.map((c) => c.id) })) }
+  const saveLayout = (next: ChannelLayout): void => updateSettings({ channelLayout: next })
+  const [naming, setNaming] = useState<string | null>(null)
+  const newGroup = (channelId: string): void => {
+    const id = crypto.randomUUID()
+    saveLayout(moveChannel(channels, addGroup(layout, { id, name: L('Novo grupo', 'New group') }), channelId, { group: id }))
+    setNaming(id)
+  }
+  const dragged = useRef<string | null>(null)
+  const accept = (e: React.DragEvent): void => {
+    if (dragged.current) e.preventDefault()
+  }
+  const dropOn = (to: { group?: string; before?: string }) => ({
+    onDragEnter: accept,
+    onDragOver: accept,
+    onDrop: (e: React.DragEvent): void => {
+      const id = dragged.current
+      if (!id) return
+      e.preventDefault()
+      e.stopPropagation()
+      dragged.current = null
+      saveLayout(moveChannel(channels, layout, id, to))
+    }
+  })
+  const channelRow = (c: (typeof channels)[number], group?: string): ReactNode => (
+    <div
+      key={c.id}
+      draggable
+      onDragStart={(e) => {
+        dragged.current = c.id
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', c.name)
+      }}
+      onDragEnd={() => (dragged.current = null)}
+      onContextMenu={(e) => open(e, channelMenu(c))}
+      {...dropOn({ group, before: c.id })}
+    >
+      <ChannelItem id={c.id} name={c.name} unread={c.unread} />
+    </div>
+  )
   // The wiki's curator reads every conversation; one can be kept out (a personal DM, say).
   const wikiItem = (id: string, on: boolean): MenuItem => ({
     label: on ? L('Não guardar na wiki', "Don't keep in the wiki") : L('Voltar a guardar na wiki', 'Keep in the wiki again'),
@@ -94,6 +156,12 @@ export function Sidebar(): ReactNode {
     { label: L('Mudar o tema…', 'Change the topic…'), icon: 'hash', onClick: () => openDialog({ kind: 'topic', id: c.id }) },
     ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
     wikiItem(c.id, c.wikiCapture !== false),
+    'separator',
+    { label: L('Mover para cima', 'Move up'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
+    { label: L('Mover para baixo', 'Move down'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
+    ...arranged.groups.filter((g) => !g.channels.includes(c)).map((g): MenuItem => ({ label: L(`Mover para ${g.name}`, `Move to ${g.name}`), onClick: () => saveLayout(moveChannel(channels, layout, c.id, { group: g.id })) })),
+    ...(arranged.groups.some((g) => g.channels.includes(c)) ? [{ label: L('Tirar do grupo', 'Take out of the group'), onClick: () => saveLayout(moveChannel(channels, layout, c.id, {})) }] : []),
+    { label: L('Novo grupo com este canal', 'New group with this channel'), icon: 'plus', onClick: () => newGroup(c.id) },
     'separator',
     {
       label: L('Excluir canal…', 'Delete channel…'),
@@ -181,10 +249,45 @@ export function Sidebar(): ReactNode {
             </button>
           }
         >
-          {channels.map((c) => (
-            <div key={c.id} onContextMenu={(e) => open(e, channelMenu(c))}>
-              <ChannelItem id={c.id} name={c.name} unread={c.unread} />
-            </div>
+          {arranged.loose.map((c) => channelRow(c))}
+          {/* Dropped here, a channel goes last among those in no group. */}
+          <div className="channel-drop" {...dropOn({})} />
+          {arranged.groups.map((g) => (
+            <GroupFold
+              key={g.id}
+              id={g.id}
+              label={g.name}
+              unread={g.channels.reduce((n, c) => n + (c.unread ?? 0), 0)}
+              head={{
+                ...dropOn({ group: g.id }),
+                onContextMenu: (e) =>
+                  open(e, [
+                    { label: L('Renomear', 'Rename'), icon: 'edit', onClick: () => setNaming(g.id) },
+                    { label: L('Desfazer o grupo', 'Ungroup'), icon: 'trash', onClick: () => saveLayout(removeGroup(whole, g.id)) }
+                  ])
+              }}
+              naming={
+                naming === g.id && (
+                  <input
+                    className="channel-group__name"
+                    autoFocus
+                    defaultValue={g.name}
+                    aria-label={L('Nome do grupo', 'Group name')}
+                    onFocus={(e) => e.target.select()}
+                    onBlur={(e) => {
+                      saveLayout(renameGroup(whole, g.id, e.target.value.trim() || g.name))
+                      setNaming(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') e.currentTarget.value = g.name
+                      if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur()
+                    }}
+                  />
+                )
+              }
+            >
+              {g.channels.map((c) => channelRow(c, g.id))}
+            </GroupFold>
           ))}
         </Section>
 

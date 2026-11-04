@@ -1,5 +1,6 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
+import type { ChannelLayout } from './channel-layout'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -210,6 +211,7 @@ export interface Settings {
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
