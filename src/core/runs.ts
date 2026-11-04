@@ -7,7 +7,7 @@ import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
-import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
+import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
@@ -71,7 +71,7 @@ export interface RunnerDeps {
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
-  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done') => void
+  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string) => void // threadId: a click opens that thread too
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
@@ -142,15 +142,26 @@ export class Runner {
 
   // Saves the human message and decides who answers it: mentioned agents
   // first, then whoever asked a pending question, then the DM agent or the
-  // only agent in the channel, and otherwise the router.
-  async send(conversationId: string, text: string, images: ImageUpload[] = []): Promise<void> {
+  // only agent in the channel, and otherwise the router. The answers, and
+  // everything else it sets off, go in its thread (`threadId`, or its own).
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const body = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
     if (!conv || (!body && pictures.length === 0)) return
+    // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
+    // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
+    const root = threadId ? db.message(threadId) : undefined
+    let thread = root?.conversationId === conv.id ? (root.threadId ?? root.id) : undefined
+    // A question an agent left waiting is answered by my next message, even one written
+    // outside its thread: the message goes in that thread.
+    const asked = this.pendingQuestion(conv.id, thread)
+    thread ??= asked?.threadId
 
-    const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now() }
+    const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
+    // Every answer goes in the thread of what it answers: a message of mine outside one opens it.
+    const replyIn = thread ?? mine.id
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
@@ -158,7 +169,6 @@ export class Runner {
     const members = this.members(conv)
     let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
 
-    const asked = this.pendingQuestion(conv.id)
     if (asked) {
       this.update(asked, { run: { ...asked.run!, status: 'done' } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
@@ -166,21 +176,21 @@ export class Runner {
     }
 
     if (members.length === 0) {
-      this.post(conv.id, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
+      this.post(conv.id, replyIn, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
       return
     }
     if (this.paused) {
-      this.post(conv.id, L('Os agentes estão pausados: ninguém responde até você retomar (botão no topo da barra lateral).', 'The agents are paused: no one answers until you resume (button at the top of the sidebar).'))
+      this.post(conv.id, replyIn, L('Os agentes estão pausados: ninguém responde até você retomar (botão no topo da barra lateral).', 'The agents are paused: no one answers until you resume (button at the top of the sidebar).'))
       return
     }
     if (responders.length === 0) {
       if (conv.kind === 'dm' || members.length === 1) responders = members
       else if (members.length > 1) {
-        void this.routeAndRun(conv, members)
+        void this.routeAndRun(conv, members, replyIn)
         return
       }
     }
-    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
+    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn }))
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -243,7 +253,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work }))
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }))
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -340,15 +350,16 @@ export class Runner {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
   }
 
-  private pendingQuestion(conversationId: string): Message | undefined {
+  // The question waiting for me: in a thread, that thread's; outside threads, the latest anywhere.
+  private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
     return this.deps.db
-      .recentMessages(conversationId, 50)
+      .recentMessages(conversationId, 50, threadId)
       .reverse()
       .find((m) => m.run?.status === 'waiting_input')
   }
 
-  private post(conversationId: string, text: string, run?: Run): Message {
-    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now(), run }
+  private post(conversationId: string, threadId: string | undefined, text: string, run?: Run): Message {
+    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now(), run, ...(threadId ? { threadId } : {}) }
     this.deps.db.saveMessage(m)
     this.deps.emit({ type: 'message', message: m })
     return m
@@ -360,16 +371,18 @@ export class Runner {
     this.deps.emit({ type: 'message', message: { ...m } })
   }
 
-  private async routeAndRun(conv: Conversation, members: Agent[]): Promise<void> {
+  // The router reads the conversation, threads included, and the thread it picks for.
+  private async routeAndRun(conv: Conversation, members: Agent[], threadId?: string): Promise<void> {
     const { db, engines } = this.deps
     this.routing++
-    const note = this.post(conv.id, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
+    const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
       this.update(note, { text: L(`Não consegui escolher quem responde (${why}). Mencione um agente com **@nome**.`, `I couldn't pick who answers (${why}). Mention an agent with **@name**.`), run: undefined })
     try {
       const settings = await this.deps.settings()
       const input = {
-        messages: db.recentMessages(conv.id, 20),
+        messages: [...new Map([...db.recentMessages(conv.id, 20), ...(threadId ? db.recentMessages(conv.id, 60, threadId) : [])].map((m) => [m.id, m])).values()].sort((a, b) => a.at - b.at),
+        thread: threadId ? db.message(threadId) : undefined,
         agents: members,
         me: settings.workspaceName,
         connectors: this.deps.connectors?.list()
@@ -406,7 +419,7 @@ export class Runner {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
     this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
-    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
+    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: note.threadId }))
   }
 
   private enqueue(job: () => Promise<unknown>): void {
@@ -443,7 +456,8 @@ export class Runner {
     return { model, account }
   }
 
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean }): Promise<Message> {
+  // `threadId`: the reply goes in that thread (an existing reply keeps its own).
+  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -455,7 +469,7 @@ export class Runner {
     let engineId: EngineId = model?.engine ?? 'claude'
     let engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
 
-    const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now() }
+    const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
     const started = Date.now()
     let stepStarted = started
     const thinking = (): Step => ({ id: randomUUID(), label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' })
@@ -533,10 +547,7 @@ export class Runner {
     const memory = this.deps.memory
     const { summary, messages: history } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? {
       summary: undefined,
-      messages: db
-        .recentMessages(conv.id, HISTORY_LIMIT + 40)
-        .filter((m) => m.id !== msg.id && m.at <= msg.at)
-        .slice(-HISTORY_LIMIT)
+      messages: contextWindow(db, msg, HISTORY_LIMIT)
     }
     // What this reply counts toward: given (a chain, a routine's issue), or an issue named in the message it answers.
     const asked = [...history].reverse().find((m) => m.author.kind === 'me' || m.author.kind === 'routine')
@@ -843,7 +854,7 @@ export class Runner {
             }
             stepStarted = Date.now()
             save()
-            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval')
+            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval', msg.threadId)
             return textResult(
               L(
                 `Pedido de aprovação criado, com o print da tela. O clique ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -900,7 +911,7 @@ export class Runner {
             msg.run = { ...msg.run!, approvalId: approval.id, steps: [...close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }), thinking()] }
             stepStarted = Date.now()
             save()
-            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval')
+            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval', msg.threadId)
             return textResult(
               L(
                 `Pedido de aprovação criado. A ação ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -943,7 +954,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu pra abrir a PR', 'Asked to open the PR'), detail: `${branch} → ${prArgs.base}`, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} quer abrir uma PR`, `${agent.name} wants to open a PR`), `${repo}: ${title}`, conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} quer abrir uma PR`, `${agent.name} wants to open a PR`), `${repo}: ${title}`, conv.id, 'approval', msg.threadId)
           return textResult(
             L(
               `Pedido de PR criado. A PR ainda NÃO existe. Encerre sua resposta agora dizendo em uma frase o que vai na PR. Quando ${settings.workspaceName} aprovar, você recebe o link numa nova mensagem.`,
@@ -978,7 +989,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu acesso', 'Asked for access'), detail: `${c.name} · ${nivel === 'read' ? L('ler', 'read') : L('ler e escrever', 'read and write')}`, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} pede acesso ao ${c.name}`, `${agent.name} asks for access to ${c.name}`), why || (nivel === 'read' ? L('Pra ler.', 'To read.') : L('Pra ler e escrever.', 'To read and write.')), conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} pede acesso ao ${c.name}`, `${agent.name} asks for access to ${c.name}`), why || (nivel === 'read' ? L('Pra ler.', 'To read.') : L('Pra ler e escrever.', 'To read and write.')), conv.id, 'approval', msg.threadId)
           return textResult(
             L(
               `Pedido de acesso enviado. Encerre sua resposta agora dizendo em uma frase o que pediu e por quê. Se ${settings.workspaceName} liberar, você continua numa nova mensagem.`,
@@ -1019,7 +1030,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${toolLabel(current.name)} · ${hit.connector.name}${approval.why ? `: ${approval.why}` : ''}`, conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${toolLabel(current.name)} · ${hit.connector.name}${approval.why ? `: ${approval.why}` : ''}`, conv.id, 'approval', msg.threadId)
           return textResult(
             L(
               `Pedido de aprovação criado. A ação ainda NÃO foi executada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -1098,7 +1109,8 @@ export class Runner {
     const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names })
+    const thread = msg.threadId ? db.message(msg.threadId) : undefined
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread })
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -1206,6 +1218,7 @@ export class Runner {
       const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
       this.post(
         conv.id,
+        msg.threadId,
         L(
           `**${agent.name}** já usou ${pct} do limite do mês (${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens). Dá pra aumentar na página dele.`,
           `**${agent.name}** has used ${pct} of the month's limit (${tokenCount(usedNow)} of ${tokenCount(agent.limit)} tokens). It can be raised on their page.`
@@ -1214,7 +1227,9 @@ export class Runner {
       this.deps.notify?.(
         L(`${agent.name} usou ${pct} do limite do mês`, `${agent.name} used ${pct} of the month's limit`),
         L(`${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens. Dá pra aumentar na página dele.`, `${tokenCount(usedNow)} of ${tokenCount(agent.limit)} tokens. It can be raised on their page.`),
-        conv.id
+        conv.id,
+        undefined,
+        msg.threadId
       )
     }
 
@@ -1249,8 +1264,8 @@ export class Runner {
         run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
-      if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question')
-      else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done')
+      if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
+      else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
     } else {
       // What happened and what to do; the CLI's own words go folded under it.
       const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
@@ -1258,7 +1273,7 @@ export class Runner {
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
     const st = msg.run?.status
-    if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done')
+    if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId)
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
@@ -1432,7 +1447,7 @@ export class Runner {
         }
       })
     }
-    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work }))
+    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }))
   }
 
   async expireApprovals(): Promise<void> {
@@ -1463,6 +1478,7 @@ export class Runner {
       this.execute(agent, conv, {
         depth: 1,
         work: asked.run?.work,
+        threadId: asked.threadId,
         task: L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
       })
     )
@@ -1476,10 +1492,10 @@ export class Runner {
     const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
     if (next.length === 0) return false
     if (depth >= MAX_DEPTH) {
-      this.post(conv.id, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
+      this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
       return false
     }
-    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work }))
+    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
     return true
   }
 }

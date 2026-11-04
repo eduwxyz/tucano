@@ -19,6 +19,9 @@ import {
   modelById,
   navigate,
   openDm,
+  openPanel,
+  openThread,
+  seeThread,
   openTuca,
   removeRoutine,
   retryRun,
@@ -36,6 +39,7 @@ import {
   type Approval,
   type Conversation,
   type ImageUpload,
+  type Author,
   type Message,
   type Step,
   IMAGE_MIMES,
@@ -45,7 +49,7 @@ import {
   transcribe,
   voiceStatus
 } from '../store'
-import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd, useJustEnded } from './ui'
+import { AgentAvatar, Icon, MeAvatar, ago, duration, time, tokens, usd, useJustEnded } from './ui'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
@@ -110,6 +114,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   })
   const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
   const focus = useStore((s) => (s.view?.kind === 'conversation' && s.view.id === id ? s.view.message : undefined))
+  const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
   const [showSummary, setShowSummary] = useState(false)
   const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
 
@@ -165,19 +170,33 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           </div>
         </header>
 
-        {showSummary && <SummaryPanel conv={conv} messages={messages} onClose={() => setShowSummary(false)} />}
+        {showSummary && <SummaryPanel conv={conv} messages={messages.filter((m) => !m.threadId)} onClose={() => setShowSummary(false)} />}
 
-        <MessageList messages={messages} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
+        <MessageList messages={messages} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} threads />
         <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
       </section>
-      <SidePanel />
+      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
     </div>
   )
 }
 
-export function MessageList({ messages, conversationId, empty, focus }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string }): ReactNode {
+const NO_REPLIES: Message[] = []
+
+// `threads`: the timeline shows only what's outside threads, and each message can start one.
+export function MessageList({ messages: all, conversationId, empty, focus, threads, lead }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string; threads?: boolean; lead?: ReactNode }): ReactNode {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const { messages, replies } = useMemo(() => {
+    if (!threads) return { messages: all, replies: undefined }
+    const replies = new Map<string, Message[]>()
+    for (const m of all) {
+      if (!m.threadId) continue
+      const list = replies.get(m.threadId)
+      if (list) list.push(m)
+      else replies.set(m.threadId, [m])
+    }
+    return { messages: all.filter((m) => !m.threadId), replies }
+  }, [all, threads])
   // In a DM, whose it is (for the empty state).
   const dmName = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
@@ -187,7 +206,7 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
   // Opened on a message (a routine's run, say): scroll to it and flash it once.
   useEffect(() => {
     const i = focus ? messages.findIndex((m) => m.id === focus) : -1
-    const el = i >= 0 ? (ref.current?.children[i] as HTMLElement | undefined) : undefined
+    const el = i >= 0 ? (ref.current?.children[i + (lead ? 1 : 0)] as HTMLElement | undefined) : undefined
     if (!el) return
     stick.current = false
     el.scrollIntoView({ block: 'center' })
@@ -198,7 +217,8 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
   }, [focus, conversationId])
 
   useEffect(() => {
-    stick.current = true
+    if (!lead) stick.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
 
   useLayoutEffect(() => {
@@ -206,7 +226,16 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
     if (el && stick.current) el.scrollTop = el.scrollHeight
   })
 
-  if (messages.length === 0 && empty) {
+  // A thread opens on the message that started it: the replies follow below.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!lead || !el) return
+    el.scrollTop = 0
+    stick.current = el.scrollHeight - el.clientHeight < 60
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (messages.length === 0 && empty && !lead) {
     return (
       <div className="messages messages--empty">
         <div className="empty">
@@ -221,7 +250,7 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
     )
   }
 
-  if (messages.length === 0) {
+  if (messages.length === 0 && !lead) {
     return (
       <div className="messages messages--empty">
         <div className="empty">
@@ -242,6 +271,7 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
       }}
     >
+      {lead}
       {messages.map((m, i) => {
         const prev = messages[i - 1]
         const grouped =
@@ -252,7 +282,7 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
           !m.run &&
           m.author.kind !== 'system' &&
           m.author.kind !== 'routine'
-        return <MessageRow key={m.id} message={m} grouped={grouped} />
+        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
       })}
     </div>
   )
@@ -261,8 +291,11 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
 const AGENT_PLUGINS = [remarkGfm, remarkLocalPaths]
 const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
 
-function MessageRow({ message, grouped }: { message: Message; grouped: boolean }): ReactNode {
+// `replies`: in a timeline with threads, the replies to this message (none yet: empty).
+function MessageRow({ message, grouped, replies }: { message: Message; grouped: boolean; replies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
+  // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
+  const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
   const attached = useStore((s) => (message.author.kind === 'me' ? s.artifacts.filter((a) => a.messageId === message.id && a.agentId === '') : []))
@@ -281,17 +314,17 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
     return (
       <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`}>
         <Icon name="spark" size={13} />
-        <Markdown>{message.text}</Markdown>
+        <SystemText text={message.text} />
         <span className="muted">{time(message.at)}</span>
       </div>
     )
   }
 
-  if (message.author.kind === 'routine') return <RoutineMessage message={message} />
+  if (message.author.kind === 'routine') return <RoutineMessage message={message} replies={replies} />
 
   const name = agent ? agent.name : me.name
   return (
-    <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''}`}>
+    <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`}>
       <div className="msg__gutter">
         {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={me.initials} size={34} />)}
       </div>
@@ -374,15 +407,20 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
         )}
-        {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && <KeepInWiki messageId={message.id} />}
-        {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length)) && (
+          <div className="msg__meta">
+            {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+            {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && <KeepInWiki messageId={message.id} />}
+          </div>
+        )}
+        {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
   )
 }
 
 // What a routine asked, posted at its time; the agent's reply comes next.
-function RoutineMessage({ message }: { message: Message }): ReactNode {
+function RoutineMessage({ message, replies }: { message: Message; replies?: Message[] }): ReactNode {
   const exists = useStore((s) => s.routines.some((r) => message.author.kind === 'routine' && r.id === message.author.id))
   const info = message.routine
   return (
@@ -413,8 +451,169 @@ function RoutineMessage({ message }: { message: Message }): ReactNode {
         <div className="md">
           <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, a: (p) => <WikiLink href={p.href}>{p.children}</WikiLink> }}>{highlightMentions(message.text)}</Markdown>
         </div>
+        {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
+  )
+}
+
+// A system note says what happened first ("Chamei **Iris**"), then why, after " · ": the
+// headline reads at a glance, the why stays quiet (and whole on hover).
+function SystemText({ text }: { text: string }): ReactNode {
+  const [head = '', ...why] = text.split(' · ')
+  return (
+    <>
+      <Markdown>{head}</Markdown>
+      {why.length > 0 && (
+        <span className="system-line__why" title={why.join(' · ').replace(/\*\*/g, '')}>
+          {why.join(' · ').replace(/\*\*/g, '')}
+        </span>
+      )}
+    </>
+  )
+}
+
+const repliesLabel = (n: number): string => L(`${n} resposta${n === 1 ? '' : 's'}`, `${n} repl${n === 1 ? 'y' : 'ies'}`)
+
+// Who took part in a thread, as faces: agents with their eyes (reading while they work), me with my initials.
+function Faces({ authors, busy }: { authors: Author[]; busy: Set<string> }): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const me = useStore((s) => s.me)
+  return (
+    <span className="thread-link__faces" aria-hidden>
+      {authors.slice(0, 3).map((a) => {
+        if (a.kind === 'agent') {
+          const agent = agents.find((x) => x.id === a.id)
+          return agent ? <AgentAvatar key={a.id} agent={agent} size={18} busy={busy.has(a.id)} /> : null
+        }
+        return <MeAvatar key="me" initials={me.initials} size={18} />
+      })}
+    </span>
+  )
+}
+
+// "Reply in thread" on hover and, under a message with replies, a small pill: who took part,
+// how many replies and when the last came (or who's replying, or what waits on me). It opens
+// the thread on the side. With no reply yet, the system's note says what happened.
+function ThreadLink({ message, replies }: { message: Message; replies: Message[] }): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const open = useStore((s) => s.panel?.kind === 'thread' && s.panel.id === message.id)
+  const said = replies.filter((m) => m.author.kind !== 'system')
+  const done = said.filter((m) => m.run?.status !== 'working')
+  const nameOf = (m: Message): string => {
+    const a = m.author
+    return a.kind === 'agent' ? (agents.find((x) => x.id === a.id)?.name ?? L('agente', 'agent')) : a.kind === 'me' ? L('você', 'you') : L('rotina', 'routine')
+  }
+  const key = (a: Author): string => (a.kind === 'agent' ? a.id : a.kind)
+  // The latest to speak first: their face leads.
+  const authors = [...new Map([...said].reverse().map((m) => [key(m.author), m.author])).values()]
+  const working = said.filter((m) => m.run?.status === 'working')
+  const busy = [...new Set(working.map(nameOf))]
+  // What's waiting on me in there, now that answers live in threads: a question or an approval.
+  const asks = said.findLast((m) => m.run?.status === 'waiting_input' || m.run?.status === 'waiting_approval')
+  const note = said.length === 0 ? replies.findLast((m) => m.author.kind === 'system') : undefined
+  const last = done.at(-1)
+  // New: what others said after I last had the thread open (while it's open, nothing is).
+  const seen = useStore((s) => s.threadSeen[message.id] ?? 0)
+  const fresh = open ? 0 : done.filter((m) => m.author.kind !== 'me' && m.at > seen).length
+  const go = (): void => openThread(message.id)
+  return (
+    <>
+      <button className="icon-btn icon-btn--sm msg__reply" title={L('Responder na thread', 'Reply in thread')} aria-label={L('Responder na thread', 'Reply in thread')} onClick={go}>
+        <Icon name="thread" size={13} />
+      </button>
+      {note && (
+        <button className={`thread-note ${note.run?.status === 'working' ? 'is-pending' : ''}`} onClick={go} title={note.text.replace(/\*\*/g, '')}>
+          <Icon name="spark" size={12} />
+          <span>{note.text.replace(/\*\*/g, '').split(' · ')[0]}</span>
+        </button>
+      )}
+      {said.length > 0 && (
+        <button className={`thread-link ${open ? 'is-open' : ''} ${asks ? 'is-asking' : ''}`} onClick={go} aria-label={L(`Abrir a thread: ${repliesLabel(done.length)}`, `Open the thread: ${repliesLabel(done.length)}`)}>
+          {fresh > 0 && <span className="thread-link__dot" aria-label={L(`${fresh} nova${fresh === 1 ? '' : 's'}`, `${fresh} new`)} />}
+          <Faces authors={authors} busy={new Set(working.flatMap((m) => (m.author.kind === 'agent' ? [m.author.id] : [])))} />
+          {asks ? (
+            <span className="thread-link__asks">
+              {asks.run!.status === 'waiting_input' ? L(`${nameOf(asks)} te perguntou algo`, `${nameOf(asks)} asked you something`) : L(`${nameOf(asks)} pede aprovação`, `${nameOf(asks)} asks for approval`)}
+            </span>
+          ) : busy.length > 0 ? (
+            <span className="shimmer">{L(`${busy.join(' e ')} ${busy.length === 1 ? 'está' : 'estão'} respondendo…`, `${busy.join(' and ')} ${busy.length === 1 ? 'is' : 'are'} replying…`)}</span>
+          ) : (
+            <strong key={done.length} className="thread-link__count">
+              {repliesLabel(done.length)}
+              {fresh > 0 && <span className="thread-link__fresh">{L(` · ${fresh} nova${fresh === 1 ? '' : 's'}`, ` · ${fresh} new`)}</span>}
+            </strong>
+          )}
+          {!busy.length && !asks && last && (
+            <span className="thread-link__when">
+              <span className="thread-link__ago">{ago(last.at)}</span>
+              <span className="thread-link__see">{L('Ver thread', 'View thread')}</span>
+            </span>
+          )}
+          <Icon name="chevron" size={12} />
+        </button>
+      )}
+    </>
+  )
+}
+
+// A thread on the side: the message that started it, set apart, then its replies and a
+// field that answers there.
+function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
+  const root = useStore((s) => s.messages.find((m) => m.id === rootId))
+  const replies = useStore((s) => s.messages.filter((m) => m.threadId === rootId))
+  const agents = useStore((s) => s.agents)
+  const said = replies.filter((m) => m.author.kind !== 'system' && m.run?.status !== 'working').length
+  const replying = [...new Set(replies.flatMap((m) => (m.run?.status === 'working' && m.author.kind === 'agent' ? [m.author.id] : [])))].map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent'))
+  // Open, the thread is seen as it goes; closed, up to when it closed.
+  const latest = replies.at(-1)?.at
+  useEffect(() => {
+    seeThread(rootId)
+    return () => seeThread(rootId)
+  }, [rootId, latest])
+  // Esc closes it, unless something on top (a menu, a window) takes the key first.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('.modal, .menu, .mention-menu, .lightbox')) return
+      openPanel(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  const lead = root && (
+    <div className="thread__lead">
+      <MessageRow message={root} grouped={false} />
+      <div className="thread__divider">
+        {replying.length > 0 ? (
+          <span key="replying" className="shimmer">
+            {L(`${replying.join(' e ')} ${replying.length === 1 ? 'está' : 'estão'} respondendo…`, `${replying.join(' and ')} ${replying.length === 1 ? 'is' : 'are'} replying…`)}
+          </span>
+        ) : (
+          <span key={said}>{said > 0 ? repliesLabel(said) : L('Ainda sem respostas', 'No replies yet')}</span>
+        )}
+      </div>
+    </div>
+  )
+  return (
+    <aside className="side-panel side-panel--thread">
+      <header className="side-panel__head">
+        <Icon name="thread" size={14} />
+        <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
+        <span className="side-panel__where">{L(`em ${title}`, `in ${title}`)}</span>
+        <span className="grow" />
+        <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
+          <Icon name="x" size={14} />
+        </button>
+      </header>
+      {root?.conversationId === conv.id ? (
+        <>
+          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
+          <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
+        </>
+      ) : (
+        <p className="empty">{L('Essa mensagem não está mais aqui.', 'That message is no longer here.')}</p>
+      )}
+    </aside>
   )
 }
 
@@ -898,8 +1097,8 @@ async function prepareImage(file: File): Promise<Attached | string> {
   }
 }
 
-// One draft per conversation, kept while the app runs: leaving a channel doesn't
-// lose the message you were typing.
+// One draft per conversation (and per thread), kept while the app runs: leaving a
+// channel doesn't lose the message you were typing.
 const drafts = new Map<string, { text: string; images: Attached[] }>()
 
 type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing'
@@ -1134,11 +1333,13 @@ function RecordingClock({ since }: { since: number }): ReactNode {
   )
 }
 
-export function Composer({ conversationId, members, placeholder }: { conversationId: string; members: Agent[]; placeholder: string }): ReactNode {
+// `threadId`: it answers in the thread that message started, not in the conversation.
+export function Composer({ conversationId, threadId, members, placeholder }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string }): ReactNode {
+  const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
-  const [text, setText] = useState(() => drafts.get(conversationId)?.text ?? '')
-  const [images, setImages] = useState<Attached[]>(() => drafts.get(conversationId)?.images ?? [])
+  const [text, setText] = useState(() => drafts.get(key)?.text ?? '')
+  const [images, setImages] = useState<Attached[]>(() => drafts.get(key)?.images ?? [])
   const [note, setNote] = useState('')
   const [dragging, setDragging] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
@@ -1148,9 +1349,11 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const platform = useStore((s) => s.platform)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
-  const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
+  // Replies at work and questions asked here: in this thread, or outside threads.
+  const here = (m: Message): boolean => m.conversationId === conversationId && m.threadId === threadId
+  const working = useStore((s) => s.messages.filter((m) => here(m) && m.author.kind === 'agent' && m.run?.status === 'working'))
   const asker = useStore((s) => {
-    const q = s.messages.findLast((m) => m.conversationId === conversationId && m.run?.status === 'waiting_input')
+    const q = s.messages.findLast((m) => here(m) && m.run?.status === 'waiting_input')
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
   })
 
@@ -1159,17 +1362,17 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const live = useRef({ text, images })
   live.current = { text, images }
   useEffect(() => {
-    const draft = drafts.get(conversationId)
+    const draft = drafts.get(key)
     setText(draft?.text ?? '')
     setImages(draft?.images ?? [])
     setNote('')
     ref.current?.focus()
     return () => {
       const { text, images } = live.current
-      if (text.trim() || images.length) drafts.set(conversationId, { text, images })
-      else drafts.delete(conversationId)
+      if (text.trim() || images.length) drafts.set(key, { text, images })
+      else drafts.delete(key)
     }
-  }, [conversationId])
+  }, [key])
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (!files.length) return
@@ -1186,9 +1389,12 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   }
 
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
+  // With a thread open there are two fields: a drop on the thread goes to its own.
+  const inThread = !!threadId
   useEffect(() => {
     let depth = 0
     const files = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
+    const mine = (e: DragEvent): boolean => !!(e.target instanceof Element && e.target.closest('.side-panel--thread')) === inThread
     const enter = (e: DragEvent): void => {
       if (!files(e)) return
       depth++
@@ -1205,7 +1411,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
       e.preventDefault()
       depth = 0
       setDragging(false)
-      void addFiles([...(e.dataTransfer?.files ?? [])])
+      if (mine(e)) void addFiles([...(e.dataTransfer?.files ?? [])])
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)
@@ -1217,7 +1423,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
       window.removeEventListener('dragleave', leave)
       window.removeEventListener('drop', drop)
     }
-  }, [])
+  }, [inThread])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -1264,16 +1470,17 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
     })
     el?.focus()
   }
-  const [voice, voiceControls] = useDictation(insert, setNote, conversationId)
+  const [voice, voiceControls] = useDictation(insert, setNote, key)
 
   const submit = (): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
       conversationId,
       text,
-      images.map(({ name, mime, data }) => ({ name, mime, data }))
+      images.map(({ name, mime, data }) => ({ name, mime, data })),
+      threadId
     )
-    drafts.delete(conversationId)
+    drafts.delete(key)
     setText('')
     setImages([])
     setNote('')
@@ -1282,7 +1489,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
 
   return (
     <div className="composer-wrap">
-      {dragging && (
+      {dragging && !inThread && (
         <div className="drop-overlay">
           <div className="drop-overlay__card">
             <Icon name="image" size={28} />
@@ -1382,7 +1589,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             }}
           />
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
+            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((m) => stopRun(m.id))}>
