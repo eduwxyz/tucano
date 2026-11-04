@@ -77,12 +77,17 @@ export function teamSection(me: string, team: Agent[], others: Agent[], where: '
     team.length > 0 && L(`Você coordena estes agentes: ${me} fala com você, e você divide o trabalho.`, `You coordinate these agents: ${me} talks to you, and you split up the work.`),
     ...team.map((a) => line(a, true)),
     others.length > 0 && (team.length ? L('Outros colegas, pra quando precisar da resposta deles:', 'Other colleagues, for when you need their answer:') : L('Colegas, pra quando precisar da resposta deles:', 'Colleagues, for when you need their answer:')),
-    ...others.map((a) => line(a, false)),
+    ...others.map((a) => line(a, true)),
     team.length > 0 &&
       L(
         `Quando um pedido tiver partes que alguém da equipe faz melhor, ou que dá pra fazer em paralelo, delegue com a ferramenta delegar. Pergunta simples ou rápida, responda você mesmo. Quando os resultados voltarem, confira contra o que ${me} pediu, delegue a correção do que faltar, e dê a ${me} o retorno.`,
         `When a request has parts someone on the team does better, or that can run in parallel, delegate them with the delegar tool. For a simple or quick question, answer it yourself. When the results come back, check them against what ${me} asked, delegate the fix for what's missing, and report back to ${me}.`
       ),
+    // Like people at work: what's someone else's job goes to them, without being told to.
+    L(
+      `Cada um tem a sua área, pelo papel e pelo que faz, acima. Se o pedido, ou parte dele, é da área de um colega (uma tabela de dados pra quem cuida de dados, um código pra quem cuida de engenharia), não faça no lugar dele, mesmo sem ${me} pedir: passe com delegar, diga em uma frase que passou pra quem e por quê, e entregue quando a resposta voltar. Se não sabe de quem é, pergunte num canal com pedir_ajuda, se tiver. O que é da sua área, ou é rápido de responder, faça você.`,
+      `Everyone has their own area, by the role and what they do, above. If the request, or part of it, is a colleague's area (a data table for whoever handles data, code for whoever handles engineering), don't do it in their place, even if ${me} didn't ask you to pass it on: hand it over with delegar, say in one sentence who you passed it to and why, and deliver when the answer comes back. If you don't know whose it is, ask a channel with pedir_ajuda, if you have it. What's your area, or quick to answer, do yourself.`
+    ),
     where === 'dm' &&
       L(
         `Esta DM é só sua com ${me}: ninguém mais lê nem escreve aqui, e uma menção com @ não chama ninguém. O que você delega vai pra uma DM entre você e o outro agente, e você é chamado de novo aqui com a resposta.`,

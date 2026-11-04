@@ -207,6 +207,19 @@ describe('delegation', () => {
     expect(turnsOf('chefe').at(-1)!.prompt).toContain('Ninguém em #dados pôde ajudar com: ok, alguém sabe o CNPJ')
   })
 
+  it('any agent, team or not, knows what each colleague does and hands over what is theirs', async () => {
+    db.saveAgent({ ...db.agent('ana')!, instructions: 'Cuida das tabelas, métricas e relatórios de vendas.\nResponde com números.' })
+    db.createConversation({ id: 'dm-dev', kind: 'dm', name: 'dev', members: ['dev'] })
+    const r = runner()
+    await r.send('dm-dev', 'me faz uma tabela de vendas por mês')
+    await r.idle()
+    const system = turnsOf('dev')[0]!.system
+    expect(system).not.toContain('Você coordena estes agentes') // dev leads no one
+    expect(system).toContain('- ana (@ana), Dados: Cuida das tabelas, métricas e relatórios de vendas.')
+    expect(system).toContain('não faça no lugar dele, mesmo sem Edu pedir: passe com delegar')
+    expect(system).toContain('Se não sabe de quem é, pergunte num canal com pedir_ajuda')
+  })
+
   it('in a channel, the team works in the open, there', async () => {
     db.createConversation({ id: 'c', kind: 'channel', name: 'geral', members: ['chefe'] })
     const r = runner()
