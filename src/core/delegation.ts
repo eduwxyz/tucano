@@ -76,6 +76,29 @@ export function teamSection(me: string, team: Agent[], others: Agent[], where: '
     .join('\n')
 }
 
+// Called at once with other agents (several @ in one message, or the router picking two): they answer in turn,
+// in the thread. The first splits the work; the next ones do only what was left to them, or say it's covered.
+export function togetherSection(me: string, before: Agent[], after: Agent[]): string {
+  const tag = (a: Agent): string => `${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})`
+  const list = (as: Agent[]): string => as.map(tag).join(L(' e ', ' and '))
+  const head = L('## Chamado junto com outros agentes', '## Called together with other agents')
+  if (!before.length)
+    return [
+      head,
+      L(
+        `${me} chamou você junto com ${list(after)}. Vocês respondem um de cada vez, nesta thread, e você é o primeiro. Comece dividindo o trabalho: em uma linha, diga o que você vai fazer e o que fica com cada um, pelo papel de cada um. Depois faça só a sua parte; a dos outros, eles fazem em seguida. Se o pedido é uma coisa só, que um faz sozinho, diga quem faz (você, se for o seu papel) e que os outros não precisam repetir.`,
+        `${me} called you together with ${list(after)}. You answer one at a time, in this thread, and you go first. Start by splitting the work: in one line, say what you'll do and what goes to each of the others, by their roles. Then do only your part; they do theirs right after you. If the request is a single thing one of you does alone, say who does it (you, if it's your role) and that the others needn't repeat it.`
+      )
+    ].join('\n')
+  return [
+    head,
+    L(
+      `${me} chamou você junto com ${list([...before, ...after])}. Vocês respondem um de cada vez, nesta thread: ${list(before)} já respondeu, logo acima, e pode ter dividido o trabalho. Faça só a parte que ficou com você. Não refaça nem repita o que já foi feito ou dito; se o pedido já está coberto, diga isso em uma frase e pare.`,
+      `${me} called you together with ${list([...before, ...after])}. You answer one at a time, in this thread: ${list(before)} already answered, right above, and may have split the work. Do only the part left to you. Don't redo or repeat what was already done or said; if the request is already covered, say so in one sentence and stop.`
+    )
+  ].join('\n')
+}
+
 // What a delegate is told about where it is, in its system prompt.
 export function delegatedWhere(me: string, by: Pick<Agent, 'name' | 'handle'>): string {
   return L(
