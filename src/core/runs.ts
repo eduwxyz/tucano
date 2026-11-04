@@ -126,7 +126,7 @@ export interface RoutineEvent {
 }
 
 type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
-type TurnOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; delegation?: Delegation; round?: number; reportOf?: string; root?: string; threadId?: string }
+type TurnOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; delegation?: Delegation; round?: number; reportOf?: string; root?: string; threadId?: string; together?: string[] }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -198,7 +198,26 @@ export class Runner {
         return
       }
     }
-    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn }))
+    this.takeTurns(responders, conv, replyIn)
+  }
+
+  // Several agents called at once answer one after another, in the thread, not all at the same time: the
+  // first splits the work and says who takes what, the next ones see that and do only their part. Nobody
+  // does the same thing twice, and what's left to the others is one short reply each.
+  private takeTurns(agents: Agent[], conv: Conversation, threadId: string | undefined): void {
+    if (agents.length < 2) {
+      for (const a of agents) this.enqueue(() => this.execute(a, conv, { depth: 1, threadId }))
+      return
+    }
+    const together = agents.map((a) => a.id)
+    const next = (i: number): void =>
+      this.enqueue(async () => {
+        const m = await this.execute(agents[i]!, conv, { depth: 1, threadId, together })
+        // Stopped by the person, or everyone paused: the rest don't start.
+        if (i + 1 < agents.length && !this.paused && m.run?.status !== 'stopped') next(i + 1)
+        return m
+      })
+    next(0)
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -430,7 +449,7 @@ export class Runner {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
     this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
-    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: note.threadId }))
+    this.takeTurns(agents, conv, note.threadId)
   }
 
   // A turn whose message shows up at once, before it leaves the queue: a team's task must never look
@@ -1307,6 +1326,10 @@ export class Runner {
               publish: repos,
               team: colleagues.length ? { team, others } : undefined,
               delegatedBy: opts.delegation ? db.agent(opts.delegation.by) : undefined,
+              together: opts.together && {
+                before: opts.together.slice(0, opts.together.indexOf(agent.id)).flatMap((id) => db.agent(id) ?? []),
+                after: opts.together.slice(opts.together.indexOf(agent.id) + 1).flatMap((id) => db.agent(id) ?? [])
+              },
               builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
             }),
             prompt: blocks.join('\n\n'),
@@ -1436,7 +1459,7 @@ export class Runner {
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       // A team's work isn't over while tasks are out or when a task is done: the manager's last reply is.
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
-      else if (!approval && !delegated.length && !opts.delegation && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
+      else if (!approval && !delegated.length && !opts.delegation && !this.chain(agent, conv, msg, opts.depth, opts.together) && !opts.routine && (opts.together?.at(-1) ?? agent.id) === agent.id) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
     } else {
       // What happened and what to do; the CLI's own words go folded under it.
       const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
@@ -1658,9 +1681,10 @@ export class Runner {
   // An agent that mentions another agent of the conversation hands it the turn,
   // up to MAX_DEPTH replies in a row without a human message in between.
   // Whether the conversation goes on with another agent.
-  private chain(agent: Agent, conv: Conversation, msg: Message, depth: number): boolean {
+  private chain(agent: Agent, conv: Conversation, msg: Message, depth: number, together: string[] = []): boolean {
     if (this.paused) return false
-    const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+    // Called together with it, the others already have a turn of their own: naming them hands them nothing.
+    const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id && !together.includes(a.id))).slice(0, MAX_MENTIONS)
     if (next.length === 0) return false
     if (depth >= MAX_DEPTH) {
       this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))

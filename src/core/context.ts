@@ -4,7 +4,7 @@
 import { L, lang, locale } from '../shared/lang'
 import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Routine, type Settings, type Skill } from '../shared/types'
 import { osOf, shellCommand, systemName } from './platform'
-import { delegatedWhere, teamSection } from './delegation'
+import { delegatedWhere, teamSection, togetherSection } from './delegation'
 
 export const HISTORY_LIMIT = 30
 
@@ -27,9 +27,10 @@ export function systemPrompt(opts: {
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   team?: { team: Agent[]; others: Agent[] } // who it can hand work to with delegar: the ones it coordinates, and the rest
   delegatedBy?: Agent // the agent whose task this reply works on
+  together?: { before: Agent[]; after: Agent[] } // called with others at once: who answered before it, who answers after
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, wiki } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, together, wiki } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const other = conversation.kind === 'agents' ? peers[0] : undefined
   const where = delegatedBy
@@ -86,6 +87,7 @@ export function systemPrompt(opts: {
     apps?.length && appsSection(me, apps),
     builder,
     team && teamSection(me, team.team, team.others, delegatedBy ? 'task' : conversation.kind === 'dm' ? 'dm' : 'open'),
+    together && togetherSection(me, together.before, together.after),
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0 || !!memories.searchable) && memorySection(me, memories),
     wiki &&
       L(

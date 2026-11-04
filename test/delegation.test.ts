@@ -147,6 +147,29 @@ describe('delegation', () => {
     expect(requestRunning(conv, [msg({ run: { status: 'working', steps: [], root: 'outro' } }), msg({ conversationId: 'p', run: { status: 'done', steps: [] } })])).toBe(false)
   })
 
+  it('agents called together answer in turn: the first splits the work, the next does only its part', async () => {
+    db.createConversation({ id: 'c', kind: 'channel', name: 'geral', members: ['dev', 'ana'] })
+    const r = runner()
+    await r.send('c', '@dev @ana preparem o lançamento: o post e os números')
+    await r.idle()
+
+    // One after another, each once, in the thread of the message.
+    const replies = said('c')
+    expect(replies.map(by)).toEqual(['dev', 'ana'])
+    expect(turnsOf('dev')).toHaveLength(1)
+    expect(turnsOf('ana')).toHaveLength(1)
+    expect(replies[1]!.at).toBeGreaterThan(replies[0]!.at)
+    const asked = db.messages().find((m) => m.author.kind === 'me')!
+    expect(replies.every((m) => m.threadId === asked.id)).toBe(true)
+
+    // The first is told to split it; the second, that the first answered and to take only what's left.
+    expect(turnsOf('dev')[0]!.system).toContain('você é o primeiro. Comece dividindo o trabalho')
+    expect(turnsOf('dev')[0]!.system).toContain('ana (@ana, Dados)')
+    expect(turnsOf('ana')[0]!.system).toContain('dev (@dev, Engenharia) já respondeu, logo acima')
+    // And it reads that answer before writing its own.
+    expect(turnsOf('ana')[0]!.prompt).toContain(replies[0]!.text.slice(0, 20))
+  })
+
   it('in a channel, the team works in the open, there', async () => {
     db.createConversation({ id: 'c', kind: 'channel', name: 'geral', members: ['chefe'] })
     const r = runner()
