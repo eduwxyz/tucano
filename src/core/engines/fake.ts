@@ -86,6 +86,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'execute_sql_read_only'), { statement })
         reply = textOf(r)
+      } else if (turn.mcpUrl && /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.test(last)) {
+        // A skill that runs a CLI (a databricks-query skill and the databricks command): read it, then run.
+        const [, skill, first, then] = /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.exec(last)!
+        await callTool(turn.mcpUrl, 'ler_skill', { nome: skill })
+        for (const command of [first!, then].filter(Boolean)) await callTool(turn.mcpUrl, 'bash', { command })
+        reply = L(
+          'Rodei o SQL pela skill: Sudeste lidera, depois Sul e Nordeste. O segundo comando falhou: o token foi recusado.',
+          'I ran the SQL through the skill: Southeast leads, then South and Northeast. The second command failed: the token was refused.'
+        )
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`
