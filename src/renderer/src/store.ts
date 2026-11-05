@@ -239,8 +239,13 @@ function apply(e: CoreEvent): void {
           fromAgent && !viewing && (!known || finished)
             ? s.conversations.map((c) => (c.id === e.message.conversationId ? { ...c, unread: (c.unread ?? 0) + 1 } : c))
             : s.conversations
-        return { ...s, conversations, messages: upsert(s.messages, e.message) }
+        // Out of the queue: it reaches the agent now, so it goes after what came in meanwhile.
+        const delivered = s.messages.find((m) => m.id === e.message.id)?.queued && !e.message.queued
+        const messages = delivered ? [...s.messages.filter((m) => m.id !== e.message.id), e.message] : upsert(s.messages, e.message)
+        return { ...s, conversations, messages }
       }
+      case 'message_removed':
+        return { ...s, messages: s.messages.filter((m) => m.id !== e.id) }
       case 'delta':
         return { ...s, messages: s.messages.map((m) => (m.id === e.id ? { ...m, text: m.text + e.text } : m)) }
       case 'agent':
@@ -537,6 +542,8 @@ export const stopRun = (messageId: string): void => void fire(L('Não consegui p
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
 export const steer = (messageId: string): void => void fire(L('Não consegui orientar o agente.', "I couldn't steer the agent."), 'steer', { messageId })
+export const editQueued = (messageId: string, text: string): void => void fire(L('Não consegui editar a mensagem.', "I couldn't edit the message."), 'editQueued', { messageId, text })
+export const cancelQueued = (messageId: string): void => void fire(L('Não consegui tirar a mensagem da fila.', "I couldn't take the message out of the queue."), 'cancelQueued', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
   void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })

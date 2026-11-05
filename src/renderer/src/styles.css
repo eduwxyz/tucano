@@ -1087,13 +1087,88 @@ h3 {
 .msg--me .md:has(+ .queued) {
   opacity: 0.75;
 }
-.queued {
+/* My messages waiting for the agent, over the field: not in the conversation until it reads them. */
+.queue {
+  margin: 0 12px -1px;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--bg);
+  font-size: 13px;
+}
+.queue__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.queue__head strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.queue__head .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue__list {
+  display: grid;
+  gap: 2px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.queue__item {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-2);
+  min-width: 0;
+  padding: 4px 4px 4px 6px;
+  border-radius: 8px;
+}
+.queue__item:hover,
+.queue__item:focus-within {
+  background: var(--hover);
+}
+.queue__n {
+  flex: none;
+  width: 16px;
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: right;
+}
+.queue__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue__edit {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  resize: none;
+}
+.queue__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+.queue__item:not(:hover):not(:focus-within) .queue__actions .icon-btn {
+  opacity: 0.55;
 }
 .msg__head {
   display: flex;

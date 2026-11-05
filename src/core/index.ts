@@ -733,6 +733,10 @@ const api: Api = {
 
   steer: ({ messageId }) => runner.steer(messageId),
 
+  editQueued: ({ messageId, text }) => runner.editQueued(messageId, text),
+
+  cancelQueued: ({ messageId }) => runner.cancelQueued(messageId),
+
   saveAgent: ({ agent, channelIds }) => {
     const before = db.agent(agent.id)
     // Archived changes only through archiveAgent, which also stops what the agent was doing.
