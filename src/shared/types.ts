@@ -118,6 +118,7 @@ export interface Conversation {
   summaryAt?: number
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
+  threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -273,6 +274,7 @@ export interface Settings {
   onboarding?: { done: boolean; checklistHidden?: boolean }
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
+  seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
 }
 
