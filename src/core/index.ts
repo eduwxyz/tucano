@@ -1083,6 +1083,11 @@ const api: Api = {
     const c = db.conversation(conversationId)
     if (c) emit({ type: 'conversation', conversation: c })
   },
+  setThreads: ({ conversationId, on }) => {
+    db.setThreads(conversationId, on)
+    const c = db.conversation(conversationId)
+    if (c) emit({ type: 'conversation', conversation: c })
+  },
   setWikiDir: async ({ dir }) => {
     const next = dir?.trim() || wikiHome
     if (!existsSync(next)) throw new Error(L('Essa pasta não existe.', "That folder doesn't exist."))

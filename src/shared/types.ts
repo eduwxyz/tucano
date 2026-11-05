@@ -118,6 +118,7 @@ export interface Conversation {
   summaryAt?: number
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
+  threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.

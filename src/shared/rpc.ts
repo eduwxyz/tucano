@@ -141,6 +141,7 @@ export interface Api {
   wikiDismissFinding(p: { id: string }): void // and refuses its fix
   wikiImport(p: { dir: string }): WikiImport // an Obsidian vault copied in, as it is
   setWikiCapture(p: { conversationId: string; on: boolean }): void
+  setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now
 }
 
