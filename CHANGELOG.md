@@ -5,6 +5,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Conectores prontos.** 34 serviços, como Notion, Sentry, Vercel, Jira, Stripe e Canva, conectam com um clique e o login no navegador. Os outros continuam em Adicionar personalizado.
 > - **Novidades na tela.** Depois de uma atualização, o Tucano mostra uma vez o que entrou na versão, no idioma do app.
 > - **As respostas voltam pra conversa.** Os agentes respondem logo abaixo da mensagem, como num chat. Quem prefere threads liga nas configurações do canal, que abrem clicando no nome dele no topo.
 > - **Respostas do Claude mais rápidas.** Terminam uns 2 segundos antes, às vezes 10.
@@ -14,6 +15,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Added
 
+- **Connectors ready to add.** **Connectors** lists 34 services by category (development, projects and tasks, business and data, design and websites, research, finance), each through its official MCP server: Notion, Sentry, Vercel, Cloudflare, Jira and Confluence, Stripe, PostHog, Canva and more. **Connect** opens the sign-in in the browser right away, the access stays on this computer, and what's already added says so. A search finds a service by name or by what it does. Anything else goes in with **Add custom**, as before.
 - **What's new, after an update.** The first time Tucano opens on a new version, a window in the middle of the screen shows what came in, in the app's language, once. Skipping versions shows the ones skipped too, up to three, and **See the full notes** opens the release page. A new install doesn't show it.
 
 ### Changed
