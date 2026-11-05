@@ -11,6 +11,7 @@ import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
 import { geminiModels } from './gemini'
 import { cursorSignedIn, parseCursorModels } from './cursor'
+import { parseCopilotModels } from './copilot'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -267,17 +268,41 @@ export async function detectCursor(): Promise<{ status: EngineStatus; models: st
   }
 }
 
+// GitHub Copilot CLI. Its models are the ones `copilot help config` lists
+// (offline). The login lives in the system's credential store (or a token in
+// the environment), which no command checks without spending a request, so an
+// installed CLI is taken as signed in. A missing login then shows as the CLI's
+// own error on the first turn.
+export async function detectCopilot(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('copilot')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const [v, help] = await Promise.all([run(path, ['--version']), run(path, ['help', 'config'])])
+  const models = parseCopilotModels(help.stdout)
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: models.length > 0,
+      ...(models.length
+        ? { route: 'plan' as const, account: `GitHub Copilot · ${models.length} ${L('modelos', 'models')}` }
+        : { account: L('Sem modelos: atualize o Copilot CLI (copilot update)', 'No models: update Copilot CLI (copilot update)') })
+    },
+    models
+  }
+}
+
 export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
   // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
   const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
-  const [claude, codex, opencode, pi, gemini, cursor] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini(), detectCursor()])
+  const [claude, codex, opencode, pi, gemini, cursor, copilot] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini(), detectCursor(), detectCopilot()])
   // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
   const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
   return {
-    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status, cursor: cursor.status },
-    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, cursor: cursor.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status, cursor: cursor.status, copilot: copilot.status },
+    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, cursor: cursor.models, copilot: copilot.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
     codexCatalog
   }
 }

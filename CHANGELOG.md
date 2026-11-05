@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub Copilot CLI.** Agents can run on [GitHub Copilot CLI](https://github.com/features/copilot/cli), on your Copilot plan, with the same governance as the other harnesses: only Tucano's tools reach the model (plus page reading when the agent has the web), so Copilot's own shell, file tools and skills stay off. Each reply runs with a `COPILOT_HOME` of its own and hooks off, so your settings, MCP servers, plugins and hooks don't load; the login stays in your system's credential store. The model list is the one `copilot help config` gives, and a model that takes no reasoning effort runs without one. Spend comes from the usage file Copilot writes at the end of each reply, so the per-reply budget can't pause a Copilot reply midway. Images attached in the chat go along with the message.
+
 ### Fixed
 
 - **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in.
