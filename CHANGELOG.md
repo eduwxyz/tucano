@@ -11,6 +11,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Um agente só acorda outro quando precisa.** Quando um agente menciona outro na resposta, o router lê e chama só quem tem algo a fazer: um agradecimento ou um “combinado” não acordam ninguém. Na dúvida, chama.
 > - **O app abre fora do instalador mesmo com uma versão estranha.** O atualizador, que nem é usado ali, conferia a versão ao abrir e derrubava o app.
 > - **Agentes no Grok.** Um agente pode rodar no Grok CLI, com a assinatura do grok.com, como roda no Cursor CLI. Cada resposta usa uma pasta própria: os seus plugins, skills e hooks não carregam, e só as ferramentas do Tucano ficam à mão.
+> - **Um conector que falha diz por quê.** O passo da resposta mostra o motivo em vermelho, e o agente recebe o mesmo motivo pra explicar, em vez de um ✗ sem nada.
 
 ### Added
 
@@ -22,6 +23,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A connector tool that fails says why.** The reply's step showed a bare ✗ next to the tool's name, and for some failures the agent got an empty result too. The step now shows the reason under its label (a few lines, all of it on a click), and the agent gets it: a reason only in the structured content or an embedded resource, an MCP error's code and data, a timeout in seconds, a result that doesn't match the tool's schema, or a session that couldn't reconnect. An approved call and a routine's poll say it the same way. Thanks [@rjgdias](https://github.com/rjgdias)! ([#133](https://github.com/eduwxyz/tucano/pull/133))
 - **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again.
 - **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring.
 - **The server's page opens over plain HTTP on a private address,** such as Tailscale or a home network. It stayed blank: a browser outside a secure context has no `crypto.randomUUID`, which the app calls as it starts. The page now brings a small replacement for it, and one for the copy buttons.
