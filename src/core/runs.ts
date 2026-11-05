@@ -532,24 +532,11 @@ export class Runner {
     }
   }
 
-  // My messages that waited for the router: with one agent picked, they wait in its line like any other;
-  // otherwise they go in the conversation now and the router reads them again.
+  // My messages that waited for the router go in now, just before the replies, which read them along with the
+  // first: no second reply for them. With no one picked they still want an answer, so the router reads them.
   private handOn(conv: Conversation, members: Agent[], hold: Line, picked: Agent[]): void {
     const { db, emit } = this.deps
     if (!hold.waiting.length) return
-    const only = picked.length === 1 ? picked[0]! : undefined
-    if (only) {
-      // Its reply may not have started yet (queued behind its other work): the line is there for it when it does.
-      const key = `${only.id}:${conv.id}`
-      const line = this.working.get(key) ?? { n: 0, waiting: [], threadId: hold.threadId, mine: true }
-      this.working.set(key, line)
-      line.waiting.push(...hold.waiting)
-      for (const id of hold.waiting) {
-        const m = db.message(id)
-        if (m) emit({ type: 'message', message: { ...m, queued: only.id } })
-      }
-      return
-    }
     const at = Date.now()
     hold.waiting.forEach((id, i) => {
       const m = db.message(id)
@@ -557,7 +544,7 @@ export class Runner {
       db.setMessageAt(id, at + i)
       emit({ type: 'message', message: { ...m, at: at + i } })
     })
-    if (!this.paused) void this.routeAndRun(conv, members, hold.threadId)
+    if (!picked.length && !this.paused) void this.routeAndRun(conv, members, hold.threadId)
   }
 
   // Who of `members` should answer the conversation's last message (in `threadId`, when given): Jev or the

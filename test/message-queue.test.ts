@@ -280,7 +280,7 @@ describe('the queue in a channel', () => {
     expect(turns).toHaveLength(2)
   })
 
-  it('while the router still picks, my next message waits for its pick and goes in that line', async () => {
+  it('while the router still picks, my next message waits, and the one reply reads both', async () => {
     channel()
     const r = runner()
     await r.send('ch', 'revisa o PR 12')
@@ -291,15 +291,30 @@ describe('the queue in a channel', () => {
     expect(routerGates).toHaveLength(1)
     pick()
     await until(() => turns.length === 1)
-    const picked = (replies()[0]!.author as { id: string }).id
-    expect(events.findLast((m) => m.text === 'e olha os testes')?.queued).toBe(picked)
-    release()
-    await until(() => turns.length === 2)
-    expect(turns[1]!.prompt).toContain('olha os testes')
+    expect(events.findLast((m) => m.text === 'e olha os testes')?.queued).toBeUndefined()
+    expect(turns[0]!.prompt).toContain('revisa o PR 12')
+    expect(turns[0]!.prompt).toContain('e olha os testes')
     release()
     await r.idle()
-    expect(turns).toHaveLength(2)
+    expect(turns).toHaveLength(1) // one reply for the two, no follow-up
     expect(db.messages().filter((m) => m.author.kind === 'system')).toHaveLength(1)
+    expect(db.messages().map((m) => m.text)).toEqual(['revisa o PR 12', expect.any(String), 'e olha os testes', 'resposta 1'])
+  })
+
+  it('with no one picked for the first, the router reads what waited', async () => {
+    channel()
+    const r = runner()
+    await r.send('ch', 'bom dia')
+    await until(() => routerGates.length === 1)
+    await r.send('ch', 'revisa o PR 12')
+    pick() // "bom dia": no one needs to answer
+    await until(() => routerGates.length === 1)
+    expect(events.findLast((m) => m.text === 'revisa o PR 12')?.queued).toBeUndefined()
+    pick()
+    await until(() => turns.length === 1)
+    release()
+    await r.idle()
+    expect(db.messages().filter((m) => m.author.kind === 'system')).toHaveLength(2)
   })
 
   it('naming someone else is another request: it gets its own answer', async () => {
