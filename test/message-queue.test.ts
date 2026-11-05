@@ -60,7 +60,35 @@ beforeEach(async () => {
 afterEach(() => gateway.stop())
 
 describe('messages sent while the agent is still answering', () => {
-  it('wait in that reply’s thread, and go together in one follow-up', async () => {
+  it('wait where that reply is, and go together in one follow-up', async () => {
+    const r = runner()
+    await r.send('dm', 'conectei no gitlab')
+    await until(() => turns.length === 1)
+    await r.send('dm', 'ah, e olha as threads da Ingridy')
+    await r.send('dm', 'e as 4 do Remy')
+    expect(turns).toHaveLength(1) // no reply of their own
+
+    // In the conversation, where the DM answers by default, marked as waiting for Teo.
+    const [, second, third] = mine()
+    expect(second!.threadId).toBeUndefined()
+    expect(third!.threadId).toBeUndefined()
+    expect(events.find((m) => m.id === second!.id)?.queued).toBe('teo')
+
+    release()
+    await until(() => turns.length === 2)
+    expect(turns[1]!.prompt).toContain('mandou 2 mensagens')
+    expect(turns[1]!.prompt).toContain('olha as threads da Ingridy')
+    expect(turns[1]!.prompt).toContain('as 4 do Remy')
+    release()
+    await r.idle()
+    expect(turns).toHaveLength(2) // two replies for three messages, not three
+    expect(replies().map((m) => m.run?.status)).toEqual(['done', 'done'])
+    expect(replies().every((m) => m.threadId === undefined)).toBe(true)
+  })
+
+
+  it('with threads on, wait in that reply’s thread', async () => {
+    db.setThreads('dm', true)
     const r = runner()
     await r.send('dm', 'conectei no gitlab')
     await until(() => turns.length === 1)
