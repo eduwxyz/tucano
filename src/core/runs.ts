@@ -136,7 +136,8 @@ export interface RoutineEvent {
   body: string // the item itself, clipped
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'steered' | 'limit' | 'budget' | 'loop' | 'errors' | 'same_error' | 'stall' | 'computer' }
+// msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'steered' | 'limit' | 'budget' | 'loop' | 'errors' | 'same_error' | 'stall' | 'computer' }
 type TurnOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; delegation?: Delegation; round?: number; reportOf?: string; root?: string; threadId?: string; together?: string[] }
 // An agent answering in a conversation: replies running there, their thread, and my messages waiting for them.
 type Line = { n: number; threadId?: string; waiting: string[]; steered?: boolean }
@@ -945,7 +946,7 @@ export class Runner {
     // The wiki: for agents that may read it, once it has a page.
     const wiki = this.deps.gateway && this.deps.wiki && wikiAccess(agent) !== 'none' && this.deps.wiki.count() > 0 ? this.deps.wiki : undefined
 
-    const control: Control = { ctl: new AbortController() }
+    const control: Control = { ctl: new AbortController(), msg }
     this.controllers.set(msg.id, control)
     const halt = (reason: NonNullable<Control['reason']>): void => {
       if (control.reason) return
@@ -1878,10 +1879,12 @@ ${note}`,
         run: { ...base, ...again, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
       })
     } else if (result) {
+      // Approved or refused before the run ended: nothing is left to wait for.
+      const waiting = approval && db.approval(approval.id)?.state === 'pending'
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        run: { ...base, status: question ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       // A team's work isn't over while tasks are out or when a task is done: the manager's last reply is.
@@ -2089,10 +2092,15 @@ ${note}`,
     db.setApprovalOutcome(id, outcome)
     emit({ type: 'approval', approval: db.approval(id)! })
 
-    const msg = db.message(ap.messageId)
+    // Approved while the agent is still replying: add the step to the live reply, which saves it when it ends.
+    const live = this.controllers.get(ap.messageId)?.msg
+    const msg = live ?? db.message(ap.messageId)
     if (msg?.run) {
       const label = decision === 'approved' ? L('Aprovado', 'Approved') : decision === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
-      this.update(msg, {
+      if (live) {
+        live.run!.steps.push({ id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' })
+        this.update(live, {})
+      } else this.update(msg, {
         run: {
           ...msg.run,
           status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
