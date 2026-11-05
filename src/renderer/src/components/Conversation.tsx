@@ -58,6 +58,7 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal } from './Tuca'
 import { FoldToggle } from './Fold'
+import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -142,10 +143,18 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            <button className="topbar__name" title={conv.kind === 'channel' ? L('Configurações do canal', 'Channel settings') : L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
-              {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
-              <h1>{title}</h1>
-            </button>
+            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card (its settings: the gear on the right, or the card). */}
+            {dmAgent ? (
+              <AgentCardButton agentId={dmAgent.id} settingsOf={id} below className="topbar__name" title={L(`Perfil de ${dmAgent.name}`, `${dmAgent.name}’s profile`)}>
+                <AgentAvatar agent={dmAgent} size={22} />
+                <h1>{title}</h1>
+              </AgentCardButton>
+            ) : (
+              <button className="topbar__name" title={L('Configurações do canal', 'Channel settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+                <Icon name="hash" />
+                <h1>{title}</h1>
+              </button>
+            )}
             {dmAgent?.role && (
               <span className="tag topbar__role" title={dmAgent.role}>
                 {dmAgent.role}
@@ -157,9 +166,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
             {conv.kind === 'channel' && (
               <div className="stack" title={L('Agentes no canal', 'Agents in the channel')}>
                 {members.map((a) => (
-                  <button key={a.id} className="stack__item" onClick={() => navigate({ kind: 'agent', id: a.id })} title={a.name}>
+                  <AgentCardButton key={a.id} agentId={a.id} below className="stack__item" title={a.name}>
                     <AgentAvatar agent={a} size={24} />
-                  </button>
+                  </AgentCardButton>
                 ))}
                 <span className="stack__count">{members.length} {L(`agente${members.length === 1 ? '' : 's'}`, `agent${members.length === 1 ? '' : 's'}`)}</span>
                 <button className="icon-btn stack__add" title={L('Adicionar ou remover agentes', 'Add or remove agents')} onClick={() => openDialog({ kind: 'members', id })}>
@@ -171,8 +180,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
             </button>
             {dmAgent && (
-              <button className="btn btn--ghost" onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
-                {L('Ver perfil', 'See profile')}
+              <button className="icon-btn" title={L('Configurações da conversa', 'Conversation settings')} aria-label={L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+                <Icon name="gear" size={16} />
               </button>
             )}
           </div>
@@ -351,15 +360,22 @@ function MessageRow({ message, grouped, replies }: { message: Message; grouped: 
   return (
     <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`}>
       <div className="msg__gutter">
-        {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={me.initials} size={34} />)}
+        {!grouped &&
+          (agent ? (
+            <AgentCardButton agentId={agent.id} className="msg__face" tabIndex={-1} label={L(`Perfil de ${agent.name}`, `${agent.name}’s profile`)}>
+              <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} />
+            </AgentCardButton>
+          ) : (
+            <MeAvatar initials={me.initials} size={34} />
+          ))}
       </div>
       <div className="msg__body">
         {!grouped && (
           <div className="msg__head">
             {agent ? (
-              <button className="msg__author link" onClick={() => navigate({ kind: 'agent', id: agent.id })}>
+              <AgentCardButton agentId={agent.id} className="msg__author link">
                 {name}
-              </button>
+              </AgentCardButton>
             ) : (
               <span className="msg__author">{name}</span>
             )}
@@ -852,10 +868,10 @@ function Mention({ handle }: { handle: string }): ReactNode {
   const agent = useStore((s) => s.agents.find((a) => a.handle.toLowerCase() === handle.toLowerCase()))
   if (!agent) return <strong>@{handle}</strong>
   return (
-    <button className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name} onClick={() => navigate({ kind: 'agent', id: agent.id })}>
+    <AgentCardButton agentId={agent.id} className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name}>
       <AgentAvatar agent={agent} size={16} />
       <span>@{agent.handle}</span>
-    </button>
+    </AgentCardButton>
   )
 }
 const plainMarkdown = { pre: CodeBlock, a: (p: { href?: string; children?: ReactNode }) => <WikiLink href={p.href}>{p.children}</WikiLink>, span: MentionSpan }
