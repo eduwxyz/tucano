@@ -577,6 +577,23 @@ h3 {
   background: var(--ok);
   animation: fade var(--dur-enter) var(--ease-in) 1.2s reverse forwards;
 }
+/* An agent waits on me in that conversation: it arrives with a short pop, then stays still. */
+.waiting-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  animation: rise var(--dur-enter) var(--ease-spring) backwards;
+}
+.section__head .waiting-mark,
+.channel-group__head .waiting-mark {
+  margin-left: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting-mark {
+    animation: none;
+  }
+}
 .inline-form {
   display: flex;
   align-items: center;

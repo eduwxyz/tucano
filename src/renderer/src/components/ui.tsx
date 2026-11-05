@@ -24,6 +24,13 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   check: <path d="m5 12 5 5L20 7" />,
+  question: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.4 9.2a2.7 2.7 0 0 1 5.2 1c0 1.8-2.6 2.4-2.6 4" />
+      <path d="M12 17.3h.01" />
+    </>
+  ),
   copy: (
     <>
       <rect x="8" y="8" width="14" height="14" rx="2" />
