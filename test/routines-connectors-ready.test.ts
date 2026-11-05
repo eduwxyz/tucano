@@ -1,5 +1,6 @@
-// Issue #146: a routine missed while the app was closed fires on the first tick, which used
-// to be before the stdio connectors finished connecting. The agent then ran without its tools.
+// Issue #146: a routine missed while the app was closed (or due as it opens) fires on the first
+// tick, which used to be before the stdio connectors finished connecting. The agent then ran
+// without its tools.
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,10 +17,10 @@ describe('routines and connectors that are still connecting', () => {
   let log: string[]
   let warn: ReturnType<typeof vi.spyOn>
   let release: () => void
-  let connectorsReady: () => Promise<void>
+  let connectorsReady: () => Promise<void> | undefined
 
   const agent: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false }
-  const build = (extra: { connectorsReady?: () => Promise<void>; connectorsWaitMs?: number } = {}): Routines =>
+  const build = (extra: { connectorsReady?: () => Promise<void> | undefined; connectorsWaitMs?: number } = {}): Routines =>
     new Routines({
       db,
       runner: {
@@ -75,13 +76,26 @@ describe('routines and connectors that are still connecting', () => {
     expect(String(warn.mock.calls[0]![0])).toContain('[routines]')
   })
 
-  it('a routine that is on time is not held at all', async () => {
+  it('a routine due right as the app opens waits too, not only a late one', async () => {
     const routines = build({ connectorsReady })
     create(routines)
     clock = at(2026, 10, 19, 9, 0) + 10_000 // on time (under two minutes)
     routines.tick()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(log).not.toContain('ran')
+    release()
+    await routines.idle()
+    expect(log).toEqual(['waiting-for-connectors', 'connectors-ready', 'ran'])
+  })
+
+  it('with every connector connected, a routine runs at once', async () => {
+    const routines = build({ connectorsReady: () => undefined }) // none connecting
+    create(routines)
+    clock = at(2026, 10, 19, 9, 0) + 10_000
+    routines.tick()
     await routines.idle()
     expect(log).toEqual(['ran'])
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('a late routine with no connector manager wired runs at once, without a warning', async () => {

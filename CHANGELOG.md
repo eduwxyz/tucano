@@ -5,6 +5,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Uma rotina que roda ao abrir o app já encontra os conectores.** As perdidas enquanto o app estava fechado rodavam antes de os conectores terminarem de conectar, e o agente achava que eles estavam fora do ar. Agora a rotina espera até 1 minuto por eles.
 > - **Conversas longas não pesam mais enquanto um agente responde.** Cada palavra recebida redesenhava todas as mensagens; agora só a que mudou.
 > - **O navegador dos agentes abre páginas num servidor Linux que é um PC.** O Chrome esperava o chaveiro bloqueado da área de trabalho e nenhuma página carregava; no servidor ele agora usa o próprio armazenamento.
 > - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
@@ -31,6 +32,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A routine that runs as the app opens finds its connectors.** Routines missed while the app was closed, and any due right as it opens, ran on the first check, before the connectors had finished connecting: the agent was told its tools were offline and ran without them. A routine now waits for the connectors still connecting, up to a minute, then runs anyway (with a line in the log); with none connecting it starts at once, as before. Thanks [@jvitorcarvalho](https://github.com/jvitorcarvalho)! ([#152](https://github.com/eduwxyz/tucano/pull/152))
 - **A connector tool that fails says why.** The reply's step showed a bare ✗ next to the tool's name, and for some failures the agent got an empty result too. The step now shows the reason under its label (a few lines, all of it on a click), and the agent gets it: a reason only in the structured content or an embedded resource, an MCP error's code and data, a timeout in seconds, a result that doesn't match the tool's schema, or a session that couldn't reconnect. An approved call and a routine's poll say it the same way. Thanks [@rjgdias](https://github.com/rjgdias)! ([#133](https://github.com/eduwxyz/tucano/pull/133))
 - **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again.
 - **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring.

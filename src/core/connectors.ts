@@ -189,9 +189,11 @@ export class ConnectorManager {
     for (const c of this.deps.db.connectors()) void this.connect(c.id)
   }
 
-  // Settles when every connection attempt under way has finished, whether it worked or not.
-  async settled(): Promise<void> {
-    await Promise.allSettled([...this.live.values()].map((l) => l.connecting))
+  // Settles when every connection attempt under way has finished, whether it worked or not;
+  // undefined when none is, so whoever waits on it can go on at once.
+  settled(): Promise<void> | undefined {
+    const pending = [...this.live.values()].flatMap((l) => (l.connecting ? [l.connecting] : []))
+    return pending.length ? Promise.allSettled(pending).then(() => {}) : undefined
   }
 
   async closeAll(): Promise<void> {
