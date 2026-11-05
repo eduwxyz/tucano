@@ -6,7 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Changed
 
-- **Answers come in the conversation again, and threads are a choice of each conversation.** Since 0.2.10 every message opened a thread with its answers. Now a channel or a DM answers in the conversation, like a chat, unless you turn on **Threads** at its top (or in its menu in the sidebar): then each message opens a thread with its answers, as before. A thread you open by hand, with a message's reply button, works either way, and the threads you already have stay as they are. An answer in the conversation reads the conversation and the message that opened each thread; what was said inside a thread it looks up when it needs it, as it does from another thread.
+- **Answers come in the conversation again, and threads are a choice of each conversation.** Since 0.2.10 every message opened a thread with its answers. Now a channel or a DM answers in the conversation, like a chat, unless its settings say **In threads, one per message**: then each message opens a thread with its answers, as before. The settings open from the conversation's name at its top or from its menu in the sidebar, and hold a channel's name and topic too; a new channel asks where its agents answer. A thread you open by hand, with a message's reply button, works either way, and the threads you already have stay as they are. An answer in the conversation reads the conversation and the message that opened each thread; what was said inside a thread it looks up when it needs it, as it does from another thread.
 
 ### Fixed
 

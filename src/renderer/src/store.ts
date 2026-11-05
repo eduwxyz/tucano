@@ -99,7 +99,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -464,8 +464,8 @@ export function newAgentDraft(): Agent {
 export const newChannel = (name: string): Promise<string> => call('createChannel', { name })
 
 // A new channel opens with the window to pick who's in it.
-export async function createChannel(name: string): Promise<void> {
-  const id = await call('createChannel', { name })
+export async function createChannel(name: string, threads?: boolean): Promise<void> {
+  const id = await call('createChannel', { name, ...(threads ? { threads } : {}) })
   navigate({ kind: 'conversation', id })
   set((s) => ({ ...s, dialog: { kind: 'members', id } }))
 }
@@ -508,6 +508,8 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
+// Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
+export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
@@ -535,12 +537,6 @@ export const editSummary = (conversationId: string, text: string): void => void 
 export const summarizeNow = (conversationId: string): void => void fire(L('Não consegui resumir a conversa.', "I couldn't summarize the conversation."), 'summarizeNow', { conversationId })
 export const editThreadSummary = (rootId: string, text: string): void => void fire(L('Não consegui salvar o resumo.', "I couldn't save the summary."), 'editThreadSummary', { rootId, text })
 export const summarizeThreadNow = (rootId: string): void => void fire(L('Não consegui resumir a thread.', "I couldn't summarize the thread."), 'summarizeThreadNow', { rootId })
-// Where a conversation's answers go from now on: each in the thread of what it answers, or in the conversation.
-export const setThreads = (conversationId: string, on: boolean): void => {
-  void fire(L('Não consegui mudar onde as respostas vão.', "I couldn't change where the answers go."), 'setThreads', { conversationId, on }).then(() =>
-    toast(on ? L('As respostas agora vão em threads.', 'Answers now go in threads.') : L('As respostas agora vão na conversa.', 'Answers now go in the conversation.'))
-  )
-}
 
 // Saves one field of a stored agent without touching the rest of its page.
 export function patchAgent(agentId: string, patch: Partial<Agent>): void {

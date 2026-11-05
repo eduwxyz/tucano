@@ -23,7 +23,6 @@ import {
   openPanel,
   openThread,
   seeThread,
-  setThreads,
   openTuca,
   removeRoutine,
   retryRun,
@@ -143,8 +142,10 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
-            <h1>{title}</h1>
+            <button className="topbar__name" title={conv.kind === 'channel' ? L('Configurações do canal', 'Channel settings') : L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+              {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
+              <h1>{title}</h1>
+            </button>
             {dmAgent?.role && (
               <span className="tag topbar__role" title={dmAgent.role}>
                 {dmAgent.role}
@@ -166,18 +167,6 @@ export function ConversationView({ id }: { id: string }): ReactNode {
                 </button>
               </div>
             )}
-            <button
-              className={`btn btn--ghost ${conv.threads ? 'is-active' : ''}`}
-              aria-pressed={!!conv.threads}
-              title={
-                conv.threads
-                  ? L('As respostas vão em threads, uma por mensagem. Clique pra elas virem na conversa.', 'Answers go in threads, one per message. Click to have them in the conversation.')
-                  : L('As respostas vêm na conversa. Clique pra cada mensagem abrir uma thread com as respostas dela.', 'Answers come in the conversation. Click to have each message open a thread with its answers.')
-              }
-              onClick={() => setThreads(conv.id, !conv.threads)}
-            >
-              <Icon name="thread" size={14} /> {L('Threads', 'Threads')}
-            </button>
             <button className={`btn btn--ghost ${showSummary ? 'is-active' : ''}`} title={L('O que esta conversa já cobriu', 'What this conversation has covered')} onClick={() => setShowSummary(!showSummary)}>
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
             </button>
