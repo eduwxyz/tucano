@@ -347,10 +347,10 @@ describe('ask_user through the gateway', () => {
     r.answer(asked.id, 1, { text: 'sexta' })
     await r.submitAnswers(asked.id)
     await r.idle()
-    expect(mine().at(-1)?.text).toBe('Paginação no menu? → Scroll infinito\nPra quando? → sexta')
+    expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
     expect(db.message(asked.id)?.run?.status).toBe('done')
     expect(db.message(asked.id)?.run?.answeredInText).toBeUndefined()
-    expect(claude.turns[1]?.prompt).toContain('Paginação no menu? → Scroll infinito\nPra quando? → sexta')
+    expect(claude.turns[1]?.prompt).toContain('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
   })
 
   it('sends the partial answers along with a free reply', async () => {
@@ -358,7 +358,7 @@ describe('ask_user through the gateway', () => {
     r.answer(asked.id, 0, { chosen: [0] })
     await r.send('c1', 'o resto eu explico: depois do deploy', [], asked.threadId)
     await r.idle()
-    expect(mine().at(-1)?.text).toBe('Paginação no menu? → Busca remota\n\no resto eu explico: depois do deploy')
+    expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Busca remota\n\no resto eu explico: depois do deploy')
     expect(db.message(asked.id)?.run).toMatchObject({ status: 'done', answeredInText: true })
   })
 

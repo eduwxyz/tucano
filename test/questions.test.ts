@@ -91,7 +91,7 @@ describe('answers', () => {
     expect(answerLabel(deadline, { skipped: true })).toBe('(pulou)')
   })
   it('formats one line per answered decision and leaves the unanswered out', () => {
-    expect(formatAnswers([pagination, parts, deadline], [{ chosen: [0] }, null, { skipped: true }])).toBe('Paginação no menu? → Busca remota\nPra quando? → (pulou)')
+    expect(formatAnswers([pagination, parts, deadline], [{ chosen: [0] }, null, { skipped: true }])).toBe('- Paginação no menu? → Busca remota\n- Pra quando? → (pulou)')
     expect(formatAnswers([pagination], undefined)).toBe('')
   })
 })

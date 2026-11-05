@@ -58,6 +58,8 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal } from './Tuca'
 import { FoldToggle } from './Fold'
+import { AnswersSummary, DecisionsCard } from './Decisions'
+import { questionsOf } from '../../../shared/questions'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -392,7 +394,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ))}
           </div>
         )}
-        {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
+        <AnswersSummary message={message} />
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.agentDraft && <AgentProposal message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
@@ -831,16 +833,6 @@ function RoutineChip({ id }: { id: string }): ReactNode {
       <button className="link" onClick={() => removeRoutine(id)}>
         {L('Desfazer', 'Undo')}
       </button>
-    </div>
-  )
-}
-
-function QuestionCard({ question, answered }: { question: string; answered: boolean }): ReactNode {
-  return (
-    <div className={`question ${answered ? 'is-answered' : ''}`}>
-      <span className="question__label">{answered ? L('Perguntou', 'Asked') : L('Pergunta pra você', 'A question for you')}</span>
-      <p>{question}</p>
-      {!answered && <span className="hint">{L('Sua próxima mensagem aqui é a resposta.', 'Your next message here is the answer.')}</span>}
     </div>
   )
 }
@@ -1455,6 +1447,9 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     const q = s.messages.findLast((m) => here(m) && m.run?.status === 'waiting_input')
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
   })
+  // The decisions waiting here take the field's place, until I close them to answer in writing.
+  const asking = useStore((s) => s.messages.findLast((m) => here(m) && m.run?.status === 'waiting_input' && m.author.kind === 'agent'))
+  const deciding = useStore((s) => !!asking && questionsOf(asking.run).length > 0 && !s.dismissedQuestions.includes(asking.id)) ? asking : undefined
 
   // What's typed but not sent, per conversation, so leaving a channel and coming
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
@@ -1664,7 +1659,8 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           )}
         </div>
       )}
-      <div className="composer">
+      {deciding && <DecisionsCard key={deciding.id} message={deciding} />}
+      <div className="composer" hidden={!!deciding}>
         {images.length > 0 && (
           <div className="composer__images">
             {images.map((img, i) => (

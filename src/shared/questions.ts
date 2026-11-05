@@ -83,11 +83,12 @@ export function answerLabel(question: Question, answer: Answer): string {
   return chosen.join(', ')
 }
 
+// A Markdown list: one line each, in my message bubble as well as for the agent.
 export function formatAnswers(questions: Question[], answers: (Answer | null)[] | undefined): string {
   return questions
     .map((q, i) => {
       const answer = answers?.[i]
-      return answer && isAnswered(answer) ? `${q.question} → ${answerLabel(q, answer)}` : ''
+      return answer && isAnswered(answer) ? `- ${q.question} → ${answerLabel(q, answer)}` : ''
     })
     .filter(Boolean)
     .join('\n')
