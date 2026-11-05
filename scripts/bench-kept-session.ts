@@ -33,7 +33,7 @@ const line = (i: number): string => `Mensagem ${i}: a tabela vendas_diarias teve
 
 type Row = { way: string; reply: number; firstMs: number; totalMs: number; input: number; cacheRead: number }
 
-async function measure(way: string, sessions: boolean, between?: (engine: Engine) => void): Promise<Row[]> {
+async function measure(way: string, sessions: boolean, after?: (engine: Engine) => void): Promise<Row[]> {
   const db = new Db(join(mkdtempSync(join(tmpdir(), 'bench-db-')), 'bench.db'))
   db.saveAgent(lia)
   db.createConversation({ id: 'dm', kind: 'dm', name: 'lia', members: ['lia'] })
@@ -52,7 +52,6 @@ async function measure(way: string, sessions: boolean, between?: (engine: Engine
 
   const rows: Row[] = []
   for (let n = 0; n <= replies; n++) {
-    if (n > 0) between?.(real)
     firstAt = 0
     const sent = Date.now()
     await runner.send('dm', n === 0 ? 'Oi Lia, me resume o que rolou com o job hoje.' : `E agora, mensagem nova ${n}: o job das ${10 + n}h também passou?`)
@@ -61,6 +60,8 @@ async function measure(way: string, sessions: boolean, between?: (engine: Engine
     const r = reply.run?.receipt
     if (reply.run?.status !== 'done' || !r) throw new Error(`${way}: reply ${n} ${reply.run?.status}: ${reply.run?.error ?? ''}`)
     rows.push({ way, reply: n, firstMs: firstAt - sent, totalMs: r.ms, input: r.inputTokens, cacheRead: r.cacheReadTokens })
+    after?.(real)
+    await new Promise((res) => setTimeout(res, 2000)) // like a person reading; and a process closed has time to go
   }
   real.dispose?.()
   await gateway.stop()
@@ -69,7 +70,7 @@ async function measure(way: string, sessions: boolean, between?: (engine: Engine
 
 const all = [
   ...(await measure('today', false)),
-  ...(await measure('resumed', true, (e) => e.dispose?.())), // each next reply finds no process open
+  ...(await measure('resumed', true, (e) => e.dispose?.())), // the process closes after each reply, as after 5 min idle
   ...(await measure('kept open', true))
 ]
 const median = (xs: number[]): number => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!
