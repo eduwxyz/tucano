@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { claudeEngine } from '../src/core/engines/claude'
+import { claudeEngine, claudeEnv } from '../src/core/engines/claude'
 import { anthropicModel, modelInfo, thinkingOff } from '../src/shared/types'
 
 describe('thinking on a model behind a gateway that isn’t Anthropic’s', () => {
@@ -18,6 +18,12 @@ describe('thinking on a model behind a gateway that isn’t Anthropic’s', () =
     expect(thinkingOff('deepseek-chat', 'high')).toBe(false)
     expect(thinkingOff('deepseek-reasoner', 'xhigh')).toBe(false)
     expect(thinkingOff('sonnet', 'low')).toBe(false)
+  })
+
+  it('goes in the environment Claude Code runs with, under the gateway’s own settings', () => {
+    expect(claudeEnv({ env: {} }, undefined, true)['CLAUDE_CODE_DISABLE_THINKING']).toBe('1')
+    expect(claudeEnv({ env: {} }, undefined, false)['CLAUDE_CODE_DISABLE_THINKING']).toBe(process.env['CLAUDE_CODE_DISABLE_THINKING'])
+    expect(claudeEnv({ env: { CLAUDE_CODE_DISABLE_THINKING: '0' } }, undefined, true)['CLAUDE_CODE_DISABLE_THINKING']).toBe('0')
   })
 
   it.skipIf(process.platform === 'win32')('the CLI gets CLAUDE_CODE_DISABLE_THINKING only then, and the person’s own setting wins', async () => {
