@@ -11,13 +11,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
 > - **Um agente só acorda outro quando precisa.** Quando um agente menciona outro na resposta, o router lê e chama só quem tem algo a fazer: um agradecimento ou um “combinado” não acordam ninguém. Na dúvida, chama.
 
-### Changed
-
-- **An agent wakes another only when it needs to.** When an agent's reply mentions other agents, the router reads it first and hands the turn only to those asked to do something: a request, a question, a task, a decision. A thank-you, an "okay" or a credit wakes no one, and the decision shows as a step on the reply. In doubt, or if the router fails, everyone mentioned is called, as before; a mention in your own message still goes straight to the agent. Thanks [@eialanjones](https://github.com/eialanjones)! ([#139](https://github.com/eduwxyz/tucano/pull/139))
-
 ### Added
 
 - **Decisions, one at a time.** When an agent needs you, its proposal comes in the message and its decisions take the place of the message box: a single choice, several choices or a short text, with options to click or pick by number, "Something else" and "Skip". With more than one, you check every answer before sending, and the agent's message keeps a summary of what you chose. A channel or DM where an agent waits on you, for an answer or an approval, shows a speech bubble with a "?" in the sidebar, and says who. Agents are told to keep each question short and to put the context in their reply; a question longer than 200 characters goes back to them. On Telegram the decisions arrive as text, and a reply still answers.
+
+### Changed
+
+- **An agent wakes another only when it needs to.** When an agent's reply mentions other agents, the router reads it first and hands the turn only to those asked to do something: a request, a question, a task, a decision. A thank-you, an "okay" or a credit wakes no one, and the decision shows as a step on the reply. In doubt, or if the router fails, everyone mentioned is called, as before; a mention in your own message still goes straight to the agent. Thanks [@eialanjones](https://github.com/eialanjones)! ([#139](https://github.com/eduwxyz/tucano/pull/139))
 
 ### Fixed
 
