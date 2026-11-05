@@ -150,6 +150,13 @@ ${err.message}`
     setTimeout(() => this.alive && this.child.kill('SIGKILL'), 5_000).unref()
   }
 
+  // No more turns: it exits on its own once stdin closes (killed if it doesn't).
+  end(): void {
+    if (!this.alive) return
+    this.child.stdin!.end()
+    setTimeout(() => this.kill(), 10_000).unref()
+  }
+
   // The app is quitting: nothing async, the process may be gone before taskkill would run.
   killNow(): void {
     if (this.alive) this.child.kill()

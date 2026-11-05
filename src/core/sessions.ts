@@ -105,6 +105,12 @@ export class Sessions {
     return this.entries.has(key)
   }
 
+  // The session a reply here would go on from, if it's still good for that (as far as time goes).
+  idOf(key: string): string | undefined {
+    const e = this.entries.get(key)
+    return e && this.now() - e.usedAt <= (this.opts.ttlMs ?? SESSION_TTL_MS) ? e.id : undefined
+  }
+
   // What's new since the session's last reply, or undefined when it can't go on.
   private since(e: Entry, input: { config: string; shown: Shown[] }): string[] | undefined {
     if (e.config !== input.config) return undefined

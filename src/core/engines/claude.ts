@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, rmdirSync, rmSync } from 'node:f
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { lastLines, LiveCli, num, parseJson, runCli, type Parser } from './cli'
-import type { Engine, EngineEvent, Turn } from './types'
+import type { Engine, EngineEvent, Turn, TurnShape } from './types'
 import { L } from '../../shared/lang'
 
 export const GATEWAY_NAME = 'tucano'
@@ -188,6 +188,14 @@ const configDirOf = (account?: string): string => account || process.env['CLAUDE
 // from disk in a new process instead.
 export const KEEP_IDLE_MS = 5 * 60_000
 export const MAX_IDLE = 2
+// A process started ahead of a turn with no session (the router's) waits this long, and only this
+// many wait: it's started while the person types, so the message comes soon or not at all.
+export const SPARE_MS = 2 * 60_000
+export const MAX_SPARES = 2
+
+// The flags of a turn with no session, reading its message as JSON: a process started ahead of
+// time has to read it that way, so the turn that uses it does too.
+const oneShot = (t: TurnShape, apiKeyHelper?: string): string[] => claudeArgs({ ...t, blocks: ['.'] }, apiKeyHelper)
 
 interface Kept {
   cli: LiveCli
@@ -199,6 +207,8 @@ interface Kept {
 export function claudeEngine(bin: () => string | undefined, provider: () => Promise<Provider> = async () => userProvider()): Engine {
   const kept = new Map<string, Kept>() // by session id
   const files = new Map<string, string>() // session id → its file
+  const shapes = new Map<string, TurnShape>() // session id → the settings of its last turn, to start it again
+  const spares = new Map<string, { cli: LiveCli; timer: NodeJS.Timeout; at: number }>() // by flags and provider
 
   const close = (id: string): void => {
     const k = kept.get(id)
@@ -211,6 +221,24 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
   const trim = (): void => {
     const idle = [...kept].filter(([, k]) => !k.cli.busy).sort((a, b) => a[1].usedAt - b[1].usedAt)
     for (const [id] of idle.slice(0, Math.max(0, idle.length - MAX_IDLE))) close(id)
+  }
+  // An open process waits for the next turn, for a while.
+  const park = (id: string, k: Kept): void => {
+    if (k.timer) clearTimeout(k.timer)
+    k.usedAt = Date.now()
+    k.timer = setTimeout(() => kept.get(id) === k && close(id), KEEP_IDLE_MS)
+    k.timer.unref()
+    trim()
+  }
+  // The same flags and provider as an open process: then it can take this turn.
+  const keyOf = (path: string, t: TurnShape, args: string[], p: Provider): string => JSON.stringify([path, t.cwd, args, p.env, t.account ?? ''])
+  const keptKey = (path: string, t: TurnShape, id: string, p: Provider): string => keyOf(path, t, claudeArgs({ ...t, session: { id, resume: true } }, p.apiKeyHelper), p)
+  const dropSpare = (key: string): void => {
+    const s = spares.get(key)
+    if (!s) return
+    spares.delete(key)
+    clearTimeout(s.timer)
+    s.cli.end()
   }
 
   return {
@@ -227,13 +255,27 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       const env = claudeEnv(p, turn.account)
       const session = turn.session
       if (!session) {
+        // A process started for it ahead of time takes the turn, then goes.
+        const key = keyOf(path, turn, oneShot(turn, p.apiKeyHelper), p)
+        const spare = spares.get(key)
+        if (spare?.cli.alive) {
+          spares.delete(key)
+          clearTimeout(spare.timer)
+          try {
+            yield* spare.cli.turn(claudeInput({ ...turn, blocks: turn.blocks?.length ? turn.blocks : [turn.prompt] }), claudeParser(), turn.signal)
+          } finally {
+            spare.cli.end()
+          }
+          return
+        }
         yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env })
         return
       }
 
+      const { prompt: _p, blocks: _b, images: _i, signal: _s, session: _n, ...shape } = turn
+      shapes.set(session.id, shape)
       files.set(session.id, join(claudeProjectDir(configDirOf(turn.account), turn.cwd), `${session.id}.jsonl`))
-      // The same flags and provider as the open process: then it can take this turn.
-      const key = JSON.stringify([path, turn.cwd, claudeArgs({ ...turn, session: { id: session.id, resume: true } }, p.apiKeyHelper), p.env, turn.account ?? ''])
+      const key = keptKey(path, turn, session.id, p)
       let k = kept.get(session.id)
       if (k && (k.key !== key || !k.cli.alive || k.cli.busy || !session.resume)) {
         close(session.id)
@@ -254,17 +296,53 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       } finally {
         // Kept for the next reply only after a clean one; anything else and it goes.
         if (kept.get(session.id) === current) {
-          if (ended && session.keep && current.cli.alive && !turn.signal.aborted) {
-            current.usedAt = Date.now()
-            current.timer = setTimeout(() => kept.get(session.id) === current && close(session.id), KEEP_IDLE_MS)
-            current.timer.unref()
-            trim()
-          } else close(session.id)
+          if (ended && session.keep && current.cli.alive && !turn.signal.aborted) park(session.id, current)
+          else close(session.id)
         }
       }
     },
+    warm(turn) {
+      const path = bin()
+      if (!path) return
+      void provider().then((p) => {
+        const args = oneShot(turn, p.apiKeyHelper)
+        const key = keyOf(path, turn, args, p)
+        const had = spares.get(key)
+        if (had?.cli.alive) {
+          // Still waiting: it waits a while longer.
+          clearTimeout(had.timer)
+          had.timer = setTimeout(() => spares.get(key) === had && dropSpare(key), SPARE_MS)
+          had.timer.unref()
+          return
+        }
+        if (had) dropSpare(key)
+        const cli = new LiveCli({ bin: path, args, cwd: turn.cwd, env: claudeEnv(p, turn.account) })
+        const spare = { cli, at: Date.now(), timer: setTimeout(() => spares.get(key)?.cli === cli && dropSpare(key), SPARE_MS) }
+        spare.timer.unref()
+        spares.set(key, spare)
+        const oldest = [...spares].sort((a, b) => a[1].at - b[1].at)
+        for (const [k] of oldest.slice(0, Math.max(0, oldest.length - MAX_SPARES))) dropSpare(k)
+      })
+    },
+    rewarm(id) {
+      const path = bin()
+      const open = kept.get(id)
+      if (open?.cli.alive) {
+        if (!open.cli.busy) park(id, open) // open already: it waits a while longer
+        return
+      }
+      const shape = shapes.get(id)
+      if (!path || !shape) return
+      void provider().then((p) => {
+        if (kept.has(id) || !shapes.has(id)) return // a turn or a release got there first
+        const k: Kept = { cli: new LiveCli({ bin: path, args: claudeArgs({ ...shape, session: { id, resume: true } }, p.apiKeyHelper), cwd: shape.cwd, env: claudeEnv(p, shape.account) }), key: keptKey(path, shape, id, p), usedAt: Date.now() }
+        kept.set(id, k)
+        park(id, k)
+      })
+    },
     release(id) {
       close(id)
+      shapes.delete(id)
       const file = files.get(id)
       files.delete(id)
       if (file) rmSync(file, { force: true })
@@ -290,7 +368,9 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
     },
     dispose() {
       for (const [, k] of kept) k.cli.killNow()
+      for (const [, s] of spares) s.cli.killNow()
       kept.clear()
+      spares.clear()
     }
   }
 }
