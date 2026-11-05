@@ -370,7 +370,7 @@ function QueuePanel({ items }: { items: Message[] }): ReactNode {
                 }}
               />
             ) : (
-              <span className="queue__text">{m.text}</span>
+              <span className="queue__text">{m.text || L('(imagem)', '(image)')}</span>
             )}
             <span className="queue__actions">
               {m.queued !== ROUTING && (

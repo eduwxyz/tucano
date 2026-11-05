@@ -466,24 +466,11 @@ export class Runner {
     }
   }
 
-  // My messages that waited for the router: with one agent picked, they wait in its line like any other;
-  // otherwise they go in the conversation now and the router reads them again.
+  // My messages that waited for the router go in now, just before the replies, which read them along with the
+  // first: no second reply for them. With no one picked they still want an answer, so the router reads them.
   private handOn(conv: Conversation, members: Agent[], hold: Line, picked: Agent[]): void {
     const { db, emit } = this.deps
     if (!hold.waiting.length) return
-    const only = picked.length === 1 ? picked[0]! : undefined
-    if (only) {
-      // Its reply may not have started yet (others ahead of it): the line is there for it when it does.
-      const key = `${only.id}:${conv.id}`
-      const line = this.working.get(key) ?? { n: 0, waiting: [], threadId: hold.threadId, mine: true }
-      this.working.set(key, line)
-      line.waiting.push(...hold.waiting)
-      for (const id of hold.waiting) {
-        const m = db.message(id)
-        if (m) emit({ type: 'message', message: { ...m, queued: only.id } })
-      }
-      return
-    }
     const at = Date.now()
     hold.waiting.forEach((id, i) => {
       const m = db.message(id)
@@ -491,7 +478,7 @@ export class Runner {
       db.setMessageAt(id, at + i)
       emit({ type: 'message', message: { ...m, at: at + i } })
     })
-    if (!this.paused) void this.routeAndRun(conv, members, hold.threadId)
+    if (!picked.length && !this.paused) void this.routeAndRun(conv, members, hold.threadId)
   }
 
   private routed(conv: Conversation, note: Message, agents: Agent[], reason: string): void {
@@ -577,6 +564,17 @@ export class Runner {
       c.reason = 'steered'
       c.ctl.abort()
     }
+  }
+
+  // What waits over the field instead of in the conversation, for when the app reads everything again.
+  withQueue(messages: Message[]): Message[] {
+    const queued = new Map<string, string>()
+    for (const [key, w] of this.working) for (const id of w.waiting) queued.set(id, key.slice(0, key.lastIndexOf(':')))
+    for (const w of this.holds.values()) for (const id of w.waiting) queued.set(id, ROUTING)
+    return messages.map((m) => {
+      const q = queued.get(m.id)
+      return q ? { ...m, queued: q } : m
+    })
   }
 
   // My message still in line, changed before the agent reads it.

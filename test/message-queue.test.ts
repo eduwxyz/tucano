@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -12,6 +12,7 @@ import { routerSystem } from '../src/core/router'
 import { ROUTING } from '../src/shared/types'
 
 const ready = { installed: true, loggedIn: true }
+const DATA = mkdtempSync(join(tmpdir(), 'mq-data-'))
 
 let db: Db
 let gateway: Gateway
@@ -52,7 +53,7 @@ function runner(): Runner {
   routerGates = []
   gates = []
   const engines: Record<EngineId, Engine> = { claude: slow, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
-  return new Runner({ db, engines, settings: async () => settings, emit: (e) => (e.type === 'message' ? events.push(e.message) : e.type === 'message_removed' ? removed.push(e.id) : 0), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
+  return new Runner({ dataDir: DATA, db, engines, settings: async () => settings, emit: (e) => (e.type === 'message' ? events.push(e.message) : e.type === 'message_removed' ? removed.push(e.id) : 0), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
 }
 
 const until = async (ok: () => boolean): Promise<void> => {
@@ -239,7 +240,7 @@ describe('the queue in a channel', () => {
     expect(turns).toHaveLength(2)
   })
 
-  it('while the router still picks, my next message waits for its pick and goes in that line', async () => {
+  it('while the router still picks, my next message waits, and the one reply reads both', async () => {
     channel()
     const r = runner()
     await r.send('ch', 'revisa o PR 12')
@@ -250,15 +251,30 @@ describe('the queue in a channel', () => {
     expect(routerGates).toHaveLength(1)
     pick()
     await until(() => turns.length === 1)
-    const picked = (replies()[0]!.author as { id: string }).id
-    expect(events.findLast((m) => m.text === 'e olha os testes')?.queued).toBe(picked)
-    release()
-    await until(() => turns.length === 2)
-    expect(turns[1]!.prompt).toContain('olha os testes')
+    expect(events.findLast((m) => m.text === 'e olha os testes')?.queued).toBeUndefined()
+    expect(turns[0]!.prompt).toContain('revisa o PR 12')
+    expect(turns[0]!.prompt).toContain('e olha os testes')
     release()
     await r.idle()
-    expect(turns).toHaveLength(2)
+    expect(turns).toHaveLength(1) // one reply for the two, no follow-up
     expect(db.messages().filter((m) => m.author.kind === 'system')).toHaveLength(1)
+    expect(db.messages().map((m) => m.text)).toEqual(['revisa o PR 12', expect.any(String), 'e olha os testes', 'resposta 1'])
+  })
+
+  it('with no one picked for the first, the router reads what waited', async () => {
+    channel()
+    const r = runner()
+    await r.send('ch', 'bom dia')
+    await until(() => routerGates.length === 1)
+    await r.send('ch', 'revisa o PR 12')
+    pick() // "bom dia": no one needs to answer
+    await until(() => routerGates.length === 1)
+    expect(events.findLast((m) => m.text === 'revisa o PR 12')?.queued).toBeUndefined()
+    pick()
+    await until(() => turns.length === 1)
+    release()
+    await r.idle()
+    expect(db.messages().filter((m) => m.author.kind === 'system')).toHaveLength(2)
   })
 
   it('naming someone else is another request: it gets its own answer', async () => {
@@ -271,5 +287,63 @@ describe('the queue in a channel', () => {
     expect(events.findLast((m) => m.text.includes('olha os números'))?.queued).toBeUndefined()
     release()
     await r.idle()
+  })
+})
+
+describe('around the queue', () => {
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64').toString('base64')
+  const image = { name: 'print.png', mime: 'image/png', data: PNG }
+
+  it('a queued message keeps its image; taken back, the image goes with it', async () => {
+    const r = runner()
+    await r.send('dm', 'revisa o PR 12')
+    await until(() => turns.length === 1)
+    await r.send('dm', 'olha este print', [image])
+    const kept = mine()[1]!
+    const [art] = db.artifactsOf(kept.id)
+    expect(art?.name).toBe('print.png')
+    expect(existsSync(join(DATA, 'artifacts', art!.id))).toBe(true)
+    r.cancelQueued(kept.id)
+    expect(db.artifactsOf(kept.id)).toEqual([])
+    expect(existsSync(join(DATA, 'artifacts', art!.id))).toBe(false)
+    release()
+    await r.idle()
+  })
+
+  it('a reply stopped at an approval or a question is over: my message is not queued behind it', async () => {
+    const r = runner()
+    for (const status of ['waiting_approval', 'waiting_input'] as const) {
+      db.saveMessage({ id: status, conversationId: 'dm', author: { kind: 'agent', id: 'teo' }, text: '', at: Date.now(), run: { status, steps: [], ...(status === 'waiting_input' ? { question: 'qual?' } : {}) } })
+      const before = turns.length
+      await r.send('dm', `resposta com ${status}`)
+      await until(() => turns.length === before + 1)
+      expect(events.findLast((m) => m.text === `resposta com ${status}`)?.queued).toBeUndefined()
+      release()
+      await r.idle()
+    }
+  })
+
+  it('paused: nothing queues, and it says no one answers', async () => {
+    const r = runner()
+    r.setPaused(true)
+    await r.send('dm', 'teste')
+    expect(events.some((m) => m.queued)).toBe(false)
+    expect(turns).toHaveLength(0)
+    expect(db.messages().at(-1)?.text).toContain('pausados')
+  })
+
+  it('reading everything again (a window reload) keeps what waits out of the conversation', async () => {
+    const r = runner()
+    await r.send('dm', 'revisa o PR 12')
+    await until(() => turns.length === 1)
+    await r.send('dm', 'e olha os testes')
+    const seen = r.withQueue(db.messages())
+    expect(seen.find((m) => m.text === 'e olha os testes')?.queued).toBe('teo')
+    expect(seen.find((m) => m.text === 'revisa o PR 12')?.queued).toBeUndefined()
+    release()
+    await until(() => turns.length === 2)
+    release()
+    await r.idle()
+    expect(r.withQueue(db.messages()).some((m) => m.queued)).toBe(false)
   })
 })
