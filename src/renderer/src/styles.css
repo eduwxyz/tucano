@@ -739,6 +739,24 @@ h3 {
   align-items: center;
   gap: 8px;
 }
+/* The conversation's name opens its settings. */
+.topbar__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.topbar__name:hover {
+  background: var(--hover);
+}
 .topbar__topic {
   color: var(--text-3);
   font-size: 13px;
@@ -4797,6 +4815,42 @@ table.csv th {
 .modal__lead {
   margin: 0 0 12px;
 }
+/* What's new after an update: wider, and the notes scroll while the buttons stay. */
+.modal__card.whats-new {
+  width: min(560px, calc(100vw - 32px));
+}
+.whats-new__body {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.whats-new__body p {
+  margin: 0;
+}
+.whats-new__release h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.whats-new__release h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.whats-new__release ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 5px;
+}
+.whats-new__thanks {
+  margin-top: 10px !important;
+}
 .modal__foot {
   display: flex;
   align-items: center;
@@ -7866,11 +7920,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-pop__close { position: absolute; top: 8px; right: 8px; }
 .voice-pop__hide { justify-self: start; font-size: 12px; color: var(--text-3); }
 .voice-setup { display: grid; gap: 10px; justify-items: start; }
-.voice-setup__choices { display: grid; gap: 6px; width: 100%; }
-.voice-choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
-.voice-choice small { color: var(--text-2); font-size: 12px; }
-.voice-choice:hover { border-color: var(--border-strong); }
-.voice-choice.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.voice-setup__choices, .choices { display: grid; gap: 6px; width: 100%; }
+.voice-choice, .choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
+.voice-choice small, .choice small { color: var(--text-2); font-size: 12px; }
+.voice-choice:hover, .choice:hover { border-color: var(--border-strong); }
+.voice-choice.is-on, .choice.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
 .voice-setup__bar { width: 100%; height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; }
 .voice-setup__bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.25s; }
 .voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
@@ -7887,3 +7941,142 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
 .voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
 
+
+/* ---------- the connector store ---------- */
+.catalog {
+  display: grid;
+  gap: 18px;
+}
+.catalog__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 100%);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text-3);
+}
+.catalog__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 7px 0;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.catalog__group h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.catalog__group h3 .muted {
+  font-weight: 400;
+}
+.catalog__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 8px;
+}
+.catalog__card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.catalog__logo {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.catalog__logo b {
+  font-weight: 700;
+  line-height: 1;
+}
+.catalog__text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.catalog__text strong {
+  font-size: 13.5px;
+}
+.catalog__about {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.catalog__error {
+  color: var(--danger);
+}
+.catalog__card.is-mine {
+  cursor: pointer;
+}
+.catalog__card.is-mine:hover {
+  border-color: var(--border-strong);
+}
+.catalog__card.is-mine:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.catalog__logo--own {
+  width: 36px;
+  height: 36px;
+  background: var(--bg);
+  color: var(--text-2);
+}
+.catalog__state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.catalog__more {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The state's color, from the tag tones the rest of the app uses. */
+.catalog__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.catalog__dot.tag--ok {
+  background: var(--ok);
+}
+.catalog__dot.tag--warn {
+  background: var(--warn, #d97706);
+}
+.catalog__dot.tag--danger {
+  background: var(--danger);
+}
+/* A connector's details, over the page: the tools scroll, the head stays. */
+.modal__card.connector-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+.connector-modal__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+.connector-modal__meta {
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.catalog__card .btn {
+  flex: none;
+}

@@ -75,6 +75,8 @@ setLang(langOf(process.env['TUCANO_LOCALE']))
 if (db.created) {
   if (process.env['TUCANO_SEED'] === '1' || (fake && process.env['TUCANO_SEED'] !== '0')) seed(db)
   else db.setSettings({ onboarding: { done: false } })
+  // A new install has nothing new to show: the news start with the next update.
+  if (process.env['TUCANO_VERSION']) db.setSettings({ seenVersion: process.env['TUCANO_VERSION'] })
 }
 const interrupted = db.interruptStaleRuns()
 if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)
@@ -798,12 +800,12 @@ const api: Api = {
     emit({ type: 'conversation_removed', id })
   },
 
-  createChannel: ({ name }) => {
+  createChannel: ({ name, threads }) => {
     const clean = channelName(name)
     if (!clean) throw new Error(L('Dê um nome ao canal.', 'Give the channel a name.'))
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
     const id = randomUUID()
-    db.createConversation({ id, kind: 'channel', name: clean, members: [] })
+    db.createConversation({ id, kind: 'channel', name: clean, members: [], ...(threads ? { threads } : {}) })
     emitConversations([id])
     return id
   },
@@ -953,7 +955,7 @@ const api: Api = {
   },
 
   // Validation errors come back to the form; connecting continues in the background.
-  addConnector: ({ input }) => connectors.add(input),
+  addConnector: ({ input }) => connectors.add(input, !serverMode), // a server hands the sign-in page over with Authorize instead
 
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
@@ -1080,6 +1082,11 @@ const api: Api = {
   wikiImport: ({ dir }) => wiki.importVault(dir, settings().workspaceName || L('Você', 'You')),
   setWikiCapture: ({ conversationId, on }) => {
     db.setWikiCapture(conversationId, on)
+    const c = db.conversation(conversationId)
+    if (c) emit({ type: 'conversation', conversation: c })
+  },
+  setThreads: ({ conversationId, on }) => {
+    db.setThreads(conversationId, on)
     const c = db.conversation(conversationId)
     if (c) emit({ type: 'conversation', conversation: c })
   },

@@ -69,8 +69,9 @@ import { voiceRefusal } from '../../../shared/voice'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
+import { ConnectorGrid } from './ConnectorStore'
 import { ApprovalCard, toolWords } from './Conversation'
-import { confirmDialog } from './Dialogs'
+import { confirmDialog, Modal } from './Dialogs'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
@@ -1106,18 +1107,21 @@ function ConnectorToken({ id }: { id: string }): ReactNode {
 
 export function ConnectorsPage(): ReactNode {
   const connectors = useStore((s) => s.connectors)
-  const agents = useStore((s) => s.agents)
   const [openId, setOpenId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const open = connectors.find((c) => c.id === openId)
 
   return (
     <Page
       title={L('Conectores', 'Connectors')}
-      subtitle={L('Servidores MCP conectados uma vez, pelo app. Os agentes nunca falam com eles direto: cada chamada passa pelas permissões e aprovações.', 'MCP servers connected once, by the app. Agents never talk to them directly: every call goes through permissions and approvals.')}
+      subtitle={L(
+        'Os serviços com que seus agentes trabalham. O login é pelo navegador e o acesso fica neste computador; cada chamada dos agentes passa pelas permissões e aprovações.',
+        'The services your agents work with. You sign in through the browser and the access stays on this computer; every call the agents make goes through permissions and approvals.'
+      )}
       actions={
         !adding && (
           <button className="btn btn--primary" onClick={() => setAdding(true)}>
-            <Icon name="plus" size={14} /> {L('Adicionar conector', 'Add connector')}
+            <Icon name="plus" size={14} /> {L('Adicionar personalizado', 'Add custom')}
           </button>
         )
       }
@@ -1130,119 +1134,102 @@ export function ConnectorsPage(): ReactNode {
           }}
         />
       )}
+      <ConnectorGrid status={STATUS()} onManage={setOpenId} />
       <HarnessMcps onAdded={setOpenId} />
-      {connectors.length === 0 && !adding && (
-        <div className="empty empty--card">
-          <Icon name="plug" size={22} />
-          <p>{L('Conecte Linear, GitHub, Notion… e os agentes passam a ler e agir neles, sempre com a sua permissão.', 'Connect Linear, GitHub, Notion… and the agents can read and act in them, always with your permission.')}</p>
-          <p className="muted small">{L('Funciona com qualquer servidor MCP: remoto, por URL, ou local, rodando como processo no seu computador.', 'Works with any MCP server: remote, by URL, or local, running as a process on your computer.')}</p>
-        </div>
-      )}
-      <div className="stack-list">
-        {connectors.map((c) => {
-          const users = agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none')
-          const open = openId === c.id
-          const fresh = c.tools.filter((t) => t.isNew).length
-          return (
-            <div key={c.id} className={`card connector ${open ? 'is-open' : ''}`}>
-              <button className="connector__head" onClick={() => setOpenId(open ? null : c.id)}>
-                <span className="connector__icon">
-                  <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} />
-                </span>
-                <span className="grow">
-                  <strong>{c.name}</strong>
-                  <span className="muted small mono truncate">{address(c)}</span>
-                </span>
-                {fresh > 0 && <span className="tag tag--warn">{L(`${fresh} nova${fresh === 1 ? '' : 's'}`, `${fresh} new`)}</span>}
-                <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
-                <span className="stack">
-                  {users.map((a) => (
-                    <span key={a.id} className="stack__item">
-                      <AgentAvatar agent={a} size={20} />
-                    </span>
-                  ))}
-                </span>
-                <span className={`chev ${open ? 'is-open' : ''}`}>
-                  <Icon name="chevron" size={14} />
-                </span>
-              </button>
-              {open && (
-                <div className="tools">
-                  {c.kind === 'stdio' && (
-                    <p className="warn-box">
-                      <Icon name="terminal" size={14} /> {L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}
-                    </p>
-                  )}
-                  {c.error && (
-                    <p className="note note--error">
-                      {c.error}
-                      {c.status === 'error' && ` ${L('Clique em Conectar de novo. Se continuar, confira o endereço e o login.', 'Click Reconnect. If it keeps happening, check the address and the sign-in.')}`}
-                    </p>
-                  )}
-                  {c.kind === 'remote' && c.auth === 'token' && <ConnectorToken id={c.id} />}
-                  <div className="row connector__actions">
-                    {c.status === 'needs_auth' && (
-                      <button className="btn btn--primary btn--sm" onClick={() => authorizeConnector(c.id)}>
-                        {L('Autorizar no navegador', 'Authorize in the browser')}
-                      </button>
-                    )}
-                    {c.status !== 'connecting' && (
-                      <button className="btn btn--sm" onClick={() => reconnectConnector(c.id)}>
-                        {c.status === 'connected' ? L('Atualizar ferramentas', 'Refresh tools') : L('Conectar de novo', 'Reconnect')}
-                      </button>
-                    )}
-                    <span className="grow" />
-                    <button
-                      className="btn btn--ghost btn--sm"
-                      onClick={() =>
-                        void confirmDialog({
-                          title: L(`Remover ${c.name}?`, `Remove ${c.name}?`),
-                          body: L('Os agentes perdem acesso às ferramentas dele. Pra voltar, é só adicionar o conector de novo.', 'The agents lose access to its tools. To get it back, just add the connector again.'),
-                          confirm: L(`Remover ${c.name}`, `Remove ${c.name}`)
-                        }).then((ok) => ok && removeConnector(c.id))
-                      }
-                    >
-                      {L('Remover', 'Remove')}
-                    </button>
-                  </div>
-                  {c.tools.length > 0 && (
-                    <div className="tools__head small muted">
-                      <span>{L('Ferramenta', 'Tool')}</span>
-                      <span>{L('Classe', 'Class')}</span>
-                      <span>{L('Alto risco', 'High risk')}</span>
-                      <span>{L('Ligada', 'On')}</span>
-                    </div>
-                  )}
-                  {c.tools.map((t) => (
-                    <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
-                      <code>
-                        {t.name}
-                        {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
-                      </code>
-                      <select value={t.cls} onChange={(e) => updateTool(c.id, t.name, { cls: e.target.value as ToolClass })}>
-                        {(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => (
-                          <option key={k} value={k}>
-                            {CLASS_LABEL()[k]}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="checkbox"
-                        disabled={t.cls !== 'sensitive'}
-                        checked={t.highRisk && t.cls === 'sensitive'}
-                        onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
-                      />
-                      <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
-                    </div>
-                  ))}
-                  <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {open && <ConnectorDetails c={open} onClose={() => setOpenId(null)} />}
     </Page>
+  )
+}
+
+// A connector's state, who uses it and its tools, in a window over the page.
+function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void }): ReactNode {
+  const users = useStore((s) => s.agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none'))
+  return (
+    <Modal title={c.name} onClose={onClose} className="connector-modal">
+      <div className="connector-modal__body">
+        <div className="row connector-modal__meta">
+          <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
+          <span className="muted small mono truncate grow">{address(c)}</span>
+        </div>
+        <p className="muted small">
+          {users.length ? (
+            <>
+              {L('Quem usa:', 'Used by:')} {users.map((a) => a.name).join(', ')}
+            </>
+          ) : (
+            L('Nenhum agente usa ainda. Dê acesso na página de cada agente, em Ferramentas.', "No agent uses it yet. Give access on each agent's page, under Tools.")
+          )}
+        </p>
+        {c.kind === 'stdio' && (
+          <p className="warn-box">
+            <Icon name="terminal" size={14} /> {L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}
+          </p>
+        )}
+        {c.error && (
+          <p className="note note--error">
+            {c.error}
+            {c.status === 'error' && ` ${L('Clique em Conectar de novo. Se continuar, confira o endereço e o login.', 'Click Reconnect. If it keeps happening, check the address and the sign-in.')}`}
+          </p>
+        )}
+        {c.kind === 'remote' && c.auth === 'token' && <ConnectorToken id={c.id} />}
+        <div className="row connector__actions">
+          {c.status === 'needs_auth' && (
+            <button className="btn btn--primary btn--sm" onClick={() => authorizeConnector(c.id)}>
+              {L('Autorizar no navegador', 'Authorize in the browser')}
+            </button>
+          )}
+          {c.status !== 'connecting' && (
+            <button className="btn btn--sm" onClick={() => reconnectConnector(c.id)}>
+              {c.status === 'connected' ? L('Atualizar ferramentas', 'Refresh tools') : L('Conectar de novo', 'Reconnect')}
+            </button>
+          )}
+          <span className="grow" />
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={() =>
+              void confirmDialog({
+                title: L(`Remover ${c.name}?`, `Remove ${c.name}?`),
+                body: L('Os agentes perdem acesso às ferramentas dele. Pra voltar, é só adicionar o conector de novo.', 'The agents lose access to its tools. To get it back, just add the connector again.'),
+                confirm: L(`Remover ${c.name}`, `Remove ${c.name}`)
+              }).then((ok) => ok && (removeConnector(c.id), onClose()))
+            }
+          >
+            {L('Remover', 'Remove')}
+          </button>
+        </div>
+        {c.tools.length > 0 && (
+          <div className="tools__head small muted">
+            <span>{L('Ferramenta', 'Tool')}</span>
+            <span>{L('Classe', 'Class')}</span>
+            <span>{L('Alto risco', 'High risk')}</span>
+            <span>{L('Ligada', 'On')}</span>
+          </div>
+        )}
+        {c.tools.map((t) => (
+          <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
+            <code>
+              {t.name}
+              {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
+            </code>
+            <select value={t.cls} onChange={(e) => updateTool(c.id, t.name, { cls: e.target.value as ToolClass })}>
+              {(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => (
+                <option key={k} value={k}>
+                  {CLASS_LABEL()[k]}
+                </option>
+              ))}
+            </select>
+            <input
+              type="checkbox"
+              disabled={t.cls !== 'sensitive'}
+              checked={t.highRisk && t.cls === 'sensitive'}
+              onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
+            />
+            <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
+          </div>
+        ))}
+        <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
+      </div>
+    </Modal>
   )
 }
 
