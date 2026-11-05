@@ -2024,7 +2024,7 @@ h3 {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 .toggle.is-on {
-  background: var(--ok);
+  background: var(--accent);
 }
 .toggle.is-on::after {
   transform: translateX(14px);
@@ -7844,10 +7844,108 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
 .voice-on { display: grid; gap: 8px; }
 .voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
-.voice-advanced { display: grid; gap: 10px; }
+.voice-advanced { display: block; }
 .voice-advanced summary { cursor: pointer; }
 .voice-pop > .btn { justify-self: start; }
 .voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
 .voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
 .voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+
+/* Dictation prefs: airier layout, custom (non-browser) checkboxes */
+.voice-prefs {
+  display: grid;
+  gap: 16px;
+}
+.voice-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 13px;
+}
+/* Space between the buttons above (.voice-on) and the “Show the microphone” label */
+.voice-prefs > .voice-check { margin-top: 8px; }
+.voice-check__input {
+  position: absolute;
+  opacity: 0;
+  margin: 0;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  z-index: 1;
+}
+.voice-check__box {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1.5px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--accent-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  pointer-events: none;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.voice-check__input:focus-visible ~ .voice-check__box {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+.voice-check__input:checked ~ .voice-check__box {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.voice-check__mark {
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.voice-check__input:checked ~ .voice-check__box .voice-check__mark {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Advanced collapse: a card-like section instead of a bare browser details */
+.voice-advanced {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+.voice-advanced__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-2);
+  list-style: none;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.voice-advanced__summary:hover { background: var(--hover); }
+.voice-advanced__summary::-webkit-details-marker { display: none; }
+.voice-advanced[open] .voice-advanced__summary { border-bottom: 1px solid var(--border-strong); }
+.voice-advanced__arrow {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border: 2px solid var(--text-3);
+  border-top: none;
+  border-right: none;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.voice-advanced[open] .voice-advanced__arrow { transform: rotate(45deg); }
+.voice-advanced__body {
+  padding: 10px 14px;
+  display: grid;
+  gap: 10px;
+}
+.voice-advanced:not([open]) .voice-advanced__body { display: none; }
+.voice-advanced__body .field { margin: 0; }
+.voice-advanced__body .voice-check { margin: 0; }

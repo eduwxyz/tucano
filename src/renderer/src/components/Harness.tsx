@@ -228,7 +228,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
         <button className={`harness__check ${picked ? 'is-on' : ''}`} disabled={!!st.soon || !st.installed} onClick={toggle} aria-label={L(`Usar o ${ENGINES[engine].label}`, `Use ${ENGINES[engine].label}`)}>
           {picked && <Icon name="check" size={12} />}
         </button>
-        <div className="grow">
+        <div className="grow" onClick={() => { if (!(st.soon || !st.installed)) toggle() }} style={{ cursor: (st.soon || !st.installed) ? 'default' : 'pointer' }}>
           <strong>{ENGINES[engine].label}</strong>
           <span className="harness__account">
             {!st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
