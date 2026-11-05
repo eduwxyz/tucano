@@ -71,7 +71,7 @@ export interface RunnerDeps {
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
-  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac'>> // without it, no agent has a computer
+  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
@@ -136,7 +136,7 @@ export interface RoutineEvent {
 }
 
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -155,7 +155,8 @@ export class Runner {
   // Saves the human message and decides who answers it: mentioned agents
   // first, then whoever asked a pending question, then the DM agent or the
   // only agent in the channel, and otherwise the router. The answers, and
-  // everything else it sets off, go in its thread (`threadId`, or its own).
+  // everything else it sets off, go in its thread (`threadId`, or its own when
+  // the conversation answers in threads) or else in the conversation.
   async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
@@ -171,8 +172,9 @@ export class Runner {
     const asked = this.pendingQuestion(conv.id, thread)
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
-    // Every answer goes in the thread of what it answers: a message of mine outside one opens it.
-    const replyIn = thread ?? mine.id
+    // An answer goes in the thread of what it answers. A message of mine outside one opens it
+    // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
+    const replyIn = thread ?? (conv.threads ? mine.id : undefined)
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
@@ -566,12 +568,18 @@ export class Runner {
     // Past the prompt's budget, the older memories are searched instead: the tool shows up only then.
     const promptMemories = memory?.forPrompt(agent)
     const canSearch = !!this.deps.gateway && !!promptMemories?.searchable
-    // A thread sees only itself: the other threads, of the conversations this agent is in, are looked up.
-    const canSeekThreads = !!this.deps.gateway && !!msg.threadId
+    // A thread sees only itself, and the conversation only what's outside threads: the other
+    // threads, of the conversations this agent is in, are looked up.
+    const canSeekThreads = !!this.deps.gateway && (!!msg.threadId || db.threadRoots(conv.id).size > 0)
     const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
     // The Tuca proposes agents; nobody else does.
     const builds = !!this.deps.gateway && agent.kind === 'tuca'
-    const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
+    // why, so it says so in a sentence instead of spending a call on each tool to find out.
+    const computerOff = computers ? await computers.unavailable?.(agent) : undefined
+    if (computerOff) computers = undefined
+    let computerDown: string | undefined // found off in the middle of the turn: what the person has to do
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
     const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
@@ -942,6 +950,11 @@ ${note}`,
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
           const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          // No tool of the computer can work: the turn ends here, before the model tries the next one.
+          if (out.down) {
+            computerDown = out.down
+            halt('computer')
+          }
           if (out.artifact) artifactIds.push(out.artifact.id)
           if (out.service && !services.includes(out.service)) services.push(out.service)
           msg.run = {
@@ -1288,6 +1301,7 @@ ${note}`,
               memories: promptMemories,
               canRemember,
               hasComputer: !!computers,
+              computerOff,
               browser: !!browser,
               apps: apps ? agent.apps : undefined,
               offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
@@ -1405,6 +1419,17 @@ ${note}`,
       save({
         text: msg.text ? `${msg.text} …` : '',
         run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
+      })
+    } else if (control.reason === 'computer') {
+      save({
+        text: msg.text ? `${msg.text} …` : '',
+        run: {
+          ...base,
+          ...again,
+          status: 'failed',
+          steps: closeThinking('error', L('Parou', 'Stopped')),
+          error: L(`Parei: meu computador não está funcionando. ${computerDown ?? ''} Depois é só mandar de novo.`, `I stopped: my computer isn't working. ${computerDown ?? ''} Then just send it again.`)
+        }
       })
     } else if (overBudget && control.reason !== 'limit') {
       // Wrapped up at the budget, or cut past it: either way it can go on from here.

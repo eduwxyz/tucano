@@ -194,16 +194,18 @@ function digests(db: Pick<Db, 'message'>, recent: Message[], except?: string): T
 // What a reply reads of the conversation. In a thread, only that thread: the message that
 // opened it and its newest `limit` replies, with the thread's summary when older ones are
 // left out. The other threads aren't in it (an agent looks them up with buscar_threads);
-// `threads` digests them for the router. Outside threads (a routine, a conversation from
-// before them): the recent messages after `until`, what the conversation's summary covers.
+// `threads` digests them for the router. Outside threads (a conversation that answers in it,
+// a routine): its recent messages after `until`, what the conversation's summary covers, and of
+// a thread only the message that opened it; what was said inside is looked up the same way.
 export function contextWindow(
   db: Pick<Db, 'message' | 'recentMessages'>,
   before: Message,
   limit: number,
   until = 0
 ): { messages: Message[]; threads: ThreadDigest[]; summary?: string } {
-  const recent = db.recentMessages(before.conversationId, limit + 40).filter((m) => m.id !== before.id && m.at <= before.at && m.at > until)
-  if (!before.threadId) return { messages: recent.slice(-limit), threads: [] }
+  const here = (m: Message): boolean => m.id !== before.id && m.at <= before.at && m.at > until
+  if (!before.threadId) return { messages: db.recentMessages(before.conversationId, limit + 40, null).filter(here).slice(-limit), threads: [] }
+  const recent = db.recentMessages(before.conversationId, limit + 40).filter(here)
   const root = db.message(before.threadId)
   const replies = db.recentMessages(before.conversationId, limit + 2, before.threadId).filter((m) => m.id !== before.id && m.at <= before.at)
   const omitted = replies.length > limit
