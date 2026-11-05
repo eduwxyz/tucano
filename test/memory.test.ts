@@ -98,6 +98,7 @@ describe('summary (short term)', () => {
     expect(outside.messages.at(-1)?.text).toBe(`mensagem ${MAX_AFTER + 9}`)
 
     // A thread is a conversation of its own: neither the summary nor those messages.
+    db.setThreads('c1', true)
     await runner.send('c1', '@lia qual é o cupom?')
     await settle()
     const prompt = agentTurns('lia')[0]!.prompt
