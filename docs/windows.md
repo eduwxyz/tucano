@@ -11,7 +11,7 @@ Status: **runs on Windows 10/11 (x64)**, in development (`npm run dev`) and as a
 | Windows 10 or 11, x64 | Tested on Windows 10 Home 22H2 (19045) |
 | [Node.js](https://nodejs.org) 24+ | For `npm install` and the tests |
 | [Git for Windows](https://git-scm.com/download/win) | Its **Git Bash** is the shell agents' commands run in when an agent's computer is *This PC* (Claude Code on Windows needs it too). Without it, those commands fall back to `cmd.exe` |
-| At least one harness, signed in | Claude Code is the quickest: `irm https://claude.ai/install.ps1 \| iex`, then `claude auth login`. Codex, OpenCode and Pi install with npm (`npm install -g @openai/codex`, `npm install -g opencode-ai`, `npm install -g @earendil-works/pi-coding-agent`) |
+| At least one harness, signed in | Claude Code is the quickest: `irm https://claude.ai/install.ps1 \| iex`, then `claude auth login`. Codex, OpenCode and Pi install with npm (`npm install -g @openai/codex`, `npm install -g opencode-ai`, `npm install -g @earendil-works/pi-coding-agent`). Grok's installer is the POSIX script (`curl -fsSL https://x.ai/cli/install.sh \| bash`); it has no Windows one-liner |
 | Optional: [Docker Desktop](https://www.docker.com/products/docker-desktop/) | For the isolated Linux computer. The first use pulls `node:22-bookworm` |
 | Optional: Google Chrome | For an agent's browser; it is found in `Program Files`, `Program Files (x86)` or `%LOCALAPPDATA%` |
 
