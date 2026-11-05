@@ -994,3 +994,37 @@ export interface WikiReview {
   error?: string // the last review failed
   findings: WikiFinding[] // still open
 }
+
+// ---------- a team's .md file, imported again when it changes (spec §21) ----------
+
+export type TeamItemKind = 'agent' | 'skill' | 'routine' | 'channel' | 'connector' | 'context'
+
+// A team this app imported or exported, as the settings show it.
+export interface TeamPackageInfo {
+  id: string
+  name: string
+  revision: number // the newest file's of this team seen here
+  at: number // last imported or exported
+  changedHere: { kind: TeamItemKind; title: string }[] // items that differ here from the team's last file, kept until I take its version
+}
+
+// What changed in one item of the team since its last file I imported.
+export interface TeamChange {
+  key: string // `${kind}:${id}`
+  kind: TeamItemKind
+  title: string
+  status: 'new' | 'update' | 'conflict' | 'removed'
+  fields: { name: string; mine?: unknown; theirs?: unknown; conflict: boolean }[]
+}
+
+export interface TeamUpdate {
+  packageId: string
+  name: string
+  revision: number
+  seen: number // the newest revision of this team seen here before; 0: never
+  changes: TeamChange[]
+}
+
+// Per change: take the file's ('package'; on a conflict, its side too), keep mine on the
+// conflicting fields ('mine'; on a removal, keep it and stop following it), or leave it for later.
+export type TeamChoice = 'package' | 'mine' | 'later'
