@@ -7,7 +7,7 @@ import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotoc
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { L } from '../shared/lang'
 import { friendly } from '../shared/errors'
@@ -43,12 +43,44 @@ export function connectError(e: unknown): string {
   return raw
 }
 
+// The text of a tool's result: its text blocks, the text of embedded resources, and the structured content
+// when that's all there is (a server may put an error's reason only there).
+export function contentText(r: Pick<CallToolResult, 'content' | 'structuredContent'>): string {
+  const text = (r.content ?? [])
+    .map((c) => (c.type === 'text' ? c.text : c.type === 'resource' && 'text' in c.resource ? c.resource.text : `[${c.type}]`))
+    .join('\n')
+  if (text.trim() || !r.structuredContent) return text
+  return JSON.stringify(r.structuredContent)
+}
+
+// Why a tool returned an error: what it said, or that it said nothing (an empty failure would show a bare ✗).
+export function errorReason(r: Pick<CallToolResult, 'content' | 'structuredContent'>): string {
+  return contentText(r).trim() || L('O servidor devolveu um erro sem mensagem.', 'The server returned an error with no message.')
+}
+
+// Why a tool call threw, in words: a timeout says how long it waited, an MCP error keeps the code and the
+// data the server sent with it (the SDK's message leaves the data out).
+export function callError(e: unknown, timeoutMs = CALL_TIMEOUT_MS): string {
+  if (e instanceof McpError) {
+    if (e.code === ErrorCode.RequestTimeout) {
+      const s = Math.round(timeoutMs / 1000)
+      return L(`O servidor não respondeu em ${s} s e a chamada foi cancelada.`, `The server didn't answer in ${s} s, so the call was cancelled.`)
+    }
+    const message = e.message.replace(/^(MCP error -?\d+:\s*)+/, '') // a server's own McpError arrives wrapped twice
+    const data = e.data === undefined || e.data === null ? '' : typeof e.data === 'string' ? e.data : JSON.stringify(e.data)
+    return `${message} (${L('código', 'code')} ${e.code})${data ? `: ${data}` : ''}`
+  }
+  const message = (e instanceof Error ? e.message : String(e)).trim()
+  return message || L('A chamada falhou sem mensagem.', 'The call failed with no message.')
+}
+
 export interface ConnectorDeps {
   db: Db
   secrets: Secrets
   emit: (e: CoreEvent) => void
   openUrl: (url: string) => void
   oauthCallbackUrl: () => string
+  callTimeoutMs?: number // how long a tool call may take; tests shorten it
 }
 
 interface Live {
@@ -312,8 +344,9 @@ export class ConnectorManager {
   }
 
   // Runs a tool on the real server, reconnecting on demand. Stdio servers that
-  // keep failing are marked as having a problem.
+  // keep failing are marked as having a problem. What it throws says why, in words.
   async call(id: string, name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    const timeout = this.deps.callTimeoutMs ?? CALL_TIMEOUT_MS
     let l = this.live.get(id)
     if (!l?.client) {
       await this.connect(id)
@@ -321,18 +354,28 @@ export class ConnectorManager {
     }
     if (!l?.client) throw new Error(L(`O conector ${this.deps.db.connector(id)?.name ?? id} não está conectado`, `The connector ${this.deps.db.connector(id)?.name ?? id} isn't connected`) + (l?.error ? `: ${l.error}.` : '.'))
     try {
-      const r = (await l.client.callTool({ name, arguments: args }, undefined, { timeout: CALL_TIMEOUT_MS })) as CallToolResult
+      const r = (await l.client.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult
       l.failures = 0
       return r
     } catch (e) {
+      let failure = e
       if (staleSession(e)) {
         await this.connect(id)
         const again = this.live.get(id)?.client
-        if (again) return (await again.callTool({ name, arguments: args }, undefined, { timeout: CALL_TIMEOUT_MS })) as CallToolResult
+        if (again) {
+          try {
+            return (await again.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult
+          } catch (e2) {
+            failure = e2
+          }
+        } else {
+          const why = this.live.get(id)?.error
+          throw new Error(L('A sessão com o servidor expirou e não deu pra conectar de novo', 'The session with the server expired and it could not connect again') + (why ? `: ${why}` : '.'), { cause: e })
+        }
       }
       const c = this.deps.db.connector(id)
       if (c?.kind === 'stdio' && ++l.failures >= MAX_STDIO_FAILURES) this.setStatus(id, 'error', L(`Falhou ${l.failures} vezes seguidas.`, `Failed ${l.failures} times in a row.`))
-      throw e
+      throw new Error(callError(failure, timeout), { cause: failure })
     }
   }
 

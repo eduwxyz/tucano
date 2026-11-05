@@ -6,7 +6,7 @@ import { L, lang, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor' | 'grok'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -138,6 +138,9 @@ export interface Step {
   label: string
   detail?: string
   note?: string // what the agent said while working, before this step's tool call
+  error?: string // why it failed, in the tool's own words
+  input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
+  output?: string // what came back, in a few words ("120 rows")
   status: StepStatus
   ms?: number
 }
@@ -393,7 +396,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
   gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
-  cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' }
+  cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
+  grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 

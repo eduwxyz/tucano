@@ -10,7 +10,7 @@ import { systemPrompt } from '../src/core/context'
 import { Db } from '../src/core/db'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 // Ids that start apart: a computer's name is the first 8 characters of its agent's id.
 const agent = (id: string, handle: string): Agent => ({ id, name: handle, handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: true, archived: false })
 const script = (...markers: string[]): string => SETUP_PRESETS().filter((p) => markers.includes(p.marker)).map((p) => p.script).join('\n\n')
