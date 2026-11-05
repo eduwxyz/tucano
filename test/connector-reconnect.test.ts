@@ -9,7 +9,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { ConnectorManager } from '../src/core/connectors'
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
+import { ConnectorManager, staleSession } from '../src/core/connectors'
 import { Db } from '../src/core/db'
 import { plainCipher, Secrets } from '../src/core/secrets'
 
@@ -105,5 +107,18 @@ describe('a remote connector whose server forgets the session', () => {
     expect(text((await connectors.call(id, 'ping', {})) as never)).toBe('pong')
     expect(status(id)).toBe('connected')
     expect(sessions.size).toBe(1) // a new session, once
+  })
+})
+
+describe('which failed calls go again on a new connection', () => {
+  it("only those that never ran: a forgotten session, or no connection to send them on", () => {
+    expect(staleSession(new StreamableHTTPError(404, 'Session not found'))).toBe(true)
+    expect(staleSession(new Error('Bad Request: No valid session ID provided'))).toBe(true)
+    expect(staleSession(new Error('Not connected'))).toBe(true)
+  })
+
+  it('not a call cut by a dropped connection: the server may have run it, and a write would go twice', () => {
+    expect(staleSession(McpError.fromError(ErrorCode.ConnectionClosed, 'Connection closed'))).toBe(false)
+    expect(staleSession(new StreamableHTTPError(500, 'Internal error'))).toBe(false)
   })
 })

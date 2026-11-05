@@ -171,16 +171,10 @@ export function claudeParser(): Parser {
 // Without CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC the CLI makes one more model call after the
 // reply (its post-turn summary) and only then sends `result` and exits: about 2.5 s on every
 // reply, at times over 10 s. Nobody reads that summary here, and the CLI runs one reply and goes.
-// `turn`: its model and effort, for a model behind a gateway that isn't Anthropic's (see thinkingOff).
-export function claudeEnv(p: Provider, account?: string, turn?: Pick<Turn, 'model' | 'effort'>): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-    ...(turn && thinkingOff(turn.model, turn.effort) ? { CLAUDE_CODE_DISABLE_THINKING: '1' } : {}),
-    ...p.env,
-    ...(account ? { CLAUDE_CONFIG_DIR: account } : {}),
-    MCP_TOOL_TIMEOUT: '900000'
-  }
+// `noThinking`: a model that isn't Anthropic's at low or medium effort (thinkingOff). The person's own setting, in
+// the gateway's environment, still wins.
+export function claudeEnv(p: Provider, account?: string, noThinking = false): NodeJS.ProcessEnv {
+  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...(noThinking ? { CLAUDE_CODE_DISABLE_THINKING: '1' } : {}), ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), MCP_TOOL_TIMEOUT: '900000' }
 }
 
 export function claudeEngine(bin: () => string | undefined, provider: () => Promise<Provider> = async () => userProvider()): Engine {
@@ -194,7 +188,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       }
       // The gateway's token goes in the environment, never in the arguments (other processes can read those).
       const p = await provider()
-      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: claudeEnv(p, turn.account, turn) })
+      yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: claudeEnv(p, turn.account, thinkingOff(turn.model, turn.effort)) })
     }
   }
 }

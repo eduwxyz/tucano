@@ -63,10 +63,11 @@ interface Live {
   passing?: boolean // the last attempt failed for a reason that may go away by itself (network, timeout)
 }
 
-// The server forgot this session (it expired while idle) or the connection is gone: the call never ran, so
-// it can go again on a new connection.
-const staleSession = (e: unknown): boolean =>
-  (e instanceof StreamableHTTPError && e.code === 404) || (e instanceof Error && /session not found|no valid session|invalid session id|not connected|connection closed/i.test(e.message))
+// The call never ran, so it can go again on a new connection: the server forgot this session (it expired
+// while idle), or the client had no connection to send it on. Not "Connection closed": the SDK gives that to
+// every call already sent when the connection drops, which the server may have run (a write would go twice).
+export const staleSession = (e: unknown): boolean =>
+  (e instanceof StreamableHTTPError && e.code === 404) || (e instanceof Error && /session not found|no valid session|invalid session id|^not connected$/i.test(e.message))
 
 const key = (id: string, what: string): string => `connector:${id}:${what}`
 
