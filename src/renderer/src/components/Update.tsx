@@ -7,7 +7,7 @@ import { L, lang, locale } from '../../../shared/lang'
 import { newsSince, type PtSummary, type ReleaseNotes } from '../../../shared/release-notes'
 import type { UpdateState } from '../../../shared/types'
 import { updateSettings, useStore } from '../store'
-import { Modal } from './Dialogs'
+import { Modal } from './Modal'
 import { ago } from './ui'
 
 const RELEASES = 'https://github.com/eduwxyz/tucano/releases'

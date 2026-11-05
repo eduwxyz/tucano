@@ -62,6 +62,8 @@ export type View =
   | { kind: 'settings' }
 
 export interface State {
+  webhookPort: number
+  defaultWorkspace: boolean
   ready: boolean
   threadSeen: Record<string, number> // thread root id → when I last had it open (what came after is new)
   navOpen: boolean // on a phone, the sidebar slid in over the view
@@ -99,7 +101,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string }
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -123,6 +125,8 @@ const loadSeen = (): Record<string, number> => {
 }
 
 let state: State = {
+  webhookPort: 47717,
+  defaultWorkspace: true,
   ready: false,
   threadSeen: loadSeen(),
   wikiRev: 0,
@@ -220,31 +224,14 @@ function apply(e: CoreEvent): void {
   set((s) => {
     switch (e.type) {
       case 'message': {
-        const known = s.messages.some((m) => m.id === e.message.id)
-        const viewing = s.view?.kind === 'conversation' && s.view.id === e.message.conversationId
-        const fromAgent = e.message.author.kind === 'agent' || e.message.author.kind === 'routine'
-        // A reply that lands while you're elsewhere is new content too: the end of
-        // the run, or it stopping for your turn (a question, an approval — the
-        // states the core notifies). Counted once: if the badge already counts
-        // this conversation, the run's start is already in it.
-        const finished =
-          known && fromAgent && !viewing && e.message.run !== undefined
-          && ['done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(e.message.run.status)
-          && s.messages.find((m) => m.id === e.message.id)?.run?.status !== e.message.run.status
-          && (s.conversations.find((c) => c.id === e.message.conversationId)?.unread ?? 0) === 0
-        const conversations =
-          fromAgent && !viewing && (!known || finished)
-            ? s.conversations.map((c) => (c.id === e.message.conversationId ? { ...c, unread: (c.unread ?? 0) + 1 } : c))
-            : s.conversations
-        return { ...s, conversations, messages: upsert(s.messages, e.message) }
+        return { ...s, messages: upsert(s.messages, e.message) }
       }
       case 'delta':
         return { ...s, messages: s.messages.map((m) => (m.id === e.id ? { ...m, text: m.text + e.text } : m)) }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
       case 'conversation': {
-        const prev = s.conversations.find((c) => c.id === e.conversation.id)
-        return { ...s, conversations: upsert(s.conversations, { ...e.conversation, unread: prev?.unread }) }
+        return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
       case 'settings':
         return withSettings(s, e.settings)
@@ -309,7 +296,10 @@ export async function start(): Promise<void> {
   let viewing: string | null = null
   subscribe(() => {
     const id = state.view?.kind === 'conversation' ? state.view.id : null
-    if (id !== viewing) window.tucano.viewing((viewing = id))
+    if (id !== viewing) {
+      window.tucano.viewing((viewing = id))
+      if (id && state.ready) void call('markRead', { conversationId: id })
+    }
   })
   await connect(apply)
   const snap = await call('snapshot')
@@ -319,6 +309,8 @@ export async function start(): Promise<void> {
     return {
       ...withSettings(s, snap.settings),
       ready: true,
+      webhookPort: snap.webhookPort ?? 47717,
+      defaultWorkspace: snap.defaultWorkspace ?? true,
       view,
       agents: snap.agents,
       conversations: snap.conversations,
@@ -512,7 +504,7 @@ export const setTopic = (id: string, topic: string): Promise<void> => call('setT
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
-export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
+export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
 // `threadId`: a reply in the thread that message started.
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
