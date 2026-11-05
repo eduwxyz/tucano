@@ -219,7 +219,7 @@ describe('the queue over the field', () => {
 
 describe('the queue in a channel', () => {
   const channel = (): void => {
-    db.saveAgent({ id: 'ana', name: 'Ana', handle: 'ana', role: '', color: 'pink', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
+    db.saveAgent({ id: 'ana', name: 'Ana', handle: 'ana', role: '', color: 'rose', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
     db.createConversation({ id: 'ch', kind: 'channel', name: 'eng', members: ['teo', 'ana'] })
   }
 
