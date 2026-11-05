@@ -89,7 +89,7 @@ it('keeps unread counts and memory data in the owning database with identical ID
   expect(a.memories().map((m) => m.text)).toEqual(['Only in A'])
   expect(b.memories()).toEqual([])
   const agent: Agent = { id: 'same-agent', name: 'Agent', handle: 'agent', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
-  const memory = (db: Db): Memories => new Memories({ db, engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }, settings: async () => { throw new Error('Prompt lookup must not invoke a model') }, emit: () => {}, workDir: '' })
+  const memory = (db: Db): Memories => new Memories({ db, engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }, settings: async () => { throw new Error('Prompt lookup must not invoke a model') }, emit: () => {}, workDir: '' })
   expect(memory(a).forPrompt(agent).aboutMe.map((m) => m.text)).toEqual(['Only in A'])
   expect(memory(b).forPrompt(agent).aboutMe).toEqual([])
   a.deleteConversation('same-channel')
@@ -117,60 +117,6 @@ it('migrates every opened workspace and backs up older schemas before changing t
   const again = open(file)
   expect(again.conversation('kept')?.name).toBe('kept')
   expect(readdirSync(join(dir, 'backups'))).toEqual(backups)
-})
-
-it('upgrades the earlier workspace schema without skipping upstream agent columns or losing unread state', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'tucano-preview-migration-'))
-  dirs.push(dir)
-  const file = join(dir, 'tucano.db')
-  const first = new Db(file)
-  first.createConversation({ id: 'kept', name: 'kept', kind: 'channel', members: [] })
-  const message: Message = { id: 'kept-message', conversationId: 'kept', author: { kind: 'me' }, text: 'keep me', at: 1 }
-  first.saveMessage(message)
-  first.recordActivity(message, null)
-  const unread = first.conversation('kept')?.unread
-  first.close()
-  const raw = new DatabaseSync(file)
-  const version = (raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-  for (const column of ['fallback_model', 'account', 'fallback_account', 'max_routines', 'custom_color', 'picture', 'avatar']) raw.exec(`ALTER TABLE agents DROP COLUMN ${column}`)
-  raw.exec(`PRAGMA user_version = ${version - 6}`)
-  raw.close()
-  const migrated = open(file)
-  expect(migrated.messages().map((m) => m.text)).toEqual(['keep me'])
-  expect(migrated.conversation('kept')?.unread).toBe(unread)
-  const check = new DatabaseSync(file)
-  expect(check.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: version })
-  const columns = (check.prepare('PRAGMA table_info(agents)').all() as { name: string }[]).map((column) => column.name)
-  expect(columns).toEqual(expect.arrayContaining(['fallback_model', 'account', 'fallback_account', 'max_routines', 'custom_color', 'picture', 'avatar']))
-  check.close()
-  expect(readdirSync(join(dir, 'backups'))).toHaveLength(1)
-})
-
-it('adds upstream avatars to the previous workspace schema without losing unread state', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'tucano-avatar-migration-'))
-  dirs.push(dir)
-  const file = join(dir, 'tucano.db')
-  const first = new Db(file)
-  first.createConversation({ id: 'kept', name: 'kept', kind: 'channel', members: [] })
-  const message: Message = { id: 'message', conversationId: 'kept', author: { kind: 'agent', id: 'agent' }, text: 'keep me', at: 1 }
-  first.saveMessage(message)
-  first.recordActivity(message, null)
-  expect(first.conversation('kept')?.unread).toBe(1)
-  first.close()
-  const raw = new DatabaseSync(file)
-  const version = (raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-  raw.exec(`ALTER TABLE agents DROP COLUMN avatar; PRAGMA user_version = ${version - 1}`)
-  raw.close()
-  const migrated = open(file)
-  expect(migrated.messages().map((m) => m.text)).toEqual(['keep me'])
-  expect(migrated.conversation('kept')?.unread).toBe(1)
-  const check = new DatabaseSync(file)
-  expect(check.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: version })
-  expect((check.prepare('PRAGMA table_info(agents)').all() as { name: string }[]).map((column) => column.name)).toContain('avatar')
-  check.close()
-  expect(readdirSync(join(dir, 'backups'))).toHaveLength(1)
-  expect(open(file).conversation('kept')?.unread).toBe(1)
-  expect(readdirSync(join(dir, 'backups'))).toHaveLength(1)
 })
 
 it('duplicates configuration and credentials without copying history or mutating the source', () => {

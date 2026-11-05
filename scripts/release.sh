@@ -19,7 +19,7 @@ mkdir -p "$(dirname "$NOTES")"
 SECTION=$(awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" { on = 1; next } /^## \[/ { on = 0 } /^\[[0-9.]+\]: / { on = 0 } on' CHANGELOG.md)
 [ -n "$(echo "$SECTION" | tr -d '[:space:]')" ] || { echo "CHANGELOG.md has no section for $VERSION." >&2; exit 1; }
 cat > "$NOTES" <<NOTES_EOF
-**Tucano is a team of AI agents that lives on your computer.** You talk to them in channels, like a work chat; they research, write, code and use your company's tools, and you decide how far each one goes. It runs on the Claude Code, Codex, OpenCode, Pi or Gemini CLI you already have, on your own subscription.
+**Tucano is a team of AI agents that lives on your computer.** You talk to them in channels, like a work chat; they research, write, code and use your company's tools, and you decide how far each one goes. It runs on the Claude Code, Codex, Cursor, OpenCode, Pi or Gemini CLI you already have, on your own subscription.
 $SECTION
 
 ## Install
@@ -57,6 +57,9 @@ IDENTITY="${TUCANO_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | a
 export APPLE_KEYCHAIN_PROFILE="${TUCANO_NOTARY_PROFILE:-tucano}"
 
 npm run build
+# Dictation's whisper-cli, built for each chip and signed with the app (scripts/whisper.mjs).
+node scripts/whisper.mjs mac arm64
+node scripts/whisper.mjs mac x64
 npx electron-builder --mac dmg zip --arm64 --x64 --publish never \
   --config.directories.output="$OUT" \
   --config.mac.identity="$IDENTITY" \

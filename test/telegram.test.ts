@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Approval, Message } from '../src/shared/types'
-import { Telegram } from '../src/core/telegram'
+import { splitIntoChunks, Telegram } from '../src/core/telegram'
 
 // A stand-in for Telegram's Bot API: updates are queued by the test; what the bot sends is recorded.
 function botApi() {
@@ -42,7 +42,7 @@ describe('Telegram', () => {
   let store: Map<string, string>
   let tg: Telegram
   let decided: [string, string, string | undefined][]
-  let answered: [string, string][]
+  let answered: [string, string, string?][]
   let approvals: Map<string, Approval>
 
   beforeEach(async () => {
@@ -58,7 +58,7 @@ describe('Telegram', () => {
         approvals.set(id, { ...approvals.get(id)!, state: d })
       },
       approval: (id) => approvals.get(id),
-      answer: (conv, text) => answered.push([conv, text]),
+      answer: (conv, text, thread) => answered.push(thread ? [conv, text, thread] : [conv, text]),
       changed: () => {},
       fetch: api.f
     })
@@ -127,5 +127,36 @@ describe('Telegram', () => {
     api.push({ message: { message_id: 6, chat: stranger, text: 'hackeado', reply_to_message: { message_id: asked.id } } })
     await settle()
     expect(answered).toEqual([['c1', 'Sexta que vem']])
+  })
+
+  it("a reply to a question asked in a thread goes back to that thread", async () => {
+    await pair()
+    const question: Message = { id: 'm2', conversationId: 'c1', threadId: 'root', author: { kind: 'agent', id: 'a1' }, text: '', at: 0, run: { status: 'waiting_input', steps: [], question: 'Qual o prazo?' } }
+    await tg.questionAsked(question, 'PM', '#simula-oab')
+    api.push({ message: { message_id: 7, chat: me, text: 'Amanhã', reply_to_message: { message_id: api.sent.at(-1)!.id } } })
+    await settle()
+    expect(answered).toEqual([['c1', 'Amanhã', 'root']])
+  })
+
+  it("a long notice arrives whole, in as many messages as it takes, split between lines", async () => {
+    await pair()
+    const lines = Array.from({ length: 120 }, (_, i) => `- Item ${i + 1}: ${'texto '.repeat(8).trim()}`)
+    await tg.notice('Lia · Bom dia', lines.join('\n'))
+    const texts = api.sent.slice(1).filter((s) => s.method === 'sendMessage').map((s) => String(s.body['text']))
+    expect(texts.length).toBeGreaterThan(1)
+    for (const t of texts) expect(t.length).toBeLessThanOrEqual(4096)
+    expect(texts[0]!.startsWith('Lia · Bom dia\n\n- Item 1:')).toBe(true)
+    expect(texts.join('\n')).toBe(`Lia · Bom dia\n\n${lines.join('\n')}`)
+  })
+
+  it('a line longer than a message is cut at the limit', () => {
+    expect(splitIntoChunks('abcdefghij', 4)).toEqual(['abcd', 'efgh', 'ij'])
+    expect(splitIntoChunks('ab\ncdefgh', 4)).toEqual(['ab', 'cdef', 'gh'])
+  })
+
+  it('a short notice is one message', async () => {
+    await pair()
+    await tg.notice('Lia · Bom dia', 'Linha 1\nLinha 2')
+    expect(api.sent.at(-1)!.body['text']).toBe('Lia · Bom dia\n\nLinha 1\nLinha 2')
   })
 })

@@ -22,7 +22,13 @@ export const tucaInstructions = (): string =>
       '- O modelo mais simples que dá conta; esforço alto só pra tarefa difícil.',
       '- Um agente por tarefa clara. Se pedirem algo enorme, sugira dividir em dois.',
       '- Depois que a pessoa criar, sugira uma primeira tarefa pra testar.',
-      '- Você não cria nada sozinho: a proposta vira um card e a pessoa decide.'
+      '- Você não cria nada sozinho: a proposta vira um card e a pessoa decide.',
+      '',
+      'Sua voz:',
+      '- Fale como um colega competente, na primeira pessoa e em português do dia a dia: "pra", não "para"; "a gente", não "nós".',
+      '- Frases curtas, uma ideia em cada. Nada de jargão técnico: diga "publicar código" ou "colocar no ar", não "merge" ou "deploy".',
+      '- Notícia ruim vem sempre com o próximo passo ("Não achei o Linear. Conecte em Conectores e eu sigo.").',
+      '- Um pouco de humor só quando o momento é bom ou neutro, nunca num erro ou numa dúvida da pessoa.'
     ].join('\n'),
     [
       "You are Tuca, the one who builds this team's agents. The person tells you a task or an area they want to hand off, and you design the right agent for it.",
@@ -33,7 +39,13 @@ export const tucaInstructions = (): string =>
       '- The simplest model that does the job; high effort only for a hard task.',
       '- One agent per clear task. If they ask for something huge, suggest splitting it in two.',
       '- Once the person creates it, suggest a first task to test it.',
-      "- You don't create anything on your own: the proposal becomes a card and the person decides."
+      "- You don't create anything on your own: the proposal becomes a card and the person decides.",
+      '',
+      'Your voice:',
+      '- Talk like a capable colleague: first person, plain everyday English, contractions welcome.',
+      '- Short sentences, one idea each. No technical jargon: say "publish code" or "put it live", not "merge" or "deploy".',
+      '- Bad news always comes with the next step ("I couldn\'t find Linear. Connect it in Connectors and I\'ll carry on.").',
+      "- A bit of humor only when the moment is good or neutral, never in an error or when the person is unsure."
     ].join('\n')
   )
 
@@ -69,14 +81,14 @@ export const PROPOR_AGENTE: ToolDef = {
   }
 }
 
-// The models agents can run on now: the listed ones of a ready plan, and what OpenCode, Pi and Gemini list.
+// The models agents can run on now: the listed ones of a ready plan, and what OpenCode, Pi, Gemini and Cursor list.
 export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Record<string, string[]>> = {}): { id: string; label: string }[] {
   // Codex's own catalog when there is one (newest first); the app's list otherwise.
   const codex = listed['codex']?.length ? listed['codex'].map((slug) => modelInfo(codexValue(slug)) ?? { id: slug, engine: 'codex' as const, label: slug, hint: '' }) : undefined
   const plan = [...MODELS.filter((m) => m.engine !== 'codex' || !codex), ...(codex ?? []).map((m) => ({ ...m, id: codexValue(m.id) }))]
     .filter((m) => s.engines[m.engine].loggedIn && s.engines[m.engine].route !== 'gateway')
     .map((m) => ({ id: m.id, label: `${ENGINES[m.engine].label} · ${m.label}` }))
-  const own = (['opencode', 'pi', 'gemini'] as const).flatMap((e) => (s.engines[e].loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
+  const own = (['opencode', 'pi', 'gemini', 'cursor', 'grok'] as const).flatMap((e) => (s.engines[e]?.loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
   return [...plan, ...own]
 }
 
@@ -194,6 +206,6 @@ export function tucaAgent(modelId: string, taken: string[], limit: number): Agen
 
 export const tucaHello = (): string =>
   L(
-    'Oi, eu sou o Tuca. Eu monto os agentes do seu time. Me conta uma tarefa que você queria tirar do seu prato, com um exemplo de verdade, e eu desenho o agente certo pra ela.',
+    'Oi, eu sou o Tuca. Monto os agentes do seu time. Me conta uma tarefa que você queria tirar do prato, com um exemplo de verdade, e eu desenho o agente certo pra ela.',
     "Hi, I'm Tuca. I build your team's agents. Tell me about a task you'd like off your plate, with a real example, and I'll design the right agent for it."
   )

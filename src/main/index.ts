@@ -1,4 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { randomBytes } from 'node:crypto'
+import { verifyLocalUrl } from '../core/local-paths'
+import { app, BrowserWindow, session, type MediaAccessPermissionRequest, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
@@ -39,18 +41,20 @@ const moved: Moved =
 if (moved === 'old-app-open' || moved === 'keychain-denied') app.setPath('userData', join(app.getPath('temp'), 'tucano-esperando'))
 
 const dataDir = (): string => process.env['TUCANO_DATA'] ?? app.getPath('userData')
-
 // tucano://artifact/<id>/<name> serves what agents showed in the chat.
 protocol.registerSchemesAsPrivileged([{ scheme: 'tucano', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 
 let registry: Workspaces
-type Runtime = { child: UtilityProcess; browsers: Browsers; ready: Promise<void>; summary: WorkspaceSummary; busy: boolean }
+// `wikiFolder`: the wiki's folder, as that core says (an Obsidian vault, say): the one folder outside the app's own it may open.
+type Runtime = { child: UtilityProcess; browsers: Browsers; ready: Promise<void>; summary: WorkspaceSummary; busy: boolean; wikiFolder: string }
 const cores = new Map<string, Runtime>()
 const workspaceList = (): WorkspaceList => ({ selected: registry.selected().id, workspaces: registry.list().map((w) => cores.get(w.id)?.summary ?? { id: w.id, name: w.name, isDefault: w.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }) })
 const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()) }
 
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
+const localKey = randomBytes(32).toString('hex')
+
 function startCore(workspace: Workspace): Runtime {
   const existing = cores.get(workspace.id)
   if (existing && existing.summary.status !== 'failed') return existing
@@ -61,14 +65,14 @@ function startCore(workspace: Workspace): Runtime {
   }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: `tucano-core-${workspace.id}`,
-    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_LOCALE: systemLocale ?? '' }
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
   })
   let resolve!: () => void
   let reject!: (e: Error) => void
   const ready = new Promise<void>((yes, no) => { resolve = yes; reject = no })
   // Background startup errors are visible in the switcher, not unhandled rejections.
   void ready.catch(() => {})
-  const runtime: Runtime = { child, ready, busy: false, summary: { id: workspace.id, name: workspace.name, isDefault: workspace.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }, browsers: new Browsers((agentId, shown) => child.postMessage({ type: 'browser-shown', agentId, shown }), workspace.isDefault ? '' : `${workspace.id}-`) }
+  const runtime: Runtime = { child, ready, busy: false, wikiFolder: '', summary: { id: workspace.id, name: workspace.name, isDefault: workspace.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }, browsers: new Browsers((agentId, shown) => child.postMessage({ type: 'browser-shown', agentId, shown }), workspace.isDefault ? '' : `${workspace.id}-`) }
   cores.set(workspace.id, runtime)
   const timer = setTimeout(() => {
     reject(new Error(L('O workspace demorou demais para iniciar.', 'The workspace took too long to start.')))
@@ -91,6 +95,7 @@ function startCore(workspace: Workspace): Runtime {
     } else handleCore(child, msg, workspace, runtime)
   })
   child.on('exit', (code) => {
+    console.error(`[main] core of workspace ${workspace.id} exited with code ${code}`)
     clearTimeout(timer)
     reject(new Error(`Workspace core exited (${code})`))
     runtime.summary.status = 'failed'
@@ -98,6 +103,8 @@ function startCore(workspace: Workspace): Runtime {
     runtime.browsers.quit()
     syncBusy()
     if (!quitting) publishWorkspaces()
+    // The one on screen: the window says so. Reloading the page connects again, and connecting starts a new core.
+    if (!quitting && registry.selected().id === workspace.id && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('core:down')
   })
   return runtime
 }
@@ -112,7 +119,9 @@ type CoreRequest =
   | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
+  | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
+  | { type: 'wiki_dir'; path: string }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -132,6 +141,8 @@ ipcMain.on('viewing', (_e, id: unknown) => {
 // you, two notes when the work is done. Never more than one at a time.
 let chirpedAt = 0
 const resource = (name: string): string => (app.isPackaged ? join(process.resourcesPath, name) : join(app.getAppPath(), 'build', name))
+// Dictation's whisper-cli, packed with the app (scripts/whisper.mjs); in development, the one built for this machine.
+const whisperDir = (): string => (app.isPackaged ? join(process.resourcesPath, 'whisper') : join(app.getAppPath(), 'build', 'whisper', `${({ darwin: 'mac', win32: 'win' } as Record<string, string>)[process.platform] ?? process.platform}-${process.arch}`))
 // The system's own player: afplay on a Mac; on Windows .NET's SoundPlayer, with nothing
 // to install; on Linux PipeWire's or PulseAudio's, else ALSA's.
 const player = ((): ((file: string) => [string, string[]]) | null => {
@@ -205,7 +216,10 @@ function stillOpen(): void {
   new Notification({
     ...noteIcon(),
     title: L(`O ${NAME} continua aberto`, `${NAME} is still open`),
-    body: L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano perto do relógio ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon by the clock or open Tucano again.'),
+    body:
+      process.platform === 'win32'
+        ? L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano na bandeja, perto do relógio (talvez dentro da setinha ^), ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon in the tray by the clock (maybe inside the little ^ arrow), or open Tucano again.')
+        : L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano perto do relógio ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon by the clock or open Tucano again.'),
     silent: true
   }).show()
 }
@@ -230,19 +244,42 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
             "This Linux has no keyring open (GNOME Keyring or KWallet), and Tucano doesn't keep passwords unencrypted. Open or enable KWallet, or install gnome-keyring, log in again and try once more."
           )
         )
-      if (!safeStorage.isEncryptionAvailable()) throw new Error(L('O cofre do sistema não está disponível.', "The system's vault isn't available."))
-      const data =
-        msg.op === 'encrypt' ? safeStorage.encryptString(msg.data).toString('base64') : safeStorage.decryptString(Buffer.from(msg.data, 'base64'))
+      if (!safeStorage.isEncryptionAvailable())
+        throw new Error(
+          process.platform === 'darwin'
+            ? L('O Tucano não conseguiu usar as Chaves do macOS. Reinicie o Tucano e, se o Mac pedir, clique em Permitir.', "Tucano couldn't use the macOS Keychain. Restart Tucano and, if the Mac asks, click Allow.")
+            : process.platform === 'win32'
+              ? L('O Tucano não conseguiu usar a proteção de dados do Windows. Reinicie o Tucano e entre de novo na sua conta do Windows se continuar.', "Tucano couldn't use Windows data protection. Restart Tucano, and sign in to Windows again if it keeps happening.")
+              : L('O Tucano não conseguiu usar o chaveiro do sistema. Reinicie o Tucano e tente de novo.', "Tucano couldn't use the system's keyring. Restart Tucano and try again.")
+        )
+      let data: string
+      if (msg.op === 'encrypt') data = safeStorage.encryptString(msg.data).toString('base64')
+      else {
+        try {
+          data = safeStorage.decryptString(Buffer.from(msg.data, 'base64'))
+        } catch (e) {
+          // Saved under another key (the system's changed, or the data came from another computer).
+          console.error('[main] decrypt', e)
+          throw new Error(L('Não consegui abrir as credenciais salvas (a chave do sistema mudou). Conecte de novo.', "I couldn't open the saved credentials (the system's key changed). Connect again."))
+        }
+      }
       child.postMessage({ type: 'secret-result', id: msg.id, data })
     } catch (e) {
       child.postMessage({ type: 'secret-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
     }
   } else if (msg.type === 'open') {
     if (/^https?:\/\//.test(msg.url)) void shell.openExternal(msg.url)
+  } else if (msg.type === 'open_local') {
+    // Never openPath on what isn't a folder or a PDF: that would run an app or a script.
+    if (msg.how === 'open') void shell.openPath(msg.path)
+    else shell.showItemInFolder(msg.path)
+  } else if (msg.type === 'wiki_dir') {
+    runtime.wikiFolder = normalize(msg.path)
   } else if (msg.type === 'open_path') {
     // Only folders the app keeps (an agent's computer, the backups), never an arbitrary path.
     const path = normalize(msg.path)
-    if (path.startsWith(join(workspace.dataDir, 'computers') + sep) || path === join(workspace.dataDir, 'backups')) void shell.openPath(path)
+    const wikiFolder = runtime.wikiFolder
+    if (path.startsWith(join(workspace.dataDir, 'computers') + sep) || path === join(workspace.dataDir, 'backups') || (!!wikiFolder && (path === wikiFolder || path.startsWith(join(wikiFolder, 'fontes', 'arquivos') + sep)))) void shell.openPath(path)
   } else if (msg.type === 'notify') {
     // Already looking at that conversation: nothing to tell.
     if (registry.selected().id === workspace.id && msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
@@ -250,7 +287,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     if (sound) chirp(sound)
     if (!Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
-    n.on('click', () => { void switchWorkspace(workspace.id).then(() => showWindow(msg.conversationId)).catch(console.error) })
+    n.on('click', () => { void switchWorkspace(workspace.id).then(() => showWindow(msg.conversationId, msg.page, msg.threadId)).catch(console.error) })
     n.show()
   } else if (msg.type === 'busy') {
     runtime.busy = msg.busy
@@ -287,7 +324,7 @@ const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms)
 // Loads the page in a hidden window with its own throwaway session (no cookies
 // from anything else) and captures it.
 async function screenshot(o: { url: string; width: number; height: number; fullPage: boolean }): Promise<Buffer> {
-  if (!/^https?:\/\//.test(o.url)) throw new Error('só http e https')
+  if (!/^https?:\/\//.test(o.url)) throw new Error(L('Só dá pra capturar endereços http e https.', 'Only http and https addresses can be captured.'))
   const win = new BrowserWindow({
     show: false,
     width: o.width,
@@ -297,7 +334,7 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   try {
-    await Promise.race([win.loadURL(o.url), wait(30_000).then(() => Promise.reject(new Error('a página não carregou em 30 s')))])
+    await Promise.race([win.loadURL(o.url), wait(30_000).then(() => Promise.reject(new Error(L('A página não carregou em 30 s. Confira o endereço ou tente de novo.', "The page didn't load in 30 s. Check the address or try again."))))])
     await wait(1200) // fonts, charts and client-side rendering
     if (o.fullPage) {
       const h = Number(await win.webContents.executeJavaScript('Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)'))
@@ -314,6 +351,16 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
 
 function serveArtifact(req: Request): Promise<Response> | Response {
   const u = new URL(req.url)
+  if (u.host === 'local') {
+    // A file the core checked and signed for the window: see resolveLocal.
+    const path = verifyLocalUrl(localKey, u)
+    if (!path) return new Response('not found', { status: 404 })
+    return net.fetch(pathToFileURL(path).toString(), { headers: req.headers }).then((r) => {
+      const headers = new Headers(r.headers)
+      headers.set('Content-Security-Policy', 'sandbox')
+      return new Response(r.body, { status: r.status, headers })
+    })
+  }
   const [id = '', name = ''] = u.pathname.slice(1).split('/')
   const dir = join(registry.selected().dataDir, 'artifacts', id)
   const file = normalize(join(dir, decodeURIComponent(name)))
@@ -470,17 +517,17 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
 })
 
 // Brings the window back (closing it keeps the app and its routines running),
-// optionally opening a conversation.
+// optionally opening a conversation (and a thread in it).
 // The app's own window; agents' browsers are windows too, hidden, and never count as it.
 let mainWindow: BrowserWindow | null = null
 
-function showWindow(conversationId?: string): void {
+function showWindow(conversationId?: string, page?: 'skills', threadId?: string): void {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
-  if (!conversationId) return
-  const go = (): void => win.webContents.send('navigate', conversationId)
+  if (!conversationId && !page) return
+  const go = (): void => (page ? win.webContents.send('navigate-page', page) : win.webContents.send('navigate', conversationId, threadId))
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go)
   else go()
 }
@@ -627,6 +674,13 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
     app.exit(0)
   })
 } else if (primary) app.whenReady().then(() => {
+  // Dictation: audio, for the app's own page. A service open in the side panel or anything else asks in vain.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, done, details) => {
+    if (permission !== 'media') return done(true)
+    const media = details as MediaAccessPermissionRequest
+    const own = !!BrowserWindow.fromWebContents(contents) && (media.requestingUrl ?? '').startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'file://')
+    done(own && !!media.mediaTypes?.length && media.mediaTypes.every((t) => t === 'audio'))
+  })
   setMenu()
   protocol.handle('tucano', serveArtifact)
   registry = new Workspaces(dataDir())

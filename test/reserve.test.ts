@@ -38,14 +38,14 @@ let codex: ReturnType<typeof counted>
 
 function runner(claude: Engine): Runner {
   codex = counted(fakeEngine('codex', { delayMs: 1 }))
-  const engines: Record<EngineId, Engine> = { claude, codex, opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') }
+  const engines: Record<EngineId, Engine> = { claude, codex, opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')) })
 }
 const reply = (): Message => db.messages().find((m) => m.author.kind === 'agent')!
 
 beforeEach(() => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent({ fallbackModelId: 'gpt-5.6-luna' }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
 })
@@ -100,7 +100,7 @@ describe('the reserve model', () => {
       r = runner(claude)
       await r.send('d1', 'oi')
       await r.idle()
-      expect(reply().run).toMatchObject({ status: 'failed', error: 'usage limit reached' })
+      expect(reply().run).toMatchObject({ status: 'failed', error: expect.stringContaining('chegou no limite') as string, errorDetail: 'usage limit reached' })
       expect(codex.turns).toHaveLength(0)
     }
   })
@@ -118,6 +118,9 @@ describe('out of quota', () => {
   it('knows the CLIs’ words for a subscription that’s out', () => {
     for (const m of [
       "You've hit your limit · resets 5pm (America/Sao_Paulo)",
+      "You've hit your 5-hour limit · resets 5:30pm (Europe/Madrid)",
+      "You've hit your weekly limit · resets Nov 5, 11pm (Europe/Madrid)",
+      "You've hit your Opus weekly limit · resets Nov 5, 11pm (Europe/Madrid)",
       'Claude AI usage limit reached|1792374000',
       '5-hour limit reached ∙ resets 3pm',
       "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at 3:21 PM.",

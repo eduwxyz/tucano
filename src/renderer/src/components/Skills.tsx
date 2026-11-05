@@ -25,6 +25,7 @@ import {
   isTeam
 } from '../store'
 import { Card, Field, Sheet } from './Pages'
+import { confirmDialog } from './Dialogs'
 import { ago, AgentAvatar, Icon, time } from './ui'
 import { Modal } from './Modal'
 
@@ -146,9 +147,19 @@ export function SkillsPage(): ReactNode {
                   <span className="skill-line__desc">{k.description}</span>
                 </span>
                 <button className="text-btn" onClick={() => archiveSkill(k.id, false)}>
-                  {L('Reativar', 'Bring back')}
+                  {L('Reativar', 'Reactivate')}
                 </button>
-                <button className="text-btn" onClick={() => removeSkill(k.id)}>
+                <button
+                  className="text-btn"
+                  onClick={() =>
+                    void confirmDialog({
+                      title: L(`Apagar a skill “${k.name}”?`, `Delete the skill “${k.name}”?`),
+                      body: L('Ela some da lista e nenhum agente volta a usar. Não dá pra desfazer.', "It leaves the list and no agent uses it again. This can't be undone."),
+                      confirm: L(`Apagar “${k.name}”`, `Delete “${k.name}”`),
+                      danger: true
+                    }).then((ok) => ok && removeSkill(k.id))
+                  }
+                >
                   {L('Apagar', 'Delete')}
                 </button>
               </div>
@@ -385,7 +396,7 @@ function History({ skill }: { skill: Skill }): ReactNode {
   useEffect(() => {
     void skillVersions(skill.id).then(setVersions)
   }, [skill.id, skill.updatedAt])
-  if (!versions) return <p className="muted small">{L('Carregando…', 'Loading…')}</p>
+  if (!versions) return <p className="muted small">{L('Buscando o histórico…', 'Fetching the history…')}</p>
   if (versions.length === 0) return <p className="muted small">{L('Nenhuma mudança ainda: esta é a primeira versão.', 'No changes yet: this is the first version.')}</p>
   return (
     <div className="skill__history">

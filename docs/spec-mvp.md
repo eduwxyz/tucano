@@ -62,7 +62,7 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
 - O estado do run, os steps e a chamada de ferramenta pendente ficam no SQLite. Um run esperando aprovação ou resposta sobrevive a fechar o app.
 - **Sem processo pendurado:** quando o run precisa esperar (aprovação ou `ask_user`), o turno da CLI termina. Depois da decisão, o app abre um turno novo com o resultado no contexto. Assim nada depende de um processo vivo por horas.
 - Ao reabrir o app, runs que estavam em `running` viram `interrupted`, com um botão **Retomar** (abre um turno novo a partir do último step completo).
-- **Contexto de cada turno** (o app monta, a CLI não guarda sessão entre turnos):
+- **Contexto de cada turno** (o app monta; no Claude Code, a sessão é guardada por agente, conversa e thread, e as respostas seguintes mandam só o que é novo; veja *Sessão guardada* abaixo):
   1. Contexto do workspace
   2. Instruções do agente
   3. Últimas N mensagens da conversa (default 30), com o autor de cada uma
@@ -86,7 +86,9 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
 
 ### 5. Motores
 
-- **Claude Code:** `claude -p --output-format stream-json --verbose --include-partial-messages`, com `--model`, `--system-prompt`, `--tools ""` (nenhuma ferramenta embutida: sem shell, sem arquivos), `--strict-mcp-config --mcp-config <gateway>`, `--setting-sources ""` (ignora hooks, plugins e configurações do usuário) e `--no-session-persistence`. Não usar `--bare`, que desliga o login por assinatura.
+- **Claude Code:** `claude -p --output-format stream-json --verbose --include-partial-messages`, com `--model`, `--system-prompt`, `--tools ""` (nenhuma ferramenta embutida: sem shell, sem arquivos), `--strict-mcp-config --mcp-config <gateway>`, `--setting-sources ""` (ignora hooks, plugins e configurações do usuário) e `--no-session-persistence` (fora as respostas de agente, que guardam sessão). Não usar `--bare`, que desliga o login por assinatura.
+- **Sessão guardada (Claude Code):** a primeira resposta de um agente numa conversa ou thread começa uma sessão (`--session-id`) com a conversa inteira; as próximas a retomam (`--resume`) mandando só as mensagens novas desde a última resposta dele e a tarefa. O processo fica aberto 5 min depois de uma resposta (no máximo 2 esperando, ~140 MB cada), e a próxima é escrita nele; depois disso, a próxima abre outro processo e retoma do disco. O token do gateway fica o mesmo enquanto a sessão vive (entre respostas, as chamadas são recusadas). Começa outra sessão quando: o system prompt ou as ferramentas mudam (o `--resume` mantém o primeiro system prompt), uma mensagem que ela viu foi editada ou apagada, aparece uma mensagem no meio, a última resposta não terminou bem (parada, travada, limite, reserva), em "Tentar de novo", passou de ~60k tokens de contexto ou de 55 min parada (o cache dura 1 h), ou o app reabriu. Enquanto outro agente ainda escreve uma mensagem que ela veria pela metade, a resposta vai sem sessão. Os arquivos das sessões largadas são apagados.
+- **Começo antecipado (Claude Code):** enquanto a pessoa digita (no máximo um aviso a cada 20 s por conversa ou thread), o app já abre o Claude Code de quem vai responder, pra resposta não esperar o segundo que ele leva pra subir: numa DM (ou canal de um agente só), o processo da sessão guardada, se ele já tinha fechado; num canal de vários agentes, um processo do router. O do router só serve pra próxima decisão e fecha depois de 2 min sem uso (no máximo 2 esperando). Não abre nada antes da primeira resposta numa conversa, nem pra uma mensagem que abre thread nova, nem com os agentes pausados ou com o Jev de router.
 - **Codex:** `codex exec --json --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check -s read-only -C <diretório vazio do run>`, com `-m`, `-c model_reasoning_effort=…`, skills e docs de projeto desligados, busca na web só com a Web ligada (§16), `--disable` em cada recurso embutido (shell, exec, plugins, apps, navegador, computer use, multiagente, imagens, memórias, hooks) e o gateway como único servidor MCP via `-c mcp_servers…` com `default_tools_approval_mode="approve"` (quem decide é o gateway).
 - **O Codex roda com um home próprio do app** (`HOME` e `CODEX_HOME` numa pasta do Tucano). Medido com `codex debug prompt-input`: com o home do usuário, mesmo com `--ignore-user-config`, ele carrega o `~/.codex/AGENTS.md` e as skills do usuário, e num teste real usou o shell pra rodar uma ferramenta pessoal. Por isso o usuário faz um login próprio do Codex pro Tucano, pelo fluxo do próprio Codex, uma vez.
 - O app **nunca** toca em credenciais: não lê, não guarda, não repassa token. O login acontece no fluxo da própria CLI (`claude auth login` / `codex login`), que o app abre num Terminal.
@@ -272,7 +274,7 @@ Receitas que os agentes seguem pra um tipo de tarefa ("como rodar os testes do C
 - Um bot do próprio usuário (criado no @BotFather): o token vai em Configurações, conferido com o Telegram e guardado no cofre do Mac. O app busca as mensagens do bot (long polling), então nada precisa chegar no Mac.
 - **Pareamento:** o app mostra um código; só o chat que mandar `/start <código>` fica com o bot. Mensagens e toques de outros chats são ignorados.
 - **O que chega:** cada aprovação, com Aprovar/Recusar (alto risco pede um segundo toque); cada pergunta de agente (`ask_user`), que eu respondo respondendo à mensagem, e a resposta entra na conversa como se eu tivesse escrito; o fim das rotinas e os avisos de limite.
-- O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo), e a tela diz isso. Desligado até eu colar um token.
+- O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo) e as respostas das rotinas, e a tela diz isso. Desligado até eu colar um token.
 
 ### 20. Boletim e custo por tarefa (M12)
 
@@ -336,6 +338,19 @@ Quem abre o app pela primeira vez sai dele com um agente trabalhando, não com u
 - Dá pra pular a introdução ou fechá-la.
 - **Primeiros passos:** uma lista na barra lateral com nove recursos (time, conector, memória, rotina, projeto, aprovação, celular…). Cada item se marca sozinho pelo estado do app, e o próximo leva à tela certa. Ela some com "Esconder a lista".
 - Em Configurações: **Rever a introdução** e **Mostrar os primeiros passos**. Uma instalação que já existia não vê nada disso até pedir.
+
+### 26. Importar de outro app
+
+Quem chega de outro app de agentes traz o time em vez de montar de novo, sem que um arquivo de fora ganhe acesso a nada.
+
+- **Onde:** Configurações → Time e backup → **Importar de outro app…**, que lê um `.zip`.
+- **OpenBot:** a exportação dele (Server settings → Transfer → Export from this server, `openbot-transfer.json`, formato `openbot-instance-transfer` v1). Só o formato documentado é lido; nenhum código do OpenBot (PolyForm Noncommercial) entra no Tucano.
+- **Apps sem exportação (Grok Bot):** o botão **Skill pro Grok Bot (experimental)** baixa uma skill nossa; um agente de lá a segue e escreve um `.zip` no formato do Tucano (`tucano-import.json`, `tucano-agent-import` v1). Experimental até alguém testar dentro do Grok Bot.
+- **O que vem:** nome, papel, instruções, foto, cor, esforço, skills (só o `SKILL.md`), rotinas, memórias e, no Grok Bot, os grupos. O modelo vem quando o CLI dele está pronto aqui; senão, o agente recebe um modelo que roda, com aviso.
+- **Governança:** os agentes chegam **sem nenhum conector, com a busca na web desligada e sem computador**; as rotinas chegam desligadas; as memórias esperam confirmação. Os servidores MCP do outro app só aparecem pelo nome no resumo, nunca viram conectores (um arquivo poderia mandar rodar qualquer comando). Um agente importado **nunca entra num canal que já existe**: o grupo vira um canal novo (`#nome-2` se o nome estiver ocupado), e nele entram **só os agentes criados nesta importação**. Um agente que já estava aqui (mesmo que pareça igual, como uma cópia do Tuca) nunca é posto pelo arquivo numa sala com um estranho; o resumo diz quem ficou de fora.
+- **Limites por arquivo:** 40 agentes, 30 canais e, por agente, 20 skills, 20 rotinas e 40 memórias de até 300 caracteres. O que passa disso, ou não dá pra ler, fica de fora sozinho (uma skill ruim não derruba o agente) e aparece no resumo, que mostra até 40 linhas.
+- **Importar de novo** não duplica: o mesmo agente (nome, papel e instruções), a mesma skill e o mesmo canal (nome e agentes) ficam como estão.
+- **O zip** é lido em partes, só com o `zlib` do Node: caminhos com `..` ou fora da pasta do agente são ignorados, entradas criptografadas são ignoradas, ZIP64 é recusado, e cada entrada tem um teto de tamanho conferido depois de descompactar.
 
 ## Acceptance criteria
 

@@ -76,7 +76,7 @@ export function UsagePage(): ReactNode {
   return (
     <Sheet wide title={L('Uso e limites', 'Usage and limits')} lede={subtitle}>
       {!u ? (
-        <p className="read-empty">{L('Calculando…', 'Crunching…')}</p>
+        <p className="read-empty">{L('Fazendo as contas…', 'Doing the math…')}</p>
       ) : (
         <>
           <Month u={u} claude={billing.find((b) => b.id === 'claude')?.status} />

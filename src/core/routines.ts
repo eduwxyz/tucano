@@ -4,9 +4,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L, locale } from '../shared/lang'
+import { firstSentence } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import { describeSchedule, MAX_AGENT_ROUTINES, nextRun, routineCap, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
+import { errorReason } from './connectors'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
 
@@ -85,7 +87,7 @@ export interface RoutineDeps {
   connectors?: { call(id: string, tool: string, args: Record<string, unknown>): Promise<CallToolResult>; list(): Connector[] }
   blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
   emit: (e: CoreEvent) => void
-  notify?: (title: string, body: string, conversationId: string) => void
+  notify?: (title: string, shortText: string, conversationId: string, fullText?: string) => void
   now?: () => number
   wait?: (ms: number) => Promise<void> // between tries (tests skip it)
 }
@@ -203,7 +205,7 @@ export class Routines {
     if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error(L(`a ferramenta ${t.tool} não está liberada como leitura`, `the tool ${t.tool} isn't enabled for reading`))
     const r = await this.deps.connectors.call(t.connectorId, t.tool, t.args)
     const text = r.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n')
-    if (r.isError) throw new Error(text.slice(0, 200) || L('a ferramenta deu erro', 'the tool returned an error'))
+    if (r.isError) throw new Error(errorReason(r).slice(0, 200))
     return { items: eventItems(text), source: `${connector.name} · ${t.tool}` }
   }
 
@@ -352,7 +354,9 @@ export class Routines {
         if (!reply) return
         const latest = this.deps.db.routine(id)
         if (latest) this.store({ ...latest, lastAt: this.now(), lastMessageId: reply.id })
-        this.deps.notify?.(`${agentName(this.deps.db, r.agentId)} · ${r.name}`, outcome(reply), r.conversationId)
+        const title = `${agentName(this.deps.db, r.agentId)} · ${r.name}`
+        const fullText = reply.run?.status === 'done' ? reply.text.trim() : ''
+        this.deps.notify?.(title, outcome(reply), r.conversationId, fullText || undefined)
       })
       .catch((e: unknown) => console.error('[routines]', e))
       .finally(() => {
@@ -387,7 +391,8 @@ export async function retrying(
     const wait = RETRY_WAITS_MS[i]!
     const base = reply.run.error ?? ''
     const min = Math.round(wait / 60_000)
-    note(reply, `${plain(base)}. ${L(`Tento de novo em ${min} min (tentativa ${i + 2} de ${tries}).`, `Trying again in ${min} min (try ${i + 2} of ${tries}).`)}`)
+    // The headline only: the rest of the error says "try again later", and this is the later.
+    note(reply, `${firstSentence(plain(base))} ${L(`Tento de novo em ${min} min (tentativa ${i + 2} de ${tries}).`, `Trying again in ${min} min (try ${i + 2} of ${tries}).`)}`)
     await deps.wait(wait)
     const now = deps.db.message(reply.id)
     if (now?.run?.status !== 'failed' || !deps.enabled()) {
@@ -417,7 +422,8 @@ export function outcome(reply: Message): string {
     case 'paused':
       return L('Pausou no teto da resposta. Abra pra continuar.', "Paused at the reply's cap. Open it to go on.")
     case 'failed':
-      return `${L('Falhou', 'Failed')}: ${reply.run.error ?? L('erro desconhecido', 'unknown error')}`
+      // The headline only (what happened); the rest is in the conversation.
+      return `${reply.run.error ? firstSentence(reply.run.error) : L('Falhou.', 'Failed.')} ${L('Abra pra resolver.', 'Open it to fix it.')}`
     case 'stopped':
       return L('Foi interrompida.', 'Was interrupted.')
   }

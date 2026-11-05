@@ -31,6 +31,7 @@ import {
   type Settings,
   type Skill,
   type SkillVersion,
+  type ThreadSummary,
   type ToolClass,
   type Trigger
 } from '../shared/types'
@@ -276,6 +277,22 @@ const MIGRATIONS = [
   ALTER TABLE agents ADD COLUMN avatar TEXT;
   `,
   `
+  ALTER TABLE agents ADD COLUMN wiki TEXT;
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN wiki_capture INTEGER;
+  `,
+  `
+  ALTER TABLE messages ADD COLUMN thread_id TEXT;
+  CREATE INDEX messages_by_thread ON messages (conversation_id, thread_id, at);
+  `,
+  `
+  ALTER TABLE messages ADD COLUMN thread_summary TEXT;
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN threads INTEGER;
+  `,
+  `
   CREATE TABLE IF NOT EXISTS message_notifications (
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     phase TEXT NOT NULL,
@@ -366,22 +383,13 @@ export class Db {
   private migrate(file: string): void {
     const { user_version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
     this.created = user_version === 0
-    if (user_version > MIGRATIONS.length) throw new Error('This workspace needs a newer Tucano version')
+    // A copy from before the update, among the daily ones (and pruned with them).
     if (user_version > 0 && user_version < MIGRATIONS.length && file !== ':memory:') {
       const backups = join(dirname(file), 'backups')
       mkdirSync(backups, { recursive: true })
-      this.backupTo(join(backups, `before-schema-${user_version}-${Date.now()}.db`))
+      this.backupTo(join(backups, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-schema-${user_version}.db`))
     }
-    // Workspace previews used upstream's next version for unread tracking.
-    // Identify those schemas by their columns before replaying from the fork.
-    const forkVersion = MIGRATIONS.findIndex((sql) => sql.includes('ADD COLUMN fallback_model'))
-    const avatarVersion = MIGRATIONS.findIndex((sql) => sql.includes('ADD COLUMN avatar'))
-    const hasNotifications = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_notifications'").get()
-    const columns = new Set((this.db.prepare('PRAGMA table_info(agents)').all() as { name: string }[]).map((column) => column.name))
-    let startVersion = user_version
-    if (hasNotifications && user_version === forkVersion + 1 && !columns.has('fallback_model')) startVersion = forkVersion
-    else if (hasNotifications && user_version === avatarVersion + 1 && !columns.has('avatar')) startVersion = avatarVersion
-    for (let v = startVersion; v < MIGRATIONS.length; v++) {
+    for (let v = user_version; v < MIGRATIONS.length; v++) {
       this.tx(() => {
         this.db.exec(MIGRATIONS[v]!)
         this.db.exec(`PRAGMA user_version = ${v + 1}`)
@@ -446,6 +454,7 @@ export class Db {
       ...(r['custom_color'] ? { customColor: str(r['custom_color']) } : {}),
       ...(r['picture'] ? { picture: str(r['picture']) } : {}),
       ...(r['avatar'] ? { avatar: JSON.parse(str(r['avatar'])) as Agent['avatar'] } : {}),
+      ...(r['wiki'] === 'none' || r['wiki'] === 'read' ? { wiki: r['wiki'] } : {}),
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
@@ -465,14 +474,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, custom_color, picture, avatar, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, custom_color, picture, avatar, wiki, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
            limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar`
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -501,6 +510,8 @@ export class Db {
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
+      ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {}),
+      ...(r['threads'] === 1 ? { threads: true } : {}),
       unread: Number(r['unread'])
     }))
   }
@@ -517,13 +528,23 @@ export class Db {
 
   createConversation(c: Omit<Conversation, 'unread'>): void {
     this.tx(() => {
-      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, created_at) VALUES (?, ?, ?, ?, ?)').run(c.id, c.kind, c.name, c.topic ?? null, Date.now())
+      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, threads, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(c.id, c.kind, c.name, c.topic ?? null, c.threads ? 1 : null, Date.now())
       for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(c.id, m)
     })
   }
 
   renameConversation(id: string, name: string): void {
     this.db.prepare('UPDATE conversations SET name = ? WHERE id = ?').run(name, id)
+  }
+
+  // Off: the wiki's curator leaves the conversation out. On is the default (stored as null).
+  setWikiCapture(id: string, on: boolean): void {
+    this.db.prepare('UPDATE conversations SET wiki_capture = ? WHERE id = ?').run(on ? null : 0, id)
+  }
+
+  // On: answers go in threads. Off, in the conversation, is the default (stored as null).
+  setThreads(id: string, on: boolean): void {
+    this.db.prepare('UPDATE conversations SET threads = ? WHERE id = ?').run(on ? 1 : null, id)
   }
 
   setTopic(id: string, topic: string | undefined): void {
@@ -587,7 +608,9 @@ export class Db {
       text: str(r['text']),
       at: Number(r['at']),
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
-      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined
+      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
+      threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
+      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {})
     }
   }
 
@@ -595,9 +618,37 @@ export class Db {
     return (this.db.prepare('SELECT * FROM messages ORDER BY at').all() as Row[]).map((r) => this.toMessage(r))
   }
 
-  recentMessages(conversationId: string, limit: number): Message[] {
-    const rows = this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY at DESC LIMIT ?').all(conversationId, limit) as Row[]
+  // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
+  recentMessages(conversationId: string, limit: number, threadId?: string | null): Message[] {
+    const where = threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?'
+    const args = typeof threadId === 'string' ? [conversationId, threadId, limit] : [conversationId, limit]
+    const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ?${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
+  }
+
+  // A thread's summary, on its first message; leave `until` out to keep it (a hand edit).
+  setThreadSummary(rootId: string, text: string, until?: number): void {
+    const kept = until ?? this.message(rootId)?.threadSummary?.until ?? 0
+    this.db.prepare('UPDATE messages SET thread_summary = ? WHERE id = ?').run(JSON.stringify({ text, until: kept, at: Date.now() } satisfies ThreadSummary), rootId)
+  }
+
+  // The messages that started a thread with replies in it.
+  threadRoots(conversationId: string): Set<string> {
+    const rows = this.db.prepare('SELECT DISTINCT thread_id FROM messages WHERE conversation_id = ? AND thread_id IS NOT NULL').all(conversationId) as Row[]
+    return new Set(rows.map((r) => str(r['thread_id'])))
+  }
+
+  // Threads quiet since `before`, active after `since`, with something said after their summary.
+  quietThreads(before: number, since: number): { id: string; conversationId: string; last: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.id, r.conversation_id, MAX(m.at) AS last, COALESCE(json_extract(r.thread_summary, '$.until'), 0) AS until
+         FROM messages r JOIN messages m ON m.thread_id = r.id
+         WHERE r.thread_id IS NULL AND m.author_kind != 'system'
+         GROUP BY r.id HAVING last < ? AND last > ? AND last > until ORDER BY last`
+      )
+      .all(before, since) as Row[]
+    return rows.map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']), last: Number(r['last']) }))
   }
 
   // Oldest first.
@@ -619,7 +670,7 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
       .run(
@@ -630,7 +681,8 @@ export class Db {
         m.text,
         m.at,
         m.run ? JSON.stringify(m.run) : null,
-        m.routine ? JSON.stringify(m.routine) : null
+        m.routine ? JSON.stringify(m.routine) : null,
+        m.threadId ?? null
       )
   }
 

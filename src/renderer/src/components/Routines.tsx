@@ -1,7 +1,7 @@
 // Routines (spec §14, §17): requests for an agent that run on their own, at a
 // time or when something happens (a new item in a connector, a call on the Mac).
 import { L, lang, locale } from '../../../shared/lang'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   agentById,
   checkTrigger,
@@ -351,18 +351,47 @@ function Calendar({
   const [ghost, setGhost] = useState<{ day: number; min: number } | null>(null)
   const today = new Date(now).toDateString()
 
+  // A crowded hour grows taller (same for all seven days, so rows stay aligned) instead of
+  // pushing its routines into the next hours. Extra room accrues at the end of the hour.
+  const { offsets, total } = useMemo(() => {
+    const n = h1 - h0
+    const heights = Array.from({ length: n }, () => HOUR)
+    for (const d of days) {
+      const last = Array.from({ length: n }, () => -Infinity)
+      for (const o of occs.filter((x) => x.at >= d && x.at < d + DAY).sort((a, b) => a.at - b.at)) {
+        const t = new Date(o.at)
+        const i = t.getHours() - h0
+        if (i < 0 || i >= n) continue
+        const top = Math.max((t.getMinutes() / 60) * HOUR, (last[i] ?? -Infinity) + BLOCK + 2)
+        last[i] = top
+        heights[i] = Math.max(heights[i] ?? HOUR, Math.ceil(top + BLOCK + 2)) // whole pixels keep the hour lines sharp
+      }
+    }
+    const offsets: number[] = []
+    let sum = 0
+    for (const h of heights) {
+      offsets.push(sum)
+      sum += h
+    }
+    return { offsets, total: sum }
+  }, [days, occs, h0, h1])
+  const y = (hour: number, minute: number): number => (offsets[Math.max(0, Math.min(offsets.length - 1, hour - h0))] ?? 0) + (minute / 60) * HOUR
+
   // Opens on the first thing of the week (or now, when the week is empty).
   useEffect(() => {
     const el = scroller.current
     if (!el) return
     const focus = occs.length ? Math.min(...occs.map((o) => new Date(o.at).getHours())) : days.some((d) => new Date(d).toDateString() === today) ? new Date(now).getHours() : h0
-    el.scrollTop = Math.max(0, (focus - h0 - 1.5) * HOUR)
+    el.scrollTop = Math.max(0, y(focus, 0) - 1.5 * HOUR)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days[0]])
 
   const slot = (e: React.MouseEvent<HTMLDivElement>): number => {
-    const y = e.clientY - e.currentTarget.getBoundingClientRect().top
-    return Math.max(h0 * 60, Math.min(h1 * 60 - 30, h0 * 60 + Math.floor(y / (HOUR / 2)) * 30))
+    const py = e.clientY - e.currentTarget.getBoundingClientRect().top
+    let row = offsets.length - 1
+    while (row > 0 && (offsets[row] ?? 0) > py) row--
+    const half = Math.min(1, Math.floor(((py - (offsets[row] ?? 0)) / HOUR) * 2))
+    return Math.max(h0 * 60, Math.min(h1 * 60 - 30, (h0 + row) * 60 + half * 30))
   }
   const time = (min: number): string => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 
@@ -382,10 +411,10 @@ function Calendar({
         })}
       </div>
       <div className="cal__scroll" ref={scroller}>
-        <div className="cal__grid" style={{ height: (h1 - h0) * HOUR }}>
+        <div className="cal__grid" style={{ height: total }}>
           <div className="cal__hours">
             {Array.from({ length: h1 - h0 }, (_, i) => (
-              <span key={i} style={{ top: i * HOUR }}>
+              <span key={i} style={{ top: offsets[i] }}>
                 {String(h0 + i).padStart(2, '0')}:00
               </span>
             ))}
@@ -393,11 +422,16 @@ function Calendar({
           {days.map((d) => {
             const isToday = new Date(d).toDateString() === today
             const list = occs.filter((o) => o.at >= d && o.at < d + DAY).sort((a, b) => a.at - b.at)
-            // Blocks closer than their height slide down under each other; each still shows its time.
+            // Blocks closer than their height stack down under each other, but only inside their own hour (its row is tall enough).
             let bottom = -Infinity
+            let rowHour = -1
             const placed = list.map((o) => {
               const t = new Date(o.at)
-              const top = Math.max((t.getHours() - h0 + t.getMinutes() / 60) * HOUR, bottom + 2)
+              if (t.getHours() !== rowHour) {
+                rowHour = t.getHours()
+                bottom = -Infinity
+              }
+              const top = Math.max(y(rowHour, t.getMinutes()), bottom + 2)
               bottom = top + BLOCK
               return { o, top }
             })
@@ -405,13 +439,15 @@ function Calendar({
               <div
                 key={d}
                 className={`cal__col ${isToday ? 'is-today' : ''}`}
-                style={{ backgroundSize: `100% ${HOUR}px` }}
                 onMouseMove={(e) => e.target === e.currentTarget && setGhost({ day: d, min: slot(e) })}
                 onMouseLeave={() => setGhost(null)}
                 onClick={(e) => e.target === e.currentTarget && onSlot(d, time(slot(e)))}
               >
+                {offsets.map((top, i) => (
+                  <div key={i} className="cal__line" style={{ top }} />
+                ))}
                 {ghost?.day === d && (
-                  <div className="cal__ghost" style={{ top: (ghost.min / 60 - h0) * HOUR }}>
+                  <div className="cal__ghost" style={{ top: y(Math.floor(ghost.min / 60), ghost.min % 60) }}>
                     <Icon name="plus" size={11} /> {time(ghost.min)}
                   </div>
                 )}
@@ -445,7 +481,7 @@ function Calendar({
                     </button>
                   )
                 })}
-                {isToday && now >= d && <div className="cal__now" style={{ top: (new Date(now).getHours() - h0 + new Date(now).getMinutes() / 60) * HOUR }} />}
+                {isToday && now >= d && <div className="cal__now" style={{ top: y(new Date(now).getHours(), new Date(now).getMinutes()) }} />}
               </div>
             )
           })}
@@ -549,7 +585,8 @@ function Popover({ occ, rect, now, onClose, onEdit }: { occ: Occ; rect: DOMRect;
       {r?.trigger?.kind === 'webhook' && <Hook token={r.trigger.token} />}
       {r?.trigger?.kind === 'poll' && r.trigger.error && (
         <p className="cal-pop__error" title={r.trigger.error}>
-          {L('A última olhada falhou', 'The last check failed')}: {r.trigger.error}
+          {L(`Não deu pra ler o ${connector?.name ?? 'conector'}: confira se ele está conectado em Conectores.`, `Couldn’t read ${connector?.name ?? 'the connector'}: check that it’s connected in Connectors.`)}
+          <span className="muted small"> ({r.trigger.error})</span>
         </p>
       )}
       {history.length > 0 && (
@@ -568,7 +605,7 @@ function Popover({ occ, rect, now, onClose, onEdit }: { occ: Occ; rect: DOMRect;
       <div className="cal-pop__acts">
         {confirm ? (
           <>
-            <span className="small">{L('Apagar a rotina?', 'Delete the routine?')}</span>
+            <span className="small">{L(`Apagar “${occ.name}”? As respostas que ela já gerou ficam nas conversas.`, `Delete “${occ.name}”? The replies it already produced stay in the conversations.`)}</span>
             <span className="grow" />
             <button className="btn btn--sm btn--ghost" onClick={() => setConfirm(false)}>
               {L('Cancelar', 'Cancel')}
@@ -643,7 +680,12 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
     const x = withArgs(t)
     if (!x) return
     setPreview(L('Olhando…', 'Checking…'))
-    checkTrigger(x).then(setPreview, (e: unknown) => setPreview(`${L('Falhou', 'Failed')}: ${e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)}`))
+    const name = x.kind === 'poll' ? connectors.find((c) => c.id === x.connectorId)?.name : undefined
+    checkTrigger(x).then(setPreview, (e: unknown) =>
+      setPreview(
+        `${L(`Não deu pra ler o ${name ?? 'conector'}: confira se ele está conectado em Conectores.`, `Couldn’t read ${name ?? 'the connector'}: check that it’s connected in Connectors.`)} (${e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)})`
+      )
+    )
   }
 
   const save = async (): Promise<void> => {

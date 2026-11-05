@@ -69,7 +69,7 @@ const agent = (grant: GrantLevel): Agent => ({
 function runner(plan: (turn: Turn, tools: string[]) => Plan, onDb: Db = db): Runner {
   const r = new Runner({
     db: onDb,
-    engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') },
+    engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') },
     settings: async () => settings,
     emit: (e) => events.push(e),
     workDir: join(dir, 'work'),
@@ -101,7 +101,7 @@ beforeEach(async () => {
   db = new Db(join(dir, 'test.db'))
   events = []
   seen = { turns: [], tools: [], results: [] }
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   gateway = new Gateway()
   await gateway.start()
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: (e) => events.push(e), openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback') })
@@ -269,6 +269,45 @@ describe('approvals', () => {
     expect(db.approvals()[0]).toMatchObject({ state: 'expired', outcome: 'Expirou sem decisão.' })
     expect(seen.turns.at(-1)?.prompt).toContain('expirou sem decisão')
   })
+
+  it("approved while the reply is still being written: the reply's last save keeps the decision (#121)", async () => {
+    db.saveAgent(agent('read_write'))
+    // A "model" that asks, then goes on writing; I approve before it ends.
+    let r!: Runner
+    let asked = false
+    const engine: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        seen.turns.push(turn)
+        if (turn.mcpUrl && !asked) {
+          asked = true
+          const client = new Client({ name: 'scripted', version: '0' })
+          await client.connect(new StreamableHTTPClientTransport(new URL(turn.mcpUrl)))
+          await client.callTool({ name: 'tarefas__delete_task', arguments: { id: 2, _motivo: 'duplicada' } })
+          await client.close()
+          await r.decide(db.approvals()[0]!.id, 'approved')
+        }
+        yield { type: 'text', delta: 'pedi pra apagar e sigo escrevendo' }
+        yield { type: 'done', text: 'pedi pra apagar e sigo escrevendo', usage: { inputTokens: 10, cacheReadTokens: 0, outputTokens: 2 } }
+      }
+    }
+    r = new Runner({
+      db,
+      engines: { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') },
+      settings: async () => settings,
+      emit: (e) => events.push(e),
+      workDir: join(dir, 'work'),
+      gateway,
+      connectors
+    })
+    await r.send('d1', 'apaga a tarefa 2')
+    await r.idle()
+
+    expect(db.approvals()[0]).toMatchObject({ state: 'approved', outcome: 'Executou.' })
+    const reply = agentMessages()[0]!
+    expect(reply.run?.status).toBe('done') // not waiting for an approval that was given
+    expect(reply.run?.steps.map((s) => s.label)).toEqual(expect.arrayContaining(['Pediu aprovação', 'Aprovado']))
+  })
 })
 
 describe('pause and resume', () => {
@@ -298,7 +337,7 @@ describe('pause and resume', () => {
         else yield { type: 'done', text: 'feito', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, gemini: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
+    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, gemini: failing, cursor: failing, grok: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
     runnerRef.current = r
     await r.send('d1', 'oi')
     await r.idle()
@@ -401,7 +440,7 @@ describe('pausing and attributing work', () => {
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })
     const r = new Runner({
       db,
-      engines: { claude: fakeEngine('claude', { delayMs: 1, reply: (t) => (t.prompt.includes('Theo · agente') ? 'feito' : '@theo dá uma olhada') }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini') },
+      engines: { claude: fakeEngine('claude', { delayMs: 1, reply: (t) => (t.prompt.includes('Theo · agente') ? 'feito' : '@theo dá uma olhada') }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') },
       settings: async () => settings,
       emit: () => {},
       workDir: join(dir, 'work')
