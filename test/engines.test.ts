@@ -595,6 +595,21 @@ describe('Grok stream', () => {
     expect(web).toEqual([{ type: 'web', action: 'search', detail: 'Node.js LTS' }])
   })
 
+  // Recorded from grok 1.0.70: a web search, a page read, and a gateway tool found with search_tool and called with use_tool.
+  it('reads a recorded turn: its text, each web step once, a running total and the whole turn at the end', () => {
+    const events = feed(grokParser(), fixture('grok-stream-recorded.jsonl'))
+    const done = events.find((e) => e.type === 'done')
+    expect(done && done.type === 'done' && done.text).toContain('Node.js')
+    expect(done).toMatchObject({ usage: { inputTokens: 11445 + 16384, cacheReadTokens: 16384, outputTokens: 560, apiCostUsd: 0.039442 } })
+    expect(events.filter((e) => e.type === 'web')).toEqual([
+      { type: 'web', action: 'search', detail: 'Node.js current LTS version' },
+      { type: 'web', action: 'fetch', detail: 'https://nodejs.org/en' }
+    ])
+    const totals = events.flatMap((e) => (e.type === 'progress' ? [e.tokens] : []))
+    expect(totals.slice(0, 3)).toEqual([2767 + 1152 + 189, 2767 + 1152 + 189 + 7608 + 3840 + 113, 2767 + 1152 + 189 + 7608 + 3840 + 113 + 1070 + 11392 + 258])
+    expect(totals.at(-1)).toBe(11445 + 16384 + 560)
+  })
+
   it('reports a finished page read, and not one still running', () => {
     const running = '{"type":"tool_call","toolCallId":"f1","toolName":"web_fetch","status":"in_progress","rawInput":{"url":"https://nodejs.org"}}'
     const done = '{"type":"tool_call_update","toolCallId":"f1","status":"completed"}'
@@ -630,6 +645,8 @@ describe('Grok config', () => {
     expect(args[args.indexOf('--prompt-file') + 1]).toBe('/tmp/prompt.txt')
     expect(args[args.indexOf('--leader-socket') + 1]).toBe('/tmp/leader.sock')
     expect(args).not.toContain('-p')
+    const withGateway = grokArgs({ ...base, mcpUrl: 'http://127.0.0.1:1/mcp/x' }, 'p.txt', 's.sock')
+    expect(withGateway[withGateway.indexOf('--system-prompt-override') + 1]).toMatch(/^You are Iris\.\n\n.*tucano__lembrar/s)
     expect(args).toContain('--no-subagents')
     expect(args).toContain('--no-plan')
     expect(args).toContain('--no-wait-for-background')
@@ -656,6 +673,9 @@ describe('Grok config', () => {
     const baseEnv = { PATH: '/bin', XAI_API_KEY: 'secret', GROK_CODE_XAI_API_KEY: 'other', GROK_CONFIG: '/c', GROK_CONFIG_PATH: '/c2', GROK_AGENT: 'x' }
     const withAuth = grokTurnEnv(baseEnv, '/turn', '/real/auth.json')
     expect(withAuth['GROK_HOME']).toBe('/turn')
+    expect(withAuth['HOME']).toBe('/turn')
+    expect(withAuth['USERPROFILE']).toBeUndefined()
+    expect(grokTurnEnv(baseEnv, '/turn', undefined, 'win32')['USERPROFILE']).toBe('/turn')
     expect(withAuth['GROK_AUTH_PATH']).toBe('/real/auth.json')
     expect(withAuth['XAI_API_KEY']).toBeUndefined()
     expect(withAuth['GROK_CODE_XAI_API_KEY']).toBeUndefined()
@@ -702,8 +722,11 @@ describe('Grok config', () => {
     const listed = 'You are logged in with grok.com.\nDefault model: grok-4.7\nAvailable models:\n\n  * grok-4.7 (default)\n  - grok-4.7-build-fast\n  - grok-4.6\n  - grok-4.5\n'
     expect(parseGrokModels(listed)).toEqual(['grok-4.7', 'grok-4.7-build-fast', 'grok-4.6', 'grok-4.5'])
     expect(grokLogin(listed)).toEqual({ loggedIn: true, plan: true })
+    // What grok 1.0.70 prints signed out (the models are still listed) and with only an API key.
+    const models = '\nDefault model: grok-4.6\n\nAvailable models:\n  * grok-4.6 (default)\n  - grok-4.5\n'
+    expect(grokLogin(`You are not authenticated.\n${models}`)).toEqual({ loggedIn: false, plan: false })
+    expect(grokLogin(`You are using XAI_API_KEY.\n${models}`)).toEqual({ loggedIn: true, plan: false })
     expect(grokLogin('Not signed in. To authenticate without a browser, run: grok login --device-code')).toEqual({ loggedIn: false, plan: false })
-    expect(grokLogin('Logged in with an API key\n- grok-4\n')).toEqual({ loggedIn: true, plan: false })
     expect(userGrokHome({ GROK_HOME: '  /custom/grok  ' }, '/h')).toBe('/custom/grok')
     expect(userGrokHome({}, '/h')).toBe(join('/h', '.grok'))
   })
@@ -746,7 +769,7 @@ mcp=no
 if [ -f "$GROK_HOME/config.toml" ] && grep -q 'mcp_servers.tucano' "$GROK_HOME/config.toml"; then mcp=yes; fi
 img=no
 if [ -n "$prompt" ] && grep -q '"type":"image"' "$prompt"; then img=yes; fi
-printf '%s\\n' "{\\"type\\":\\"text\\",\\"data\\":\\"key=$key cfg=$cfg mem=$mem pflag=$pflag mcp=$mcp img=$img home=$GROK_HOME cwd=$(pwd) auth=$auth\\"}"
+printf '%s\\n' "{\\"type\\":\\"text\\",\\"data\\":\\"key=$key cfg=$cfg mem=$mem pflag=$pflag mcp=$mcp img=$img home=$GROK_HOME userhome=$HOME cwd=$(pwd) auth=$auth\\"}"
 printf '%s\\n' '{"type":"end","stopReason":"end_turn","usage":{"input_tokens":4,"output_tokens":1}}'
 `,
       { mode: 0o755 }
@@ -785,6 +808,7 @@ printf '%s\\n' '{"type":"end","stopReason":"end_turn","usage":{"input_tokens":4,
     // macOS resolves /var to /private/var; the shell's pwd follows the link.
     const plain = (p: string): string => p.replace(/^\/private/, '')
     expect(home).toBeTruthy()
+    expect(/userhome=(\S+)/.exec(body)?.[1]).toBe(home)
     expect(plain(cwd!)).toBe(plain(join(home!, 'work')))
     expect(existsSync(home!)).toBe(false)
     expect(readFileSync(auth, 'utf8')).toBe('secret')

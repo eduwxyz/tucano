@@ -90,7 +90,7 @@ Give an agent the apps on your computer, such as Notes, Calendar or Spotify, eac
 | [Cursor CLI](https://cursor.com/cli) | Your Cursor account (`cursor-agent login`) | Runs with a home of its own, so your hooks, plugins, skills and `~/.cursor/mcp.json` servers don't load; Cursor's own file reads, writes and shell stay off; each reply adds about 10k tokens of Cursor's own prompt |
 | [OpenCode](https://opencode.ai) | The providers you configured | Uses the models you have logins for |
 | [Pi](https://pi.dev) | The providers you configured | Uses the models you have logins for |
-| [Grok](https://x.ai/cli) | grok.com (`grok login`) | Own `GROK_HOME` in the temp folder, so personal MCP servers, skills, hooks and Claude/Cursor compat don't load; Grok's own shell and files stay off; only Tucano's gateway; an `XAI_API_KEY` in the environment is unset when grok.com is signed in, so the subscription isn't billed as API. The official installer is macOS and Linux |
+| [Grok](https://x.ai/cli) | grok.com (`grok login`) | Runs with a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load; Grok's own shell and files stay off; only Tucano's gateway; an `XAI_API_KEY` in the environment is unset when grok.com is signed in, so the subscription isn't billed as API. The official installer is macOS and Linux |
 
 Each agent picks its harness and model, so a team can mix them: Opus to fix, GPT to review, Haiku to route.
 

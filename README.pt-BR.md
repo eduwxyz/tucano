@@ -90,7 +90,7 @@ Dê a um agente os apps do seu computador, como Notas, Calendário ou Spotify, c
 | [Cursor CLI](https://cursor.com/cli) | Sua conta do Cursor (`cursor-agent login`) | Roda com um home próprio, pra não carregar seus hooks, plugins, skills e os servidores do `~/.cursor/mcp.json`; a leitura, a escrita e o shell do próprio Cursor ficam desligados; cada resposta soma uns 10 mil tokens do prompt do próprio Cursor |
 | [OpenCode](https://opencode.ai) | Os provedores que você configurou | Usa os modelos em que você tem login |
 | [Pi](https://pi.dev) | Os provedores que você configurou | Usa os modelos em que você tem login |
-| [Grok](https://x.ai/cli) | grok.com (`grok login`) | Um `GROK_HOME` próprio na pasta temporária, pra não carregar MCP, skills, hooks e a compatibilidade com Claude e Cursor pessoais; o shell e os arquivos do próprio Grok ficam desligados; só o gateway do Tucano; uma `XAI_API_KEY` no ambiente é retirada quando o grok.com está logado, pra a assinatura não ser cobrada como API. O instalador oficial é macOS e Linux |
+| [Grok](https://x.ai/cli) | grok.com (`grok login`) | Roda com uma pasta pessoal própria, pra não carregar os seus servidores MCP, skills, hooks e plugins (do Grok e os instalados pro Claude Code ou Cursor); o shell e os arquivos do próprio Grok ficam desligados; só o gateway do Tucano; uma `XAI_API_KEY` no ambiente é retirada quando o grok.com está logado, pra a assinatura não ser cobrada como API. O instalador oficial é macOS e Linux |
 
 Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra corrigir, GPT pra revisar, Haiku pra rotear.
 

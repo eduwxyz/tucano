@@ -10,16 +10,19 @@ import { L } from '../../shared/lang'
 // Grok Build, the `grok` CLI, on the grok.com subscription (~/.grok/auth.json),
 // not an xAI API key. Headless (`--prompt-file --output-format streaming-json`)
 // prints one JSON event per line and exits. Each turn gets a home of its own in
-// the temp folder: Grok walks upward from the working directory to a git
-// checkout and would otherwise load that project's rules, and the temp folder
-// isn't inside one. The login stays the person's, named with GROK_AUTH_PATH,
-// and is never copied. An API key in the environment is dropped when that
-// login exists: Grok would bill the key instead of the subscription.
+// the temp folder, as GROK_HOME and HOME: Grok walks upward from the working
+// directory to a git checkout and would otherwise load that project's rules,
+// and from HOME it loads the plugins, skills and hooks installed for Claude
+// Code (~/.claude), whatever the compat switches say. The login stays the
+// person's, named with GROK_AUTH_PATH, and is never copied. An API key in the
+// environment is dropped when that login exists: Grok would bill the key
+// instead of the subscription.
 
 // streaming-json (grok 1.0.70): text {data}; thought (skipped); tool_call and
-// tool_call_update {toolCallId, toolName, status, rawInput}; usage {usage};
-// end {stopReason, usage, total_cost_usd}; error {message}. `input_tokens` on
-// these events leaves the cache out.
+// tool_call_update {toolCallId, toolName, status, rawInput, rawOutput}; usage
+// {usage}, one per model call; end {stopReason, usage, total_cost_usd}, the
+// whole turn; error {message}. `input_tokens` on these events leaves the cache
+// out. A web search says its query only when it completes, in rawOutput.
 
 const charsToTokens = (chars: number): number => Math.ceil(chars / 4)
 
@@ -44,6 +47,9 @@ export function grokParser(sent = 0): Parser {
   let finished = false
   const pending = new Map<string, { action: 'search' | 'fetch'; detail: string }>()
   const reported = new Set<string>()
+  // The turn so far: each usage event is one model call.
+  let tokens = 0
+  let cacheRead = 0
 
   const usageOf = (raw: unknown, costFrom?: unknown): Usage | undefined => {
     if (!raw || typeof raw !== 'object') return undefined
@@ -75,13 +81,18 @@ export function grokParser(sent = 0): Parser {
         const found = webCall(ev)
         if (id && found) pending.set(id, found)
         const item = (id && pending.get(id)) || found
+        if (item && !item.detail) item.detail = searchQuery(ev)
         if (item && ev['status'] === 'completed' && !reported.has(id || item.detail)) {
           reported.add(id || item.detail)
           out.push({ type: 'web', action: item.action, detail: item.detail })
         }
       } else if (type === 'usage') {
         const u = usageOf(ev['usage'])
-        if (u) out.push({ type: 'progress', tokens: u.inputTokens + u.outputTokens, cacheRead: u.cacheReadTokens })
+        if (u) {
+          tokens += u.inputTokens + u.outputTokens
+          cacheRead += u.cacheReadTokens
+          out.push({ type: 'progress', tokens, cacheRead })
+        }
       } else if (type === 'error') {
         finished = true
         out.push({ type: 'error', message: typeof ev['message'] === 'string' && ev['message'] ? ev['message'] : L('O Grok terminou com erro.', 'Grok ended with an error.') })
@@ -116,6 +127,19 @@ function webCall(ev: Record<string, unknown>): { action: 'search' | 'fetch'; det
   return undefined
 }
 
+function searchQuery(ev: Record<string, unknown>): string {
+  const out = ev['rawOutput'] as { action?: { query?: unknown } } | null | undefined
+  return typeof out?.action?.query === 'string' ? out.action.query : ''
+}
+
+// Grok reaches MCP tools through search_tool and use_tool, by their full name; a
+// bare name fails and costs the agent a try.
+const gatewayNote = (): string =>
+  L(
+    `As ferramentas do Tucano estão no servidor MCP \`${GATEWAY_NAME}\`. Chame com use_tool pelo nome completo, \`${GATEWAY_NAME}__<nome>\` (por exemplo \`${GATEWAY_NAME}__lembrar\`); search_tool lista as que existem.`,
+    `Tucano's tools are on the \`${GATEWAY_NAME}\` MCP server. Call them with use_tool by their full name, \`${GATEWAY_NAME}__<name>\` (for example \`${GATEWAY_NAME}__lembrar\`); search_tool lists the ones there are.`
+  )
+
 // Headless, one shot. The prompt is a file: Grok does not read the prompt from
 // stdin, and a .json file is ACP content blocks, which is how images go along.
 // No -p beside --prompt-file (the two are alternatives, and -p wins).
@@ -123,7 +147,7 @@ function webCall(ev: Record<string, unknown>): { action: 'search' | 'fetch'; det
 // run can't answer; deny rules still block Grok's own shell and files, and
 // --disallowed-tools takes those tools off the list. The leader socket is the
 // turn's, so this run doesn't attach to the person's grok and stop it on exit.
-export function grokArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'web'>, promptFile: string, socket: string): string[] {
+export function grokArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'web' | 'mcpUrl'>, promptFile: string, socket: string): string[] {
   const model = turn.model.includes(':') ? turn.model.slice(turn.model.indexOf(':') + 1) : turn.model.includes('/') ? turn.model.slice(turn.model.indexOf('/') + 1) : turn.model
   const web = !!turn.web
   // With the web, Grok's own search and page reading stay; X search does not.
@@ -135,7 +159,7 @@ export function grokArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'web'>
     '--output-format', 'streaming-json',
     '--model', model,
     '--reasoning-effort', turn.effort,
-    '--system-prompt-override', turn.system,
+    '--system-prompt-override', turn.mcpUrl ? `${turn.system}\n\n${gatewayNote()}` : turn.system,
     '--permission-mode', 'bypassPermissions',
     '--no-subagents',
     '--no-plan',
@@ -210,8 +234,9 @@ const OFF = {
 
 // authFile set: the subscription login, and the API key is removed so it can't
 // replace that login. Unset: an API key in the environment is the only way in.
-export function grokTurnEnv(base: NodeJS.ProcessEnv, home: string, authFile?: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...base, ...OFF, GROK_HOME: home }
+// HOME is the turn's too, so nothing installed for Claude Code loads.
+export function grokTurnEnv(base: NodeJS.ProcessEnv, home: string, authFile?: string, os: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, ...OFF, GROK_HOME: home, HOME: home, ...(os === 'win32' ? { USERPROFILE: home } : {}) }
   delete env['GROK_CONFIG']
   delete env['GROK_CONFIG_PATH']
   delete env['GROK_AGENT']
@@ -249,8 +274,9 @@ export function grokCleanup(dirs: GrokTurnDirs): void {
     }
 }
 
-// `grok models` prints "You are logged in with grok.com." and a line per model,
-// "* grok-4.7 (default)" or "- grok-4.6". There is no separate status command.
+// `grok models` prints "You are logged in with grok.com.", "You are using
+// XAI_API_KEY." or "You are not authenticated.", then a line per model,
+// "* grok-4.7 (default)" or "- grok-4.6", listed even when signed out.
 export function parseGrokModels(out: string): string[] {
   const ids: string[] = []
   for (const line of out.split('\n')) {
@@ -261,10 +287,10 @@ export function parseGrokModels(out: string): string[] {
 }
 
 export function grokLogin(out: string): { loggedIn: boolean; plan: boolean } {
-  if (/not signed in|not logged in/i.test(out)) return { loggedIn: false, plan: false }
+  if (/not signed in|not logged in|not authenticated/i.test(out)) return { loggedIn: false, plan: false }
   const plan = /logged in with grok\.com/i.test(out)
   const models = parseGrokModels(out)
-  return { loggedIn: plan || (models.length > 0 && /logged in|api key/i.test(out)), plan }
+  return { loggedIn: plan || (models.length > 0 && /logged in|api[ _]key/i.test(out)), plan }
 }
 
 export function grokEngine(bin: () => string | undefined, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {

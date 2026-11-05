@@ -278,7 +278,7 @@ describe('approvals', () => {
     }
     r = new Runner({
       db,
-      engines: { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') },
+      engines: { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: join(dir, 'work'),
