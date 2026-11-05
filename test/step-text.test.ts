@@ -64,6 +64,16 @@ describe('maskSecrets: a step never shows a secret', () => {
   it('leaves ordinary commands alone', () => {
     for (const c of ['mkdir -p /tmp/out', 'databricks -p prod fs ls dbfs:/', 'ssh -p 2222 host', 'echo $max_tokens', 'select author from books']) expect(masked(c)).toBe(c)
   })
+
+  // The core waits while a step is masked: a long run of word characters (base64, a hash, a minified
+  // line) used to take seconds on 40 KB.
+  it('masks a long text in a blink, whatever it is made of', () => {
+    for (const s of ['a'.repeat(40_000), 'QUJD'.repeat(10_000), 'a.'.repeat(20_000), 'a-'.repeat(20_000), 'mysql '.repeat(7000), 'x://a:'.repeat(7000)]) {
+      const t0 = performance.now()
+      maskSecrets(s)
+      expect(performance.now() - t0).toBeLessThan(250)
+    }
+  })
 })
 
 describe('sqlIn and commandStep: the SQL inside a command', () => {
