@@ -135,7 +135,7 @@ let state: State = {
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -525,6 +525,16 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
 export const answerQuestion = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerQuestion', { messageId, index, answer })
 export const submitAnswers = (messageId: string): void => void fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitAnswers', { messageId })
+
+// The person is writing: the core gets what will answer ready. Once in a while per place, and
+// nobody needs to hear if it didn't work.
+const typed = new Map<string, number>()
+export const typing = (conversationId: string, threadId?: string): void => {
+  const where = `${conversationId}:${threadId ?? ''}`
+  if (Date.now() - (typed.get(where) ?? 0) < 20_000) return
+  typed.set(where, Date.now())
+  void call('typing', { conversationId, ...(threadId ? { threadId } : {}) }).catch(() => {})
+}
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })

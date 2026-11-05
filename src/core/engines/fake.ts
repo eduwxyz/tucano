@@ -9,10 +9,20 @@ import type { Engine, EngineEvent, Turn } from './types'
 // Deterministic engine for tests and screenshots. Never spawns anything, but
 // behaves like the real ones where it matters: it routes when given the
 // router prompt, and calls ask_user through the gateway when asked to ask.
-export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (turn: Turn) => string } = {}): Engine {
+// `sessions`: it takes kept sessions like Claude Code does, and `released` gets the ones let go;
+// `warmed` gets what was started ahead ("warm <model>", "rewarm <session id>").
+export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (turn: Turn) => string; sessions?: boolean; released?: string[]; warmed?: string[] } = {}): Engine {
   const delay = opts.delayMs ?? 25
   return {
     id,
+    ...(opts.sessions
+      ? {
+          sessions: true,
+          release: (sessionId: string) => void opts.released?.push(sessionId),
+          warm: (t: { model: string }) => void opts.warmed?.push(`warm ${t.model}`),
+          rewarm: (sessionId: string) => void opts.warmed?.push(`rewarm ${sessionId}`)
+        }
+      : {}),
     async *run(turn): AsyncIterable<EngineEvent> {
       const last = lastMessage(turn.prompt)
       // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
@@ -63,6 +73,20 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /(?:consulte|run the sql) `([^`]+)`/i.test(last)) {
+        // A SQL connector's tool (Databricks' execute_sql_read_only), to see its steps and errors.
+        const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!
+        const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'execute_sql_read_only'), { statement })
+        reply = textOf(r)
+      } else if (turn.mcpUrl && /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.test(last)) {
+        // A skill that runs a CLI (a databricks-query skill and the databricks command): read it, then run.
+        const [, skill, first, then] = /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.exec(last)!
+        await callTool(turn.mcpUrl, 'ler_skill', { nome: skill })
+        for (const command of [first!, then].filter(Boolean)) await callTool(turn.mcpUrl, 'bash', { command })
+        reply = L(
+          'Rodei o SQL pela skill: Sudeste lidera, depois Sul e Nordeste. O segundo comando falhou: o token foi recusado.',
+          'I ran the SQL through the skill: Southeast leads, then South and Northeast. The second command failed: the token was refused.'
+        )
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`

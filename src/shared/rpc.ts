@@ -27,6 +27,7 @@ export interface Api {
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
   answerQuestion(p: { messageId: string; index: number; answer: Answer | null }): void // one decision answered on the card; null clears it
   submitAnswers(p: { messageId: string }): void // sends the decisions answered, as my message
+  typing(p: { conversationId: string; threadId?: string }): void // the person is writing there: what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
