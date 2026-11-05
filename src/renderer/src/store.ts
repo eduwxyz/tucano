@@ -99,7 +99,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -465,8 +465,8 @@ export function newAgentDraft(): Agent {
 export const newChannel = (name: string): Promise<string> => call('createChannel', { name })
 
 // A new channel opens with the window to pick who's in it.
-export async function createChannel(name: string): Promise<void> {
-  const id = await call('createChannel', { name })
+export async function createChannel(name: string, threads?: boolean): Promise<void> {
+  const id = await call('createChannel', { name, ...(threads ? { threads } : {}) })
   navigate({ kind: 'conversation', id })
   set((s) => ({ ...s, dialog: { kind: 'members', id } }))
 }
@@ -509,6 +509,8 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
+// Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
+export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))

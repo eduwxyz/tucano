@@ -165,7 +165,8 @@ export class Runner {
   // Saves the human message and decides who answers it: mentioned agents
   // first, then whoever asked a pending question, then the DM agent or the
   // only agent in the channel, and otherwise the router. The answers, and
-  // everything else it sets off, go in its thread (`threadId`, or its own).
+  // everything else it sets off, go in its thread (`threadId`, or its own when
+  // the conversation answers in threads) or else in the conversation.
   async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
@@ -193,8 +194,9 @@ export class Runner {
     }
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
-    // Every answer goes in the thread of what it answers: a message of mine outside one opens it.
-    const replyIn = thread ?? mine.id
+    // An answer goes in the thread of what it answers. A message of mine outside one opens it
+    // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
+    const replyIn = thread ?? (conv.threads ? mine.id : undefined)
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
@@ -914,8 +916,9 @@ export class Runner {
     // Past the prompt's budget, the older memories are searched instead: the tool shows up only then.
     const promptMemories = memory?.forPrompt(agent)
     const canSearch = !!this.deps.gateway && !!promptMemories?.searchable
-    // A thread sees only itself: the other threads, of the conversations this agent is in, are looked up.
-    const canSeekThreads = !!this.deps.gateway && !!msg.threadId
+    // A thread sees only itself, and the conversation only what's outside threads: the other
+    // threads, of the conversations this agent is in, are looked up.
+    const canSeekThreads = !!this.deps.gateway && (!!msg.threadId || db.threadRoots(conv.id).size > 0)
     const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
     // The Tuca proposes agents; nobody else does.
     const builds = !!this.deps.gateway && agent.kind === 'tuca'

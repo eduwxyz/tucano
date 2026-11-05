@@ -256,6 +256,9 @@ const MIGRATIONS = [
   ALTER TABLE messages ADD COLUMN thread_summary TEXT;
   `,
   `
+  ALTER TABLE conversations ADD COLUMN threads INTEGER;
+  `,
+  `
   ALTER TABLE agents ADD COLUMN team TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE conversations ADD COLUMN pair INTEGER NOT NULL DEFAULT 0;
   `,
@@ -448,6 +451,7 @@ export class Db {
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
       ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {}),
+      ...(r['threads'] === 1 ? { threads: true } : {}),
       ...(r['request'] ? { request: str(r['request']) } : {})
     }))
   }
@@ -464,7 +468,7 @@ export class Db {
 
   createConversation(c: Omit<Conversation, 'unread'>): void {
     this.tx(() => {
-      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, pair, request, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(c.id, c.kind === 'agents' ? 'channel' : c.kind, c.name, c.topic ?? null, c.kind === 'agents' ? 1 : 0, c.request ?? null, Date.now())
+      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, threads, pair, request, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(c.id, c.kind === 'agents' ? 'channel' : c.kind, c.name, c.topic ?? null, c.threads ? 1 : null, c.kind === 'agents' ? 1 : 0, c.request ?? null, Date.now())
       for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(c.id, m)
     })
   }
@@ -476,6 +480,11 @@ export class Db {
   // Off: the wiki's curator leaves the conversation out. On is the default (stored as null).
   setWikiCapture(id: string, on: boolean): void {
     this.db.prepare('UPDATE conversations SET wiki_capture = ? WHERE id = ?').run(on ? null : 0, id)
+  }
+
+  // On: answers go in threads. Off, in the conversation, is the default (stored as null).
+  setThreads(id: string, on: boolean): void {
+    this.db.prepare('UPDATE conversations SET threads = ? WHERE id = ?').run(on ? 1 : null, id)
   }
 
   setTopic(id: string, topic: string | undefined): void {

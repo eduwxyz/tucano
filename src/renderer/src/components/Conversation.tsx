@@ -145,18 +145,20 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            {dmAgent ? (
-              <AgentAvatar agent={dmAgent} size={22} />
-            ) : pair ? (
-              <span className="pair-avatars">
-                {pair.map((a) => (
-                  <AgentAvatar key={a.id} agent={a} size={20} />
-                ))}
-              </span>
-            ) : (
-              <Icon name="hash" />
-            )}
-            <h1>{title}</h1>
+            <button className="topbar__name" title={conv.kind === 'channel' ? L('Configurações do canal', 'Channel settings') : L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+              {dmAgent ? (
+                <AgentAvatar agent={dmAgent} size={22} />
+              ) : pair ? (
+                <span className="pair-avatars">
+                  {pair.map((a) => (
+                    <AgentAvatar key={a.id} agent={a} size={20} />
+                  ))}
+                </span>
+              ) : (
+                <Icon name="hash" />
+              )}
+              <h1>{title}</h1>
+            </button>
             {dmAgent?.role && (
               <span className="tag topbar__role" title={dmAgent.role}>
                 {dmAgent.role}

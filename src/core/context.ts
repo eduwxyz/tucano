@@ -373,17 +373,21 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
           ? L(`por uma rotina de ${me}`, `by a routine of ${me}'s`)
           : L('pelo app', 'by the app')
   // A thread is a conversation of its own: the others reach it only when looked up.
+  const lookUp = L(
+    `Se ${me} falar de outra conversa, ou de algo combinado antes que não está aqui nem nas memórias, procure com buscar_threads e leia com ler_thread.`,
+    `If ${me} mentions another conversation, or something agreed before that isn't here or in the memories, look it up with buscar_threads and read it with ler_thread.`
+  )
   const apart = searchable
-    ? L(
-        ` Ela é uma conversa à parte: você não vê as outras threads de ${where}. Se ${me} falar de outra conversa, ou de algo combinado antes que não está aqui nem nas memórias, procure com buscar_threads e leia com ler_thread.`,
-        ` It's a conversation of its own: you don't see the other threads of ${where}. If ${me} mentions another conversation, or something agreed before that isn't here or in the memories, look it up with buscar_threads and read it with ler_thread.`
-      )
+    ? thread
+      ? ` ${L(`Ela é uma conversa à parte: você não vê as outras threads de ${where}.`, `It's a conversation of its own: you don't see the other threads of ${where}.`)} ${lookUp}`
+      : ` ${L('As threads ficam à parte: daqui você só vê a mensagem que abriu cada uma.', 'Threads are kept apart: from here you only see the message that started each one.')} ${lookUp}`
     : ''
   const head = [
     summary?.trim() &&
       (thread
         ? `${L('Resumo do começo desta thread (as mensagens mais antigas dela não vão inteiras)', "Summary of this thread's beginning (its oldest messages don't go in full)")}:\n${summary.trim()}`
         : `${L(`Resumo do que veio antes em ${where}`, `Summary of what came before in ${where}`)}:\n${summary.trim()}`),
+    !thread && apart.trim(),
     thread
       ? L(
           `Você está respondendo numa thread em ${where}, aberta ${by}.${apart} Abaixo, a mensagem que abriu a thread e as respostas dela, das mais antigas pras mais novas:`,
