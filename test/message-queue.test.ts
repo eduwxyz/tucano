@@ -18,6 +18,7 @@ let turns: Turn[]
 let gates: (() => void)[] // one per turn: lets it finish
 const release = (): void => gates.splice(0).forEach((go) => go())
 let events: Message[]
+let removed: string[]
 
 // An agent that works until it's let go (or stopped), then answers.
 const slow: Engine = {
@@ -37,9 +38,10 @@ const slow: Engine = {
 function runner(): Runner {
   turns = []
   events = []
+  removed = []
   gates = []
   const engines: Record<EngineId, Engine> = { claude: slow, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
-  return new Runner({ db, engines, settings: async () => settings, emit: (e) => e.type === 'message' && events.push(e.message), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
+  return new Runner({ db, engines, settings: async () => settings, emit: (e) => (e.type === 'message' ? events.push(e.message) : e.type === 'message_removed' ? removed.push(e.id) : 0), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
 }
 
 const until = async (ok: () => boolean): Promise<void> => {
@@ -148,5 +150,58 @@ describe('messages sent while the agent is still answering', () => {
     release()
     await r.idle()
     expect(turns).toHaveLength(2)
+  })
+})
+
+describe('the queue over the field', () => {
+  it('a waiting message goes in the conversation when the agent reads it: after its reply, just before the next', async () => {
+    const r = runner()
+    await r.send('dm', 'revisa o PR 12')
+    await until(() => turns.length === 1)
+    await r.send('dm', 'e olha os testes')
+    // Waiting: not delivered yet, so the app keeps it over the field.
+    expect(events.at(-1)!.queued).toBe('teo')
+    release()
+    await until(() => turns.length === 2)
+    release()
+    await r.idle()
+    // In the conversation, in the order things reached the agent: my first message, its reply, then the waiting one.
+    expect(db.messages().map((m) => m.text)).toEqual(['revisa o PR 12', 'resposta 1', 'e olha os testes', 'resposta 2'])
+    const [, , waited] = db.messages()
+    expect(waited!.at).toBeGreaterThan(replies()[0]!.at)
+    expect(events.findLast((m) => m.id === waited!.id)?.queued).toBeUndefined()
+  })
+
+  it('changed while it waits: the agent reads the new text', async () => {
+    const r = runner()
+    await r.send('dm', 'revisa o PR 12')
+    await until(() => turns.length === 1)
+    await r.send('dm', 'e olha os testes')
+    const waiting = mine()[1]!
+    r.editQueued(waiting.id, 'e olha os testes de integração')
+    expect(db.message(waiting.id)?.text).toBe('e olha os testes de integração')
+    expect(events.at(-1)).toMatchObject({ id: waiting.id, queued: 'teo' })
+    release()
+    await until(() => turns.length === 2)
+    expect(turns[1]!.prompt).toContain('testes de integração')
+    release()
+    await r.idle()
+  })
+
+  it('taken back while it waits: gone, and with nothing left in line there is no follow-up', async () => {
+    const r = runner()
+    await r.send('dm', 'revisa o PR 12')
+    await until(() => turns.length === 1)
+    await r.send('dm', 'esquece, era outra coisa')
+    const waiting = mine()[1]!
+    r.cancelQueued(waiting.id)
+    expect(db.message(waiting.id)).toBeUndefined()
+    expect(removed).toEqual([waiting.id])
+    release()
+    await r.idle()
+    expect(turns).toHaveLength(1)
+    // A message no longer in line can't be changed or taken back.
+    r.cancelQueued(mine()[0]!.id)
+    expect(db.message(mine()[0]!.id)).toBeDefined()
   })
 })

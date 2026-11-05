@@ -6,7 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Changed
 
-- **Messages in a row go together.** What you send while an agent is still on your last message no longer starts a reply of its own: it waits where that reply is (in the conversation, or in its thread when the conversation uses threads), marked **Waiting**, and once the agent is done it answers everything that came in, in one reply, reading it as more of the same request. **Steer now** on a waiting message stops the agent and starts it again with it in hand, without redoing what's done. A message in another thread, or an answer to the agent's question, still gets its own reply.
+- **Messages in a row go together.** What you send while an agent is still on your last message no longer starts a reply of its own: it waits in a **Message queue** over the field, and goes in the conversation only when the agent reads it: after the reply it was working on, in the order you sent it, just before the one reply to everything that came in, which reads it as more of the same request. While it waits you can edit it, delete it, or **Steer** with it, which stops the agent and starts it again with it in hand, without redoing what's done. A message in another thread, or an answer to the agent's question, still gets its own reply.
 
 ## [0.2.11] - 2026-11-05
 

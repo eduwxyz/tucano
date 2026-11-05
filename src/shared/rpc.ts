@@ -28,6 +28,8 @@ export interface Api {
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   steer(p: { messageId: string }): void // a message waiting in line: the agent stops and starts again with it now
+  editQueued(p: { messageId: string; text: string }): void // a message waiting in line, changed before the agent reads it
+  cancelQueued(p: { messageId: string }): void // a message waiting in line, taken back: the agent never gets it
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string; threads?: boolean }): string
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
@@ -153,6 +155,7 @@ export type Result<M extends Method> = Awaited<ReturnType<Api[M]>>
 export type CoreEvent =
   | { type: 'voice' } // dictation's model: downloading, done, removed
   | { type: 'message'; message: Message }
+  | { type: 'message_removed'; id: string } // a message taken back while it waited in line
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
   | { type: 'agent'; agent: Agent }
   | { type: 'conversation'; conversation: Conversation }

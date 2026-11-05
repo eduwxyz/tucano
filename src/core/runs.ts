@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
@@ -500,26 +500,52 @@ export class Runner {
     return Object.assign(w, { agentId: to[0]!.id })
   }
 
+  // The line my message waits in, and the agent it waits for.
+  private lineOf(messageId: string): { w: Line; agentId: string } | undefined {
+    for (const [key, w] of this.working) if (w.waiting.includes(messageId)) return { w, agentId: key.slice(0, key.lastIndexOf(':')) }
+    return undefined
+  }
+
   // My message waiting in line: the agent stops what it's doing and starts again with it, now.
   steer(messageId: string): void {
     const { db } = this.deps
     const m = db.message(messageId)
-    if (!m) return
-    for (const [key, w] of this.working) {
-      if (!w.waiting.includes(messageId)) continue
-      w.steered = true
-      const agentId = key.slice(0, key.lastIndexOf(':'))
-      const live = db
-        .recentMessages(m.conversationId, 60)
-        .reverse()
-        .find((x) => x.author.kind === 'agent' && x.author.id === agentId && x.run?.status === 'working')
-      const c = live && this.controllers.get(live.id)
-      if (c) {
-        c.reason = 'steered'
-        c.ctl.abort()
-      }
-      return
+    const line = this.lineOf(messageId)
+    if (!m || !line) return
+    line.w.steered = true
+    const live = db
+      .recentMessages(m.conversationId, 60)
+      .reverse()
+      .find((x) => x.author.kind === 'agent' && x.author.id === line.agentId && x.run?.status === 'working')
+    const c = live && this.controllers.get(live.id)
+    if (c) {
+      c.reason = 'steered'
+      c.ctl.abort()
     }
+  }
+
+  // My message still in line, changed before the agent reads it.
+  editQueued(messageId: string, text: string): void {
+    const { db, emit } = this.deps
+    const body = text.trim()
+    const m = db.message(messageId)
+    const line = this.lineOf(messageId)
+    if (!body || !m || !line) return
+    const edited = { ...m, text: body }
+    db.saveMessage(edited)
+    emit({ type: 'message', message: { ...edited, queued: line.agentId } })
+  }
+
+  // My message still in line, taken back: the agent never gets it.
+  cancelQueued(messageId: string): void {
+    const { db, emit } = this.deps
+    const line = this.lineOf(messageId)
+    if (!line) return
+    line.w.waiting = line.w.waiting.filter((id) => id !== messageId)
+    const images = db.artifactsOf(messageId)
+    db.deleteMessage(messageId)
+    for (const a of images) if (this.deps.dataDir) rmSync(join(this.deps.dataDir, 'artifacts', a.id), { recursive: true, force: true })
+    emit({ type: 'message_removed', id: messageId })
   }
 
   // A reply, and what came in for it while it ran: my messages that waited go together in one follow-up.
@@ -545,10 +571,15 @@ export class Runner {
   // the same request. Steered, it knows it was cut short and what it had done.
   private async followUp(agent: Agent, conv: Conversation, w: Line, last: Message | undefined): Promise<void> {
     const { db, emit } = this.deps
-    for (const id of w.waiting) {
+    // They reach the agent now, so they go in the conversation now: after what came in meanwhile, in the
+    // order I sent them, just before the reply to them.
+    const at = Date.now()
+    w.waiting.forEach((id, i) => {
       const m = db.message(id)
-      if (m) emit({ type: 'message', message: m }) // no longer waiting
-    }
+      if (!m) return
+      db.setMessageAt(id, at + i)
+      emit({ type: 'message', message: { ...m, at: at + i } }) // no longer waiting
+    })
     const current = db.agent(agent.id)
     if (!current || current.archived || this.paused) return
     const me = (await this.deps.settings()).workspaceName
