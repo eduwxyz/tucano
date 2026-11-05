@@ -1,5 +1,4 @@
 import { L, lang, locale } from '../../../shared/lang'
-import { actionLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform, type ExtraProps } from 'react-markdown'
 import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
@@ -28,11 +27,7 @@ import {
   removeRoutine,
   retryRun,
   continueRun,
-  steer,
-  editQueued,
-  cancelQueued,
   ACCESS_REQUEST,
-  ROUTING,
   countedTokens,
   sendMessage,
   typing,
@@ -64,7 +59,6 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal } from './Tuca'
 import { FoldToggle } from './Fold'
-import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -119,10 +113,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const members = useStore((s) => {
     if (!conv) return []
     const all = conv.members.map((m) => agentById(s, m)).filter((a): a is Agent => !!a)
-    return conv.kind === 'channel' ? all.filter(isTeam) : all
+    return conv.kind === 'dm' ? all : all.filter(isTeam)
   })
-  // A message waiting in line isn't in the conversation yet: it's over the field until the agent reads it.
-  const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id && !m.queued))
+  const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
   const focus = useStore((s) => (s.view?.kind === 'conversation' && s.view.id === id ? s.view.message : undefined))
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
   const [showSummary, setShowSummary] = useState(false)
@@ -144,48 +137,30 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       </div>
     )
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
-  const pair = conv.kind === 'agents' ? members : undefined
 
   return (
     <div className="split">
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card (its settings: the gear on the right, or the card). */}
-            {dmAgent ? (
-              <AgentCardButton agentId={dmAgent.id} settingsOf={id} below className="topbar__name" title={L(`Perfil de ${dmAgent.name}`, `${dmAgent.name}’s profile`)}>
-                <AgentAvatar agent={dmAgent} size={22} />
-                <h1>{title}</h1>
-              </AgentCardButton>
-            ) : (
-              <button className="topbar__name" title={conv.kind === 'channel' ? L('Configurações do canal', 'Channel settings') : L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
-                {pair ? (
-                  <span className="pair-avatars">
-                    {pair.map((a) => (
-                      <AgentAvatar key={a.id} agent={a} size={20} />
-                    ))}
-                  </span>
-                ) : (
-                  <Icon name="hash" />
-                )}
-                <h1>{title}</h1>
-              </button>
-            )}
+            <button className="topbar__name" title={conv.kind === 'channel' ? L('Configurações do canal', 'Channel settings') : L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+              {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
+              <h1>{title}</h1>
+            </button>
             {dmAgent?.role && (
               <span className="tag topbar__role" title={dmAgent.role}>
                 {dmAgent.role}
               </span>
             )}
-            {pair && !conv.topic && <span className="topbar__topic">{L('DM entre agentes: você lê e pode responder aqui', 'DM between agents: you can read and answer here')}</span>}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
           </div>
           <div className="topbar__actions">
             {conv.kind === 'channel' && (
               <div className="stack" title={L('Agentes no canal', 'Agents in the channel')}>
                 {members.map((a) => (
-                  <AgentCardButton key={a.id} agentId={a.id} below className="stack__item" title={a.name}>
+                  <button key={a.id} className="stack__item" onClick={() => navigate({ kind: 'agent', id: a.id })} title={a.name}>
                     <AgentAvatar agent={a} size={24} />
-                  </AgentCardButton>
+                  </button>
                 ))}
                 <span className="stack__count">{members.length} {L(`agente${members.length === 1 ? '' : 's'}`, `agent${members.length === 1 ? '' : 's'}`)}</span>
                 <button className="icon-btn stack__add" title={L('Adicionar ou remover agentes', 'Add or remove agents')} onClick={() => openDialog({ kind: 'members', id })}>
@@ -197,8 +172,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
             </button>
             {dmAgent && (
-              <button className="icon-btn" title={L('Configurações da conversa', 'Conversation settings')} aria-label={L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
-                <Icon name="gear" size={16} />
+              <button className="btn btn--ghost" onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
+                {L('Ver perfil', 'See profile')}
               </button>
             )}
           </div>
@@ -207,7 +182,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {showSummary && <SummaryPanel conv={conv} messages={messages.filter((m) => !m.threadId)} onClose={() => setShowSummary(false)} />}
 
         <MessageList messages={messages} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} threads />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : pair ? L(`Mensagem pra ${title}`, `Message ${title}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
       </section>
       {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
     </div>
@@ -342,188 +317,6 @@ const AGENT_PLUGINS = [remarkGfm, remarkMentions, remarkLocalPaths]
 const PLAIN_PLUGINS = [remarkGfm, remarkMentions]
 const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
 
-// What an agent handed out from this message, each with how it's going and a way to where it happens
-// (the DM between the two agents). Your DM only shows this line; the work itself stays there.
-function Handoffs({ message }: { message: Message }): ReactNode {
-  const items = message.run!.delegated!
-  const latest = useStore((s) => items.map((t) => s.messages.findLast((m) => m.run?.delegation?.id === t.id && m.run.delegation.from === message.id)))
-  const agents = useStore((s) => items.map((t) => agentById(s, t.agentId)))
-  // The person deleted the DM it ran in, once the request was over: what it said is gone with it.
-  const deleted = useStore((s) => items.map((t) => !!t.conversationId && !s.conversations.some((c) => c.id === t.conversationId)))
-  // A task that waits for my approval elsewhere: its card shows here too, so I decide without leaving.
-  const waiting = useStore((s) => latest.map((m) => (m?.run?.status === 'waiting_approval' && m.run.approvalId ? s.approvals.find((a) => a.id === m.run!.approvalId && a.state === 'pending') : undefined)))
-  // A question asked in a channel: where, for its label and its link.
-  const channels = useStore((s) => items.map((t) => (t.askedIn ? s.conversations.find((c) => c.id === t.askedIn)?.name : undefined)))
-  const stateOf = (m: Message | undefined, gone: boolean, t: (typeof items)[number]): { label: string; tone: string } => {
-    if (!m && gone) return { label: L('conversa apagada', 'conversation deleted'), tone: '' }
-    if (t.nobody) return { label: L('ninguém pôde ajudar', 'no one could help'), tone: '' }
-    if (t.askedIn && !t.agentId) return { label: L('procurando quem ajuda', 'looking for help'), tone: 'tag--warn' }
-    const st = m?.run?.status
-    if (!m || st === 'working') return { label: L('trabalhando', 'working'), tone: 'tag--warn' }
-    if (st === 'waiting_input') return { label: L('te perguntou algo', 'asked you something'), tone: 'tag--warn' }
-    if (st === 'waiting_approval') return { label: L('pede aprovação', 'asks for approval'), tone: 'tag--warn' }
-    if (m.run?.delegated?.length) return { label: L('esperando a equipe dele', 'waiting on its team'), tone: 'tag--warn' }
-    if (st === 'done') return { label: L('respondeu', 'answered'), tone: 'tag--ok' }
-    if (st === 'paused') return { label: L('pausou', 'paused'), tone: 'tag--warn' }
-    return { label: L('parou', 'stopped'), tone: 'tag--danger' }
-  }
-  return (
-    <div className="handoffs">
-      {items.map((t, i) => {
-        const agent = agents[i]
-        const state = stateOf(latest[i], deleted[i]!, t)
-        const elsewhere = t.conversationId && t.conversationId !== message.conversationId && !deleted[i]
-        const approval = elsewhere ? waiting[i] : undefined
-        return (
-          <div key={t.id} className="handoff__item">
-            <div className="handoff" title={t.task}>
-              <Icon name="send" size={12} />
-              {agent && <AgentAvatar agent={agent} size={16} />}
-              <span className="handoff__who">
-                {agent?.name ?? (t.askedIn ? '' : L('agente removido', 'removed agent'))}
-                {t.askedIn && `${agent ? L(' em ', ' in ') : ''}#${channels[i] ?? '?'}`}
-              </span>
-              <span className="handoff__task">{t.task}</span>
-              <span className={`tag ${state.tone}`}>{state.label}</span>
-              {elsewhere && (
-                <button
-                  className="link handoff__open"
-                  onClick={() => {
-                    navigate({ kind: 'conversation', id: t.conversationId! })
-                    if (t.threadId) openThread(t.threadId)
-                  }}
-                >
-                  {L('abrir conversa', 'open conversation')}
-                </button>
-              )}
-            </div>
-            {approval && <ApprovalCard approval={approval} compact />}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// Under a lead's report: the tasks it reports on, with how each one ended and a way to its conversation.
-function ReportBasis({ id }: { id: string }): ReactNode {
-  const head = useStore((s) => s.messages.find((m) => m.id === id))
-  if (!head?.run?.delegated?.length) return null
-  return (
-    <div className="report-basis">
-      <span className="report-basis__label">{L('Com base em', 'Based on')}</span>
-      <Handoffs message={head} />
-    </div>
-  )
-}
-
-// My messages sent while the agent was still on my last one, over the field: they aren't in the
-// conversation yet, since the agent hasn't read them. They go in, in this order, when it's done and
-// takes them all in one reply. Until then each can be changed, taken back, or sent at once ("Orientar":
-// the agent stops and starts again with it in hand).
-function QueuedReply({ message }: { message: Message }): ReactNode {
-  const agent = useStore((s) => (message.queued ? agentById(s, message.queued) : undefined))
-  const name = agent?.name ?? L('O agente', 'The agent')
-  const why = message.run?.steps[0]?.detail ?? L('esperando a vez', 'waiting its turn')
-  return (
-    <li className="queue__item queue__item--reply" aria-label={L(`${name} vai responder: ${why}`, `${name} will reply: ${why}`)}>
-      {agent ? <AgentAvatar agent={agent} size={16} /> : <span className="queue__n" />}
-      <span className="queue__text">
-        <strong>{name}</strong> <span className="muted">· {why}</span>
-      </span>
-      <span className="queue__actions">
-        <button type="button" className="btn btn--ghost btn--sm" title={L(`${name} não vai responder isso`, `${name} won't reply to this`)} onClick={() => stopRun(message.id)}>
-          {L('Cancelar', 'Cancel')}
-        </button>
-      </span>
-    </li>
-  )
-}
-
-function QueuePanel({ items }: { items: Message[] }): ReactNode {
-  const mine = items.filter((m) => m.author.kind === 'me')
-  const agent = useStore((s) => (mine[0]?.queued ? agentById(s, mine[0].queued) : undefined))
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
-  const [steering, setSteering] = useState<string | null>(null)
-  const who = agent?.name ?? L('O agente', 'The agent')
-  // The router is still picking: no one to steer yet.
-  const picking = mine.length > 0 && mine.every((m) => m.queued === ROUTING)
-  const position = (m: Message): number => mine.indexOf(m) + 1
-  // Its reply here hasn't started (the agent is on something else): there's nothing here to interrupt yet.
-  const behindReply = (m: Message): boolean => items.some((r) => r.author.kind === 'agent' && r.queued === m.queued)
-  const save = (): void => {
-    if (editing?.text.trim()) editQueued(editing.id, editing.text)
-    setEditing(null)
-  }
-  return (
-    <section className="queue" aria-label={L('Fila de mensagens', 'Message queue')}>
-      <div className="queue__head">
-        <Icon name="clock" size={13} />
-        <strong>{L('Fila de mensagens', 'Message queue')}</strong>
-        <span className="muted">
-          {!mine.length
-            ? L('Aguardando · respostas esperando a vez', 'Waiting · replies waiting their turn')
-            : picking
-            ? L('Aguardando · escolhendo quem responde', 'Waiting · picking who answers')
-            : mine.some(behindReply)
-            ? L(`Aguardando · ${who} termina o que está fazendo e lê na sequência`, `Waiting · ${who} finishes what it's doing and reads these next`)
-            : L(`Aguardando · ${who} está respondendo e lê na sequência`, `Waiting · ${who} is replying and reads these next`)}
-        </span>
-      </div>
-      <ol className="queue__list">
-        {items.map((m) => m.author.kind === 'agent' ? <QueuedReply key={m.id} message={m} /> : (
-          <li key={m.id} className={`queue__item ${editing?.id === m.id ? 'is-editing' : ''}`} aria-label={L(`Mensagem na fila ${position(m)}: ${m.text}`, `Queued message ${position(m)}: ${m.text}`)}>
-            <span className="queue__n">{position(m)}</span>
-            {editing?.id === m.id ? (
-              <textarea
-                className="queue__edit"
-                value={editing.text}
-                autoFocus
-                rows={Math.min(5, editing.text.split('\n').length + 1)}
-                onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
-                onBlur={save}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    save()
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault()
-                    setEditing(null)
-                  }
-                }}
-              />
-            ) : (
-              <span className="queue__text">{m.text || L('(imagem)', '(image)')}</span>
-            )}
-            <span className="queue__actions">
-              {m.queued !== ROUTING && !behindReply(m) && (
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm"
-                  disabled={steering === m.id}
-                  title={L(`${who} para o que está fazendo e recomeça já com esta mensagem`, `${who} stops what it's doing and starts again with this message`)}
-                  onClick={() => {
-                    setSteering(m.id)
-                    steer(m.id)
-                  }}
-                >
-                  {steering === m.id ? L('Orientando…', 'Steering…') : L('Orientar', 'Steer')}
-                </button>
-              )}
-              <button type="button" className="icon-btn" title={L('Editar mensagem', 'Edit message')} aria-label={L(`Editar mensagem na fila ${position(m)}`, `Edit queued message ${position(m)}`)} onClick={() => setEditing({ id: m.id, text: m.text })}>
-                <Icon name="edit" size={14} />
-              </button>
-              <button type="button" className="icon-btn" title={L('Excluir mensagem', 'Delete message')} aria-label={L(`Excluir mensagem na fila ${position(m)}`, `Delete queued message ${position(m)}`)} onClick={() => cancelQueued(m.id)}>
-                <Icon name="trash" size={14} />
-              </button>
-            </span>
-          </li>
-        ))}
-      </ol>
-    </section>
-  )
-}
-
 // Parsing is by far the most expensive part of drawing a message, so it only runs when the text changes.
 const MessageMarkdown = memo(Markdown)
 
@@ -535,7 +328,6 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
-  const manager = useStore((s) => (message.run?.delegation ? agentById(s, message.run.delegation.by) : undefined))
   const attached = useStore((s) => (message.author.kind === 'me' ? s.artifacts.filter((a) => a.messageId === message.id && a.agentId === '') : []))
   // The browser shows live on the agent's latest message that used it, unless it's open on the side.
   const liveBrowser = useStore(
@@ -564,30 +356,17 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   return (
     <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`}>
       <div className="msg__gutter">
-        {!grouped &&
-          (agent ? (
-            <AgentCardButton agentId={agent.id} className="msg__face" tabIndex={-1} label={L(`Perfil de ${agent.name}`, `${agent.name}’s profile`)}>
-              <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} />
-            </AgentCardButton>
-          ) : (
-            <MeAvatar initials={me.initials} size={34} />
-          ))}
+        {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={me.initials} size={34} />)}
       </div>
       <div className="msg__body">
         {!grouped && (
           <div className="msg__head">
             {agent ? (
-              <AgentCardButton agentId={agent.id} className="msg__author link">
+              <button className="msg__author link" onClick={() => navigate({ kind: 'agent', id: agent.id })}>
                 {name}
-              </AgentCardButton>
+              </button>
             ) : (
               <span className="msg__author">{name}</span>
-            )}
-            {message.run?.reportOf && <span className="tag tag--ok">{L('Retorno da equipe', 'Team report')}</span>}
-            {manager && (
-              <span className="tag" title={`${L('Tarefa', 'Task')}: ${message.run!.delegation!.task}`}>
-                {L(`a pedido de ${manager.name}`, `for ${manager.name}`)}
-              </span>
             )}
             {agent?.computer && agent.computerKind === 'mac' && (
               <span className="tag tag--warn" title={L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer')}>
@@ -614,8 +393,6 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ))}
           </div>
         )}
-        {message.run?.delegated && <Handoffs message={message} />}
-        {message.run?.reportOf && <ReportBasis id={message.run.reportOf} />}
         {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.agentDraft && <AgentProposal message={message} />}
@@ -631,12 +408,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
         {agent && message.run?.browser && <BrowserCard agentId={agent.id} big={liveBrowser} />}
-        {message.run?.status === 'stopped' &&
-          (message.run.steered ? (
-            <div className="note">{L('Parei aqui para seguir a sua orientação: continuo logo abaixo.', 'I stopped here to follow your steer: I carry on right below.')}</div>
-          ) : (
-            <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>
-          ))}
+        {message.run?.status === 'stopped' && <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>}
         {message.run?.status === 'interrupted' && <div className="note">{L('Interrompido: o app fechou no meio da resposta.', 'Interrupted: the app closed in the middle of the reply.')}</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
         {message.run?.errorDetail && (
@@ -655,7 +427,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </>
         )}
         {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it. */}
-        {message.run && !message.run.steered && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
+        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             {L('Tentar de novo', 'Try again')}
           </button>
@@ -819,7 +591,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
 // field that answers there.
 function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
   const root = useStore((s) => s.messages.find((m) => m.id === rootId))
-  const replies = useStore((s) => s.messages.filter((m) => m.threadId === rootId && !m.queued))
+  const replies = useStore((s) => s.messages.filter((m) => m.threadId === rootId))
   const agents = useStore((s) => s.agents)
   const [showSummary, setShowSummary] = useState(false)
   const said = replies.filter((m) => m.author.kind !== 'system' && m.run?.status !== 'working').length
@@ -1085,10 +857,10 @@ function Mention({ handle }: { handle: string }): ReactNode {
   const agent = useStore((s) => s.agents.find((a) => a.handle.toLowerCase() === handle.toLowerCase()))
   if (!agent) return <strong>@{handle}</strong>
   return (
-    <AgentCardButton agentId={agent.id} className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name}>
+    <button className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name} onClick={() => navigate({ kind: 'agent', id: agent.id })}>
       <AgentAvatar agent={agent} size={16} />
       <span>@{agent.handle}</span>
-    </AgentCardButton>
+    </button>
   )
 }
 const plainMarkdown = { pre: CodeBlock, a: (p: { href?: string; children?: ReactNode }) => <WikiLink href={p.href}>{p.children}</WikiLink>, span: MentionSpan }
@@ -1256,16 +1028,6 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   }
 
   const decided = approval.state !== 'pending'
-  // A command on the agent's computer: what it does, in words, and the command itself.
-  const onComputer = approval.connectorId === COMPUTADOR
-  const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
-  // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
-  const canAlways = approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (!onComputer || kinds.length > 0)
-  const alwaysTitle = onComputer
-    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => actionLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => actionLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
-    : approval.tool === 'abrir_pr'
-      ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} abre PRs sem pedir. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} opens PRs without asking. You can change it on its page.`)
-      : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)
 
   return (
     <div className={`approval approval--${approval.state} ${compact ? 'approval--compact' : ''}`}>
@@ -1280,10 +1042,6 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         {approval.tool === ACCESS_REQUEST ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('pede acesso ao', 'asks for access to')} <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? L('ler e escrever', 'read and write') : L('ler', 'read')}
-          </>
-        ) : onComputer ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{kinds.length ? kinds.map(actionVerb).join(L(' e ', ' and ')) : L('rodar um comando', 'run a command')}</strong> {L('no computador dele', 'on its computer')}
           </>
         ) : approval.tool === 'abrir_pr' ? (
           <>
@@ -1319,8 +1077,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
       </div>
       {approval.why && <p className="approval__why">{approval.why}</p>}
       {/* The title already says it all for an access request, an app or the browser. */}
-      {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}
-      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !onComputer && summary.shown.length > 0 && (
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && summary.shown.length > 0 && (
         <div className="approval__args small">
           {summary.shown.map(([k, v], i) => (
             <p key={i}>
@@ -1395,8 +1152,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
                 {L('Aprovar', 'Approve')}
               </button>
-              {canAlways && (
-                <button className="btn" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
+              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (
+                <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}
@@ -1712,7 +1469,6 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // Replies at work and questions asked here: in this thread, or outside threads.
   const here = (m: Message): boolean => m.conversationId === conversationId && m.threadId === threadId
   const working = useStore((s) => s.messages.filter((m) => here(m) && m.author.kind === 'agent' && m.run?.status === 'working'))
-  const queue = useStore((s) => s.messages.filter((m) => here(m) && !!m.queued))
   const asker = useStore((s) => {
     const q = s.messages.findLast((m) => here(m) && m.run?.status === 'waiting_input')
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
@@ -1890,7 +1646,6 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
 
   return (
     <div className="composer-wrap">
-      {queue.length > 0 && <QueuePanel items={queue} />}
       {dragging && !inThread && (
         <div className="drop-overlay">
           <div className="drop-overlay__card">

@@ -28,7 +28,7 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
 - **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
-- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
+- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o Grok, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
 - **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
 
 ## O que ele faz
@@ -36,8 +36,6 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 ### Canais onde os agentes trabalham juntos
 
 Crie um canal, coloque os agentes e peça. Mencione alguém com `@`, ou não, e um roteador escolhe quem responde. Os agentes passam a vez entre si com `@menção`, então um pedido vai da investigação à correção e à revisão sozinho, e cada passo aparece na conversa: o que pesquisou, leu, rodou e editou, com recibo de tokens e tempo.
-
-Os agentes também passam trabalho uns pros outros, como pessoas num Slack. Qualquer agente pode entregar uma tarefa ou uma pergunta a outro com a ferramenta `delegar`, e retoma sozinho quando a resposta volta. Na página de um agente, **Canais, equipe e skills › Equipe** escolhe os agentes que ele coordena: mande um pedido grande pra ele, ele entrega cada parte ao agente certo e te dá o retorno com o resultado, quem fez o quê, o que foi decidido e aplicado, e o que ficou pendente. A sua DM com um agente é só sua: o trabalho entre eles acontece numa DM entre os dois agentes, em **Entre agentes** na barra lateral, uma por dupla de agentes, com cada pedido numa thread, onde você acompanha e responde as perguntas deles. Tudo o que um pedido envolve divide um teto de tokens.
 
 <img src="docs/images/pt/conversation.png" alt="Um canal onde a Iris achou o erro no Datadog, o Leo corrigiu e abriu a MR, e o Nico revisou e pede aprovação pro merge" width="880">
 
@@ -92,6 +90,7 @@ Dê a um agente os apps do seu computador, como Notas, Calendário ou Spotify, c
 | [Cursor CLI](https://cursor.com/cli) | Sua conta do Cursor (`cursor-agent login`) | Roda com um home próprio, pra não carregar seus hooks, plugins, skills e os servidores do `~/.cursor/mcp.json`; a leitura, a escrita e o shell do próprio Cursor ficam desligados; cada resposta soma uns 10 mil tokens do prompt do próprio Cursor |
 | [OpenCode](https://opencode.ai) | Os provedores que você configurou | Usa os modelos em que você tem login |
 | [Pi](https://pi.dev) | Os provedores que você configurou | Usa os modelos em que você tem login |
+| [Grok](https://x.ai/cli) | grok.com (`grok login`) | Roda com uma pasta pessoal própria, pra não carregar os seus servidores MCP, skills, hooks e plugins (do Grok e os instalados pro Claude Code ou Cursor); o shell e os arquivos do próprio Grok ficam desligados; só o gateway do Tucano; uma `XAI_API_KEY` no ambiente é retirada quando o grok.com está logado, pra a assinatura não ser cobrada como API. O instalador oficial é macOS e Linux |
 
 Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra corrigir, GPT pra revisar, Haiku pra rotear.
 
@@ -163,7 +162,7 @@ No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o
 flowchart LR
   subgraph Mac["Seu computador"]
     UI["Janela<br/>(React)"] <-->|MessagePort| Core["Núcleo<br/>SQLite · respostas · memória · rotinas"]
-    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · cursor · opencode · pi"]
+    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · cursor · grok · opencode · pi"]
     CLI -->|"URL secreta por turno<br/>só as ferramentas do agente"| GW["Gateway MCP do Tucano"]
     GW --> Tools["Conectores (MCP)<br/>computador · navegador · memória"]
     GW -.->|"ação de escrita"| OK{{"Sua aprovação"}}

@@ -4,7 +4,7 @@
 // Mac; the computer only receives commands through these tools.
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, posix, sep } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -12,32 +12,11 @@ import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import { PROJECTS_DIR, type Agent, type Artifact, type ArtifactKind, type ComputerInfo, type LentFolder, type Service } from '../shared/types'
 import type { Db } from './db'
-import { lastLines } from './engines/cli'
 import { textResult, type ToolDef } from './gateway'
 import { MacComputer, macTools } from './mac'
 import { isWin, osOf } from './platform'
 
 export const IMAGE = 'node:22-bookworm'
-// The base a new computer starts from when the person set up what it comes with: IMAGE, with their
-// setup script run once. Tagged by the script, so a new script makes a new base.
-export const BASE = 'tucano-base'
-
-// Sharing the person's SSH agent with a Linux computer: the socket goes in, the keys stay on their machine.
-// Docker Desktop (Mac, and Linux when it's the one running) hands its own forwarded socket to containers;
-// plain Docker on Linux takes the session's SSH_AUTH_SOCK as a mount. Docker on Windows has no way in.
-export const SSH_SOCK = '/run/tucano-ssh.sock'
-const DESKTOP_SOCK = '/run/host-services/ssh-auth.sock'
-export function sshForward(opts: { platform: NodeJS.Platform; desktop: boolean; sock?: string; exists: (p: string) => boolean }): { args: string[] } | { why: string } {
-  if (opts.platform === 'win32')
-    return { why: L('No Windows o Docker não repassa o agente SSH pros containers. Funciona com o Tucano no Linux ou no Mac.', "On Windows Docker can't hand the SSH agent to containers. It works with Tucano on Linux or a Mac.") }
-  if (opts.platform === 'darwin' || opts.desktop) return { args: ['-v', `${DESKTOP_SOCK}:${DESKTOP_SOCK}`, '-e', `SSH_AUTH_SOCK=${DESKTOP_SOCK}`] }
-  if (!opts.sock || !opts.exists(opts.sock))
-    return { why: L('Não achei um agente SSH rodando na sua sessão (SSH_AUTH_SOCK). Rode ssh-add com a sua chave, abra o Tucano de novo e ligue de novo o computador.', "I found no SSH agent running in your session (SSH_AUTH_SOCK). Run ssh-add with your key, reopen Tucano and turn the computer on again.") }
-  return { args: ['-v', `${opts.sock}:${SSH_SOCK}`, '-e', `SSH_AUTH_SOCK=${SSH_SOCK}`] }
-}
-// What goes from the person's ~/.ssh into the computer: no private key, ever.
-export const SSH_FILES = (names: string[]): string[] => names.filter((n) => n === 'config' || n === 'known_hosts' || n.endsWith('.pub'))
-export const baseTag = (script: string): string => `${BASE}:${createHash('sha256').update(script.trim()).digest('hex').slice(0, 12)}`
 // Containers of another data directory (tests, a second install) never collide.
 const prefixOf = (dataDir: string, name: string): string => `${name}-${createHash('sha1').update(dataDir).digest('hex').slice(0, 6)}`
 export const PORTS = [3000, 3001, 4173, 5000, 5173, 8000, 8080, 8501, 8888]
@@ -393,7 +372,6 @@ export interface ComputerDeps {
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
   gitRemote?: (agentId: string) => string | undefined // the app's GitHub proxy for this agent (spec §22)
-  setup?: () => string | undefined // what every new computer comes with (Settings): a bash script
 }
 
 export class Computers {
@@ -401,8 +379,6 @@ export class Computers {
   private gitSet = new Set<string>() // computers whose git already goes through the proxy, this session
   private ports = new Map<string, Record<number, number>>()
   private starting = new Map<string, Promise<void>>()
-  private bases = new Map<string, Promise<string>>() // base images being made, by tag
-  private desktop?: boolean // Docker Desktop runs the containers (asked once)
   private prefix: string
   private legacy: string
   private adopted = new Set<string>()
@@ -501,8 +477,7 @@ export class Computers {
   private async doEnsure(agentId: string): Promise<void> {
     await this.adopt(agentId)
     const name = this.name(agentId)
-    const ssh = await this.ssh(agentId)
-    const mounts = [...mountArgs(name, this.deps.db.agent(agentId)?.folders ?? []), ...('args' in ssh ? ssh.args : [])]
+    const mounts = mountArgs(name, this.deps.db.agent(agentId)?.folders ?? [])
     const sig = mounts.length ? createHash('sha1').update(JSON.stringify(mounts)).digest('hex').slice(0, 12) : ''
     let state = await docker(['inspect', '-f', '{{.State.Running}} {{index .Config.Labels "tucano.mounts"}}', name], { timeoutMs: 15_000 })
     const [running, raw = ''] = state.stdout.trim().split(' ')
@@ -535,16 +510,11 @@ export class Computers {
       if (r.code !== 0) return this.fail(agentId, r.stderr)
     } else {
       const saved = (await docker(['image', 'inspect', this.stateImage(agentId)], { timeoutMs: 15_000 })).code === 0
+      const image = saved ? this.stateImage(agentId) : IMAGE
       if (!saved && (await docker(['image', 'inspect', IMAGE], { timeoutMs: 15_000 })).code !== 0) {
         this.set(agentId, { state: 'starting', detail: L('Baixando o sistema do computador (só na primeira vez, alguns minutos)…', "Downloading the computer's system (only the first time, a few minutes)…") })
         const pull = await docker(['pull', IMAGE], { timeoutMs: 30 * 60_000 })
         if (pull.code !== 0) return this.fail(agentId, pull.stderr)
-      }
-      let image = this.stateImage(agentId)
-      if (!saved) {
-        const base = await this.base(agentId)
-        if (typeof base !== 'string') return this.fail(agentId, base.error)
-        image = base
       }
       this.set(agentId, { state: 'starting', detail: L('Montando o computador…', 'Setting up the computer…') })
       const folder = this.folder(agentId)
@@ -579,76 +549,9 @@ export class Computers {
       const clean = `cd ${PROJECTS_DIR} 2>/dev/null || exit 0; for d in */; do d="\${d%/}"; case " ${lent.join(' ')} " in *" $d "*) ;; *) find "$d" -xdev -depth -type d -empty -delete ;; esac; done; true`
       await docker(['exec', name, 'bash', '-c', clean], { timeoutMs: 15_000 })
     }
-    await this.copySsh(agentId, 'args' in ssh)
     await this.readPorts(agentId)
     await this.pointGit(agentId)
-    this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId), ssh: 'why' in ssh ? ssh.why : undefined })
-  }
-
-  // Whether this agent's computer gets the person's SSH agent, and the mount that does it.
-  private async ssh(agentId: string): Promise<{ args: string[] } | { why: string } | { off: true }> {
-    if (!this.deps.db.agent(agentId)?.ssh) return { off: true }
-    if (this.desktop === undefined) this.desktop = /docker desktop/i.test((await docker(['info', '--format', '{{.OperatingSystem}}'], { timeoutMs: 15_000 })).stdout)
-    return sshForward({ platform: process.platform, desktop: this.desktop, sock: process.env['SSH_AUTH_SOCK'], exists: existsSync })
-  }
-
-  // The person's ~/.ssh config, known_hosts and public keys, copied in (or taken out, when it's turned off):
-  // host names and known servers work, and a config that names a key finds its public half, so the agent's
-  // matching key signs. What Tucano copied is listed, so turning it off removes only that.
-  private async copySsh(agentId: string, on: boolean): Promise<void> {
-    const name = this.name(agentId)
-    const list = '/root/.ssh/.tucano-copied'
-    await docker(['exec', name, 'bash', '-c', `[ -f ${list} ] && (cd /root/.ssh && xargs -r rm -f < ${list}; rm -f ${list}); true`], { timeoutMs: 15_000 })
-    if (!on) return
-    const dir = join(homedir(), '.ssh')
-    let names: string[] = []
-    try {
-      names = SSH_FILES(readdirSync(dir)).filter((n) => statSync(join(dir, n)).isFile())
-    } catch {
-      return // no ~/.ssh: the agent's keys still work, with plain host names
-    }
-    await docker(['exec', name, 'bash', '-c', 'mkdir -p /root/.ssh && chmod 700 /root/.ssh'], { timeoutMs: 15_000 })
-    for (const n of names) await docker(['cp', join(dir, n), `${name}:/root/.ssh/${n}`], { timeoutMs: 30_000 })
-    const quoted = names.map((n) => `'${n.replace(/'/g, `'\\''`)}'`).join(' ')
-    if (names.length) await docker(['exec', name, 'bash', '-c', `cd /root/.ssh && chown root:root ${quoted} && chmod 600 ${quoted} && printf '%s\\n' ${quoted} > ${list}`], { timeoutMs: 15_000 })
-  }
-
-  // The image a new computer starts from: IMAGE, or the base made from the person's setup script, made the
-  // first time it's needed (once for every computer after it) and kept. A script that fails says why.
-  private async base(agentId: string): Promise<string | { error: string }> {
-    const script = this.deps.setup?.()?.trim()
-    if (!script) return IMAGE
-    const tag = baseTag(script)
-    if ((await docker(['image', 'inspect', tag], { timeoutMs: 15_000 })).code === 0) return tag
-    let making = this.bases.get(tag)
-    if (!making) {
-      making = this.makeBase(tag, script).finally(() => this.bases.delete(tag))
-      this.bases.set(tag, making)
-    }
-    this.set(agentId, { state: 'starting', detail: L('Instalando o que você configurou pros computadores (só na primeira vez, alguns minutos)…', 'Installing what you set up for the computers (only the first time, a few minutes)…') })
-    try {
-      return await making
-    } catch (e) {
-      return { error: e instanceof Error ? e.message : String(e) }
-    }
-  }
-
-  private async makeBase(tag: string, script: string): Promise<string> {
-    const prep = `tucano-prep-${tag.split(':')[1]}`
-    await docker(['rm', '-f', prep], { timeoutMs: 30_000 })
-    const run = await docker(['run', '--name', prep, '-e', 'DEBIAN_FRONTEND=noninteractive', IMAGE, 'bash', '-c', `set -e\n${script}`], { timeoutMs: 30 * 60_000 })
-    if (run.code !== 0) {
-      await docker(['rm', '-f', prep], { timeoutMs: 30_000 })
-      const said = lastLines(`${run.stdout}\n${run.stderr}`, 6)
-      throw new Error(L(`A preparação do computador falhou (Configurações › Agentes › Computador dos agentes):\n${said}`, `The computer setup failed (Settings › Agents › Agents’ computer):\n${said}`))
-    }
-    const commit = await docker(['commit', prep, tag], { timeoutMs: 10 * 60_000 })
-    await docker(['rm', '-f', prep], { timeoutMs: 30_000 })
-    if (commit.code !== 0) throw new Error(commit.stderr.trim() || L('Não consegui guardar o computador preparado.', "I couldn't save the set-up computer."))
-    // The bases of scripts no longer in use go, so they don't pile up on the disk (one in use stays).
-    const old = await docker(['image', 'ls', BASE, '--format', '{{.Repository}}:{{.Tag}}'], { timeoutMs: 15_000 })
-    for (const t of old.stdout.split('\n').map((x) => x.trim()).filter((x) => x && x !== tag)) await docker(['image', 'rm', t], { timeoutMs: 60_000 })
-    return tag
+    this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
   }
 
   // GitHub, by any of its URL forms, goes through the app's proxy, which adds the

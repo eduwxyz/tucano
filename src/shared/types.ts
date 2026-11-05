@@ -1,13 +1,12 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
-import type { ActionRules } from './actions'
 import type { ChannelLayout } from './channel-layout'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor' | 'grok'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -80,17 +79,11 @@ export interface Agent {
   memory: MemoryMode
   computer: boolean // has a computer (spec §13): see computerKind for which
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
-  // Its Linux computer uses the person's SSH agent: their keys sign for it, but never leave their machine.
-  // Their ~/.ssh config, known_hosts and public keys are copied in, so host names work. Off unless they turn it on.
-  ssh?: boolean
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
-  actionRules?: ActionRules // what it does about a commit, a push, a PR…: over settings.actionRules, kind by kind; unset kinds follow them
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
-  // The agents it coordinates: it may hand them tasks with `delegar`, and their results come back to it.
-  team?: string[]
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
 }
@@ -116,8 +109,7 @@ export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a
 
 export interface Conversation {
   id: string
-  // 'agents': a DM between two agents (members), where they work together; the person can read it and write in it.
-  kind: 'channel' | 'dm' | 'agents'
+  kind: 'channel' | 'dm'
   name: string // channel name, or agent id for a DM
   topic?: string
   members: string[] // agent ids
@@ -127,16 +119,6 @@ export interface Conversation {
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
   threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
-  // A DM between agents opens for one request (the id of the message that started it) and holds only that
-  // work; its topic is the task. One kept from before this (no request) is the pair's old running DM.
-  request?: string
-}
-
-// A DM between agents can be deleted once its request is over: while any reply of that request is still
-// working, asking or waiting for an approval (here or anywhere else it reached), the lead still needs it.
-export function requestRunning(conv: Conversation, messages: Message[]): boolean {
-  const live = (m: Message): boolean => m.run?.status === 'working' || m.run?.status === 'waiting_input' || m.run?.status === 'waiting_approval'
-  return messages.some((m) => live(m) && (m.conversationId === conv.id || (!!conv.request && (m.id === conv.request || m.run?.root === conv.request))))
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -179,7 +161,6 @@ export interface Run {
   steps: Step[]
   receipt?: Receipt
   approvalId?: string
-  steered?: boolean // stopped by "Orientar agora": the reply right after it carries on
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
@@ -194,40 +175,6 @@ export interface Run {
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
-  delegation?: Delegation // this reply works on a task another agent handed it
-  delegated?: Delegated[] // the tasks this reply handed its team; it waits for their results
-  round?: number // how many times in a row this agent got its team's results back without a human message
-  reportOf?: string // the message whose delegated work this reply reports on, once it came back
-  released?: boolean // what it delegated came back, but it wasn't called with it (paused, stopped, archived)
-  root?: string // on a reply that delegated or reports back: the message that started the request (see Delegation.root)
-}
-
-// A task one agent handed another with `delegar` (its team, or a colleague whose answer it needs). Every reply of the delegate on it carries
-// the same id; once all of the manager's message's tasks are settled, the manager gets the results back.
-export interface Delegation {
-  id: string
-  by: string // the agent that delegated
-  from: string // its message that delegated: the batch this task belongs to
-  task: string // what it was asked, in the manager's words
-  doneWhen?: string
-  chain: string[] // the agents above it, top first; `by` is the last
-  root: string // the message that started it all: everything one request sets off shares its budget
-  since: number // `at` of the manager's message: what the delegate sees of the conversation starts there
-  reported?: boolean // its result already went back to `by`
-  asked?: string // it answers a question `by` asked in this channel (pedir_ajuda), picked by the router, not named
-}
-
-export interface Delegated {
-  id: string
-  agentId: string
-  conversationId?: string // where it runs, once handed out: the DM between the two agents, or the channel it came from
-  task: string
-  doneWhen?: string
-  // Asked in a channel, of whoever can help (pedir_ajuda): the channel. agentId is '' until the router picks.
-  askedIn?: string
-  threadId?: string // the thread the question opened there
-  nobody?: boolean // no one there could help
-  reported?: boolean // `nobody` already went back to the one who asked
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
@@ -259,13 +206,7 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
-  // Sent while this agent was still on my last message: it waits and goes with that reply's follow-up. Not
-  // stored: it lives as long as the reply it waits for, and the app forgets it with that reply.
-  queued?: string
 }
-
-// `queued` on a message of mine that waits while the router still picks who answers the one before it.
-export const ROUTING = '@router'
 
 // A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.
 export interface ThreadSummary {
@@ -301,9 +242,6 @@ export interface LocalInfo {
 
 export interface Settings {
   workspaceName: string
-  // A script (bash, as root) every new Linux computer is set up with: the tools the agents use (glab, the
-  // Databricks CLI…). Run once into a base image, which each new computer starts from.
-  computerSetup?: string
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
@@ -319,12 +257,10 @@ export interface Settings {
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
-  actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
-  requestBudget?: number // counted tokens one request may spend across every agent it reaches with delegar; default REQUEST_BUDGET
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
@@ -439,7 +375,6 @@ export const MAX_AGENT_ROUTINES = 10
 export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
 
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
-export const REQUEST_BUDGET = 1_000_000 // counted tokens: past it, a request hands no more work out and reports with what it has
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops
@@ -463,7 +398,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
   gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
-  cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' }
+  cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
+  grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 
@@ -498,13 +434,6 @@ const effort = (id: Effort, pt: string, en: string): { id: Effort; label: string
 })
 
 export const EFFORTS: { id: Effort; label: string }[] = [effort('low', 'Baixo', 'Low'), effort('medium', 'Médio', 'Medium'), effort('high', 'Alto', 'High'), effort('xhigh', 'Máximo', 'Max')]
-
-// Behind a company gateway, Claude Code may run a model that isn't Anthropic's (DeepSeek, say). It still asks
-// every call to think (adaptive thinking), which puts such a model in its slow reasoning mode, and the
-// reasoning counts as output (a plain "oi" could pass the output cap). At low and medium effort that's
-// turned off for them; high and max keep it. Anthropic's own models are left as they are.
-export const anthropicModel = (name: string): boolean => /claude|sonnet|opus|haiku|fable/i.test(name)
-export const thinkingOff = (name: string, effort: Effort): boolean => !anthropicModel(name) && (effort === 'low' || effort === 'medium')
 
 // A model the app doesn't list, by the name a company gateway gives it: kept as "<engine>:<name>".
 export const customModel = (engine: EngineId, name: string): string => `${engine}:${name.trim()}`
@@ -666,7 +595,6 @@ export interface ComputerInfo {
   folder: string // /work, on the Mac (on a Mac computer: its default working folder)
   services: Service[]
   kind?: ComputerKind
-  ssh?: string // why the person's SSH can't be shared now, when the agent asks for it
 }
 
 export type ArtifactKind = 'image' | 'video' | 'markdown' | 'html' | 'pdf' | 'csv' | 'text' | 'file'
@@ -997,37 +925,3 @@ export interface WikiReview {
   error?: string // the last review failed
   findings: WikiFinding[] // still open
 }
-
-// ---------- a team's .md file, imported again when it changes (spec §21) ----------
-
-export type TeamItemKind = 'agent' | 'skill' | 'routine' | 'channel' | 'connector' | 'context'
-
-// A team this app imported or exported, as the settings show it.
-export interface TeamPackageInfo {
-  id: string
-  name: string
-  revision: number // the newest file's of this team seen here
-  at: number // last imported or exported
-  changedHere: { kind: TeamItemKind; title: string }[] // items that differ here from the team's last file, kept until I take its version
-}
-
-// What changed in one item of the team since its last file I imported.
-export interface TeamChange {
-  key: string // `${kind}:${id}`
-  kind: TeamItemKind
-  title: string
-  status: 'new' | 'update' | 'conflict' | 'removed'
-  fields: { name: string; mine?: unknown; theirs?: unknown; conflict: boolean }[]
-}
-
-export interface TeamUpdate {
-  packageId: string
-  name: string
-  revision: number
-  seen: number // the newest revision of this team seen here before; 0: never
-  changes: TeamChange[]
-}
-
-// Per change: take the file's ('package'; on a conflict, its side too), keep mine on the
-// conflicting fields ('mine'; on a removal, keep it and stop following it), or leave it for later.
-export type TeamChoice = 'package' | 'mine' | 'later'

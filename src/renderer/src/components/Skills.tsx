@@ -462,7 +462,7 @@ function Proposal({ proposal: p }: { proposal: Skill }): ReactNode {
 }
 
 // Line by line: what was removed and what was added.
-export function Diff({ before, after }: { before: string; after: string }): ReactNode {
+function Diff({ before, after }: { before: string; after: string }): ReactNode {
   const a = before.split('\n')
   const b = after.split('\n')
   // Longest common subsequence, enough for recipes of a few hundred lines.

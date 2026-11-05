@@ -1,5 +1,4 @@
 import { L, locale, type Lang } from '../../../shared/lang'
-import { SETUP_PRESETS } from '../../../shared/computer-setup'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
@@ -32,16 +31,14 @@ import {
   setGithubToken,
   exportTeam,
   importAgents,
-  previewTeam,
+  importTeam,
   backupNow,
   openBackups,
   type TelegramInfo,
   useStore,
   EFFORTS,
-  anthropicModel,
   ENGINES,
   MAX_AGENT_ROUTINES,
-  REQUEST_BUDGET,
   RUN_BUDGET_PCT,
   routineCap,
   RUN_STALL_MINUTES,
@@ -67,9 +64,7 @@ import {
   type VoiceModelId,
   type VoiceSettings
 } from '../store'
-import type { TeamUpdate } from '../../../shared/types'
 import { voiceRefusal } from '../../../shared/voice'
-import { ACTION_KINDS, actionHint, actionLabel, actionMode, COMPUTADOR, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
@@ -78,7 +73,6 @@ import { ApprovalCard, toolWords } from './Conversation'
 import { confirmDialog, Modal } from './Dialogs'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
-import { KnownTeams, TeamImportDialog } from './TeamImport'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
@@ -244,7 +238,6 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const channels = useStore((s) => s.conversations.filter((c) => c.kind === 'channel'))
   const handles = useStore((s) => s.agents.map((a) => [a.id, a.handle] as const))
   const notes = useStore((s) => (id ? s.memories.filter((m) => m.scope === id && m.state === 'active').length : 0))
-  const globalRules = useStore((s) => s.settings.actionRules)
 
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
   const [chosen, setChosen] = useState<string[]>(() => (id ? channels.filter((c) => c.members.includes(id)).map((c) => c.id) : []))
@@ -405,8 +398,6 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             </Card>
           )}
 
-          {pane('canais') && <TeamPicker draft={draft} patch={patch} />}
-
           {!isNew && pane('canais') && <AgentSkills agentId={draft.id} name={draft.name} />}
 
           {pane('ferramentas') && (
@@ -505,23 +496,6 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           )}
 
           {pane('ferramentas') && (
-            <Card
-              title={L('Aprovações', 'Approvals')}
-              lead={`${L(
-                `O que ${draft.name || 'o agente'} faz sozinho e o que pede sua aprovação antes, com um botão na conversa. Ler e investigar nunca pede. "Padrão" segue Configurações › Agentes.`,
-                `What ${draft.name || 'the agent'} does alone and what asks for your approval first, with a button in the conversation. Reading and looking into things never asks. "Default" follows Settings › Agents.`
-              )}${isNew ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
-            >
-              <ActionRulesList
-                rules={draft.actionRules ?? {}}
-                perAgent
-                inherited={globalRules}
-                onChange={(actionRules) => (isNew ? patch({ actionRules }) : (setDraft((d) => ({ ...d, actionRules })), patchAgent(draft.id, { actionRules })))}
-              />
-            </Card>
-          )}
-
-          {pane('ferramentas') && (
             <Card title="Web" lead={`${L('Pesquisa e lê páginas com a ferramenta do próprio Claude Code ou Codex, na sua assinatura. Cada busca aparece nos passos da resposta.', 'Searches and reads pages with Claude Code’s or Codex’s own tool, on your subscription. Every search shows up in the reply’s steps.')}${isNew ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}>
               <div className="segmented segmented--wide" role="radiogroup" aria-label="Web">
                 {[false, true].map((v) => (
@@ -597,11 +571,6 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 const patch = { computer: k !== 'none', computerKind: k === 'none' ? (draft.computerKind ?? 'linux') : k }
                 setDraft((d) => ({ ...d, ...patch }))
                 patchAgent(draft.id, patch)
-              }}
-              ssh={!!draft.ssh}
-              onSsh={(on) => {
-                setDraft((d) => ({ ...d, ssh: on }))
-                patchAgent(draft.id, { ssh: on })
               }}
             />
           )}
@@ -700,14 +669,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <div className="grid2">
                 {/* Cursor's models carry the effort in the name (…-high, …-xhigh): no separate pick. */}
                 {engine !== 'cursor' && (
-                  <Field
-                    label={L('Esforço de raciocínio', 'Reasoning effort')}
-                    hint={
-                      engine === 'claude' && !anthropicModel(modelInfo(draft.modelId)?.id ?? draft.modelId)
-                        ? L('Neste modelo, que não é da Anthropic, Baixo e Médio desligam o raciocínio: respostas bem mais rápidas. Alto e Máximo pensam antes de responder.', "On this model, which isn't Anthropic's, Low and Medium turn reasoning off: much faster replies. High and Max think before answering.")
-                        : L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')
-                    }
-                  >
+                  <Field label={L('Esforço de raciocínio', 'Reasoning effort')} hint={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
                     <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
                       {EFFORTS.map((ef) => (
                         <option key={ef.id} value={ef.id}>
@@ -759,12 +721,6 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <span className="muted small">{L('Canais', 'Channels')}</span>
                 <span>{chosen.length || '—'}</span>
               </div>
-              {(draft.team?.length ?? 0) > 0 && (
-                <div>
-                  <span className="muted small">{L('Equipe', 'Team')}</span>
-                  <span>{draft.team!.length}</span>
-                </div>
-              )}
               <div>
                 <span className="muted small">{L('Conectores', 'Connectors')}</span>
                 <span>{Object.values(draft.grants).filter((g) => g !== 'none').length || '—'}</span>
@@ -786,41 +742,6 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   )
 }
 
-// The agents it coordinates: it hands them tasks with `delegar`, and gets their results back to answer you.
-function TeamPicker({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
-  const others = useStore((s) => s.agents.filter((a) => a.id !== draft.id && !a.archived && a.kind !== 'tuca'))
-  const team = draft.team ?? []
-  return (
-    <Card
-      title={L('Equipe', 'Team')}
-      lead={L(
-        `Os agentes que ${draft.name || 'este agente'} coordena. Você conversa com ele, e ele delega partes do trabalho pra equipe, em paralelo; os resultados voltam pra ele conferir e te responder.`,
-        `The agents ${draft.name || 'this agent'} coordinates. You talk to it, and it delegates parts of the work to the team, in parallel; the results come back to it to check and answer you.`
-      )}
-    >
-      {others.length === 0 ? (
-        <p className="muted small">{L('Crie outros agentes pra montar uma equipe.', 'Create other agents to build a team.')}</p>
-      ) : (
-        <div className="checks">
-          {others.map((a) => (
-            <label key={a.id} className="check">
-              <input type="checkbox" checked={team.includes(a.id)} onChange={(e) => patch({ team: e.target.checked ? [...team, a.id] : team.filter((x) => x !== a.id) })} />
-              <AgentAvatar agent={a} size={16} /> {a.name}
-              {a.role && <span className="muted small"> · {a.role}</span>}
-            </label>
-          ))}
-        </div>
-      )}
-      <p className="hint">
-        {L(
-          'Cada um trabalha com o próprio modelo, ferramentas e limites, e só vê o que receber. Perguntas e aprovações deles aparecem na conversa.',
-          'Each one works with its own model, tools and limits, and only sees what it’s sent. Their questions and approvals show up in the conversation.'
-        )}
-      </p>
-    </Card>
-  )
-}
-
 const COMPUTER_STATE = (): Record<string, { label: string; tone: string }> => ({
   off: { label: L('desligado', 'off'), tone: '' },
   stopped: { label: L('parado', 'stopped'), tone: 'tag--warn' },
@@ -837,7 +758,7 @@ const COMPUTER_CHOICES = (): { value: ComputerChoice; label: string }[] => [
   { value: 'mac', label: L('Este computador', 'This computer') }
 ]
 
-function ComputerCard({ agentId, kind, onChange, ssh, onSsh }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void; ssh: boolean; onSsh: (on: boolean) => void }): ReactNode {
+function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void }): ReactNode {
   const info = useStore((s) => computerOf(s, agentId))
   const [confirmErase, setConfirmErase] = useState(false)
   const [confirmMac, setConfirmMac] = useState(false)
@@ -895,32 +816,6 @@ function ComputerCard({ agentId, kind, onChange, ssh, onSsh }: { agentId: string
               {L('Cancelar', 'Cancel')}
             </button>
           </div>
-        </div>
-      )}
-      {kind === 'linux' && (
-        <div className="ssh-share">
-          <label className="check">
-            <input type="checkbox" checked={ssh} onChange={(e) => onSsh(e.target.checked)} />
-            <span>
-              <strong>{L('Usar o SSH da minha máquina', 'Use my machine’s SSH')}</strong>
-              <span className="muted small">
-                {' '}
-                {L(
-                  '· as suas chaves assinam por ele, pelo seu agente SSH, sem serem copiadas. O seu ~/.ssh/config, o known_hosts e as chaves públicas vão junto, pros nomes de host funcionarem.',
-                  '· your keys sign for it, through your SSH agent, without being copied. Your ~/.ssh config, known_hosts and public keys go along, so host names work.'
-                )}
-              </span>
-            </span>
-          </label>
-          {ssh && (
-            <p className="muted small ssh-share__warn">
-              {L(
-                'Tudo o que ele fizer por SSH sai com a sua identidade, nos servidores em que a sua chave entra. Ligar ou desligar reinicia o computador dele (o que ele instalou fica).',
-                'Everything it does over SSH goes out as you, on the servers your key gets into. Turning it on or off restarts its computer (what it installed stays).'
-              )}
-            </p>
-          )}
-          {ssh && info?.ssh && <p className="field__error">{info.ssh}</p>}
         </div>
       )}
       {kind === 'mac' && (
@@ -1070,48 +965,6 @@ function LentFolders({ agentId }: { agentId: string }): ReactNode {
   )
 }
 
-// One row per action that matters, each with what the agent does about it. With `perAgent`
-// (`perAgent`, `inherited`: an agent's page), "Padrão" follows Settings and clears the agent's own rule.
-function ActionRulesList({ rules, perAgent, inherited, onChange }: { rules: ActionRules; perAgent?: boolean; inherited?: ActionRules; onChange: (r: ActionRules) => void }): ReactNode {
-  const set = (k: ActionKind, m: ActionMode | undefined): void => {
-    const next: ActionRules = { ...rules }
-    if (m) next[k] = m
-    else delete next[k]
-    onChange(next)
-  }
-  return (
-    <div className="grants rules">
-      {ACTION_KINDS.map((k) => {
-        const own = rules[k]
-        const fallback = actionMode(k, undefined, inherited)
-        const value: ActionMode | 'default' = perAgent ? (own ?? 'default') : actionMode(k, undefined, rules)
-        const options: (ActionMode | 'default')[] = perAgent ? ['default', 'ask', 'auto', 'off'] : ['ask', 'auto', 'off']
-        return (
-          <div key={k} className="grant">
-            <div className="grant__name">
-              <Icon name="shield" size={15} />
-              <div>
-                <strong>{actionLabel(k)}</strong>
-                <span className="muted small">
-                  {actionHint(k)}
-                  {perAgent && !own ? ` · ${L('padrão', 'default')}: ${modeLabel(fallback).toLowerCase()}` : ''}
-                </span>
-              </div>
-            </div>
-            <div className="segmented" role="radiogroup" aria-label={actionLabel(k)}>
-              {options.map((o) => (
-                <button key={o} role="radio" aria-checked={value === o} className={value === o ? 'is-active' : ''} onClick={() => set(k, o === 'default' ? undefined : o)}>
-                  {o === 'default' ? L('Padrão', 'Default') : modeLabel(o)}
-                </button>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 export function Card({ title, lead, action, children }: { title: string; lead?: string; action?: ReactNode; children: ReactNode }): ReactNode {
   return (
     <div className="card">
@@ -1197,7 +1050,7 @@ function HistoryRow({ id }: { id: string }): ReactNode {
     <div className="table__row">
       {agent && <AgentAvatar agent={agent} size={22} />}
       <span className="grow">
-        {a.connectorId === COMPUTADOR ? shellActions(String(a.args['command'] ?? '')).map(actionLabel).join(', ') || toolWords(a.tool) : toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
+        {toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
       </span>
       {a.outcome && <span className="muted small">{a.outcome}</span>}
       <span className={`tag ${a.state === 'approved' ? 'tag--ok' : a.state === 'refused' ? 'tag--danger' : ''}`}>{a.state === 'approved' ? L('aprovado', 'approved') : a.state === 'refused' ? L('recusado', 'refused') : L('expirado', 'expired')}</span>
@@ -1537,7 +1390,7 @@ const SETTINGS_TABS = (): TabList => [
 ]
 const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
-  ['canais', L('Canais, equipe e skills', 'Channels, team and skills')],
+  ['canais', L('Canais e skills', 'Channels and skills')],
   ['ferramentas', L('Ferramentas', 'Tools')],
   ['memoria', L('Memória', 'Memory')]
 ]
@@ -1711,8 +1564,6 @@ function GithubCard({ info }: { info?: { user?: string; error?: string } }): Rea
 const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
-  const [importing, setImporting] = useState<{ text: string; update: TeamUpdate } | null>(null)
-  const [version, setVersion] = useState(0) // a team was imported or exported: the list below reloads
   // Grok Bot has no export: one of the person's agents there runs this skill and writes our .zip.
   const grokSkill = (): void => {
     const a = document.createElement('a')
@@ -1734,20 +1585,12 @@ function TeamCard(): ReactNode {
       a.download = `${L('time-tucano', 'tucano-team')}-${new Date().toISOString().slice(0, 10)}.md`
       a.click()
       URL.revokeObjectURL(a.href)
-      setVersion((v) => v + 1)
     })
   }
   const failed = (e: unknown): void => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
   const upload = (file?: File): void => {
     if (!file) return
-    void file.text().then(
-      (text) =>
-        previewTeam(text).then((update) => {
-          if (update.changes.length) setImporting({ text, update })
-          else setNote(L('Nada novo: você já tem tudo o que esse arquivo traz.', 'Nothing new: you already have everything this file brings.'))
-        }, failed),
-      failed
-    )
+    void file.text().then(importTeam).then(setNote, failed)
   }
   // Another app's export: on the desktop the core reads the file where it is; in a browser it goes up whole.
   const fromApp = (file?: File): void => {
@@ -1767,7 +1610,7 @@ function TeamCard(): ReactNode {
       .then(setNote, failed)
   }
   return (
-    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais, rotinas, conectores e o contexto, sem credenciais nem conversas), pra guardar, levar pra outro computador ou passar pro time. Importar de novo um arquivo mais novo do mesmo time mostra o que mudou pra você escolher, sem sobrescrever o que você mudou aqui. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels, routines, connectors and the context, without credentials or conversations), to keep, take to another computer or pass to your team. Importing a newer file of the same team again shows what changed for you to choose, without overwriting what you changed here. Agents from OpenBot and Grok Bot come in too, with no connector and web search off. And a copy of everything once a day (the last 7).')}>
+    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot and Grok Bot come in too, with no connector and web search off. And a copy of everything once a day (the last 7).')}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button className="btn btn--sm" onClick={download}>
           {L('Exportar time', 'Export team')}
@@ -1811,19 +1654,6 @@ function TeamCard(): ReactNode {
         </button>
       </div>
       {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
-      <KnownTeams version={version} />
-      {importing && (
-        <TeamImportDialog
-          text={importing.text}
-          update={importing.update}
-          onClose={() => setImporting(null)}
-          onDone={(n) => {
-            setImporting(null)
-            setNote(n)
-            setVersion((v) => v + 1)
-          }}
-        />
-      )}
     </Card>
   )
 }
@@ -2108,55 +1938,6 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('agentes') && (
-          <Card
-            title={L('Aprovações', 'Approvals')}
-            lead={L(
-              'Pra todos os agentes: o que pede sua aprovação antes, com um botão na conversa, o que eles fazem sozinhos e o que nunca fazem. Na página de cada agente dá pra mudar só pra ele. Ler e investigar nunca pede.',
-              'For every agent: what asks for your approval first, with a button in the conversation, what they do alone and what they never do. On each agent’s page you can change it for that agent only. Reading and looking into things never asks.'
-            )}
-          >
-            <ActionRulesList rules={settings.actionRules ?? {}} onChange={(actionRules) => updateSettings({ actionRules })} />
-          </Card>
-        )}
-
-        {pane('agentes') && (
-          <Card
-            title={L('Computador dos agentes', 'Agents’ computer')}
-            lead={L(
-              'O que todo computador Linux novo já traz instalado, pra os agentes não perderem tempo instalando (e errando) a cada computador. É um script bash, rodado como root no Debian deles. Roda uma vez só: o resultado vira a base de todo computador criado depois.',
-              'What every new Linux computer comes with, so agents don’t spend time installing (and getting it wrong) on each one. A bash script, run as root on their Debian. It runs once: the result is the base of every computer made after it.'
-            )}
-          >
-            <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-              {SETUP_PRESETS().map((p) => {
-                const has = (settings.computerSetup ?? '').includes(p.marker)
-                return (
-                  <button
-                    key={p.marker}
-                    className="btn btn--sm"
-                    disabled={has}
-                    title={has ? L('Já está no script', 'Already in the script') : p.what}
-                    onClick={() => updateSettings({ computerSetup: [(settings.computerSetup ?? '').trim(), p.script].filter(Boolean).join('\n\n') })}
-                  >
-                    {has ? '✓ ' : '+ '}
-                    {p.label}
-                  </button>
-                )
-              })}
-            </div>
-            <Field
-              label={L('Script de preparação', 'Setup script')}
-              hint={L(
-                'Vale pros computadores criados depois de mudar. Um que já existe guarda o que tem; pra ele pegar o novo, apague o computador na página do agente (Ferramentas). Sem senhas nem tokens aqui: o resultado fica no computador de todos os agentes.',
-                'It applies to computers made after a change. One that exists keeps what it has; to give it the new one, erase that computer on the agent’s page (Tools). No passwords or tokens here: the result is on every agent’s computer.'
-              )}
-            >
-              <textarea rows={8} spellCheck={false} className="mono" placeholder={L('# ex.: apt-get update && apt-get install -y jq', '# e.g. apt-get update && apt-get install -y jq')} value={settings.computerSetup ?? ''} onChange={(e) => updateSettings({ computerSetup: e.target.value })} />
-            </Field>
-          </Card>
-        )}
-
-        {pane('agentes') && (
           <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
             <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
               {[false, true].map((v) => (
@@ -2250,14 +2031,6 @@ export function SettingsPage(): ReactNode {
                   onChange={(n) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(n))) })}
                 />
               </Field>
-              <Field label={L('Teto por pedido delegado (milhões de tokens)', 'Ceiling per delegated request (millions of tokens)')} hint={L('Somando todos os agentes que um pedido envolve. Chegou nele, ninguém delega mais e o agente te dá o retorno com o que tem.', 'Adding up every agent a request reaches. When it hits it, no one delegates any more and the agent reports back with what it has.')}>
-                <NumberInput
-                  min={0.1}
-                  step={0.5}
-                  value={(settings.requestBudget ?? REQUEST_BUDGET) / 1_000_000}
-                  onChange={(n) => updateSettings({ requestBudget: Math.max(100_000, Math.round(n * 1_000_000)) })}
-                />
-              </Field>
               <Field label={L('Considerar travado após (min sem sinal)', 'Treat as stuck after (min with no sign)')} hint={L('Sem texto nem ferramenta terminando. Trabalho longo que anda não é cortado.', 'No text and no tool finishing. Long work that’s moving isn’t cut off.')}>
                 <NumberInput
                   min={5}
@@ -2279,4 +2052,3 @@ export function SettingsPage(): ReactNode {
     </Page>
   )
 }
-

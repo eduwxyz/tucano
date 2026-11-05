@@ -2,19 +2,48 @@ import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { examples } from 'open-bot-avatar'
 import type { Agent } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { claudeParser } from '../src/core/engines/claude'
 import { report } from '../src/core/report'
-import { backup } from '../src/core/team'
+import { backup, exportTeam, importTeam } from '../src/core/team'
 
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({
   id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: 'Engenharia', color: 'sky', instructions: 'Dev do app.', modelId: 'opus', effort: 'high', limit: 10_000_000, used: 0, grants: {}, memory: 'auto', computer: true, archived: false, ...extra
 })
 const fresh = (): Db => new Db(join(mkdtempSync(join(tmpdir(), 'ad-team-')), 'test.db'))
 
-// The team's .md file is in team-files.test.ts.
-describe('backups', () => {
+describe('the team as a file', () => {
+  it('exports readable Markdown without credentials, and imports it elsewhere with routines off', () => {
+    const a = fresh()
+    a.saveConnector({ id: 'lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth' })
+    a.saveAgent(agent('s', 'staff', { grants: { lin: 'read' } }))
+    a.saveAgent(agent('p', 'pm', { role: 'Produto', computer: false, customColor: '#ff00aa', picture: 'data:image/webp;base64,AAAA', avatar: examples[0] }))
+    a.createConversation({ id: 'c1', kind: 'channel', name: 'simula-oab', members: ['s', 'p'] })
+    a.saveSkill({ id: 'k', name: 'testes-do-core', description: 'Ao rodar testes', body: 'swift test', agents: ['s'], state: 'active', createdAt: 1, updatedAt: 1 })
+    a.saveRoutine({ id: 'r', name: 'Issues novas', agentId: 'p', conversationId: 'c1', prompt: 'Planeje.', schedule: { days: [], time: '' }, trigger: { kind: 'poll', connectorId: 'lin', tool: 'list_issues', args: { label: 'agente' }, everyMinutes: 5 }, enabled: true, createdAt: 1 })
+    a.setSecret('connector:lin:oauth', 'segredo')
+    const md = exportTeam(a)
+    expect(md).toContain('- **Staff** (@staff) · Engenharia · Opus · com computador · acessa Linear')
+    expect(md).toContain('- **Issues novas** (@pm, #simula-oab): quando aparece algo novo em Linear · list_issues')
+    expect(md).not.toContain('segredo')
+
+    const b = fresh()
+    b.saveConnector({ id: 'lin2', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth' })
+    expect(importTeam(b, md, 2_000_000)).toBe('Importei 2 agentes, 1 skill, 1 canal, 1 rotina (desligadas).')
+    const staff = b.agents().find((x) => x.handle === 'staff')!
+    expect(staff).toMatchObject({ modelId: 'opus', grants: { lin2: 'read' }, computer: false })
+    // The drawn avatar and the color travel; the picture stays on its computer.
+    const pm = b.agents().find((x) => x.handle === 'pm')!
+    expect(pm).toMatchObject({ customColor: '#ff00aa', avatar: { id: examples[0]!.id } })
+    expect(pm.picture).toBeUndefined()
+    expect(b.skills()[0]).toMatchObject({ name: 'testes-do-core', agents: [staff.id] })
+    expect(b.routines()[0]).toMatchObject({ enabled: false, trigger: { kind: 'poll', connectorId: 'lin2' } })
+    expect(importTeam(b, md, 2_000_000)).toBe('Nada novo: tudo já existia aqui.')
+    expect(() => importTeam(b, '# outro arquivo', 1)).toThrow('não é um time exportado')
+  })
+
   it('backs up the database to a file', () => {
     const a = fresh()
     a.saveAgent(agent('s', 'staff'))

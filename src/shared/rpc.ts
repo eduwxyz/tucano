@@ -1,6 +1,6 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
-import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, TeamChoice, TeamPackageInfo, TeamUpdate, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
+import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -28,9 +28,6 @@ export interface Api {
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
-  steer(p: { messageId: string }): void // a message waiting in line: the agent stops and starts again with it now
-  editQueued(p: { messageId: string; text: string }): void // a message waiting in line, changed before the agent reads it
-  cancelQueued(p: { messageId: string }): void // a message waiting in line, taken back: the agent never gets it
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string; threads?: boolean }): string
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
@@ -104,11 +101,8 @@ export interface Api {
   checkTrigger(p: { trigger: Trigger }): Promise<string> // what a connector check finds now, for the form
   setTelegramToken(p: { token: string | null }): Promise<void> // checks it with Telegram; throws why it's refused
   unpairTelegram(): void
-  exportTeam(): string // the team as Markdown, under this team's id
-  previewTeam(p: { text: string }): TeamUpdate // what importing the file would change; throws if it isn't a team file
-  importTeam(p: { text: string; choices: Record<string, TeamChoice> }): string // applies the chosen changes; what was done
-  teams(): TeamPackageInfo[] // the teams imported or exported here
-  forgetTeam(p: { id: string }): void // its next file comes in as a new team, matched by handle and name
+  exportTeam(): string // the team as Markdown
+  importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
   backupNow(): string // where the copy went
   openBackups(): void
@@ -159,7 +153,6 @@ export type Result<M extends Method> = Awaited<ReturnType<Api[M]>>
 export type CoreEvent =
   | { type: 'voice' } // dictation's model: downloading, done, removed
   | { type: 'message'; message: Message }
-  | { type: 'message_removed'; id: string } // a message taken back while it waited in line
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
   | { type: 'agent'; agent: Agent }
   | { type: 'conversation'; conversation: Conversation }

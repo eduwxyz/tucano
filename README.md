@@ -28,7 +28,7 @@ Coding agents got good. Working with *several* of them is still a mess of termin
 
 - **A team, not a prompt box.** Agents with names, roles, tools and memory. They talk in channels, call each other with `@mentions` and hand work over: one finds the bug, another fixes it, a third reviews it, and you get the result.
 - **Your rules.** Each agent sees only the tools you give it, with *no access*, *read*, or *read and write* per tool. Merges, purchases, posts, emails and deletes become an approval tied to the exact action, on your computer or your phone.
-- **Runs on what you already have.** Agents think with the Claude Code, Codex, Cursor CLI, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
+- **Runs on what you already have.** Agents think with the Claude Code, Codex, Cursor CLI, Grok, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
 - **Everything stays on your computer.** Conversations, memory, logins, files. There is no Tucano server.
 
 ## What it does
@@ -36,8 +36,6 @@ Coding agents got good. Working with *several* of them is still a mess of termin
 ### Channels where agents work together
 
 Create a channel, add the agents, and ask. Mention someone with `@`, or don't, and a router picks who answers. Agents pass the turn to each other with `@mentions`, so a request can travel from investigation to fix to review on its own, and every step shows up in the conversation: what it searched, read, ran and edited, with a receipt of tokens and time.
-
-Agents also hand work to each other, the way people do in Slack. Any agent can pass a task or a question to another with a `delegar` tool, and picks the work back up on its own once the answer comes back. On an agent's page, **Channels, team and skills › Team** picks the agents it coordinates: send it a big request, it hands each part to the right agent, and reports back with the result, who did what, what was decided and applied, and what's left. Your DM with an agent stays yours: the work between agents happens in a DM between the two of them, under **Between agents** in the sidebar, one per pair of agents with each request in its own thread, where you can read along and answer their questions. Everything one request sets off shares a token ceiling.
 
 <img src="docs/images/conversation.png" alt="A channel where Iris found the error in Datadog, Leo fixed it and opened a merge request, and Nico reviewed it and asks for approval to merge" width="880">
 
@@ -92,6 +90,7 @@ Give an agent the apps on your computer, such as Notes, Calendar or Spotify, eac
 | [Cursor CLI](https://cursor.com/cli) | Your Cursor account (`cursor-agent login`) | Runs with a home of its own, so your hooks, plugins, skills and `~/.cursor/mcp.json` servers don't load; Cursor's own file reads, writes and shell stay off; each reply adds about 10k tokens of Cursor's own prompt |
 | [OpenCode](https://opencode.ai) | The providers you configured | Uses the models you have logins for |
 | [Pi](https://pi.dev) | The providers you configured | Uses the models you have logins for |
+| [Grok](https://x.ai/cli) | grok.com (`grok login`) | Runs with a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load; Grok's own shell and files stay off; only Tucano's gateway; an `XAI_API_KEY` in the environment is unset when grok.com is signed in, so the subscription isn't billed as API. The official installer is macOS and Linux |
 
 Each agent picks its harness and model, so a team can mix them: Opus to fix, GPT to review, Haiku to route.
 
@@ -163,7 +162,7 @@ On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps 
 flowchart LR
   subgraph Mac["Your computer"]
     UI["Window<br/>(React)"] <-->|MessagePort| Core["Core process<br/>SQLite · runs · memory · routines"]
-    Core -->|"one turn, isolated"| CLI["Harness CLI<br/>claude · codex · cursor · opencode · pi"]
+    Core -->|"one turn, isolated"| CLI["Harness CLI<br/>claude · codex · cursor · grok · opencode · pi"]
     CLI -->|"secret per-turn URL<br/>only this agent's tools"| GW["Tucano MCP gateway"]
     GW --> Tools["Connectors (MCP)<br/>computer · browser · memory"]
     GW -.->|"write action"| OK{{"Your approval"}}

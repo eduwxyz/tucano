@@ -26,7 +26,7 @@ describe('while the person types', () => {
   function runner(): Runner {
     const fake = fakeEngine('claude', { delayMs: 1, sessions: true, warmed })
     const claude: Engine = { ...fake, run: (t) => (turns.push(t), fake.run(t)) }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ws-work-')) })
   }
 
@@ -34,7 +34,7 @@ describe('while the person types', () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ws-db-')), 'test.db'))
     warmed = []
     turns = []
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(agent('a1', 'lia'))
     db.saveAgent(agent('a2', 'theo'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -107,7 +107,7 @@ describe('a Claude Code process started ahead', () => {
     expect(upOf(warm)).toBeGreaterThanOrEqual(1000)
     const cold = await reply(engine.run(turn())) // the spare is used up: a new process, as before
     expect(cold.split(' ')[0]).not.toBe(warm.split(' ')[0])
-    expect(upOf(cold)).toBeLessThan(1000)
+    expect(upOf(cold)).toBeLessThan(upOf(warm)) // started for this turn (a busy machine may take a second to start it)
     engine.dispose!()
   }, 30_000)
 

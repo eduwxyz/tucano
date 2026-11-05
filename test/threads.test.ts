@@ -35,7 +35,7 @@ function runner(opts: { reply?: (t: Turn) => string; memory?: boolean; onTurn?: 
       yield* base.run(t)
     }
   }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
   memory = new Memories({ db, engines, settings: async () => settings, emit: () => {}, workDir })
   return new Runner({
@@ -65,7 +65,7 @@ beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   turns = []
   notes = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia', { role: 'Engenharia' }))
   db.saveAgent(agent('a2', 'theo', { role: 'Dados' }))
   // Both answer in threads; a conversation that answers in it is made where it's tested.
@@ -406,39 +406,13 @@ describe('what a thread message sets off stays in the thread', () => {
 })
 
 describe('the database', () => {
-  it("opens a database whose migrations ran in another order (a test build's), adding what it lacks", () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'next.db')
-    // Made before main's thread summaries and threads per conversation: the team's migrations took
-    // their slots, so the version is two short and the request column, now last, is already there.
-    new Db(file).close()
-    const raw = new DatabaseSync(file)
-    const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
-    raw.exec(`ALTER TABLE messages DROP COLUMN thread_summary; ALTER TABLE conversations DROP COLUMN threads; PRAGMA user_version = ${user_version - 2};`)
-    raw.exec("INSERT INTO conversations (id, kind, name, created_at) VALUES ('c1', 'channel', 'geral', 1)")
-    raw.exec("INSERT INTO messages (id, conversation_id, author_kind, text, at) VALUES ('m1', 'c1', 'me', 'oi', 1)")
-    raw.close()
-
-    const reopened = new Db(file)
-    reopened.setThreadSummary('m1', 'o que a thread cobriu', 1)
-    expect(reopened.message('m1')?.threadSummary?.text).toBe('o que a thread cobriu')
-    reopened.setThreads('c1', true)
-    expect(reopened.conversation('c1')?.threads).toBe(true)
-    reopened.close()
-    const check = new DatabaseSync(file)
-    expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(user_version)
-    check.close()
-  })
-
   it('an existing database gains thread_id, thread_summary and threads, and round-trips them', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'old.db')
-    // A database from before threads, with a message in it: the schema back to before the threads'
-    // migration, undoing the four that came after it (the thread summaries, threads per conversation, the team and the DMs between agents).
+    // A database from before threads: the schema three migrations back, with a message in it.
     new Db(file).close()
     const raw = new DatabaseSync(file)
     const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
-    raw.exec(
-      `ALTER TABLE conversations DROP COLUMN request; ALTER TABLE conversations DROP COLUMN pair; ALTER TABLE agents DROP COLUMN team; ALTER TABLE conversations DROP COLUMN threads; ALTER TABLE messages DROP COLUMN thread_summary; DROP INDEX messages_by_thread; ALTER TABLE messages DROP COLUMN thread_id; PRAGMA user_version = ${user_version - 5};`
-    )
+    raw.exec(`ALTER TABLE conversations DROP COLUMN threads; ALTER TABLE messages DROP COLUMN thread_summary; DROP INDEX messages_by_thread; ALTER TABLE messages DROP COLUMN thread_id; PRAGMA user_version = ${user_version - 3};`)
     raw.exec("INSERT INTO conversations (id, kind, name, created_at) VALUES ('c1', 'channel', 'geral', 1)")
     raw.exec("INSERT INTO messages (id, conversation_id, author_kind, text, at) VALUES ('old', 'c1', 'me', 'antes das threads', 1)")
     raw.close()

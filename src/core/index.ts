@@ -14,8 +14,7 @@ import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { friendly } from '../shared/errors'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, requestRunning, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
-import { cleanRules } from '../shared/actions'
+import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -25,6 +24,7 @@ import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
+import { grokEngine } from './engines/grok'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import { DesktopApps, macApps, SELF } from './apps'
@@ -43,8 +43,7 @@ import { Wiki } from './wiki'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
-import { backup, backupIfDue } from './team'
-import { TeamFiles } from './team-files'
+import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { applyForeignTeam, readForeignZip } from './agent-import'
 import { zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
@@ -97,7 +96,7 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
 }
 
 const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
-let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine, cursor: unknownEngine }
+let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine, cursor: unknownEngine, grok: unknownEngine }
 // The models OpenCode and Pi list (what the person has logins for), from the last check.
 let listed: Partial<Record<EngineId, string[]>> = {}
 // Codex's own catalog for this login (names and what each model is for), from the last check.
@@ -106,7 +105,7 @@ let codexCatalog: CodexModel[] = []
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 async function detect(): Promise<void> {
   if (fake) {
-    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false } }
+    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
   } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
   await checkAccounts()
@@ -182,17 +181,16 @@ function watchAccount(id: string): void {
 // github is made further down; settings can be asked for before.
 const githubInfo = (): Settings['github'] => githubRef?.info()
 
-// TUCANO_FAKE_DELAY_MS slows the fake engines down, to see in the app what happens while an agent works.
-const fakeOpts = { delayMs: Number(process.env['TUCANO_FAKE_DELAY_MS']) || undefined }
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude', fakeOpts), codex: fakeEngine('codex', fakeOpts), opencode: fakeEngine('opencode', fakeOpts), pi: fakeEngine('pi', fakeOpts), gemini: fakeEngine('gemini', fakeOpts), cursor: fakeEngine('cursor', fakeOpts) }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   : {
       claude: claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())),
       codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())),
       opencode: opencodeEngine(() => engines.opencode.path, join(dataDir, 'opencode-home'), loginEnv, () => engines.opencode.version),
       pi: piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv),
       gemini: geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv),
-      cursor: cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv)
+      cursor: cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv),
+      grok: grokEngine(() => engines.grok.path, loginEnv)
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
@@ -457,7 +455,7 @@ const github: GitHub = new GitHub({
 })
 
 githubRef = github
-const computers = new Computers({ db, dataDir, emit, shoot, gitRemote: (agentId) => github.gitRemote(agentId), setup: () => settings().computerSetup })
+const computers = new Computers({ db, dataDir, emit, shoot, gitRemote: (agentId) => github.gitRemote(agentId) })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
@@ -499,9 +497,6 @@ const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   }
   return text
 }
-// The team's .md file: exporting carries this team's id, importing a newer one offers what changed.
-const teamFiles = new TeamFiles({ db, dir: join(dataDir, 'teams'), defaultLimit: () => settings().defaultLimit, context: () => settings().context, name: () => settings().workspaceName })
-
 const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm })
 // The review: by hand, or once a week when asked (checked every hour).
 const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
@@ -703,7 +698,7 @@ const api: Api = {
     settings: settings(),
     agents: db.agents(),
     conversations: db.conversations(),
-    messages: runner.withQueue(db.messages()),
+    messages: db.messages(),
     connectors: connectors.list(),
     approvals: db.approvals(),
     memories: db.memories(),
@@ -731,12 +726,6 @@ const api: Api = {
 
   continueRun: ({ messageId }) => void runner.continue(messageId),
 
-  steer: ({ messageId }) => runner.steer(messageId),
-
-  editQueued: ({ messageId, text }) => runner.editQueued(messageId, text),
-
-  cancelQueued: ({ messageId }) => runner.cancelQueued(messageId),
-
   saveAgent: ({ agent, channelIds }) => {
     const before = db.agent(agent.id)
     // Archived changes only through archiveAgent, which also stops what the agent was doing.
@@ -747,8 +736,6 @@ const api: Api = {
     // A Linux computer starts right away when turned on (the first time downloads the system) and stops when
     // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
     if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})
-    // Its SSH turned on or off: the computer is made again now (keeping what it installed), with or without it.
-    else if (linux(clean) && !!clean.ssh !== !!before?.ssh) void computers.ensure(clean.id).catch(() => {})
     if (linux(before) && !linux(clean))
       void computers.stopLinux(clean.id).then(() => {
         if (mac(clean)) db.removeServices(clean.id) // the container's services don't exist on the Mac
@@ -770,6 +757,7 @@ const api: Api = {
     if (archived) {
       for (const m of db.messages()) if (m.author.kind === 'agent' && m.author.id === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
       routines.pauseAgent(id)
+      runner.forgetSessions({ agentId: id })
       if (agent.browser) void browser.close(id)
     }
     db.saveAgent({ ...agent, archived })
@@ -811,13 +799,11 @@ const api: Api = {
   },
 
   deleteConversation: ({ id }) => {
-    const conv = db.conversation(id)
-    if (!conv) return
-    if (conv.kind === 'agents' && requestRunning(conv, db.messages()))
-      throw new Error(L('Esse pedido ainda está em andamento. Dá pra apagar a conversa quando ele terminar.', "That request is still going. The conversation can be deleted once it's over."))
+    if (!db.conversation(id)) return
     for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
     for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
     for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
+    runner.forgetSessions({ conversationId: id })
     db.deleteConversation(id)
     emit({ type: 'conversation_removed', id })
   },
@@ -872,24 +858,15 @@ const api: Api = {
 
   setTelegramToken: ({ token }) => telegram!.setToken(token),
   setGithubToken: ({ token }) => github.setToken(token),
-  exportTeam: () => teamFiles.export(),
-  previewTeam: ({ text }) => teamFiles.preview(text),
-  importTeam: ({ text, choices }) => {
-    const r = teamFiles.apply(text, choices)
+  exportTeam: () => exportTeam(db),
+  importTeam: ({ text }) => {
+    const r = importTeam(db, text, settings().defaultLimit)
     for (const a of db.agents()) emit({ type: 'agent', agent: a })
     emitConversations()
     for (const k of db.skills()) emit({ type: 'skill', skill: k })
     for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
-    emit({ type: 'settings', settings: settings() })
-    for (const id of r.connectors) {
-      const c = connectors.get(id)
-      if (c) emit({ type: 'connector', connector: c })
-      void connectors.connect(id) // each person signs in with their own account
-    }
-    return r.note
+    return r
   },
-  teams: () => teamFiles.list(),
-  forgetTeam: ({ id }) => teamFiles.forget(id),
   importAgents: ({ path, data }) => {
     if (!path && !data) throw new Error(L('Escolha um arquivo .zip.', 'Choose a .zip file.'))
     const zip = path ? zipFromFile(path) : zipFromBuffer(Buffer.from(data!, 'base64'))
@@ -977,7 +954,6 @@ const api: Api = {
   updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...patch } }) => {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
-    if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
     db.setSettings(patch)
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })

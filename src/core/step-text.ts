@@ -110,17 +110,19 @@ const RULES: [RegExp, string | ((...m: string[]) => string)][] = [
   [/\b(authorization\s*[:=]\s*)(?:(bearer|basic|token)\s+)?[^\s"',}]+/gi, (_m, head, kind) => `${head}${kind ? `${kind} ` : ''}${MASK}`],
   [/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, `$1 ${MASK}`],
   // --token xyz, --password=xyz, --client-secret "xyz"
-  [new RegExp(String.raw`(--?[\w-]*${SECRET_WORDS})(\s+|=)${QUOTED_OR_WORD}`, 'gi'), `$1$2${MASK}`],
+  [new RegExp(String.raw`(--?[\w-]{0,40}${SECRET_WORDS})(\s+|=)${QUOTED_OR_WORD}`, 'gi'), `$1$2${MASK}`],
   // DATABRICKS_TOKEN=xyz, export API_KEY="xyz", password=xyz in a connection string
-  [new RegExp(String.raw`\b([A-Za-z_][\w.-]*?${SECRET_WORDS})(\s*=\s*)${QUOTED_OR_WORD}`, 'gi'), `$1$2${MASK}`],
+  [new RegExp(String.raw`\b([A-Za-z_][\w.-]{0,40}?${SECRET_WORDS})(\s*=\s*)${QUOTED_OR_WORD}`, 'gi'), `$1$2${MASK}`],
   // "token": "xyz" in JSON, token: xyz in YAML
-  [new RegExp(String.raw`(["']?[\w-]*${SECRET_WORDS}["']?\s*:\s*)("[^"]*"|'[^']*'|[^\s,}\]]+)`, 'gi'), (_m, head, v) => `${head}${v!.startsWith('"') ? `"${MASK}"` : v!.startsWith("'") ? `'${MASK}'` : MASK}`],
+  [new RegExp(String.raw`(["']?[\w-]{0,40}${SECRET_WORDS}["']?\s*:\s*)("[^"]*"|'[^']*'|[^\s,}\]]+)`, 'gi'), (_m, head, v) => `${head}${v!.startsWith('"') ? `"${MASK}"` : v!.startsWith("'") ? `'${MASK}'` : MASK}`],
   // https://user:password@host
-  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, `$1${MASK}@`],
+  [/(\b[a-z][a-z0-9+.-]{0,30}:\/\/[^\s:/@]+:)[^\s@/]+@/gi, `$1${MASK}@`],
   // -p is a password only for these (for mkdir, ssh or the databricks CLI it's something else)
-  [/\b(mysql|mariadb|mysqldump|mysqladmin|sshpass)\b([^\n|;&]*?\s)-p(?:\s+|=)?(?![\s-])\S+/g, `$1$2-p${MASK}`]
+  [/\b(mysql|mariadb|mysqldump|mysqladmin|sshpass)\b([^\n|;&]{0,300}?\s)-p(?:\s+|=)?(?![\s-])\S+/g, `$1$2-p${MASK}`]
 ]
 
+// The rules' prefixes are bounded ({0,40} and the like): unbounded, a long run of word characters (base64, a hash)
+// made each rule scan to the end from every position, seconds on 40 KB with the core waiting.
 export function maskSecrets(text: string): string {
   let t = text
   for (const [re, to] of RULES) t = t.replace(re, to as never)

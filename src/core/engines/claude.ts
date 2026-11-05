@@ -1,10 +1,9 @@
-import { existsSync, readdirSync, readFileSync, rmdirSync, rmSync } from 'node:fs'
+import { readdirSync, readFileSync, rmdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { lastLines, LiveCli, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn, TurnShape } from './types'
 import { L } from '../../shared/lang'
-import { thinkingOff } from '../../shared/types'
 
 export const GATEWAY_NAME = 'tucano'
 const WEB_TOOLS = ['WebSearch', 'WebFetch'] // run on Anthropic's side, on the subscription
@@ -175,10 +174,8 @@ export function claudeParser(): Parser {
 // Without CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC the CLI makes one more model call after the
 // reply (its post-turn summary) and only then sends `result`: about 2.5 s on every reply, at
 // times over 10 s. Nobody reads that summary here.
-// `noThinking`: a model that isn't Anthropic's at low or medium effort (thinkingOff). The person's own setting, in
-// the gateway's environment, still wins.
-export function claudeEnv(p: Provider, account?: string, noThinking = false): NodeJS.ProcessEnv {
-  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...(noThinking ? { CLAUDE_CODE_DISABLE_THINKING: '1' } : {}), ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), MCP_TOOL_TIMEOUT: '900000' }
+export function claudeEnv(p: Provider, account?: string): NodeJS.ProcessEnv {
+  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), MCP_TOOL_TIMEOUT: '900000' }
 }
 
 // Where Claude Code keeps a session: its config folder, then the working folder with every
@@ -189,6 +186,7 @@ const configDirOf = (account?: string): string => account || process.env['CLAUDE
 // A process kept open after a reply waits this long for the next one, and only this many wait at
 // once (each holds about 140 MB): past either, it closes, and the next reply resumes the session
 // from disk in a new process instead.
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export const KEEP_IDLE_MS = 5 * 60_000
 export const MAX_IDLE = 2
 // A process started ahead of a turn with no session (the router's) waits this long, and only this
@@ -255,7 +253,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       }
       // The gateway's token goes in the environment, never in the arguments (other processes can read those).
       const p = await provider()
-      const env = claudeEnv(p, turn.account, thinkingOff(turn.model, turn.effort))
+      const env = claudeEnv(p, turn.account)
       const session = turn.session
       if (!session) {
         // A process started for it ahead of time takes the turn, then goes.
@@ -344,30 +342,53 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       })
     },
     release(id) {
+      const open = kept.get(id)?.cli
       close(id)
       shapes.delete(id)
       const file = files.get(id)
       files.delete(id)
-      if (file) rmSync(file, { force: true })
-    },
-    clean(workDir) {
-      const projects = join(configDirOf(), 'projects')
-      const prefix = claudeProjectDir(configDirOf(), workDir).slice(projects.length + 1)
-      let dirs: string[]
-      try {
-        dirs = readdirSync(projects).filter((d) => d.startsWith(`${prefix}-`))
-      } catch {
-        return // no session was ever kept here
-      }
-      for (const d of dirs) {
-        const dir = join(projects, d)
+      if (!file) return
+      // The file, and the folder Claude Code may keep beside it (tool results). Only once the process
+      // is gone: on its way out it writes the session's last prompt and cost to the file again.
+      // Still in use (on Windows), it stays: the next start's clean() takes it.
+      const remove = (): void => {
+        for (const p of [file, file.slice(0, -'.jsonl'.length)])
+          try {
+            rmSync(p, { recursive: true, force: true })
+          } catch {
+            /* in use */
+          }
         try {
-          for (const f of readdirSync(dir)) if (f.endsWith('.jsonl') && !files.has(f.slice(0, -'.jsonl'.length))) rmSync(join(dir, f), { force: true })
-          if (existsSync(dir) && !readdirSync(dir).length) rmdirSync(dir)
+          rmdirSync(dirname(file)) // the agent's folder, once it holds nothing
         } catch {
-          /* in use, or gone: the next start tries again */
+          /* not empty */
         }
       }
+      if (open?.alive) void open.exited().then(remove)
+      else remove()
+    },
+    // Only the exact folders of the agents under workDir, in the usual config folder and in each
+    // account's: Claude Code's folder names are lossy, so a prefix could take someone else's.
+    clean(workDir, accountDirs = []) {
+      let agents: string[]
+      try {
+        agents = readdirSync(workDir)
+      } catch {
+        return // no agent has worked here yet
+      }
+      for (const config of [configDirOf(), ...accountDirs])
+        for (const a of agents) {
+          const dir = claudeProjectDir(config, join(workDir, a))
+          try {
+            for (const f of readdirSync(dir)) {
+              const id = f.endsWith('.jsonl') ? f.slice(0, -'.jsonl'.length) : f
+              if (!files.has(id) && (f.endsWith('.jsonl') || SESSION_ID.test(f))) rmSync(join(dir, f), { recursive: true, force: true })
+            }
+            if (!readdirSync(dir).length) rmdirSync(dir)
+          } catch {
+            /* none here, in use, or gone: the next start tries again */
+          }
+        }
     },
     dispose() {
       for (const [, k] of kept) k.cli.killNow()
