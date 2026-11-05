@@ -9,12 +9,20 @@ import type { Engine, EngineEvent, Turn } from './types'
 // Deterministic engine for tests and screenshots. Never spawns anything, but
 // behaves like the real ones where it matters: it routes when given the
 // router prompt, and calls ask_user through the gateway when asked to ask.
-// `sessions`: it takes kept sessions like Claude Code does, and `released` gets the ones let go.
-export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (turn: Turn) => string; sessions?: boolean; released?: string[] } = {}): Engine {
+// `sessions`: it takes kept sessions like Claude Code does, and `released` gets the ones let go;
+// `warmed` gets what was started ahead ("warm <model>", "rewarm <session id>").
+export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (turn: Turn) => string; sessions?: boolean; released?: string[]; warmed?: string[] } = {}): Engine {
   const delay = opts.delayMs ?? 25
   return {
     id,
-    ...(opts.sessions ? { sessions: true, release: (sessionId: string) => void opts.released?.push(sessionId) } : {}),
+    ...(opts.sessions
+      ? {
+          sessions: true,
+          release: (sessionId: string) => void opts.released?.push(sessionId),
+          warm: (t: { model: string }) => void opts.warmed?.push(`warm ${t.model}`),
+          rewarm: (sessionId: string) => void opts.warmed?.push(`rewarm ${sessionId}`)
+        }
+      : {}),
     async *run(turn): AsyncIterable<EngineEvent> {
       const last = lastMessage(turn.prompt)
       // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
