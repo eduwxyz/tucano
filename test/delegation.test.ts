@@ -159,14 +159,13 @@ describe('delegation', () => {
     await r.send('c', '@dev @ana preparem o lançamento: o post e os números')
     await r.idle()
 
-    // One after another, each once, in the thread of the message.
+    // One after another, each once, where the channel answers: in the conversation, by default.
     const replies = said('c')
     expect(replies.map(by)).toEqual(['dev', 'ana'])
     expect(turnsOf('dev')).toHaveLength(1)
     expect(turnsOf('ana')).toHaveLength(1)
     expect(replies[1]!.at).toBeGreaterThan(replies[0]!.at)
-    const asked = db.messages().find((m) => m.author.kind === 'me')!
-    expect(replies.every((m) => m.threadId === asked.id)).toBe(true)
+    expect(replies.every((m) => m.threadId === undefined)).toBe(true)
 
     // The first is told to split it; the second, that the first answered and to take only what's left.
     expect(turnsOf('dev')[0]!.system).toContain('você é o primeiro. Comece dividindo o trabalho')
