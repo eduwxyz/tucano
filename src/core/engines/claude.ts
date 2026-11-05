@@ -180,7 +180,14 @@ export function claudeEnv(p: Provider, account?: string): NodeJS.ProcessEnv {
 
 // Where Claude Code keeps a session: its config folder, then the working folder with every
 // character other than a letter or digit turned into "-".
-export const claudeProjectDir = (configDir: string, cwd: string): string => join(configDir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
+// As Claude Code names it: past 200 characters, cut there and followed by a hash of the whole path.
+export const claudeProjectDir = (configDir: string, cwd: string): string => {
+  const name = cwd.replace(/[^a-zA-Z0-9]/g, '-')
+  if (name.length <= 200) return join(configDir, 'projects', name)
+  let hash = 0
+  for (let i = 0; i < cwd.length; i++) hash = ((hash << 5) - hash + cwd.charCodeAt(i)) | 0
+  return join(configDir, 'projects', `${name.slice(0, 200)}-${Math.abs(hash).toString(36)}`)
+}
 const configDirOf = (account?: string): string => account || process.env['CLAUDE_CONFIG_DIR'] || join(homedir(), '.claude')
 
 // A process kept open after a reply waits this long for the next one, and only this many wait at
@@ -211,6 +218,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
   const shapes = new Map<string, TurnShape>() // session id → the settings of its last turn, to start it again
   const spares = new Map<string, { cli: LiveCli; timer: NodeJS.Timeout; at: number }>() // by flags and provider
 
+  const removing = new Set<Promise<void>>() // session files waiting for their process to exit
   const close = (id: string): void => {
     const k = kept.get(id)
     if (!k) return
@@ -364,8 +372,13 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
           /* not empty */
         }
       }
-      if (open?.alive) void open.exited().then(remove)
-      else remove()
+      if (!open?.alive) return remove()
+      const gone = open.exited().then(remove)
+      removing.add(gone)
+      void gone.finally(() => removing.delete(gone))
+    },
+    async settle() {
+      await Promise.all([...removing])
     },
     // Only the exact folders of the agents under workDir, in the usual config folder and in each
     // account's: Claude Code's folder names are lossy, so a prefix could take someone else's.

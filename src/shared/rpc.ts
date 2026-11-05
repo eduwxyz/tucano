@@ -3,6 +3,8 @@ import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiRevie
 import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
+  webhookPort?: number
+  defaultWorkspace?: boolean
   settings: Settings
   agents: Agent[]
   conversations: Conversation[]
@@ -21,6 +23,7 @@ export interface Snapshot {
 }
 
 export interface Api {
+  markRead(p: { conversationId: string }): void
   snapshot(): Snapshot
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
