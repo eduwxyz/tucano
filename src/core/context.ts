@@ -17,6 +17,7 @@ export function systemPrompt(opts: {
   memories?: { aboutMe: Memory[]; own: Memory[]; searchable?: number }
   canRemember?: boolean
   hasComputer?: boolean
+  computerOff?: string // it has a computer, but Docker is off right now: what the person has to do
   offline?: string[] // connectors it has access to that aren't connected right now
   macFolder?: string // a computer on this Mac (spec §23): where its commands start in this conversation
   web?: boolean
@@ -28,7 +29,7 @@ export function systemPrompt(opts: {
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, browser, apps, routines, skills, publish, builder, wiki } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, publish, builder, wiki } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -44,6 +45,14 @@ export function systemPrompt(opts: {
     settings.context.trim() && `## ${L('Sobre', 'About')} ${me}\n${settings.context.trim()}`,
     agent.instructions.trim() && `## ${L('Suas instruções', 'Your instructions')}\n${agent.instructions.trim()}`,
     hasComputer && macFolder && macSection(me, macFolder),
+    computerOff &&
+      [
+        L('## Seu computador', '## Your computer'),
+        L(
+          `Está fora do ar agora: ${computerOff} Nesta resposta você não tem comandos nem arquivos dele. Se o pedido precisar do computador, diga isso a ${me} em uma frase, com o que fazer, e não tente outro caminho; o que der pra responder sem ele, responda.`,
+          `It's down right now: ${computerOff} In this reply you have none of its commands or files. If the request needs the computer, tell ${me} so in one sentence, with what to do, and don't try another way; what you can answer without it, answer.`
+        )
+      ].join('\n'),
     hasComputer &&
       !macFolder &&
       [
