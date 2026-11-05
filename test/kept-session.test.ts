@@ -110,6 +110,17 @@ describe('Sessions', () => {
     expect(s.begin('other', { config: cfg, shown: msgs('m1') })).toBeDefined()
   })
 
+  it('lets an archived agent’s or a deleted conversation’s sessions go, a running one when it ends', () => {
+    const s = store()
+    const idle = started(s)
+    const p = s.begin('a1:c2:', { config: cfg, shown: msgs('m1') })!
+    s.dropWhere((key) => key === 'k' || key.startsWith('a1:'))
+    expect(forgot).toEqual([idle.id])
+    s.end('a1:c2:', p, { ok: true, config: cfg, shown: msgs('m1'), reply: 'r1' })
+    expect(forgot).toEqual([idle.id, p.id])
+    expect(s.has('a1:c2:')).toBe(false)
+  })
+
   it('sweeps the ones past the cache', () => {
     const s = store()
     const first = started(s)
@@ -134,7 +145,7 @@ describe('a reply with a kept session', () => {
   const recorded = (e: Engine): Engine => ({ ...e, run: (t) => (turns.push(t), e.run(t)) })
   function runner(opts: { delayMs?: number; reply?: (t: Turn) => string; sessions?: boolean } = {}): Runner {
     const claude = recorded(fakeEngine('claude', { delayMs: opts.delayMs ?? 1, reply: opts.reply, sessions: opts.sessions ?? true, released }))
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ks-work-')) })
   }
   const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
@@ -143,7 +154,7 @@ describe('a reply with a kept session', () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ks-db-')), 'test.db'))
     turns = []
     released = []
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(agent('a1', 'lia'))
     db.saveAgent(agent('a2', 'theo'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -232,6 +243,35 @@ describe('a reply with a kept session', () => {
     await r.idle()
     expect(turns[1]!.session?.resume).toBe(false)
     expect(turns[1]!.blocks!.some((b) => b.includes('tabela de vendas'))).toBe(true)
+  })
+
+  it('lets the session go when its conversation is deleted or its agent archived', async () => {
+    const r = runner()
+    await r.send('d1', 'oi')
+    await r.idle()
+    r.forgetSessions({ conversationId: 'c1' })
+    expect(released).toEqual([])
+    r.forgetSessions({ agentId: 'a1' })
+    expect(released).toEqual([turns[0]!.session!.id])
+    await r.send('d1', 'de novo')
+    await r.idle()
+    expect(turns[1]!.session).toMatchObject({ resume: false })
+  })
+
+  it('finishes the reply when letting a session go fails', async () => {
+    const claude = recorded(fakeEngine('claude', { delayMs: 1, sessions: true, released }))
+    const failing: Engine = { ...claude, release: () => { throw new Error('EBUSY: resource busy or locked') } }
+    const engines: Record<EngineId, Engine> = { claude: failing, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+    const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ks-work-')) })
+    await r.send('d1', 'oi')
+    await r.idle()
+    db.saveAgent({ ...db.agent('a1')!, instructions: 'outra coisa' }) // the next reply starts over, letting the first go
+    await r.send('d1', 'de novo')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
+    await r.send('d1', 'e agora?')
+    await r.idle()
+    expect(turns[2]!.session).toMatchObject({ resume: true }) // the key isn't stuck busy
   })
 
   it('gives an engine that takes no sessions the whole conversation every time', async () => {
@@ -376,8 +416,30 @@ describe('a Claude Code process kept open', () => {
     const file = join(claudeProjectDir(cfg, dir), 's1.jsonl')
     mkdirSync(claudeProjectDir(cfg, dir), { recursive: true })
     writeFileSync(file, '{}\n')
+    mkdirSync(join(claudeProjectDir(cfg, dir), 's1', 'tool-results'), { recursive: true })
     engine.release!('s1')
+    for (let i = 0; i < 50 && existsSync(file); i++) await new Promise((r) => setTimeout(r, 100)) // once its process is gone
     expect(existsSync(file)).toBe(false)
+    expect(existsSync(join(claudeProjectDir(cfg, dir), 's1'))).toBe(false)
     engine.dispose!()
   }, 30_000)
+
+  it('cleans what an earlier run left in the agents’ own folders only, the accounts’ too', () => {
+    const engine = claudeEngine(() => bin, async () => ({ env: {} }))
+    const work = join(dir, 'agents')
+    mkdirSync(join(work, 'a1'), { recursive: true })
+    const id = '0f8fad5b-d9cb-469f-a165-70867728950e'
+    const left = join(claudeProjectDir(cfg, join(work, 'a1')), `${id}.jsonl`)
+    const beside = join(claudeProjectDir(cfg, join(work, 'a1')), id)
+    const neighbour = join(claudeProjectDir(cfg, join(dir, 'agents-backup', 'x')), `${id}.jsonl`)
+    for (const f of [left, neighbour]) {
+      mkdirSync(join(f, '..'), { recursive: true })
+      writeFileSync(f, '{}\n')
+    }
+    mkdirSync(beside)
+    engine.clean!(work, [cfg])
+    expect(existsSync(left)).toBe(false)
+    expect(existsSync(beside)).toBe(false)
+    expect(existsSync(neighbour)).toBe(true)
+  })
 })

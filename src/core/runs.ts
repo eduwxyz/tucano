@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
@@ -25,6 +25,8 @@ import { sessionConfig, Sessions, type SessionPlan, type Shown } from './session
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { callError, contentText, errorReason } from './connectors'
+import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -42,6 +44,8 @@ const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is c
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
 const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
+const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
+const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
 const THOUGHT = (): string => L('Pensou', 'Thought') // the thinking step, closed
 
 export const ASK_USER: ToolDef = {
@@ -108,9 +112,7 @@ const tokenCount = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toLocaleString(locale(), { maximumFractionDigits: 1 })} ${L('mi', 'M')}` : `${Math.round(n / 1000).toLocaleString(locale())}${L(' mil', 'k')}`
 
 export function resultText(r: CallToolResult): string {
-  const text = r.content
-    .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
-    .join('\n')
+  const text = r.isError ? errorReason(r) : contentText(r)
   const bytes = Buffer.from(text, 'utf8')
   if (bytes.length <= MAX_RESULT_BYTES) return text
   // Cut on a whole character: a split one decodes as U+FFFD at the end.
@@ -150,13 +152,36 @@ export class Runner {
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
       exists: (id) => !!deps.db.message(id),
+      // The token first: a failure letting the process or its file go must not keep it, nor the reply.
       forget: (s) => {
-        for (const e of Object.values(deps.engines)) e.release?.(s.id)
         deps.gateway?.release(s.token)
+        for (const e of Object.values(deps.engines))
+          try {
+            e.release?.(s.id)
+          } catch (err) {
+            console.error('[sessions] release', err)
+          }
       }
     })
-    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir) // left by an earlier run of the app
+    // Left by an earlier run of the app, under the usual login and each account's.
+    const accounts = deps.dataDir ? join(deps.dataDir, 'accounts') : undefined
+    let accountDirs: string[] = []
+    try {
+      if (accounts) accountDirs = readdirSync(accounts).map((d) => join(accounts, d))
+    } catch {
+      // no accounts
+    }
+    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir, accountDirs)
     setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
+
+  // An archived agent's sessions, or a deleted conversation's, go now: their process and the
+  // transcript Claude Code keeps on disk.
+  forgetSessions(of: { agentId?: string; conversationId?: string }): void {
+    this.sessions.dropWhere((key) => {
+      const [agent, conversation] = key.split(':')
+      return (of.agentId !== undefined && agent === of.agentId) || (of.conversationId !== undefined && conversation === of.conversationId)
+    })
   }
 
   setPaused(paused: boolean): void {
@@ -879,7 +904,9 @@ export class Runner {
 
         if (skills && SKILL_TOOL_NAMES.has(name)) {
           const r = name === LER_SKILL.name ? skills.read(agent, args) : skills.propose(db.agent(agent.id) ?? agent, args)
-          if (r.skill) addSteps({ id: randomUUID(), label: name === LER_SKILL.name ? L('Leu a skill', 'Read the skill') : L('Propôs uma skill', 'Proposed a skill'), detail: r.skill.name, status: 'done' })
+          const file = name === LER_SKILL.name && typeof args['arquivo'] === 'string' && args['arquivo'].trim() ? ` · ${args['arquivo'].trim()}` : ''
+          if (r.skill) addSteps({ id: randomUUID(), label: name === LER_SKILL.name ? L('Leu a skill', 'Read the skill') : L('Propôs uma skill', 'Proposed a skill'), detail: r.skill.name + file, status: r.error ? 'error' : 'done', ...(r.error ? { error: r.reply } : {}) })
+          else if (name === LER_SKILL.name && r.error) addSteps({ id: randomUUID(), label: L('Leu a skill', 'Read the skill'), detail: String(args['nome'] ?? '') + file, status: 'error', error: r.reply })
           return textResult(r.reply, r.error)
         }
 
@@ -898,11 +925,24 @@ export class Runner {
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
           const t0 = Date.now()
           const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
-          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          // A command shows whole (or the SQL it runs, pulled out), masked, from the moment it starts.
+          const command = name === 'bash' && typeof args['command'] === 'string' ? commandStep(args['command']) : undefined
+          const step: Step = command
+            ? { id: randomUUID(), label: command.sql ? L('Rodou SQL', 'Ran SQL') : label, detail: command.detail, input: command.input, status: 'running' }
+            : { id: randomUUID(), label, detail: maskSecrets(detail), status: 'running' }
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
           const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          const failed = !!out.result.isError
+          const end: Pick<Step, 'output' | 'error'> = command
+            ? execSummary(resultText(out.result), failed)
+            : failed
+              ? { error: maskSecrets(errorReason(out.result)) }
+              : SUMMED_COMPUTER_TOOLS.has(name)
+                ? { output: resultSummary(resultText(out.result)) }
+                : {}
+          if (end.error && end.error.length > STEP_ERROR_MAX) end.error = `${end.error.slice(0, STEP_ERROR_MAX)}…`
           // No tool of the computer can work: the turn ends here, before the model tries the next one.
           if (out.down) {
             computerDown = out.down
@@ -914,7 +954,7 @@ export class Runner {
             ...msg.run!,
             artifactIds: artifactIds.length ? [...artifactIds] : undefined,
             services: services.length ? [...services] : undefined,
-            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status: out.result.isError ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
+            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...end, status: failed ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
           }
           stepStarted = Date.now()
           save()
@@ -1152,22 +1192,31 @@ export class Runner {
 
         const t0 = Date.now()
         const step: Step = { id: randomUUID(), label: current.cls === 'read' ? L('Consultou', 'Looked up') : always ? L('Executou (sempre permitido)', 'Ran (always allowed)') : L('Executou', 'Ran'), detail, status: 'running' }
+        // What it asked (the SQL, the path) shows while it runs; what came back, when it's done.
+        const { [REASON_PARAM]: _reason, ...toolArgs } = args
+        const input = keyArg(toolArgs)
+        if (input) step.input = input
         flush()
         msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
         save()
-        const finish = (status: 'done' | 'error'): void => {
-          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0 } : s)), thinking()] }
+        // A failure keeps its reason on the step: a bare ✗ leaves nobody knowing why.
+        const finish = (status: 'done' | 'error', why?: string, output?: string): void => {
+          const error = why && maskSecrets(why)
+          if (error) console.warn(`[connector] ${detail} failed: ${error}`)
+          const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : output ? { output } : {}
+          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s)), thinking()] }
           stepStarted = Date.now()
           save()
         }
         try {
-          const { [REASON_PARAM]: _reason, ...toolArgs } = args
           const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
-          finish(r.isError ? 'error' : 'done')
+          if (r.isError) finish('error', errorReason(r))
+          else finish('done', undefined, resultSummary(resultText(r)))
           return clip(r)
         } catch (e) {
-          finish('error')
-          return textResult(L(`A ferramenta falhou: ${e instanceof Error ? e.message : String(e)}`, `The tool failed: ${e instanceof Error ? e.message : String(e)}`), true)
+          const why = callError(e)
+          finish('error', why)
+          return textResult(L(`A ferramenta falhou: ${why}`, `The tool failed: ${why}`), true)
         }
       }
 
@@ -1572,7 +1621,7 @@ export class Runner {
         try {
           const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
           ok = !r.isError
-          outcome = r.isError ? L('Executou, com erro.', 'Ran, with an error.') : ran
+          outcome = r.isError ? L(`Executou, com erro: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`) : ran
           task = L(
             `${me} aprovou o seu pedido ${call}. O app executou exatamente essa chamada${r.isError ? ' e ela devolveu um erro' : ''}. Resultado:\n${resultText(r)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
             `${me} approved your request ${call}. The app ran exactly that call${r.isError ? ' and it returned an error' : ''}. Result:\n${resultText(r)}\n\nGo on from here and tell ${me} the result.`
