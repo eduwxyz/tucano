@@ -9,7 +9,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { L } from '../shared/lang'
-import { findChrome, userAgentPlatform } from './platform'
+import { chromeKeyringFlags, findChrome, userAgentPlatform } from './platform'
 import { POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
 import type { BrowserInput, BrowserOp, BrowserReply } from '../shared/types'
 
@@ -243,6 +243,7 @@ export class ChromeBrowsers {
       '--no-default-browser-check',
       '--disable-features=Translate,MediaRouter',
       '--deny-permission-prompts',
+      ...chromeKeyringFlags(),
       `--window-size=${W},${H}`,
       ...(headed ? ['--new-window'] : ['--headless=new', '--mute-audio']),
       url && /^https?:/.test(url) ? url : 'about:blank'
