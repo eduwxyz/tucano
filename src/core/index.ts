@@ -717,6 +717,10 @@ const api: Api = {
     void runner.send(conversationId, text, images, threadId)
   },
 
+  typing: ({ conversationId, threadId }) => {
+    void runner.typing(conversationId, threadId).catch((e: unknown) => console.warn('[typing]', e))
+  },
+
   stopRun: ({ messageId }) => runner.stop(messageId),
 
   retryRun: ({ messageId }) => runner.retry(messageId),
@@ -754,6 +758,7 @@ const api: Api = {
     if (archived) {
       for (const m of db.messages()) if (m.author.kind === 'agent' && m.author.id === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
       routines.pauseAgent(id)
+      runner.forgetSessions({ agentId: id })
       if (agent.browser) void browser.close(id)
     }
     db.saveAgent({ ...agent, archived })
@@ -799,6 +804,7 @@ const api: Api = {
     for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
     for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
     for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
+    runner.forgetSessions({ conversationId: id })
     db.deleteConversation(id)
     emit({ type: 'conversation_removed', id })
   },
@@ -1213,7 +1219,10 @@ process.parentPort.on('message', (e) => {
   port.start()
 })
 
-process.on('exit', () => db.close())
+process.on('exit', () => {
+  for (const e of Object.values(engineImpls)) e.dispose?.() // the Claude Code processes kept open between replies
+  db.close()
+})
 // The app stops the core with SIGTERM, which by default skips the 'exit' handlers
 // above and leaves the agents' Chromes running with nothing to drive them.
 process.on('SIGTERM', () => process.exit(0))

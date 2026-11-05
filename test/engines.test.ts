@@ -29,6 +29,7 @@ describe('Claude Code stream', () => {
     expect(done).toEqual({
       type: 'done',
       text: 'oi, tudo certo.',
+      context: 10 + 6617 + 84, // the last model call's input and output
       usage: { inputTokens: 10 + 6617, cacheReadTokens: 6617, outputTokens: 84, apiCostUsd: 0.0010917 }
     })
     expect(events.some((e) => e.type === 'error')).toBe(false)
