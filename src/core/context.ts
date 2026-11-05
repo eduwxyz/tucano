@@ -173,12 +173,12 @@ export function systemPrompt(opts: {
 export function readingData(me: string): string {
   return [
     L(
-      `- Pra ler um canal, um histórico, logs ou uma tabela, peça só a janela que a tarefa precisa, com o filtro de tempo da ferramenta, uma busca ou um limite, em vez de paginar tudo. Cada mensagem traz a hora, com os segundos Unix; a última é de agora. Ex.: "o alarme da última hora" é oldest = (unix da última mensagem − 3600). Se ${me} não disser a janela, comece pela última hora e só amplie se faltar. Se um resultado vier cortado, estreite a pergunta (janela menor, filtro, menos campos, uma agregação) em vez de chamar de novo pro resto.`,
-      `- To read a channel, a history, logs or a table, ask only for the window the task needs, with the tool's time filter, a search or a limit, instead of paging through everything. Each message carries its time, with the Unix seconds; the last one is from now. E.g. "the alarm from the last hour" is oldest = (the last message's unix − 3600). If ${me} doesn't say the window, start with the last hour and widen it only if something's missing. If a result comes back cut, narrow the question (a shorter window, a filter, fewer fields, an aggregate) instead of calling again for the rest.`
+      `- Pra ler um canal, um histórico, logs ou uma tabela, peça só a janela que a tarefa precisa, com o filtro de tempo da ferramenta, uma busca ou um limite, em vez de paginar tudo. Cada mensagem traz a hora, com os segundos Unix; a última é de agora. Ex.: "o alarme da última hora" é oldest = (unix da última mensagem − 3600). Se o pedido é sobre algo de agora (um alarme, um erro) e ${me} não disser a janela, comece pela última hora e só amplie se faltar. Se um resultado vier cortado, estreite a pergunta (janela menor, filtro, menos campos, uma agregação) em vez de chamar de novo pro resto.`,
+      `- To read a channel, a history, logs or a table, ask only for the window the task needs, with the tool's time filter, a search or a limit, instead of paging through everything. Each message carries its time, with the Unix seconds; the last one is from now. E.g. "the alarm from the last hour" is oldest = (the last message's unix − 3600). If it's about something happening now (an alarm, an error) and ${me} doesn't say the window, start with the last hour and widen it only if something's missing. If a result comes back cut, narrow the question (a shorter window, a filter, fewer fields, an aggregate) instead of calling again for the rest.`
     ),
     L(
-      '- Um resultado que volta ainda rodando (uma consulta SQL, um job) o app espera por você: ele só te devolve quando terminar. Nunca espere com sleep nem fique perguntando de novo; rode a mesma consulta uma vez só.',
-      "- A result that comes back still running (a SQL query, a job) is awaited by the app for you: it only comes back to you once it's done. Never wait with sleep or keep asking again; run the same query only once."
+      '- Uma consulta que volta ainda rodando (um SQL demorado) o app espera por você, com a ferramenta de status do próprio conector: ela só te devolve quando terminar. Não espere com sleep nem rode a mesma consulta de novo.',
+      "- A query that comes back still running (a slow SQL) is awaited by the app for you, with the connector's own status tool: it only comes back once it's done. Don't wait with sleep or run the same query again."
     )
   ].join('\n')
 }
@@ -319,6 +319,7 @@ type TranscriptOpts = {
   images?: Map<string, string[]>
   thread?: Message
   searchable?: boolean
+  unix?: boolean // message times with the year, the offset and the Unix seconds: for an agent whose tools filter by time
 }
 
 export function transcript(opts: TranscriptOpts): string[] {
@@ -333,7 +334,7 @@ export const snip = (text: string, max: number): string => {
 
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
-  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable } = opts
+  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable, unix } = opts
   const name = (m: Message): string | null => {
     if (m.author.kind === 'me') return me
     if (m.author.kind === 'system') return null
@@ -392,7 +393,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       : `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
   ].filter((b): b is string => !!b)
   const blockOf = new Map(shown.map((m, i) => [m.id, head.length + i]))
-  const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${stamp(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
+  const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${unix ? stamp(m.at) : clock(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
   return { blocks, blockOf }
 }
 

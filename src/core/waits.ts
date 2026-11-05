@@ -51,6 +51,10 @@ type Tool = ConnectorTool & { inputSchema?: Record<string, unknown> }
 
 const POLL_NAME = /poll|status|wait|get_?(statement|result|run|job|query|operation|execution)/i
 
+// A tool that asks how something is going (poll_sql_result, get_workflow_run): the agent calling it
+// wants the answer as it is now, so its own result is never waited on.
+export const isStatusTool = (name: string): boolean => POLL_NAME.test(name) || /^(get|describe|check)_?\w*?(statement|result|run|job|query|operation|execution|build|deploy(ment)?|pipeline|task)s?$/i.test(name)
+
 // The connector's own status tool for a pending result: a read tool whose name says it polls, and
 // whose required arguments are all ids the result gave. The tool that was just called counts too
 // (asking poll_sql_result again is how the agent would have waited).
@@ -73,6 +77,15 @@ export function sleepSeconds(command: string): number {
   if (!m) return 0
   const unit = { '': 1, s: 1, m: 60, h: 3600, d: 86_400 }[m[2] as '' | 's' | 'm' | 'h' | 'd']
   return Number(m[1]) * unit
+}
+
+// Seconds a command sleeps with nothing checked after it ("sleep 60", "sleep 60 && echo check 3"): a wait
+// for something outside the computer. 0 when something runs after the sleep ("sleep 30 && curl …").
+export function idleSleepSeconds(command: string): number {
+  const s = sleepSeconds(command)
+  if (!s) return 0
+  const rest = command.replace(/^\s*(?:\(\s*)?sleep\s+\d+(?:\.\d+)?[smhd]?\s*\)?/, '')
+  return /^(?:\s*(?:&&|;|\|\|)\s*(?:echo\b[^;&|]*|printf\b[^;&|]*|true|:|date)\s*)*\s*;?\s*$/.test(rest) ? s : 0
 }
 
 export const realWait = (ms: number, signal?: AbortSignal): Promise<void> =>

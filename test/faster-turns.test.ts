@@ -14,7 +14,7 @@ describe('a tool result handed back to the model', () => {
     const out = resultText(text('a'.repeat(60_000)))
     expect(Buffer.byteLength(out, 'utf8')).toBeLessThan(50_000)
     expect(out.startsWith('a'.repeat(MAX_RESULT_BYTES))).toBe(true)
-    // How much was left out, and to narrow the question instead of reading the rest piece by piece.
+    // How much was left out, and to narrow the question before reading the rest piece by piece.
     expect(out).toContain('40 KB de 60 KB (67%')
     expect(out).toMatch(/estreito/)
   })

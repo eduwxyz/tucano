@@ -83,8 +83,10 @@ describe('transcript', () => {
 
   it('labels authors, marks the agent itself, skips system lines and empty messages', () => {
     const blocks = transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu' })
+    expect(blocks).toEqual(['Conversa em #engenharia, das mais antigas pras mais novas:', '[Edu · sáb 17/10 14:02]\nOi, time', '[Theo · agente · sáb 17/10 14:02]\nOi!', '[Lia (você) · agente · sáb 17/10 14:02]\nOlá'])
+    // An agent whose tools filter by time gets the year, the offset and the Unix seconds too.
     const when = `sáb 17/10/2026 14:02 (${stampZone}, unix ${Math.floor(at / 1000)})`
-    expect(blocks).toEqual(['Conversa em #engenharia, das mais antigas pras mais novas:', `[Edu · ${when}]\nOi, time`, `[Theo · agente · ${when}]\nOi!`, `[Lia (você) · agente · ${when}]\nOlá`])
+    expect(transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu', unix: true })[1]).toBe(`[Edu · ${when}]\nOi, time`)
   })
 
   it('gives each message its time with the year, the UTC offset and the Unix seconds, for tools that filter by time', () => {
@@ -95,7 +97,8 @@ describe('transcript', () => {
   it('tells an agent with connectors to read only the window it needs, and not to wait with sleep', () => {
     const s = systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '' }, conversation: dm, peers: [], connectors: true })
     expect(s).toContain('oldest = (unix da última mensagem − 3600)')
-    expect(s).toContain('Nunca espere com sleep')
+    expect(s).toContain('Não espere com sleep')
+    expect(s).toContain('Se o pedido é sobre algo de agora') // a table of open issues isn't read for the last hour only
     expect(systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '' }, conversation: dm, peers: [] })).not.toContain('oldest')
   })
 

@@ -25,7 +25,7 @@ import { sessionConfig, Sessions, type SessionPlan, type Shown } from './session
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
-import { awaitDone, pendingOf, pollTool, sleepSeconds } from './waits'
+import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
 
@@ -124,8 +124,8 @@ export function resultText(r: CallToolResult): string {
   const lines = (s: string): number => s.split('\n').length
   const shown = Math.max(1, Math.round((MAX_RESULT_BYTES / bytes.length) * 100))
   return `${kept}\n${L(
-    `[… resultado cortado: chegaram ${kb(MAX_RESULT_BYTES)} de ${kb(bytes.length)} (${shown}%, ${lines(kept)} de ${lines(text)} linhas). Não chame de novo pra ler o resto aos pedaços: se precisar de mais, pergunte de um jeito mais estreito (uma janela de tempo menor, um filtro, menos campos, uma agregação).]`,
-    `[… result cut: ${kb(MAX_RESULT_BYTES)} of ${kb(bytes.length)} came through (${shown}%, ${lines(kept)} of ${lines(text)} lines). Don't call again to read the rest piece by piece: if you need more, ask more narrowly (a shorter time window, a filter, fewer fields, an aggregate).]`
+    `[… resultado cortado: chegaram ${kb(MAX_RESULT_BYTES)} de ${kb(bytes.length)} (${shown}%, ${lines(kept)} de ${lines(text)} linhas). Se precisar de mais, pergunte de um jeito mais estreito (uma janela de tempo menor, um filtro, menos campos, uma agregação); leia o resto em partes só se precisar mesmo de tudo.]`,
+    `[… result cut: ${kb(MAX_RESULT_BYTES)} of ${kb(bytes.length)} came through (${shown}%, ${lines(kept)} of ${lines(text)} lines). If you need more, ask more narrowly (a shorter time window, a filter, fewer fields, an aggregate); read the rest in parts only if you really need all of it.]`
   )}`
 }
 
@@ -965,16 +965,17 @@ export class Runner {
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
-          // Sleeping to wait for something outside (a query, a job, a rate limit) holds the reply a minute
-          // at a time and makes nothing come sooner. The first runs; the next ones don't.
-          const slept = name === 'bash' && typeof args['command'] === 'string' ? sleepSeconds(args['command']) : 0
+          // An agent with connectors sleeping with nothing checked after it is waiting for something outside
+          // (a query, a job): that holds the reply a minute at a time and makes nothing come sooner. The first
+          // runs; the next ones don't. A sleep before checking something here (a server, a build) always runs.
+          const slept = exposed.size && name === 'bash' && typeof args['command'] === 'string' ? idleSleepSeconds(args['command']) : 0
           if (slept >= 20 && ++sleeps > SLEEPS_FREE) {
             if (++refusedSleeps >= SLEEPS_STOP) halt('sleeping')
             addSteps({ id: randomUUID(), label: L('Não esperou com sleep', "Didn't wait with sleep"), detail: snip(String(args['command']), 80), status: 'error' })
             return textResult(
               L(
-                `Não rodei: esperar com sleep não faz nada chegar mais cedo e segura a resposta. Um resultado de conector que volta pendente (uma consulta SQL rodando, um job) o app espera por você: chame a ferramenta de status dele uma vez (ex.: poll_sql_result) e ela só volta quando terminar, por até ${PENDING_WAIT_MINUTES} minutos. Se precisar esperar algo no seu computador, espere dentro de um comando só (um laço que confere e dorme). Se não há o que esperar, siga com o que já tem ou encerre dizendo o que falta.`,
-                `Not run: waiting with sleep makes nothing come sooner and holds the reply. A connector result that comes back pending (a SQL query running, a job) is awaited by the app for you: call its status tool once (e.g. poll_sql_result) and it only returns once it's done, for up to ${PENDING_WAIT_MINUTES} minutes. If you need to wait for something on your computer, wait inside one command (a loop that checks and sleeps). If there's nothing to wait for, go on with what you have or end saying what's left.`
+                `Não rodei: dormir sem conferir nada não faz nada chegar mais cedo e segura a resposta. Uma consulta de conector que volta ainda rodando (um SQL demorado) o app espera por você, por até ${PENDING_WAIT_MINUTES} minutos: rode-a uma vez só. Se precisar esperar algo no seu computador, durma e confira no mesmo comando (ex.: sleep 30 && curl …, ou um laço). Se não há o que esperar, siga com o que já tem ou encerre dizendo o que falta.`,
+                `Not run: sleeping without checking anything makes nothing come sooner and holds the reply. A connector query that comes back still running (a slow SQL) is awaited by the app for you, for up to ${PENDING_WAIT_MINUTES} minutes: run it only once. If you need to wait for something on your computer, sleep and check in the same command (e.g. sleep 30 && curl …, or a loop). If there's nothing to wait for, go on with what you have or end saying what's left.`
               ),
               true
             )
@@ -1267,9 +1268,10 @@ export class Runner {
         try {
           const { [REASON_PARAM]: _reason, ...toolArgs } = args
           const first = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
-          const pending = pendingOf(first)
-          // Still running: the app waits for it here, with the connector's own status tool, instead of the
-          // agent sleeping and asking again.
+          // A query still running: the app waits for it here, with the connector's own status tool, instead
+          // of the agent sleeping and asking again. Not a status tool the agent called itself (asking whether a
+          // deploy finished wants the answer now), nor a write (starting a job doesn't mean waiting for it).
+          const pending = current.cls === 'read' && !isStatusTool(current.name) ? pendingOf(first) : undefined
           const poller = pending && pollTool(db.tools(hit.connector.id), pending, (t) => allowed(t, db.agent(agent.id)?.grants[hit.connector.id]))
           const done = (r: CallToolResult): void => (r.isError ? finish('error', errorReason(r)) : finish('done', undefined, resultSummary(resultText(r))))
           if (!pending || !poller) {
@@ -1321,7 +1323,8 @@ export class Runner {
             true
           )
         }
-        const count = exposed.has(name) ? (callsOf.get(name) ?? 0) + 1 : 0
+        // Only reads: paging a history is reading, and many writes in a row (filing 80 issues) are the work.
+        const count = exposed.get(name)?.tool.cls === 'read' ? (callsOf.get(name) ?? 0) + 1 : 0
         if (count) callsOf.set(name, count)
         if (count > SAME_TOOL_STOP) {
           if (++failing >= ERRORS_STOP) halt('errors')
@@ -1377,7 +1380,7 @@ export class Runner {
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
     const thread = msg.threadId ? db.message(msg.threadId) : undefined
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread, searchable: canSeekThreads })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0 })
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))

@@ -17,7 +17,7 @@ import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway, textResult } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
-import { awaitDone, pendingOf, pollTool, sleepSeconds } from '../src/core/waits'
+import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool, sleepSeconds } from '../src/core/waits'
 
 const ready = { installed: true, loggedIn: true }
 const STEP_S = 5 // a model step: what each tool call costs the agent before it's even made
@@ -216,6 +216,72 @@ describe('an alarm triage', () => {
   })
 })
 
+// An agent that makes these calls, in order, and ends.
+function scripted(calls: [string, Record<string, unknown>][]): Engine {
+  return {
+    id: 'claude',
+    async *run(turn: Turn) {
+      const client = new Client({ name: 'scripted', version: '0.0.0' })
+      await client.connect(new StreamableHTTPClientTransport(new URL(turn.mcpUrl!)))
+      try {
+        for (const [name, args] of calls) {
+          clock += STEP_S * 1000
+          agentCalls.push(name)
+          const r = (await client.callTool({ name, arguments: args })) as CallToolResult
+          agentCalls.push(`=> ${allText(r).slice(0, 80)}`)
+        }
+        yield { type: 'done', text: 'pronto', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+      } finally {
+        await client.close()
+      }
+    }
+  }
+}
+
+describe('what stays as it was', () => {
+  it('sleeps before checking something on the computer always run, and so do an agent without connectors', async () => {
+    const r = runner(world(), scripted([['bash', { command: 'sleep 30 && curl -s localhost:3000' }], ['bash', { command: 'sleep 30 && curl -s localhost:3000' }], ['bash', { command: 'sleep 30 && curl -s localhost:3000' }]]))
+    await r.send('dm', 'sobe o servidor e confere')
+    await r.idle()
+    expect(slept).toBe(90)
+    db.saveAgent({ ...db.agent('ops')!, grants: {} }) // a coding agent: no connectors
+    slept = 0
+    const coder = runner(world(), scripted([['bash', { command: 'sleep 60' }], ['bash', { command: 'sleep 60' }], ['bash', { command: 'sleep 60' }]]))
+    await coder.send('dm', 'espera o build')
+    await coder.idle()
+    expect(slept).toBe(180)
+  })
+
+  it("asking a status tool itself gets today's answer, not a wait", async () => {
+    const r = runner(world(), scripted([['databricks__execute_sql_read_only', { query: 'select 1' }]]))
+    await r.send('dm', 'roda')
+    await r.idle()
+    polls = 0
+    const start = clock
+    const asks = runner(world(), scripted([['databricks__poll_sql_result', { statement_id: 's-1' }]]))
+    await asks.send('dm', 'já terminou?')
+    await asks.idle()
+    expect(polls).toBe(1) // its own call, answered RUNNING, and nothing more
+    expect(clock - start).toBeLessThan(10_000)
+  })
+
+  it('many writes in a row are the work: only reads count toward the same-tool guard', async () => {
+    db.saveConnector({ id: 'sheet', name: 'Planilha', kind: 'remote', auth: 'none' })
+    db.syncTools('sheet', [{ name: 'insert_row', description: 'Inserts a row.', cls: 'write', inputSchema: { type: 'object', properties: { v: { type: 'number' } } } }])
+    db.saveAgent({ ...db.agent('ops')!, grants: { sheet: 'read_write' } })
+    const calls = { n: 0 }
+    const sheet = {
+      list: (): Connector[] => [{ id: 'sheet', name: 'Planilha', kind: 'remote', auth: 'none', status: 'connected', tools: [] }],
+      call: async (): Promise<CallToolResult> => json({ ok: true, n: ++calls.n })
+    }
+    const r = runner(sheet as unknown as ReturnType<typeof world>, scripted(Array.from({ length: 70 }, (_, i): [string, Record<string, unknown>] => ['planilha__insert_row', { v: i }])))
+    await r.send('dm', 'insere as 70 linhas')
+    await r.idle()
+    expect(calls.n).toBe(70)
+    expect(reply().run!.status).toBe('done')
+  })
+})
+
 describe('waiting on a pending result', () => {
   const pending = json({ statement_id: 's-1', status: { state: 'PENDING' } })
   const tools = [
@@ -257,5 +323,17 @@ describe('waiting on a pending result', () => {
     expect(sleepSeconds('sleep 2 && curl localhost:5173')).toBe(2)
     expect(sleepSeconds('for i in 1 2 3; do curl x && break; sleep 10; done')).toBe(0)
     expect(sleepSeconds('npm test')).toBe(0)
+  })
+
+  it('tells a sleep with nothing after it from one before a check, and a status tool by its name', () => {
+    expect(idleSleepSeconds('sleep 60')).toBe(60)
+    expect(idleSleepSeconds('sleep 60 && echo "check 3"')).toBe(60)
+    expect(idleSleepSeconds('sleep 1m; date')).toBe(60)
+    expect(idleSleepSeconds('sleep 30 && curl -s localhost:3000')).toBe(0)
+    expect(idleSleepSeconds('sleep 60; gh run view 123')).toBe(0)
+    expect(idleSleepSeconds('npm test')).toBe(0)
+    expect(isStatusTool('poll_sql_result')).toBe(true)
+    expect(isStatusTool('get_workflow_run')).toBe(true)
+    expect(isStatusTool('execute_sql_read_only')).toBe(false)
   })
 })
