@@ -37,8 +37,9 @@ export function systemPrompt(opts: {
   askedIn?: string // that task is a question it asked in this channel, and this agent was picked to answer
   together?: { before: Agent[]; after: Agent[] } // called with others at once: who answered before it, who answers after
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
+  connectors?: boolean // it has connector tools (Slack, Databricks…)
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, computerSetup, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, askedIn, together, wiki } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, computerSetup, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, askedIn, together, wiki, connectors } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const other = conversation.kind === 'agents' ? peers[0] : undefined
   const where = delegatedBy
@@ -179,6 +180,7 @@ export function systemPrompt(opts: {
         `- Suas outras ferramentas são as que ${me} liberou pra você. Ações sensíveis não rodam na hora: viram um pedido de aprovação, e você recebe o resultado depois da decisão.`,
         `- Your other tools are the ones ${me} granted you. Sensitive actions don't run right away: they become an approval request, and you get the result after the decision.`
       ),
+      connectors && readingData(me),
       offline?.length &&
         L(
           `- Você tem acesso a ${offline.join(', ')}, mas ${offline.length > 1 ? 'eles estão desconectados' : 'ele está desconectado'} agora, então as ferramentas não aparecem pra você. Se precisar, peça a ${me} pra reconectar em Conectores (não é falta de permissão).`,
@@ -196,6 +198,21 @@ export function systemPrompt(opts: {
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+// Reading a channel, a history, logs or a table: only the window the task needs, and no waiting by hand.
+// Without it an agent asked about "the alarm" pages through the whole channel and sleeps on slow queries.
+export function readingData(me: string): string {
+  return [
+    L(
+      `- Pra ler um canal, um histórico, logs ou uma tabela, peça só a janela que a tarefa precisa, com o filtro de tempo da ferramenta, uma busca ou um limite, em vez de paginar tudo. Cada mensagem traz a hora, com os segundos Unix; a última é de agora. Ex.: "o alarme da última hora" é oldest = (unix da última mensagem − 3600). Se ${me} não disser a janela, comece pela última hora e só amplie se faltar. Se um resultado vier cortado, estreite a pergunta (janela menor, filtro, menos campos, uma agregação) em vez de chamar de novo pro resto.`,
+      `- To read a channel, a history, logs or a table, ask only for the window the task needs, with the tool's time filter, a search or a limit, instead of paging through everything. Each message carries its time, with the Unix seconds; the last one is from now. E.g. "the alarm from the last hour" is oldest = (the last message's unix − 3600). If ${me} doesn't say the window, start with the last hour and widen it only if something's missing. If a result comes back cut, narrow the question (a shorter window, a filter, fewer fields, an aggregate) instead of calling again for the rest.`
+    ),
+    L(
+      '- Um resultado que volta ainda rodando (uma consulta SQL, um job) o app espera por você: ele só te devolve quando terminar. Nunca espere com sleep nem fique perguntando de novo; rode a mesma consulta uma vez só.',
+      "- A result that comes back still running (a SQL query, a job) is awaited by the app for you: it only comes back to you once it's done. Never wait with sleep or keep asking again; run the same query only once."
+    )
+  ].join('\n')
 }
 
 // The language of the app is the one agents answer in, unless the person writes in another.
@@ -295,7 +312,15 @@ function memorySection(me: string, m: { aboutMe: Memory[]; own: Memory[]; search
     .join('\n\n')
 }
 
-const now = (): string => new Date().toLocaleString(locale(), { weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+// "UTC-03:00": message times are local, and the tools that filter by time often want UTC or Unix seconds.
+const utcOffset = (d: Date): string => {
+  const m = -d.getTimezoneOffset()
+  const a = Math.abs(m)
+  return `UTC${m < 0 ? '-' : '+'}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`
+}
+const zone = (at: number): string => `${utcOffset(new Date(at))}, unix ${Math.floor(at / 1000)}`
+
+const now = (): string => `${new Date().toLocaleString(locale(), { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} (${zone(Date.now())})`
 
 // "sáb 18/10 14:02": with the weekday, so "toda segunda" and "amanhã" can be worked out.
 export const clock = (at: number): string => {
@@ -303,6 +328,10 @@ export const clock = (at: number): string => {
   const day = d.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')
   return `${day} ${d.toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', '')}`
 }
+
+// A message's time in the transcript: the clock with the year, the offset and the Unix seconds, so
+// "the last hour" goes straight into a tool's time filter. It never changes, so the cache still holds.
+export const stamp = (at: number): string => `${clock(at).replace(/^(\S+ \d{2}\/\d{2})/, `$1/${new Date(at).getFullYear()}`)} (${zone(at)})`
 
 // The conversation as blocks, one per message, oldest first. Nothing in them
 // changes between turns (no "now", no closing line), so the next turn starts
@@ -396,7 +425,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       : `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
   ].filter((b): b is string => !!b)
   const blockOf = new Map(shown.map((m, i) => [m.id, head.length + i]))
-  const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${clock(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
+  const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${stamp(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
   return { blocks, blockOf }
 }
 
