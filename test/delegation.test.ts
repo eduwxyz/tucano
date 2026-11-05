@@ -25,7 +25,7 @@ function runner(): Runner {
   turns = []
   const fake = fakeEngine('claude', { delayMs: 1 })
   const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), fake.run(t)) }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'dl-work-')), gateway, notify: (title, _body, _conv, kind) => notes.push({ title, kind }) })
 }
 
@@ -39,7 +39,7 @@ const turnsOf = (id: string): Turn[] => turns.filter((t) => t.system.startsWith(
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'dl-db-')), 'test.db'))
   notes = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('chefe', { role: 'Manager', team: ['dev', 'ana'] }))
   db.saveAgent(agent('dev', { role: 'Engenharia' }))
   db.saveAgent(agent('ana', { role: 'Dados' }))
