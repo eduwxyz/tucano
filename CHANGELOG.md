@@ -10,6 +10,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
 > - **Os agentes do Claude respondem mais rápido e gastam menos do plano em conversas longas.** Cada agente continua a mesma sessão do Claude Code na conversa e manda só o que é novo; entre uma resposta e outra o processo fica aberto por 5 minutos. O primeiro trecho da resposta chega quase 1 segundo antes, e uma conversa longa não é mandada inteira de novo a cada resposta.
 > - **Um agente só acorda outro quando precisa.** Quando um agente menciona outro na resposta, o router lê e chama só quem tem algo a fazer: um agradecimento ou um “combinado” não acordam ninguém. Na dúvida, chama.
+> - **O app abre fora do instalador mesmo com uma versão estranha.** O atualizador, que nem é usado ali, conferia a versão ao abrir e derrubava o app.
+> - **Agentes no Grok.** Um agente pode rodar no Grok CLI, com a assinatura do grok.com, como roda no Cursor CLI. Cada resposta usa uma pasta própria: os seus plugins, skills e hooks não carregam, e só as ferramentas do Tucano ficam à mão.
+> - **Um conector que falha diz por quê.** O passo da resposta mostra o motivo em vermelho, e o agente recebe o mesmo motivo pra explicar, em vez de um ✗ sem nada.
+
+### Added
+
+- **Agents on Grok.** An agent can run on the [Grok CLI](https://x.ai/cli) with a grok.com subscription, the way it runs on Cursor CLI: sign in with `grok login` and pick a Grok model. Each reply runs in a folder and a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load, Grok's own shell and files stay off, and Tucano's tools are the only ones it has. An `XAI_API_KEY` in the environment is set aside when grok.com is signed in, so the subscription isn't billed per token. The official installer is macOS and Linux. Thanks [@matheus-apolonio](https://github.com/matheus-apolonio)! ([#87](https://github.com/eduwxyz/tucano/pull/87))
 
 ### Changed
 
@@ -18,9 +25,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A connector tool that fails says why.** The reply's step showed a bare ✗ next to the tool's name, and for some failures the agent got an empty result too. The step now shows the reason under its label (a few lines, all of it on a click), and the agent gets it: a reason only in the structured content or an embedded resource, an MCP error's code and data, a timeout in seconds, a result that doesn't match the tool's schema, or a session that couldn't reconnect. An approved call and a routine's poll say it the same way. Thanks [@rjgdias](https://github.com/rjgdias)! ([#133](https://github.com/eduwxyz/tucano/pull/133))
 - **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again.
 - **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring.
 - **The server's page opens over plain HTTP on a private address,** such as Tailscale or a home network. It stayed blank: a browser outside a secure context has no `crypto.randomUUID`, which the app calls as it starts. The page now brings a small replacement for it, and one for the copy buttons.
+- **The app opens unpacked even when its version isn't one the updater accepts.** The updater was made as the app started, and making it checks the version, so an unpacked build reporting one like `0.0` stopped before its window opened. It's now made only when updates are on. Thanks [@b7s](https://github.com/b7s)! ([#123](https://github.com/eduwxyz/tucano/pull/123))
 
 ## [0.2.11] - 2026-11-05
 
