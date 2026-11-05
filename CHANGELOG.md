@@ -12,6 +12,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **O app abre fora do instalador mesmo com uma versão estranha.** O atualizador, que nem é usado ali, conferia a versão ao abrir e derrubava o app.
 > - **Agentes no Grok.** Um agente pode rodar no Grok CLI, com a assinatura do grok.com, como roda no Cursor CLI. Cada resposta usa uma pasta própria: os seus plugins, skills e hooks não carregam, e só as ferramentas do Tucano ficam à mão.
 > - **Um conector que falha diz por quê.** O passo da resposta mostra o motivo em vermelho, e o agente recebe o mesmo motivo pra explicar, em vez de um ✗ sem nada.
+> - **Os passos mostram o que o agente fez.** Cada consulta mostra o SQL ou o que foi pedido, e o que voltou ("120 linhas"); um comando mostra o comando inteiro, e o SQL quando roda um; uma skill diz qual foi lida. Tudo aparece enquanto o agente trabalha, sem nenhum segredo na tela.
 
 ### Added
 
@@ -19,6 +20,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Changed
 
+- **A reply's steps say what each call did, as it runs.** A connector call shows what it asked (the SQL, a path, a search) from the moment it starts, and what came back once it ends, in a few words: the rows of a table or a SQL answer, the items of a list, the lines of a long text. A command shows whole, or as **Ran SQL** with the SQL taken out of it, and ends with what it printed or its exit code and the last lines of stderr; reading a skill says which skill and file. Tokens, passwords, keys and auth headers are masked on the screen and in the log (the agent still gets the real output). The steps list stays open while the agent works, unless closed, and folds when the reply is done. Thanks [@rjgdias](https://github.com/rjgdias)! ([#135](https://github.com/eduwxyz/tucano/pull/135))
 - **An agent wakes another only when it needs to.** When an agent's reply mentions other agents, the router reads it first and hands the turn only to those asked to do something: a request, a question, a task, a decision. A thank-you, an "okay" or a credit wakes no one, and the decision shows as a step on the reply. In doubt, or if the router fails, everyone mentioned is called, as before; a mention in your own message still goes straight to the agent. Thanks [@eialanjones](https://github.com/eialanjones)! ([#139](https://github.com/eduwxyz/tucano/pull/139))
 
 ### Fixed
