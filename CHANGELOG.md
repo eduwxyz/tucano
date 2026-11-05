@@ -4,6 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Conversas longas não pesam mais enquanto um agente responde.** Cada palavra recebida redesenhava todas as mensagens; agora só a que mudou.
+
+### Fixed
+
+- **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again.
+
 ## [0.2.11] - 2026-11-05
 
 > **Em português:**
