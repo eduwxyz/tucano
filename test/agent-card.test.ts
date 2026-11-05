@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { chromium } from 'playwright'
-import { describe, expect, it } from 'vitest'
-import { agentChannels, agentNow, placeCard } from '../src/renderer/src/agent-card'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { agentChannels, agentNow, cardState, HOVER_CLOSE_MS, HOVER_OPEN_MS, placeCard } from '../src/renderer/src/agent-card'
 import type { Conversation, Message, Run } from '../src/shared/types'
 
 const agent = { id: 'lia', archived: false, used: 0, limit: 1000 }
@@ -70,6 +70,118 @@ describe('where the card goes', () => {
     const phone = { width: 360, height: 700 }
     expect(placeCard({ left: 20, top: 100, width: 34, height: 34 }, card, phone)).toEqual({ left: 12, top: 142, width: 336 })
     expect(placeCard({ left: 20, top: 600, width: 34, height: 34 }, card, phone).top).toBe(600 - 8 - 300)
+  })
+})
+
+describe('opening the card on a click and on hover', () => {
+  beforeEach(() => void vi.useFakeTimers())
+  afterEach(() => void vi.useRealTimers())
+  const face = { name: 'Lia’s face' }
+  const other = { name: 'Theo’s face' }
+  const open = (s: ReturnType<typeof cardState<object>>) => s.get() && { agentId: s.get()!.agentId, anchor: s.get()!.anchor, via: s.get()!.via }
+
+  it('opens after the pointer rests on a face for the delay, not before', () => {
+    const s = cardState<object>()
+    s.hoverEnter('lia', face)
+    vi.advanceTimersByTime(HOVER_OPEN_MS - 1)
+    expect(s.get()).toBeNull()
+    vi.advanceTimersByTime(1)
+    expect(open(s)).toEqual({ agentId: 'lia', anchor: face, via: 'hover' })
+  })
+  it('doesn’t open when the pointer leaves before the delay', () => {
+    const s = cardState<object>()
+    s.hoverEnter('lia', face)
+    vi.advanceTimersByTime(HOVER_OPEN_MS - 100)
+    s.hoverLeave()
+    vi.advanceTimersByTime(HOVER_OPEN_MS * 4)
+    expect(s.get()).toBeNull()
+  })
+  it('stays while the pointer moves from the face onto the card, and goes a moment after it leaves both', () => {
+    const s = cardState<object>()
+    s.hoverEnter('lia', face)
+    vi.advanceTimersByTime(HOVER_OPEN_MS)
+    s.hoverLeave()
+    vi.advanceTimersByTime(HOVER_CLOSE_MS - 50)
+    s.cardEnter()
+    vi.advanceTimersByTime(HOVER_CLOSE_MS * 10)
+    expect(open(s)?.via).toBe('hover')
+    s.cardLeave()
+    vi.advanceTimersByTime(HOVER_CLOSE_MS - 1)
+    expect(s.get()).not.toBeNull()
+    vi.advanceTimersByTime(1)
+    expect(s.get()).toBeNull()
+  })
+  it('stays when the pointer comes back to its face in time', () => {
+    const s = cardState<object>()
+    s.hoverEnter('lia', face)
+    vi.advanceTimersByTime(HOVER_OPEN_MS)
+    s.hoverLeave()
+    vi.advanceTimersByTime(HOVER_CLOSE_MS - 50)
+    s.hoverEnter('lia', face)
+    vi.advanceTimersByTime(HOVER_CLOSE_MS * 10)
+    expect(open(s)?.anchor).toBe(face)
+  })
+  it('opens at once on a click, which the same click closes, and a clicked card ignores the pointer', () => {
+    const s = cardState<object>()
+    s.click('lia', face)
+    expect(open(s)).toEqual({ agentId: 'lia', anchor: face, via: 'click' })
+    s.hoverLeave()
+    s.hoverEnter('theo', other)
+    vi.advanceTimersByTime(HOVER_OPEN_MS * 4)
+    expect(open(s)).toEqual({ agentId: 'lia', anchor: face, via: 'click' })
+    s.click('lia', face)
+    expect(s.get()).toBeNull()
+  })
+  it('keeps a hovered card open as a clicked one when its face is clicked', () => {
+    const s = cardState<object>()
+    s.hoverEnter('lia', face)
+    vi.advanceTimersByTime(HOVER_OPEN_MS)
+    s.click('lia', face)
+    s.hoverLeave()
+    vi.advanceTimersByTime(HOVER_CLOSE_MS * 10)
+    expect(open(s)).toEqual({ agentId: 'lia', anchor: face, via: 'click' })
+  })
+  it('a click before the delay opens it right away, with no second card after', () => {
+    const s = cardState<object>()
+    s.hoverEnter('lia', face)
+    vi.advanceTimersByTime(100)
+    s.click('lia', face)
+    vi.advanceTimersByTime(HOVER_OPEN_MS * 4)
+    expect(open(s)?.via).toBe('click')
+  })
+  it('shows one card at a time: a hovered face replaces the hovered card once its delay passes', () => {
+    const s = cardState<object>()
+    s.hoverEnter('lia', face)
+    vi.advanceTimersByTime(HOVER_OPEN_MS)
+    s.hoverLeave()
+    s.hoverEnter('theo', other)
+    vi.advanceTimersByTime(HOVER_OPEN_MS)
+    expect(open(s)).toEqual({ agentId: 'theo', anchor: other, via: 'hover' })
+  })
+  it('doesn’t open while the page scrolls under a still pointer', () => {
+    const s = cardState<object>()
+    s.hoverEnter('lia', face)
+    s.scrolled()
+    vi.advanceTimersByTime(HOVER_OPEN_MS * 2)
+    expect(s.get()).toBeNull()
+    s.scrolled()
+    vi.advanceTimersByTime(50)
+    s.hoverEnter('theo', other) // a face passing under the pointer, right after the scroll
+    vi.advanceTimersByTime(HOVER_OPEN_MS * 2)
+    expect(s.get()).toBeNull()
+    s.hoverEnter('theo', other) // the pointer moves onto it once the page is still
+    vi.advanceTimersByTime(HOVER_OPEN_MS)
+    expect(open(s)?.agentId).toBe('theo')
+  })
+  it('tells who listens when the card opens and closes', () => {
+    const s = cardState<object>()
+    const seen = vi.fn()
+    const stop = s.subscribe(seen)
+    s.click('lia', face)
+    s.close()
+    stop()
+    s.click('lia', face)
+    expect(seen).toHaveBeenCalledTimes(2)
   })
 })
 

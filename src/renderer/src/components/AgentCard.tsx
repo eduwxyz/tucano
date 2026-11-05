@@ -1,47 +1,47 @@
 // An agent's profile card, like Slack's: a click on its face or name (on a message, a mention,
 // the faces of a channel, the top of its DM) opens a small card next to the click with who it
 // is, what it's doing now and where it works, and the way to talk to it or see its whole page.
-// One card at a time; Esc, a click outside or leaving it with Tab closes it.
+// The mouse resting on a face opens it too, after a moment, and it goes when the mouse leaves the
+// face and the card. One card at a time; Esc, a click outside or leaving it with Tab closes it.
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { ENGINES } from '../../../shared/types'
 import { agentById, modelById, navigate, openDialog, openDm, useStore } from '../store'
-import { agentChannels, agentNow, placeCard, type AgentNow } from '../agent-card'
+import { agentChannels, agentNow, cardState, placeCard, type AgentNow, type CardOpen, type CardOptions } from '../agent-card'
 import { AgentAvatar, Icon, ago, ownColor } from './ui'
 
-interface Open {
-  agentId: string
-  anchor: HTMLElement
-  settingsOf?: string // opened from the top of a DM: the card also leads to that conversation's settings
-  below?: boolean // opened from a top bar: under it, like a menu
-}
+type Open = CardOpen<HTMLElement>
 
-let current: Open | null = null
-const listeners = new Set<() => void>()
-const emit = (): void => listeners.forEach((l) => l())
-const subscribe = (l: () => void): (() => void) => (listeners.add(l), () => void listeners.delete(l))
+const cards = cardState<HTMLElement>()
 
-export function openAgentCard(agentId: string, anchor: HTMLElement, opts: { settingsOf?: string; below?: boolean } = {}): void {
-  // The same face clicked again closes its card, as a toggle does.
-  current = current?.anchor === anchor ? null : { agentId, anchor, ...opts }
-  emit()
-}
+export const openAgentCard = (agentId: string, anchor: HTMLElement, opts: CardOptions = {}): void => cards.click(agentId, anchor, opts)
 
 export function closeAgentCard(restoreFocus = false): void {
-  const was = current
-  if (!was) return
-  current = null
-  emit()
-  if (restoreFocus && was.anchor.isConnected) was.anchor.focus()
+  const was = cards.close()
+  if (restoreFocus && was?.anchor.isConnected) was.anchor.focus()
 }
 
-// A real button that opens the card. `tabIndex={-1}` for a face next to a name that opens the
-// same card: one stop for the keyboard, a bigger target for the mouse.
+// A real button that opens the card on a click (or Enter), and on a mouse resting on it.
+// `tabIndex={-1}` for a face next to a name that opens the same card: one stop for the
+// keyboard, a bigger target for the mouse. Touch has no hover: a tap is a click.
 export function AgentCardButton({ agentId, settingsOf, below, className, style, title, label, tabIndex, children }: { agentId: string; settingsOf?: string; below?: boolean; className?: string; style?: CSSProperties; title?: string; label?: string; tabIndex?: number; children: ReactNode }): ReactNode {
   const ref = useRef<HTMLButtonElement>(null)
-  const expanded = useSyncExternalStore(subscribe, () => !!ref.current && current?.anchor === ref.current)
+  const expanded = useSyncExternalStore(cards.subscribe, () => !!ref.current && cards.get()?.anchor === ref.current)
   return (
-    <button ref={ref} type="button" className={className} style={style} title={title} aria-label={label} aria-haspopup="dialog" aria-expanded={expanded} tabIndex={tabIndex} onClick={(e) => openAgentCard(agentId, e.currentTarget, { settingsOf, below })}>
+    <button
+      ref={ref}
+      type="button"
+      className={className}
+      style={style}
+      title={title}
+      aria-label={label}
+      aria-haspopup="dialog"
+      aria-expanded={expanded}
+      tabIndex={tabIndex}
+      onClick={(e) => cards.click(agentId, e.currentTarget, { settingsOf, below })}
+      onPointerEnter={(e) => e.pointerType === 'mouse' && cards.hoverEnter(agentId, e.currentTarget, { settingsOf, below })}
+      onPointerLeave={(e) => e.pointerType === 'mouse' && cards.hoverLeave()}
+    >
       {children}
     </button>
   )
@@ -49,10 +49,15 @@ export function AgentCardButton({ agentId, settingsOf, below, className, style, 
 
 // Mounted once, over the app.
 export function AgentCardLayer(): ReactNode {
-  const open = useSyncExternalStore(subscribe, () => current)
+  const open = useSyncExternalStore(cards.subscribe, cards.get)
   // Going somewhere else closes it.
   const view = useStore((s) => s.view)
   useEffect(() => closeAgentCard(), [view])
+  // A face passing under a still pointer while the page scrolls isn't a hover.
+  useEffect(() => {
+    window.addEventListener('scroll', cards.scrolled, true)
+    return () => window.removeEventListener('scroll', cards.scrolled, true)
+  }, [])
   if (!open) return null
   return <AgentCard key={`${open.agentId}-${open.settingsOf ?? ''}`} open={open} />
 }
@@ -101,11 +106,13 @@ function AgentCard({ open }: { open: Open }): ReactNode {
     }
   }, [open.anchor])
 
-  // The card takes focus once it's placed (hidden, it can't), so a screen reader reads it and Tab walks its buttons.
+  // A clicked card takes focus once it's placed (hidden, it can't), so a screen reader reads it
+  // and Tab walks its buttons. A hovered one doesn't take focus from where you're typing.
   const placed = !!place
+  const clicked = open.via === 'click'
   useEffect(() => {
-    if (placed) card.current?.focus({ preventScroll: true })
-  }, [placed])
+    if (placed && clicked) card.current?.focus({ preventScroll: true })
+  }, [placed, clicked])
 
   // Esc closes it before anything under it (a thread panel) takes the key; a click outside,
   // or a scroll under it, closes it too.
@@ -115,7 +122,7 @@ function AgentCard({ open }: { open: Open }): ReactNode {
       if (e.key !== 'Escape') return
       e.preventDefault()
       e.stopPropagation()
-      closeAgentCard(true)
+      closeAgentCard(open.via === 'click') // a hovered card never had the focus to give back
     }
     const onDown = (e: PointerEvent): void => void (!inside(e.target) && closeAgentCard())
     const onScroll = (e: Event): void => void (!(e.target instanceof Node && card.current?.contains(e.target)) && closeAgentCard())
@@ -144,6 +151,8 @@ function AgentCard({ open }: { open: Open }): ReactNode {
       role="dialog"
       aria-labelledby={nameId}
       tabIndex={-1}
+      onPointerEnter={(e) => e.pointerType === 'mouse' && cards.cardEnter()}
+      onPointerLeave={(e) => e.pointerType === 'mouse' && cards.cardLeave()}
       onBlur={(e) => {
         // Tab out of the card closes it; a click elsewhere is the pointer's job.
         if (e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && !open.anchor.contains(e.relatedTarget)) closeAgentCard()

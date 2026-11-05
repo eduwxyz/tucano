@@ -54,6 +54,27 @@ console.log('focus moved into the card:', await win.evaluate(() => !!document.ac
 await win.keyboard.press('Escape')
 console.log('focus back on the name after Esc:', await win.evaluate(() => !!document.activeElement?.classList.contains('msg__author')))
 
+// Hover: the mouse resting on the @mention opens the card after a moment, without taking focus;
+// it stays while the mouse moves onto the card, and goes once the mouse leaves both.
+await win.mouse.move(700, 600)
+await win.focus('.composer textarea')
+const chip = await win.locator('.msg--me .mention').first().boundingBox()
+await win.mouse.move(chip.x + chip.width / 2, chip.y + chip.height / 2, { steps: 4 })
+await win.waitForTimeout(250)
+const early = await win.locator('.agent-card').count()
+await win.waitForTimeout(450)
+const late = await win.locator('.agent-card').count()
+await shot('08-card-on-hover')
+const typing = await win.evaluate(() => document.activeElement?.tagName === 'TEXTAREA')
+const box = await win.locator('.agent-card').boundingBox()
+await win.mouse.move(box.x + box.width / 2, box.y + 40, { steps: 6 })
+await win.waitForTimeout(800)
+const kept = await win.locator('.agent-card').count()
+await win.mouse.move(700, 650, { steps: 4 })
+await win.waitForTimeout(600)
+const gone = (await win.locator('.agent-card').count()) === 0
+console.log('hover:', { openAt250ms: early > 0, openAt700ms: late > 0, focusStaysInComposer: typing, keptOnCard: kept > 0, goneAfterLeaving: gone })
+
 // While the agent works, the card says on what.
 await send('@theo demore 6 s e calcule a mediana de 3, 9 e 4')
 await win.waitForSelector('.msg .shimmer', { timeout: 10_000 }).catch(() => {})

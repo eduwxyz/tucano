@@ -57,3 +57,88 @@ export function placeCard(anchor: Box, card: { width: number; height: number }, 
   const below = anchor.top + anchor.height + GAP
   return { left: x, top: clampTop(below + card.height <= view.height - EDGE ? below : anchor.top - GAP - card.height), width: card.width }
 }
+
+// ---------- which card is open, and how ----------
+
+export const HOVER_OPEN_MS = 500 // the pointer rests on a face this long before its card opens
+export const HOVER_CLOSE_MS = 300 // and the card waits this long after it leaves, to reach the card
+const SCROLL_QUIET_MS = 250 // right after a scroll, a face passing under the pointer isn't a hover
+
+export interface CardOpen<A> {
+  agentId: string
+  anchor: A // what opened it: the card goes next to it and gives it focus back
+  via: 'click' | 'hover' // a clicked card stays until clicked away; a hovered one goes with the pointer
+  settingsOf?: string // opened from the top of a DM: the card also leads to that conversation's settings
+  below?: boolean // opened from a top bar: under it, like a menu
+}
+export type CardOptions = Pick<CardOpen<unknown>, 'settingsOf' | 'below'>
+
+// One card at a time. A click (or Enter) opens it at once and the same click again closes it;
+// a pointer resting on a face opens it after a moment and, leaving the face and the card, closes it.
+// A click on a face whose card the hover opened keeps that card, as a clicked one.
+export function cardState<A>(ms = { open: HOVER_OPEN_MS, close: HOVER_CLOSE_MS }) {
+  let current: CardOpen<A> | null = null
+  let openTimer: ReturnType<typeof setTimeout> | undefined
+  let closeTimer: ReturnType<typeof setTimeout> | undefined
+  let scrolledAt = -Infinity
+  const listeners = new Set<() => void>()
+  const set = (next: CardOpen<A> | null): void => {
+    current = next
+    listeners.forEach((l) => l())
+  }
+  const stopOpening = (): void => {
+    clearTimeout(openTimer)
+    openTimer = undefined
+  }
+  const stopClosing = (): void => {
+    clearTimeout(closeTimer)
+    closeTimer = undefined
+  }
+  const leave = (): void => {
+    stopOpening()
+    if (current?.via !== 'hover') return
+    stopClosing()
+    closeTimer = setTimeout(() => {
+      closeTimer = undefined
+      if (current?.via === 'hover') set(null)
+    }, ms.close)
+  }
+  return {
+    get: (): CardOpen<A> | null => current,
+    subscribe(l: () => void): () => void {
+      listeners.add(l)
+      return () => void listeners.delete(l)
+    },
+    click(agentId: string, anchor: A, opts: CardOptions = {}): void {
+      stopOpening()
+      stopClosing()
+      if (current?.anchor === anchor) return set(current.via === 'hover' ? { ...current, via: 'click' } : null)
+      set({ agentId, anchor, via: 'click', ...opts })
+    },
+    hoverEnter(agentId: string, anchor: A, opts: CardOptions = {}): void {
+      if (current?.via === 'click') return // a clicked card stays the one open
+      if (current?.anchor === anchor) return stopClosing() // back on its face in time
+      if (Date.now() - scrolledAt < SCROLL_QUIET_MS) return
+      stopOpening()
+      openTimer = setTimeout(() => {
+        openTimer = undefined
+        stopClosing()
+        set({ agentId, anchor, via: 'hover', ...opts })
+      }, ms.open)
+    },
+    hoverLeave: leave,
+    cardEnter: stopClosing,
+    cardLeave: leave,
+    scrolled(): void {
+      scrolledAt = Date.now()
+      stopOpening()
+    },
+    close(): CardOpen<A> | null {
+      stopOpening()
+      stopClosing()
+      const was = current
+      if (was) set(null)
+      return was
+    }
+  }
+}
