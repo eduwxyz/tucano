@@ -160,8 +160,7 @@ export function Sidebar(): ReactNode {
   })
   const channelMenu = (c: (typeof channels)[number]): MenuItem[] => [
     { label: L('Adicionar ou remover agentes…', 'Add or remove agents…'), icon: 'users', onClick: () => openDialog({ kind: 'members', id: c.id }) },
-    { label: L('Renomear…', 'Rename…'), icon: 'edit', onClick: () => openDialog({ kind: 'rename', id: c.id }) },
-    { label: L('Mudar o tema…', 'Change the topic…'), icon: 'hash', onClick: () => openDialog({ kind: 'topic', id: c.id }) },
+    { label: L('Configurações do canal…', 'Channel settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id: c.id }) },
     ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
     wikiItem(c.id, c.wikiCapture !== false),
     'separator',
@@ -189,6 +188,7 @@ export function Sidebar(): ReactNode {
   const dmMenu = (id: string, agentId: string, agentName: string): MenuItem[] => [
     { label: L(`Ver ${agentName}`, `See ${agentName}`), icon: 'eye', onClick: () => navigate({ kind: 'agent', id: agentId }) },
     { label: L('Marcar como lido', 'Mark as read'), icon: 'check', onClick: () => markRead(id) },
+    { label: L('Configurações da conversa…', 'Conversation settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id }) },
     wikiItem(id, s.conversations.find((x) => x.id === id)?.wikiCapture !== false),
     'separator',
     {

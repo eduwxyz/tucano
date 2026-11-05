@@ -1,9 +1,13 @@
-// A newer Tucano: a note at the foot of the sidebar once it's downloaded, and the
-// state in Settings. The main process looks and downloads (src/main/updates.ts).
-import { useSyncExternalStore, type ReactNode } from 'react'
-import { L } from '../../../shared/lang'
+// A newer Tucano: a note at the foot of the sidebar once it's downloaded, the state in
+// Settings, and what's new once it's running. The main process looks and downloads (src/main/updates.ts).
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import Markdown from 'react-markdown'
+import changelog from '../../../../CHANGELOG.md?raw'
+import { L, lang, locale } from '../../../shared/lang'
+import { newsSince, type PtSummary, type ReleaseNotes } from '../../../shared/release-notes'
 import type { UpdateState } from '../../../shared/types'
-import { useStore } from '../store'
+import { updateSettings, useStore } from '../store'
+import { Modal } from './Dialogs'
 import { ago } from './ui'
 
 const RELEASES = 'https://github.com/eduwxyz/tucano/releases'
@@ -119,5 +123,100 @@ export function UpdateSettings(): ReactNode {
         </a>
       </div>
     </div>
+  )
+}
+
+const KINDS = (): Record<string, string> => ({ Added: L('Novidades', 'New'), Changed: L('O que mudou', 'Changed'), Fixed: L('Correções', 'Fixed'), Removed: L('Saiu', 'Removed'), Security: L('Segurança', 'Security') })
+
+const day = (date?: string): string => (date ? new Date(`${date}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'long' }) : '')
+
+// One version's news: in Portuguese, its summary; in English (or with no summary), the first
+// sentence of each item. The full notes are on GitHub.
+function Release({ r, titled }: { r: ReleaseNotes; titled: boolean }): ReactNode {
+  return (
+    <section className="whats-new__release">
+      {titled && (
+        <h3>
+          {r.version} <span className="muted">· {day(r.date)}</span>
+        </h3>
+      )}
+      {lang() === 'pt' && r.pt ? (
+        <Summary pt={r.pt} />
+      ) : (
+        r.sections
+          .filter((s) => s.items.length)
+          .map((s) => (
+            <div key={s.kind}>
+              <h4>{KINDS()[s.kind] ?? s.kind}</h4>
+              <ul>
+                {s.items.map((item, i) => (
+                  <li key={i}>
+                    <Markdown allowedElements={['strong', 'em', 'code', 'p']} unwrapDisallowed>
+                      {item}
+                    </Markdown>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+      )}
+    </section>
+  )
+}
+
+// The Portuguese summary as written: its topics as a list, the text around them as text.
+function Summary({ pt }: { pt: PtSummary }): ReactNode {
+  const inline = (md: string): ReactNode => (
+    <Markdown allowedElements={['strong', 'em', 'code', 'p']} unwrapDisallowed>
+      {md}
+    </Markdown>
+  )
+  return (
+    <>
+      {pt.intro && <p>{inline(pt.intro)}</p>}
+      {pt.points.length > 0 && (
+        <ul>
+          {pt.points.map((p, i) => (
+            <li key={i}>{inline(p)}</li>
+          ))}
+        </ul>
+      )}
+      {pt.outro && <p className="muted whats-new__thanks">{inline(pt.outro)}</p>}
+    </>
+  )
+}
+
+// After an update, once: what came in since the version I last saw (a new install saw its own).
+export function WhatsNew(): ReactNode {
+  const version = useUpdate()?.version
+  const seen = useStore((s) => s.settings.seenVersion)
+  const news = useMemo(() => (version && seen !== version ? newsSince(changelog, version, seen) : []), [version, seen])
+  const [closed, setClosed] = useState(false)
+  // A version with nothing written (or an older one, after going back): seen, quietly.
+  useEffect(() => {
+    if (version && seen !== version && news.length === 0) updateSettings({ seenVersion: version })
+  }, [version, seen, news.length])
+  if (!version || closed || news.length === 0) return null
+  const close = (): void => {
+    setClosed(true)
+    updateSettings({ seenVersion: version })
+  }
+  return (
+    <Modal title={L(`Novidades do Tucano ${version}`, `What’s new in Tucano ${version}`)} onClose={close} className="whats-new">
+      <div className="whats-new__body">
+        {news.map((r) => (
+          <Release key={r.version} r={r} titled={news.length > 1} />
+        ))}
+      </div>
+      <footer className="modal__foot">
+        <a className="link" href={notes(version)} target="_blank" rel="noreferrer">
+          {L('Ver as notas completas', 'See the full notes')}
+        </a>
+        <span className="grow" />
+        <button className="btn btn--primary btn--sm" autoFocus onClick={close}>
+          {L('Entendi', 'Got it')}
+        </button>
+      </footer>
+    </Modal>
   )
 }

@@ -99,7 +99,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -133,7 +133,7 @@ let state: State = {
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -464,8 +464,8 @@ export function newAgentDraft(): Agent {
 export const newChannel = (name: string): Promise<string> => call('createChannel', { name })
 
 // A new channel opens with the window to pick who's in it.
-export async function createChannel(name: string): Promise<void> {
-  const id = await call('createChannel', { name })
+export async function createChannel(name: string, threads?: boolean): Promise<void> {
+  const id = await call('createChannel', { name, ...(threads ? { threads } : {}) })
   navigate({ kind: 'conversation', id })
   set((s) => ({ ...s, dialog: { kind: 'members', id } }))
 }
@@ -508,6 +508,8 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
+// Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
+export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
@@ -515,6 +517,16 @@ export const markRead = (id: string): void => set((s) => ({ ...s, conversations:
 // `threadId`: a reply in the thread that message started.
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
   if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
+}
+
+// The person is writing: the core gets what will answer ready. Once in a while per place, and
+// nobody needs to hear if it didn't work.
+const typed = new Map<string, number>()
+export const typing = (conversationId: string, threadId?: string): void => {
+  const where = `${conversationId}:${threadId ?? ''}`
+  if (Date.now() - (typed.get(where) ?? 0) < 20_000) return
+  typed.set(where, Date.now())
+  void call('typing', { conversationId, ...(threadId ? { threadId } : {}) }).catch(() => {})
 }
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })

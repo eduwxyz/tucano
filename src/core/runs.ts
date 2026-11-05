@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
@@ -20,10 +20,13 @@ import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
-import { textResult, type Gateway, type ToolDef } from './gateway'
+import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
-import { route } from './router'
+import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { callError, contentText, errorReason } from './connectors'
+import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -31,12 +34,17 @@ const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', 
 const MAX_MENTIONS = 3
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
-const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
+// Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
+// or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
+// can't here (no file tools), so it calls again and again and answers without the data.
+export const MAX_RESULT_BYTES = 40_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
 const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
+const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
+const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
 const THOUGHT = (): string => L('Pensou', 'Thought') // the thinking step, closed
 
 export const ASK_USER: ToolDef = {
@@ -66,7 +74,7 @@ export interface RunnerDeps {
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
-  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac'>> // without it, no agent has a computer
+  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
@@ -103,10 +111,15 @@ const tokenCount = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toLocaleString(locale(), { maximumFractionDigits: 1 })} ${L('mi', 'M')}` : `${Math.round(n / 1000).toLocaleString(locale())}${L(' mil', 'k')}`
 
 export function resultText(r: CallToolResult): string {
-  const text = r.content
-    .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
-    .join('\n')
-  return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n${L(`[… resultado cortado em ${MAX_RESULT_CHARS} caracteres]`, `[… result cut at ${MAX_RESULT_CHARS} characters]`)}` : text
+  const text = r.isError ? errorReason(r) : contentText(r)
+  const bytes = Buffer.from(text, 'utf8')
+  if (bytes.length <= MAX_RESULT_BYTES) return text
+  // Cut on a whole character: a split one decodes as U+FFFD at the end.
+  const kept = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8').replace(/�+$/, '')
+  return `${kept}\n${L(
+    `[… resultado cortado em ${MAX_RESULT_BYTES / 1000} KB: o resto não chegou. Se precisar dele, chame de novo pedindo menos de uma vez (paginação, filtro, menos campos).]`,
+    `[… result cut at ${MAX_RESULT_BYTES / 1000} KB: the rest didn't come through. If you need it, call again asking for less at once (pagination, a filter, fewer fields).]`
+  )}`
 }
 
 // Text is clipped; images go through (screenshots, charts), a few at most.
@@ -123,7 +136,8 @@ export interface RoutineEvent {
   body: string // the item itself, clipped
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
+// msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -132,17 +146,81 @@ export class Runner {
   private controllers = new Map<string, Control>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
+  private sessions: Sessions
 
-  constructor(private deps: RunnerDeps) {}
+  constructor(private deps: RunnerDeps) {
+    this.sessions = new Sessions({
+      exists: (id) => !!deps.db.message(id),
+      // The token first: a failure letting the process or its file go must not keep it, nor the reply.
+      forget: (s) => {
+        deps.gateway?.release(s.token)
+        for (const e of Object.values(deps.engines))
+          try {
+            e.release?.(s.id)
+          } catch (err) {
+            console.error('[sessions] release', err)
+          }
+      }
+    })
+    // Left by an earlier run of the app, under the usual login and each account's.
+    const accounts = deps.dataDir ? join(deps.dataDir, 'accounts') : undefined
+    let accountDirs: string[] = []
+    try {
+      if (accounts) accountDirs = readdirSync(accounts).map((d) => join(accounts, d))
+    } catch {
+      // no accounts
+    }
+    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir, accountDirs)
+    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
+
+  // An archived agent's sessions, or a deleted conversation's, go now: their process and the
+  // transcript Claude Code keeps on disk.
+  forgetSessions(of: { agentId?: string; conversationId?: string }): void {
+    this.sessions.dropWhere((key) => {
+      const [agent, conversation] = key.split(':')
+      return (of.agentId !== undefined && agent === of.agentId) || (of.conversationId !== undefined && conversation === of.conversationId)
+    })
+  }
 
   setPaused(paused: boolean): void {
     this.paused = paused
   }
 
+  // The person is writing here. What will answer gets its Claude Code started now, so the reply
+  // doesn't wait the second that takes: in a DM (or a channel of one agent), the agent's kept
+  // session, if its process closed; in a channel of several, the router. A first reply has no
+  // session to start yet, and a mention or a pending question skips the router: then the
+  // process started waits a couple of minutes and goes.
+  async typing(conversationId: string, threadId?: string): Promise<void> {
+    const { db, engines } = this.deps
+    const conv = db.conversation(conversationId)
+    if (!conv || this.paused) return
+    const members = this.members(conv)
+    const settings = await this.deps.settings()
+    const ready = (engine: EngineId): boolean => !!settings.engines[engine]?.installed && !!settings.engines[engine]?.loggedIn
+    if (conv.kind === 'dm' || members.length === 1) {
+      const agent = members[0]
+      // A message outside threads in a conversation that answers in them opens a new thread: nothing is kept there yet.
+      if (!agent || (conv.threads && !threadId)) return
+      const engine = modelInfo(agent.modelId)?.engine ?? 'claude'
+      const id = this.sessions.idOf(`${agent.id}:${conv.id}:${threadId ?? ''}`)
+      if (id && ready(engine)) engines[engine].rewarm?.(id)
+      return
+    }
+    if (members.length < 2 || settings.routerModel === JEV_MODEL) return
+    const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+    if (!ready(model.engine)) return
+    const cwd = join(this.deps.workDir, '_router')
+    mkdirSync(cwd, { recursive: true })
+    engines[model.engine].warm?.(routerTurn(model.id, cwd))
+  }
+
   // Saves the human message and decides who answers it: mentioned agents
   // first, then whoever asked a pending question, then the DM agent or the
   // only agent in the channel, and otherwise the router. The answers, and
-  // everything else it sets off, go in its thread (`threadId`, or its own).
+  // everything else it sets off, go in its thread (`threadId`, or its own when
+  // the conversation answers in threads) or else in the conversation.
   async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
@@ -158,8 +236,9 @@ export class Runner {
     const asked = this.pendingQuestion(conv.id, thread)
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
-    // Every answer goes in the thread of what it answers: a message of mine outside one opens it.
-    const replyIn = thread ?? mine.id
+    // An answer goes in the thread of what it answers. A message of mine outside one opens it
+    // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
+    const replyIn = thread ?? (conv.threads ? mine.id : undefined)
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
@@ -553,12 +632,18 @@ export class Runner {
     // Past the prompt's budget, the older memories are searched instead: the tool shows up only then.
     const promptMemories = memory?.forPrompt(agent)
     const canSearch = !!this.deps.gateway && !!promptMemories?.searchable
-    // A thread sees only itself: the other threads, of the conversations this agent is in, are looked up.
-    const canSeekThreads = !!this.deps.gateway && !!msg.threadId
+    // A thread sees only itself, and the conversation only what's outside threads: the other
+    // threads, of the conversations this agent is in, are looked up.
+    const canSeekThreads = !!this.deps.gateway && (!!msg.threadId || db.threadRoots(conv.id).size > 0)
     const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
     // The Tuca proposes agents; nobody else does.
     const builds = !!this.deps.gateway && agent.kind === 'tuca'
-    const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
+    // why, so it says so in a sentence instead of spending a call on each tool to find out.
+    const computerOff = computers ? await computers.unavailable?.(agent) : undefined
+    if (computerOff) computers = undefined
+    let computerDown: string | undefined // found off in the middle of the turn: what the person has to do
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
     const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
@@ -567,7 +652,7 @@ export class Runner {
     // The wiki: for agents that may read it, once it has a page.
     const wiki = this.deps.gateway && this.deps.wiki && wikiAccess(agent) !== 'none' && this.deps.wiki.count() > 0 ? this.deps.wiki : undefined
 
-    const control: Control = { ctl: new AbortController() }
+    const control: Control = { ctl: new AbortController(), msg }
     this.controllers.set(msg.id, control)
     const halt = (reason: NonNullable<Control['reason']>): void => {
       if (control.reason) return
@@ -627,7 +712,9 @@ export class Runner {
     const exposed = new Map<string, Exposed>()
     const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
-      if (c.status !== 'connected') continue
+      // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
+      // (a refused token, a sign-in to finish) takes them away.
+      if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
@@ -816,7 +903,9 @@ export class Runner {
 
         if (skills && SKILL_TOOL_NAMES.has(name)) {
           const r = name === LER_SKILL.name ? skills.read(agent, args) : skills.propose(db.agent(agent.id) ?? agent, args)
-          if (r.skill) addSteps({ id: randomUUID(), label: name === LER_SKILL.name ? L('Leu a skill', 'Read the skill') : L('Propôs uma skill', 'Proposed a skill'), detail: r.skill.name, status: 'done' })
+          const file = name === LER_SKILL.name && typeof args['arquivo'] === 'string' && args['arquivo'].trim() ? ` · ${args['arquivo'].trim()}` : ''
+          if (r.skill) addSteps({ id: randomUUID(), label: name === LER_SKILL.name ? L('Leu a skill', 'Read the skill') : L('Propôs uma skill', 'Proposed a skill'), detail: r.skill.name + file, status: r.error ? 'error' : 'done', ...(r.error ? { error: r.reply } : {}) })
+          else if (name === LER_SKILL.name && r.error) addSteps({ id: randomUUID(), label: L('Leu a skill', 'Read the skill'), detail: String(args['nome'] ?? '') + file, status: 'error', error: r.reply })
           return textResult(r.reply, r.error)
         }
 
@@ -835,18 +924,36 @@ export class Runner {
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
           const t0 = Date.now()
           const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
-          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          // A command shows whole (or the SQL it runs, pulled out), masked, from the moment it starts.
+          const command = name === 'bash' && typeof args['command'] === 'string' ? commandStep(args['command']) : undefined
+          const step: Step = command
+            ? { id: randomUUID(), label: command.sql ? L('Rodou SQL', 'Ran SQL') : label, detail: command.detail, input: command.input, status: 'running' }
+            : { id: randomUUID(), label, detail: maskSecrets(detail), status: 'running' }
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
           const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          const failed = !!out.result.isError
+          const end: Pick<Step, 'output' | 'error'> = command
+            ? execSummary(resultText(out.result), failed)
+            : failed
+              ? { error: maskSecrets(errorReason(out.result)) }
+              : SUMMED_COMPUTER_TOOLS.has(name)
+                ? { output: resultSummary(resultText(out.result)) }
+                : {}
+          if (end.error && end.error.length > STEP_ERROR_MAX) end.error = `${end.error.slice(0, STEP_ERROR_MAX)}…`
+          // No tool of the computer can work: the turn ends here, before the model tries the next one.
+          if (out.down) {
+            computerDown = out.down
+            halt('computer')
+          }
           if (out.artifact) artifactIds.push(out.artifact.id)
           if (out.service && !services.includes(out.service)) services.push(out.service)
           msg.run = {
             ...msg.run!,
             artifactIds: artifactIds.length ? [...artifactIds] : undefined,
             services: services.length ? [...services] : undefined,
-            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status: out.result.isError ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
+            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...end, status: failed ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
           }
           stepStarted = Date.now()
           save()
@@ -1084,26 +1191,35 @@ export class Runner {
 
         const t0 = Date.now()
         const step: Step = { id: randomUUID(), label: current.cls === 'read' ? L('Consultou', 'Looked up') : always ? L('Executou (sempre permitido)', 'Ran (always allowed)') : L('Executou', 'Ran'), detail, status: 'running' }
+        // What it asked (the SQL, the path) shows while it runs; what came back, when it's done.
+        const { [REASON_PARAM]: _reason, ...toolArgs } = args
+        const input = keyArg(toolArgs)
+        if (input) step.input = input
         flush()
         msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
         save()
-        const finish = (status: 'done' | 'error'): void => {
-          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0 } : s)), thinking()] }
+        // A failure keeps its reason on the step: a bare ✗ leaves nobody knowing why.
+        const finish = (status: 'done' | 'error', why?: string, output?: string): void => {
+          const error = why && maskSecrets(why)
+          if (error) console.warn(`[connector] ${detail} failed: ${error}`)
+          const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : output ? { output } : {}
+          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s)), thinking()] }
           stepStarted = Date.now()
           save()
         }
         try {
-          const { [REASON_PARAM]: _reason, ...toolArgs } = args
           const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
-          finish(r.isError ? 'error' : 'done')
+          if (r.isError) finish('error', errorReason(r))
+          else finish('done', undefined, resultSummary(resultText(r)))
           return clip(r)
         } catch (e) {
-          finish('error')
-          return textResult(L(`A ferramenta falhou: ${e instanceof Error ? e.message : String(e)}`, `The tool failed: ${e instanceof Error ? e.message : String(e)}`), true)
+          const why = callError(e)
+          finish('error', why)
+          return textResult(L(`A ferramenta falhou: ${why}`, `The tool failed: ${why}`), true)
         }
       }
 
-    const session = this.deps.gateway?.open({
+    const tools: Session = {
       tools: toolDefs,
       call: async (name, args) => {
         if (overBudget) {
@@ -1140,10 +1256,10 @@ export class Runner {
           sign()
         }
       }
-    })
+    }
 
     let progress = { tokens: 0, cacheRead: 0 }
-    let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'> } | null = null
+    let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'>; context?: number } | null = null
     let error: string | null = null
     let thrown: unknown // what the engine threw, if it did: a bug reads differently from a CLI's own words
 
@@ -1157,34 +1273,56 @@ export class Runner {
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
+    const system = systemPrompt({
+      agent,
+      settings,
+      conversation: conv,
+      peers,
+      memories: promptMemories,
+      canRemember,
+      hasComputer: !!computers,
+      computerOff,
+      browser: !!browser,
+      apps: apps ? agent.apps : undefined,
+      offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
+      macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
+      web: agent.web !== false,
+      routines: routines?.forAgent(agent.id),
+      skills: skills && mySkills,
+      wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
+      publish: repos,
+      builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
+    })
+
+    // A kept session: the reply goes on from this agent's last one here (this conversation, or this
+    // thread) with only what's new since. Not while another agent is still writing a message this
+    // reply would see half of: that one goes the usual way, and the session takes it all next time.
+    const sessionKey = `${agent.id}:${conv.id}:${msg.threadId ?? ''}`
+    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs, gateway: !!this.deps.gateway })
+    const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
+    const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
+    let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, restart: !!opts.existing, task: !!task }) : undefined
+    let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
+    const session = this.deps.gateway?.open(tools, plan?.token)
+    const whole = { prompt: blocks.join('\n\n'), blocks, images }
+    // Resumed: the new messages' blocks, then the task's, with their images.
+    const since = (p: SessionPlan): typeof whole => {
+      const at = p.send.map((id) => blockOf.get(id)!)
+      if (task) at.push(blocks.length - 1)
+      const pos = new Map(at.map((b, i) => [b, i]))
+      const sent = at.map((i) => blocks[i]!)
+      return { prompt: sent.join('\n\n'), blocks: sent, images: images.flatMap((img) => (pos.has(img.block) ? [{ ...img, block: pos.get(img.block)! }] : [])) }
+    }
+    let input = plan?.resume ? since(plan) : whole
     try {
       for (;;) {
         try {
           const events = engines[engineId].run({
             model: modelName,
             effort: agent.effort,
-            system: systemPrompt({
-              agent,
-              settings,
-              conversation: conv,
-              peers,
-              memories: promptMemories,
-              canRemember,
-              hasComputer: !!computers,
-              browser: !!browser,
-              apps: apps ? agent.apps : undefined,
-              offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
-              macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
-              web: agent.web !== false,
-              routines: routines?.forAgent(agent.id),
-              skills: skills && mySkills,
-              wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
-              publish: repos,
-              builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
-            }),
-            prompt: blocks.join('\n\n'),
-            blocks,
-            images,
+            system,
+            ...input,
+            session: plan && { id: plan.id, resume: plan.resume, keep: true },
             cwd,
             signal: control.ctl.signal,
             mcpUrl: session?.url,
@@ -1230,6 +1368,10 @@ export class Runner {
         const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
         flush()
         msg.text = '' // the CLI's own "you've hit your limit", when it wrote it as text
+        // The reserve starts from the whole conversation: the session stays with the main model.
+        lost = plan
+        plan = undefined
+        input = whole
         onReserve = true
         modelId = agent.fallbackModelId!
         modelName = reserve.model.id
@@ -1246,6 +1388,8 @@ export class Runner {
       clearInterval(stall)
       flush()
       session?.close()
+      if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown })
+      if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, reply: msg.id, context: result?.context })
       this.controllers.delete(msg.id)
     }
 
@@ -1289,6 +1433,17 @@ export class Runner {
         text: msg.text ? `${msg.text} …` : '',
         run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
       })
+    } else if (control.reason === 'computer') {
+      save({
+        text: msg.text ? `${msg.text} …` : '',
+        run: {
+          ...base,
+          ...again,
+          status: 'failed',
+          steps: closeThinking('error', L('Parou', 'Stopped')),
+          error: L(`Parei: meu computador não está funcionando. ${computerDown ?? ''} Depois é só mandar de novo.`, `I stopped: my computer isn't working. ${computerDown ?? ''} Then just send it again.`)
+        }
+      })
     } else if (overBudget && control.reason !== 'limit') {
       // Wrapped up at the budget, or cut past it: either way it can go on from here.
       save({
@@ -1301,14 +1456,23 @@ export class Runner {
         run: { ...base, ...again, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
       })
     } else if (result) {
+      // Approved or refused before the run ended: nothing is left to wait for.
+      const waiting = approval && db.approval(approval.id)?.state === 'pending'
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        run: { ...base, status: question ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
-      else if (!approval && !this.chain(agent, conv, msg, opts.depth, chainDepthCap(settings.chainDepth)) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
+      else if (!approval) {
+        const finished = (): void => {
+          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
+        }
+        const next = this.mentions(agent, conv, msg)
+        if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
+        else finished()
+      }
     } else {
       // What happened and what to do; the CLI's own words go folded under it.
       const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
@@ -1456,7 +1620,7 @@ export class Runner {
         try {
           const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
           ok = !r.isError
-          outcome = r.isError ? L('Executou, com erro.', 'Ran, with an error.') : ran
+          outcome = r.isError ? L(`Executou, com erro: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`) : ran
           task = L(
             `${me} aprovou o seu pedido ${call}. O app executou exatamente essa chamada${r.isError ? ' e ela devolveu um erro' : ''}. Resultado:\n${resultText(r)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
             `${me} approved your request ${call}. The app ran exactly that call${r.isError ? ' and it returned an error' : ''}. Result:\n${resultText(r)}\n\nGo on from here and tell ${me} the result.`
@@ -1480,10 +1644,15 @@ export class Runner {
     db.setApprovalOutcome(id, outcome)
     emit({ type: 'approval', approval: db.approval(id)! })
 
-    const msg = db.message(ap.messageId)
+    // Approved while the agent is still replying: add the step to the live reply, which saves it when it ends.
+    const live = this.controllers.get(ap.messageId)?.msg
+    const msg = live ?? db.message(ap.messageId)
     if (msg?.run) {
       const label = decision === 'approved' ? L('Aprovado', 'Approved') : decision === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
-      this.update(msg, {
+      if (live) {
+        live.run!.steps.push({ id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' })
+        this.update(live, {})
+      } else this.update(msg, {
         run: {
           ...msg.run,
           status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
@@ -1528,18 +1697,67 @@ export class Runner {
     )
   }
 
-  // An agent that mentions another agent of the conversation hands it the turn,
+  // An agent that mentions another agent of the conversation may hand it the turn,
   // up to the limit set in Settings (chainDepth) without a human message in between.
-  // Whether the conversation goes on with another agent.
-  private chain(agent: Agent, conv: Conversation, msg: Message, depth: number, limit: number): boolean {
-    if (this.paused) return false
-    const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
-    if (next.length === 0) return false
-    if (depth >= limit) {
-      this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: ${limit === 1 ? 'foi 1 resposta seguida' : `foram ${limit} respostas seguidas`}. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${limit === 1 ? '1 reply' : `${limit} replies`} in a row. Send a message to go on.`))
-      return false
+  // The agents a reply mentions (none while paused).
+  private mentions(agent: Agent, conv: Conversation, msg: Message): Agent[] {
+    if (this.paused) return []
+    return mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+  }
+
+  // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
+  // router can't say, everyone mentioned is called. `finished` runs when no one gets the turn.
+  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, limit: number, finished: () => void): Promise<void> {
+    const { db, engines } = this.deps
+    const and = L(' e ', ' and ')
+    const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
+    this.routing++
+    try {
+      let called = next
+      let step = { label: L('Chamou', 'Called'), detail: list(next), ms: 0 }
+      const failed = (why: string): void => {
+        console.warn('[handoff]', why)
+        step.detail = `${list(next)} · ${L('não consegui avaliar, chamei todos', "couldn't screen it, called everyone")}`
+      }
+      try {
+        const settings = await this.deps.settings()
+        // Jev stays for human messages: here 'jev' isn't a model, so this falls to Haiku.
+        const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+        const status = settings.engines[model.engine]
+        if (!status.installed || !status.loggedIn) failed(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+        else {
+          const cwd = join(this.deps.workDir, '_router')
+          mkdirSync(cwd, { recursive: true })
+          const { messages } = contextWindow(db, msg, ROUTER_HISTORY)
+          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
+          if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
+          step.ms = r.ms
+          if ('error' in r) failed(r.error)
+          else {
+            called = r.agents
+            const why = r.reason ? ` · ${r.reason}` : ''
+            step = called.length ? { ...step, detail: `${list(called)}${why}` } : { label: L('Ninguém precisa responder', 'No one needs to answer'), detail: r.reason, ms: r.ms }
+          }
+        }
+      } catch (e) {
+        failed(e instanceof Error ? e.message : String(e))
+      }
+      // Paused while the router was thinking: call no one.
+      if (this.paused) called = []
+      else {
+        // Seconds have passed: other code may have saved this reply meanwhile (the wiki, a draft), so add to what's stored.
+        const saved = db.message(msg.id) ?? msg
+        if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
+      }
+      if (called.length === 0) return finished()
+      if (depth >= limit) {
+        this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: ${limit === 1 ? 'foi 1 resposta seguida' : `foram ${limit} respostas seguidas`}. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${limit === 1 ? '1 reply' : `${limit} replies`} in a row. Send a message to go on.`))
+        return finished()
+      }
+      for (const a of called) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
+    } finally {
+      this.routing--
+      this.checkIdle()
     }
-    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
-    return true
   }
 }
