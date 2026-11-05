@@ -18,7 +18,8 @@ side effect of pausing. Pause state is saved in each workspace's own database.
 
 Creating and duplicating are one form: a name, and what to bring from a workspace,
 each part ticked on its own: the general settings (the person's name, language,
-router and memory models, limits, quiet hours, voice), the context, agents,
+router and memory models, limits, quiet hours, voice), the context, the wiki,
+agents,
 channels, skills, connectors with their encrypted credentials (and GitHub's), and
 routines. Creating starts from the workspace on screen with only the general
 settings ticked; with nothing ticked it starts empty, with the introduction.
@@ -28,6 +29,9 @@ workspace once it's made.
 What depends on something left behind comes without it: agents without the
 connectors have no grants, a skill of specific agents comes archived without
 them, a routine comes only with its agent and place (and a connector it polls).
+The wiki isn't copied: the new workspace uses the same folder, so what one keeps
+the other reads; without it, it gets its own, empty. Deleting a workspace whose
+own wiki another one uses keeps that folder, moved to the first one using it.
 With its agents, a set-up workspace skips the introduction; without, the
 introduction starts from what came. Never copied: messages, memories,
 conversation summaries, approvals, usage history, artifacts, running services,

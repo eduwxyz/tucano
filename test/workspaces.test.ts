@@ -17,7 +17,7 @@ it('suggests the current name with the next available duplicate count', () => {
 })
 
 it('reads what comes along to a new workspace, routines only with their agents', () => {
-  expect(workspaceParts({ general: true, agents: true, routines: true, extra: true })).toEqual({ general: true, context: false, agents: true, channels: false, skills: false, connectors: false, routines: true })
+  expect(workspaceParts({ general: true, agents: true, routines: true, extra: true })).toEqual({ general: true, context: false, wiki: false, agents: true, channels: false, skills: false, connectors: false, routines: true })
   expect(workspaceParts({ routines: true }).routines).toBe(false)
   expect(workspaceParts({ general: 'yes' }).general).toBe(false)
   expect(Object.values(workspaceParts(null)).some(Boolean)).toBe(false)
