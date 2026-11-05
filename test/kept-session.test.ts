@@ -220,10 +220,18 @@ describe('a reply with a kept session', () => {
   })
 
   it('goes without a session while another agent is still writing what it would see', async () => {
-    const r = runner({ delayMs: 5 })
-    await r.send('c1', '@lia @theo oi')
+    const r = runner()
+    const half: Message = { id: 'm-theo', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: 'Estou olhando a tab', at: Date.now() - 1000, run: { status: 'working', depth: 1, steps: [] } }
+    db.saveMessage(half)
+    await r.send('c1', '@lia oi')
     await r.idle()
-    expect(turns.slice(0, 2).some((t) => !t.session)).toBe(true)
+    expect(turns[0]!.session).toBeUndefined()
+    // Once it's done, the next reply starts a session with all of it.
+    db.saveMessage({ ...half, text: 'Estou olhando a tabela de vendas.', run: { status: 'done', depth: 1, steps: [] } })
+    await r.send('c1', '@lia e agora?')
+    await r.idle()
+    expect(turns[1]!.session?.resume).toBe(false)
+    expect(turns[1]!.blocks!.some((b) => b.includes('tabela de vendas'))).toBe(true)
   })
 
   it('gives an engine that takes no sessions the whole conversation every time', async () => {
