@@ -193,6 +193,7 @@ const NO_REPLIES: Message[] = []
 export function MessageList({ messages: all, conversationId, empty, focus, threads, lead }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string; threads?: boolean; lead?: ReactNode }): ReactNode {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const [farFromBottom, setFarFromBottom] = useState(false)
   const { messages, replies } = useMemo(() => {
     if (!threads) return { messages: all, replies: undefined }
     const replies = new Map<string, Message[]>()
@@ -225,6 +226,7 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
 
   useEffect(() => {
     if (!lead) stick.current = true
+    setFarFromBottom(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
 
@@ -280,7 +282,9 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
       ref={ref}
       onScroll={(e) => {
         const el = e.currentTarget
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+        const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+        stick.current = fromBottom < 60
+        setFarFromBottom(fromBottom > el.clientHeight / 2)
       }}
     >
       {lead}
@@ -296,6 +300,13 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
           m.author.kind !== 'routine'
         return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
       })}
+      {farFromBottom && (
+        <div className="messages__jump">
+          <button className="messages__jump-btn" title={L('Ir para o fim', 'Go to the end')} aria-label={L('Ir para o fim da conversa', 'Go to the end of the conversation')} onClick={() => ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' })}>
+            <Icon name="down" size={15} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
