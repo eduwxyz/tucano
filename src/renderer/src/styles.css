@@ -2196,6 +2196,41 @@ h3 {
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
+.decisions__prose,
+.answers__prose {
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.decisions__prose {
+  margin: 0 4px 10px;
+  padding-right: 6px;
+}
+.decisions__prose > :first-child,
+.answers__prose > :first-child {
+  margin-top: 0;
+}
+.decisions__prose > :last-child,
+.answers__prose > :last-child {
+  margin-bottom: 0;
+}
+.decisions__prose code,
+.answers__prose code {
+  font: 0.92em var(--mono);
+  background: var(--code-bg);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.answers__prose {
+  max-height: none;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
 .decisions__options {
   display: flex;
   flex-direction: column;

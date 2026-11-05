@@ -113,3 +113,23 @@ describe('questionsAsText', () => {
     expect(questionsAsText([pagination, deadline])).toBe('1. Paginação no menu? (Busca remota | Scroll infinito)\n2. Pra quando?')
   })
 })
+
+describe('lengths', () => {
+  it('refuses a long question, a long label or a long description, and says where the context goes', () => {
+    const long = (n: number): string => 'x'.repeat(n)
+    const result = parseQuestions({ questions: [{ question: long(201), kind: 'text' }] })
+    expect('error' in result && result.error).toMatch(/texto da (sua )?resposta/)
+    expect('error' in parseQuestions({ question: long(201) })).toBe(true)
+    expect('error' in parseQuestions({ questions: [{ question: 'x', kind: 'single', options: [{ label: long(81) }, { label: 'b' }] }] })).toBe(true)
+    expect('error' in parseQuestions({ questions: [{ question: 'x', kind: 'single', options: [{ label: 'a', description: long(201) }, { label: 'b' }] }] })).toBe(true)
+    expect('error' in parseQuestions({ questions: [{ question: long(200), kind: 'single', options: [{ label: long(80), description: long(200) }, { label: 'b' }] }] })).toBe(false)
+  })
+})
+
+describe('a lone text question', () => {
+  it('is answered with the answer alone, as before decisions', () => {
+    expect(formatAnswers([deadline], [{ text: 'sexta' }])).toBe('sexta')
+    expect(formatAnswers([deadline], [{ skipped: true }])).toBe('(pulou)')
+    expect(formatAnswers([pagination], [{ chosen: [0] }])).toBe('- Paginação no menu? → Busca remota')
+  })
+})

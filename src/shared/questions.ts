@@ -24,6 +24,10 @@ export interface Answer {
 export const MAX_QUESTIONS = 4
 export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 4
+// A decision is read at a glance: the context goes in the reply's text, not here.
+export const MAX_QUESTION_LENGTH = 200
+export const MAX_LABEL_LENGTH = 80
+export const MAX_DESCRIPTION_LENGTH = 200
 
 const KINDS: QuestionKind[] = ['single', 'multiple', 'text']
 
@@ -34,11 +38,17 @@ export function questionsOf(run: Run | undefined): Question[] {
 }
 
 const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+const tooLong = (question: string): string =>
+  L(
+    `Pergunta longa demais (${question.length} caracteres, o máximo é ${MAX_QUESTION_LENGTH}): coloque o contexto e a proposta no texto da sua resposta e deixe aqui só a decisão.`,
+    `Question too long (${question.length} characters, at most ${MAX_QUESTION_LENGTH}): put the context and the proposal in your reply's text and leave only the decision here.`
+  )
 
 export function parseQuestions(args: Record<string, unknown>): { questions: Question[] } | { error: string } {
   if (args['questions'] === undefined && typeof args['question'] === 'string') {
     const question = trimmed(args['question'])
-    return question ? { questions: [{ question, kind: 'text' }] } : { error: L('Faltou a pergunta.', 'Missing the question.') }
+    if (!question) return { error: L('Faltou a pergunta.', 'Missing the question.') }
+    return question.length > MAX_QUESTION_LENGTH ? { error: tooLong(question) } : { questions: [{ question, kind: 'text' }] }
   }
   const list = args['questions']
   if (!Array.isArray(list) || list.length === 0) return { error: L('Faltou a pergunta: mande ao menos uma decisão em questions.', 'Missing the question: send at least one decision in questions.') }
@@ -47,6 +57,7 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Ques
   for (const item of list as Record<string, unknown>[]) {
     const question = trimmed(item?.['question'])
     if (!question) return { error: L('Toda decisão precisa de uma pergunta.', 'Every decision needs a question.') }
+    if (question.length > MAX_QUESTION_LENGTH) return { error: tooLong(question) }
     const kind = item['kind'] as QuestionKind
     if (!KINDS.includes(kind)) return { error: L(`"${question}": kind tem que ser single, multiple ou text.`, `"${question}": kind must be single, multiple or text.`) }
     if (kind === 'text') {
@@ -60,6 +71,13 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Ques
       const label = trimmed(o?.['label'])
       if (!label) return { error: L(`"${question}": toda opção precisa de um label.`, `"${question}": every option needs a label.`) }
       const description = trimmed(o['description'])
+      if (label.length > MAX_LABEL_LENGTH || description.length > MAX_DESCRIPTION_LENGTH)
+        return {
+          error: L(
+            `"${question}": label de até ${MAX_LABEL_LENGTH} caracteres e description de até ${MAX_DESCRIPTION_LENGTH}; o detalhe vai no texto da sua resposta.`,
+            `"${question}": label up to ${MAX_LABEL_LENGTH} characters and description up to ${MAX_DESCRIPTION_LENGTH}; the detail goes in your reply's text.`
+          )
+        }
       options.push(description ? { label, description } : { label })
     }
     questions.push({ question, kind, options })
@@ -85,6 +103,9 @@ export function answerLabel(question: Question, answer: Answer): string {
 
 // A Markdown list: one line each, in my message bubble as well as for the agent.
 export function formatAnswers(questions: Question[], answers: (Answer | null)[] | undefined): string {
+  // One text question reads as a reply, as it did before decisions: the agent knows what it asked.
+  const lone = questions.length === 1 && questions[0]!.kind === 'text' ? answers?.[0] : undefined
+  if (lone && isAnswered(lone)) return answerLabel(questions[0]!, lone)
   return questions
     .map((q, i) => {
       const answer = answers?.[i]

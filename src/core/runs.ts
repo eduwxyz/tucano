@@ -21,7 +21,7 @@ import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type ToolDef } from './gateway'
-import { formatAnswers, MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsOf, type Answer, type Question } from '../shared/questions'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsOf, type Answer, type Question } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
@@ -63,7 +63,7 @@ export const ASK_USER: ToolDef = {
           items: {
             type: 'object',
             properties: {
-              question: { type: 'string', description: L('A pergunta, curta e direta.', 'The question, short and direct.') },
+              question: { type: 'string', maxLength: MAX_QUESTION_LENGTH, description: L('A pergunta, curta e direta.', 'The question, short and direct.') },
               kind: { type: 'string', enum: ['single', 'multiple', 'text'] },
               options: {
                 type: 'array',
@@ -73,8 +73,8 @@ export const ASK_USER: ToolDef = {
                 items: {
                   type: 'object',
                   properties: {
-                    label: { type: 'string', description: L('Curto: o que aparece no botão.', 'Short: what shows on the button.') },
-                    description: { type: 'string', description: L('Opcional: o que essa opção implica.', 'Optional: what this option implies.') }
+                    label: { type: 'string', maxLength: MAX_LABEL_LENGTH, description: L('Curto: o que aparece no botão.', 'Short: what shows on the button.') },
+                    description: { type: 'string', maxLength: MAX_DESCRIPTION_LENGTH, description: L('Opcional: o que essa opção implica.', 'Optional: what this option implies.') }
                   },
                   required: ['label']
                 }

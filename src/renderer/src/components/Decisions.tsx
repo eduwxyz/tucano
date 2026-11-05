@@ -1,13 +1,23 @@
 // The decisions an agent asked with ask_user: answered one at a time in place of the message
 // box, reviewed and sent as my message; on the agent's message, what is waiting or what I chose.
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, firstUnanswered, isAnswered, questionsOf, type Answer, type Question } from '../../../shared/questions'
+import { answerLabel, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type Question } from '../../../shared/questions'
 import { answerQuestion, dismissQuestion, reopenQuestion, submitAnswers, useStore, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
 
 type Step = number | 'review'
+
+// Only a message from before the length limit has a question this long: it reads as text, not as a title.
+const isLong = (q: Question): boolean => q.question.length > MAX_QUESTION_LENGTH || q.question.includes('\n')
+const Prose = ({ text, className }: { text: string; className: string }): ReactNode => (
+  <div className={className}>
+    <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+  </div>
+)
 
 const typing = (e: KeyboardEvent): boolean => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
 
@@ -59,7 +69,7 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
         ))}
       </div>
       <div className="decisions__head">
-        <h3 className="decisions__question">{step === 'review' ? L('Confira antes de enviar', 'Check before sending') : questions[step]!.question}</h3>
+        <h3 className="decisions__question">{step === 'review' ? L('Confira antes de enviar', 'Check before sending') : isLong(questions[step]!) ? L('Pergunta pra você', 'A question for you') : questions[step]!.question}</h3>
         {questions.length > 1 && (
           <div className="decisions__nav">
             <button className="icon-btn" disabled={position === 0} title={L('Anterior', 'Previous')} onClick={() => go(position - 1)}>
@@ -130,6 +140,7 @@ function Decision({ question, answer, last, takeFocus, onAnswer, onDismiss }: { 
 
   return (
     <div className="decisions__body" ref={body} tabIndex={-1} onKeyDown={keys}>
+      {isLong(question) && <Prose className="decisions__prose" text={question.question} />}
       {question.kind === 'text' ? (
         <textarea ref={textField} className="decisions__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onChange={(e) => setText(e.target.value)} />
       ) : (
@@ -178,7 +189,7 @@ function Review({ questions, answers, onEdit, onSend, sending }: { questions: Qu
         {questions.map((q, i) => (
           <li key={i}>
             <button className="decisions__review-row" title={L('Mudar esta resposta', 'Change this answer')} onClick={() => onEdit(i)}>
-              <span className="decisions__review-question">{q.question}</span>
+              <span className="decisions__review-question">{isLong(q) ? L('Pergunta', 'Question') : q.question}</span>
               <span className={`decisions__review-answer ${answers[i]?.skipped ? 'is-skipped' : ''}`}>{answers[i] ? answerLabel(q, answers[i]) : ''}</span>
             </button>
           </li>
@@ -221,7 +232,7 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
         <dl className="answers__list">
           {answered.map(({ q, a }, i) => (
             <div key={q.question + i}>
-              <dt>{q.question}</dt>
+              <dt>{isLong(q) ? <Prose className="answers__prose" text={q.question} /> : q.question}</dt>
               <dd className={a!.skipped ? 'is-skipped' : ''}>{answerLabel(q, a!)}</dd>
             </div>
           ))}
@@ -229,7 +240,7 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
       ) : (
         <ul className="answers__questions">
           {questions.map((q, i) => (
-            <li key={i}>{q.question}</li>
+            <li key={i}>{isLong(q) ? <Prose className="answers__prose" text={q.question} /> : q.question}</li>
           ))}
         </ul>
       )}

@@ -44,6 +44,9 @@ O que se quer: **a proposta vai na mensagem do agente (markdown normal); as deci
 
 - A descrição da ferramenta diz explicitamente: análise e proposta vão no texto da resposta, *antes* de chamar; aqui só o que precisa ser decidido. Uma decisão por item, pergunta curta, opções curtas (detalhe no `description`).
 - Validação no `runTool` (`runs.ts`), com erro devolvido ao agente: ao menos 1 decisão; `single`/`multiple` precisam de opções. **Minha decisão:** 1–4 decisões, 2–4 opções, como no Claude; acima disso, erro pedindo pra dividir.
+- **Tamanho:** pergunta de até 200 caracteres, label de até 80 e description de até 200. Acima disso, a ferramenta devolve erro pedindo que o contexto vá no texto da resposta, então o agente não consegue repetir o bloco de texto da pergunta antiga.
+- **Pergunta longa antiga** (só uma mensagem de antes desse limite pode ter): o card mostra "Pergunta pra você" como título e o texto com markdown, com rolagem. No resumo, ela aparece cortada em 3 linhas.
+- **Uma única decisão de texto** é respondida só com a resposta, como antes, sem repetir a pergunta.
 - **Minha decisão:** continuar aceitando `{ question: string }` (forma antiga) como uma decisão `text`, pra não quebrar agentes no meio de uma conversa.
 
 ### O dado
