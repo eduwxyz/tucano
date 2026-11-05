@@ -74,6 +74,7 @@ export class LiveCli {
   private stderr = ''
   private code: number | null | undefined // set once it exited
   private turning = false
+  private exits: (() => void)[] = []
 
   constructor(opts: { bin: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv }) {
     const s = spawnable(opts.bin, opts.args)
@@ -92,6 +93,7 @@ export class LiveCli {
       if (this.code !== undefined) return
       this.code = code
       this.wake?.()
+      for (const done of this.exits.splice(0)) done()
     }
     this.child.on('close', exit)
     this.child.on('error', (err) => {
@@ -107,6 +109,11 @@ ${err.message}`
 
   get busy(): boolean {
     return this.turning
+  }
+
+  // Once it has exited (at once if it already has).
+  exited(): Promise<void> {
+    return this.alive ? new Promise((resolve) => this.exits.push(resolve)) : Promise.resolve()
   }
 
   async *turn(input: string, parser: Parser, signal: AbortSignal): AsyncIterable<EngineEvent> {

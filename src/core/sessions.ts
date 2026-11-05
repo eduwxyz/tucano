@@ -43,6 +43,7 @@ export const sessionConfig = (parts: Record<string, unknown>): string => hash(JS
 export class Sessions {
   private entries = new Map<string, Entry>()
   private busy = new Set<string>()
+  private doomed = new Set<string>() // to go when their running reply ends
   private readonly now: () => number
 
   constructor(
@@ -77,7 +78,7 @@ export class Sessions {
   end(key: string, plan: SessionPlan, out: { ok: boolean; config: string; shown: Shown[]; reply?: string; context?: number }): void {
     this.busy.delete(key)
     const e = this.entries.get(key)
-    if (!out.ok) {
+    if (!out.ok || this.doomed.delete(key)) {
       if (e?.id === plan.id) this.drop(key)
       else this.opts.forget(plan)
       return
@@ -93,6 +94,15 @@ export class Sessions {
       const oldest = [...this.entries].filter(([k]) => !this.busy.has(k)).sort((a, b) => a[1].usedAt - b[1].usedAt)[0]
       if (oldest) this.drop(oldest[0])
     }
+  }
+
+  // Sessions that can't go on: their agent was archived or their conversation deleted. Keys are
+  // agent:conversation:thread. One with a reply running goes when that reply ends.
+  dropWhere(match: (key: string) => boolean): void {
+    for (const k of new Set([...this.entries.keys(), ...this.busy]))
+      if (!match(k)) continue
+      else if (this.busy.has(k)) this.doomed.add(k)
+      else this.drop(k)
   }
 
   // Sessions whose cache is gone: resuming them would cost what starting over does.

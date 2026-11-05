@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
@@ -150,13 +150,36 @@ export class Runner {
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
       exists: (id) => !!deps.db.message(id),
+      // The token first: a failure letting the process or its file go must not keep it, nor the reply.
       forget: (s) => {
-        for (const e of Object.values(deps.engines)) e.release?.(s.id)
         deps.gateway?.release(s.token)
+        for (const e of Object.values(deps.engines))
+          try {
+            e.release?.(s.id)
+          } catch (err) {
+            console.error('[sessions] release', err)
+          }
       }
     })
-    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir) // left by an earlier run of the app
+    // Left by an earlier run of the app, under the usual login and each account's.
+    const accounts = deps.dataDir ? join(deps.dataDir, 'accounts') : undefined
+    let accountDirs: string[] = []
+    try {
+      if (accounts) accountDirs = readdirSync(accounts).map((d) => join(accounts, d))
+    } catch {
+      // no accounts
+    }
+    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir, accountDirs)
     setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
+
+  // An archived agent's sessions, or a deleted conversation's, go now: their process and the
+  // transcript Claude Code keeps on disk.
+  forgetSessions(of: { agentId?: string; conversationId?: string }): void {
+    this.sessions.dropWhere((key) => {
+      const [agent, conversation] = key.split(':')
+      return (of.agentId !== undefined && agent === of.agentId) || (of.conversationId !== undefined && conversation === of.conversationId)
+    })
   }
 
   setPaused(paused: boolean): void {

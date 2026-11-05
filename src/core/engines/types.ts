@@ -49,6 +49,6 @@ export interface Engine {
   run(turn: Turn): AsyncIterable<EngineEvent>
   sessions?: boolean // takes `turn.session`; without it, every turn gets the whole conversation
   release?(sessionId: string): void // a session that won't be resumed: its process and its file go
-  clean?(workDir: string): void // sessions left from an earlier run of the app, by agents under workDir
+  clean?(workDir: string, accountDirs?: string[]): void // sessions left from an earlier run of the app, by agents under workDir
   dispose?(): void // the app is quitting: processes kept open close
 }
