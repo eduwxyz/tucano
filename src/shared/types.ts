@@ -121,6 +121,7 @@ export interface Conversation {
   summaryAt?: number
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
+  threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
   // A DM between agents opens for one request (the id of the message that started it) and holds only that
   // work; its topic is the task. One kept from before this (no request) is the pair's old running DM.
   request?: string
@@ -317,6 +318,7 @@ export interface Settings {
   onboarding?: { done: boolean; checklistHidden?: boolean }
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
+  seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
 }
 

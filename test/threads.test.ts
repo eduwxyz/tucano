@@ -68,8 +68,9 @@ beforeEach(async () => {
   settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia', { role: 'Engenharia' }))
   db.saveAgent(agent('a2', 'theo', { role: 'Dados' }))
-  db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
-  db.createConversation({ id: 'c1', kind: 'channel', name: 'lancamento', members: ['a1', 'a2'] })
+  // Both answer in threads; a conversation that answers in it is made where it's tested.
+  db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'], threads: true })
+  db.createConversation({ id: 'c1', kind: 'channel', name: 'lancamento', members: ['a1', 'a2'], threads: true })
   gateway = new Gateway()
   await gateway.start()
 })
@@ -110,6 +111,68 @@ describe('sending into a thread', () => {
     await r.idle()
     expect(mine().at(-1)?.threadId).toBeUndefined()
     expect(replies()[0]?.threadId).toBe(mine().at(-1)!.id)
+  })
+})
+
+describe('a conversation that answers in it', () => {
+  beforeEach(() => {
+    db.createConversation({ id: 'p1', kind: 'channel', name: 'papo', members: ['a1', 'a2'] }) // threads off, the default
+  })
+
+  it("my message, the router's note and the answers stay in the conversation, like a chat", async () => {
+    const r = runner()
+    await r.send('p1', 'qual a média de retenção da semana?')
+    await r.idle()
+    const here = db.messages().filter((m) => m.conversationId === 'p1')
+    expect(here.map((m) => m.author.kind)).toEqual(['me', 'system', 'agent'])
+    expect(here.every((m) => m.threadId === undefined)).toBe(true)
+    expect(notes.at(-1)).toEqual({ conversationId: 'p1', kind: 'done', threadId: undefined })
+  })
+
+  it('a thread opened by hand still takes its answers; switched to threads, every message opens one', async () => {
+    const root = put('p1', { kind: 'me' }, 'um assunto à parte')
+    const r = runner()
+    await r.send('p1', '@lia e esse?', [], root.id)
+    await r.idle()
+    expect(mine().at(-1)?.threadId).toBe(root.id)
+    expect(replies().at(-1)?.threadId).toBe(root.id)
+
+    db.setThreads('p1', true)
+    await r.send('p1', '@lia e agora?')
+    await r.idle()
+    expect(mine().at(-1)?.threadId).toBeUndefined()
+    expect(replies().at(-1)?.threadId).toBe(mine().at(-1)!.id)
+  })
+
+  it('an answer there reads the conversation and the message that opened each thread, not what was said inside: that is looked up', async () => {
+    put('p1', { kind: 'me' }, 'CANAL: bom dia')
+    const root = put('p1', { kind: 'me' }, 'RAIZ: o plano do post')
+    put('p1', { kind: 'agent', id: 'a2' }, 'DENTRO DA THREAD: o plano inteiro', root.id)
+    const found: string[] = []
+    const r = runner({
+      onTurn: async (t) => {
+        if (t.mcpUrl) found.push(JSON.stringify(await callTool(t.mcpUrl, 'buscar_threads', { busca: 'plano' })))
+      }
+    })
+    await r.send('p1', '@lia e o plano?')
+    await r.idle()
+
+    const prompt = agentTurns()[0]!.prompt
+    expect(prompt).toContain('CANAL: bom dia')
+    expect(prompt).toContain('RAIZ: o plano do post')
+    expect(prompt).not.toContain('DENTRO DA THREAD')
+    expect(prompt).toContain('As threads ficam à parte')
+    expect(found[0]).toContain('DENTRO DA THREAD: o plano inteiro')
+    expect(replies().at(-1)?.threadId).toBeUndefined()
+  })
+
+  it('with no thread in it, an answer there is given no thread tools nor the note about them', async () => {
+    put('p1', { kind: 'me' }, 'CANAL: bom dia')
+    const r = runner()
+    await r.send('p1', '@lia tudo certo?')
+    await r.idle()
+    expect(agentTurns()[0]!.prompt).toContain('CANAL: bom dia')
+    expect(agentTurns()[0]!.prompt).not.toContain('buscar_threads')
   })
 })
 
@@ -343,15 +406,15 @@ describe('what a thread message sets off stays in the thread', () => {
 })
 
 describe('the database', () => {
-  it('an existing database gains thread_id and thread_summary, and messages round-trip them', () => {
+  it('an existing database gains thread_id, thread_summary and threads, and round-trips them', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'old.db')
     // A database from before threads, with a message in it: the schema back to before the threads'
-    // migration, undoing the three that came after it (the thread summaries, the team and the DMs between agents).
+    // migration, undoing the four that came after it (the thread summaries, threads per conversation, the team and the DMs between agents).
     new Db(file).close()
     const raw = new DatabaseSync(file)
     const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
     raw.exec(
-      `ALTER TABLE conversations DROP COLUMN request; ALTER TABLE conversations DROP COLUMN pair; ALTER TABLE agents DROP COLUMN team; ALTER TABLE messages DROP COLUMN thread_summary; DROP INDEX messages_by_thread; ALTER TABLE messages DROP COLUMN thread_id; PRAGMA user_version = ${user_version - 4};`
+      `ALTER TABLE conversations DROP COLUMN request; ALTER TABLE conversations DROP COLUMN pair; ALTER TABLE agents DROP COLUMN team; ALTER TABLE conversations DROP COLUMN threads; ALTER TABLE messages DROP COLUMN thread_summary; DROP INDEX messages_by_thread; ALTER TABLE messages DROP COLUMN thread_id; PRAGMA user_version = ${user_version - 5};`
     )
     raw.exec("INSERT INTO conversations (id, kind, name, created_at) VALUES ('c1', 'channel', 'geral', 1)")
     raw.exec("INSERT INTO messages (id, conversation_id, author_kind, text, at) VALUES ('old', 'c1', 'me', 'antes das threads', 1)")
@@ -368,6 +431,12 @@ describe('the database', () => {
     reopened.saveMessage({ ...reopened.message('old')!, text: 'antes das threads (editada)' }) // saving a message keeps its summary
     reopened.setThreadSummary('old', 'editado à mão') // a hand edit keeps what it covers
     expect(reopened.message('old')?.threadSummary).toMatchObject({ text: 'editado à mão', until: 2 })
+    // A conversation answers in it until it's switched to threads, and back.
+    expect(reopened.conversation('c1')?.threads).toBeUndefined()
+    reopened.setThreads('c1', true)
+    expect(reopened.conversation('c1')?.threads).toBe(true)
+    reopened.setThreads('c1', false)
+    expect(reopened.conversation('c1')?.threads).toBeUndefined()
     reopened.close()
   })
 })

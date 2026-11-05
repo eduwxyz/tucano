@@ -107,7 +107,8 @@ export class ConnectorManager {
     if (c) this.deps.emit({ type: 'connector', connector: c })
   }
 
-  async add(input: ConnectorInput): Promise<string> {
+  // `interactive`: someone just added it, so an OAuth sign-in opens the browser now instead of waiting for Authorize.
+  async add(input: ConnectorInput, interactive = false): Promise<string> {
     const name = input.name.trim()
     if (!name) throw new Error(L('Dê um nome ao conector.', 'Give the connector a name.'))
     const id = randomUUID()
@@ -124,7 +125,7 @@ export class ConnectorManager {
       if (Object.keys(env).length) await this.deps.secrets.setJson(key(id, 'env'), env)
     }
     this.emitConnector(id)
-    void this.connect(id)
+    void this.connect(id, interactive)
     return id
   }
 
