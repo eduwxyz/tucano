@@ -10,6 +10,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
 > - **Um agente só acorda outro quando precisa.** Quando um agente menciona outro na resposta, o router lê e chama só quem tem algo a fazer: um agradecimento ou um “combinado” não acordam ninguém. Na dúvida, chama.
 > - **O app abre fora do instalador mesmo com uma versão estranha.** O atualizador, que nem é usado ali, conferia a versão ao abrir e derrubava o app.
+> - **Agentes no Grok.** Um agente pode rodar no Grok CLI, com a assinatura do grok.com, como roda no Cursor CLI. Cada resposta usa uma pasta própria: os seus plugins, skills e hooks não carregam, e só as ferramentas do Tucano ficam à mão.
+
+### Added
+
+- **Agents on Grok.** An agent can run on the [Grok CLI](https://x.ai/cli) with a grok.com subscription, the way it runs on Cursor CLI: sign in with `grok login` and pick a Grok model. Each reply runs in a folder and a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load, Grok's own shell and files stay off, and Tucano's tools are the only ones it has. An `XAI_API_KEY` in the environment is set aside when grok.com is signed in, so the subscription isn't billed per token. The official installer is macOS and Linux. Thanks [@matheus-apolonio](https://github.com/matheus-apolonio)! ([#87](https://github.com/eduwxyz/tucano/pull/87))
 
 ### Changed
 

@@ -1,0 +1,143 @@
+{"type":"thought","data":"Vou pesquisar a versão"}
+{"type":"thought","data":" LTS atual do Node.js."}
+{"type":"text","data":"V"}
+{"type":"text","data":"ou"}
+{"type":"text","data":" buscar"}
+{"type":"text","data":" a"}
+{"type":"text","data":" L"}
+{"type":"text","data":"TS"}
+{"type":"text","data":" do"}
+{"type":"text","data":" Node"}
+{"type":"text","data":".js"}
+{"type":"text","data":","}
+{"type":"text","data":" abrir"}
+{"type":"text","data":" o"}
+{"type":"text","data":" site"}
+{"type":"text","data":" oficial"}
+{"type":"text","data":" e"}
+{"type":"text","data":" consultar"}
+{"type":"text","data":" a"}
+{"type":"text","data":" estrutura"}
+{"type":"text","data":" da"}
+{"type":"text","data":" wiki"}
+{"type":"text","data":" do"}
+{"type":"text","data":" React"}
+{"type":"text","data":"."}
+{"type":"tool_call","toolCallId":"ws_a6248257-a732-9626-8da2-39104be210ce_call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-0","title":"Web search:","kind":"search","status":"in_progress","toolName":"Web search:","rawInput":{"variant":"WebSearch","backend":true},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"ws_a6248257-a732-9626-8da2-39104be210ce_call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-0","status":"completed","content":[],"rawOutput":{"action":{"type":"search","query":"Node.js current LTS version","sources":[{"type":"url","url":"https://nodejs.org/en/blog/release"},{"type":"url","url":"https://nodejs.org/en/about/previous-releases"},{"type":"url","url":"https://www.linuxcompatible.org/story/nodejs-26130-lithium-reaches-lts-support-through-april-2029/"}]},"id":"ws_a6248257-a732-9626-8da2-39104be210ce_call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-0","status":"completed"},"locations":[]}
+{"type":"usage","usage":{"input_tokens":2767,"output_tokens":189,"cache_read_input_tokens":1152,"cache_creation_input_tokens":0,"reasoning_tokens":108}}
+{"type":"tool_call","toolCallId":"call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-1","title":"web_fetch","kind":"web_fetch","status":"pending","toolName":"web_fetch","rawInput":{"url":"https://nodejs.org/en"},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-1","status":null,"content":[],"rawOutput":null,"locations":[]}
+{"type":"tool_call","toolCallId":"call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-2","title":"search_tool","kind":"search_tool","status":"pending","toolName":"search_tool","rawInput":{"query":"tucano read_wiki_structure","limit":3},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-2","status":null,"content":[],"rawOutput":null,"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-2","status":"completed","content":[{"type":"content","content":{"type":"text","text":"{\n  \"results\": [\n    {\n      \"server\": \"tucano\",\n      \"tools\": [\n        {\n          \"tool_name\": \"tucano__read_wiki_structure\",\n          \"description\": \"Get …"}}],"rawOutput":{"type":"SearchTool","result_count":3,"content":"{\n  \"results\": [\n    {\n      \"server\": \"tucano\",\n      \"tools\": [\n        {\n          \"tool_name\": \"tucano__read_wiki_structure\",\n          \"description\": \"Get …"},"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-97807bff-a2b0-4d60-bbc1-bf411bc854ef-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Node.js — Run JavaScript Everywhere\n\n[Skip to content](#main)\n\n# Run JavaScript Everywhere\n\nNode.js® is a free, open-source, cross-platform JavaScript runtime e…"}}],"rawOutput":{"type":"WebFetch","Content":{"url":"https://nodejs.org/en","content":"Node.js — Run JavaScript Everywhere\n\n[Skip to content](#main)\n\n# Run JavaScript Everywhere\n\nNode.js® is a free, open-source, cross-platform JavaScript runtime e…","content_type":"markdown","status_code":200,"bytes":3213}},"locations":[]}
+{"type":"thought","data":"Vou consultar a estrutura"}
+{"type":"thought","data":" do wiki no servidor"}
+{"type":"thought","data":" tucano em facebook/react."}
+{"type":"usage","usage":{"input_tokens":7608,"output_tokens":113,"cache_read_input_tokens":3840,"cache_creation_input_tokens":0,"reasoning_tokens":78}}
+{"type":"tool_call","toolCallId":"call-c1e28e3e-e021-4f65-8619-da09548610a7-3","title":"use_tool","kind":"use_tool","status":"pending","toolName":"use_tool","rawInput":{"tool_name":"tucano__read_wiki_structure","tool_input":{"repoName":"facebook/react"}},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-c1e28e3e-e021-4f65-8619-da09548610a7-3","status":null,"content":[],"rawOutput":null,"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-c1e28e3e-e021-4f65-8619-da09548610a7-3","status":"completed","content":[],"rawOutput":{"type":"MCP","tool_name":"read_wiki_structure","server_name":"tucano","output":{"OkayOutput":"Available pages for facebook/react:\n\n- 1 React Repository Overview\n  - 1.1 Repository Structure and Packages\n  - 1.2 Feature Flags System\n- 2 Core Reconciler Ar…"}},"locations":[]}
+{"type":"thought","data":"Vou responder em duas"}
+{"type":"thought","data":" linhas."}
+{"type":"text","data":"A"}
+{"type":"text","data":" L"}
+{"type":"text","data":"TS"}
+{"type":"text","data":" atual"}
+{"type":"text","data":" do"}
+{"type":"text","data":" Node"}
+{"type":"text","data":".js"}
+{"type":"text","data":" é"}
+{"type":"text","data":" a"}
+{"type":"text","data":" "}
+{"type":"text","data":"26"}
+{"type":"text","data":" “"}
+{"type":"text","data":"Lith"}
+{"type":"text","data":"ium"}
+{"type":"text","data":"”"}
+{"type":"text","data":" ("}
+{"type":"text","data":"26"}
+{"type":"text","data":"."}
+{"type":"text","data":"13"}
+{"type":"text","data":"."}
+{"type":"text","data":"0"}
+{"type":"text","data":","}
+{"type":"text","data":" suporte"}
+{"type":"text","data":" até"}
+{"type":"text","data":" abril"}
+{"type":"text","data":" de"}
+{"type":"text","data":" "}
+{"type":"text","data":"202"}
+{"type":"text","data":"9"}
+{"type":"text","data":");"}
+{"type":"text","data":" a"}
+{"type":"text","data":" home"}
+{"type":"text","data":" de"}
+{"type":"text","data":" node"}
+{"type":"text","data":"js"}
+{"type":"text","data":".org"}
+{"type":"text","data":" descre"}
+{"type":"text","data":"ve"}
+{"type":"text","data":" o"}
+{"type":"text","data":" runtime"}
+{"type":"text","data":" e"}
+{"type":"text","data":" exemplos"}
+{"type":"text","data":" ("}
+{"type":"text","data":"serv"}
+{"type":"text","data":"idor"}
+{"type":"text","data":" HTTP"}
+{"type":"text","data":","}
+{"type":"text","data":" testes"}
+{"type":"text","data":","}
+{"type":"text","data":" streams"}
+{"type":"text","data":"),"}
+{"type":"text","data":" sem"}
+{"type":"text","data":" list"}
+{"type":"text","data":"ar"}
+{"type":"text","data":" o"}
+{"type":"text","data":" número"}
+{"type":"text","data":" da"}
+{"type":"text","data":" L"}
+{"type":"text","data":"TS"}
+{"type":"text","data":".\n"}
+{"type":"text","data":"A"}
+{"type":"text","data":" wiki"}
+{"type":"text","data":" de"}
+{"type":"text","data":" facebook"}
+{"type":"text","data":"/"}
+{"type":"text","data":"react"}
+{"type":"text","data":" tem"}
+{"type":"text","data":" "}
+{"type":"text","data":"8"}
+{"type":"text","data":" t"}
+{"type":"text","data":"ópicos"}
+{"type":"text","data":":"}
+{"type":"text","data":" visão"}
+{"type":"text","data":" geral"}
+{"type":"text","data":","}
+{"type":"text","data":" reconc"}
+{"type":"text","data":"iler"}
+{"type":"text","data":","}
+{"type":"text","data":" al"}
+{"type":"text","data":"vos"}
+{"type":"text","data":" de"}
+{"type":"text","data":" render"}
+{"type":"text","data":","}
+{"type":"text","data":" React"}
+{"type":"text","data":" Compiler"}
+{"type":"text","data":","}
+{"type":"text","data":" Dev"}
+{"type":"text","data":"Tools"}
+{"type":"text","data":","}
+{"type":"text","data":" build"}
+{"type":"text","data":","}
+{"type":"text","data":" pac"}
+{"type":"text","data":"otes"}
+{"type":"text","data":" extras"}
+{"type":"text","data":" e"}
+{"type":"text","data":" gloss"}
+{"type":"text","data":"ário"}
+{"type":"text","data":"."}
+{"type":"usage","usage":{"input_tokens":1070,"output_tokens":258,"cache_read_input_tokens":11392,"cache_creation_input_tokens":0,"reasoning_tokens":160}}
+{"type":"end","stopReason":"end_turn","cwd":"/tmp/tucano-grok-0/work","usage":{"input_tokens":11445,"cache_read_input_tokens":16384,"cache_creation_input_tokens":0,"output_tokens":560,"reasoning_tokens":346,"total_tokens":28389},"num_turns":3,"total_cost_usd":0.039442,"total_cost_usd_ticks":394420000,"modelUsage":{"grok-4.7-build":{"inputTokens":11445,"outputTokens":560,"cacheReadInputTokens":16384,"cacheCreationInputTokens":0,"modelCalls":3,"costUSD":0.039442}}}
