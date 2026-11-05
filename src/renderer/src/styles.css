@@ -1328,6 +1328,29 @@ h3 {
   font-size: 12.5px;
   line-height: 1.4;
 }
+.step--why {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.step__error {
+  flex-basis: 100%;
+  padding-left: 26px; /* under the label, past the icon */
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.step__error.is-whole {
+  display: block;
+  cursor: text;
+}
 .step__ms {
   margin-left: auto;
   flex-shrink: 0;

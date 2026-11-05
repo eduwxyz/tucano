@@ -24,6 +24,7 @@ import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { callError, contentText, errorReason } from './connectors'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -41,6 +42,7 @@ const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is c
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
 const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
+const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
 const THOUGHT = (): string => L('Pensou', 'Thought') // the thinking step, closed
 
 export const ASK_USER: ToolDef = {
@@ -107,9 +109,7 @@ const tokenCount = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toLocaleString(locale(), { maximumFractionDigits: 1 })} ${L('mi', 'M')}` : `${Math.round(n / 1000).toLocaleString(locale())}${L(' mil', 'k')}`
 
 export function resultText(r: CallToolResult): string {
-  const text = r.content
-    .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
-    .join('\n')
+  const text = r.isError ? errorReason(r) : contentText(r)
   const bytes = Buffer.from(text, 'utf8')
   if (bytes.length <= MAX_RESULT_BYTES) return text
   // Cut on a whole character: a split one decodes as U+FFFD at the end.
@@ -1114,19 +1114,24 @@ export class Runner {
         flush()
         msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
         save()
-        const finish = (status: 'done' | 'error'): void => {
-          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0 } : s)), thinking()] }
+        // A failure keeps its reason on the step: a bare ✗ leaves nobody knowing why.
+        const finish = (status: 'done' | 'error', error?: string): void => {
+          if (error) console.warn(`[connector] ${detail} failed: ${error}`)
+          const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : {}
+          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s)), thinking()] }
           stepStarted = Date.now()
           save()
         }
         try {
           const { [REASON_PARAM]: _reason, ...toolArgs } = args
           const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
-          finish(r.isError ? 'error' : 'done')
+          if (r.isError) finish('error', errorReason(r))
+          else finish('done')
           return clip(r)
         } catch (e) {
-          finish('error')
-          return textResult(L(`A ferramenta falhou: ${e instanceof Error ? e.message : String(e)}`, `The tool failed: ${e instanceof Error ? e.message : String(e)}`), true)
+          const why = callError(e)
+          finish('error', why)
+          return textResult(L(`A ferramenta falhou: ${why}`, `The tool failed: ${why}`), true)
         }
       }
 
@@ -1497,7 +1502,7 @@ export class Runner {
         try {
           const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
           ok = !r.isError
-          outcome = r.isError ? L('Executou, com erro.', 'Ran, with an error.') : ran
+          outcome = r.isError ? L(`Executou, com erro: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`) : ran
           task = L(
             `${me} aprovou o seu pedido ${call}. O app executou exatamente essa chamada${r.isError ? ' e ela devolveu um erro' : ''}. Resultado:\n${resultText(r)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
             `${me} approved your request ${call}. The app ran exactly that call${r.isError ? ' and it returned an error' : ''}. Result:\n${resultText(r)}\n\nGo on from here and tell ${me} the result.`
