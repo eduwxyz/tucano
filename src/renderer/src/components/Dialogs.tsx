@@ -167,7 +167,8 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
 const openModals: object[] = []
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }): ReactNode {
+// `className`: a card of another size (the news after an update).
+export function Modal({ title, onClose, children, className }: { title: string; onClose: () => void; children: ReactNode; className?: string }): ReactNode {
   const card = useRef<HTMLDivElement>(null)
   const close = useRef(onClose)
   close.current = onClose
@@ -201,7 +202,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   }, [])
   return (
     <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal__card" role="dialog" aria-modal="true" aria-label={title} ref={card}>
+      <div className={`modal__card ${className ?? ''}`} role="dialog" aria-modal="true" aria-label={title} ref={card}>
         <header className="modal__head">
           <strong>{title}</strong>
           <button className="icon-btn icon-btn--sm" title={L('Fechar', 'Close')} onClick={onClose}>

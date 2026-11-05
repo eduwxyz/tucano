@@ -75,6 +75,8 @@ setLang(langOf(process.env['TUCANO_LOCALE']))
 if (db.created) {
   if (process.env['TUCANO_SEED'] === '1' || (fake && process.env['TUCANO_SEED'] !== '0')) seed(db)
   else db.setSettings({ onboarding: { done: false } })
+  // A new install has nothing new to show: the news start with the next update.
+  if (process.env['TUCANO_VERSION']) db.setSettings({ seenVersion: process.env['TUCANO_VERSION'] })
 }
 const interrupted = db.interruptStaleRuns()
 if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)

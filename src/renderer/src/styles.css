@@ -4815,6 +4815,42 @@ table.csv th {
 .modal__lead {
   margin: 0 0 12px;
 }
+/* What's new after an update: wider, and the notes scroll while the buttons stay. */
+.modal__card.whats-new {
+  width: min(560px, calc(100vw - 32px));
+}
+.whats-new__body {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.whats-new__body p {
+  margin: 0;
+}
+.whats-new__release h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.whats-new__release h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.whats-new__release ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 5px;
+}
+.whats-new__thanks {
+  margin-top: 10px !important;
+}
 .modal__foot {
   display: flex;
   align-items: center;
