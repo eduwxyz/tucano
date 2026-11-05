@@ -41,7 +41,8 @@ const allText = (r: CallToolResult): string => r.content.map((c) => (c.type === 
 function world(opts: { pollTool?: boolean } = {}) {
   const sent = clock // the person's message, and the end of the channel
   const messages = Array.from({ length: HISTORY_S / ALARM_EVERY_S }, (_, i) => {
-    const ts = sent / 1000 - HISTORY_S + i * ALARM_EVERY_S
+    // Half a period off: none right on the hour's edge, whatever second the message goes out.
+    const ts = sent / 1000 - HISTORY_S + i * ALARM_EVERY_S + ALARM_EVERY_S / 2
     const firing = ts >= sent / 1000 - 3600
     return { ts: ts.toFixed(6), user: 'alertmanager', text: firing ? `[FIRING] job nightly_orders failed (${i})` : `[RESOLVED] all green (${i})` }
   })
