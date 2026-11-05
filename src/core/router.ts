@@ -1,7 +1,8 @@
 // The router picks who answers a channel message nobody was mentioned in. It
 // only chooses speakers: it grants nothing and never sees tools, just which
 // connectors each agent may use, so a question about Linear goes to whoever
-// can read Linear.
+// can read Linear. It also screens an agent's reply that mentions others, so a
+// "thanks, @bia" doesn't wake her up.
 import { L } from '../shared/lang'
 import type { Agent, Connector, Message } from '../shared/types'
 import type { Engine, Usage } from './engines/types'
@@ -46,18 +47,24 @@ export function describeAgent(a: Agent, connectors: Connector[] = []): string {
 
 export const REPLY_JSON = (): string => L('Responda só com o JSON.', 'Reply with the JSON only.')
 
-// `thread`: the message that started the thread the last message is in; `messages` are then
-// that thread, and `threads` the conversation's other threads, a line each (who took what).
-export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; thread?: Message; threads?: ThreadDigest[] }): string {
-  const { messages, agents, me, connectors = [], thread, threads = [] } = opts
-  const roster = agents.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`)
-  const said = (m: Message): boolean => !!m.text.trim() && m.author.kind !== 'system'
-  const name = (m: Message): string =>
+const said = (m: Message): boolean => !!m.text.trim() && m.author.kind !== 'system'
+
+// Who wrote a message, as the router reads it.
+const speaker =
+  (agents: Agent[], me: string) =>
+  (m: Message): string =>
     m.author.kind === 'me'
       ? me
       : m.author.kind === 'routine'
         ? L(`rotina de ${me}`, `${me}'s routine`)
         : (agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent'))
+
+// `thread`: the message that started the thread the last message is in; `messages` are then
+// that thread, and `threads` the conversation's other threads, a line each (who took what).
+export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; thread?: Message; threads?: ThreadDigest[] }): string {
+  const { messages, agents, me, connectors = [], thread, threads = [] } = opts
+  const roster = agents.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`)
+  const name = speaker(agents, me)
   const recent = messages.filter((m) => said(m) && m.id !== thread?.id).slice(-ROUTER_HISTORY)
   const lines = [...(thread && said(thread) ? [thread] : []), ...recent].map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`)
   // Who answered what elsewhere, so a follow-up goes to whoever handled the subject.
@@ -81,8 +88,50 @@ export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: s
   ].join('\n')
 }
 
+export const handoffSystem = (): string =>
+  L(
+    [
+      'Um agente de um chat de trabalho escreveu uma resposta que menciona outros agentes. Você decide quais deles precisam agir por causa dela.',
+      'Responda SOMENTE com JSON, sem texto em volta, no formato {"handles": ["..."], "reason": "..."}:',
+      '- "handles": só handles da lista de agentes mencionados.',
+      '- "reason": um motivo de até 12 palavras, em português.',
+      'Passe a vez para: um pedido, uma pergunta, uma tarefa, uma revisão, uma decisão que alguém está esperando.',
+      'Não passe a vez para: agradecimento, confirmação ("combinado", "valeu", "ok", 👍), menção que só dá crédito ou informa, recado sem pedido.',
+      'Na dúvida, passe a vez.'
+    ].join('\n'),
+    [
+      'An agent in a work chat wrote a reply that mentions other agents. You decide which of them need to act because of it.',
+      'Reply ONLY with JSON, no text around it, in the format {"handles": ["..."], "reason": "..."}:',
+      '- "handles": only handles from the list of mentioned agents.',
+      '- "reason": a reason of up to 12 words, in English.',
+      'Hand the turn over for: a request, a question, a task, a review, a decision someone is waiting on.',
+      'Do not hand it over for: thanks, an acknowledgement ("agreed", "thanks", "ok", 👍), a mention that only credits or informs, a note with no ask.',
+      'When in doubt, hand the turn over.'
+    ].join('\n')
+  )
+
+// The reply sits between <reply> tags so it can't be confused with the roster or the history.
+export function handoffPrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; connectors?: Connector[] }): string {
+  const { reply, author, candidates, messages, members, me, connectors = [] } = opts
+  const name = speaker(members, me)
+  return [
+    L('Agentes mencionados:', 'Mentioned agents:'),
+    ...candidates.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`),
+    '',
+    L('Conversa recente:', 'Recent conversation:'),
+    ...messages.filter(said).slice(-ROUTER_HISTORY).map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`),
+    '',
+    L(`Resposta de ${author.name} que você avalia:`, `${author.name}'s reply you are judging:`),
+    '<reply>',
+    reply.trim().slice(0, 3000),
+    '</reply>',
+    '',
+    REPLY_JSON()
+  ].join('\n')
+}
+
 // Lenient: models sometimes wrap JSON in a code fence or add a line around it.
-export function parseRoute(text: string, agents: Agent[]): { agents: Agent[]; reason: string } | null {
+export function parseRoute(text: string, agents: Agent[], max = MAX_ROUTED): { agents: Agent[]; reason: string } | null {
   const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
   if (!json) return null
   let data: unknown
@@ -103,7 +152,7 @@ export function parseRoute(text: string, agents: Agent[]): { agents: Agent[]; re
     const a = agents.find((x) => x.handle.toLowerCase() === h.replace(/^@/, '').toLowerCase())
     if (a && !picked.includes(a)) picked.push(a)
   }
-  return { agents: picked.slice(0, MAX_ROUTED), reason: why }
+  return { agents: picked.slice(0, max), reason: why }
 }
 
 export async function route(opts: {
@@ -138,5 +187,43 @@ export async function route(opts: {
   const ms = Date.now() - started
   if (error) return { error, usage, ms }
   const parsed = parseRoute(text, opts.agents)
+  return parsed ? { ...parsed, usage, ms } : { error: L('resposta do router fora do formato', "the router's answer wasn't in the format"), usage, ms }
+}
+
+// Which of the agents an agent's reply mentions need to act on it. Same engine loop as route().
+export async function screenHandoff(opts: {
+  engine: Engine
+  model: string
+  reply: string
+  author: Agent
+  candidates: Agent[]
+  messages: Message[]
+  members: Agent[]
+  me: string
+  connectors?: Connector[]
+  cwd: string
+}): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
+  const started = Date.now()
+  let text = ''
+  let usage: Usage | undefined
+  let error: string | undefined
+  for await (const ev of opts.engine.run({
+    model: opts.model,
+    effort: 'low',
+    system: handoffSystem(),
+    prompt: handoffPrompt(opts),
+    cwd: opts.cwd,
+    signal: AbortSignal.timeout(60_000)
+  })) {
+    if (ev.type === 'text') text += ev.delta
+    else if (ev.type === 'done') {
+      text = ev.text || text
+      usage = ev.usage
+    } else if (ev.type === 'error') error = ev.message
+  }
+  const ms = Date.now() - started
+  if (error) return { error, usage, ms }
+  // A reply may mention up to three agents, and each one asked needs the turn.
+  const parsed = parseRoute(text, opts.candidates, opts.candidates.length)
   return parsed ? { ...parsed, usage, ms } : { error: L('resposta do router fora do formato', "the router's answer wasn't in the format"), usage, ms }
 }
