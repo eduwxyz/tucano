@@ -10,9 +10,9 @@ ipcRenderer.on('core:port', (event) => {
 contextBridge.exposeInMainWorld('tucano', {
   workspaces: {
     list: () => ipcRenderer.invoke('workspaces:list'),
-    create: (name?: string, general?: object) => ipcRenderer.invoke('workspaces:create', name, general),
+    create: (name?: string) => ipcRenderer.invoke('workspaces:create', name),
     delete: (id?: string) => ipcRenderer.invoke('workspaces:delete', id),
-    duplicate: (id: string, name?: string) => ipcRenderer.invoke('workspaces:duplicate', id, name),
+    duplicate: (id: string, name?: string, parts?: object) => ipcRenderer.invoke('workspaces:duplicate', id, name, parts),
     setPaused: (paused: boolean, id?: string) => ipcRenderer.invoke('workspaces:pause', paused, id),
     switch: (id: string) => ipcRenderer.invoke('workspaces:switch', id),
     subscribe: (cb: (list: unknown) => void) => {

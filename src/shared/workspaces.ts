@@ -4,15 +4,20 @@ import type { Settings } from './types'
 // What a workspace is called on screen: its own name, or else the person's (one workspace, as before).
 export const workspaceLabel = (s: Pick<Settings, 'workspaceName' | 'workspaceLabel'>): string => s.workspaceLabel?.trim() || s.workspaceName
 
-// What "bring the general settings" takes to a new workspace: how things work, not what it holds.
-// Never its context, wiki folder, accounts, keys or phone: those belong to each workspace.
+// The general settings: how things work, not what the workspace holds (never its context, wiki
+// folder, accounts, keys or phone).
 export const GENERAL_SETTINGS = ['workspaceName', 'language', 'routerModel', 'memoryModel', 'memoryLearning', 'defaultLimit', 'approvalTtlHours', 'runBudgetPct', 'runStallMinutes', 'quietHours', 'harnesses', 'sounds', 'voice', 'browserJev', 'wikiCapture', 'wikiEdits', 'wikiReview'] as const satisfies readonly (keyof Settings)[]
-export type GeneralSettings = Partial<Pick<Settings, (typeof GENERAL_SETTINGS)[number]>>
+// What a new workspace takes from another, each picked when creating it (a duplicate takes it all).
+// Never messages, memories, approvals, usage, computers' files, browser sessions or extra logins.
+export const WORKSPACE_PARTS = ['general', 'context', 'agents', 'channels', 'skills', 'connectors', 'routines'] as const
+export type WorkspacePart = (typeof WORKSPACE_PARTS)[number]
+export type WorkspaceParts = Record<WorkspacePart, boolean>
+export const ALL_PARTS: WorkspaceParts = { general: true, context: true, agents: true, channels: true, skills: true, connectors: true, routines: true }
 
-export function generalSettings(s: unknown): GeneralSettings {
-  if (!s || typeof s !== 'object' || Array.isArray(s)) return {}
-  const from = s as Record<string, unknown>
-  return Object.fromEntries(GENERAL_SETTINGS.filter((k) => from[k] !== undefined).map((k) => [k, from[k]])) as GeneralSettings
+export function workspaceParts(raw: unknown): WorkspaceParts {
+  const from = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const parts = Object.fromEntries(WORKSPACE_PARTS.map((p) => [p, from[p] === true])) as WorkspaceParts
+  return { ...parts, routines: parts.routines && parts.agents } // a routine is an agent's
 }
 
 export function isTheme(value: unknown): value is Settings['theme'] {

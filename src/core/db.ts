@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
 import { dirname, join } from 'node:path'
 import {
   CACHE_READ_WEIGHT,
@@ -35,6 +36,8 @@ import {
   type ToolClass,
   type Trigger
 } from '../shared/types'
+
+const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -339,7 +342,7 @@ export class Db {
   // VACUUM removes deleted history from its pages; no engine/browser files copy.
   // The extra Claude Code and Codex logins stay too (their folders, and the Mac's keychain,
   // are the source's): the copy's agents use the usual login.
-  duplicateTo(file: string, name: string): void {
+  duplicateTo(file: string, name: string, parts: WorkspaceParts = ALL_PARTS): void {
     if (existsSync(file)) throw new Error('Workspace destination already exists')
     // Keep the unsanitized snapshot with its source, not in the new workspace.
     // A crash before sanitizing must not leave source memories in the copy.
@@ -365,9 +368,12 @@ export class Db {
           UPDATE agents SET account = NULL, fallback_account = NULL;
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
         `)
+        target.keepOnly(parts)
         const setup = target.db.prepare("SELECT value FROM settings WHERE key = 'onboarding'").get() as { value: string } | undefined
         const onboarding = setup ? JSON.parse(setup.value) as Settings['onboarding'] : undefined
-        target.setSettings({ workspaceLabel: name, onboarding: { ...onboarding, done: onboarding?.done !== false, workspaceManagerSeen: undefined } })
+        // With its agents, a set-up workspace needs no introduction; without, it starts from what came.
+        const done = parts.agents && onboarding?.done !== false
+        target.setSettings({ workspaceLabel: name, onboarding: done ? { ...onboarding, done: true, workspaceManagerSeen: undefined } : { done: false, ...(parts.general ? { carried: true } : {}) } })
         for (const r of target.routines()) {
           const trigger: Trigger | undefined = r.trigger?.kind === 'webhook' ? { kind: 'webhook', token: randomUUID().replaceAll('-', '') }
             : r.trigger?.kind === 'poll' ? { kind: 'poll', connectorId: r.trigger.connectorId, tool: r.trigger.tool, args: r.trigger.args, everyMinutes: r.trigger.everyMinutes } : undefined
@@ -382,6 +388,28 @@ export class Db {
       copy?.close()
       for (const path of [staging, `${staging}-wal`, `${staging}-shm`]) rmSync(path, { force: true })
     }
+  }
+
+  // A copy keeps only what was picked to come along; what depends on something left behind goes,
+  // or comes without it: agents without connectors have no grants, a skill of agents left behind
+  // comes archived (with no agents it would apply to everyone), a routine needs its agent and place.
+  private keepOnly(parts: WorkspaceParts): void {
+    if (WORKSPACE_PARTS.every((p) => parts[p])) return
+    const kept = new Set(['seenVersion', 'theme', 'onboarding', ...(parts.general ? GENERAL_SETTINGS : []), ...(parts.context ? ['context'] : []), ...(parts.channels ? ['channelLayout', 'folded'] : [])])
+    for (const { key } of this.db.prepare('SELECT key FROM settings').all() as { key: string }[]) if (!kept.has(key)) this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+    if (!parts.general) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(JEV_KEY)
+    if (!parts.connectors) {
+      this.db.exec('DELETE FROM connectors; UPDATE agents SET grants = \'{}\', auto_approve = \'[]\'')
+      this.db.prepare('DELETE FROM secrets WHERE key <> ?').run(JEV_KEY) // the connectors' keys and logins, and GitHub's
+    }
+    if (!parts.agents) this.db.exec("DELETE FROM members; DELETE FROM conversations WHERE kind = 'dm'; DELETE FROM agents")
+    if (!parts.channels) this.db.exec("DELETE FROM conversations WHERE kind <> 'dm'")
+    if (!parts.skills) this.db.exec('DELETE FROM skill_versions; DELETE FROM skills')
+    else if (!parts.agents) this.db.exec("UPDATE skills SET state = 'archived' WHERE agents <> '[]'")
+    if (!parts.routines) this.db.exec('DELETE FROM routines')
+    const connectors = new Set(this.connectors().map((c) => c.id))
+    for (const r of this.routines())
+      if (!this.agent(r.agentId) || !this.conversation(r.conversationId) || (r.trigger?.kind === 'poll' && !connectors.has(r.trigger.connectorId))) this.removeRoutine(r.id)
   }
 
   private migrate(file: string): void {

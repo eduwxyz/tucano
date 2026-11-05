@@ -60,7 +60,7 @@ import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello } from './tuca'
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
-import { generalSettings, isTheme, workspaceLabel } from '../shared/workspaces'
+import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
@@ -78,14 +78,6 @@ setLang(langOf(process.env['TUCANO_LOCALE']))
 initializeWorkspace(db)
 // A workspace made from the switcher starts with the name it was given there.
 if (db.created && process.env['TUCANO_WORKSPACE_LABEL']) db.setSettings({ workspaceLabel: process.env['TUCANO_WORKSPACE_LABEL'] })
-// And, if the person chose, the general settings of the one they were in; the introduction starts from them.
-if (db.created && process.env['TUCANO_WORKSPACE_SETTINGS']) {
-  try {
-    db.setSettings({ ...generalSettings(JSON.parse(process.env['TUCANO_WORKSPACE_SETTINGS'])), onboarding: { done: false, carried: true } })
-  } catch (e) {
-    console.error('[core] carried settings', e)
-  }
-}
 const appTheme = process.env['TUCANO_THEME']
 if (!serverMode && isTheme(appTheme)) db.setSettings({ theme: appTheme })
 // A new install has nothing new to show: the news start with the next update.
@@ -311,7 +303,7 @@ const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error)
 // Agents' browsers too (spec §24).
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown } | undefined
   if (r?.type === 'workspace-pause') {
     try {
       if (closing || typeof r.paused !== 'boolean') throw new Error('Workspace cannot change pause state right now')
@@ -331,7 +323,7 @@ process.parentPort.on('message', (e) => {
     try {
       if (closing || !r.targetDir || !r.name) throw new Error('Workspace cannot be duplicated right now')
       mkdirSync(r.targetDir, { recursive: true, mode: 0o700 })
-      db.duplicateTo(join(r.targetDir, 'tucano.db'), r.name)
+      db.duplicateTo(join(r.targetDir, 'tucano.db'), r.name, r.parts === undefined ? undefined : workspaceParts(r.parts))
       process.parentPort.postMessage({ type: 'workspace-duplicated' })
     } catch (error) {
       process.parentPort.postMessage({ type: 'workspace-duplicated', error: error instanceof Error ? error.message : String(error) })

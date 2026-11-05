@@ -16,17 +16,23 @@ The button at the top pauses all workspaces, or resumes them when all available
 workspaces are paused. Unavailable cores are reported rather than started as a
 side effect of pausing. Pause state is saved in each workspace's own database.
 
-Duplication asks for confirmation and creates an independent UUIDv7 workspace.
-The dialog suggests the source name with the next available count, such as
-`Company (2)`. Edit the name before confirming if you prefer another name.
-After confirmation, the app opens the new copy automatically.
-It copies model selections, agents/instructions, channel structure/membership,
-connector configuration and encrypted credentials/grants, skills, routines and
-settings. A configured copy skips onboarding; an unfinished source still needs
-setup. It does not copy messages, memories, conversation summaries, approvals,
-usage history, artifacts, running services, computer files or browser sessions,
-nor the extra Claude Code/Codex accounts (their sign-ins live in the source's folder
-and the keychain): the copy's agents use the usual sign-in.
+Creating and duplicating are one form: a name, and what to bring from a workspace,
+each part ticked on its own: the general settings (the person's name, language,
+router and memory models, limits, quiet hours, voice), the context, agents,
+channels, skills, connectors with their encrypted credentials (and GitHub's), and
+routines. Creating starts from the workspace on screen with only the general
+settings ticked; with nothing ticked it starts empty, with the introduction.
+Duplicating a row of the manager ticks everything and suggests the source name
+with the next available count, such as `Company (2)`. The app opens the new
+workspace once it's made.
+What depends on something left behind comes without it: agents without the
+connectors have no grants, a skill of specific agents comes archived without
+them, a routine comes only with its agent and place (and a connector it polls).
+With its agents, a set-up workspace skips the introduction; without, the
+introduction starts from what came. Never copied: messages, memories,
+conversation summaries, approvals, usage history, artifacts, running services,
+computer files, browser sessions, nor the extra Claude Code/Codex accounts (their
+sign-ins live in the source's folder and the keychain): agents use the usual sign-in.
 Lent folders and linked skills remain references to the same external files.
 Changes to those external files are not isolated by making a copy.
 

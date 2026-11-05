@@ -185,3 +185,61 @@ it('duplicates configuration and credentials without copying history or mutating
   source.duplicateTo(unfinished, 'Unfinished')
   expect(open(unfinished).getSettings(defaults).onboarding?.done).toBe(false)
 })
+
+it('brings only what was picked to a new workspace, and what depends on it comes without what stayed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tucano-parts-'))
+  dirs.push(dir)
+  const source = open(join(dir, 'source.db'))
+  source.setSettings({ ...defaults, workspaceName: 'Edu', context: 'SECRET CONTEXT', routerModel: 'sonnet', defaultLimit: 4242, wikiDir: '/vault', channelLayout: { order: [] } as unknown as Settings['channelLayout'], onboarding: { done: true } })
+  source.saveAgent({ id: 'lia', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: 'Lia instructions', modelId: 'sonnet', effort: 'low', limit: 1000, used: 0, grants: { linear: 'read_write' }, autoApprove: ['linear:create'], memory: 'auto', computer: false, archived: false })
+  source.createConversation({ id: 'dm', kind: 'dm', name: 'lia', members: ['lia'] })
+  source.createConversation({ id: 'eng', kind: 'channel', name: 'eng', members: ['lia'] })
+  source.saveConnector({ id: 'linear', name: 'Linear', kind: 'remote', url: 'https://example.com/mcp', auth: 'token' })
+  source.setSecret('connector:linear:token', 'encrypted')
+  source.setSecret('github:token', 'encrypted-github')
+  source.setSecret('typesafe:key', 'encrypted-jev')
+  source.saveSkill({ id: 'all', name: 'For all', description: 'x', body: 'y', agents: [], state: 'active', createdAt: 1, updatedAt: 1 })
+  source.saveSkill({ id: 'own', name: 'For Lia', description: 'x', body: 'y', agents: ['lia'], state: 'active', createdAt: 1, updatedAt: 1 })
+  source.saveRoutine({ id: 'daily', name: 'Daily', agentId: 'lia', conversationId: 'eng', prompt: 'p', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 1 })
+  source.saveRoutine({ id: 'poll', name: 'Poll', agentId: 'lia', conversationId: 'dm', prompt: 'p', schedule: { days: [], time: '09:00' }, enabled: true, createdAt: 1, trigger: { kind: 'poll', connectorId: 'linear', tool: 'list', args: {}, everyMinutes: 5 } })
+  const none = { general: false, context: false, agents: false, channels: false, skills: false, connectors: false, routines: false }
+
+  // The general settings only: an empty workspace whose introduction starts from them.
+  source.duplicateTo(join(dir, 'general.db'), 'General', { ...none, general: true })
+  const general = open(join(dir, 'general.db'))
+  const g = general.getSettings(defaults)
+  expect(g).toMatchObject({ workspaceName: 'Edu', workspaceLabel: 'General', routerModel: 'sonnet', defaultLimit: 4242, context: '', onboarding: { done: false, carried: true } })
+  expect(g.wikiDir).toBeUndefined()
+  expect(g.channelLayout).toBeUndefined()
+  expect([general.agents(), general.conversations(), general.connectors(), general.skills(), general.routines()].map((x) => x.length)).toEqual([0, 0, 0, 0, 0])
+  expect(general.getSecret('typesafe:key')).toBe('encrypted-jev')
+  expect(general.getSecret('github:token')).toBeUndefined()
+
+  // Agents and their routines, no connectors: no grants, and the routine that polls one stays behind.
+  source.duplicateTo(join(dir, 'agents.db'), 'Agents', { ...none, agents: true, channels: true, skills: true, routines: true })
+  const agents = open(join(dir, 'agents.db'))
+  expect(agents.agent('lia')).toMatchObject({ instructions: 'Lia instructions', grants: {}, autoApprove: [] })
+  expect(agents.conversations().map((c) => c.id).sort()).toEqual(['dm', 'eng'])
+  expect(agents.routines().map((r) => r.id)).toEqual(['daily'])
+  expect(agents.connectors()).toEqual([])
+  for (const key of ['connector:linear:token', 'github:token', 'typesafe:key']) expect(agents.getSecret(key)).toBeUndefined()
+  expect(agents.getSettings(defaults)).toMatchObject({ routerModel: 'haiku', context: '', onboarding: { done: true } }) // defaults: the general settings stayed
+
+  // Skills and connectors without agents: a skill of agents left behind comes archived.
+  source.duplicateTo(join(dir, 'skills.db'), 'Skills', { ...none, skills: true, connectors: true })
+  const skills = open(join(dir, 'skills.db'))
+  expect(skills.skills().map((k) => [k.id, k.state]).sort()).toEqual([['all', 'active'], ['own', 'archived']])
+  expect(skills.connectors().map((c) => c.id)).toEqual(['linear'])
+  expect(skills.getSecret('connector:linear:token')).toBe('encrypted')
+  expect(skills.agents()).toEqual([])
+  expect(skills.routines()).toEqual([])
+  expect(skills.getSettings(defaults).onboarding).toEqual({ done: false })
+
+  // Everything: the duplicate, as before (context and the wiki folder too).
+  source.duplicateTo(join(dir, 'all.db'), 'All')
+  const all = open(join(dir, 'all.db'))
+  expect(all.getSettings(defaults)).toMatchObject({ context: 'SECRET CONTEXT', wikiDir: '/vault', onboarding: { done: true } })
+  expect(all.routines().map((r) => r.id).sort()).toEqual(['daily', 'poll'])
+  expect(source.agents()).toHaveLength(1) // the source is untouched
+  expect(source.getSecret('github:token')).toBe('encrypted-github')
+})

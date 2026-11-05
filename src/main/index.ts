@@ -11,7 +11,7 @@ import { Browsers } from './browser'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
-import { generalSettings, suggestWorkspaceCopyName, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
+import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, onPath } from '../core/platform'
 
 const NAME = 'Tucano'
@@ -55,8 +55,7 @@ const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces
 // never blocks the window or the main process.
 const localKey = randomBytes(32).toString('hex')
 
-// `carried`: the general settings a new workspace starts with (JSON), on its first start only.
-function startCore(workspace: Workspace, carried?: string): Runtime {
+function startCore(workspace: Workspace): Runtime {
   const existing = cores.get(workspace.id)
   if (existing && existing.summary.status !== 'failed') return existing
   if (existing) {
@@ -66,7 +65,7 @@ function startCore(workspace: Workspace, carried?: string): Runtime {
   }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: `tucano-core-${workspace.id}`,
-    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), ...(carried ? { TUCANO_WORKSPACE_SETTINGS: carried } : {}), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
   })
   let resolve!: () => void
   let reject!: (e: Error) => void
@@ -445,16 +444,16 @@ ipcMain.handle('workspaces:switch', async (event, id: unknown) => {
   if (typeof id !== 'string') throw new Error('Invalid workspace')
   await switchWorkspace(id)
 })
-ipcMain.handle('workspaces:create', async (event, name?: unknown, general?: unknown) => {
+ipcMain.handle('workspaces:create', async (event, name?: unknown) => {
   trustedWorkspaceRequest(event)
   if (switching) throw new Error('Wait for the workspace switch')
   if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 120)) throw new Error(L('Dê um nome ao workspace, com até 120 caracteres.', 'Give the workspace a name, up to 120 characters.'))
-  const carried = general !== undefined ? JSON.stringify(generalSettings(general)) : undefined
   const workspace = registry.create(typeof name === 'string' ? name.trim() : undefined)
-  startCore(workspace, carried)
+  startCore(workspace)
   await switchWorkspace(workspace.id)
 })
-ipcMain.handle('workspaces:duplicate', async (event, id: unknown, requestedName?: unknown) => {
+// `parts`: what comes along; unset, all of it.
+ipcMain.handle('workspaces:duplicate', async (event, id: unknown, requestedName?: unknown, parts?: unknown) => {
   trustedWorkspaceRequest(event)
   if (switching) throw new Error('Wait for the workspace operation')
   if (typeof id !== 'string') throw new Error('Invalid workspace')
@@ -467,7 +466,7 @@ ipcMain.handle('workspaces:duplicate', async (event, id: unknown, requestedName?
     await runtime.ready
     const name = typeof requestedName === 'string' ? requestedName.trim() : suggestWorkspaceCopyName(source.name, registry.list().map((w) => w.name))
     target = registry.create(name)
-    await requestWorkspace(runtime, { type: 'duplicate-workspace', targetDir: target.dataDir, name: target.name }, 'workspace-duplicated')
+    await requestWorkspace(runtime, { type: 'duplicate-workspace', targetDir: target.dataDir, name: target.name, ...(parts !== undefined ? { parts: workspaceParts(parts) } : {}) }, 'workspace-duplicated')
     await startCore(target).ready
     publishWorkspaces()
     return target.id
