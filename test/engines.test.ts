@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -7,7 +8,7 @@ import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
 import { detectGeminiCliModels, geminiArgs, geminiEnv, geminiHome, geminiModels, geminiParser } from '../src/core/engines/gemini'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
-import { copilotArgs, copilotEngine, copilotEnv, copilotParser, copilotTurnDirs, copilotUsage, effortRefused, parseCopilotModels } from '../src/core/engines/copilot'
+import { copilotArgs, copilotEngine, copilotEnv, copilotParser, copilotTurnDirs, copilotUsage, effortRefused, parseCopilotModels, sweepCopilotTurns } from '../src/core/engines/copilot'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
@@ -609,6 +610,13 @@ describe('Copilot stream', () => {
     expect(events.at(-1)).toMatchObject({ type: 'done', text: 'Vou olhar.\n\nPronto.' })
   })
 
+  it('keeps every message that comes with no id, and still pairs its deltas with its whole text', () => {
+    const delta = (t: string): string => JSON.stringify({ type: 'assistant.message_delta', data: { deltaContent: t } })
+    const whole = (t: string): string => JSON.stringify({ type: 'assistant.message', data: { content: t } })
+    const events = feed(copilotParser(), [delta('Vou '), delta('olhar.'), whole('Vou olhar.'), whole('Pronto.'), '{"type":"result","exitCode":0}'])
+    expect(text(events)).toBe('Vou olhar.\n\nPronto.')
+  })
+
   it("doesn't report a web read that failed", () => {
     const start = '{"type":"tool.execution_start","data":{"toolCallId":"t1","toolName":"web_fetch","arguments":{"url":"https://nodejs.org"}}}'
     const failed = '{"type":"tool.execution_complete","data":{"toolCallId":"t1","success":false}}'
@@ -627,6 +635,12 @@ describe('Copilot stream', () => {
     const gone = feed(copilotParser(), [], 1, 'Error: Model "gpt-5-mini" from --model flag is not available.')
     expect(gone).toHaveLength(1)
     expect((gone[0] as { message: string }).message).toContain('is not available')
+  })
+
+  it("isn't a reply when the result has no exit code, or says 0 from a process that failed", () => {
+    const answer = '{"type":"assistant.message","data":{"messageId":"m1","content":"oi"}}'
+    expect(feed(copilotParser(), [answer, '{"type":"result"}'], 0)).toMatchObject([{ type: 'text' }, { type: 'error' }])
+    expect(feed(copilotParser(), [answer, '{"type":"result","exitCode":0}'], 1, 'Error: boom')).toEqual([{ type: 'text', delta: 'oi' }, { type: 'error', message: 'Error: boom' }])
   })
 
   it('knows when the model refused the reasoning effort', () => {
@@ -659,8 +673,8 @@ describe('Copilot config', () => {
     expect(args).not.toContain('--additional-mcp-config')
   })
 
-  it('lets web_fetch in only when the agent has the web, and drops the effort when asked', () => {
-    const args = copilotArgs({ model: 'gpt-5.5', effort: 'low', web: true }, files, false)
+  it('lets web_fetch in only when the agent has the web, and leaves the effort out when there is none', () => {
+    const args = copilotArgs({ model: 'gpt-5.5', effort: undefined, web: true }, files)
     expect(tools(args)).toBe('--available-tools=tucano,web_fetch')
     expect(args).toContain('--allow-all-urls')
     expect(args).not.toContain('--reasoning-effort')
@@ -694,15 +708,18 @@ describe('Copilot config', () => {
     expect(existsSync(join(a.home, 'config.json'))).toBe(false)
   })
 
-  it("brings the person's config.json in, where the login is when there's no credential store", () => {
+  it("brings a copy of the person's config.json in (the login is there with no credential store), which the turn can rewrite", () => {
     const userHome = mkdtempSync(join(tmpdir(), 'tucano-copilot-user-'))
     writeFileSync(join(userHome, 'config.json'), '{"login":"edu"}')
     const d = copilotTurnDirs(mkdtempSync(join(tmpdir(), 'tucano-copilot-')), { system: '', mcpUrl: undefined }, userHome)
     expect(readFileSync(join(d.home, 'config.json'), 'utf8')).toBe('{"login":"edu"}')
+    writeFileSync(join(d.home, 'config.json'), '{"login":"edu","firstLaunchAt":"now"}')
+    expect(readFileSync(join(userHome, 'config.json'), 'utf8')).toBe('{"login":"edu"}')
   })
 
   it("runs with the turn's home, and none of the person's variables that change what the turn is", () => {
-    const env = copilotEnv(join('/t', 'home'), {
+    const dirs = { root: join('/t'), home: join('/t', 'home') }
+    const env = copilotEnv(dirs, {
       PATH: '/bin',
       GH_TOKEN: 'gho_x',
       COPILOT_HOME: '/h/.copilot',
@@ -711,7 +728,16 @@ describe('Copilot config', () => {
       COPILOT_ALLOW_ALL: 'true',
       COPILOT_PROVIDER_BASE_URL: 'http://gw'
     })
-    expect(env).toEqual({ PATH: '/bin', GH_TOKEN: 'gho_x', COPILOT_HOME: join('/t', 'home'), COPILOT_PROVIDER_BASE_URL: 'http://gw' })
+    expect(env).toEqual({ PATH: '/bin', GH_TOKEN: 'gho_x', COPILOT_HOME: dirs.home, GIT_CEILING_DIRECTORIES: dirs.root, COPILOT_PROVIDER_BASE_URL: 'http://gw' })
+  })
+
+  it("keeps git's search inside the turn's folder, even with the app's data inside a repository", () => {
+    const repo = mkdtempSync(join(tmpdir(), 'tucano-copilot-repo-'))
+    execFileSync('git', ['init', '-q'], { cwd: repo })
+    const d = copilotTurnDirs(join(repo, 'data', 'copilot'), { system: '', mcpUrl: undefined }, mkdtempSync(join(tmpdir(), 'tucano-copilot-user-')))
+    const inRepo = (env: NodeJS.ProcessEnv): boolean => spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: d.workspace, env }).status === 0
+    expect(inRepo(process.env)).toBe(true)
+    expect(inRepo(copilotEnv(d, process.env))).toBe(false)
   })
 
   it('reads the models from `copilot help config`', () => {
@@ -729,8 +755,10 @@ describe('Copilot engine', () => {
     writeFileSync(
       script,
       [
-        "import { existsSync, readFileSync, writeFileSync } from 'node:fs'",
+        "import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'",
+        "import { join } from 'node:path'",
         'const args = process.argv.slice(2)',
+        "appendFileSync(join(import.meta.dirname, 'calls.log'), 'x')",
         `if (${refusesEffort} && args.includes('--reasoning-effort')) {`,
         "  process.stderr.write('Error: Model \"m\" does not support reasoning effort configuration (requested: \"medium\").\\n')",
         '  process.exit(1)',
@@ -766,6 +794,36 @@ describe('Copilot engine', () => {
     const events = await reply(fakeCopilot(true), mkdtempSync(join(tmpdir(), 'tucano-copilot-app-')))
     expect(events.filter((e) => e.type === 'error')).toEqual([])
     expect(events.at(-1)).toMatchObject({ type: 'done', text: 'Oi|home|You are Iris.|noeffort' })
+  })
+
+  it('remembers a model that takes no effort, so its next turn runs once', async () => {
+    const bin = fakeCopilot(true)
+    const engine = copilotEngine(() => bin, mkdtempSync(join(tmpdir(), 'tucano-copilot-app-')))
+    const turn = { model: 'm', effort: 'medium' as const, system: '', prompt: 'Oi', cwd: tmpdir(), signal: new AbortController().signal }
+    const calls = (): number => readFileSync(join(dirname(bin), 'calls.log'), 'utf8').length
+    for await (const _ of engine.run(turn));
+    expect(calls()).toBe(2)
+    for await (const _ of engine.run(turn));
+    expect(calls()).toBe(3)
+  })
+
+  it("leaves no folder when the person's shell can't be read", async () => {
+    const app = mkdtempSync(join(tmpdir(), 'tucano-copilot-app-'))
+    const engine = copilotEngine(() => fakeCopilot(false), app, () => Promise.reject(new Error('shell gone')))
+    const turn = { model: 'm', effort: 'low' as const, system: '', prompt: 'Oi', cwd: tmpdir(), signal: new AbortController().signal }
+    await expect((async () => { for await (const _ of engine.run(turn)); })()).rejects.toThrow('shell gone')
+    expect(readdirSync(app)).toEqual([])
+  })
+
+  it('clears the turn folders left from a day ago, and keeps the newer ones', () => {
+    const app = mkdtempSync(join(tmpdir(), 'tucano-copilot-app-'))
+    mkdirSync(join(app, 'old'))
+    mkdirSync(join(app, 'new'))
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+    utimesSync(join(app, 'old'), twoDaysAgo, twoDaysAgo)
+    sweepCopilotTurns(app)
+    expect(readdirSync(app)).toEqual(['new'])
+    sweepCopilotTurns(join(app, 'missing'))
   })
 
   it("says so when the CLI isn't installed", async () => {

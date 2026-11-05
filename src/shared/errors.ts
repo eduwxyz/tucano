@@ -22,7 +22,7 @@ const status = (codes: string): string =>
 const AUTH = new RegExp(
   `${status(
     "401"
-  )}|\\b401 Unauthorized|authentication_error|invalid[ _-]?(x-)?api[ _-]?key|run \`?\\/login|not (logged|signed) in|log ?in again|oauth token has expired|token (has )?expired|invalid authentication credentials|\\bunauthorized\\b`,
+  )}|\\b401 Unauthorized|authentication_error|invalid[ _-]?(x-)?api[ _-]?key|run \`?\\/login|not (logged|signed) in|log ?in again|oauth token has expired|token (has )?expired|invalid authentication credentials|no authentication information|authentication token validation failed|\\bunauthorized\\b`,
   "i"
 );
 // The plan ran out. The engines share it: a reserve model takes over on the same words.

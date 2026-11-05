@@ -64,6 +64,22 @@ export async function* runCli(opts: {
   }
 }
 
+// Some CLIs refuse an option (an image, a reasoning effort) only once the turn starts, before
+// saying anything. Then the turn runs once more with `retry`, and the refusal never reaches
+// the person.
+export async function* retryOnRefusal(first: AsyncIterable<EngineEvent>, refused: (message: string) => boolean, retry: () => AsyncIterable<EngineEvent>, signal: AbortSignal, onRefused: () => void = () => {}): AsyncIterable<EngineEvent> {
+  let said = false
+  for await (const ev of first) {
+    if (!said && ev.type === 'error' && refused(ev.message)) {
+      onRefused()
+      if (!signal.aborted) yield* retry()
+      return
+    }
+    said = said || ev.type === 'text'
+    yield ev
+  }
+}
+
 export function parseJson(line: string): Record<string, unknown> | null {
   try {
     const v: unknown = JSON.parse(line)

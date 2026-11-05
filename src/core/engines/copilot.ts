@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
-import { lastLines, num, parseJson, runCli, type Parser } from './cli'
-import { linkOrCopy } from './gemini'
+import { lastLines, num, parseJson, retryOnRefusal, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn, Usage } from './types'
+import type { Effort } from '../../shared/types'
 import { L } from '../../shared/lang'
 
 // GitHub Copilot CLI (`copilot`, @github/copilot). Headless, the prompt comes on
@@ -15,7 +15,9 @@ import { L } from '../../shared/lang'
 //   sessions in it, and hooks off (disableAllHooks). The login stays the
 //   person's: it's in the system's credential store, which COPILOT_HOME doesn't move.
 // - a workspace with the agent's instructions as AGENTS.md, which the CLI reads
-//   as the repository's instructions.
+//   as the repository's instructions. The CLI also reads the instructions at the
+//   root of a git repository above it, so git's search stops at the turn's folder
+//   (the app's data folder can sit inside one: dotfiles kept in a home).
 // The CLI still lists the person's skills from ~/.agents (on Windows even with
 // HOME moved), but `--available-tools` leaves out the `skill` tool, so no skill
 // can load: the model sees only the gateway's tools (and web_fetch with the web).
@@ -41,6 +43,7 @@ export function copilotParser(usage: () => Usage | undefined = () => undefined, 
   const spokenIds = new Set<string>()
   const webUrlByCall = new Map<string, string>()
   let exitCode: number | undefined
+  let unnamed = 0
 
   // Text around tool calls comes in separate messages; keep them as paragraphs.
   const say = (id: string, delta: string): EngineEvent => {
@@ -55,13 +58,15 @@ export function copilotParser(usage: () => Usage | undefined = () => undefined, 
       const ev = parseJson(line)
       if (!ev) return []
       const data = (ev['data'] ?? {}) as Record<string, unknown>
-      const id = String(data['messageId'] ?? '')
+      const id = typeof data['messageId'] === 'string' && data['messageId'] ? data['messageId'] : `unnamed-${unnamed}`
       switch (ev['type']) {
         case 'assistant.message_delta':
           return typeof data['deltaContent'] === 'string' && data['deltaContent'] ? [say(id, data['deltaContent'])] : []
-        case 'assistant.message':
+        case 'assistant.message': {
+          if (!data['messageId']) unnamed++
           // The whole message, only when no deltas came for it (it repeats them).
           return typeof data['content'] === 'string' && data['content'] && !spokenIds.has(id) ? [say(id, data['content'])] : []
+        }
         case 'tool.execution_start':
           if (data['toolName'] === COPILOT_WEB) webUrlByCall.set(String(data['toolCallId']), String((data['arguments'] as Record<string, unknown> | undefined)?.['url'] ?? ''))
           return []
@@ -70,7 +75,7 @@ export function copilotParser(usage: () => Usage | undefined = () => undefined, 
           return url !== undefined && data['success'] === true ? [{ type: 'web', action: 'fetch', detail: url }] : []
         }
         case 'result':
-          exitCode = num(ev['exitCode'])
+          exitCode = typeof ev['exitCode'] === 'number' ? ev['exitCode'] : undefined
           return []
         default:
           return []
@@ -79,7 +84,8 @@ export function copilotParser(usage: () => Usage | undefined = () => undefined, 
     end(code, stderr) {
       const detail = lastLines(stderr)
       if (exitCode === undefined) return [{ type: 'error', message: L(`O Copilot saiu sem resposta (código ${code ?? '?'}).`, `Copilot exited without a reply (code ${code ?? '?'}).`) + (detail ? `\n${detail}` : '') }]
-      if (exitCode !== 0) return [{ type: 'error', message: detail || L(`O Copilot terminou com erro (código ${exitCode}).`, `Copilot ended with an error (code ${exitCode}).`) }]
+      const failed = exitCode !== 0 ? exitCode : code !== null && code !== 0 ? code : 0
+      if (failed !== 0) return [{ type: 'error', message: detail || L(`O Copilot terminou com erro (código ${failed}).`, `Copilot ended with an error (code ${failed}).`) }]
       return [{ type: 'done', text, usage: usage() ?? { inputTokens: charsToTokens(sent) * 2, cacheReadTokens: 0, outputTokens: charsToTokens(text.length) } }]
     }
   }
@@ -105,7 +111,9 @@ export function copilotUsage(file: string): Usage | undefined {
 // matches nothing, and no tool is left.
 // No auto-update: the turn's home is new each time, so it would download the
 // CLI again; the installed version runs.
-export function copilotArgs(turn: Pick<Turn, 'model' | 'effort' | 'web' | 'images'>, files: { mcpConfig?: string; usage: string }, effort = true): string[] {
+// No --max-ai-credits: it caps a session in AI credits, a unit the app's budget (tokens)
+// can't be turned into before the turn; the spend is counted from the usage file after.
+export function copilotArgs(turn: Pick<Turn, 'model' | 'web' | 'images'> & { effort?: Effort }, files: { mcpConfig?: string; usage: string }): string[] {
   return [
     '--output-format', 'json',
     '--allow-all-tools',
@@ -115,7 +123,7 @@ export function copilotArgs(turn: Pick<Turn, 'model' | 'effort' | 'web' | 'image
     '--disable-client-telemetry',
     '--no-auto-update',
     '--model', turn.model,
-    ...(effort ? ['--reasoning-effort', turn.effort] : []),
+    ...(turn.effort ? ['--reasoning-effort', turn.effort] : []),
     ...(turn.web ? ['--allow-all-urls'] : []),
     ...(files.mcpConfig ? ['--additional-mcp-config', `@${files.mcpConfig}`] : []),
     ...(turn.images ?? []).filter((i) => existsSync(i.path)).flatMap((i) => ['--attachment', i.path]),
@@ -143,8 +151,10 @@ export interface CopilotTurnDirs {
 
 // A folder for one turn. settings.json turns the hooks off (the person's and any
 // repository's: a hook is a command the CLI runs around the turn) and keeps the
-// CLI away from an open editor. config.json is linked in from the person's home:
-// without a credential store (a Linux box with no keyring) the login is there.
+// CLI away from an open editor. config.json is copied in from the person's home:
+// without a credential store (a Linux box with no keyring) the login is there. A copy,
+// not a link: the CLI rewrites it as it starts, and turns side by side (or the person's
+// own session) would write the same file.
 export function copilotTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl'>, userHome = userHomeOf()): CopilotTurnDirs {
   const root = join(appDir, randomBytes(8).toString('hex'))
   const home = join(root, 'home')
@@ -152,7 +162,8 @@ export function copilotTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 'mcp
   mkdirSync(home, { recursive: true })
   mkdirSync(workspace, { recursive: true })
   writeFileSync(join(home, 'settings.json'), JSON.stringify({ disableAllHooks: true, ide: { autoConnect: false } }, null, 2))
-  linkOrCopy(join(userHome, 'config.json'), join(home, 'config.json'))
+  const config = join(userHome, 'config.json')
+  if (existsSync(config)) copyFileSync(config, join(home, 'config.json'))
   writeFileSync(join(workspace, 'AGENTS.md'), turn.system)
   const mcpConfig = turn.mcpUrl ? join(root, 'mcp.json') : undefined
   if (mcpConfig) writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: turn.mcpUrl, tools: ['*'] } } }, null, 2))
@@ -165,13 +176,35 @@ export function copilotTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 'mcp
 // --allow-all-tools and could refuse the gateway's tools) and COPILOT_ALLOW_ALL
 // (exactly "true" trusts the folder). A provider of their own (COPILOT_PROVIDER_*)
 // or a GitHub host stays: that's their setup.
-export function copilotEnv(home: string, base: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...base, COPILOT_HOME: home }
+export function copilotEnv(dirs: Pick<CopilotTurnDirs, 'root' | 'home'>, base: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, COPILOT_HOME: dirs.home, GIT_CEILING_DIRECTORIES: dirs.root }
   for (const k of ['COPILOT_CUSTOM_INSTRUCTIONS_DIRS', 'COPILOT_ASSISTED_APPROVAL', 'COPILOT_ALLOW_ALL']) delete env[k]
   return env
 }
 
+// Turn folders a crash left behind, or a stop on Windows while the CLI still held a file.
+// A day is longer than any turn, so a folder that old belongs to none running.
+export function sweepCopilotTurns(appDir: string, now = Date.now()): void {
+  let names: string[]
+  try {
+    names = readdirSync(appDir)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    const dir = join(appDir, name)
+    try {
+      if (now - statSync(dir).mtimeMs > 24 * 60 * 60 * 1000) rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // still in use: the next sweep tries again
+    }
+  }
+}
+
 export function copilotEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
+  // Later turns of a model that refused the effort skip that first try: it costs a CLI start.
+  const noEffort = new Set<string>()
+  let swept = false
   return {
     id: 'copilot',
     async *run(turn) {
@@ -180,30 +213,24 @@ export function copilotEngine(bin: () => string | undefined, appDir: string, she
         yield { type: 'error', message: L('O GitHub Copilot CLI não está instalado. Veja em Configurações.', "GitHub Copilot CLI isn't installed. See Settings.") }
         return
       }
-      const dirs = copilotTurnDirs(appDir, turn)
+      if (!swept) sweepCopilotTurns(appDir)
+      swept = true
       // A token (COPILOT_GITHUB_TOKEN, GH_TOKEN) may live in the person's shell, which an app opened from Finder doesn't get.
-      const env = copilotEnv(dirs.home, { ...process.env, ...(await shellEnv()) })
-      const sent = turn.system.length + turn.prompt.length
-      const run = (effort: boolean): AsyncIterable<EngineEvent> =>
-        runCli({ bin: path, args: copilotArgs(turn, dirs, effort), stdin: turn.prompt, cwd: dirs.workspace, signal: turn.signal, parser: copilotParser(() => copilotUsage(dirs.usage), sent), env })
+      const base = { ...process.env, ...(await shellEnv()) }
+      const dirs = copilotTurnDirs(appDir, turn)
       try {
-        let said = false
-        let refused = false
-        for await (const ev of run(true)) {
-          if (!said && ev.type === 'error' && effortRefused(ev.message)) {
-            refused = true
-            break
-          }
-          said = said || ev.type === 'text'
-          yield ev
-        }
-        if (refused && !turn.signal.aborted) yield* run(false)
+        const env = copilotEnv(dirs, base)
+        const sent = turn.system.length + turn.prompt.length
+        const run = (effort: Effort | undefined): AsyncIterable<EngineEvent> =>
+          runCli({ bin: path, args: copilotArgs({ ...turn, effort }, dirs), stdin: turn.prompt, cwd: dirs.workspace, signal: turn.signal, parser: copilotParser(() => copilotUsage(dirs.usage), sent), env })
+        if (noEffort.has(turn.model)) yield* run(undefined)
+        else yield* retryOnRefusal(run(turn.effort), effortRefused, () => run(undefined), turn.signal, () => noEffort.add(turn.model))
       } finally {
         try {
           rmSync(dirs.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
         } catch {
-          // On Windows the CLI that just exited may still hold a file for a moment;
-          // a folder left behind must not turn a finished reply into an error.
+          // On Windows the CLI that just stopped may still hold a file for a moment: the
+          // sweep takes the folder later, and a finished reply doesn't turn into an error.
         }
       }
     }

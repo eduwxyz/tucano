@@ -363,6 +363,7 @@ describe('an agent on Gemini', () => {
   it('runs on Gemini, not on Claude', async () => {
     db.saveAgent(agent('a9', 'gi', { modelId: customModel('gemini', 'gemini/gemini-2.5-flash') }))
     db.createConversation({ id: 'd9', kind: 'dm', name: 'a9', members: ['a9'] })
+    claude = counted(fakeEngine('claude'))
     const gemini = counted(fakeEngine('gemini'))
     const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini, cursor: fakeEngine('cursor'), copilot: fakeEngine('copilot') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-gemini-')) })
     await r.send('d9', 'oi')
@@ -376,6 +377,7 @@ describe('an agent on Cursor', () => {
   it('runs on Cursor, not on Claude', async () => {
     db.saveAgent(agent('a10', 'cu', { modelId: customModel('cursor', 'auto') }))
     db.createConversation({ id: 'd10', kind: 'dm', name: 'a10', members: ['a10'] })
+    claude = counted(fakeEngine('claude'))
     const cursor = counted(fakeEngine('cursor'))
     const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor, copilot: fakeEngine('copilot') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-cursor-')) })
     await r.send('d10', 'oi')
@@ -389,6 +391,7 @@ describe('an agent on GitHub Copilot', () => {
   it('runs on Copilot with the model Copilot listed, not on Claude', async () => {
     db.saveAgent(agent('a11', 'gh', { modelId: customModel('copilot', 'claude-sonnet-5.5'), effort: 'high' }))
     db.createConversation({ id: 'd11', kind: 'dm', name: 'a11', members: ['a11'] })
+    claude = counted(fakeEngine('claude'))
     const copilot = counted(fakeEngine('copilot'))
     const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), copilot }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-copilot-')) })
     await r.send('d11', 'oi')

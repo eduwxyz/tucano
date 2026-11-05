@@ -81,7 +81,7 @@ export const geminiAppDir = (dataDir: string): string => join(dataDir, 'gemini')
 
 // A link where one is possible (the login must stay the person's), a plain copy
 // where the platform refuses links (Windows without privileges).
-export function linkOrCopy(target: string, at: string): void {
+function linkOrCopy(target: string, at: string): void {
   if (!existsSync(target) || existsSync(at)) return
   try {
     symlinkSync(target, at)

@@ -271,8 +271,8 @@ export async function detectCursor(): Promise<{ status: EngineStatus; models: st
 // GitHub Copilot CLI. Its models are the ones `copilot help config` lists
 // (offline). The login lives in the system's credential store (or a token in
 // the environment), which no command checks without spending a request, so an
-// installed CLI is taken as signed in. A missing login then shows as the CLI's
-// own error on the first turn.
+// installed CLI is taken as signed in, and the card says the login wasn't checked.
+// A missing login then shows on the first turn, as the sign-in error.
 export async function detectCopilot(): Promise<{ status: EngineStatus; models: string[] }> {
   const path = await which('copilot')
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
@@ -285,7 +285,7 @@ export async function detectCopilot(): Promise<{ status: EngineStatus; models: s
       version: version(v.stdout),
       loggedIn: models.length > 0,
       ...(models.length
-        ? { route: 'plan' as const, account: `GitHub Copilot · ${models.length} ${L('modelos', 'models')}` }
+        ? { route: 'plan' as const, account: `GitHub Copilot · ${models.length} ${L('modelos', 'models')} · ${L('login não conferido', 'login not checked')}` }
         : { account: L('Sem modelos: atualize o Copilot CLI (copilot update)', 'No models: update Copilot CLI (copilot update)') })
     },
     models
