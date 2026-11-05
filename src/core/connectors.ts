@@ -21,6 +21,9 @@ const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
 const CONNECT_TIMEOUT_MS = 20_000
 const MAX_STDIO_FAILURES = 3
+// A connection that dropped on its own (the server's process ended, the network went), or an attempt that
+// failed for a passing reason, is tried again after these waits; then it waits for a call or the button.
+const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 60_000, 300_000]
 
 // The authorization page sent the browser back without a code: why, and what to do.
 export function notAuthorized(url: URL): string {
@@ -55,7 +58,16 @@ interface Live {
   error?: string
   failures: number
   connecting?: Promise<void>
+  retry?: NodeJS.Timeout // the next try after a drop
+  retries?: number // tries since it last worked
+  passing?: boolean // the last attempt failed for a reason that may go away by itself (network, timeout)
 }
+
+// The call never ran, so it can go again on a new connection: the server forgot this session (it expired
+// while idle), or the client had no connection to send it on. Not "Connection closed": the SDK gives that to
+// every call already sent when the connection drops, which the server may have run (a write would go twice).
+export const staleSession = (e: unknown): boolean =>
+  (e instanceof StreamableHTTPError && e.code === 404) || (e instanceof Error && /session not found|no valid session|invalid session id|^not connected$/i.test(e.message))
 
 const key = (id: string, what: string): string => `connector:${id}:${what}`
 
@@ -64,6 +76,7 @@ export class ConnectorManager {
   private oauthStates = new Map<string, { connectorId: string; transport: StreamableHTTPClientTransport }>()
   private authUrls = new Map<string, string>() // a connector's last authorization page
   private doneStates = new Set<string>() // finished already (the callback got there first): not an expired one
+  private closing = false // the app is quitting: nothing reconnects
 
   constructor(private deps: ConnectorDeps) {}
 
@@ -127,6 +140,7 @@ export class ConnectorManager {
   }
 
   async remove(id: string): Promise<void> {
+    clearTimeout(this.live.get(id)?.retry)
     await this.disconnect(id)
     this.live.delete(id)
     this.deps.db.removeConnector(id)
@@ -143,6 +157,8 @@ export class ConnectorManager {
   }
 
   async closeAll(): Promise<void> {
+    this.closing = true
+    for (const l of this.live.values()) clearTimeout(l.retry)
     await Promise.all([...this.live.keys()].map((id) => this.disconnect(id)))
   }
 
@@ -228,8 +244,12 @@ export class ConnectorManager {
       } else if (e instanceof Error && /timed out/i.test(e.message)) {
         await client.close().catch(() => {})
         this.setStatus(id, 'error', L(`O servidor não respondeu em ${CONNECT_TIMEOUT_MS / 1000} s. Confira o endereço e a sua rede.`, `The server didn't answer in ${CONNECT_TIMEOUT_MS / 1000} s. Check the address and your network.`))
+        this.live.get(id)!.passing = true
+        this.reconnectLater(id)
       } else {
         this.setStatus(id, 'error', connectError(e))
+        this.live.get(id)!.passing = true
+        this.reconnectLater(id)
       }
       return
     }
@@ -237,10 +257,14 @@ export class ConnectorManager {
     l.client = client
     l.transport = transport
     l.failures = 0
+    l.retries = 0
+    l.passing = false
+    // Closed by us (disconnect clears the client first) it stays closed; closed on its own, it comes back.
     transport.onclose = () => {
       if (this.live.get(id)?.client === client) {
         l.client = undefined
         this.setStatus(id, 'disconnected')
+        this.reconnectLater(id)
       }
     }
     try {
@@ -249,6 +273,25 @@ export class ConnectorManager {
     } catch (e) {
       this.setStatus(id, 'error', e instanceof Error ? e.message : String(e))
     }
+  }
+
+  // Connects again after a wait that grows with each try, while the connector exists and nothing else has
+  // brought it back. A failure that won't pass by itself (a refused token, a sign-in to finish) stops it.
+  private reconnectLater(id: string): void {
+    const l = this.live.get(id)
+    if (!l || l.retry || this.closing) return
+    const attempt = l.retries ?? 0
+    if (attempt >= RECONNECT_DELAYS_MS.length) return
+    l.retry = setTimeout(() => {
+      l.retry = undefined
+      if (this.closing || !this.deps.db.connector(id) || this.live.get(id)?.client) return
+      l.retries = attempt + 1
+      void this.connect(id).then(() => {
+        const now = this.live.get(id)
+        if (now && !now.client && (now.status === 'disconnected' || now.passing)) this.reconnectLater(id)
+      })
+    }, RECONNECT_DELAYS_MS[attempt])
+    l.retry.unref?.()
   }
 
   private async refreshTools(id: string): Promise<void> {
@@ -281,6 +324,11 @@ export class ConnectorManager {
       l.failures = 0
       return r
     } catch (e) {
+      if (staleSession(e)) {
+        await this.connect(id)
+        const again = this.live.get(id)?.client
+        if (again) return (await again.callTool({ name, arguments: args }, undefined, { timeout: CALL_TIMEOUT_MS })) as CallToolResult
+      }
       const c = this.deps.db.connector(id)
       if (c?.kind === 'stdio' && ++l.failures >= MAX_STDIO_FAILURES) this.setStatus(id, 'error', L(`Falhou ${l.failures} vezes seguidas.`, `Failed ${l.failures} times in a row.`))
       throw e
