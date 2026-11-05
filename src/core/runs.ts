@@ -22,7 +22,7 @@ import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
-import { route } from './router'
+import { ROUTER_HISTORY, route, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
 import { callError, contentText, errorReason } from './connectors'
 
@@ -1354,7 +1354,14 @@ export class Runner {
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
-      else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
+      else if (!approval) {
+        const finished = (): void => {
+          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
+        }
+        const next = this.mentions(agent, conv, msg)
+        if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, finished)
+        else finished()
+      }
     } else {
       // What happened and what to do; the CLI's own words go folded under it.
       const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
@@ -1579,18 +1586,67 @@ export class Runner {
     )
   }
 
-  // An agent that mentions another agent of the conversation hands it the turn,
+  // An agent that mentions another agent of the conversation may hand it the turn,
   // up to MAX_DEPTH replies in a row without a human message in between.
-  // Whether the conversation goes on with another agent.
-  private chain(agent: Agent, conv: Conversation, msg: Message, depth: number): boolean {
-    if (this.paused) return false
-    const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
-    if (next.length === 0) return false
-    if (depth >= MAX_DEPTH) {
-      this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
-      return false
+  // The agents a reply mentions (none while paused).
+  private mentions(agent: Agent, conv: Conversation, msg: Message): Agent[] {
+    if (this.paused) return []
+    return mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+  }
+
+  // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
+  // router can't say, everyone mentioned is called. `finished` runs when no one gets the turn.
+  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, finished: () => void): Promise<void> {
+    const { db, engines } = this.deps
+    const and = L(' e ', ' and ')
+    const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
+    this.routing++
+    try {
+      let called = next
+      let step = { label: L('Chamou', 'Called'), detail: list(next), ms: 0 }
+      const failed = (why: string): void => {
+        console.warn('[handoff]', why)
+        step.detail = `${list(next)} · ${L('não consegui avaliar, chamei todos', "couldn't screen it, called everyone")}`
+      }
+      try {
+        const settings = await this.deps.settings()
+        // Jev stays for human messages: here 'jev' isn't a model, so this falls to Haiku.
+        const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+        const status = settings.engines[model.engine]
+        if (!status.installed || !status.loggedIn) failed(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+        else {
+          const cwd = join(this.deps.workDir, '_router')
+          mkdirSync(cwd, { recursive: true })
+          const { messages } = contextWindow(db, msg, ROUTER_HISTORY)
+          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
+          if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
+          step.ms = r.ms
+          if ('error' in r) failed(r.error)
+          else {
+            called = r.agents
+            const why = r.reason ? ` · ${r.reason}` : ''
+            step = called.length ? { ...step, detail: `${list(called)}${why}` } : { label: L('Ninguém precisa responder', 'No one needs to answer'), detail: r.reason, ms: r.ms }
+          }
+        }
+      } catch (e) {
+        failed(e instanceof Error ? e.message : String(e))
+      }
+      // Paused while the router was thinking: call no one.
+      if (this.paused) called = []
+      else {
+        // Seconds have passed: other code may have saved this reply meanwhile (the wiki, a draft), so add to what's stored.
+        const saved = db.message(msg.id) ?? msg
+        if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
+      }
+      if (called.length === 0) return finished()
+      if (depth >= MAX_DEPTH) {
+        this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
+        return finished()
+      }
+      for (const a of called) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
+    } finally {
+      this.routing--
+      this.checkIdle()
     }
-    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
-    return true
   }
 }
