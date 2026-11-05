@@ -264,6 +264,9 @@ export interface Message {
   queued?: string
 }
 
+// `queued` on a message of mine that waits while the router still picks who answers the one before it.
+export const ROUTING = '@router'
+
 // A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.
 export interface ThreadSummary {
   text: string
