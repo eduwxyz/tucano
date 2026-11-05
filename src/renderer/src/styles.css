@@ -1369,6 +1369,38 @@ h3 {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.step__input {
+  flex-basis: 100%;
+  margin-left: 26px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: pointer;
+}
+.step__clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.step__input.is-whole {
+  cursor: text;
+}
+.step__input.is-whole .step__clamp {
+  display: block;
+}
+.step__output {
+  flex-basis: 100%;
+  padding-left: 26px;
+  color: var(--text-3);
+  font-size: 12px;
+}
 .step__error.is-whole {
   display: block;
   cursor: text;

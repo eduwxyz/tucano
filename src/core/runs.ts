@@ -27,6 +27,7 @@ import { allowed, approvalHash, canonical } from './policy'
 import { briefFor, colleaguesOf, DELEGAR, delegarTool, PEDIR_AJUDA, pedirAjudaTool, requestCap, MAX_DELEGATION_DEPTH, MAX_DELEGATIONS, MAX_TEAM_ROUNDS, resultsTask, settled, teamOf } from './delegation'
 import { actionLabel, actionVerb, chainMode, COMPUTADOR, gate, shellActions, toolActions, type ActionKind, type ActionRules } from '../shared/actions'
 import { callError, contentText, errorReason } from './connectors'
+import { keyArg, resultSummary } from './step-text'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -1630,22 +1631,25 @@ ${note}`,
 
         const t0 = Date.now()
         const step: Step = { id: randomUUID(), label: current.cls === 'read' ? L('Consultou', 'Looked up') : always ? L('Executou (sempre permitido)', 'Ran (always allowed)') : L('Executou', 'Ran'), detail, status: 'running' }
+        // What it asked (the SQL, the path) shows while it runs; what came back, when it's done.
+        const { [REASON_PARAM]: _reason, ...toolArgs } = args
+        const input = keyArg(toolArgs)
+        if (input) step.input = input
         flush()
         msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
         save()
         // A failure keeps its reason on the step: a bare ✗ leaves nobody knowing why.
-        const finish = (status: 'done' | 'error', error?: string): void => {
+        const finish = (status: 'done' | 'error', error?: string, output?: string): void => {
           if (error) console.warn(`[connector] ${detail} failed: ${error}`)
-          const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : {}
+          const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : output ? { output } : {}
           msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s)), thinking()] }
           stepStarted = Date.now()
           save()
         }
         try {
-          const { [REASON_PARAM]: _reason, ...toolArgs } = args
           const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
           if (r.isError) finish('error', errorReason(r))
-          else finish('done')
+          else finish('done', undefined, resultSummary(resultText(r)))
           return clip(r)
         } catch (e) {
           const why = callError(e)
