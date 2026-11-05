@@ -5,6 +5,7 @@ import { L } from '../../../shared/lang'
 import { answerLabel, firstUnanswered, isAnswered, questionsOf, type Answer, type Question } from '../../../shared/questions'
 import { answerQuestion, dismissQuestion, reopenQuestion, submitAnswers, useStore, type Message } from '../store'
 import { Icon } from './ui'
+import { decisionKey } from './decision-keys'
 
 type Step = number | 'review'
 
@@ -22,6 +23,8 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
     return first === -1 ? (questions.length > 1 ? 'review' : 0) : first
   })
   const [sending, setSending] = useState(false)
+  // The card shows up while I may be typing elsewhere: it takes the focus only once I've used it.
+  const [engaged, setEngaged] = useState(false)
 
   const send = (): void => {
     if (sending) return
@@ -30,6 +33,7 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
   }
 
   const commit = (index: number, answer: Answer | null): void => {
+    setEngaged(true)
     const next = answers.map((a, i) => (i === index ? answer : a))
     setAnswers(next)
     answerQuestion(message.id, index, answer)
@@ -41,6 +45,7 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
 
   const go = (to: Step): void => {
     if (to === 'review' && !allAnswered(answers)) return
+    setEngaged(true)
     setStep(to)
   }
   const position = step === 'review' ? questions.length : step
@@ -73,23 +78,25 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
       {step === 'review' ? (
         <Review questions={questions} answers={answers} onEdit={setStep} onSend={send} sending={sending} />
       ) : (
-        <Decision key={step} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} onAnswer={(a) => commit(step, a)} />
+        <Decision key={step} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onDismiss={() => dismissQuestion(message.id)} />
       )}
     </div>
   )
 }
 
-function Decision({ question, answer, last, onAnswer }: { question: Question; answer: Answer | null; last: boolean; onAnswer: (a: Answer) => void }): ReactNode {
+function Decision({ question, answer, last, takeFocus, onAnswer, onDismiss }: { question: Question; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onDismiss: () => void }): ReactNode {
   const options = question.options ?? []
   const [chosen, setChosen] = useState<number[]>(answer?.chosen ?? [])
   const [other, setOther] = useState(answer?.other ?? '')
   const [text, setText] = useState(answer?.text ?? '')
-  const [focus, setFocus] = useState(0)
+  const [focus, setFocus] = useState<number | null>(null)
   const otherField = useRef<HTMLInputElement>(null)
   const textField = useRef<HTMLTextAreaElement>(null)
   const body = useRef<HTMLDivElement>(null)
-  // Keys work as soon as a decision shows: the text field, or the options, takes the focus.
-  useEffect(() => (textField.current ?? body.current)?.focus(), [])
+  // From the second decision on, keys work at once: the text field, or the options, takes the focus.
+  useEffect(() => {
+    if (takeFocus) (textField.current ?? body.current)?.focus()
+  }, [])
 
   const multiple = question.kind === 'multiple'
   const pick = (i: number): void => {
@@ -105,20 +112,20 @@ function Decision({ question, answer, last, onAnswer }: { question: Question; an
   const skip = (): void => onAnswer({ skipped: true })
 
   const keys = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') return (e.preventDefault(), skip())
-    if (typing(e)) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) (e.preventDefault(), confirm())
-      return
-    }
-    const n = Number(e.key)
-    if (Number.isInteger(n) && n >= 1 && n <= options.length) return (e.preventDefault(), pick(n - 1))
-    if (e.key === 'ArrowDown') return (e.preventDefault(), setFocus((focus + 1) % (options.length + 1)))
-    if (e.key === 'ArrowUp') return (e.preventDefault(), setFocus((focus + options.length) % (options.length + 1)))
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      if (focus === options.length) return otherField.current?.focus()
-      pick(focus)
-    }
+    const action = decisionKey(
+      { key: e.key, shift: e.shiftKey, modifier: e.metaKey || e.ctrlKey || e.altKey, composing: e.nativeEvent.isComposing, inField: typing(e), onBody: e.target === e.currentTarget },
+      focus,
+      options.length
+    )
+    if (!action) return
+    e.preventDefault()
+    if (action.kind === 'dismiss') return onDismiss()
+    if (action.kind === 'confirm') return confirm()
+    if (action.kind === 'pick') return pick(action.index)
+    if (action.kind === 'other') return otherField.current?.focus()
+    setFocus(action.index)
+    if (action.index === options.length) otherField.current?.focus()
+    else body.current?.focus()
   }
 
   return (
