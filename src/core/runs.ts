@@ -21,6 +21,7 @@ import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { Followups, replyKey, type Followup } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
@@ -144,6 +145,7 @@ export interface RoutineEvent {
 }
 
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 export class Runner {
@@ -154,6 +156,7 @@ export class Runner {
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
   private sessions: Sessions
+  private followups = new Followups()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -197,6 +200,7 @@ export class Runner {
   stopAll(): void {
     this.paused = true
     this.queue.length = 0
+    this.followups = new Followups() // the places the dropped queue held, and what was noted for later
     for (const c of this.controllers.values()) {
       c.reason = 'stopped'
       c.ctl.abort()
@@ -236,7 +240,7 @@ export class Runner {
       // A message outside threads in a conversation that answers in them opens a new thread: nothing is kept there yet.
       if (!agent || (conv.threads && !threadId)) return
       const engine = modelInfo(agent.modelId)?.engine ?? 'claude'
-      const id = this.sessions.idOf(`${agent.id}:${conv.id}:${threadId ?? ''}`)
+      const id = this.sessions.idOf(replyKey(agent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
       return
     }
@@ -573,8 +577,31 @@ export class Runner {
     return { model, account }
   }
 
+  // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
+  // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
+  // `reserved`: this reply was queued by handOff, which already holds its place.
+  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+    const threadId = opts.existing ? opts.existing.threadId : opts.threadId
+    const key = replyKey(agent.id, conv.id, threadId)
+    const { reserved, ...rest } = opts
+    this.followups.start(key, reserved)
+    let msg: Message
+    let f: Followup | undefined
+    try {
+      msg = await this.reply(agent, conv, rest)
+    } finally {
+      this.followups.end(key)
+      f = this.followups.take(key) // taken even when the reply threw: a stale follow-up must not wait for the next one
+    }
+    if (f && msg.run?.status === 'done' && !this.paused) {
+      this.followups.reserve(key)
+      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }))
+    }
+    return msg
+  }
+
   // `threadId`: the reply goes in that thread (an existing reply keeps its own).
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }): Promise<Message> {
+  private async reply(agent: Agent, conv: Conversation, opts: ReplyOpts): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -1409,7 +1436,7 @@ export class Runner {
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
     // thread) with only what's new since. Not while another agent is still writing a message this
     // reply would see half of: that one goes the usual way, and the session takes it all next time.
-    const sessionKey = `${agent.id}:${conv.id}:${msg.threadId ?? ''}`
+    const sessionKey = replyKey(agent.id, conv.id, msg.threadId)
     const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs, gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
@@ -1826,6 +1853,8 @@ export class Runner {
     const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
     this.routing++
     try {
+      const keyOf = (a: Agent): string => replyKey(a.id, conv.id, msg.threadId)
+      const isBusy = (a: Agent): boolean => this.followups.busy(keyOf(a))
       let called = next
       let step = { label: L('Chamou', 'Called'), detail: list(next), ms: 0 }
       const failed = (why: string): void => {
@@ -1842,7 +1871,7 @@ export class Runner {
           const cwd = join(this.deps.workDir, '_router')
           mkdirSync(cwd, { recursive: true })
           const { messages } = contextWindow(db, msg, ROUTER_HISTORY)
-          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
+          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
           if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
           step.ms = r.ms
           if ('error' in r) failed(r.error)
@@ -1857,7 +1886,10 @@ export class Runner {
       }
       // Paused while the router was thinking: call no one.
       if (this.paused) called = []
-      else {
+      // Nothing awaits from here to the enqueues, so who is busy now is who is busy when they're called.
+      const busy = called.filter(isBusy)
+      if (!this.paused) {
+        if (busy.length) step.detail = `${step.detail ? `${step.detail} · ` : ''}${busy.length === called.length ? '' : `${list(busy)}: `}${busy.length > 1 ? L('já estão respondendo aqui, veem isto na próxima resposta', 'already replying here, will see this next') : L('já está respondendo aqui, vê isto na próxima resposta', 'already replying here, will see this next')}`
         // Seconds have passed: other code may have saved this reply meanwhile (the wiki, a draft), so add to what's stored.
         const saved = db.message(msg.id) ?? msg
         if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
@@ -1867,7 +1899,14 @@ export class Runner {
         this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
         return finished()
       }
-      for (const a of called) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
+      // A noted follow-up counts as someone taking the turn: the agent will answer it, so no "done" yet.
+      for (const a of called) {
+        if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work })
+        else {
+          this.followups.reserve(keyOf(a))
+          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true }))
+        }
+      }
     } finally {
       this.routing--
       this.checkIdle()
