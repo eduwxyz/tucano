@@ -81,6 +81,11 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /(?:consulte|run the sql) `([^`]+)`/i.test(last)) {
+        // A SQL connector's tool (Databricks' execute_sql_read_only), to see its steps and errors.
+        const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!
+        const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'execute_sql_read_only'), { statement })
+        reply = textOf(r)
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`

@@ -156,6 +156,7 @@ export interface Step {
   label: string
   detail?: string
   note?: string // what the agent said while working, before this step's tool call
+  error?: string // why it failed, in the tool's own words
   status: StepStatus
   ms?: number
 }

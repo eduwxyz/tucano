@@ -1086,14 +1086,21 @@ function RunSteps({ message }: { message: Message }): ReactNode {
 }
 
 function StepRow({ step }: { step: Step }): ReactNode {
+  const [whole, setWhole] = useState(false)
   return (
-    <li className={`step step--${step.status}`}>
+    <li className={`step step--${step.status}${step.error ? ' step--why' : ''}`}>
       <span className="step__icon">
         {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'done' ? 'check' : 'x'} size={12} />}
       </span>
       <span className="step__label">{step.label}</span>
       {step.note ? <span className="step__note">{step.note}</span> : step.detail && <code className="step__detail">{step.detail}</code>}
       {step.ms !== undefined && <span className="step__ms">{duration(step.ms)}</span>}
+      {step.error && (
+        // Why it failed, in the tool's words: a few lines, the whole of it on a click.
+        <span className={`step__error${whole ? ' is-whole' : ''}`} title={whole ? undefined : L('Ver tudo', 'See all')} onClick={() => setWhole(!whole)}>
+          {step.error}
+        </span>
+      )}
     </li>
   )
 }
