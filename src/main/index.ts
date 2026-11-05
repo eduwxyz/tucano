@@ -57,7 +57,7 @@ const localKey = randomBytes(32).toString('hex')
 function startCore(): UtilityProcess {
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: 'tucano-core',
-    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
+    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
   })
   child.on('message', (msg: CoreRequest) => handleCore(child, msg))
   child.on('exit', (code) => {

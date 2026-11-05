@@ -15,6 +15,7 @@ import { extname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Forwarder, isPrivate } from './forward'
 import { vault } from './vault'
+import { INSECURE_CONTEXT_SHIM } from './web-shim'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
 const host = process.env['TUCANO_HOST'] || '127.0.0.1'
@@ -207,7 +208,7 @@ const server = createServer((req, res) => {
 
 // window.tucano for a browser: the core's port comes from the event stream and
 // the requests go up by POST; what only the desktop does is left out quietly.
-const WEB = `(() => {
+const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
   window.__TUCANO_WEB__ = true
   let client = null
   const connect = () => {

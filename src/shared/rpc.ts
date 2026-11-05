@@ -28,7 +28,7 @@ export interface Api {
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
-  createChannel(p: { name: string }): string
+  createChannel(p: { name: string; threads?: boolean }): string
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
   archiveAgent(p: { id: string; archived: boolean }): void // out of the sidebar, its replies stopped and routines off; back with archived: false
   setTopic(p: { id: string; topic: string }): void
@@ -141,6 +141,7 @@ export interface Api {
   wikiDismissFinding(p: { id: string }): void // and refuses its fix
   wikiImport(p: { dir: string }): WikiImport // an Obsidian vault copied in, as it is
   setWikiCapture(p: { conversationId: string; on: boolean }): void
+  setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now
 }
 

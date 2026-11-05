@@ -1,6 +1,6 @@
 {
   "name": "tucano",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "private": true,
   "description": "Tucano: your team of AI agents on your computer, with scopes, approvals and budgets.",
   "homepage": "https://tucano.sh",
@@ -116,7 +116,7 @@
         }
       ],
       "category": "Utility",
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "executableName": "tucano",
       "artifactName": "tucano-linux-${arch}.${ext}",
       "maintainer": "Eduardo da Silva <eduwxyz@users.noreply.github.com>",
