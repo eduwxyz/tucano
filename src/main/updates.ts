@@ -15,7 +15,11 @@ const EVERY_MS = 4 * 3_600_000
 export class Updates {
   private state: UpdateState
   private timer: NodeJS.Timeout | null = null
-  private readonly updater = electronUpdater.autoUpdater
+  // Made when first used: making it reads the app's version, and an unpacked build's may not be one
+  // it accepts, which would stop the app from opening. With updates off it's never used.
+  private get updater() {
+    return electronUpdater.autoUpdater
+  }
 
   constructor(private readonly onChange: (s: UpdateState) => void) {
     // A test points the app at a local server instead of GitHub.
