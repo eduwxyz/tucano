@@ -139,6 +139,8 @@ export interface Step {
   detail?: string
   note?: string // what the agent said while working, before this step's tool call
   error?: string // why it failed, in the tool's own words
+  input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
+  output?: string // what came back, in a few words ("120 rows")
   status: StepStatus
   ms?: number
 }

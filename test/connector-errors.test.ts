@@ -10,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
+import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, Message, Settings } from '../src/shared/types'
 import { callError, ConnectorManager, errorReason } from '../src/core/connectors'
 import { Db } from '../src/core/db'
@@ -41,6 +42,10 @@ s.setRequestHandler(CallToolRequestSchema, async (r) => {
   if (q === 'resource') return { isError: true, content: [{ type: 'resource', resource: { uri: 'sql://error', text: 'TABLE_OR_VIEW_NOT_FOUND: main.sales.orders' } }] }
   if (q === 'throw') throw new McpError(-32603, 'Statement failed', { error_code: 'PERMISSION_DENIED', message: 'User does not have SELECT on main.sales' })
   if (q === 'slow') await new Promise((ok) => setTimeout(ok, 3000))
+  if (q.startsWith('select region')) {
+    await new Promise((ok) => setTimeout(ok, 400))
+    return { content: [{ type: 'text', text: 'region,total\\nSul,120\\nSudeste,340' }] }
+  }
   return { content: [{ type: 'text', text: 'id\\n1\\n2' }] }
 })
 await s.connect(new StdioServerTransport())`
@@ -52,6 +57,7 @@ let connectors: ConnectorManager
 let connectorId: string
 let settings: Settings
 let results: { text: string; isError?: boolean }[]
+let events: CoreEvent[]
 
 // A "model" that calls the SQL tool once with the statement in the message, and says what it got.
 function sqlModel(tool = 'execute_sql_read_only'): Engine {
@@ -85,7 +91,7 @@ async function ask(statement: string, tool?: string): Promise<{ step: NonNullabl
     db,
     engines: { claude: sqlModel(tool), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') },
     settings: async () => settings,
-    emit: () => {},
+    emit: (e) => events.push(e),
     workDir: join(dir, 'work'),
     gateway,
     connectors
@@ -102,6 +108,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'tucano-conn-errors-'))
   db = new Db(join(dir, 'test.db'))
   results = []
+  events = []
   settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
   gateway = new Gateway()
   await gateway.start()
@@ -181,4 +188,24 @@ describe('callError and errorReason', () => {
     expect(errorReason({ content: [{ type: 'text', text: 'bad SQL' }] })).toBe('bad SQL')
     expect(errorReason({ content: [] })).toMatch(/no message/)
   })
+})
+
+describe('a connector step reads as it goes', () => {
+  it('shows the SQL while it runs, and the result in a few words when it is done', async () => {
+    const sql = 'select region, sum(total) from main.sales.orders group by 1'
+    const { step } = await ask(sql)
+    const running = events
+      .flatMap((e) => (e.type === 'message' ? (e.message.run?.steps ?? []) : []))
+      .find((s) => s.id === step.id && s.status === 'running')
+    expect(running?.input).toBe(sql) // already there before the server answered
+    expect(running?.output).toBeUndefined()
+    expect(step).toMatchObject({ status: 'done', input: sql, output: '2 rows' })
+  }, 20_000)
+
+  it('a failed call keeps what it asked, and its reason instead of a result', async () => {
+    const { step } = await ask('structured')
+    expect(step).toMatchObject({ status: 'error', input: 'structured' })
+    expect(step.output).toBeUndefined()
+    expect(step.error).toContain('Warehouse abc123 is stopped')
+  }, 20_000)
 })
