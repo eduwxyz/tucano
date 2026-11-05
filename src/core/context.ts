@@ -1,6 +1,7 @@
 // Builds what a turn sends to the engine: a system prompt (stable per agent)
-// and a prompt with the conversation transcript. The CLI keeps no session
-// between turns, so everything the agent knows comes from here.
+// and a prompt with the conversation transcript. Everything the agent knows
+// comes from here; a kept session (sessions.ts) gets it once, then only the
+// blocks of what's new.
 import { L, lang, locale } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Routine, type Settings, type Skill } from '../shared/types'
@@ -334,9 +335,9 @@ export const clock = (at: number): string => {
 export const stamp = (at: number): string => `${clock(at).replace(/^(\S+ \d{2}\/\d{2})/, `$1/${new Date(at).getFullYear()}`)} (${zone(at)})`
 
 // The conversation as blocks, one per message, oldest first. Nothing in them
-// changes between turns (no "now", no closing line), so the next turn starts
-// with the same blocks and reads them from the cache. `task` (to continue after
-// an approval, a routine…) goes last, with the time, since it may come later.
+// changes between turns (no "now", no closing line), so a kept session can tell
+// what it already saw by its block. `task` (to continue after an approval, a
+// routine…) goes last, with the time, since it may come later.
 // `images`: the names of the images attached to each message (by id). `thread`: the message
 // that started the thread this reply is in (`messages` is then that thread, root first, and
 // `summary` the thread's own). `searchable`: the agent has buscar_threads and ler_thread.
