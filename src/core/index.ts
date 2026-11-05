@@ -798,12 +798,12 @@ const api: Api = {
     emit({ type: 'conversation_removed', id })
   },
 
-  createChannel: ({ name }) => {
+  createChannel: ({ name, threads }) => {
     const clean = channelName(name)
     if (!clean) throw new Error(L('Dê um nome ao canal.', 'Give the channel a name.'))
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
     const id = randomUUID()
-    db.createConversation({ id, kind: 'channel', name: clean, members: [] })
+    db.createConversation({ id, kind: 'channel', name: clean, members: [], ...(threads ? { threads } : {}) })
     emitConversations([id])
     return id
   },
@@ -1080,6 +1080,11 @@ const api: Api = {
   wikiImport: ({ dir }) => wiki.importVault(dir, settings().workspaceName || L('Você', 'You')),
   setWikiCapture: ({ conversationId, on }) => {
     db.setWikiCapture(conversationId, on)
+    const c = db.conversation(conversationId)
+    if (c) emit({ type: 'conversation', conversation: c })
+  },
+  setThreads: ({ conversationId, on }) => {
+    db.setThreads(conversationId, on)
     const c = db.conversation(conversationId)
     if (c) emit({ type: 'conversation', conversation: c })
   },

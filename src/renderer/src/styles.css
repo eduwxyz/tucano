@@ -739,6 +739,24 @@ h3 {
   align-items: center;
   gap: 8px;
 }
+/* The conversation's name opens its settings. */
+.topbar__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.topbar__name:hover {
+  background: var(--hover);
+}
 .topbar__topic {
   color: var(--text-3);
   font-size: 13px;
@@ -7866,11 +7884,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-pop__close { position: absolute; top: 8px; right: 8px; }
 .voice-pop__hide { justify-self: start; font-size: 12px; color: var(--text-3); }
 .voice-setup { display: grid; gap: 10px; justify-items: start; }
-.voice-setup__choices { display: grid; gap: 6px; width: 100%; }
-.voice-choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
-.voice-choice small { color: var(--text-2); font-size: 12px; }
-.voice-choice:hover { border-color: var(--border-strong); }
-.voice-choice.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.voice-setup__choices, .choices { display: grid; gap: 6px; width: 100%; }
+.voice-choice, .choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
+.voice-choice small, .choice small { color: var(--text-2); font-size: 12px; }
+.voice-choice:hover, .choice:hover { border-color: var(--border-strong); }
+.voice-choice.is-on, .choice.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
 .voice-setup__bar { width: 100%; height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; }
 .voice-setup__bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.25s; }
 .voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
