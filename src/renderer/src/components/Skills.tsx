@@ -27,6 +27,7 @@ import {
 import { Card, Field, Sheet } from './Pages'
 import { confirmDialog } from './Dialogs'
 import { ago, AgentAvatar, Icon, time } from './ui'
+import { Modal } from './Modal'
 
 type Place = { kind: 'list' } | { kind: 'skill'; id: string } | { kind: 'review' }
 
@@ -62,11 +63,9 @@ export function SkillsPage(): ReactNode {
   const toList = (): void => setPlace({ kind: 'list' })
 
   const form = draft && (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setDraft(null)}>
-      <div className="form-modal">
-        <SkillForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
-      </div>
-    </div>
+    <Modal title={draft.id ? L('Editar skill', 'Edit skill') : L('Nova skill', 'New skill')} variant="form" onClose={() => setDraft(null)}>
+      <SkillForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
+    </Modal>
   )
 
   if (open)

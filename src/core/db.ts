@@ -1,5 +1,43 @@
 import { DatabaseSync } from 'node:sqlite'
-import { CACHE_READ_WEIGHT, routineCap, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ThreadSummary, type ToolClass, type Trigger } from '../shared/types'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
+import { dirname, join } from 'node:path'
+import {
+  CACHE_READ_WEIGHT,
+  nextRun,
+  routineCap,
+  type Agent,
+  type AgentApp,
+  type AgentColor,
+  type Approval,
+  type ApprovalState,
+  type Artifact,
+  type ArtifactKind,
+  type Author,
+  type Connector,
+  type ConnectorAuth,
+  type ConnectorTool,
+  type Conversation,
+  type Effort,
+  type LentFolder,
+  type Memory,
+  type MemoryMode,
+  type MemoryState,
+  type Message,
+  type Receipt,
+  type Routine,
+  type RoutineRun,
+  type Run,
+  type Settings,
+  type Skill,
+  type SkillVersion,
+  type ThreadSummary,
+  type ToolClass,
+  type Trigger
+} from '../shared/types'
+
+const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -256,6 +294,17 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE conversations ADD COLUMN threads INTEGER;
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS message_notifications (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL,
+    unread INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (message_id, phase)
+  );
+  INSERT OR IGNORE INTO message_notifications (message_id, phase)
+    SELECT id, COALESCE(json_extract(run, '$.status'), 'message') FROM messages;
+  CREATE INDEX IF NOT EXISTS message_notifications_unread ON message_notifications (message_id) WHERE unread = 1;
   `
 ]
 
@@ -273,10 +322,11 @@ export class Db {
   // "no agents", since someone may have deleted them all.
   created = false
 
-  constructor(file: string) {
+  constructor(private file: string) {
     this.db = new DatabaseSync(file)
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
-    this.migrate()
+    try { this.migrate(file) }
+    catch (error) { this.db.close(); throw error }
   }
 
   close(): void {
@@ -288,9 +338,89 @@ export class Db {
     this.db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`)
   }
 
-  private migrate(): void {
+  // Snapshot the live DB, then sanitize only the copy. Publish it only after
+  // VACUUM removes deleted history from its pages; no engine/browser files copy.
+  // The extra Claude Code and Codex logins stay too (their folders, and the Mac's keychain,
+  // are the source's): the copy's agents use the usual login.
+  duplicateTo(file: string, name: string, parts: WorkspaceParts = ALL_PARTS): void {
+    if (existsSync(file)) throw new Error('Workspace destination already exists')
+    // Keep the unsanitized snapshot with its source, not in the new workspace.
+    // A crash before sanitizing must not leave source memories in the copy.
+    const stagingDir = this.file === ':memory:' ? dirname(file) : join(dirname(this.file), 'backups')
+    mkdirSync(stagingDir, { recursive: true, mode: 0o700 })
+    const staging = join(stagingDir, `.workspace-copy-${randomUUID()}.preparing`)
+    let copy: Db | undefined
+    try {
+      this.backupTo(staging)
+      copy = new Db(staging)
+      const target = copy
+      target.db.exec('PRAGMA secure_delete = ON')
+      target.tx(() => {
+        target.db.exec(`
+          DELETE FROM messages;
+          DELETE FROM memories;
+          DELETE FROM approvals;
+          DELETE FROM receipts;
+          DELETE FROM artifacts;
+          DELETE FROM services;
+          UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL;
+          DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts');
+          UPDATE agents SET account = NULL, fallback_account = NULL;
+          DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
+        `)
+        target.keepOnly(parts)
+        const setup = target.db.prepare("SELECT value FROM settings WHERE key = 'onboarding'").get() as { value: string } | undefined
+        const onboarding = setup ? JSON.parse(setup.value) as Settings['onboarding'] : undefined
+        // With its agents, a set-up workspace needs no introduction; without, it starts from what came.
+        const done = parts.agents && onboarding?.done !== false
+        target.setSettings({ workspaceLabel: name, onboarding: done ? { ...onboarding, done: true, workspaceManagerSeen: undefined } : { done: false, ...(parts.general ? { carried: true } : {}) } })
+        for (const r of target.routines()) {
+          const trigger: Trigger | undefined = r.trigger?.kind === 'webhook' ? { kind: 'webhook', token: randomUUID().replaceAll('-', '') }
+            : r.trigger?.kind === 'poll' ? { kind: 'poll', connectorId: r.trigger.connectorId, tool: r.trigger.tool, args: r.trigger.args, everyMinutes: r.trigger.everyMinutes } : undefined
+          target.saveRoutine({ ...r, lastAt: undefined, lastMessageId: undefined, trigger, nextAt: r.enabled && !trigger ? nextRun(r.schedule, Date.now()) : undefined })
+        }
+      })
+      target.db.exec('VACUUM; PRAGMA wal_checkpoint(TRUNCATE)')
+      target.close()
+      copy = undefined
+      renameSync(staging, file)
+    } finally {
+      copy?.close()
+      for (const path of [staging, `${staging}-wal`, `${staging}-shm`]) rmSync(path, { force: true })
+    }
+  }
+
+  // A copy keeps only what was picked to come along; what depends on something left behind goes,
+  // or comes without it: agents without connectors have no grants, a skill of agents left behind
+  // comes archived (with no agents it would apply to everyone), a routine needs its agent and place.
+  private keepOnly(parts: WorkspaceParts): void {
+    if (WORKSPACE_PARTS.every((p) => parts[p])) return
+    const kept = new Set(['seenVersion', 'theme', 'onboarding', ...(parts.general ? GENERAL_SETTINGS : []), ...(parts.context ? ['context'] : []), ...(parts.channels ? ['channelLayout', 'folded'] : [])])
+    for (const { key } of this.db.prepare('SELECT key FROM settings').all() as { key: string }[]) if (!kept.has(key)) this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+    if (!parts.general) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(JEV_KEY)
+    if (!parts.connectors) {
+      this.db.exec('DELETE FROM connectors; UPDATE agents SET grants = \'{}\', auto_approve = \'[]\'')
+      this.db.prepare('DELETE FROM secrets WHERE key <> ?').run(JEV_KEY) // the connectors' keys and logins, and GitHub's
+    }
+    if (!parts.agents) this.db.exec("DELETE FROM members; DELETE FROM conversations WHERE kind = 'dm'; DELETE FROM agents")
+    if (!parts.channels) this.db.exec("DELETE FROM conversations WHERE kind <> 'dm'")
+    if (!parts.skills) this.db.exec('DELETE FROM skill_versions; DELETE FROM skills')
+    else if (!parts.agents) this.db.exec("UPDATE skills SET state = 'archived' WHERE agents <> '[]'")
+    if (!parts.routines) this.db.exec('DELETE FROM routines')
+    const connectors = new Set(this.connectors().map((c) => c.id))
+    for (const r of this.routines())
+      if (!this.agent(r.agentId) || !this.conversation(r.conversationId) || (r.trigger?.kind === 'poll' && !connectors.has(r.trigger.connectorId))) this.removeRoutine(r.id)
+  }
+
+  private migrate(file: string): void {
     const { user_version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
     this.created = user_version === 0
+    // A copy from before the update, among the daily ones (and pruned with them).
+    if (user_version > 0 && user_version < MIGRATIONS.length && file !== ':memory:') {
+      const backups = join(dirname(file), 'backups')
+      mkdirSync(backups, { recursive: true })
+      this.backupTo(join(backups, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-schema-${user_version}.db`))
+    }
     for (let v = user_version; v < MIGRATIONS.length; v++) {
       this.tx(() => {
         this.db.exec(MIGRATIONS[v]!)
@@ -401,7 +531,14 @@ export class Db {
   // ---------- conversations ----------
 
   conversations(): Conversation[] {
-    const rows = this.db.prepare('SELECT * FROM conversations ORDER BY created_at').all() as Row[]
+    // Only the unread rows are read (a partial index): a conversation with years of messages costs nothing here.
+    const rows = this.db
+      .prepare(
+        `SELECT c.*, COALESCE(u.n, 0) AS unread FROM conversations c
+         LEFT JOIN (SELECT m.conversation_id AS id, COUNT(*) AS n FROM message_notifications n JOIN messages m ON m.id = n.message_id WHERE n.unread = 1 GROUP BY m.conversation_id) u ON u.id = c.id
+         ORDER BY created_at`
+      )
+      .all() as Row[]
     const members = this.db.prepare('SELECT conversation_id, agent_id FROM members').all() as { conversation_id: string; agent_id: string }[]
     return rows.map((r) => ({
       id: str(r['id']),
@@ -413,7 +550,8 @@ export class Db {
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
       ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {}),
-      ...(r['threads'] === 1 ? { threads: true } : {})
+      ...(r['threads'] === 1 ? { threads: true } : {}),
+      unread: Number(r['unread'])
     }))
   }
 
@@ -483,6 +621,28 @@ export class Db {
   }
 
   // ---------- messages ----------
+
+  markRead(conversationId: string): void {
+    this.db.prepare('UPDATE message_notifications SET unread = 0 WHERE unread = 1 AND message_id IN (SELECT id FROM messages WHERE conversation_id = ?)').run(conversationId)
+  }
+
+  unread(conversationId?: string): number {
+    const sql = 'SELECT COUNT(*) AS n FROM message_notifications n JOIN messages m ON m.id = n.message_id WHERE n.unread = 1'
+    const row = (conversationId ? this.db.prepare(`${sql} AND m.conversation_id = ?`).get(conversationId) : this.db.prepare(sql).get()) as { n: number }
+    return Number(row.n)
+  }
+
+  // True when this made the conversation's unread count go up.
+  recordActivity(message: Message, viewing: string | null): boolean {
+    if (message.author.kind !== 'agent' && message.author.kind !== 'routine') return false
+    const phase = message.run?.status ?? 'message'
+    if (phase !== 'message' && !['working', 'done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(phase)) return false
+    // A running reply counts once. If it was read while running, its completion
+    // is new content, but repeated terminal events and deltas must not count again.
+    const unread = message.conversationId !== viewing && (phase === 'working' || phase === 'message' || this.unread(message.conversationId) === 0)
+    const r = this.db.prepare('INSERT OR IGNORE INTO message_notifications (message_id, phase, unread) VALUES (?, ?, ?)').run(message.id, phase, unread ? 1 : 0)
+    return unread && Number(r.changes) > 0
+  }
 
   private toMessage(r: Row): Message {
     const kind = str(r['author_kind'])

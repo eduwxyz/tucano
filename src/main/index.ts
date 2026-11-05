@@ -6,10 +6,12 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
-import { chirpOf, type BrowserOp } from '../shared/types'
+import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { Browsers } from './browser'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
+import { Workspaces } from './workspaces'
+import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, onPath } from '../core/platform'
 
 const NAME = 'Tucano'
@@ -39,39 +41,82 @@ const moved: Moved =
 if (moved === 'old-app-open' || moved === 'keychain-denied') app.setPath('userData', join(app.getPath('temp'), 'tucano-esperando'))
 
 const dataDir = (): string => process.env['TUCANO_DATA'] ?? app.getPath('userData')
-// The wiki's folder, as the core says (an Obsidian vault, say): the one folder outside the app's own it may open.
-let wikiFolder = ''
-
 // tucano://artifact/<id>/<name> serves what agents showed in the chat.
 protocol.registerSchemesAsPrivileged([{ scheme: 'tucano', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 
-let core: UtilityProcess | null = null
-
-// Agents' browsers (spec §24); the core is told when I take one over or hand it back.
-const browsers = new Browsers((agentId, shown) => core?.postMessage({ type: 'browser-shown', agentId, shown }))
+let registry: Workspaces
+// `wikiFolder`: the wiki's folder, as that core says (an Obsidian vault, say): the one folder outside the app's own it may open.
+type Runtime = { child: UtilityProcess; browsers: Browsers; ready: Promise<void>; summary: WorkspaceSummary; busy: boolean; wikiFolder: string }
+const cores = new Map<string, Runtime>()
+const workspaceList = (): WorkspaceList => ({ selected: registry.selected().id, workspaces: registry.list().map((w) => cores.get(w.id)?.summary ?? { id: w.id, name: w.name, isDefault: w.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }) })
+const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()) }
 
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
 const localKey = randomBytes(32).toString('hex')
 
-function startCore(): UtilityProcess {
+function startCore(workspace: Workspace): Runtime {
+  const existing = cores.get(workspace.id)
+  if (existing && existing.summary.status !== 'failed') return existing
+  if (existing) {
+    existing.browsers.quit()
+    existing.child.kill()
+    cores.delete(workspace.id)
+  }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
-    serviceName: 'tucano-core',
-    env: { ...process.env, TUCANO_DATA: dataDir(), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
+    serviceName: `tucano-core-${workspace.id}`,
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
   })
-  child.on('message', (msg: CoreRequest) => handleCore(child, msg))
+  let resolve!: () => void
+  let reject!: (e: Error) => void
+  const ready = new Promise<void>((yes, no) => { resolve = yes; reject = no })
+  // Background startup errors are visible in the switcher, not unhandled rejections.
+  void ready.catch(() => {})
+  const runtime: Runtime = { child, ready, busy: false, wikiFolder: '', summary: { id: workspace.id, name: workspace.name, isDefault: workspace.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }, browsers: new Browsers((agentId, shown) => child.postMessage({ type: 'browser-shown', agentId, shown }), workspace.isDefault ? '' : `${workspace.id}-`) }
+  cores.set(workspace.id, runtime)
+  const timer = setTimeout(() => {
+    reject(new Error(L('O workspace demorou demais para iniciar.', 'The workspace took too long to start.')))
+    runtime.summary.status = 'failed'
+    publishWorkspaces()
+    child.kill()
+  }, 90_000)
+  child.on('message', (msg: CoreRequest) => {
+    if (msg.type === 'ready') {
+      clearTimeout(timer)
+      const theme = registry.theme()
+      if (theme) child.postMessage({ type: 'workspace-theme', theme })
+      runtime.summary.status = 'ready'
+      resolve()
+      publishWorkspaces()
+    } else if (msg.type === 'workspace-summary') {
+      registry.rename(workspace.id, msg.name)
+      runtime.summary = { ...runtime.summary, name: msg.name || runtime.summary.name, paused: msg.paused, unread: msg.unread, approvals: msg.approvals }
+      publishWorkspaces()
+    } else handleCore(child, msg, workspace, runtime)
+  })
   child.on('exit', (code) => {
-    console.error(`[main] core exited with code ${code}`)
-    if (core !== child) return
-    core = null
-    // Not while quitting: the window would say so on its way out. Reloading the page
-    // connects again, and connecting starts a new core.
-    if (!quitting && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('core:down')
+    console.error(`[main] core of workspace ${workspace.id} exited with code ${code}`)
+    clearTimeout(timer)
+    if (cores.get(workspace.id) !== runtime) return // replaced by a new one already
+    reject(new Error(`Workspace core exited (${code})`))
+    runtime.summary.status = 'failed'
+    runtime.busy = false
+    runtime.browsers.quit()
+    syncBusy()
+    if (!quitting) publishWorkspaces()
+    // The one on screen: the window says so. Reloading the page connects again, and connecting starts a new core.
+    if (!quitting && registry.selected().id === workspace.id && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('core:down')
   })
-  return child
+  return runtime
 }
 
 type CoreRequest =
+  | { type: 'theme'; theme: Settings['theme']; initial?: boolean }
+  | { type: 'ready' }
+  | { type: 'workspace-summary'; name: string; paused: boolean; unread: number; approvals: number }
+  | { type: 'workspace-cleaned'; agentIds?: string[]; error?: string }
+  | { type: 'workspace-duplicated'; error?: string }
+  | { type: 'workspace-paused'; error?: string }
   | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
@@ -88,7 +133,9 @@ type CoreRequest =
 // The conversation open in the window, so a notification about it can stay quiet.
 let viewing: string | null = null
 ipcMain.on('viewing', (_e, id: unknown) => {
+  if (_e.sender !== mainWindow?.webContents || _e.senderFrame !== _e.sender.mainFrame) return
   viewing = typeof id === 'string' ? id : null
+  cores.get(registry.selected().id)?.child.postMessage({ type: 'viewing', conversationId: viewing })
 })
 
 // The toucan's own sound, instead of the system's: a knock at the door when an agent needs
@@ -117,6 +164,14 @@ function chirp(sound: 'chama' | 'pronto'): void {
 
 // While an agent is replying, the Mac doesn't go to sleep on its own (closing the lid still does).
 let awakeBlocker: number | null = null
+function syncBusy(): void {
+  const busy = [...cores.values()].some((r) => r.busy)
+  if (busy && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension')
+  else if (!busy && awakeBlocker !== null) {
+    powerSaveBlocker.stop(awakeBlocker)
+    awakeBlocker = null
+  }
+}
 
 // Opening at login: the system's login items on a Mac; on Linux a desktop entry in
 // ~/.config/autostart (an AppImage starts from wherever the person keeps it).
@@ -171,8 +226,15 @@ function stillOpen(): void {
 }
 
 // Things the core can't do itself: the OS keychain, the browser, notifications.
-function handleCore(child: UtilityProcess, msg: CoreRequest): void {
-  if (msg.type === 'secret') {
+function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspace, runtime: Runtime): void {
+  if (msg.type === 'theme') {
+    // Adopt the default workspace's old preference once. Other startup events
+    // and stale workspace snapshots must never overwrite the app preference.
+    if (msg.initial && (!workspace.isDefault || registry.theme() !== undefined)) return
+    registry.setTheme(msg.theme)
+    if (nativeTheme.themeSource !== msg.theme) nativeTheme.themeSource = msg.theme
+    for (const core of cores.values()) if (core.summary.status !== 'failed') core.child.postMessage({ type: 'workspace-theme', theme: msg.theme })
+  } else if (msg.type === 'secret') {
     try {
       // Linux without an open keyring falls back to a fixed key, or to nothing: Tucano keeps no
       // secret that way, and says what to do.
@@ -213,34 +275,33 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     if (msg.how === 'open') void shell.openPath(msg.path)
     else shell.showItemInFolder(msg.path)
   } else if (msg.type === 'wiki_dir') {
-    wikiFolder = normalize(msg.path)
+    runtime.wikiFolder = normalize(msg.path)
   } else if (msg.type === 'open_path') {
     // Only folders the app keeps (an agent's computer, the backups), never an arbitrary path.
     const path = normalize(msg.path)
-    if (path.startsWith(join(dataDir(), 'computers') + sep) || path === join(dataDir(), 'backups') || (!!wikiFolder && (path === wikiFolder || path.startsWith(join(wikiFolder, 'fontes', 'arquivos') + sep)))) void shell.openPath(path)
+    const wikiFolder = runtime.wikiFolder
+    if (path.startsWith(join(workspace.dataDir, 'computers') + sep) || path === join(workspace.dataDir, 'backups') || (!!wikiFolder && (path === wikiFolder || path.startsWith(join(wikiFolder, 'fontes', 'arquivos') + sep)))) void shell.openPath(path)
   } else if (msg.type === 'notify') {
     // Already looking at that conversation: nothing to tell.
-    if (msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
+    if (registry.selected().id === workspace.id && msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
     const sound = chirpOf(msg.kind, msg.sound)
     if (sound) chirp(sound)
     if (!Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
-    n.on('click', () => showWindow(msg.conversationId, msg.page, msg.threadId))
+    n.on('click', () => { void switchWorkspace(workspace.id).then(() => showWindow(msg.conversationId, msg.page, msg.threadId)).catch(console.error) })
     n.show()
   } else if (msg.type === 'busy') {
-    if (msg.busy && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension')
-    else if (!msg.busy && awakeBlocker !== null) {
-      powerSaveBlocker.stop(awakeBlocker)
-      awakeBlocker = null
-    }
+    runtime.busy = msg.busy
+    syncBusy()
   } else if (msg.type === 'lang') {
+    if (registry.selected().id !== workspace.id) return
     setLang(msg.lang)
     setMenu()
   } else if (msg.type === 'login_item') {
     // Only the installed app: in dev this would register the bare Electron binary.
-    if (app.isPackaged) openAtLogin(msg.open)
+    if (app.isPackaged && workspace.isDefault) openAtLogin(msg.open)
   } else if (msg.type === 'browser') {
-    browsers.run(msg.agentId, msg.op, msg.args).then(
+    runtime.browsers.run(msg.agentId, msg.op, msg.args).then(
       (data) => child.postMessage({ type: 'browser-result', id: msg.id, data }),
       (e: unknown) => child.postMessage({ type: 'browser-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
     )
@@ -302,7 +363,7 @@ function serveArtifact(req: Request): Promise<Response> | Response {
     })
   }
   const [id = '', name = ''] = u.pathname.slice(1).split('/')
-  const dir = join(dataDir(), 'artifacts', id)
+  const dir = join(registry.selected().dataDir, 'artifacts', id)
   const file = normalize(join(dir, decodeURIComponent(name)))
   if (u.host !== 'artifact' || !/^[0-9a-f-]{36}$/.test(id) || !file.startsWith(dir + sep)) return new Response('not found', { status: 404 })
   return net.fetch(pathToFileURL(file).toString()).then((r) => {
@@ -314,11 +375,149 @@ function serveArtifact(req: Request): Promise<Response> | Response {
 }
 
 // Each page load asks for a port; one end goes to the core, the other to the page.
-ipcMain.on('core:connect', (event) => {
-  core ??= startCore()
+ipcMain.on('core:connect', async (event) => {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return
+  const workspace = registry.selected()
+  const runtime = startCore(workspace)
+  try { await runtime.ready } catch { return }
+  if (event.sender.isDestroyed() || registry.selected().id !== workspace.id) return
   const { port1, port2 } = new MessageChannelMain()
-  core.postMessage(null, [port1])
+  runtime.child.postMessage(null, [port1])
   event.sender.postMessage('core:port', null, [port2])
+})
+
+let switching = false
+async function switchWorkspace(id: string): Promise<void> {
+  if (id === registry.selected().id) return // already on screen: nothing to reload
+  if (switching) throw new Error(L('Aguarde a troca de workspace.', 'Wait for the workspace switch.'))
+  switching = true
+  try {
+    const workspace = registry.get(id)
+    await startCore(workspace).ready
+    cores.get(registry.selected().id)?.child.postMessage({ type: 'viewing', conversationId: null })
+    registry.select(id)
+    viewing = null
+    mainWindow?.reload()
+  } finally { switching = false }
+}
+
+function trustedWorkspaceRequest(event: Electron.IpcMainInvokeEvent): void {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Not the app window')
+}
+function requestWorkspace(runtime: Runtime, request: object, response: 'workspace-cleaned' | 'workspace-duplicated' | 'workspace-paused'): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { cleanup(); reject(new Error('Workspace operation timed out')) }, 180_000)
+    const onExit = (): void => { cleanup(); reject(new Error('Workspace stopped before the operation finished')) }
+    const onMessage = (msg: CoreRequest): void => {
+      if (msg.type !== response) return
+      cleanup()
+      if (msg.error) reject(new Error(msg.error))
+      else resolve('agentIds' in msg ? msg.agentIds ?? [] : [])
+    }
+    const cleanup = (): void => { clearTimeout(timer); runtime.child.removeListener('message', onMessage); runtime.child.removeListener('exit', onExit) }
+    runtime.child.on('message', onMessage)
+    runtime.child.once('exit', onExit)
+    runtime.child.postMessage(request)
+  })
+}
+ipcMain.handle('workspaces:list', (event) => { trustedWorkspaceRequest(event); return workspaceList() })
+ipcMain.handle('workspaces:pause', async (event, paused: unknown, id?: unknown) => {
+  trustedWorkspaceRequest(event)
+  if (switching) throw new Error('Wait for the workspace operation')
+  if (typeof paused !== 'boolean' || (id !== undefined && typeof id !== 'string')) throw new Error('Invalid workspace pause request')
+  const targets = typeof id === 'string' ? [registry.get(id)] : registry.list()
+  switching = true
+  try {
+    const results = await Promise.allSettled(targets.map(async (w) => {
+      const runtime = cores.get(w.id)
+      // Pausing must never start a failed core and accidentally fire its jobs.
+      if (!runtime || runtime.summary.status === 'failed') throw new Error('Workspace is unavailable')
+      await runtime.ready
+      await requestWorkspace(runtime, { type: 'workspace-pause', paused }, 'workspace-paused')
+    }))
+    const failed = targets.filter((_w, index) => results[index]!.status === 'rejected')
+    if (failed.length) throw new Error(L(`Não foi possível atualizar a pausa de: ${failed.map((w) => w.name).join(', ')}.`, `Could not update pause state for: ${failed.map((w) => w.name).join(', ')}.`))
+  } finally { switching = false }
+})
+ipcMain.handle('workspaces:switch', async (event, id: unknown) => {
+  trustedWorkspaceRequest(event)
+  if (typeof id !== 'string') throw new Error('Invalid workspace')
+  await switchWorkspace(id)
+})
+ipcMain.handle('workspaces:create', async (event, name?: unknown) => {
+  trustedWorkspaceRequest(event)
+  if (switching) throw new Error('Wait for the workspace switch')
+  if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 120)) throw new Error(L('Dê um nome ao workspace, com até 120 caracteres.', 'Give the workspace a name, up to 120 characters.'))
+  const workspace = registry.create(typeof name === 'string' ? name.trim() : undefined)
+  startCore(workspace)
+  await switchWorkspace(workspace.id)
+})
+// `parts`: what comes along; unset, all of it.
+ipcMain.handle('workspaces:duplicate', async (event, id: unknown, requestedName?: unknown, parts?: unknown) => {
+  trustedWorkspaceRequest(event)
+  if (switching) throw new Error('Wait for the workspace operation')
+  if (typeof id !== 'string') throw new Error('Invalid workspace')
+  if (requestedName !== undefined && (typeof requestedName !== 'string' || !requestedName.trim() || requestedName.trim().length > 120)) throw new Error(L('Dê um nome ao workspace, com até 120 caracteres.', 'Give the workspace a name, up to 120 characters.'))
+  const source = registry.get(id)
+  switching = true
+  let target: Workspace | undefined
+  try {
+    const runtime = startCore(source)
+    await runtime.ready
+    const name = typeof requestedName === 'string' ? requestedName.trim() : suggestWorkspaceCopyName(source.name, registry.list().map((w) => w.name))
+    target = registry.create(name)
+    await requestWorkspace(runtime, { type: 'duplicate-workspace', targetDir: target.dataDir, name: target.name, ...(parts !== undefined ? { parts: workspaceParts(parts) } : {}) }, 'workspace-duplicated')
+    await startCore(target).ready
+    publishWorkspaces()
+    return target.id
+  } catch (error) {
+    // Only remove a failed, newly generated copy, never the source workspace.
+    if (target && !cores.has(target.id)) registry.deleteData(target.id)
+    publishWorkspaces()
+    throw error
+  } finally { switching = false }
+})
+ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
+  trustedWorkspaceRequest(event)
+  if (switching) throw new Error('Wait for the workspace switch')
+  if (id !== undefined && typeof id !== 'string') throw new Error('Invalid workspace')
+  const workspace = id === undefined ? registry.selected() : registry.get(id as string)
+  if (workspace.isDefault) throw new Error(L('O workspace padrão não pode ser excluído.', 'The default workspace cannot be deleted.'))
+  switching = true
+  try {
+    const answer = await dialog.showMessageBox(mainWindow!, {
+      type: 'warning',
+      title: L('Excluir workspace', 'Delete workspace'),
+      message: L(`Excluir “${workspace.name}” e todos os seus dados?`, `Delete “${workspace.name}” and all its data?`),
+      detail: L('Conversas, agentes, memórias, credenciais, rotinas e backups deste workspace serão apagados. Não dá para desfazer. Pastas de projetos e outros workspaces ficam intactos.', 'Conversations, agents, memories, credentials, routines and backups in this workspace will be deleted. This cannot be undone. Project folders and other workspaces are kept.'),
+      buttons: [L('Cancelar', 'Cancel'), L('Excluir todos os dados', 'Delete all data')], defaultId: 0, cancelId: 0, noLink: true
+    })
+    if (answer.response !== 1) return
+    const runtime = startCore(workspace)
+    await runtime.ready
+    const agentIds = await requestWorkspace(runtime, { type: 'delete-workspace' }, 'workspace-cleaned')
+    for (const agentId of agentIds) await runtime.browsers.run(agentId, 'clear')
+    runtime.browsers.quit()
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Workspace did not stop. Data has not been removed.')), 10_000)
+      runtime.child.once('exit', () => { clearTimeout(timer); resolve() })
+      if (!runtime.child.kill()) { clearTimeout(timer); reject(new Error('Could not stop workspace')) }
+    })
+    const active = registry.selected().id === workspace.id
+    registry.deleteData(workspace.id)
+    cores.delete(workspace.id)
+    for (const w of registry.list()) startCore(w)
+    if (active) { viewing = null; mainWindow?.reload() }
+    else publishWorkspaces()
+  } catch (error) {
+    const runtime = cores.get(workspace.id)
+    if (runtime) {
+      runtime.summary.status = 'failed'
+      runtime.child.kill()
+      publishWorkspaces()
+    }
+    throw error
+  } finally { switching = false }
 })
 
 // Brings the window back (closing it keeps the app and its routines running),
@@ -393,7 +592,11 @@ function createWindow(): BrowserWindow {
   win.once('ready-to-show', () => win.show())
   mainWindow = win
   win.on('closed', () => {
-    if (mainWindow === win) mainWindow = null
+    if (mainWindow === win) {
+      cores.get(registry.selected().id)?.child.postMessage({ type: 'viewing', conversationId: null })
+      viewing = null
+      mainWindow = null
+    }
     stillOpen()
   })
 
@@ -484,11 +687,13 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   })
   setMenu()
   protocol.handle('tucano', serveArtifact)
-  core = startCore()
+  registry = new Workspaces(dataDir())
+  nativeTheme.themeSource = registry.theme() ?? 'system'
+  for (const workspace of registry.list()) startCore(workspace)
   // The Mac wakes for a few seconds at a time while asleep (maintenance, "DarkWake"):
   // routines wait for a real wake, so a run doesn't start and freeze mid-way.
-  powerMonitor.on('suspend', () => core?.postMessage({ type: 'power', awake: false }))
-  powerMonitor.on('resume', () => core?.postMessage({ type: 'power', awake: true }))
+  powerMonitor.on('suspend', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: false }) })
+  powerMonitor.on('resume', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: true }) })
   createWindow()
   setTray()
   updates.start()
@@ -504,9 +709,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true
-  browsers.quit()
+  for (const r of cores.values()) r.browsers.quit()
 })
 
 app.on('will-quit', () => {
-  core?.kill()
+  for (const r of cores.values()) r.child.kill()
 })

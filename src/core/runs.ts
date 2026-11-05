@@ -164,15 +164,39 @@ export class Runner {
       }
     })
     // Left by an earlier run of the app, under the usual login and each account's.
-    const accounts = deps.dataDir ? join(deps.dataDir, 'accounts') : undefined
+    this.cleanTranscripts()
+    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
+
+  // What the engines keep outside the app's folder (Claude Code's transcripts, in ~/.claude) for
+  // agents here, but not of a session still kept.
+  cleanTranscripts(): void {
+    const accounts = this.deps.dataDir ? join(this.deps.dataDir, 'accounts') : undefined
     let accountDirs: string[] = []
     try {
       if (accounts) accountDirs = readdirSync(accounts).map((d) => join(accounts, d))
     } catch {
       // no accounts
     }
-    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir, accountDirs)
-    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+    for (const e of Object.values(this.deps.engines)) e.clean?.(this.deps.workDir, accountDirs)
+  }
+
+  // The sessions let go are gone from disk: their processes exited and their files went after.
+  async settled(): Promise<void> {
+    await Promise.all(Object.values(this.deps.engines).map((e) => e.settle?.()))
+  }
+
+  // For good (the workspace is being deleted): what's queued is dropped, what's running stops,
+  // and the kept sessions go, with their transcripts.
+  stopAll(): void {
+    this.paused = true
+    this.queue.length = 0
+    for (const c of this.controllers.values()) {
+      c.reason = 'stopped'
+      c.ctl.abort()
+    }
+    this.sessions.dropWhere(() => true)
+    this.checkIdle()
   }
 
   // An archived agent's sessions, or a deleted conversation's, go now: their process and the
@@ -186,6 +210,7 @@ export class Runner {
 
   setPaused(paused: boolean): void {
     this.paused = paused
+    if (!paused) this.pump() // resumed: any queued work that was blocked can go on
   }
 
   // The person is writing here. What will answer gets its Claude Code started now, so the reply
@@ -298,6 +323,7 @@ export class Runner {
   retry(messageId: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
+    if (this.paused) return // nobody starts working while paused
     if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status)) return
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
@@ -311,6 +337,7 @@ export class Runner {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (msg?.run?.status !== 'paused' || msg.author.kind !== 'agent') return
+    if (this.paused) return // nobody starts working while paused
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
@@ -338,6 +365,7 @@ export class Runner {
   // Resolves with the agent's reply once that run ends, or undefined when it can't run.
   async runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> {
     const { db, emit } = this.deps
+    if (this.paused) return undefined // routines don't run while paused
     const conv = db.conversation(r.conversationId)
     const agent = db.agent(r.agentId)
     if (!conv || !agent || agent.archived) return undefined
@@ -367,6 +395,7 @@ export class Runner {
 
   // A routine's reply that failed, run again in place with the same request.
   async retryRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined> {
+    if (this.paused) return undefined // routines don't run while paused
     const { db } = this.deps
     const msg = db.message(messageId)
     const conv = db.conversation(r.conversationId)
@@ -452,6 +481,7 @@ export class Runner {
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
   private async routeAndRun(conv: Conversation, members: Agent[], threadId?: string): Promise<void> {
     const { db, engines } = this.deps
+    if (this.paused) return // nobody starts working while paused
     this.routing++
     const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
@@ -509,6 +539,7 @@ export class Runner {
 
   private pump(): void {
     while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
+      if (this.paused) return // paused: nothing new starts, queued work waits
       const job = this.queue.shift()!
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
