@@ -114,7 +114,7 @@ function triageAgent(): Engine {
           if (turn.signal.aborted) return
           const r = await call('slack__slack_read_channel', { channel_id: 'C0ALARMS', ...windowed, ...(cursor ? { cursor } : {}) })
           if (r.isError) break
-          const page = JSON.parse(firstText(r)) as { messages: { text: string }[]; has_more: boolean; response_metadata?: { next_cursor: string } }
+          const page = JSON.parse(firstText(r)) as { messages: { text: string }[]; has_more: boolean; response_metadata?: { next_cursor: string, grok: string } }
           alarms.push(...page.messages.filter((m) => m.text.startsWith('[FIRING]')).map((m) => m.text))
           if (/Atenção: você já chamou|Careful: you've called/.test(allText(r))) break // told to narrow: it has the alarm already
           if (!page.has_more) break
@@ -143,7 +143,7 @@ function triageAgent(): Engine {
 }
 
 function runner(connectors: ReturnType<typeof world>, engine: Engine = triageAgent()): Runner {
-  const engines: Record<EngineId, Engine> = { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+  const engines: Record<EngineId, Engine> = { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   const computers = {
     call: async (_a: Agent, name: string, args: Record<string, unknown>) => {
       const command = String(args['command'] ?? '')
@@ -170,7 +170,7 @@ async function triage(connectors = world()) {
 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'st-db-')), 'test.db'))
-  settings = { workspaceName: 'Gabriel', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Gabriel', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent({ id: 'ops', name: 'Ops', handle: 'ops', role: 'Plantão', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 50_000_000, used: 0, grants: { slack: 'read', dbx: 'read' }, memory: 'auto', computer: true, archived: false })
   db.createConversation({ id: 'dm', kind: 'dm', name: 'ops', members: ['ops'] })
   clock = Date.now()

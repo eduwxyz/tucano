@@ -69,4 +69,13 @@ describe("Tuca's list of models", () => {
       { id: 'cursor:claude-opus-5-5-high', label: 'Cursor CLI · claude-opus-5-5-high' }
     ])
   })
+
+  it('includes the Grok models when the Grok CLI is signed in', () => {
+    const off = { installed: false, loggedIn: false }
+    const s = { engines: { claude: off, codex: off, opencode: off, pi: off, gemini: off, cursor: off, grok: { installed: true, loggedIn: true, route: 'plan' } } } as unknown as Pick<Settings, 'engines'>
+    expect(availableModels(s, { grok: ['grok-4.7', 'grok-4.5'] })).toEqual([
+      { id: 'grok:grok-4.7', label: 'Grok · grok-4.7' },
+      { id: 'grok:grok-4.5', label: 'Grok · grok-4.5' }
+    ])
+  })
 })

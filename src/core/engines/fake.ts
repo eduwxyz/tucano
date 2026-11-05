@@ -3,7 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { L } from '../../shared/lang'
 import { memorySystem } from '../memory'
 import { curatorSystem } from '../wiki-curator'
-import { routerSystem } from '../router'
+import { handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
 // Deterministic engine for tests and screenshots. Never spawns anything, but
@@ -17,7 +17,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       const last = lastMessage(turn.prompt)
       // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
       // harness, or another account of Claude, whose limit is still there).
-      if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== memorySystem()) {
+      if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== handoffSystem() && turn.system !== memorySystem()) {
         yield { type: 'error', message: "You've hit your limit · resets 5pm" }
         return
       }
@@ -25,6 +25,8 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       let spend = 0 // "gaste N tokens": a reply that costs that much, to see the budget pause
       if (turn.system === routerSystem()) {
         reply = JSON.stringify(fakeRoute(turn.prompt))
+      } else if (turn.system === handoffSystem()) {
+        reply = JSON.stringify(fakeHandoff(turn.prompt))
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
       } else if (turn.system === curatorSystem()) {
@@ -51,6 +53,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         } else reply = L('Legal! Que tipo de tarefa você quer delegar? Me dá um exemplo de algo que você fez essa semana.', 'Nice! What kind of task do you want to delegate? Give me an example of something you did this week.')
       } else if (/pe[çc]a pr[oa] (\w+)/i.test(last)) {
         reply = `@${/pe[çc]a pr[oa] (\w+)/i.exec(last)![1]!.toLowerCase()}, pode ajudar aqui?`
+      } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
+        // A thank-you that mentions someone: the hand-off screening lets no one answer it.
+        reply = `Valeu, @${/agrade[çc]a (?:a|ao|à) (\w+)/i.exec(last)![1]!.toLowerCase()}! Ficou ótimo.`
       } else if (turn.mcpUrl && /(lista|liste|mostra|quais).*tarefas/i.test(last)) {
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'list_tasks'), {})
         reply = `Suas tarefas:\n\n${textOf(r)}`
@@ -58,6 +63,20 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /(?:consulte|run the sql) `([^`]+)`/i.test(last)) {
+        // A SQL connector's tool (Databricks' execute_sql_read_only), to see its steps and errors.
+        const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!
+        const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'execute_sql_read_only'), { statement })
+        reply = textOf(r)
+      } else if (turn.mcpUrl && /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.test(last)) {
+        // A skill that runs a CLI (a databricks-query skill and the databricks command): read it, then run.
+        const [, skill, first, then] = /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.exec(last)!
+        await callTool(turn.mcpUrl, 'ler_skill', { nome: skill })
+        for (const command of [first!, then].filter(Boolean)) await callTool(turn.mcpUrl, 'bash', { command })
+        reply = L(
+          'Rodei o SQL pela skill: Sudeste lidera, depois Sul e Nordeste. O segundo comando falhou: o token foi recusado.',
+          'I ran the SQL through the skill: Southeast leads, then South and Northeast. The second command failed: the token was refused.'
+        )
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`
@@ -140,6 +159,15 @@ function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
+}
+
+// Courtesy replies don't hand the turn; anything else does, to every mentioned agent.
+function fakeHandoff(prompt: string): { handles: string[]; reason: string } {
+  const [head = '', rest = ''] = prompt.split('<reply>\n')
+  const reply = rest.slice(0, rest.lastIndexOf('\n</reply>'))
+  const body = reply.replace(/^(?:@[\w-]+|[\s,.!:;-])+/, '')
+  if (!body.includes('?') && /^(valeu|obrigad|combinado|ok\b|beleza|👍|thanks|got it)/i.test(body)) return { handles: [], reason: 'agradecimento, ninguém precisa responder' }
+  return { handles: [...head.matchAll(/^- ([a-z0-9_-]+): /gim)].map((m) => m[1]!), reason: 'pedido' }
 }
 
 // Summarizes by listing the first words of each message, and learns "prefiro X"
