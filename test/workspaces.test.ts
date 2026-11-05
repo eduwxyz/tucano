@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
 import { Workspaces, workspaceId } from '../src/main/workspaces'
-import { suggestWorkspaceCopyName } from '../src/shared/workspaces'
+import { suggestWorkspaceCopyName, workspaceCreatedAt } from '../src/shared/workspaces'
 
 const dirs: string[] = []
 const root = (): string => { const dir = mkdtempSync(join(tmpdir(), 'tucano-workspaces-')); dirs.push(dir); return dir }
@@ -20,6 +20,9 @@ it('uses unique UUIDv7 identities', () => {
   const ids = Array.from({ length: 1000 }, workspaceId)
   expect(new Set(ids).size).toBe(ids.length)
   for (const id of ids) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  const before = Date.now()
+  expect(workspaceCreatedAt(workspaceId())).toBeGreaterThanOrEqual(before) // the time in it, to the millisecond
+  expect(workspaceCreatedAt(workspaceId())).toBeLessThanOrEqual(Date.now())
 })
 
 it('persists one app theme across workspace selection, creation and removal', () => {

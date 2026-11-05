@@ -146,7 +146,6 @@ export class Runner {
   private routing = 0
   private controllers = new Map<string, Control>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
-  private pumps = 0 // in-flight queue drains, for tests to wait on
   private idleWaiters: (() => void)[] = []
   private sessions: Sessions
 
@@ -165,15 +164,34 @@ export class Runner {
       }
     })
     // Left by an earlier run of the app, under the usual login and each account's.
-    const accounts = deps.dataDir ? join(deps.dataDir, 'accounts') : undefined
+    this.cleanTranscripts()
+    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
+
+  // What the engines keep outside the app's folder (Claude Code's transcripts, in ~/.claude) for
+  // agents here, but not of a session still kept.
+  cleanTranscripts(): void {
+    const accounts = this.deps.dataDir ? join(this.deps.dataDir, 'accounts') : undefined
     let accountDirs: string[] = []
     try {
       if (accounts) accountDirs = readdirSync(accounts).map((d) => join(accounts, d))
     } catch {
       // no accounts
     }
-    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir, accountDirs)
-    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+    for (const e of Object.values(this.deps.engines)) e.clean?.(this.deps.workDir, accountDirs)
+  }
+
+  // For good (the workspace is being deleted): what's queued is dropped, what's running stops,
+  // and the kept sessions go, with their transcripts.
+  stopAll(): void {
+    this.paused = true
+    this.queue.length = 0
+    for (const c of this.controllers.values()) {
+      c.reason = 'stopped'
+      c.ctl.abort()
+    }
+    this.sessions.dropWhere(() => true)
+    this.checkIdle()
   }
 
   // An archived agent's sessions, or a deleted conversation's, go now: their process and the
@@ -417,16 +435,9 @@ export class Runner {
   }
 
   // Resolves when nothing is routing, running or queued (tests and shutdown).
-  // Waits through pauses too, since nothing starts while paused.
   idle(): Promise<void> {
-    if (this.isIdle() && this.pumps === 0) return Promise.resolve()
-    return new Promise((resolve) => {
-      const wait = () => {
-        if (this.isIdle() && this.pumps === 0) return resolve()
-        setTimeout(wait, 10).unref()
-      }
-      wait()
-    })
+    if (this.isIdle()) return Promise.resolve()
+    return new Promise((r) => this.idleWaiters.push(r))
   }
 
   private isIdle(): boolean {

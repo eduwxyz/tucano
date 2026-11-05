@@ -301,6 +301,7 @@ const MIGRATIONS = [
   );
   INSERT OR IGNORE INTO message_notifications (message_id, phase)
     SELECT id, COALESCE(json_extract(run, '$.status'), 'message') FROM messages;
+  CREATE INDEX IF NOT EXISTS message_notifications_unread ON message_notifications (message_id) WHERE unread = 1;
   `
 ]
 
@@ -336,6 +337,8 @@ export class Db {
 
   // Snapshot the live DB, then sanitize only the copy. Publish it only after
   // VACUUM removes deleted history from its pages; no engine/browser files copy.
+  // The extra Claude Code and Codex logins stay too (their folders, and the Mac's keychain,
+  // are the source's): the copy's agents use the usual login.
   duplicateTo(file: string, name: string): void {
     if (existsSync(file)) throw new Error('Workspace destination already exists')
     // Keep the unsanitized snapshot with its source, not in the new workspace.
@@ -358,7 +361,8 @@ export class Db {
           DELETE FROM artifacts;
           DELETE FROM services;
           UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL;
-          DELETE FROM settings WHERE key IN ('quota', 'telegram');
+          DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts');
+          UPDATE agents SET account = NULL, fallback_account = NULL;
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
         `)
         const setup = target.db.prepare("SELECT value FROM settings WHERE key = 'onboarding'").get() as { value: string } | undefined
@@ -499,7 +503,14 @@ export class Db {
   // ---------- conversations ----------
 
   conversations(): Conversation[] {
-    const rows = this.db.prepare(`SELECT c.*, (SELECT COUNT(*) FROM message_notifications n JOIN messages m ON m.id = n.message_id WHERE m.conversation_id = c.id AND n.unread = 1) AS unread FROM conversations c ORDER BY created_at`).all() as Row[]
+    // Only the unread rows are read (a partial index): a conversation with years of messages costs nothing here.
+    const rows = this.db
+      .prepare(
+        `SELECT c.*, COALESCE(u.n, 0) AS unread FROM conversations c
+         LEFT JOIN (SELECT m.conversation_id AS id, COUNT(*) AS n FROM message_notifications n JOIN messages m ON m.id = n.message_id WHERE n.unread = 1 GROUP BY m.conversation_id) u ON u.id = c.id
+         ORDER BY created_at`
+      )
+      .all() as Row[]
     const members = this.db.prepare('SELECT conversation_id, agent_id FROM members').all() as { conversation_id: string; agent_id: string }[]
     return rows.map((r) => ({
       id: str(r['id']),
@@ -584,17 +595,25 @@ export class Db {
   // ---------- messages ----------
 
   markRead(conversationId: string): void {
-    this.db.prepare('UPDATE message_notifications SET unread = 0 WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)').run(conversationId)
+    this.db.prepare('UPDATE message_notifications SET unread = 0 WHERE unread = 1 AND message_id IN (SELECT id FROM messages WHERE conversation_id = ?)').run(conversationId)
   }
 
-  recordActivity(message: Message, viewing: string | null): void {
-    if (message.author.kind !== 'agent' && message.author.kind !== 'routine') return
+  unread(conversationId?: string): number {
+    const sql = 'SELECT COUNT(*) AS n FROM message_notifications n JOIN messages m ON m.id = n.message_id WHERE n.unread = 1'
+    const row = (conversationId ? this.db.prepare(`${sql} AND m.conversation_id = ?`).get(conversationId) : this.db.prepare(sql).get()) as { n: number }
+    return Number(row.n)
+  }
+
+  // True when this made the conversation's unread count go up.
+  recordActivity(message: Message, viewing: string | null): boolean {
+    if (message.author.kind !== 'agent' && message.author.kind !== 'routine') return false
     const phase = message.run?.status ?? 'message'
-    if (phase !== 'message' && !['working', 'done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(phase)) return
+    if (phase !== 'message' && !['working', 'done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(phase)) return false
     // A running reply counts once. If it was read while running, its completion
     // is new content, but repeated terminal events and deltas must not count again.
-    const unread = message.conversationId !== viewing && (phase === 'working' || phase === 'message' || (this.conversation(message.conversationId)?.unread ?? 0) === 0)
-    this.db.prepare('INSERT OR IGNORE INTO message_notifications (message_id, phase, unread) VALUES (?, ?, ?)').run(message.id, phase, unread ? 1 : 0)
+    const unread = message.conversationId !== viewing && (phase === 'working' || phase === 'message' || this.unread(message.conversationId) === 0)
+    const r = this.db.prepare('INSERT OR IGNORE INTO message_notifications (message_id, phase, unread) VALUES (?, ?, ?)').run(message.id, phase, unread ? 1 : 0)
+    return unread && Number(r.changes) > 0
   }
 
   private toMessage(r: Row): Message {

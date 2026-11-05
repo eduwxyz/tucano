@@ -31,7 +31,7 @@ export interface WorkspaceList {
 
 // UUIDv7: bytes 0-5 (48 bits) = Unix timestamp in milliseconds.
 export function workspaceCreatedAt(id: string): number {
-  return parseInt(id.slice(0, 12), 16)
+  return parseInt(id.replace(/-/g, '').slice(0, 12), 16)
 }
 
 export function sortWorkspaces(workspaces: WorkspaceSummary[] | undefined | null): WorkspaceSummary[] {

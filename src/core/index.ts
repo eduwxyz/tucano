@@ -229,19 +229,28 @@ const gatewayLists = new Map<EngineId, Promise<{ models: string[]; error?: strin
 const ports = new Set<MessagePortMain>()
 let viewing: string | null = null
 let closing = false
+// What the workspace switcher shows of this workspace: its name, whether it's paused, and two
+// counts. Coalesced: a reply streaming updates its message many times a second.
+let summaryTimer: NodeJS.Timeout | undefined
+let lastSummary = ''
 function workspaceSummary(): void {
-  const current = db.getSettings(DEFAULTS)
-  process.parentPort.postMessage({ type: 'workspace-summary', name: current.workspaceName, paused: !!current.paused, unread: db.conversations().reduce((n, c) => n + (c.unread ?? 0), 0), approvals: db.approvals().filter((a) => a.state === 'pending').length })
+  summaryTimer ??= setTimeout(() => {
+    summaryTimer = undefined
+    const current = db.getSettings(DEFAULTS)
+    const summary = { type: 'workspace-summary', name: current.workspaceName, paused: !!current.paused, unread: db.unread(), approvals: db.approvals().filter((a) => a.state === 'pending').length }
+    const wire = JSON.stringify(summary)
+    if (wire !== lastSummary) process.parentPort.postMessage(summary)
+    lastSummary = wire
+  }, 250)
 }
 function emit(event: CoreEvent): void {
-  if (event.type === 'message') db.recordActivity(event.message, viewing)
+  const more = event.type === 'message' && db.recordActivity(event.message, viewing)
   const wire: Wire = { event }
   for (const p of ports) p.postMessage(wire)
   toPhone(event)
-  if (event.type === 'message') {
-    const conversation = db.conversation(event.message.conversationId)
-    if (conversation) for (const p of ports) p.postMessage({ event: { type: 'conversation', conversation } })
-  }
+  // A new unread one: the sidebar's count goes up.
+  const conversation = more ? db.conversation(event.message.conversationId) : undefined
+  if (conversation) for (const p of ports) p.postMessage({ event: { type: 'conversation', conversation } } satisfies Wire)
   if (['message', 'conversation', 'conversation_removed', 'approval', 'settings'].includes(event.type)) workspaceSummary()
 }
 
@@ -326,11 +335,11 @@ process.parentPort.on('message', (e) => {
     telegram?.stop()
     hooks.close()
     github.stop()
-    runner.setPaused(true)
-    for (const m of db.messages()) runner.stop(m.id)
+    runner.stopAll()
     void (async () => {
       await runner.idle()
       await memory.idle()
+      runner.cleanTranscripts()
       const agents = db.agents()
       for (const a of agents) if (a.computer) await computers.erase(a.id)
       chrome?.quit()
@@ -531,6 +540,7 @@ const routines = new Routines({
   runner: { runRoutine: (r, when) => runner.runRoutine(r, when), retryRoutine: (r, when, id) => runner.retryRoutine(r, when, id) },
   connectors: { call: (id, tool, args) => connectors.call(id, tool, args), list: () => connectors.list() },
   blocked: () => !!settings().paused || inQuietHours(settings().quietHours),
+  paused: () => !!settings().paused,
   emit,
   notify: notifyAll
 })
@@ -629,8 +639,16 @@ const hooks = createServer((req, res) => {
     if (tooBig) return void res.writeHead(413).end(L('Grande demais (máx. 64 KB).\n', 'Too big (max. 64 KB).\n'))
     const r = routines.webhook(m[1]!, body)
     res
-      .writeHead(r === 'ok' ? 202 : r === 'busy' ? 409 : 404)
-      .end(r === 'ok' ? L('Rotina disparada.\n', 'Routine fired.\n') : r === 'busy' ? L('A rotina ainda está rodando.\n', 'The routine is still running.\n') : L('Nenhuma rotina ligada com esse endereço.\n', 'No routine on with that address.\n'))
+      .writeHead(r === 'ok' ? 202 : r === 'busy' || r === 'paused' ? 409 : 404)
+      .end(
+        r === 'ok'
+          ? L('Rotina disparada.\n', 'Routine fired.\n')
+          : r === 'busy'
+            ? L('A rotina ainda está rodando.\n', 'The routine is still running.\n')
+            : r === 'paused'
+              ? L('Os agentes estão pausados.\n', 'The agents are paused.\n')
+              : L('Nenhuma rotina ligada com esse endereço.\n', 'No routine on with that address.\n')
+      )
   })
 })
 hooks.on('error', (e) => console.error(`[gatilhos] porta ${runtimePorts.webhook}:`, e.message))
@@ -648,15 +666,10 @@ void ready.then(async () => {
   // macOS prompt that stays open until someone answers it.
   void github.start().catch((e: unknown) => console.error('[github]', e))
   if (!fake) {
-    await new Promise<void>((resolve, reject) => {
-      hooks.once('error', reject)
-      hooks.listen(runtimePorts.webhook, '127.0.0.1', () => { hooks.removeListener('error', reject); resolve() })
-    })
-    await new Promise<void>((resolve, reject) => {
-      const proxy = github.listen()
-      proxy.once('error', reject)
-      proxy.once('listening', () => { proxy.removeListener('error', reject); resolve() })
-    })
+    // A port taken (another Tucano open, say) is logged and the rest goes on: a call there reaches
+    // a server that doesn't know its token, never this workspace's data.
+    hooks.listen(runtimePorts.webhook, '127.0.0.1')
+    github.listen()
     void telegram?.start()
   }
   routines.start()

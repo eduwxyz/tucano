@@ -24,7 +24,9 @@ It copies model selections, agents/instructions, channel structure/membership,
 connector configuration and encrypted credentials/grants, skills, routines and
 settings. A configured copy skips onboarding; an unfinished source still needs
 setup. It does not copy messages, memories, conversation summaries, approvals,
-usage history, artifacts, running services, computer files or browser sessions.
+usage history, artifacts, running services, computer files or browser sessions,
+nor the extra Claude Code/Codex accounts (their sign-ins live in the source's folder
+and the keychain): the copy's agents use the usual sign-in.
 Lent folders and linked skills remain references to the same external files.
 Changes to those external files are not isolated by making a copy.
 
@@ -48,11 +50,13 @@ becomes the shared preference. Server mode keeps its single-workspace settings.
 The selector shares only names, unread counts and pending approval counts.
 Conversations, memory and credentials are not combined. Default webhook/git
 ports remain 47717/47718; other workspaces have persistent separate assignments.
-A port conflict fails startup visibly rather than routing work to another DB.
+A port already taken (another Tucano open, say) is logged and that workspace keeps
+running without it: a call there reaches a server that doesn't know its tokens.
 
 At the end of **Settings > General**, the **Danger area** contains backup controls
 and workspace deletion. Deletion requires an OS confirmation dialog and removes
-that workspace's data, including its local backups. Copy a backup outside the
+that workspace's data, including its local backups and the transcripts Claude Code
+keeps for its agents in `~/.claude/projects`. Copy a backup outside the
 workspace before confirming. External project folders and other workspaces are
 kept. The default workspace is protected: it cannot be deleted from Settings,
 the manager or the backend. Its backup and duplication actions remain available.

@@ -86,6 +86,7 @@ export interface RoutineDeps {
   }
   connectors?: { call(id: string, tool: string, args: Record<string, unknown>): Promise<CallToolResult>; list(): Connector[] }
   blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
+  paused?: () => boolean // paused: a call from outside says so instead of starting a run
   emit: (e: CoreEvent) => void
   notify?: (title: string, shortText: string, conversationId: string, fullText?: string) => void
   now?: () => number
@@ -236,8 +237,8 @@ export class Routines {
   }
 
   // A call to http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>, from something on this Mac.
-  webhook(token: string, body: string): 'ok' | 'unknown' | 'busy' {
-    if (this.deps.blocked?.()) return 'busy'
+  webhook(token: string, body: string): 'ok' | 'unknown' | 'busy' | 'paused' {
+    if (this.deps.paused?.()) return 'paused'
     const r = this.deps.db.routines().find((x) => x.trigger?.kind === 'webhook' && x.trigger.token === token)
     if (!r || !r.enabled) return 'unknown'
     if (this.running.has(r.id)) return 'busy'
@@ -304,7 +305,6 @@ export class Routines {
   }
 
   runNow(id: string): void {
-    if (this.deps.blocked?.()) return
     this.fire(id, { scheduledAt: this.now(), late: false })
   }
 
@@ -345,7 +345,6 @@ export class Routines {
   // One run of a routine at a time: if the last one is still going, this one skips.
   // `more`: a connector check left new items, so check again when this run ends.
   private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
-    if (this.deps.blocked?.()) return
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
     this.running.add(id)

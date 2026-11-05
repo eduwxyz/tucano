@@ -97,6 +97,7 @@ function startCore(workspace: Workspace): Runtime {
   child.on('exit', (code) => {
     console.error(`[main] core of workspace ${workspace.id} exited with code ${code}`)
     clearTimeout(timer)
+    if (cores.get(workspace.id) !== runtime) return // replaced by a new one already
     reject(new Error(`Workspace core exited (${code})`))
     runtime.summary.status = 'failed'
     runtime.busy = false
@@ -387,6 +388,7 @@ ipcMain.on('core:connect', async (event) => {
 
 let switching = false
 async function switchWorkspace(id: string): Promise<void> {
+  if (id === registry.selected().id) return // already on screen: nothing to reload
   if (switching) throw new Error(L('Aguarde a troca de workspace.', 'Wait for the workspace switch.'))
   switching = true
   try {

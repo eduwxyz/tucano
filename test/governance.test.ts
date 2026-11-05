@@ -145,11 +145,7 @@ describe('grants', () => {
     const r = runner((_, tools) => ({ tool: tools.find((t) => t.endsWith('__create_task')) ?? 'tarefas__create_task', args: { title: 'invasora' } }))
     await r.send('d1', 'oi')
     await r.idle()
-    const tools = seen.tools[0]!
-    expect(tools).toContain('ask_user')
-    expect(tools).toContain('pedir_acesso')
-    expect(tools).toContain('tarefas__list_tasks')
-    expect(tools).not.toContain('tarefas__create_task')
+    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'agendar_rotina', 'cancelar_rotina', 'tarefas__list_tasks']) // it can ask for more, not take it
     expect(seen.results[0]).toMatchObject({ isError: true })
     expect(textOf(seen.results[0])).toContain('não permitida')
     expect(tasks().some((t) => t.title === 'invasora')).toBe(false)
