@@ -7,7 +7,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > **Em português:**
 > - **Conversas longas não pesam mais enquanto um agente responde.** Cada palavra recebida redesenhava todas as mensagens; agora só a que mudou.
 > - **O navegador dos agentes abre páginas num servidor Linux que é um PC.** O Chrome esperava o chaveiro bloqueado da área de trabalho e nenhuma página carregava; no servidor ele agora usa o próprio armazenamento.
+> - **Decisões, uma de cada vez.** Quando um agente precisa de você, a proposta vem na mensagem e as decisões aparecem no lugar da caixa de texto, com opções pra clicar ou apertar o número, "Outra coisa" e "Pular". Com mais de uma, você confere tudo antes de enviar.
 > - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
+
+### Added
+
+- **Decisions, one at a time.** When an agent needs you, its proposal comes in the message and its decisions take the place of the message box: a single choice, several choices or a short text, with options to click or pick by number, "Something else" and "Skip". With more than one, you check every answer before sending, and the agent's message keeps a summary of what you chose. Agents are told to keep each question short and to put the context in their reply; a question longer than 200 characters goes back to them. On Telegram the decisions arrive as text, and a reply still answers.
 
 ### Fixed
 
