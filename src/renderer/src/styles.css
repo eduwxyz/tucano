@@ -262,6 +262,9 @@ h3 {
   border: 3px solid transparent;
   background-clip: content-box;
 }
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 
 /* ---------- layout ---------- */
 .app {
@@ -925,6 +928,31 @@ h3 {
   flex: 1;
   overflow-y: auto;
   padding: 24px 0 12px;
+}
+/* "Go to the end": rides the bottom of the list while you read further up. */
+.messages__jump {
+  position: sticky;
+  bottom: 12px;
+  height: 0;
+  display: flex;
+  justify-content: center;
+}
+.messages__jump-btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-100%);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text-2);
+  box-shadow: var(--shadow-panel);
+  transition: var(--transition-ui);
+  --pop-y: 0;
+  animation: pop var(--dur-base) var(--ease-out);
+}
+.messages__jump-btn:hover {
+  color: var(--text);
 }
 .messages--empty {
   display: grid;
@@ -2036,7 +2064,7 @@ h3 {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 .toggle.is-on {
-  background: var(--ok);
+  background: var(--accent);
 }
 .toggle.is-on::after {
   transform: translateX(14px);
@@ -2505,6 +2533,7 @@ h3 {
 
 /* A router's note: what it did, and why, quietly, on one line. */
 .system-line__why {
+  flex: 1 1 0; /* the headline wraps only when it doesn't fit alone; the why takes what's left, or nothing */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2515,7 +2544,7 @@ h3 {
   content: '· ';
 }
 .system-line > p {
-  flex-shrink: 0;
+  min-width: 0;
 }
 .system-line > .muted {
   margin-left: auto;
@@ -4590,6 +4619,9 @@ table.csv th {
 .harness__head strong {
   display: block;
   font-size: 14px;
+}
+.harness__check:not(:disabled) + .harness__name {
+  cursor: pointer;
 }
 .harness__account {
   display: block;
@@ -7856,10 +7888,14 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
 .voice-on { display: grid; gap: 8px; }
 .voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
-.voice-advanced { display: grid; gap: 10px; }
+/* The card doesn't space its children: the model's line, the microphone and Avançado get a gap here. */
+.voice-prefs { display: grid; gap: 14px; }
+/* Closed, the folded part keeps no room: the gap only between what shows when it's open. */
+.voice-advanced[open] { display: grid; gap: 10px; }
 .voice-advanced summary { cursor: pointer; }
 .voice-pop > .btn { justify-self: start; }
 .voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
 .voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
 .voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+
