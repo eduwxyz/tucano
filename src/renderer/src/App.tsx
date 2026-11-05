@@ -7,11 +7,14 @@ import { Lightbox } from './components/Lightbox'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage } from './components/Pages'
 import { UsagePage } from './components/Usage'
 import { MemoryPage } from './components/Memory'
+import { WikiView } from './components/Wiki'
 import { RoutinesPage } from './components/Routines'
 import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
 import { Onboarding } from './components/Onboarding'
 import { Dialogs } from './components/Dialogs'
+import { WhatsNew } from './components/Update'
+import { CoreDown, Toasts } from './components/Toast'
 import { Icon } from './components/ui'
 
 export function App(): ReactNode {
@@ -53,13 +56,21 @@ export function App(): ReactNode {
     return () => window.removeEventListener('keydown', keys)
   }, [intro, mac])
 
-  if (!view) return <div className="boot" />
+  // The core may stop before the app shows: the banner says so even then.
+  if (!view)
+    return (
+      <div className="boot">
+        <CoreDown />
+      </div>
+    )
   // Dialogs too: connecting a tool from the introduction may open one (on a server).
   if (intro)
     return (
       <>
         <Onboarding />
         <Dialogs />
+        <Toasts />
+        <CoreDown />
       </>
     )
   if (view.kind === 'tuca')
@@ -67,6 +78,8 @@ export function App(): ReactNode {
       <>
         <Onboarding build from={view.from} />
         <Dialogs />
+        <Toasts />
+        <CoreDown />
       </>
     )
 
@@ -86,13 +99,17 @@ export function App(): ReactNode {
         {view.kind === 'usage' && <UsagePage />}
         {view.kind === 'connectors' && <ConnectorsPage />}
         {view.kind === 'memory' && <MemoryPage />}
+        {view.kind === 'wiki' && <WikiView />}
         {view.kind === 'routines' && <RoutinesPage />}
         {view.kind === 'skills' && <SkillsPage />}
         {view.kind === 'report' && <ReportPage />}
         {view.kind === 'settings' && <SettingsPage />}
       </main>
       <Dialogs />
+      <WhatsNew />
       <Lightbox />
+      <Toasts />
+      <CoreDown />
     </div>
   )
 }

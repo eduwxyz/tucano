@@ -1,8 +1,11 @@
-import { L } from '../../../shared/lang'
-import { CODE_SPANS } from '../../../shared/types'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import Markdown from 'react-markdown'
+import { L, lang, locale } from '../../../shared/lang'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import Markdown, { defaultUrlTransform, type ExtraProps } from 'react-markdown'
+import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
+import { remarkMentions, splitMentions } from '../../../shared/mention-text'
+import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
+import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import {
   agentById,
   conversationTitle,
@@ -11,19 +14,26 @@ import {
   decideMemory,
   describeSchedule,
   editSummary,
+  editThreadSummary,
   ENGINES,
   forgetMemory,
   modelById,
   navigate,
   openDm,
+  openPanel,
+  openThread,
+  seeThread,
+  openTuca,
   removeRoutine,
   retryRun,
   continueRun,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
+  setTab,
   stopRun,
   summarizeNow,
+  summarizeThreadNow,
   useStore,
   SUMMARY_MAX_AFTER,
   SUMMARY_WINDOW,
@@ -31,16 +41,68 @@ import {
   type Approval,
   type Conversation,
   type ImageUpload,
+  type Author,
   type Message,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
-  isTeam
+  isTeam,
+  cancelTranscribe,
+  transcribe,
+  voiceStatus
 } from '../store'
-import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
+import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { canRecord, NoSound, record, type Recording } from '../voice'
+import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal } from './Tuca'
+import { FoldToggle } from './Fold'
+
+// Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
+export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
+  const [open, setOpen] = useState(initiallyOpen)
+  return (
+    <div className="note">
+      <FoldToggle open={open} onToggle={() => setOpen(!open)}>
+        {label}
+      </FoldToggle>
+      {open && children}
+    </div>
+  )
+}
+
+// A tool's name as words: "create_issue" → "create issue", "getPullRequest" → "get pull request".
+export const toolWords = (name: string): string =>
+  name
+    .replace(/^mcp__[^_]+__/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_\-.]+/g, ' ')
+    .trim()
+    .toLowerCase()
+
+// An approval's arguments a person can read at a glance: the plain values, named in words.
+// Nested ones stay in the exact details.
+function argSummary(args: Record<string, unknown>): { shown: [string, string][]; more: boolean } {
+  const plain = (v: unknown): string | undefined =>
+    typeof v === 'string' ? (v.length > 160 ? `${v.slice(0, 160)}…` : v) : typeof v === 'number' || typeof v === 'boolean' ? String(v) : Array.isArray(v) && v.every((x) => typeof x === 'string' || typeof x === 'number') ? v.join(', ') : undefined
+  const all = Object.entries(args).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  const shown = all
+    .map(([k, v]): [string, string | undefined] => [toolWords(k), plain(v)])
+    .filter((e): e is [string, string] => !!e[1]?.trim())
+    .slice(0, 5)
+  // What the glance leaves out (a long text cut, a nested value, a sixth field) is said, not hidden.
+  return { shown, more: shown.length < all.length || all.some(([, v]) => typeof v === 'string' && v.length > 160) }
+}
+
+// "Vale até as 14:30." / "Good until 2:30 PM.", with the day when it isn't today.
+function until(at: number): string {
+  const d = new Date(at)
+  const hm = d.toLocaleTimeString(locale(), lang() === 'en' ? { hour: 'numeric', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' })
+  if (d.toDateString() === new Date().toDateString()) return L(`Vale até as ${hm}.`, `Good until ${hm}.`)
+  const day = d.toLocaleDateString(locale(), { day: 'numeric', month: 'short' }).replace('.', '')
+  return L(`Vale até ${day}, às ${hm}.`, `Good until ${day}, ${hm}.`)
+}
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
@@ -54,9 +116,25 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   })
   const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
   const focus = useStore((s) => (s.view?.kind === 'conversation' && s.view.id === id ? s.view.message : undefined))
+  const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
   const [showSummary, setShowSummary] = useState(false)
+  const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
 
-  if (!conv) return <div className="empty">{L('Conversa não encontrada.', 'Conversation not found.')}</div>
+  if (!conv)
+    return (
+      <div className="empty">
+        <p>{L('Essa conversa não existe mais: pode ter sido apagada.', 'This conversation no longer exists: it may have been deleted.')}</p>
+        {firstChannel ? (
+          <button className="btn btn--primary btn--sm" onClick={() => navigate({ kind: 'conversation', id: firstChannel.id })}>
+            {L(`Voltar pra #${firstChannel.name}`, `Back to #${firstChannel.name}`)}
+          </button>
+        ) : (
+          <button className="btn btn--primary btn--sm" onClick={openTuca}>
+            {L('Falar com o Tuca', 'Talk to Tuca')}
+          </button>
+        )}
+      </div>
+    )
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
 
   return (
@@ -64,9 +142,15 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
-            <h1>{title}</h1>
-            {dmAgent && <span className="tag">{dmAgent.role}</span>}
+            <button className="topbar__name" title={conv.kind === 'channel' ? L('Configurações do canal', 'Channel settings') : L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+              {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
+              <h1>{title}</h1>
+            </button>
+            {dmAgent?.role && (
+              <span className="tag topbar__role" title={dmAgent.role}>
+                {dmAgent.role}
+              </span>
+            )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
           </div>
           <div className="topbar__actions">
@@ -94,24 +178,44 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           </div>
         </header>
 
-        {showSummary && <SummaryPanel conv={conv} messages={messages} onClose={() => setShowSummary(false)} />}
+        {showSummary && <SummaryPanel conv={conv} messages={messages.filter((m) => !m.threadId)} onClose={() => setShowSummary(false)} />}
 
-        <MessageList messages={messages} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem para ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        <MessageList messages={messages} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} threads />
+        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
       </section>
-      <SidePanel />
+      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
     </div>
   )
 }
 
-export function MessageList({ messages, conversationId, empty, focus }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string }): ReactNode {
+const NO_REPLIES: Message[] = []
+
+// `threads`: the timeline shows only what's outside threads, and each message can start one.
+export function MessageList({ messages: all, conversationId, empty, focus, threads, lead }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string; threads?: boolean; lead?: ReactNode }): ReactNode {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const [farFromBottom, setFarFromBottom] = useState(false)
+  const { messages, replies } = useMemo(() => {
+    if (!threads) return { messages: all, replies: undefined }
+    const replies = new Map<string, Message[]>()
+    for (const m of all) {
+      if (!m.threadId) continue
+      const list = replies.get(m.threadId)
+      if (list) list.push(m)
+      else replies.set(m.threadId, [m])
+    }
+    return { messages: all.filter((m) => !m.threadId), replies }
+  }, [all, threads])
+  // In a DM, whose it is (for the empty state).
+  const dmName = useStore((s) => {
+    const c = s.conversations.find((x) => x.id === conversationId)
+    return c?.kind === 'dm' && c.members[0] ? agentById(s, c.members[0])?.name : undefined
+  })
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once.
   useEffect(() => {
     const i = focus ? messages.findIndex((m) => m.id === focus) : -1
-    const el = i >= 0 ? (ref.current?.children[i] as HTMLElement | undefined) : undefined
+    const el = i >= 0 ? (ref.current?.children[i + (lead ? 1 : 0)] as HTMLElement | undefined) : undefined
     if (!el) return
     stick.current = false
     el.scrollIntoView({ block: 'center' })
@@ -122,7 +226,9 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
   }, [focus, conversationId])
 
   useEffect(() => {
-    stick.current = true
+    if (!lead) stick.current = true
+    setFarFromBottom(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
 
   useLayoutEffect(() => {
@@ -130,7 +236,21 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
     if (el && stick.current) el.scrollTop = el.scrollHeight
   })
 
-  if (messages.length === 0 && empty) {
+  // A thread opens at its latest message, like Slack: the message that started it is a scroll up.
+  // Once more on the next frame, for what lays out a little late (code blocks, images).
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!lead || !el) return
+    stick.current = true
+    el.scrollTop = el.scrollHeight
+    const frame = requestAnimationFrame(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight
+    })
+    return () => cancelAnimationFrame(frame)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (messages.length === 0 && empty && !lead) {
     return (
       <div className="messages messages--empty">
         <div className="empty">
@@ -145,13 +265,13 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
     )
   }
 
-  if (messages.length === 0) {
+  if (messages.length === 0 && !lead) {
     return (
       <div className="messages messages--empty">
         <div className="empty">
           <Icon name="spark" size={22} />
           <p>{L('Nada por aqui ainda.', 'Nothing here yet.')}</p>
-          <p className="muted">{L('Mencione um agente com @ ou escreva e deixe o router decidir quem responde.', 'Mention an agent with @, or just write and let the router decide who replies.')}</p>
+          <p className="muted">{dmName ? L(`Escreva o que precisa: ${dmName} sempre responde aqui.`, `Write what you need: ${dmName} always replies here.`) : L('Escreva e quem estiver no canal responde. Pra chamar alguém, use @.', 'Write and whoever is in the channel replies. To call on someone, use @.')}</p>
         </div>
       </div>
     )
@@ -163,9 +283,12 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
       ref={ref}
       onScroll={(e) => {
         const el = e.currentTarget
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+        const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+        stick.current = fromBottom < 60
+        setFarFromBottom(fromBottom > el.clientHeight / 2)
       }}
     >
+      {lead}
       {messages.map((m, i) => {
         const prev = messages[i - 1]
         const grouped =
@@ -176,14 +299,32 @@ export function MessageList({ messages, conversationId, empty, focus }: { messag
           !m.run &&
           m.author.kind !== 'system' &&
           m.author.kind !== 'routine'
-        return <MessageRow key={m.id} message={m} grouped={grouped} />
+        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
       })}
+      {farFromBottom && (
+        <div className="messages__jump">
+          <button className="messages__jump-btn" title={L('Ir para o fim', 'Go to the end')} aria-label={L('Ir para o fim da conversa', 'Go to the end of the conversation')} onClick={() => ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' })}>
+            <Icon name="down" size={15} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
-function MessageRow({ message, grouped }: { message: Message; grouped: boolean }): ReactNode {
+const AGENT_PLUGINS = [remarkGfm, remarkMentions, remarkLocalPaths]
+const PLAIN_PLUGINS = [remarkGfm, remarkMentions]
+const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
+
+// Parsing is by far the most expensive part of drawing a message, so it only runs when the text changes.
+const MessageMarkdown = memo(Markdown)
+
+// `replies`: in a timeline with threads, the replies to this message (none yet: empty).
+// Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
+const MessageRow = memo(function MessageRow({ message, grouped, replies }: { message: Message; grouped: boolean; replies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
+  // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
+  const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
   const attached = useStore((s) => (message.author.kind === 'me' ? s.artifacts.filter((a) => a.messageId === message.id && a.agentId === '') : []))
@@ -195,21 +336,24 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
       s.messages.findLast((m) => m.conversationId === message.conversationId && m.run?.browser && m.author.kind === 'agent' && m.author.id === agent?.id)?.id === message.id
   )
 
+  // The same object between renders, or every link would start over.
+  const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
+
   if (message.author.kind === 'system') {
     return (
       <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`}>
         <Icon name="spark" size={13} />
-        <Markdown>{message.text}</Markdown>
+        <SystemText text={message.text} />
         <span className="muted">{time(message.at)}</span>
       </div>
     )
   }
 
-  if (message.author.kind === 'routine') return <RoutineMessage message={message} />
+  if (message.author.kind === 'routine') return <RoutineMessage message={message} replies={replies} />
 
   const name = agent ? agent.name : me.name
   return (
-    <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''}`}>
+    <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`}>
       <div className="msg__gutter">
         {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={me.initials} size={34} />)}
       </div>
@@ -234,7 +378,11 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run && <RunSteps message={message} />}
         {message.text ? (
           <div className="md">
-            <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>{highlightMentions(message.text)}</Markdown>
+            {agent && message.run?.status !== 'working' ? (
+              <MessageMarkdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+            ) : (
+              <MessageMarkdown remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+            )}
           </div>
         ) : null}
         {attached.length > 0 && (
@@ -249,6 +397,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run?.agentDraft && <AgentProposal message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
+        {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">
             {message.run.artifactIds.map((aid) => (
@@ -261,6 +410,13 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run?.status === 'stopped' && <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>}
         {message.run?.status === 'interrupted' && <div className="note">{L('Interrompido: o app fechou no meio da resposta.', 'Interrupted: the app closed in the middle of the reply.')}</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
+        {message.run?.errorDetail && (
+          <Details label={L('Detalhes', 'Details')}>
+            <div className="mono small" style={{ whiteSpace: 'pre-wrap' }}>
+              {message.run.errorDetail}
+            </div>
+          </Details>
+        )}
         {message.run?.status === 'paused' && (
           <>
             <div className="note">{L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}</div>
@@ -269,19 +425,31 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
             </button>
           </>
         )}
-        {message.run && ['failed', 'stopped', 'interrupted', 'limit_reached'].includes(message.run.status) && (
+        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it. */}
+        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             {L('Tentar de novo', 'Try again')}
           </button>
         )}
-        {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+        {message.run?.status === 'limit_reached' && agent && agent.used >= agent.limit && (
+          <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
+            {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
+          </button>
+        )}
+        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length)) && (
+          <div className="msg__meta">
+            {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+            {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && <KeepInWiki messageId={message.id} />}
+          </div>
+        )}
+        {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
   )
-}
+})
 
 // What a routine asked, posted at its time; the agent's reply comes next.
-function RoutineMessage({ message }: { message: Message }): ReactNode {
+function RoutineMessage({ message, replies }: { message: Message; replies?: Message[] }): ReactNode {
   const exists = useStore((s) => s.routines.some((r) => message.author.kind === 'routine' && r.id === message.author.id))
   const info = message.routine
   return (
@@ -310,10 +478,184 @@ function RoutineMessage({ message }: { message: Message }): ReactNode {
           </div>
         )}
         <div className="md">
-          <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>{highlightMentions(message.text)}</Markdown>
+          <MessageMarkdown remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
         </div>
+        {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
+  )
+}
+
+// A system note says what happened first ("Chamei **Iris**"), then why, after " · ": the
+// headline reads at a glance, the why stays quiet (and whole on hover).
+function SystemText({ text }: { text: string }): ReactNode {
+  const [head = '', ...why] = text.split(' · ')
+  return (
+    <>
+      <Markdown>{head}</Markdown>
+      {why.length > 0 && (
+        <span className="system-line__why" title={why.join(' · ').replace(/\*\*/g, '')}>
+          {why.join(' · ').replace(/\*\*/g, '')}
+        </span>
+      )}
+    </>
+  )
+}
+
+const repliesLabel = (n: number): string => L(`${n} resposta${n === 1 ? '' : 's'}`, `${n} repl${n === 1 ? 'y' : 'ies'}`)
+
+// Who took part in a thread, as faces: agents with their eyes (reading while they work), me with my initials.
+function Faces({ authors, busy }: { authors: Author[]; busy: Set<string> }): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const me = useStore((s) => s.me)
+  return (
+    <span className="thread-link__faces" aria-hidden>
+      {authors.slice(0, 3).map((a) => {
+        if (a.kind === 'agent') {
+          const agent = agents.find((x) => x.id === a.id)
+          return agent ? <AgentAvatar key={a.id} agent={agent} size={18} busy={busy.has(a.id)} /> : null
+        }
+        return <MeAvatar key="me" initials={me.initials} size={18} />
+      })}
+    </span>
+  )
+}
+
+// "Reply in thread" on hover and, under a message with replies, a small pill: who took part,
+// how many replies and when the last came (or who's replying, or what waits on me). It opens
+// the thread on the side. With no reply yet, the system's note says what happened.
+function ThreadLink({ message, replies }: { message: Message; replies: Message[] }): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const open = useStore((s) => s.panel?.kind === 'thread' && s.panel.id === message.id)
+  const said = replies.filter((m) => m.author.kind !== 'system')
+  const done = said.filter((m) => m.run?.status !== 'working')
+  const nameOf = (m: Message): string => {
+    const a = m.author
+    return a.kind === 'agent' ? (agents.find((x) => x.id === a.id)?.name ?? L('agente', 'agent')) : a.kind === 'me' ? L('você', 'you') : L('rotina', 'routine')
+  }
+  const key = (a: Author): string => (a.kind === 'agent' ? a.id : a.kind)
+  // The latest to speak first: their face leads.
+  const authors = [...new Map([...said].reverse().map((m) => [key(m.author), m.author])).values()]
+  const working = said.filter((m) => m.run?.status === 'working')
+  const busy = [...new Set(working.map(nameOf))]
+  // What's waiting on me in there, now that answers live in threads: a question or an approval.
+  const asks = said.findLast((m) => m.run?.status === 'waiting_input' || m.run?.status === 'waiting_approval')
+  const note = said.length === 0 ? replies.findLast((m) => m.author.kind === 'system') : undefined
+  const last = done.at(-1)
+  // New: what others said after I last had the thread open (while it's open, nothing is).
+  const seen = useStore((s) => s.threadSeen[message.id] ?? 0)
+  const fresh = open ? 0 : done.filter((m) => m.author.kind !== 'me' && m.at > seen).length
+  const go = (): void => openThread(message.id)
+  return (
+    <>
+      <button className="icon-btn icon-btn--sm msg__reply" title={L('Responder na thread', 'Reply in thread')} aria-label={L('Responder na thread', 'Reply in thread')} onClick={go}>
+        <Icon name="thread" size={13} />
+      </button>
+      {note && (
+        <button className={`thread-note ${note.run?.status === 'working' ? 'is-pending' : ''}`} onClick={go} title={note.text.replace(/\*\*/g, '')}>
+          <Icon name="spark" size={12} />
+          <span>{note.text.replace(/\*\*/g, '').split(' · ')[0]}</span>
+        </button>
+      )}
+      {said.length > 0 && (
+        <button className={`thread-link ${open ? 'is-open' : ''} ${asks ? 'is-asking' : ''}`} onClick={go} aria-label={L(`Abrir a thread: ${repliesLabel(done.length)}`, `Open the thread: ${repliesLabel(done.length)}`)}>
+          {fresh > 0 && <span className="thread-link__dot" aria-label={L(`${fresh} nova${fresh === 1 ? '' : 's'}`, `${fresh} new`)} />}
+          <Faces authors={authors} busy={new Set(working.flatMap((m) => (m.author.kind === 'agent' ? [m.author.id] : [])))} />
+          {asks ? (
+            <span className="thread-link__asks">
+              {asks.run!.status === 'waiting_input' ? L(`${nameOf(asks)} te perguntou algo`, `${nameOf(asks)} asked you something`) : L(`${nameOf(asks)} pede aprovação`, `${nameOf(asks)} asks for approval`)}
+            </span>
+          ) : busy.length > 0 ? (
+            <span className="shimmer">{L(`${busy.join(' e ')} ${busy.length === 1 ? 'está' : 'estão'} respondendo…`, `${busy.join(' and ')} ${busy.length === 1 ? 'is' : 'are'} replying…`)}</span>
+          ) : (
+            <strong key={done.length} className="thread-link__count">
+              {repliesLabel(done.length)}
+              {fresh > 0 && <span className="thread-link__fresh">{L(` · ${fresh} nova${fresh === 1 ? '' : 's'}`, ` · ${fresh} new`)}</span>}
+            </strong>
+          )}
+          {!busy.length && !asks && last && (
+            <span className="thread-link__when">
+              <span className="thread-link__ago">{ago(last.at)}</span>
+              <span className="thread-link__see">{L('Ver thread', 'View thread')}</span>
+            </span>
+          )}
+          <Icon name="chevron" size={12} />
+        </button>
+      )}
+    </>
+  )
+}
+
+// A thread on the side: the message that started it, set apart, then its replies and a
+// field that answers there.
+function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
+  const root = useStore((s) => s.messages.find((m) => m.id === rootId))
+  const replies = useStore((s) => s.messages.filter((m) => m.threadId === rootId))
+  const agents = useStore((s) => s.agents)
+  const [showSummary, setShowSummary] = useState(false)
+  const said = replies.filter((m) => m.author.kind !== 'system' && m.run?.status !== 'working').length
+  const replying = [...new Set(replies.flatMap((m) => (m.run?.status === 'working' && m.author.kind === 'agent' ? [m.author.id] : [])))].map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent'))
+  // Open, the thread is seen as it goes; closed, up to when it closed.
+  const latest = replies.at(-1)?.at
+  useEffect(() => {
+    seeThread(rootId)
+    return () => seeThread(rootId)
+  }, [rootId, latest])
+  // Esc closes it, unless something on top (a menu, a window) takes the key first.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('.modal, .menu, .mention-menu, .lightbox')) return
+      openPanel(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  const lead = root && (
+    <div className="thread__lead">
+      <MessageRow message={root} grouped={false} />
+      <div className="thread__divider">
+        {replying.length > 0 ? (
+          <span key="replying" className="shimmer">
+            {L(`${replying.join(' e ')} ${replying.length === 1 ? 'está' : 'estão'} respondendo…`, `${replying.join(' and ')} ${replying.length === 1 ? 'is' : 'are'} replying…`)}
+          </span>
+        ) : (
+          <span key={said}>{said > 0 ? repliesLabel(said) : L('Ainda sem respostas', 'No replies yet')}</span>
+        )}
+      </div>
+    </div>
+  )
+  return (
+    <aside className="side-panel side-panel--thread">
+      <header className="side-panel__head">
+        <Icon name="thread" size={14} />
+        <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
+        <span className="side-panel__where">{L(`em ${title}`, `in ${title}`)}</span>
+        <span className="grow" />
+        {root && (
+          <button
+            className={`icon-btn ${showSummary ? 'is-active' : ''}`}
+            title={L('O que esta thread já cobriu', 'What this thread has covered')}
+            aria-label={L('Resumo da thread', 'Thread summary')}
+            aria-pressed={showSummary}
+            onClick={() => setShowSummary(!showSummary)}
+          >
+            <Icon name="book" size={14} />
+          </button>
+        )}
+        <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
+          <Icon name="x" size={14} />
+        </button>
+      </header>
+      {root?.conversationId === conv.id ? (
+        <>
+          {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
+          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
+          <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
+        </>
+      ) : (
+        <p className="empty">{L('Essa mensagem não está mais aqui.', 'That message is no longer here.')}</p>
+      )}
+    </aside>
   )
 }
 
@@ -325,7 +667,7 @@ function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
     <div className="md-code">
       <pre ref={ref}>{children}</pre>
       <button
-        className="icon-btn icon-btn--sm md-code__copy"
+        className={`icon-btn icon-btn--sm md-code__copy ${copied ? 'is-copied' : ''}`}
         title={L(copied ? 'Copiado' : 'Copiar', copied ? 'Copied' : 'Copy')}
         aria-label={L(copied ? 'Copiado' : 'Copiar código', copied ? 'Copied' : 'Copy code')}
         onClick={() =>
@@ -339,52 +681,99 @@ function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
 }
 
 function SummaryPanel({ conv, messages, onClose }: { conv: Conversation; messages: Message[]; onClose: () => void }): ReactNode {
-  const [text, setText] = useState(conv.summary ?? '')
+  const since = messages.filter((m) => m.author.kind !== 'system' && m.text.trim() && m.at > (conv.summaryUntil ?? 0)).length
+  return (
+    <SummaryBox
+      title={L('Resumo da conversa', 'Conversation summary')}
+      summary={conv.summary}
+      at={conv.summaryAt}
+      ready={since > SUMMARY_WINDOW}
+      notYet={L(`As últimas ${SUMMARY_WINDOW} mensagens sempre vão inteiras; ainda não há o que resumir.`, `The last ${SUMMARY_WINDOW} messages always go in full; nothing to summarize yet.`)}
+      empty={L(`Quando passar de ${SUMMARY_MAX_AFTER} mensagens, o que sair da janela vira um resumo aqui.`, `Past ${SUMMARY_MAX_AFTER} messages, what leaves the window becomes a summary here.`)}
+      hint={L(
+        `Numa thread, os agentes leem só a thread. Este resumo vai pras respostas fora de threads, como as das rotinas: elas recebem ${conv.summary ? 'este resumo e ' : ''}as ${since} mensagens ${conv.summary ? 'desde ele' : 'da conversa'}.`,
+        `In a thread, agents read only the thread. This summary goes to replies outside threads, like routines': they get ${conv.summary ? 'this summary and ' : ''}the ${since} messages ${conv.summary ? 'since it' : 'of the conversation'}.`
+      )}
+      onSummarize={() => summarizeNow(conv.id)}
+      onSave={(text) => editSummary(conv.id, text)}
+      onClose={onClose}
+    />
+  )
+}
+
+// A thread's own summary: made once it's quiet for a while (or grows long), and where the
+// memories about me in it come from.
+function ThreadSummaryPanel({ root, replies, onClose }: { root: Message; replies: Message[]; onClose: () => void }): ReactNode {
+  const s = root.threadSummary
+  const since = [root, ...replies].filter((m) => m.author.kind !== 'system' && m.text.trim() && m.at > (s?.until ?? 0)).length
+  return (
+    <SummaryBox
+      title={L('Resumo da thread', 'Thread summary')}
+      summary={s?.text}
+      at={s?.at}
+      ready={since > 0}
+      notYet={L('Nada novo desde o resumo.', 'Nothing new since the summary.')}
+      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', 'Once the thread is quiet for a few minutes, what was said becomes a summary here, and the memories about you come from it.')}
+      hint={L(
+        `Os agentes de outras threads acham esta por ele, quando procuram. Aqui, eles recebem a thread inteira até ${SUMMARY_MAX_AFTER} respostas; passando disso, este resumo e as mais recentes.`,
+        `Agents in other threads find this one by it when they search. Here, they get the whole thread up to ${SUMMARY_MAX_AFTER} replies; past that, this summary and the newest ones.`
+      )}
+      onSummarize={() => summarizeThreadNow(root.id)}
+      onSave={(text) => editThreadSummary(root.id, text)}
+      onClose={onClose}
+    />
+  )
+}
+
+function SummaryBox(p: {
+  title: string
+  summary?: string
+  at?: number
+  ready: boolean // there's something new to summarize
+  notYet: string // why not, when there isn't
+  empty: string
+  hint: string
+  onSummarize: () => void
+  onSave: (text: string) => void
+  onClose: () => void
+}): ReactNode {
+  const [text, setText] = useState(p.summary ?? '')
   const [asked, setAsked] = useState<number | null>(null)
-  useEffect(() => setText(conv.summary ?? ''), [conv.summary, conv.summaryAt])
+  useEffect(() => setText(p.summary ?? ''), [p.summary, p.at])
   useEffect(() => {
     if (asked === null) return
     const t = setTimeout(() => setAsked(null), 120_000) // give up waiting; the core logs failures
     return () => clearTimeout(t)
   }, [asked])
-  const busy = asked !== null && (conv.summaryAt ?? 0) < asked
-  const since = messages.filter((m) => m.author.kind !== 'system' && m.text.trim() && m.at > (conv.summaryUntil ?? 0)).length
-  const changed = text.trim() !== (conv.summary ?? '').trim()
+  const busy = asked !== null && (p.at ?? 0) < asked
+  const changed = text.trim() !== (p.summary ?? '').trim()
 
   return (
     <div className="summary">
       <div className="summary__head">
-        <strong>{L('Resumo da conversa', 'Conversation summary')}</strong>
-        <span className="muted small">{conv.summaryAt ? L(`atualizado ${time(conv.summaryAt)}`, `updated ${time(conv.summaryAt)}`) : L('ainda não há', 'none yet')}</span>
+        <strong>{p.title}</strong>
+        <span className="muted small">{p.at ? L(`atualizado ${time(p.at)}`, `updated ${time(p.at)}`) : L('ainda não há', 'none yet')}</span>
         <span className="grow" />
         <button
           className="btn btn--sm"
-          disabled={busy || since <= SUMMARY_WINDOW}
-          title={since <= SUMMARY_WINDOW ? L(`As últimas ${SUMMARY_WINDOW} mensagens sempre vão inteiras; ainda não há o que resumir.`, `The last ${SUMMARY_WINDOW} messages always go in full; nothing to summarize yet.`) : undefined}
+          disabled={busy || !p.ready}
+          title={p.ready ? undefined : p.notYet}
           onClick={() => {
             setAsked(Date.now())
-            summarizeNow(conv.id)
+            p.onSummarize()
           }}
         >
           {busy ? L('Resumindo…', 'Summarizing…') : L('Resumir agora', 'Summarize now')}
         </button>
-        <button className="icon-btn" title={L('Fechar', 'Close')} onClick={onClose}>
+        <button className="icon-btn" title={L('Fechar', 'Close')} onClick={p.onClose}>
           <Icon name="x" size={14} />
         </button>
       </div>
-      {conv.summary !== undefined || changed ? (
-        <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} />
-      ) : (
-        <p className="muted small">
-          {L(`Quando passar de ${SUMMARY_MAX_AFTER} mensagens, o que sair da janela vira um resumo aqui, e os agentes recebem o resumo mais as mensagens recentes.`, `Past ${SUMMARY_MAX_AFTER} messages, what leaves the window becomes a summary here, and agents get the summary plus the recent messages.`)}
-        </p>
-      )}
+      {p.summary !== undefined || changed ? <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} /> : <p className="muted small">{p.empty}</p>}
       <div className="row row--between">
-        <span className="hint">
-          {L(`Os agentes recebem ${conv.summary ? 'este resumo e ' : ''}as ${since} mensagens ${conv.summary ? 'desde ele' : 'da conversa'}.`, `Agents get ${conv.summary ? 'this summary and ' : ''}the ${since} messages ${conv.summary ? 'since it' : 'of the conversation'}.`)}
-        </span>
+        <span className="hint">{p.hint}</span>
         {changed && (
-          <button className="btn btn--sm btn--primary" onClick={() => editSummary(conv.id, text)}>
+          <button className="btn btn--sm btn--primary" onClick={() => p.onSave(text)}>
             {L('Salvar resumo', 'Save summary')}
           </button>
         )}
@@ -456,17 +845,24 @@ function QuestionCard({ question, answered }: { question: string; answered: bool
   )
 }
 
-// A @handle in code is not bolded (CODE_SPANS, the core's rule too): the box shows and copies the real text.
-const boldMentions = (t: string): string => t.replace(/(^|\s)@([a-z0-9_-]{2,32})/gi, '$1**@$2**')
-const highlightMentions = (text: string): string => {
-  let out = ''
-  let last = 0
-  for (const m of text.matchAll(CODE_SPANS)) {
-    out += boldMentions(text.slice(last, m.index)) + m[0]
-    last = m.index! + m[0].length
-  }
-  return out + boldMentions(text.slice(last))
+// What remarkMentions marked: an agent's @handle becomes its chip, which opens its profile. A handle
+// no agent has stays as it was written, in bold, as any @ always was.
+function MentionSpan({ node: _, ...props }: ComponentProps<'span'> & ExtraProps): ReactNode {
+  const handle = (props as Record<string, unknown>)['data-mention']
+  if (typeof handle !== 'string') return <span {...props} />
+  return <Mention handle={handle} />
 }
+function Mention({ handle }: { handle: string }): ReactNode {
+  const agent = useStore((s) => s.agents.find((a) => a.handle.toLowerCase() === handle.toLowerCase()))
+  if (!agent) return <strong>@{handle}</strong>
+  return (
+    <button className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name} onClick={() => navigate({ kind: 'agent', id: agent.id })}>
+      <AgentAvatar agent={agent} size={16} />
+      <span>@{agent.handle}</span>
+    </button>
+  )
+}
+const plainMarkdown = { pre: CodeBlock, a: (p: { href?: string; children?: ReactNode }) => <WikiLink href={p.href}>{p.children}</WikiLink>, span: MentionSpan }
 
 // Now, every second while `on`: the clock of a reply at work.
 function useNow(on: boolean): number {
@@ -486,6 +882,8 @@ function RunSteps({ message }: { message: Message }): ReactNode {
   const [open, setOpen] = useState(false)
   const working = run.status === 'working'
   const now = useNow(working)
+  // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
+  const justDone = useJustEnded(working, 1600) && run.status === 'done'
 
   if (run.steps.length === 0 && !working) return null
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
@@ -497,15 +895,28 @@ function RunSteps({ message }: { message: Message }): ReactNode {
       <button className="steps__toggle" onClick={() => setOpen(!open)}>
         {working ? (
           <span className="steps__pulse" />
+        ) : justDone ? (
+          <span className="steps__done">
+            <Icon name="check" size={12} />
+          </span>
         ) : (
           <span className="steps__chev">
             <Icon name="chevron" size={12} />
           </span>
         )}
         {working ? (
-          <span className="shimmer">{current ? `${current.label}…` : L('Pensando…', 'Thinking…')}</span>
+          <span className="shimmer">
+            {current
+              ? `${current.label}…`
+              : now - message.at > 60_000
+                ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
+                : run.steps.length === 0
+                  ? L('Lendo o pedido…', 'Reading the request…')
+                  : L('Pensando…', 'Thinking…')}
+          </span>
         ) : (
-          <span>
+          <span className="steps__summary">
+            {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
             {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
             {total > 0 && ` · ${duration(total)}`}
           </span>
@@ -585,27 +996,17 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const me = useStore((s) => s.me)
   const [refusing, setRefusing] = useState(false)
   const [reason, setReason] = useState('')
-  const [hold, setHold] = useState(0)
-  const timer = useRef<number | null>(null)
-
-  const startHold = (): void => {
-    const started = performance.now()
-    const tick = (): void => {
-      const p = Math.min(1, (performance.now() - started) / 1500)
-      setHold(p)
-      if (p >= 1) {
-        timer.current = null
-        decideApproval(approval.id, 'approved')
-        return
-      }
-      timer.current = requestAnimationFrame(tick)
+  const summary = argSummary(approval.args)
+  // Hold to approve: CSS fills the button in 1.5s (.is-holding); the approval goes when
+  // that fill ends while still held. Letting go drains it back. Space or Enter hold too.
+  const [holding, setHolding] = useState(false)
+  const startHold = (): void => setHolding(true)
+  const cancelHold = (): void => setHolding(false)
+  const holdFilled = (e: React.TransitionEvent<HTMLButtonElement>): void => {
+    if (holding && e.propertyName === 'transform' && e.pseudoElement === '::before') {
+      setHolding(false)
+      decideApproval(approval.id, 'approved')
     }
-    timer.current = requestAnimationFrame(tick)
-  }
-  const cancelHold = (): void => {
-    if (timer.current) cancelAnimationFrame(timer.current)
-    timer.current = null
-    setHold(0)
   }
 
   const decided = approval.state !== 'pending'
@@ -652,20 +1053,34 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           </>
         ) : (
           <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer usar', 'wants to use')} <strong>{approval.tool.replace(/_/g, ' ')}</strong> {L('no', 'in')} {approval.connectorName}
+            {agent?.name ?? L('Agente', 'Agent')} {L('quer usar', 'wants to use')} <strong>{toolWords(approval.tool)}</strong> {L('no', 'in')} {approval.connectorName}
           </>
         )}
       </div>
       {approval.why && <p className="approval__why">{approval.why}</p>}
-      <div className="approval__call">
-        <code>
-          {approval.connectorName} · {approval.tool}
-        </code>
-        <pre>{JSON.stringify(approval.args, null, 2)}</pre>
-      </div>
+      {/* The title already says it all for an access request, an app or the browser. */}
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && summary.shown.length > 0 && (
+        <div className="approval__args small">
+          {summary.shown.map(([k, v], i) => (
+            <p key={i}>
+              <span className="muted">{k}:</span> {v}
+            </p>
+          ))}
+          {summary.more && <p className="muted">{L('Tem mais nos detalhes exatos.', 'There’s more in the exact details.')}</p>}
+        </div>
+      )}
+      {/* High risk: what is being approved shows in full, not behind a click. */}
+      <Details label={L('Ver detalhes exatos', 'See exact details')} initiallyOpen={approval.highRisk && !decided}>
+        <div className="approval__call">
+          <code>
+            {approval.connectorName} · {approval.tool}
+          </code>
+          <pre>{JSON.stringify(approval.args, null, 2)}</pre>
+        </div>
+      </Details>
       <p className="approval__bound">
         {L('A aprovação cobre só esta chamada, com estes valores. Se mudar qualquer coisa, o agente pede de novo.', 'The approval covers only this call, with these values. If anything changes, the agent asks again.')}
-        {!decided && L(` Expira ${time(approval.expiresAt)}.`, ` Expires ${time(approval.expiresAt)}.`)}
+        {!decided && ` ${until(approval.expiresAt)}`}
       </p>
 
       {decided ? (
@@ -703,13 +1118,16 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         <div className="row">
           {approval.highRisk ? (
             <button
-              className="btn btn--primary btn--hold"
+              className={`btn btn--primary btn--hold ${holding ? 'is-holding' : ''}`}
               onPointerDown={startHold}
               onPointerUp={cancelHold}
               onPointerLeave={cancelHold}
-              style={{ ['--hold' as string]: `${hold * 100}%` }}
+              onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && !e.repeat && (e.preventDefault(), startHold())}
+              onKeyUp={(e) => (e.key === ' ' || e.key === 'Enter') && cancelHold()}
+              onBlur={cancelHold}
+              onTransitionEnd={holdFilled}
             >
-              <span>{hold > 0 ? L('Segure…', 'Hold…') : L('Segure para aprovar', 'Hold to approve')}</span>
+              <span>{holding ? L('Segure…', 'Hold…') : L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
             </button>
           ) : (
             <>
@@ -717,7 +1135,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
                 {L('Aprovar', 'Approve')}
               </button>
               {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (
-                <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa ${approval.tool} no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses ${approval.tool} in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
+                <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}
@@ -770,30 +1188,271 @@ async function prepareImage(file: File): Promise<Attached | string> {
     const url = blob === file ? src : await dataUrlOf(blob)
     return { name: file.name || L('imagem', 'image'), mime: blob.type, data: url.slice(url.indexOf(',') + 1), url }
   } catch {
-    return L(`Não consegui abrir ${file.name}.`, `Couldn't open ${file.name}.`)
+    return L(`Não deu pra abrir ${file.name}. Tente salvar de novo ou mandar outra imagem.`, `${file.name} couldn't be opened. Try saving it again or send another image.`)
   }
 }
 
-// One draft per conversation, kept while the app runs: leaving a channel doesn't
-// lose the message you were typing.
+// One draft per conversation (and per thread), kept while the app runs: leaving a
+// channel doesn't lose the message you were typing.
 const drafts = new Map<string, { text: string; images: Attached[] }>()
 
-export function Composer({ conversationId, members, placeholder }: { conversationId: string; members: Agent[]; placeholder: string }): ReactNode {
+type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing'
+type DictationControls = { press: () => void; release: () => void; stop: () => void; cancel: () => void; startedAt: () => number }
+
+const NOT_READY = (): string => L('Para ditar, clique no microfone e ative o ditado.', 'To dictate, click the microphone and turn dictation on.')
+const SHORT_MS = 300
+const HOLD_MS = 400 // held at least this long, letting go ends it (push to talk); a click starts it, the next one ends it
+
+// Click to record, click again to transcribe (or hold and let go). The text goes to the field to be reviewed, never sent:
+// dictation gets names wrong, and a message sets an agent working.
+function useDictation(insert: (text: string) => void, setNote: (note: string) => void, conversationId: string): [DictationState, DictationControls] {
+  const [state, setState] = useState<DictationState>('idle')
+  const rec = useRef<Recording | null>(null)
+  const startedAt = useRef(0)
+  const job = useRef<string | null>(null)
+  const released = useRef(false)
+  const attempt = useRef(0) // a microphone that opens after this one was given up on gets closed
+  const platform = useStore((s) => s.platform)
+
+  const cancel = (): void => {
+    released.current = true
+    rec.current?.cancel()
+    rec.current = null
+    if (job.current) void cancelTranscribe(job.current)
+    job.current = null
+    setState('idle')
+  }
+
+  const stop = (): void => {
+    released.current = true
+    const r = rec.current
+    if (!r) return
+    rec.current = null
+    if (Date.now() - startedAt.current < SHORT_MS) {
+      r.cancel()
+      setState('idle')
+      setNote(L('Curto demais: clique, fale e clique de novo.', 'Too short: click, speak, and click again.'))
+      return
+    }
+    setState('transcribing')
+    const id = crypto.randomUUID()
+    job.current = id
+    void r
+      .stop()
+      .then((audio) => transcribe(id, audio))
+      .then(
+        (said) => {
+          if (job.current !== id) return
+          if (said) insert(said)
+          else setNote(L('Não ouvi nada nessa gravação.', "I didn't hear anything in that recording."))
+        },
+        (e: unknown) => {
+          if (job.current !== id) return
+          if (e instanceof NoSound)
+            setNote(
+              platform === 'mac'
+                ? L('Não chegou som do microfone. Confira qual está em uso em Ajustes do Sistema › Som.', 'No sound came from the microphone. Check which one is in use in System Settings › Sound.')
+                : L('Não chegou som do microfone. Confira qual está em uso nas configurações de som do sistema.', 'No sound came from the microphone. Check which one is in use in the system’s sound settings.')
+            )
+          else setNote(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
+        }
+      )
+      .finally(() => {
+        if (job.current !== id) return
+        job.current = null
+        setState('idle')
+      })
+  }
+
+  const start = (): void => {
+    if (state !== 'idle') return
+    released.current = false
+    const mine = ++attempt.current
+    setNote('')
+    setState('starting')
+    void voiceStatus()
+      .then((status) => {
+        if (!status.ready) throw new Error(NOT_READY())
+        return record()
+      })
+      .then(
+        (r) => {
+          if (mine !== attempt.current) return r.cancel()
+          // Let go while the microphone was still opening: nothing to record.
+          if (released.current) {
+            r.cancel()
+            setState('idle')
+            return
+          }
+          rec.current = r
+          startedAt.current = Date.now()
+          setState('recording')
+        },
+        (e: unknown) => {
+          if (mine !== attempt.current) return
+          setState('idle')
+          const name = e instanceof Error ? e.name : ''
+          setNote(
+            name === 'NotAllowedError'
+              ? platform === 'mac'
+                ? L('O microfone está bloqueado. Libere o Tucano em Ajustes do Sistema › Privacidade e Segurança › Microfone.', 'The microphone is blocked. Allow Tucano in System Settings › Privacy & Security › Microphone.')
+                : L('O microfone está bloqueado. Libere o Tucano nas configurações de privacidade do sistema.', 'The microphone is blocked. Allow Tucano in the system’s privacy settings.')
+            : name === 'NotFoundError' ? L('Não encontrei um microfone.', "I couldn't find a microphone.")
+            : e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)
+          )
+        }
+      )
+  }
+
+  useEffect(() => cancel, [conversationId]) // leaving the conversation drops what's going on
+
+  // The key can be let go anywhere, and no event reaches the field after the window loses focus.
+  // A press starts it, or ends one going on. Let go after holding it a while ends it too.
+  const pressedAt = useRef(0)
+  const toggled = useRef(false) // this press ended a recording: its release does nothing
+  const press = (): void => {
+    if (state === 'recording' || state === 'starting') return (toggled.current = true), stop()
+    if (state !== 'idle') return
+    toggled.current = false
+    pressedAt.current = Date.now()
+    start()
+  }
+  const release = (): void => {
+    if (toggled.current || !pressedAt.current) return
+    const held = Date.now() - pressedAt.current
+    pressedAt.current = 0
+    if (held >= HOLD_MS) stop()
+  }
+
+  const listening = state === 'starting' || state === 'recording'
+  useEffect(() => {
+    if (!listening) return
+    // the key can be let go anywhere; Esc drops it from anywhere
+    const up = (e: KeyboardEvent): void => {
+      if (e.code === 'Space') release()
+    }
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') cancel()
+    }
+    // held when the window lost focus: no release will come, so that's the end of it
+    const blur = (): void => {
+      if (pressedAt.current && Date.now() - pressedAt.current >= HOLD_MS) release()
+    }
+    document.addEventListener('keyup', up)
+    document.addEventListener('keydown', esc)
+    window.addEventListener('blur', blur)
+    return () => {
+      document.removeEventListener('keyup', up)
+      document.removeEventListener('keydown', esc)
+      window.removeEventListener('blur', blur)
+    }
+  }, [listening])
+
+  return [state, { press, release, stop, cancel, startedAt: () => startedAt.current }]
+}
+
+function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
+  const platform = useStore((s) => s.platform)
+  const hidden = useStore((s) => !!s.settings.voice?.hidden)
+  const status = useVoice()
+  const [open, setOpen] = useState(false)
+  // Once it's turned on from the balloon, the balloon says how to use it, then gets out of the way.
+  if (!canRecord() || hidden || !status) return null // no secure context, or the person hid it
+  if (!status.ready)
+    return (
+      <span className="voice-wrap">
+        <button
+          className={`icon-btn voice-btn is-off ${status.downloading ? 'is-loading' : ''}`}
+          aria-label={L('Ditar mensagens', 'Dictate messages')}
+          aria-expanded={open}
+          title={status.downloading ? L('Baixando o modelo de voz…', 'Downloading the voice model…') : L('Ditar mensagens: ativar', 'Dictate messages: turn on')}
+          onClick={() => setOpen(!open)}
+        >
+          <Icon name="mic" size={15} />
+        </button>
+        {open && <VoicePopover status={status} onClose={() => setOpen(false)} />}
+      </span>
+    )
+  if (open)
+    return (
+      <span className="voice-wrap">
+        <button className="icon-btn voice-btn" aria-label={L('Ditar mensagens', 'Dictate messages')} onClick={() => setOpen(false)}>
+          <Icon name="mic" size={15} />
+        </button>
+        <VoicePopover status={status} onClose={() => setOpen(false)} />
+      </span>
+    )
+  if (state === 'transcribing')
+    return (
+      <button className="btn btn--xs" title={L('Cancelar', 'Cancel')} onClick={controls.cancel}>
+        {L('Transcrevendo…', 'Transcribing…')} <Icon name="x" size={11} />
+      </button>
+    )
+  const on = state === 'recording'
+  return (
+    <span className="voice-wrap">
+      <button
+        className={`icon-btn voice-btn ${on ? 'is-recording' : ''}`}
+        aria-label={on ? L('Terminar e transcrever', 'Finish and transcribe') : L('Falar', 'Speak')}
+        aria-pressed={on}
+        title={on ? L('Clique para terminar (Esc cancela)', 'Click to finish (Esc cancels)') : L(`Clique para falar, e de novo para terminar (${platform === 'mac' ? '⌥' : 'Ctrl+'}Espaço)`, `Click to speak, and again to finish (${platform === 'mac' ? '⌥' : 'Ctrl+'}Space)`)}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          controls.press()
+        }}
+        onPointerUp={controls.release}
+        onPointerCancel={controls.cancel}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <Icon name="mic" size={15} />
+      </button>
+      {on && <RecordingClock since={controls.startedAt()} />}
+    </span>
+  )
+}
+
+// While it records: for how long, and how to end it.
+function RecordingClock({ since }: { since: number }): ReactNode {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 500)
+    return () => clearInterval(t)
+  }, [])
+  const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
+  return (
+    <span className="voice-clock" aria-live="off">
+      <i />
+      {Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}
+      <span className="muted"> · {L('clique para terminar', 'click to finish')}</span>
+    </span>
+  )
+}
+
+const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'word-spacing', 'tab-size', 'text-transform', 'text-indent', 'padding']
+
+// `threadId`: it answers in the thread that message started, not in the conversation.
+export function Composer({ conversationId, threadId, members, placeholder }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string }): ReactNode {
+  const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
-  const [text, setText] = useState(() => drafts.get(conversationId)?.text ?? '')
-  const [images, setImages] = useState<Attached[]>(() => drafts.get(conversationId)?.images ?? [])
+  const [text, setText] = useState(() => drafts.get(key)?.text ?? '')
+  const [images, setImages] = useState<Attached[]>(() => drafts.get(key)?.images ?? [])
   const [note, setNote] = useState('')
   const [dragging, setDragging] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
   const [active, setActive] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const mirror = useRef<HTMLDivElement>(null)
+  const platform = useStore((s) => s.platform)
+  const agents = useStore((s) => s.agents)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
-  const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
+  // Replies at work and questions asked here: in this thread, or outside threads.
+  const here = (m: Message): boolean => m.conversationId === conversationId && m.threadId === threadId
+  const working = useStore((s) => s.messages.filter((m) => here(m) && m.author.kind === 'agent' && m.run?.status === 'working'))
   const asker = useStore((s) => {
-    const q = s.messages.findLast((m) => m.conversationId === conversationId && m.run?.status === 'waiting_input')
+    const q = s.messages.findLast((m) => here(m) && m.run?.status === 'waiting_input')
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
   })
 
@@ -802,17 +1461,17 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   const live = useRef({ text, images })
   live.current = { text, images }
   useEffect(() => {
-    const draft = drafts.get(conversationId)
+    const draft = drafts.get(key)
     setText(draft?.text ?? '')
     setImages(draft?.images ?? [])
     setNote('')
     ref.current?.focus()
     return () => {
       const { text, images } = live.current
-      if (text.trim() || images.length) drafts.set(conversationId, { text, images })
-      else drafts.delete(conversationId)
+      if (text.trim() || images.length) drafts.set(key, { text, images })
+      else drafts.delete(key)
     }
-  }, [conversationId])
+  }, [key])
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (!files.length) return
@@ -829,9 +1488,12 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
   }
 
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
+  // With a thread open there are two fields: a drop on the thread goes to its own.
+  const inThread = !!threadId
   useEffect(() => {
     let depth = 0
     const files = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
+    const mine = (e: DragEvent): boolean => !!(e.target instanceof Element && e.target.closest('.side-panel--thread')) === inThread
     const enter = (e: DragEvent): void => {
       if (!files(e)) return
       depth++
@@ -848,7 +1510,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
       e.preventDefault()
       depth = 0
       setDragging(false)
-      void addFiles([...(e.dataTransfer?.files ?? [])])
+      if (mine(e)) void addFiles([...(e.dataTransfer?.files ?? [])])
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)
@@ -860,14 +1522,54 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
       window.removeEventListener('dragleave', leave)
       window.removeEventListener('drop', drop)
     }
-  }, [])
+  }, [inThread])
 
-  useLayoutEffect(() => {
+  // The field grows with its text, up to a point; on a narrower window the same text takes more lines.
+  const fit = (): void => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
-  }, [text])
+    followField()
+  }
+  useLayoutEffect(fit, [text])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let width = el.clientWidth
+    const watch = new ResizeObserver(() => {
+      if (el.clientWidth === width) return // only a new width changes the lines; fit's own height doesn't
+      width = el.clientWidth
+      fit()
+    })
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [])
+
+  // The text shows from a copy behind the field, where an agent's @handle wears its color; the field
+  // on top keeps the caret and the selection. The copy takes the field's type as computed (a phone
+  // gets 16 px, and a field doesn't inherit letter spacing), its width (a scrollbar takes some) and
+  // its size and its scroll, so both break the lines in the same places and scroll as far.
+  const followField = (): void => {
+    const el = ref.current
+    const m = mirror.current
+    if (!el || !m) return
+    const field = getComputedStyle(el)
+    for (const p of TYPE) m.style.setProperty(p, field.getPropertyValue(p))
+    m.style.width = `${el.clientWidth}px`
+    m.style.height = `${el.clientHeight}px`
+    m.scrollTop = el.scrollTop
+  }
+  const painted = splitMentions(text).map((p, i) => {
+    const a = 'handle' in p ? agents.find((x) => x.handle.toLowerCase() === p.handle.toLowerCase()) : undefined
+    return a ? (
+      <mark key={i} className={`c-${a.color}`} style={ownColor(a)}>
+        {p.text}
+      </mark>
+    ) : (
+      p.text
+    )
+  })
 
   const options = mention
     ? members.filter((a) => a.handle.startsWith(mention.query.toLowerCase()) || a.name.toLowerCase().startsWith(mention.query.toLowerCase()))
@@ -896,14 +1598,28 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
     })
   }
 
+  const insert = (said: string): void => {
+    const el = ref.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? start
+    setText((cur) => {
+      const before = cur.slice(0, start)
+      const glue = before && !/\s$/.test(before) ? ' ' : ''
+      return `${before}${glue}${said}${cur.slice(end)}`
+    })
+    el?.focus()
+  }
+  const [voice, voiceControls] = useDictation(insert, setNote, key)
+
   const submit = (): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
       conversationId,
       text,
-      images.map(({ name, mime, data }) => ({ name, mime, data }))
+      images.map(({ name, mime, data }) => ({ name, mime, data })),
+      threadId
     )
-    drafts.delete(conversationId)
+    drafts.delete(key)
     setText('')
     setImages([])
     setNote('')
@@ -912,7 +1628,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
 
   return (
     <div className="composer-wrap">
-      {dragging && (
+      {dragging && !inThread && (
         <div className="drop-overlay">
           <div className="drop-overlay__card">
             <Icon name="image" size={28} />
@@ -961,35 +1677,49 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             ))}
           </div>
         )}
-        <textarea
-          ref={ref}
-          rows={1}
-          value={text}
-          placeholder={asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
-          onChange={(e) => {
-            setText(e.target.value)
-            updateMention(e.target.value, e.target.selectionStart)
-          }}
-          onPaste={(e) => {
-            const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
-            if (!files.length) return
-            e.preventDefault()
-            void addFiles(files)
-          }}
-          onKeyDown={(e) => {
-            if (mention && options.length > 0) {
-              if (e.key === 'ArrowDown') return (e.preventDefault(), setActive((active + 1) % options.length))
-              if (e.key === 'ArrowUp') return (e.preventDefault(), setActive((active - 1 + options.length) % options.length))
-              if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
-              if (e.key === 'Escape') return setMention(null)
-            }
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+        <div className="composer__field">
+          <div ref={mirror} className="composer__mirror" aria-hidden>
+            {painted}
+            {'\n'}
+          </div>
+          <textarea
+            ref={ref}
+            rows={1}
+            onScroll={followField}
+            value={text}
+            placeholder={asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
+            onChange={(e) => {
+              setText(e.target.value)
+              updateMention(e.target.value, e.target.selectionStart)
+            }}
+            onPaste={(e) => {
+              const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
+              if (!files.length) return
               e.preventDefault()
-              submit()
-            }
-          }}
-        />
+              void addFiles(files)
+            }}
+            onKeyDown={(e) => {
+              if (e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
+                e.preventDefault()
+                if (!e.repeat) voiceControls.press()
+                return
+              }
+              if (e.key === 'Escape' && voice !== 'idle') return voiceControls.cancel()
+              if (mention && options.length > 0) {
+                if (e.key === 'ArrowDown') return (e.preventDefault(), setActive((active + 1) % options.length))
+                if (e.key === 'ArrowUp') return (e.preventDefault(), setActive((active - 1 + options.length) % options.length))
+                if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
+                if (e.key === 'Escape') return setMention(null)
+              }
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                submit()
+              }
+            }}
+          />
+        </div>
         <div className="composer__bar">
+          <VoiceButton controls={voiceControls} state={voice} />
           <button className="icon-btn" title={L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
             <Icon name="image" size={15} />
           </button>
@@ -1005,7 +1735,7 @@ export function Composer({ conversationId, members, placeholder }: { conversatio
             }}
           />
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : isDm ? L('O agente sempre responde na DM', 'The agent always replies in a DM') : L('@ chama um agente · sem menção, o router decide', '@ calls an agent · without a mention, the router decides'))}
+            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((m) => stopRun(m.id))}>

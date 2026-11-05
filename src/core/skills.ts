@@ -225,7 +225,10 @@ export class Skills {
       createdAt: waiting?.createdAt ?? at,
       updatedAt: at
     })
-    this.deps.notify?.(L(`${agent.name} propõe ${current ? 'mudar a skill' : 'uma skill'}`, `${agent.name} proposes ${current ? 'a change to a skill' : 'a skill'}`), `${name}: ${description}`)
+    this.deps.notify?.(
+      L(`${agent.name} propõe ${current ? 'mudar a skill' : 'uma skill'}`, `${agent.name} proposes ${current ? 'a change to a skill' : 'a skill'}`),
+      `${name}: ${description.replace(/[.\s]+$/, '')}. ${L('Revise em Skills.', 'Review it in Skills.')}`
+    )
     return {
       reply: L(
         `Proposta enviada (${current ? 'mudança na skill' : 'skill nova'} "${name}"). Ela só vale depois que o usuário aprovar, na tela de Skills.`,

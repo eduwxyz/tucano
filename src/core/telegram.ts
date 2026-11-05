@@ -4,6 +4,7 @@
 // reach this Mac. It answers only the chat paired with a code shown in the app.
 import { randomInt } from 'node:crypto'
 import { L } from '../shared/lang'
+import { offline, UserError } from '../shared/errors'
 import type { Approval, Message, TelegramInfo } from '../shared/types'
 import type { Secrets } from './secrets'
 
@@ -13,6 +14,16 @@ const CHAT = 'telegram:chat'
 const POLL_SECONDS = 50
 const RETRY_MS = 15_000
 const MAX_TEXT = 3_500 // Telegram allows 4096 per message
+
+// Telegram's refusal, in what to do: the token was revoked, or another app reads the same bot.
+export const refused = (status: number, description?: string): UserError =>
+  new UserError(
+    status === 401
+      ? L('O token do bot não vale mais. Cole um novo do @BotFather.', "The bot's token isn't valid anymore. Paste a new one from @BotFather.")
+      : status === 409
+        ? L('Outro app está lendo este bot (outro Tucano ou um webhook). Feche o outro ou troque o token.', 'Another app is reading this bot (another Tucano, or a webhook). Close the other one or change the token.')
+        : L(`O Telegram recusou: ${description ?? status}.`, `Telegram refused: ${description ?? status}.`)
+  )
 
 type Fetch = typeof fetch
 type Update = {
@@ -25,7 +36,7 @@ export interface TelegramDeps {
   secrets: Pick<Secrets, 'get' | 'set'>
   decide(approvalId: string, decision: 'approved' | 'refused', reason?: string): Promise<void>
   approval(id: string): Approval | undefined
-  answer(conversationId: string, text: string): void // a reply to a question, as if I wrote it in the app
+  answer(conversationId: string, text: string, threadId?: string): void // a reply to a question, as if I wrote it in the app (in its thread)
   changed(): void // the bot or the pairing changed: settings show it
   fetch?: Fetch
 }
@@ -37,7 +48,7 @@ export class Telegram {
   private error?: string
   private loop?: AbortController
   private offset = 0
-  private questions = new Map<number, string>() // Telegram message id → conversation it asked from
+  private questions = new Map<number, { conversationId: string; threadId?: string }>() // Telegram message id → where it was asked
 
   constructor(private deps: TelegramDeps) {}
 
@@ -112,7 +123,7 @@ export class Telegram {
       signal: signal ?? AbortSignal.timeout(15_000)
     })
     const body = (await res.json().catch(() => null)) as { ok?: boolean; result?: unknown; description?: string } | null
-    if (!body?.ok) throw new Error(body?.description ?? `Telegram ${res.status}`)
+    if (!body?.ok) throw refused(res.status, body?.description)
     return body.result
   }
 
@@ -127,7 +138,7 @@ export class Telegram {
             signal: AbortSignal.any([ctl.signal, AbortSignal.timeout((POLL_SECONDS + 10) * 1000)])
           })
           const body = (await res.json()) as { ok: boolean; result?: Update[]; description?: string }
-          if (!body.ok) throw new Error(body.description ?? `Telegram ${res.status}`)
+          if (!body.ok) throw refused(res.status, body.description)
           for (const u of body.result ?? []) {
             this.offset = u.update_id + 1
             await this.handle(u).catch((e: unknown) => console.error('[telegram]', e))
@@ -138,7 +149,13 @@ export class Telegram {
           }
         } catch (e) {
           if (ctl.signal.aborted) return
-          const why = e instanceof Error ? e.message : String(e)
+          // Telegram said no (and why), or it didn't answer at all: the loop asks again in a moment.
+          const why =
+            e instanceof UserError
+              ? e.message
+              : offline(e)
+                ? L('Sem internet; tento de novo sozinho.', 'No internet; I’ll try again on my own.')
+                : L('O Telegram não respondeu direito; tento de novo sozinho.', 'Telegram didn’t answer properly; I’ll try again on my own.')
           if (why !== this.error) {
             this.error = why
             this.deps.changed()
@@ -167,9 +184,9 @@ export class Telegram {
         return
       }
       if (m.chat.id !== this.chat.id) return
-      const conv = m.reply_to_message && this.questions.get(m.reply_to_message.message_id)
-      if (conv) {
-        this.deps.answer(conv, m.text)
+      const asked = m.reply_to_message && this.questions.get(m.reply_to_message.message_id)
+      if (asked) {
+        this.deps.answer(asked.conversationId, m.text, asked.threadId)
         await this.send(L('Mandei a sua resposta.', 'I sent your answer.'), { reply_to_message_id: m.message_id })
       } else {
         await this.send(L('Pra responder a um agente, responda à mensagem da pergunta (deslize pro lado). Aprovações têm botões.', "To answer an agent, reply to the question's message (swipe it sideways). Approvals have buttons."))
@@ -222,11 +239,11 @@ export class Telegram {
       L(`${agentName} pergunta (${where}):\n\n${msg.run.question}\n\nResponda a esta mensagem.`, `${agentName} asks (${where}):\n\n${msg.run.question}\n\nReply to this message.`),
       { reply_markup: { force_reply: true, input_field_placeholder: L('Sua resposta', 'Your answer') } }
     )
-    if (id) this.questions.set(id, msg.conversationId)
+    if (id) this.questions.set(id, { conversationId: msg.conversationId, ...(msg.threadId ? { threadId: msg.threadId } : {}) })
   }
 
   async notice(title: string, body: string): Promise<void> {
-    await this.send(`${title}\n\n${body}`)
+    for (const chunk of splitIntoChunks(`${title}\n\n${body}`, MAX_TEXT)) await this.send(chunk)
   }
 }
 
@@ -236,3 +253,21 @@ function approvalText(ap: Approval): string {
 }
 
 const clip = (s: string): string => (s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}…` : s)
+
+// Cuts at the last line break that fits, and drops it; a line longer than maxLength is cut at maxLength.
+export function splitIntoChunks(text: string, maxLength: number): string[] {
+  const chunks: string[] = []
+  let remaining = text
+
+  while (remaining.length > maxLength) {
+    const lineBreak = remaining.lastIndexOf('\n', maxLength)
+    const endsAtLineBreak = lineBreak > 0
+    const end = endsAtLineBreak ? lineBreak : maxLength
+
+    chunks.push(remaining.slice(0, end))
+    remaining = remaining.slice(endsAtLineBreak ? end + 1 : end)
+  }
+
+  chunks.push(remaining)
+  return chunks
+}

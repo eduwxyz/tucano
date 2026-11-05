@@ -233,9 +233,9 @@ export async function detectGemini(): Promise<{ status: EngineStatus; models: st
   const path = await which('gemini')
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
   const v = await run(path, ['--version'])
-  const home = process.env['GEMINI_CLI_HOME'] || join(homedir(), '.gemini')
+  const home = join(process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
   const signedIn = existsSync(join(home, 'oauth_creds.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
-  const models = geminiModels()
+  const models = geminiModels(path)
   return {
     status: {
       installed: true,

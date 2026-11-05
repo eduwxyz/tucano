@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { dockerProblem, ownedBack } from '../src/core/computer'
-import { autostartEntry, autostartFile, chromeCandidates, executableNames, fallbackPath, findChrome, gitRoot, loginShell, onPath, openWindowsConsole, osOf, shellCommand, spawnable, systemName, terminalCommand, userAgentPlatform, withInstallDirs } from '../src/core/platform'
+import { autostartEntry, autostartFile, chromeCandidates, chromeKeyringFlags, executableNames, fallbackPath, findChrome, gitRoot, loginShell, onPath, openWindowsConsole, osOf, shellCommand, spawnable, systemName, terminalCommand, userAgentPlatform, withInstallDirs } from '../src/core/platform'
 import { shortcut } from '../src/shared/types'
 
 const win = process.platform === 'win32'
@@ -261,3 +261,19 @@ it.skipIf(process.platform !== 'win32')('opens a sign-in console that works from
   // The console wrote the folder in its code page; the folder itself was found, accents and all.
   expect(readFileSync(marker, 'latin1').trim().length).toBeGreaterThan(0)
 }, 20_000)
+
+describe("Chrome's keyring on a server", () => {
+  it('uses its own cookie store on a Linux server, where nobody can unlock the desktop keyring', () => {
+    expect(chromeKeyringFlags('linux', { TUCANO_SERVER: '1' })).toEqual(['--password-store=basic'])
+  })
+
+  it('leaves a desktop alone: its cookies are in the keyring already', () => {
+    expect(chromeKeyringFlags('linux', {})).toEqual([])
+    expect(chromeKeyringFlags('linux', { TUCANO_SERVER: '0' })).toEqual([])
+  })
+
+  it('is a Linux matter only', () => {
+    expect(chromeKeyringFlags('mac', { TUCANO_SERVER: '1' })).toEqual([])
+    expect(chromeKeyringFlags('windows', { TUCANO_SERVER: '1' })).toEqual([])
+  })
+})

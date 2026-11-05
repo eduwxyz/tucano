@@ -1,15 +1,20 @@
 // The core runs in an Electron utility process: database, engines and runs
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
+import { voiceRefusal } from '../shared/voice'
+import { ModelDownload, Transcriber, voiceStatus, warmUp } from './transcribe'
+import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
-import { join } from 'node:path'
+import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
+import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
+import { friendly } from '../shared/errors'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -25,7 +30,7 @@ import { fakeEngine } from './engines/fake'
 import { DesktopApps, macApps, SELF } from './apps'
 import { linuxApps, windowsApps, type SystemApp } from './apps-os'
 import type { Engine } from './engines/types'
-import { ConnectorManager } from './connectors'
+import { ConnectorManager, notAuthorized } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
@@ -34,7 +39,13 @@ import { GitHub } from './github'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
+import { Wiki } from './wiki'
+import { WikiCurator } from './wiki-curator'
+import { WikiReviewer } from './wiki-review'
+import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
+import { applyForeignTeam, readForeignZip } from './agent-import'
+import { zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
@@ -65,6 +76,8 @@ setLang(langOf(process.env['TUCANO_LOCALE']))
 if (db.created) {
   if (process.env['TUCANO_SEED'] === '1' || (fake && process.env['TUCANO_SEED'] !== '0')) seed(db)
   else db.setSettings({ onboarding: { done: false } })
+  // A new install has nothing new to show: the news start with the next update.
+  if (process.env['TUCANO_VERSION']) db.setSettings({ seenVersion: process.env['TUCANO_VERSION'] })
 }
 const interrupted = db.interruptStaleRuns()
 if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)
@@ -237,16 +250,19 @@ function toPhone(e: CoreEvent): void {
 }
 
 // Desktop notification, and the same on the phone.
-const notifyAll = (title: string, body: string, conversationId?: string): void => {
-  toMain({ type: 'notify', title, body, conversationId, sound: settings().sounds !== false })
-  void telegram?.notice(title, body)
+// `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
+const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string } = {}): void => {
+  toMain({ type: 'notify', title, body: shortText, conversationId, ...more, sound: settings().sounds !== false })
+  void telegram?.notice(title, fullText ?? shortText)
 }
 
 // Asks the main process to do what only it can: open the browser or a folder, show a notification.
 type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; kind?: 'approval' | 'question' | 'done'; sound?: boolean }
+  | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
+  | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
+  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -368,6 +384,29 @@ const chrome =
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
+const transcriber = new Transcriber()
+// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads.
+const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(dataDir, 'voice') }
+const modelDownload = new ModelDownload(voicePlaces.models, () => emit({ type: 'voice' }), fetch, undefined, () => void dictation().then((s) => warmUp(transcriber, s)))
+const dictation = async () => {
+  const s = voiceStatus(settings().voice, await loginEnv(), undefined, voicePlaces)
+  return { ...s, ...(modelDownload.progress ? { downloading: modelDownload.progress } : {}), ...(modelDownload.error ? { error: modelDownload.error } : {}) }
+}
+// Out of the environment before anything starts: commands the agents run inherit it.
+const localKey = process.env['TUCANO_LOCAL_KEY']
+delete process.env['TUCANO_LOCAL_KEY']
+
+// What the author of a message reaches, for the paths it cites. An agent on this Mac reaches what
+// its commands do; any other, only its own files. Not on a server, where the page isn't on this
+// computer, and not on Windows yet, where paths don't look like this.
+function localReach(messageId: string): LocalReach | undefined {
+  const message = db.message(messageId)
+  if (serverMode || isWin || message?.author.kind !== 'agent') return undefined
+  const agent = db.agent(message.author.id)
+  if (!agent) return undefined
+  return { agentId: agent.id, own: computers.folder(agent.id), dataRoot: dataDir, limited: isLimited(agent) }
+}
+
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
 // The person's own apps, through agent-desktop (none on a server: no screen there).
 // Off a Mac it needs the installed apps to know each one's program.
@@ -395,10 +434,7 @@ const connectors = new ConnectorManager({
 gateway.route('/oauth/callback', async (url) => {
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state') ?? ''
-  if (!code) {
-    const why = url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? L('sem código', 'no code')
-    return L(`Autorização não concluída: ${why}.`, `Authorization not completed: ${why}.`)
-  }
+  if (!code) return notAuthorized(url)
   return (await connectors.finishOAuth(state, code))
     ? L('Conector autorizado. Pode fechar esta aba e voltar pro Tucano.', 'Connector authorized. You can close this tab and go back to Tucano.')
     : L('Esse pedido de autorização expirou. Tente de novo pelo app.', 'This authorization request expired. Try again from the app.')
@@ -432,7 +468,41 @@ const routines = new Routines({
   notify: notifyAll
 })
 
-const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, body) })
+// A proposal waits for a decision: the knock at the door, and a click opens Skills.
+const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, body, undefined, undefined, { kind: 'approval', page: 'skills' }) })
+// The wiki's folder is the truth (Markdown, as Obsidian opens it); TUCANO_WIKI points it elsewhere.
+// The default folder keeps wiki.db; another folder gets an index of its own, so going back finds the old one.
+const wikiHome = join(dataDir, 'wiki')
+const wikiIndex = (dir: string): string => (dir === wikiHome ? join(dataDir, 'wiki.db') : join(dataDir, `wiki-${createHash('sha256').update(dir).digest('hex').slice(0, 12)}.db`))
+const wikiDir = (): string => process.env['TUCANO_WIKI'] || settings().wikiDir || wikiHome
+const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }) })
+wiki.init()
+toMain({ type: 'wiki_dir', path: wiki.dir })
+// The curator reads the conversations with the memory's cheap model, and keeps what lasts.
+const wikiLlm = async (system: string, prompt: string): Promise<string> => {
+  const s = settings()
+  const model = usable(modelInfo(s.memoryModel)) ?? modelInfo('haiku')!
+  const st = s.engines[model.engine]
+  if (!st.installed || !st.loggedIn) throw new Error(L(`O ${ENGINES[model.engine].label} não está pronto pra organizar a wiki.`, `${ENGINES[model.engine].label} isn't ready to organize the wiki.`))
+  const cwd = join(dataDir, 'agents', '_wiki')
+  mkdirSync(cwd, { recursive: true })
+  const started = Date.now()
+  let text = ''
+  for await (const ev of engineImpls[model.engine].run({ model: model.id, effort: 'low', system, prompt, cwd, signal: AbortSignal.timeout(180_000) })) {
+    if (ev.type === 'text') text += ev.delta
+    else if (ev.type === 'done') {
+      text = ev.text || text
+      db.addReceipt({ ...ev.usage, model: model.id, ms: Date.now() - started, messageId: 'wiki', agentId: 'wiki', engine: model.engine, at: Date.now() })
+    } else if (ev.type === 'error') throw new Error(ev.message)
+  }
+  return text
+}
+const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm })
+// The review: by hand, or once a week when asked (checked every hour).
+const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
+setInterval(() => {
+  if (reviewer.due()) void reviewer.review().then(() => emit({ type: 'wiki' }))
+}, 3600_000).unref()
 
 const runner = new Runner({
   db,
@@ -449,9 +519,12 @@ const runner = new Runner({
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
   skills,
+  wiki,
+  wikiCurator: curator,
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
-  notify: (title, body, conversationId, kind) => (kind ? toMain({ type: 'notify', title, body, conversationId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId)),
+  notify: (title, body, conversationId, kind, threadId) =>
+    kind ? toMain({ type: 'notify', title, body, conversationId, threadId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId, undefined, { threadId }),
   jev: { key: () => secrets.get(JEV_SECRET) },
   github,
   onBusy: (busy) => toMain({ type: 'busy', busy }),
@@ -470,7 +543,7 @@ telegram = new Telegram({
   secrets,
   decide: (id, decision, reason) => runner.decide(id, decision, reason),
   approval: (id) => db.approval(id),
-  answer: (conversationId, text) => void runner.send(conversationId, text),
+  answer: (conversationId, text, threadId) => void runner.send(conversationId, text, [], threadId),
   changed: () => emit({ type: 'settings', settings: settings() })
 })
 
@@ -502,6 +575,8 @@ void ready.then(async () => {
   for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
+  // A thread that went quiet gets its own summary, and the memories in it.
+  setInterval(() => void memory.sweep().catch((e: unknown) => console.error('[memory]', e)), 60_000).unref()
   routines.start()
   // Nothing here waits on the keychain: the first use after an update can be a
   // macOS prompt that stays open until someone answers it.
@@ -549,12 +624,22 @@ const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
 // even when archived. His model: the one given, else a plan's, else the router's
 // or the memory's, which the introduction made sure work.
 // `fresh` starts a new session: the builder screen opens with only his hello.
-function ensureTuca(modelId?: string, fresh = false): { agentId: string; conversationId: string } {
-  const s = settings()
-  const works = (id: string): boolean => {
+// A model runs here when its harness is chosen and signed in.
+function worksWith(s: Settings): (id: string) => boolean {
+  return (id) => {
     const m = modelInfo(id)
     return !!m?.id && s.engines[m.engine].loggedIn
   }
+}
+// The first that runs: the one given, a plan's, the router's or the memory's, or any a harness lists.
+function readyModel(s: Settings, first?: string): string | undefined {
+  const works = worksWith(s)
+  return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
+}
+
+function ensureTuca(modelId?: string, fresh = false): { agentId: string; conversationId: string } {
+  const s = settings()
+  const works = worksWith(s)
   let tuca = db.agents().find((a) => a.kind === 'tuca')
   // A harness turned off since: the model given now, if it works.
   if (tuca && !works(tuca.modelId) && modelId && works(modelId)) {
@@ -563,7 +648,7 @@ function ensureTuca(modelId?: string, fresh = false): { agentId: string; convers
     emit({ type: 'agent', agent: tuca })
   }
   if (!tuca) {
-    const model = [modelId, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
+    const model = readyModel(s, modelId)
     tuca = tucaAgent(model ?? 'sonnet', db.agents().map((a) => a.handle), s.defaultLimit)
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
@@ -627,8 +712,8 @@ const api: Api = {
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
 
-  sendMessage: ({ conversationId, text, images }) => {
-    void runner.send(conversationId, text, images)
+  sendMessage: ({ conversationId, text, images, threadId }) => {
+    void runner.send(conversationId, text, images, threadId)
   },
 
   stopRun: ({ messageId }) => runner.stop(messageId),
@@ -696,6 +781,18 @@ const api: Api = {
   },
   // Everything that only made sense there goes too: replies still running stop,
   // its routines, its pending approvals.
+  localPath: ({ messageId, path }) => {
+    const reach = localReach(messageId)
+    const found = reach && resolveLocal(path, reach)
+    if (!found) return null
+    return { kind: found.kind, ...((found.kind === 'image' || found.kind === 'video') && localKey ? { url: localUrl(localKey, found.path) } : {}) }
+  },
+  openLocal: ({ messageId, path, how }) => {
+    const reach = localReach(messageId)
+    const found = reach && resolveLocal(path, reach)
+    if (found) toMain({ type: 'open_local', path: found.path, how: how === 'open' && (found.kind === 'folder' || found.kind === 'pdf') ? 'open' : 'reveal' })
+  },
+
   deleteConversation: ({ id }) => {
     if (!db.conversation(id)) return
     for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
@@ -705,12 +802,12 @@ const api: Api = {
     emit({ type: 'conversation_removed', id })
   },
 
-  createChannel: ({ name }) => {
+  createChannel: ({ name, threads }) => {
     const clean = channelName(name)
     if (!clean) throw new Error(L('Dê um nome ao canal.', 'Give the channel a name.'))
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
     const id = randomUUID()
-    db.createConversation({ id, kind: 'channel', name: clean, members: [] })
+    db.createConversation({ id, kind: 'channel', name: clean, members: [], ...(threads ? { threads } : {}) })
     emitConversations([id])
     return id
   },
@@ -763,6 +860,22 @@ const api: Api = {
     for (const k of db.skills()) emit({ type: 'skill', skill: k })
     for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
     return r
+  },
+  importAgents: ({ path, data }) => {
+    if (!path && !data) throw new Error(L('Escolha um arquivo .zip.', 'Choose a .zip file.'))
+    const zip = path ? zipFromFile(path) : zipFromBuffer(Buffer.from(data!, 'base64'))
+    try {
+      const s = settings()
+      const r = applyForeignTeam(db, readForeignZip(zip), { defaultLimit: s.defaultLimit, defaultModel: readyModel(s) ?? 'sonnet', works: worksWith(s) })
+      for (const id of r.agents) emit({ type: 'agent', agent: db.agent(id)! })
+      emitConversations()
+      for (const k of db.skills()) emit({ type: 'skill', skill: k })
+      for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
+      for (const m of r.memories) emit({ type: 'memory', memory: m })
+      return r.summary
+    } finally {
+      zip.close()
+    }
   },
   backupNow: () => backup(db, backups),
   openBackups: () => {
@@ -822,7 +935,19 @@ const api: Api = {
     return { ok: true, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
   },
 
+  voiceStatus: () => dictation(),
+  transcribe: async ({ id, audio }) => {
+    const voice = settings().voice
+    return { text: await transcriber.transcribe(id, audio, await dictation(), voice?.detect ? undefined : settings().language) }
+  },
+  voiceDownload: ({ model }) => void modelDownload.start(model),
+  voiceCancelDownload: () => modelDownload.cancel(),
+  voiceRemoveModel: ({ model }) => modelDownload.remove(model),
+  cancelTranscribe: ({ id }) => transcriber.cancel(id),
+
   updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...patch } }) => {
+    const why = voiceRefusal(patch.voice)
+    if (why) throw new Error(why)
     db.setSettings(patch)
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
@@ -832,10 +957,11 @@ const api: Api = {
   },
 
   // Validation errors come back to the form; connecting continues in the background.
-  addConnector: ({ input }) => connectors.add(input),
+  addConnector: ({ input }) => connectors.add(input, !serverMode), // a server hands the sign-in page over with Authorize instead
 
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
+  setConnectorToken: ({ id, token }) => connectors.setToken(id, token),
   authorizeConnector: async ({ id }) => {
     const url = await connectors.authorize(id)
     return serverMode && url ? { url } : {}
@@ -859,6 +985,8 @@ const api: Api = {
   purgeMemory: ({ id }) => memory.purge(id),
   editSummary: ({ conversationId, text }) => memory.editSummary(conversationId, text),
   summarizeNow: ({ conversationId }) => void memory.consolidate(conversationId, true),
+  editThreadSummary: ({ rootId, text }) => memory.editThreadSummary(rootId, text),
+  summarizeThreadNow: ({ rootId }) => void memory.consolidateThread(rootId, 'now'),
 
   computerAction: ({ agentId, action }) => {
     const agent = db.agent(agentId)
@@ -902,6 +1030,78 @@ const api: Api = {
 
   saveRoutine: ({ routine }) => routines.save(routine),
   removeRoutine: ({ id }) => routines.remove(id),
+  wiki: () => ({ dir: wiki.dir, pages: wiki.list(), kinds: wiki.kinds(), log: wiki.log(), pending: [...wiki.changes('pending'), ...wiki.changes('conflict')].filter((c) => c.by !== 'review').length, findings: wiki.findings().length, server: serverMode, graph: wiki.graph(), recent: wiki.recent(), sources: wiki.sourceCount() }),
+  wikiPage: ({ title }) => wiki.page(title) ?? null,
+  wikiSearch: ({ q }) => wiki.search(q, 20),
+  wikiSave: ({ title, body, kind, expectedHash, rename }) => wiki.save({ title, body, by: 'me', byName: settings().workspaceName || L('Você', 'You'), ...(kind !== undefined ? { kind } : {}), ...(expectedHash !== undefined ? { expectedHash } : {}), ...(rename ? { rename } : {}) }),
+  wikiRemove: ({ title }) => wiki.remove(title, 'me', settings().workspaceName || L('Você', 'You')),
+  wikiHistory: ({ title }) => wiki.history(title),
+  wikiRestore: ({ id }) => wiki.restore(id, 'me', settings().workspaceName || L('Você', 'You')),
+  wikiSchema: () => wiki.schema(),
+  wikiSaveSchema: ({ text }) => wiki.saveSchema(text),
+  wikiChanges: ({ state }) => wiki.changes(state),
+  wikiChange: ({ id }) => wiki.change(id) ?? null,
+  wikiApplyChange: ({ id }) => wiki.applyChange(id, settings().workspaceName || L('Você', 'You')),
+  wikiRefuseChange: ({ id }) => wiki.refuseChange(id),
+  wikiUndoChange: ({ id }) => wiki.undoChange(id, settings().workspaceName || L('Você', 'You')),
+  wikiSources: () => wiki.sources(),
+  wikiSource: ({ id }) => wiki.source(id) ?? null,
+  wikiKeepMessage: async ({ messageId }) => (await curator.keepMessage(messageId)).length,
+  wikiRedoChange: async ({ id }) => (await curator.redo(id)).length,
+  wikiAddFile: async ({ name, data }) => {
+    const buf = Buffer.from(data, 'base64')
+    const text = await extractFile(name, buf)
+    const src = wiki.addSource({ title: name, text, kind: 'file', file: { name, data: buf }, by: 'me', status: 'reading' })
+    void curator.ingest(src.id)
+    return src
+  },
+  wikiAddLink: async ({ url }) => {
+    const page = await extractLink(url.trim())
+    const src = wiki.addSource({ title: page.title, text: `${url.trim()}\n\n${page.text}`, kind: 'link', origin: { url: url.trim() }, by: 'me', status: 'reading' })
+    void curator.ingest(src.id)
+    return src
+  },
+  wikiAddNote: ({ text, title }) => {
+    const first = text.trim().split('\n')[0]!.replace(/^#+\s*/, '').slice(0, 60)
+    const src = wiki.addSource({ title: title?.trim() || first || L('Anotação', 'Note'), text, kind: 'note', by: 'me', status: 'reading' })
+    void curator.ingest(src.id)
+    return src
+  },
+  wikiOpenOriginal: ({ id }) => {
+    const p = wiki.originalPath(id)
+    if (!p || !existsSync(p)) return null
+    if (serverMode) return { name: basename(p), data: readFileSync(p).toString('base64') }
+    toMain({ type: 'open_path', path: p })
+    return null
+  },
+  wikiIngestAgain: ({ id }) => void curator.ingest(id),
+  wikiReview: () => reviewer.status(),
+  wikiRunReview: () => {
+    void reviewer.review().then(() => emit({ type: 'wiki' }))
+    emit({ type: 'wiki' })
+  },
+  wikiDismissFinding: ({ id }) => wiki.dismissFinding(id),
+  wikiImport: ({ dir }) => wiki.importVault(dir, settings().workspaceName || L('Você', 'You')),
+  setWikiCapture: ({ conversationId, on }) => {
+    db.setWikiCapture(conversationId, on)
+    const c = db.conversation(conversationId)
+    if (c) emit({ type: 'conversation', conversation: c })
+  },
+  setThreads: ({ conversationId, on }) => {
+    db.setThreads(conversationId, on)
+    const c = db.conversation(conversationId)
+    if (c) emit({ type: 'conversation', conversation: c })
+  },
+  setWikiDir: async ({ dir }) => {
+    const next = dir?.trim() || wikiHome
+    if (!existsSync(next)) throw new Error(L('Essa pasta não existe.', "That folder doesn't exist."))
+    db.setSettings({ wikiDir: next === wikiHome ? undefined : next })
+    wiki.relocate(next, wikiIndex(next))
+    toMain({ type: 'wiki_dir', path: next })
+    emit({ type: 'settings', settings: settings() })
+    return next
+  },
+  openWikiFolder: () => (serverMode ? undefined : toMain({ type: 'open_path', path: wiki.dir })),
   runRoutine: ({ id }) => routines.runNow(id),
 
   refreshEngines: () => {
@@ -996,7 +1196,8 @@ function handle(port: MessagePortMain, req: Request): void {
       (result) => reply({ result }),
       (e: unknown) => {
         console.error(`[core] ${req.method}`, e)
-        reply({ error: e instanceof Error ? e.message : String(e) })
+        // The page shows it as it comes: in people's words, the raw text stays in the log above.
+        reply({ error: friendly(e).text })
       }
     )
 }

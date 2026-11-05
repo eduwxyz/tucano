@@ -169,7 +169,7 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
     <div className={`screen ${onOpen ? 'screen--button' : ''}`} onClick={onOpen} role={onOpen ? 'button' : undefined}>
       <img className="screen__frame" src={view.frame} alt={view.title} draggable={false} />
       {c && !view.shown && agent && (
-        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ ...ownColor(agent), left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
+        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ ...ownColor(agent), transform: `translate(${c.x * 100}%, ${c.y * 100}%)` }}>
           <i key={c.at} className="screen__ripple" />
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
             <path d="m4 2 16 8-7 2-3 7L4 2Z" />
@@ -290,7 +290,7 @@ export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }
   const name = useStore((s) => agentById(s, agentId)?.name ?? L('agente', 'agent'))
   const open = useStore((s) => s.panel?.kind === 'browser' && s.panel.agentId === agentId)
   const show = (): void => openPanel({ kind: 'browser', agentId })
-  const status = view?.shown ? L('você está no controle', 'you’re in control') : view?.doing ? `${view.doing.label.toLowerCase()} ${view.doing.detail}` : view?.log.at(-1)?.label.toLowerCase() ?? L('parado', 'idle')
+  const status = view?.shown ? L('você está no controle', 'you’re in control') : view?.doing ? `${view.doing.label.toLowerCase()}${view.doing.detail ? ` ${view.doing.detail}` : ''}` : view?.log.at(-1)?.label.toLowerCase() ?? L('em espera', 'idle')
 
   if (big)
     return (
@@ -368,7 +368,7 @@ export function SidePanel(): ReactNode {
   const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId) : undefined))
   const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
   const [reload, setReload] = useState(0)
-  if (!panel) return null
+  if (!panel || panel.kind === 'thread') return null // a thread is drawn by its conversation
 
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? L(`Navegador de ${browserName ?? 'agente'}`, `${browserName ?? 'Agent'}'s browser`) : '')
   return (
@@ -401,9 +401,9 @@ export function SidePanel(): ReactNode {
             // Same origin is the service's own (127.0.0.1:port), not the app's.
             <iframe key={reload} src={reachable(service.url)} sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals" title={service.name} />
           ) : (
-            <p className="empty">{L('Esse serviço não está rodando.', 'This service isn’t running.')}</p>
+            <p className="empty">{L('Esse serviço parou. Peça pro agente subir de novo na conversa.', 'This service stopped. Ask the agent in the conversation to start it again.')}</p>
           ))}
-        {panel.kind === 'artifact' && !artifact && <p className="empty">{L('Arquivo não encontrado.', 'File not found.')}</p>}
+        {panel.kind === 'artifact' && !artifact && <p className="empty">{L('Esse arquivo não existe mais. Peça pro agente gerar de novo.', 'This file no longer exists. Ask the agent to make it again.')}</p>}
         {panel.kind === 'browser' && <BrowserPanel agentId={panel.agentId} />}
       </div>
     </aside>
@@ -418,8 +418,8 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
     setText(null)
     if (textual)
       void call('artifactText', { id: artifact.id }).then(
-        (t) => setText(t ?? L('(não consegui abrir o arquivo)', '(couldn’t open the file)')),
-        () => setText(L('(não consegui abrir o arquivo)', '(couldn’t open the file)'))
+        (t) => setText(t ?? L('(o arquivo não abriu: pode ter sido movido ou apagado. Peça pro agente gerar de novo.)', '(the file didn’t open: it may have been moved or deleted. Ask the agent to make it again.)')),
+        () => setText(L('(o arquivo não abriu: pode ter sido movido ou apagado. Peça pro agente gerar de novo.)', '(the file didn’t open: it may have been moved or deleted. Ask the agent to make it again.)'))
       )
   }, [artifact.id, textual])
 

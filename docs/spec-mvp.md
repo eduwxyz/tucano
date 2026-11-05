@@ -272,7 +272,7 @@ Receitas que os agentes seguem pra um tipo de tarefa ("como rodar os testes do C
 - Um bot do próprio usuário (criado no @BotFather): o token vai em Configurações, conferido com o Telegram e guardado no cofre do Mac. O app busca as mensagens do bot (long polling), então nada precisa chegar no Mac.
 - **Pareamento:** o app mostra um código; só o chat que mandar `/start <código>` fica com o bot. Mensagens e toques de outros chats são ignorados.
 - **O que chega:** cada aprovação, com Aprovar/Recusar (alto risco pede um segundo toque); cada pergunta de agente (`ask_user`), que eu respondo respondendo à mensagem, e a resposta entra na conversa como se eu tivesse escrito; o fim das rotinas e os avisos de limite.
-- O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo), e a tela diz isso. Desligado até eu colar um token.
+- O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo) e as respostas das rotinas, e a tela diz isso. Desligado até eu colar um token.
 
 ### 20. Boletim e custo por tarefa (M12)
 
@@ -336,6 +336,19 @@ Quem abre o app pela primeira vez sai dele com um agente trabalhando, não com u
 - Dá pra pular a introdução ou fechá-la.
 - **Primeiros passos:** uma lista na barra lateral com nove recursos (time, conector, memória, rotina, projeto, aprovação, celular…). Cada item se marca sozinho pelo estado do app, e o próximo leva à tela certa. Ela some com "Esconder a lista".
 - Em Configurações: **Rever a introdução** e **Mostrar os primeiros passos**. Uma instalação que já existia não vê nada disso até pedir.
+
+### 26. Importar de outro app
+
+Quem chega de outro app de agentes traz o time em vez de montar de novo, sem que um arquivo de fora ganhe acesso a nada.
+
+- **Onde:** Configurações → Time e backup → **Importar de outro app…**, que lê um `.zip`.
+- **OpenBot:** a exportação dele (Server settings → Transfer → Export from this server, `openbot-transfer.json`, formato `openbot-instance-transfer` v1). Só o formato documentado é lido; nenhum código do OpenBot (PolyForm Noncommercial) entra no Tucano.
+- **Apps sem exportação (Grok Bot):** o botão **Skill pro Grok Bot (experimental)** baixa uma skill nossa; um agente de lá a segue e escreve um `.zip` no formato do Tucano (`tucano-import.json`, `tucano-agent-import` v1). Experimental até alguém testar dentro do Grok Bot.
+- **O que vem:** nome, papel, instruções, foto, cor, esforço, skills (só o `SKILL.md`), rotinas, memórias e, no Grok Bot, os grupos. O modelo vem quando o CLI dele está pronto aqui; senão, o agente recebe um modelo que roda, com aviso.
+- **Governança:** os agentes chegam **sem nenhum conector, com a busca na web desligada e sem computador**; as rotinas chegam desligadas; as memórias esperam confirmação. Os servidores MCP do outro app só aparecem pelo nome no resumo, nunca viram conectores (um arquivo poderia mandar rodar qualquer comando). Um agente importado **nunca entra num canal que já existe**: o grupo vira um canal novo (`#nome-2` se o nome estiver ocupado), e nele entram **só os agentes criados nesta importação**. Um agente que já estava aqui (mesmo que pareça igual, como uma cópia do Tuca) nunca é posto pelo arquivo numa sala com um estranho; o resumo diz quem ficou de fora.
+- **Limites por arquivo:** 40 agentes, 30 canais e, por agente, 20 skills, 20 rotinas e 40 memórias de até 300 caracteres. O que passa disso, ou não dá pra ler, fica de fora sozinho (uma skill ruim não derruba o agente) e aparece no resumo, que mostra até 40 linhas.
+- **Importar de novo** não duplica: o mesmo agente (nome, papel e instruções), a mesma skill e o mesmo canal (nome e agentes) ficam como estão.
+- **O zip** é lido em partes, só com o `zlib` do Node: caminhos com `..` ou fora da pasta do agente são ignorados, entradas criptografadas são ignoradas, ZIP64 é recusado, e cada entrada tem um teto de tamanho conferido depois de descompactar.
 
 ## Acceptance criteria
 

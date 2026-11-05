@@ -159,6 +159,42 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
   })
 
+  describe('screening a hand-off', () => {
+    const lia = (text: string): Engine => fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? text : 'ok') })
+    const steps = (): string[] => agentMessages().find((m) => (m.author as { id: string }).id === 'a1')!.run!.steps.map((x) => `${x.label} | ${x.detail ?? ''}`)
+
+    it('does not wake an agent that is only thanked', async () => {
+      const r = runner(lia('Valeu, @theo! Ficou ótimo.'))
+      await r.send('c1', '@lia começa')
+      await r.idle()
+      expect(agentMessages().map((m) => (m.author as { id: string }).id)).toEqual(['a1'])
+      expect(steps().some((x) => x.startsWith('Ninguém precisa responder'))).toBe(true)
+      expect(db.messages().some((m) => m.text.includes('Parei a conversa'))).toBe(false)
+    })
+
+    it('hands the turn for a request and notes it on the reply', async () => {
+      const r = runner(lia('@theo, revisa o PR #12?'))
+      await r.send('c1', '@lia começa')
+      await r.idle()
+      expect(agentMessages().map((m) => [(m.author as { id: string }).id, m.run?.depth])).toEqual([
+        ['a1', 1],
+        ['a2', 2]
+      ])
+      expect(steps().some((x) => x.startsWith('Chamou') && x.includes('theo'))).toBe(true)
+    })
+
+    it('calls everyone mentioned when the router is not ready', async () => {
+      settings.routerModel = 'gpt-5.6-luna'
+      settings.engines.codex = { installed: true, loggedIn: false }
+      db.saveAgent(agent('a2', 'theo')) // on Claude, so only the router's harness is down
+      const r = runner(lia('Valeu, @theo! Ficou ótimo.'))
+      await r.send('c1', '@lia começa')
+      await r.idle()
+      expect(agentMessages().map((m) => (m.author as { id: string }).id)).toEqual(['a1', 'a2'])
+      expect(steps().some((x) => x.startsWith('Chamou') && x.includes('não consegui avaliar'))).toBe(true)
+    })
+  })
+
   it('does not hand the turn for a handle quoted inside a code block', async () => {
     // The reply shows a prompt in a fenced block that mentions the other agent (the case that made an agent answer twice).
     const quoted = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? 'O prompt é este:\n```\n@theo, pode ajudar aqui?\n```' : 'ok') })
@@ -238,7 +274,8 @@ describe('Runner', () => {
     const r = runner(broken)
     await r.send('d1', 'oi')
     await r.idle()
-    expect(agentMessages()[0]?.run).toMatchObject({ status: 'failed', error: 'usage limit reached' })
+    // In what to do, with the CLI's own words kept as the detail.
+    expect(agentMessages()[0]?.run).toMatchObject({ status: 'failed', error: 'Seu plano do Claude Code chegou no limite. Tente de novo mais tarde.', errorDetail: 'usage limit reached' })
   })
 })
 
@@ -283,8 +320,8 @@ describe('ask_user through the gateway', () => {
     expect(asked?.run?.steps.map((s) => s.label)).toEqual(['Pensou', 'Perguntou a você', 'Respondeu'])
     expect(claude.turns[0]?.mcpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[a-f0-9]{48}$/)
 
-    // No mention and two agents in the channel, but Lia asked: she answers, not the router.
-    await r.send('c1', 'até sexta')
+    // No mention and two agents in the channel, but Lia asked in this thread: she answers, not the router.
+    await r.send('c1', 'até sexta', [], asked!.threadId)
     await r.idle()
     expect(db.message(asked!.id)?.run?.status).toBe('done')
     const replies = agentMessages()

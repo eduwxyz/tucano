@@ -2,11 +2,13 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
+import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
-import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
-import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, mentioned, snip, systemPrompt, transcript, transcriptBlocks } from './context'
+import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
+import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
@@ -20,7 +22,7 @@ import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
-import { route } from './router'
+import { ROUTER_HISTORY, route, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
 
 const MAX_CONCURRENT = 4
@@ -30,7 +32,10 @@ const MAX_MENTIONS = 3
 const MAX_DEPTH = 3 // agent replies chained from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
-const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
+// Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
+// or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
+// can't here (no file tools), so it calls again and again and answers without the data.
+export const MAX_RESULT_BYTES = 40_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
@@ -65,17 +70,19 @@ export interface RunnerDeps {
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
-  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac'>> // without it, no agent has a computer
+  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
-  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done') => void
+  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string) => void // threadId: a click opens that thread too
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   github?: Pick<GitHub, 'pushable' | 'openPr'> // without it, agents can't open PRs
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
+  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds'> // without it, agents have no wiki
+  wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
 }
 
 // What the runner needs from the connector manager.
@@ -103,7 +110,14 @@ export function resultText(r: CallToolResult): string {
   const text = r.content
     .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
     .join('\n')
-  return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n${L(`[… resultado cortado em ${MAX_RESULT_CHARS} caracteres]`, `[… result cut at ${MAX_RESULT_CHARS} characters]`)}` : text
+  const bytes = Buffer.from(text, 'utf8')
+  if (bytes.length <= MAX_RESULT_BYTES) return text
+  // Cut on a whole character: a split one decodes as U+FFFD at the end.
+  const kept = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8').replace(/�+$/, '')
+  return `${kept}\n${L(
+    `[… resultado cortado em ${MAX_RESULT_BYTES / 1000} KB: o resto não chegou. Se precisar dele, chame de novo pedindo menos de uma vez (paginação, filtro, menos campos).]`,
+    `[… result cut at ${MAX_RESULT_BYTES / 1000} KB: the rest didn't come through. If you need it, call again asking for less at once (pagination, a filter, fewer fields).]`
+  )}`
 }
 
 // Text is clipped; images go through (screenshots, charts), a few at most.
@@ -120,7 +134,8 @@ export interface RoutineEvent {
   body: string // the item itself, clipped
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
+// msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -138,15 +153,27 @@ export class Runner {
 
   // Saves the human message and decides who answers it: mentioned agents
   // first, then whoever asked a pending question, then the DM agent or the
-  // only agent in the channel, and otherwise the router.
-  async send(conversationId: string, text: string, images: ImageUpload[] = []): Promise<void> {
+  // only agent in the channel, and otherwise the router. The answers, and
+  // everything else it sets off, go in its thread (`threadId`, or its own when
+  // the conversation answers in threads) or else in the conversation.
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const body = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
     if (!conv || (!body && pictures.length === 0)) return
+    // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
+    // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
+    const root = threadId ? db.message(threadId) : undefined
+    const thread = root?.conversationId === conv.id ? (root.threadId ?? root.id) : undefined
+    // A question an agent left waiting is answered by my next message in its thread. What I
+    // write outside threads stays outside: it only answers a question that is outside too.
+    const asked = this.pendingQuestion(conv.id, thread)
 
-    const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now() }
+    const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
+    // An answer goes in the thread of what it answers. A message of mine outside one opens it
+    // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
+    const replyIn = thread ?? (conv.threads ? mine.id : undefined)
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
@@ -154,7 +181,6 @@ export class Runner {
     const members = this.members(conv)
     let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
 
-    const asked = this.pendingQuestion(conv.id)
     if (asked) {
       this.update(asked, { run: { ...asked.run!, status: 'done' } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
@@ -162,21 +188,21 @@ export class Runner {
     }
 
     if (members.length === 0) {
-      this.post(conv.id, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
+      this.post(conv.id, replyIn, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
       return
     }
     if (this.paused) {
-      this.post(conv.id, L('Os agentes estão pausados: ninguém responde até você retomar (botão no topo da barra lateral).', 'The agents are paused: no one answers until you resume (button at the top of the sidebar).'))
+      this.post(conv.id, replyIn, L('Os agentes estão pausados: ninguém responde até você retomar (botão no topo da barra lateral).', 'The agents are paused: no one answers until you resume (button at the top of the sidebar).'))
       return
     }
     if (responders.length === 0) {
       if (conv.kind === 'dm' || members.length === 1) responders = members
       else if (members.length > 1) {
-        void this.routeAndRun(conv, members)
+        void this.routeAndRun(conv, members, replyIn)
         return
       }
     }
-    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
+    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn }))
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -239,7 +265,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work }))
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }))
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -336,15 +362,16 @@ export class Runner {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
   }
 
-  private pendingQuestion(conversationId: string): Message | undefined {
+  // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
+  private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
     return this.deps.db
-      .recentMessages(conversationId, 50)
+      .recentMessages(conversationId, 50, threadId ?? null)
       .reverse()
       .find((m) => m.run?.status === 'waiting_input')
   }
 
-  private post(conversationId: string, text: string, run?: Run): Message {
-    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now(), run }
+  private post(conversationId: string, threadId: string | undefined, text: string, run?: Run): Message {
+    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now(), run, ...(threadId ? { threadId } : {}) }
     this.deps.db.saveMessage(m)
     this.deps.emit({ type: 'message', message: m })
     return m
@@ -356,16 +383,20 @@ export class Runner {
     this.deps.emit({ type: 'message', message: { ...m } })
   }
 
-  private async routeAndRun(conv: Conversation, members: Agent[]): Promise<void> {
+  // The router reads the thread it picks for, and the conversation's other threads in a line each.
+  private async routeAndRun(conv: Conversation, members: Agent[], threadId?: string): Promise<void> {
     const { db, engines } = this.deps
     this.routing++
-    const note = this.post(conv.id, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
+    const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
       this.update(note, { text: L(`Não consegui escolher quem responde (${why}). Mencione um agente com **@nome**.`, `I couldn't pick who answers (${why}). Mention an agent with **@name**.`), run: undefined })
     try {
       const settings = await this.deps.settings()
+      const { messages, threads } = contextWindow(db, note, 20)
       const input = {
-        messages: db.recentMessages(conv.id, 20),
+        messages,
+        threads,
+        thread: threadId ? db.message(threadId) : undefined,
         agents: members,
         me: settings.workspaceName,
         connectors: this.deps.connectors?.list()
@@ -402,7 +433,7 @@ export class Runner {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
     this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
-    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
+    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: note.threadId }))
   }
 
   private enqueue(job: () => Promise<unknown>): void {
@@ -439,7 +470,8 @@ export class Runner {
     return { model, account }
   }
 
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean }): Promise<Message> {
+  // `threadId`: the reply goes in that thread (an existing reply keeps its own).
+  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -451,7 +483,7 @@ export class Runner {
     let engineId: EngineId = model?.engine ?? 'claude'
     let engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
 
-    const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now() }
+    const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
     const started = Date.now()
     let stepStarted = started
     const thinking = (): Step => ({ id: randomUUID(), label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' })
@@ -527,13 +559,7 @@ export class Runner {
     const members = this.members(conv)
     const peers = members.filter((a) => a.id !== agent.id)
     const memory = this.deps.memory
-    const { summary, messages: history } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? {
-      summary: undefined,
-      messages: db
-        .recentMessages(conv.id, HISTORY_LIMIT + 40)
-        .filter((m) => m.id !== msg.id && m.at <= msg.at)
-        .slice(-HISTORY_LIMIT)
-    }
+    const { summary, messages: history } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // What this reply counts toward: given (a chain, a routine's issue), or an issue named in the message it answers.
     const asked = [...history].reverse().find((m) => m.author.kind === 'me' || m.author.kind === 'routine')
     const work = opts.work ?? opts.existing?.run?.work ?? (asked ? workIn(asked.text) : undefined)
@@ -541,16 +567,27 @@ export class Runner {
     // Past the prompt's budget, the older memories are searched instead: the tool shows up only then.
     const promptMemories = memory?.forPrompt(agent)
     const canSearch = !!this.deps.gateway && !!promptMemories?.searchable
+    // A thread sees only itself, and the conversation only what's outside threads: the other
+    // threads, of the conversations this agent is in, are looked up.
+    const canSeekThreads = !!this.deps.gateway && (!!msg.threadId || db.threadRoots(conv.id).size > 0)
+    const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
     // The Tuca proposes agents; nobody else does.
     const builds = !!this.deps.gateway && agent.kind === 'tuca'
-    const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
+    // why, so it says so in a sentence instead of spending a call on each tool to find out.
+    const computerOff = computers ? await computers.unavailable?.(agent) : undefined
+    if (computerOff) computers = undefined
+    let computerDown: string | undefined // found off in the middle of the turn: what the person has to do
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
     const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
     const skills = this.deps.gateway ? this.deps.skills : undefined
     const mySkills = skills?.forAgent(agent.id) ?? []
+    // The wiki: for agents that may read it, once it has a page.
+    const wiki = this.deps.gateway && this.deps.wiki && wikiAccess(agent) !== 'none' && this.deps.wiki.count() > 0 ? this.deps.wiki : undefined
 
-    const control: Control = { ctl: new AbortController() }
+    const control: Control = { ctl: new AbortController(), msg }
     this.controllers.set(msg.id, control)
     const halt = (reason: NonNullable<Control['reason']>): void => {
       if (control.reason) return
@@ -608,9 +645,11 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
-      if (c.status !== 'connected') continue
+      // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
+      // (a refused token, a sign-in to finish) takes them away.
+      if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
@@ -662,12 +701,14 @@ export class Runner {
       ...(prTool ? [prTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
+      ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
       ...(builds ? [PROPOR_AGENTE] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
+      ...(wiki ? WIKI_TOOLS : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
@@ -736,6 +777,48 @@ export class Runner {
           return textResult(found.map((m) => `- [${m.id}] ${m.text} (${about(m)}, ${new Date(m.confirmedAt).toLocaleDateString(locale())})`).join('\n'))
         }
 
+        if (name === BUSCAR_THREADS.name && canSeekThreads) {
+          const busca = typeof args['busca'] === 'string' ? args['busca'].trim() : ''
+          if (!busca) return textResult(L('Faltou o que buscar.', 'Missing what to search for.'), true)
+          const convs = myConversations()
+          const hits = searchThreads(db, convs.map((c) => c.id), busca, msg.threadId, typeof args['limite'] === 'number' ? args['limite'] : 5)
+          addSteps({ id: randomUUID(), label: L('Buscou nas threads', 'Searched threads'), detail: `${busca} · ${hits.length === 1 ? L('1 achada', '1 found') : L(`${hits.length} achadas`, `${hits.length} found`)}`, status: 'done' })
+          if (!hits.length) return textResult(L(`Nenhuma thread com "${busca}". Tente outras palavras; se não achar, o assunto não foi tratado nas conversas recentes.`, `No thread with "${busca}". Try other words; if nothing turns up, the subject wasn't covered in the recent conversations.`))
+          const who = (m: Message): string => (m.author.kind === 'me' ? settings.workspaceName : m.author.kind === 'agent' ? (db.agent(m.author.id)?.name ?? L('agente', 'agent')) : L('rotina', 'routine'))
+          const lines = hits.map((h) => {
+            const c = convs.find((x) => x.id === h.conversationId)
+            const where = c?.kind === 'dm' ? L('DM', 'DM') : `#${c?.name ?? '?'}`
+            const opened = h.root ? `${who(h.root)}: "${snip(h.root.text, 200)}"` : L('(a mensagem que abriu foi apagada)', '(the message that opened it was deleted)')
+            const gist = h.root?.threadSummary?.text.trim()
+              ? `${L('resumo', 'summary')}: "${snip(h.root.threadSummary.text, 400)}"`
+              : h.last
+                ? `${L('última resposta', 'last reply')} (${who(h.last)}): "${snip(h.last.text, 300)}"`
+                : L('sem resposta', 'no reply')
+            return `- [${h.id}] ${where} · ${clock(h.at)} · ${opened} · ${gist}`
+          })
+          return textResult(lines.join('\n'))
+        }
+
+        if (name === LER_THREAD.name && canSeekThreads) {
+          const id = typeof args['id'] === 'string' ? args['id'].trim().replace(/^\[|\]$/g, '') : ''
+          const found = id ? db.message(id) : undefined
+          const c = found && myConversations().find((x) => x.id === found.conversationId)
+          // Only threads of the conversations it's in, and not the one it's replying in (that's in the prompt).
+          const root = c && found ? (found.threadId ? db.message(found.threadId) : found) : undefined
+          if (!c || !root || root.id === msg.threadId) return textResult(L('Não achei essa thread nas suas conversas. Use um id que buscar_threads devolveu.', "I couldn't find that thread in your conversations. Use an id buscar_threads returned."), true)
+          const replies = db.recentMessages(c.id, HISTORY_LIMIT + 1, root.id).filter((m) => m.id !== msg.id)
+          const older = replies.length > HISTORY_LIMIT && root.threadSummary?.text.trim()
+          const where = c.kind === 'dm' ? L(`DM com ${settings.workspaceName}`, `DM with ${settings.workspaceName}`) : `#${c.name}`
+          addSteps({ id: randomUUID(), label: L('Leu uma thread', 'Read a thread'), detail: snip(root.text, 80), status: 'done' })
+          return textResult(
+            [
+              L(`Thread em ${where}:`, `Thread in ${where}:`),
+              ...(older ? [`${L('Resumo do começo dela', 'Summary of its beginning')}:\n${root.threadSummary!.text.trim()}`] : []),
+              ...transcript({ agent, conversation: c, messages: [root, ...replies.slice(-HISTORY_LIMIT)], agents: db.agents(), me: settings.workspaceName }).slice(1)
+            ].join('\n\n')
+          )
+        }
+
         if (name === LEMBRAR.name && canRemember) {
           const current = db.agent(agent.id) ?? agent // the mode may have changed mid-turn
           if (current.memory === 'read') return textResult(L('Sua memória está só leitura agora.', 'Your memory is read-only right now.'), true)
@@ -745,6 +828,12 @@ export class Runner {
           msg.run = { ...msg.run!, memoryIds: [...memoryIds] }
           addSteps({ id: randomUUID(), label: r.label!, detail: r.memory.text, status: 'done' })
           return textResult(r.reply)
+        }
+
+        if (wiki && WIKI_TOOL_NAMES.has(name)) {
+          const r = wikiCall(wiki, name, args)
+          addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: 'done' })
+          return textResult(r.text, r.error)
         }
 
         if (skills && SKILL_TOOL_NAMES.has(name)) {
@@ -773,6 +862,11 @@ export class Runner {
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
           const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          // No tool of the computer can work: the turn ends here, before the model tries the next one.
+          if (out.down) {
+            computerDown = out.down
+            halt('computer')
+          }
           if (out.artifact) artifactIds.push(out.artifact.id)
           if (out.service && !services.includes(out.service)) services.push(out.service)
           msg.run = {
@@ -830,7 +924,7 @@ export class Runner {
             }
             stepStarted = Date.now()
             save()
-            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval')
+            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval', msg.threadId)
             return textResult(
               L(
                 `Pedido de aprovação criado, com o print da tela. O clique ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -887,7 +981,7 @@ export class Runner {
             msg.run = { ...msg.run!, approvalId: approval.id, steps: [...close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }), thinking()] }
             stepStarted = Date.now()
             save()
-            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval')
+            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval', msg.threadId)
             return textResult(
               L(
                 `Pedido de aprovação criado. A ação ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -930,7 +1024,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu pra abrir a PR', 'Asked to open the PR'), detail: `${branch} → ${prArgs.base}`, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} quer abrir uma PR`, `${agent.name} wants to open a PR`), `${repo}: ${title}`, conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} quer abrir uma PR`, `${agent.name} wants to open a PR`), `${repo}: ${title}`, conv.id, 'approval', msg.threadId)
           return textResult(
             L(
               `Pedido de PR criado. A PR ainda NÃO existe. Encerre sua resposta agora dizendo em uma frase o que vai na PR. Quando ${settings.workspaceName} aprovar, você recebe o link numa nova mensagem.`,
@@ -965,7 +1059,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu acesso', 'Asked for access'), detail: `${c.name} · ${nivel === 'read' ? L('ler', 'read') : L('ler e escrever', 'read and write')}`, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} pede acesso ao ${c.name}`, `${agent.name} asks for access to ${c.name}`), why || (nivel === 'read' ? L('Pra ler.', 'To read.') : L('Pra ler e escrever.', 'To read and write.')), conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} pede acesso ao ${c.name}`, `${agent.name} asks for access to ${c.name}`), why || (nivel === 'read' ? L('Pra ler.', 'To read.') : L('Pra ler e escrever.', 'To read and write.')), conv.id, 'approval', msg.threadId)
           return textResult(
             L(
               `Pedido de acesso enviado. Encerre sua resposta agora dizendo em uma frase o que pediu e por quê. Se ${settings.workspaceName} liberar, você continua numa nova mensagem.`,
@@ -1006,7 +1100,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${detail}${approval.why ? `: ${approval.why}` : ''}`, conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${toolLabel(current.name)} · ${hit.connector.name}${approval.why ? `: ${approval.why}` : ''}`, conv.id, 'approval', msg.threadId)
           return textResult(
             L(
               `Pedido de aprovação criado. A ação ainda NÃO foi executada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -1078,13 +1172,15 @@ export class Runner {
     let progress = { tokens: 0, cacheRead: 0 }
     let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'> } | null = null
     let error: string | null = null
+    let thrown: unknown // what the engine threw, if it did: a bug reads differently from a CLI's own words
 
     // Images I attached: every message says which it had; the newest go in as images.
     const ids = new Set(history.map((m) => m.id))
     const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names })
+    const thread = msg.threadId ? db.message(msg.threadId) : undefined
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread, searchable: canSeekThreads })
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -1102,13 +1198,15 @@ export class Runner {
               memories: promptMemories,
               canRemember,
               hasComputer: !!computers,
+              computerOff,
               browser: !!browser,
               apps: apps ? agent.apps : undefined,
-              offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
+              offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
               macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
               web: agent.web !== false,
               routines: routines?.forAgent(agent.id),
               skills: skills && mySkills,
+              wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
               publish: repos,
               builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
             }),
@@ -1151,6 +1249,7 @@ export class Runner {
           }
         } catch (e) {
           error = e instanceof Error ? e.message : String(e)
+          thrown = e
         }
         // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
         // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
@@ -1168,6 +1267,7 @@ export class Runner {
         const to = `${engineLabel}${account ? ` (${account.name})` : ''}`
         addSteps({ id: randomUUID(), label: L('Foi pro modelo reserva', 'Moved to the reserve model'), detail: L(`${from} está sem limite agora; segue no ${to}`, `${from} is out of quota for now; going on with ${to}`), status: 'done' })
         error = null
+        thrown = undefined
         progress = { tokens: 0, cacheRead: 0 }
       }
     } finally {
@@ -1189,6 +1289,7 @@ export class Runner {
       const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
       this.post(
         conv.id,
+        msg.threadId,
         L(
           `**${agent.name}** já usou ${pct} do limite do mês (${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens). Dá pra aumentar na página dele.`,
           `**${agent.name}** has used ${pct} of the month's limit (${tokenCount(usedNow)} of ${tokenCount(agent.limit)} tokens). It can be raised on their page.`
@@ -1197,7 +1298,9 @@ export class Runner {
       this.deps.notify?.(
         L(`${agent.name} usou ${pct} do limite do mês`, `${agent.name} used ${pct} of the month's limit`),
         L(`${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens. Dá pra aumentar na página dele.`, `${tokenCount(usedNow)} of ${tokenCount(agent.limit)} tokens. It can be raised on their page.`),
-        conv.id
+        conv.id,
+        undefined,
+        msg.threadId
       )
     }
 
@@ -1214,6 +1317,17 @@ export class Runner {
         text: msg.text ? `${msg.text} …` : '',
         run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
       })
+    } else if (control.reason === 'computer') {
+      save({
+        text: msg.text ? `${msg.text} …` : '',
+        run: {
+          ...base,
+          ...again,
+          status: 'failed',
+          steps: closeThinking('error', L('Parou', 'Stopped')),
+          error: L(`Parei: meu computador não está funcionando. ${computerDown ?? ''} Depois é só mandar de novo.`, `I stopped: my computer isn't working. ${computerDown ?? ''} Then just send it again.`)
+        }
+      })
     } else if (overBudget && control.reason !== 'limit') {
       // Wrapped up at the budget, or cut past it: either way it can go on from here.
       save({
@@ -1226,24 +1340,37 @@ export class Runner {
         run: { ...base, ...again, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
       })
     } else if (result) {
+      // Approved or refused before the run ended: nothing is left to wait for.
+      const waiting = approval && db.approval(approval.id)?.state === 'pending'
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        run: { ...base, status: question ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
-      if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question')
-      else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done')
+      if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
+      else if (!approval) {
+        const finished = (): void => {
+          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
+        }
+        const next = this.mentions(agent, conv, msg)
+        if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, finished)
+        else finished()
+      }
     } else {
-      save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: error ?? L('O motor terminou sem resposta.', 'The engine ended without a reply.') } })
+      // What happened and what to do; the CLI's own words go folded under it.
+      const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
+      save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: failure.text, ...(failure.detail ? { errorDetail: failure.detail } : {}) } })
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
     const st = msg.run?.status
-    if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done')
+    if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId)
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
     void memory?.consolidate(conv.id)
+    if (msg.threadId) void memory?.consolidateThread(msg.threadId, 'grown')
+    if (!opts.routine && msg.run?.status === 'done') this.deps.wikiCurator?.afterReply(conv.id)
     return msg
   }
 
@@ -1401,10 +1528,15 @@ export class Runner {
     db.setApprovalOutcome(id, outcome)
     emit({ type: 'approval', approval: db.approval(id)! })
 
-    const msg = db.message(ap.messageId)
+    // Approved while the agent is still replying: add the step to the live reply, which saves it when it ends.
+    const live = this.controllers.get(ap.messageId)?.msg
+    const msg = live ?? db.message(ap.messageId)
     if (msg?.run) {
       const label = decision === 'approved' ? L('Aprovado', 'Approved') : decision === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
-      this.update(msg, {
+      if (live) {
+        live.run!.steps.push({ id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' })
+        this.update(live, {})
+      } else this.update(msg, {
         run: {
           ...msg.run,
           status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
@@ -1412,7 +1544,7 @@ export class Runner {
         }
       })
     }
-    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work }))
+    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }))
   }
 
   async expireApprovals(): Promise<void> {
@@ -1443,23 +1575,73 @@ export class Runner {
       this.execute(agent, conv, {
         depth: 1,
         work: asked.run?.work,
+        threadId: asked.threadId,
         task: L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
       })
     )
   }
 
-  // An agent that mentions another agent of the conversation hands it the turn,
+  // An agent that mentions another agent of the conversation may hand it the turn,
   // up to MAX_DEPTH replies in a row without a human message in between.
-  // Whether the conversation goes on with another agent.
-  private chain(agent: Agent, conv: Conversation, msg: Message, depth: number): boolean {
-    if (this.paused) return false
-    const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
-    if (next.length === 0) return false
-    if (depth >= MAX_DEPTH) {
-      this.post(conv.id, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
-      return false
+  // The agents a reply mentions (none while paused).
+  private mentions(agent: Agent, conv: Conversation, msg: Message): Agent[] {
+    if (this.paused) return []
+    return mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+  }
+
+  // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
+  // router can't say, everyone mentioned is called. `finished` runs when no one gets the turn.
+  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, finished: () => void): Promise<void> {
+    const { db, engines } = this.deps
+    const and = L(' e ', ' and ')
+    const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
+    this.routing++
+    try {
+      let called = next
+      let step = { label: L('Chamou', 'Called'), detail: list(next), ms: 0 }
+      const failed = (why: string): void => {
+        console.warn('[handoff]', why)
+        step.detail = `${list(next)} · ${L('não consegui avaliar, chamei todos', "couldn't screen it, called everyone")}`
+      }
+      try {
+        const settings = await this.deps.settings()
+        // Jev stays for human messages: here 'jev' isn't a model, so this falls to Haiku.
+        const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+        const status = settings.engines[model.engine]
+        if (!status.installed || !status.loggedIn) failed(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+        else {
+          const cwd = join(this.deps.workDir, '_router')
+          mkdirSync(cwd, { recursive: true })
+          const { messages } = contextWindow(db, msg, ROUTER_HISTORY)
+          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
+          if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
+          step.ms = r.ms
+          if ('error' in r) failed(r.error)
+          else {
+            called = r.agents
+            const why = r.reason ? ` · ${r.reason}` : ''
+            step = called.length ? { ...step, detail: `${list(called)}${why}` } : { label: L('Ninguém precisa responder', 'No one needs to answer'), detail: r.reason, ms: r.ms }
+          }
+        }
+      } catch (e) {
+        failed(e instanceof Error ? e.message : String(e))
+      }
+      // Paused while the router was thinking: call no one.
+      if (this.paused) called = []
+      else {
+        // Seconds have passed: other code may have saved this reply meanwhile (the wiki, a draft), so add to what's stored.
+        const saved = db.message(msg.id) ?? msg
+        if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
+      }
+      if (called.length === 0) return finished()
+      if (depth >= MAX_DEPTH) {
+        this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
+        return finished()
+      }
+      for (const a of called) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
+    } finally {
+      this.routing--
+      this.checkIdle()
     }
-    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work }))
-    return true
   }
 }

@@ -1,8 +1,13 @@
-// A newer Tucano: a note at the foot of the sidebar once it's downloaded, and the
-// state in Settings. The main process looks and downloads (src/main/updates.ts).
-import { useSyncExternalStore, type ReactNode } from 'react'
-import { L } from '../../../shared/lang'
+// A newer Tucano: a note at the foot of the sidebar once it's downloaded, the state in
+// Settings, and what's new once it's running. The main process looks and downloads (src/main/updates.ts).
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import Markdown from 'react-markdown'
+import changelog from '../../../../CHANGELOG.md?raw'
+import { L, lang, locale } from '../../../shared/lang'
+import { newsSince, type PtSummary, type ReleaseNotes } from '../../../shared/release-notes'
 import type { UpdateState } from '../../../shared/types'
+import { updateSettings, useStore } from '../store'
+import { Modal } from './Dialogs'
 import { ago } from './ui'
 
 const RELEASES = 'https://github.com/eduwxyz/tucano/releases'
@@ -35,19 +40,29 @@ function useUpdate(): UpdateState | null {
 
 const notes = (version?: string): string => (version ? `${RELEASES}/tag/v${version}` : RELEASES)
 
+// How many agents are in the middle of a reply: restarting now would cut them off.
+const useWorking = (): number => useStore((s) => new Set(s.messages.filter((m) => m.run?.status === 'working' && m.author.kind === 'agent').map((m) => (m.author.kind === 'agent' ? m.author.id : ''))).size)
+
+const workingNote = (n: number): string => (n === 1 ? L('1 agente trabalhando: reinicie quando ele terminar.', '1 agent working: restart once it’s done.') : L(`${n} agentes trabalhando: reinicie quando terminarem.`, `${n} agents working: restart once they’re done.`))
+
 export function UpdateNote(): ReactNode {
   const u = useUpdate()
+  const working = useWorking()
   if (u?.status !== 'ready') return null
   return (
     <div className="update-note">
       <div className="update-note__text">
         <strong>{L(`Tucano ${u.next} pronto`, `Tucano ${u.next} is ready`)}</strong>
-        <a href={notes(u.next)} target="_blank" rel="noreferrer">
-          {L('O que mudou', 'What’s new')}
-        </a>
+        {working > 0 ? (
+          <span className="muted small">{workingNote(working)}</span>
+        ) : (
+          <a href={notes(u.next)} target="_blank" rel="noreferrer">
+            {L('O que mudou', 'What’s new')}
+          </a>
+        )}
       </div>
-      <button className="btn btn--primary btn--sm" onClick={() => window.tucano.installUpdate()}>
-        {L('Reiniciar', 'Restart')}
+      <button className={`btn btn--sm ${working > 0 ? '' : 'btn--primary'}`} onClick={() => window.tucano.installUpdate()}>
+        {working > 0 ? L('Reiniciar mesmo assim', 'Restart anyway') : L('Reiniciar', 'Restart')}
       </button>
     </div>
   )
@@ -64,7 +79,11 @@ function status(u: UpdateState): string {
     case 'ready':
       return L(`O Tucano ${u.next} está pronto. Ele entra quando você reiniciar ou fechar o app.`, `Tucano ${u.next} is ready. It goes in when you restart or quit the app.`)
     case 'error':
-      return L('Não deu pra procurar uma versão nova agora. Tente de novo mais tarde.', 'Couldn’t look for a new version just now. Try again later.')
+      return u.errorKind === 'other'
+        ? L('Não deu pra atualizar sozinho. Baixe a versão nova em Releases.', 'Couldn’t update on its own. Download the new version from Releases.')
+        : u.errorKind === 'offline'
+          ? L('Sem internet pra procurar uma versão nova. O Tucano tenta de novo sozinho mais tarde.', 'No internet to look for a new version. Tucano tries again on its own later.')
+          : L('Não deu pra procurar uma versão nova agora. Tente de novo mais tarde.', 'Couldn’t look for a new version just now. Try again later.')
     default:
       return u.checkedAt
         ? L(`É a versão mais recente. Conferido ${ago(u.checkedAt)}.`, `It’s the latest version. Checked ${ago(u.checkedAt)}.`)
@@ -74,6 +93,7 @@ function status(u: UpdateState): string {
 
 export function UpdateSettings(): ReactNode {
   const u = useUpdate()
+  const working = useWorking()
   if (!u) return null
   const busy = u.status === 'checking' || u.status === 'downloading'
   return (
@@ -81,21 +101,122 @@ export function UpdateSettings(): ReactNode {
       <span className="hint">
         {L(`Você está na versão ${u.version}. `, `You’re on version ${u.version}. `)}
         {status(u)}
+        {u.status === 'ready' && working > 0 && ` ${workingNote(working)}`}
       </span>
       <div className="row">
         {u.status === 'ready' ? (
-          <button className="btn btn--primary btn--sm" onClick={() => window.tucano.installUpdate()}>
-            {L('Reiniciar e atualizar', 'Restart and update')}
+          <button className={`btn btn--sm ${working > 0 ? '' : 'btn--primary'}`} onClick={() => window.tucano.installUpdate()}>
+            {working > 0 ? L('Reiniciar mesmo assim', 'Restart anyway') : L('Reiniciar e atualizar', 'Restart and update')}
           </button>
         ) : (
           <button className="btn btn--sm" disabled={u.status === 'off' || busy} onClick={() => window.tucano.checkUpdates()}>
             {L('Procurar atualizações', 'Check for updates')}
           </button>
         )}
+        {u.status === 'error' && u.errorKind === 'other' && (
+          <a className="btn btn--sm btn--primary" href={`${RELEASES}/latest`} target="_blank" rel="noreferrer">
+            {L('Baixar em Releases', 'Download from Releases')}
+          </a>
+        )}
         <a className="link" href={notes(u.status === 'ready' ? u.next : u.version)} target="_blank" rel="noreferrer">
           {L('Notas da versão', 'Release notes')}
         </a>
       </div>
     </div>
+  )
+}
+
+const KINDS = (): Record<string, string> => ({ Added: L('Novidades', 'New'), Changed: L('O que mudou', 'Changed'), Fixed: L('Correções', 'Fixed'), Removed: L('Saiu', 'Removed'), Security: L('Segurança', 'Security') })
+
+const day = (date?: string): string => (date ? new Date(`${date}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'long' }) : '')
+
+// One version's news: in Portuguese, its summary; in English (or with no summary), the first
+// sentence of each item. The full notes are on GitHub.
+function Release({ r, titled }: { r: ReleaseNotes; titled: boolean }): ReactNode {
+  return (
+    <section className="whats-new__release">
+      {titled && (
+        <h3>
+          {r.version} <span className="muted">· {day(r.date)}</span>
+        </h3>
+      )}
+      {lang() === 'pt' && r.pt ? (
+        <Summary pt={r.pt} />
+      ) : (
+        r.sections
+          .filter((s) => s.items.length)
+          .map((s) => (
+            <div key={s.kind}>
+              <h4>{KINDS()[s.kind] ?? s.kind}</h4>
+              <ul>
+                {s.items.map((item, i) => (
+                  <li key={i}>
+                    <Markdown allowedElements={['strong', 'em', 'code', 'p']} unwrapDisallowed>
+                      {item}
+                    </Markdown>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+      )}
+    </section>
+  )
+}
+
+// The Portuguese summary as written: its topics as a list, the text around them as text.
+function Summary({ pt }: { pt: PtSummary }): ReactNode {
+  const inline = (md: string): ReactNode => (
+    <Markdown allowedElements={['strong', 'em', 'code', 'p']} unwrapDisallowed>
+      {md}
+    </Markdown>
+  )
+  return (
+    <>
+      {pt.intro && <p>{inline(pt.intro)}</p>}
+      {pt.points.length > 0 && (
+        <ul>
+          {pt.points.map((p, i) => (
+            <li key={i}>{inline(p)}</li>
+          ))}
+        </ul>
+      )}
+      {pt.outro && <p className="muted whats-new__thanks">{inline(pt.outro)}</p>}
+    </>
+  )
+}
+
+// After an update, once: what came in since the version I last saw (a new install saw its own).
+export function WhatsNew(): ReactNode {
+  const version = useUpdate()?.version
+  const seen = useStore((s) => s.settings.seenVersion)
+  const news = useMemo(() => (version && seen !== version ? newsSince(changelog, version, seen) : []), [version, seen])
+  const [closed, setClosed] = useState(false)
+  // A version with nothing written (or an older one, after going back): seen, quietly.
+  useEffect(() => {
+    if (version && seen !== version && news.length === 0) updateSettings({ seenVersion: version })
+  }, [version, seen, news.length])
+  if (!version || closed || news.length === 0) return null
+  const close = (): void => {
+    setClosed(true)
+    updateSettings({ seenVersion: version })
+  }
+  return (
+    <Modal title={L(`Novidades do Tucano ${version}`, `What’s new in Tucano ${version}`)} onClose={close} className="whats-new">
+      <div className="whats-new__body">
+        {news.map((r) => (
+          <Release key={r.version} r={r} titled={news.length > 1} />
+        ))}
+      </div>
+      <footer className="modal__foot">
+        <a className="link" href={notes(version)} target="_blank" rel="noreferrer">
+          {L('Ver as notas completas', 'See the full notes')}
+        </a>
+        <span className="grow" />
+        <button className="btn btn--primary btn--sm" autoFocus onClick={close}>
+          {L('Entendi', 'Got it')}
+        </button>
+      </footer>
+    </Modal>
   )
 }
