@@ -96,7 +96,7 @@ export const handoffSystem = (): string =>
       '- "handles": só handles da lista de agentes mencionados.',
       '- "reason": um motivo de até 12 palavras, em português.',
       'Passe a vez para: um pedido, uma pergunta, uma tarefa, uma revisão, uma decisão que alguém está esperando.',
-      'Não passe a vez para: agradecimento, confirmação ("combinado", "valeu", "ok", 👍), menção que só dá crédito ou informa, recado sem pedido.',
+      'Não passe a vez para: agradecimento, confirmação ("combinado", "valeu", "ok", 👍), menção que só dá crédito ou informa, recado sem pedido, ficar esperando o aviso ou o resultado de alguém ("Fico esperando o aviso do Léo").',
       'Na dúvida, passe a vez.'
     ].join('\n'),
     [
@@ -105,18 +105,26 @@ export const handoffSystem = (): string =>
       '- "handles": only handles from the list of mentioned agents.',
       '- "reason": a reason of up to 12 words, in English.',
       'Hand the turn over for: a request, a question, a task, a review, a decision someone is waiting on.',
-      'Do not hand it over for: thanks, an acknowledgement ("agreed", "thanks", "ok", 👍), a mention that only credits or informs, a note with no ask.',
+      "Do not hand it over for: thanks, an acknowledgement (\"agreed\", \"thanks\", \"ok\", 👍), a mention that only credits or informs, a note with no ask, waiting for someone's update or result (\"I'll wait for Léo's heads-up\").",
       'When in doubt, hand the turn over.'
     ].join('\n')
   )
 
 // The reply sits between <reply> tags so it can't be confused with the roster or the history.
-export function handoffPrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; connectors?: Connector[] }): string {
-  const { reply, author, candidates, messages, members, me, connectors = [] } = opts
+export function handoffPrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; connectors?: Connector[]; busy?: Agent[] }): string {
+  const { reply, author, candidates, messages, members, me, connectors = [], busy = [] } = opts
   const name = speaker(members, me)
   return [
     L('Agentes mencionados:', 'Mentioned agents:'),
     ...candidates.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`),
+    ...(busy.length
+      ? [
+          L(
+            `Já estão respondendo aqui: ${busy.map((a) => a.name).join(', ')}. Só passe a vez para eles se a resposta trouxer algo novo pra eles (decisão, pedido, correção).`,
+            `Already replying here: ${busy.map((a) => a.name).join(', ')}. Only hand them the turn if the reply brings them something new (a decision, a request, a correction).`
+          )
+        ]
+      : []),
     '',
     L('Conversa recente:', 'Recent conversation:'),
     ...messages.filter(said).slice(-ROUTER_HISTORY).map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`),
@@ -197,6 +205,7 @@ export async function screenHandoff(opts: {
   members: Agent[]
   me: string
   connectors?: Connector[]
+  busy?: Agent[]
   cwd: string
 }): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()
