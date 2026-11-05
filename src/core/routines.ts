@@ -17,6 +17,7 @@ export { MAX_AGENT_ROUTINES } // the default; each agent's own is agent.maxRouti
 export const TICK_MS = 30_000
 export const LATE_GRACE_MS = 12 * 3_600_000 // a run missed by more than this is skipped
 const LATE_AFTER_MS = 2 * 60_000 // later than this is "atrasada" in the conversation
+export const CONNECTORS_WAIT_MS = 60_000 // a run waits this long, at most, for connectors still connecting
 // A reply that fails is tried again in place, after these waits; then it stays failed.
 export const RETRY_WAITS_MS = [60_000, 5 * 60_000]
 
@@ -85,6 +86,8 @@ export interface RoutineDeps {
     retryRoutine?(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined>
   }
   connectors?: { call(id: string, tool: string, args: Record<string, unknown>): Promise<CallToolResult>; list(): Connector[] }
+  connectorsReady?: () => Promise<void> | undefined // settles when the connectors connecting have finished (or failed); undefined when none is
+  connectorsWaitMs?: number // how long a run waits for that (tests shorten it)
   blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
   paused?: () => boolean // paused: a call from outside says so instead of starting a run
   emit: (e: CoreEvent) => void
@@ -342,13 +345,35 @@ export class Routines {
     )
   }
 
+  private connectorsSettled(): Promise<void> | undefined {
+    const pending = this.deps.connectorsReady?.()
+    return pending && this.waitFor(pending)
+  }
+
+  private async waitFor(pending: Promise<void>): Promise<void> {
+    const ms = this.deps.connectorsWaitMs ?? CONNECTORS_WAIT_MS
+    let timer: NodeJS.Timeout | undefined
+    const timedOut = new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), ms)))
+    timer?.unref()
+    try {
+      const done = await Promise.race([pending.then(() => 'ready' as const, () => 'ready' as const), timedOut])
+      if (done === 'timeout') console.warn(`[routines] connectors still connecting after ${Math.round(ms / 1000)}s: running the routine without waiting`)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   // One run of a routine at a time: if the last one is still going, this one skips.
   // `more`: a connector check left new items, so check again when this run ends.
   private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
     this.running.add(id)
-    const run = this.runWithRetries(r, when)
+    // The first tick comes before the connectors have connected, with what was missed while the
+    // app was closed and what is due right then: a run waits for them (a little), or the agent
+    // starts without its tools. With none connecting, it starts right now, as before.
+    const wait = this.connectorsSettled()
+    const run = (wait ? wait.then(() => this.runWithRetries(r, when)) : this.runWithRetries(r, when))
       .then((reply) => {
         if (!reply) return
         const latest = this.deps.db.routine(id)

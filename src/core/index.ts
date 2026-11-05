@@ -552,6 +552,7 @@ const routines = new Routines({
   db,
   runner: { runRoutine: (r, when) => runner.runRoutine(r, when), retryRoutine: (r, when, id) => runner.retryRoutine(r, when, id) },
   connectors: { call: (id, tool, args) => connectors.call(id, tool, args), list: () => connectors.list() },
+  connectorsReady: () => connectors.settled(),
   blocked: () => !!settings().paused || inQuietHours(settings().quietHours),
   paused: () => !!settings().paused,
   emit,
