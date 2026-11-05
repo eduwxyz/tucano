@@ -241,7 +241,8 @@ export interface LocalInfo {
 }
 
 export interface Settings {
-  workspaceName: string
+  workspaceName: string // the person's name: what the agents call them
+  workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
@@ -270,7 +271,7 @@ export interface Settings {
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
-  onboarding?: { done: boolean; checklistHidden?: boolean }
+  onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean; carried?: boolean } // carried: the general settings came from another workspace
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once

@@ -14,7 +14,9 @@ import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
+import { LATE_GRACE_MS, MAX_AGENT_ROUTINES, Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
+
 import { plainCipher, Secrets } from '../src/core/secrets'
 
 const DEMO = join(import.meta.dirname, '..', 'scripts', 'demo-mcp-server.mjs')
@@ -57,6 +59,7 @@ let events: CoreEvent[]
 let settings: Settings
 let connectorId: string
 let seen: { turns: Turn[]; tools: string[][]; results: unknown[] }
+let runnerRef = { current: undefined as Runner | undefined }
 
 const agent = (grant: GrantLevel): Agent => ({
   id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low',
@@ -64,15 +67,18 @@ const agent = (grant: GrantLevel): Agent => ({
 })
 
 function runner(plan: (turn: Turn, tools: string[]) => Plan, onDb: Db = db): Runner {
-  return new Runner({
+  const r = new Runner({
     db: onDb,
     engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') },
     settings: async () => settings,
     emit: (e) => events.push(e),
     workDir: join(dir, 'work'),
     gateway,
-    connectors
+    connectors,
+    routines
   })
+  runnerRef.current = r
+  return r
 }
 
 const tasks = (): { id: number; title: string; done: boolean }[] => {
@@ -84,6 +90,10 @@ const tasks = (): { id: number; title: string; done: boolean }[] => {
 }
 const agentMessages = (d: Db = db): Message[] => d.messages().filter((m) => m.author.kind === 'agent')
 const textOf = (r: unknown): string => ((r as { content: { text: string }[] }).content[0]?.text ?? '')
+const at = (y: number, mo: number, d: number, h = 0, mi = 0): number => new Date(y, mo - 1, d, h, mi).getTime()
+let clock = at(2026, 10, 19, 8, 0)
+const posted = (conv = 'c1') => db.messages().filter((m) => m.conversationId === conv)
+let routines: Routines
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'ad-gov-'))
@@ -97,6 +107,7 @@ beforeEach(async () => {
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: (e) => events.push(e), openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback') })
   connectorId = await connectors.add({ kind: 'stdio', name: 'Tarefas', command: process.execPath, args: [DEMO], env: { DEMO_TASKS_FILE: tasksFile } })
   await connectors.connect(connectorId)
+  routines = new Routines({ db, runner: { runRoutine: (r, when) => runnerRef.current!.runRoutine(r, when), retryRoutine: (r, when, id) => runnerRef.current!.retryRoutine(r, when, id) }, emit: () => {}, now: () => clock, wait: async () => {}, notify: () => {} })
   db.saveAgent(agent('none'))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
 })
@@ -134,7 +145,7 @@ describe('grants', () => {
     const r = runner((_, tools) => ({ tool: tools.find((t) => t.endsWith('__create_task')) ?? 'tarefas__create_task', args: { title: 'invasora' } }))
     await r.send('d1', 'oi')
     await r.idle()
-    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'tarefas__list_tasks']) // it can ask for more, not take it
+    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'agendar_rotina', 'cancelar_rotina', 'tarefas__list_tasks']) // it can ask for more, not take it
     expect(seen.results[0]).toMatchObject({ isError: true })
     expect(textOf(seen.results[0])).toContain('não permitida')
     expect(tasks().some((t) => t.title === 'invasora')).toBe(false)
@@ -292,6 +303,69 @@ describe('approvals', () => {
     const reply = agentMessages()[0]!
     expect(reply.run?.status).toBe('done') // not waiting for an approval that was given
     expect(reply.run?.steps.map((s) => s.label)).toEqual(expect.arrayContaining(['Pediu aprovação', 'Aprovado']))
+  })
+})
+
+describe('pause and resume', () => {
+  it('a message while paused gets the note and starts nothing', async () => {
+    const r = runner(() => null)
+    r.setPaused(true)
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(agentMessages()).toHaveLength(0)
+    expect(db.messages().at(-1)!.text).toContain('Os agentes estão pausados')
+    expect(seen.turns).toHaveLength(0)
+    r.setPaused(false)
+    await r.send('d1', 'oi de novo')
+    await r.idle()
+    expect(agentMessages()).toHaveLength(1)
+    expect(seen.turns).toHaveLength(1)
+  })
+
+  it('a failed reply keeps its retry note while paused and retries after resume', async () => {
+    db.saveAgent(agent('read_write'))
+    let shouldFail = true
+    const failing: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        seen.turns.push(turn)
+        if (shouldFail) yield { type: 'error', message: 'provider down' }
+        else yield { type: 'done', text: 'feito', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+      }
+    }
+    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, gemini: failing, cursor: failing, grok: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
+    runnerRef.current = r
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(seen.turns).toHaveLength(1)
+    const failed = db.messages().filter((m) => m.author.kind === 'agent' && m.run?.status === 'failed').at(-1)
+    expect(failed).toBeDefined()
+    shouldFail = false
+    r.setPaused(true)
+    r.retry(failed!.id)
+    await r.idle()
+    expect(seen.turns).toHaveLength(1) // no retry while paused
+    r.setPaused(false)
+    r.retry(failed!.id)
+    await r.idle()
+    expect(seen.turns).toHaveLength(2) // retry ran after resume
+  })
+
+  it('a due routine does not run while paused', async () => {
+    const r = runner(() => null)
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'geral', members: ['a1'] })
+    const routine = routines.save({ name: 'Bom dia', agentId: 'a1', conversationId: 'c1', prompt: 'hi', schedule: { days: [1, 2, 3, 4, 5], time: '09:00' }, enabled: true })
+    clock = at(2026, 10, 19, 9, 0) + 10_000
+    routines.tick()
+    expect(posted('c1').filter((m) => m.author.kind === 'routine')).toHaveLength(0)
+    r.setPaused(true)
+    routines.tick()
+    expect(posted('c1').filter((m) => m.author.kind === 'routine')).toHaveLength(0)
+    r.setPaused(false)
+    routines.tick()
+    await r.idle()
+    expect(posted('c1').filter((m) => m.author.kind === 'routine')).toHaveLength(1)
+    db.deleteConversation(routine.conversationId)
   })
 })
 
