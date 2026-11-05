@@ -674,7 +674,7 @@ describe('Grok config', () => {
     const withAuth = grokTurnEnv(baseEnv, '/turn', '/real/auth.json')
     expect(withAuth['GROK_HOME']).toBe('/turn')
     expect(withAuth['HOME']).toBe('/turn')
-    expect(withAuth['USERPROFILE']).toBeUndefined()
+    expect(grokTurnEnv(baseEnv, '/turn', undefined, 'darwin')['USERPROFILE']).toBeUndefined()
     expect(grokTurnEnv(baseEnv, '/turn', undefined, 'win32')['USERPROFILE']).toBe('/turn')
     expect(withAuth['GROK_AUTH_PATH']).toBe('/real/auth.json')
     expect(withAuth['XAI_API_KEY']).toBeUndefined()
