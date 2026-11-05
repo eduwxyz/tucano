@@ -29,7 +29,7 @@ let settings: Settings
 
 function runner(engine: Engine = fakeEngine('claude', { delayMs: 1 })): Runner {
   claude = counted(engine)
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') }
   return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')) })
 }
 
@@ -38,7 +38,7 @@ const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind
 beforeEach(() => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   events = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, copilot: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia'))
   db.saveAgent(agent('a2', 'theo', { modelId: 'gpt-5.6-luna' }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -66,7 +66,7 @@ describe('Runner', () => {
   it('keeps the images I attach and shows them to the agent with my message', async () => {
     const data = mkdtempSync(join(tmpdir(), 'ad-data-'))
     claude = counted(fakeEngine('claude', { delayMs: 1 }))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') }, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
     const png = Buffer.from('fake-png').toString('base64')
     await r.send('d1', '', [{ name: 'Tela do checkout.png', mime: 'image/png', data: png }, { name: 'virus.exe', mime: 'application/x-msdownload', data: png }])
     await r.idle()
@@ -307,7 +307,7 @@ describe('ask_user through the gateway', () => {
     claude = counted(fakeEngine('claude', { delayMs: 1 }))
     const r = new Runner({
       db,
-      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') },
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
@@ -345,7 +345,7 @@ describe('browser handback', () => {
     claude = counted(fakeEngine('claude', { delayMs: 1 }))
     return new Runner({
       db,
-      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') },
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
@@ -399,8 +399,9 @@ describe('an agent on Gemini', () => {
   it('runs on Gemini, not on Claude', async () => {
     db.saveAgent(agent('a9', 'gi', { modelId: customModel('gemini', 'gemini/gemini-2.5-flash') }))
     db.createConversation({ id: 'd9', kind: 'dm', name: 'a9', members: ['a9'] })
+    claude = counted(fakeEngine('claude'))
     const gemini = counted(fakeEngine('gemini'))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini, cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-gemini-')) })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini, cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-gemini-')) })
     await r.send('d9', 'oi')
     await r.idle()
     expect(gemini.turns.map((t) => t.model)).toEqual(['gemini/gemini-2.5-flash'])
@@ -412,12 +413,28 @@ describe('an agent on Cursor', () => {
   it('runs on Cursor, not on Claude', async () => {
     db.saveAgent(agent('a10', 'cu', { modelId: customModel('cursor', 'auto') }))
     db.createConversation({ id: 'd10', kind: 'dm', name: 'a10', members: ['a10'] })
+    claude = counted(fakeEngine('claude'))
     const cursor = counted(fakeEngine('cursor'))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor, grok: fakeEngine('grok') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-cursor-')) })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor, grok: fakeEngine('grok'), copilot: fakeEngine('copilot') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-cursor-')) })
     await r.send('d10', 'oi')
     await r.idle()
     expect(cursor.turns.map((t) => t.model)).toEqual(['auto'])
     expect(claude.turns).toHaveLength(0)
+  })
+})
+
+describe('an agent on GitHub Copilot', () => {
+  it('runs on Copilot with the model Copilot listed, not on Claude', async () => {
+    db.saveAgent(agent('a12', 'gh', { modelId: customModel('copilot', 'claude-sonnet-5.5'), effort: 'high' }))
+    db.createConversation({ id: 'd12', kind: 'dm', name: 'a12', members: ['a12'] })
+    claude = counted(fakeEngine('claude'))
+    const copilot = counted(fakeEngine('copilot'))
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-copilot-')) })
+    await r.send('d12', 'oi')
+    await r.idle()
+    expect(copilot.turns.map((t) => [t.model, t.effort])).toEqual([['claude-sonnet-5.5', 'high']])
+    expect(claude.turns).toHaveLength(0)
+    expect(agentMessages().some((m) => m.author.kind === 'agent' && m.author.id === 'a12')).toBe(true)
   })
 })
 
@@ -426,7 +443,7 @@ describe('an agent on Grok', () => {
     db.saveAgent(agent('a11', 'gk', { modelId: customModel('grok', 'grok-4.7') }))
     db.createConversation({ id: 'd11', kind: 'dm', name: 'a11', members: ['a11'] })
     const grok = counted(fakeEngine('grok'))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-grok-')) })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok, copilot: fakeEngine('copilot') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-grok-')) })
     await r.send('d11', 'oi')
     await r.idle()
     expect(grok.turns.map((t) => t.model)).toEqual(['grok-4.7'])
