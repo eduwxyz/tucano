@@ -2024,7 +2024,7 @@ h3 {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 .toggle.is-on {
-  background: var(--ok);
+  background: var(--accent);
 }
 .toggle.is-on::after {
   transform: translateX(14px);
@@ -4578,6 +4578,9 @@ table.csv th {
 .harness__head strong {
   display: block;
   font-size: 14px;
+}
+.harness__check:not(:disabled) + .harness__name {
+  cursor: pointer;
 }
 .harness__account {
   display: block;
@@ -7844,10 +7847,14 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
 .voice-on { display: grid; gap: 8px; }
 .voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
-.voice-advanced { display: grid; gap: 10px; }
+/* The card doesn't space its children: the model's line, the microphone and Avançado get a gap here. */
+.voice-prefs { display: grid; gap: 14px; }
+/* Closed, the folded part keeps no room: the gap only between what shows when it's open. */
+.voice-advanced[open] { display: grid; gap: 10px; }
 .voice-advanced summary { cursor: pointer; }
 .voice-pop > .btn { justify-self: start; }
 .voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
 .voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
 .voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+
