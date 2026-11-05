@@ -21,7 +21,7 @@ import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type ToolDef } from './gateway'
-import { MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, type Question } from '../shared/questions'
+import { formatAnswers, MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsOf, type Answer, type Question } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
@@ -188,9 +188,9 @@ export class Runner {
   async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
-    const body = text.trim()
+    const typed = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
-    if (!conv || (!body && pictures.length === 0)) return
+    if (!conv) return
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
     // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
     const root = threadId ? db.message(threadId) : undefined
@@ -198,6 +198,9 @@ export class Runner {
     // A question an agent left waiting is answered by my next message in its thread. What I
     // write outside threads stays outside: it only answers a question that is outside too.
     const asked = this.pendingQuestion(conv.id, thread)
+    // The decisions I answered on the card go first, whether I send them or write my own reply.
+    const body = [asked ? formatAnswers(questionsOf(asked.run), asked.run?.answers) : '', typed].filter(Boolean).join('\n\n')
+    if (!body && pictures.length === 0) return
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
@@ -208,10 +211,10 @@ export class Runner {
     emit({ type: 'message', message: mine })
 
     const members = this.members(conv)
-    let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
+    let responders = mentioned(typed, members).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
 
     if (asked) {
-      this.update(asked, { run: { ...asked.run!, status: 'done' } })
+      this.update(asked, { run: { ...asked.run!, status: 'done', ...(typed ? { answeredInText: true as const } : {}) } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
       if (asker && responders.length === 0) responders = [asker]
     }
@@ -1571,6 +1574,26 @@ export class Runner {
 
   async expireApprovals(): Promise<void> {
     for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
+  }
+
+  // One decision answered on the card (null clears it): kept on the question until I send.
+  answer(messageId: string, index: number, answer: Answer | null): void {
+    const asked = this.deps.db.message(messageId)
+    if (asked?.run?.status !== 'waiting_input') return
+    const questions = questionsOf(asked.run)
+    const question = questions[index]
+    if (!question) return
+    if (answer?.chosen?.some((i) => !Number.isInteger(i) || i < 0 || i >= (question.options?.length ?? 0))) return
+    const answers = Array.from({ length: questions.length }, (_, i) => asked.run!.answers?.[i] ?? null)
+    answers[index] = answer
+    this.update(asked, { run: { ...asked.run, answers } })
+  }
+
+  // Sends the decisions answered on the card as my message, as if I wrote them.
+  async submitAnswers(messageId: string): Promise<void> {
+    const asked = this.deps.db.message(messageId)
+    if (asked?.run?.status !== 'waiting_input') return
+    await this.send(asked.conversationId, '', [], asked.threadId)
   }
 
   // The user took over the agent's browser ("Assumir") and handed it back

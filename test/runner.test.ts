@@ -330,6 +330,67 @@ describe('ask_user through the gateway', () => {
     expect(asked?.run?.status).not.toBe('waiting_input')
     expect(asked?.run?.questions).toBeUndefined()
   })
+
+  const askDecisions = async (): Promise<{ r: Runner; asked: Message }> => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia me ajuda a decidir')
+    await r.idle()
+    return { r, asked: agentMessages()[0]! }
+  }
+  const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'me')
+
+  it('keeps partial answers on the question and sends them as my message', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 0, { chosen: [1] })
+    expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [1] }, null])
+    r.answer(asked.id, 1, { text: 'sexta' })
+    await r.submitAnswers(asked.id)
+    await r.idle()
+    expect(mine().at(-1)?.text).toBe('Paginação no menu? → Scroll infinito\nPra quando? → sexta')
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(db.message(asked.id)?.run?.answeredInText).toBeUndefined()
+    expect(claude.turns[1]?.prompt).toContain('Paginação no menu? → Scroll infinito\nPra quando? → sexta')
+  })
+
+  it('sends the partial answers along with a free reply', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 0, { chosen: [0] })
+    await r.send('c1', 'o resto eu explico: depois do deploy', [], asked.threadId)
+    await r.idle()
+    expect(mine().at(-1)?.text).toBe('Paginação no menu? → Busca remota\n\no resto eu explico: depois do deploy')
+    expect(db.message(asked.id)?.run).toMatchObject({ status: 'done', answeredInText: true })
+  })
+
+  it('ignores answers to a question already sent, out of range, or to an unknown option', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 9, { text: 'x' })
+    r.answer(asked.id, 0, { chosen: [7] })
+    r.answer(asked.id, -1, { text: 'x' })
+    r.answer('nope', 0, { chosen: [0] })
+    expect(db.message(asked.id)?.run?.answers).toBeUndefined()
+    r.answer(asked.id, 0, { chosen: [0] })
+    await r.submitAnswers(asked.id)
+    await r.idle()
+    r.answer(asked.id, 0, { chosen: [1] })
+    expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [0] }, null])
+  })
+
+  it('sends only once', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 0, { skipped: true })
+    await Promise.all([r.submitAnswers(asked.id), r.submitAnswers(asked.id)])
+    await r.idle()
+    expect(mine()).toHaveLength(2)
+  })
+
+  it('clears an answer with null', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 0, { chosen: [0] })
+    r.answer(asked.id, 1, { text: 'sexta' })
+    r.answer(asked.id, 0, null)
+    expect(db.message(asked.id)?.run?.answers).toEqual([null, { text: 'sexta' }])
+  })
 })
 
 describe('browser handback', () => {

@@ -2,6 +2,7 @@
 // is kept in sync by its events; actions go to the core over RPC.
 import { useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
+import type { Answer } from '../../shared/questions'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import {
   type Account,
@@ -518,6 +519,10 @@ export const markRead = (id: string): void => set((s) => ({ ...s, conversations:
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
   if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
 }
+
+export const answerQuestion = (messageId: string, index: number, answer: Answer | null): void =>
+  void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerQuestion', { messageId, index, answer })
+export const submitAnswers = (messageId: string): void => void fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitAnswers', { messageId })
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })

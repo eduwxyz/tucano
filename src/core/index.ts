@@ -715,6 +715,10 @@ const api: Api = {
     void runner.send(conversationId, text, images, threadId)
   },
 
+  answerQuestion: ({ messageId, index, answer }) => runner.answer(messageId, index, answer),
+
+  submitAnswers: ({ messageId }) => void runner.submitAnswers(messageId),
+
   stopRun: ({ messageId }) => runner.stop(messageId),
 
   retryRun: ({ messageId }) => runner.retry(messageId),
