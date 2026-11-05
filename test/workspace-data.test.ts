@@ -149,7 +149,7 @@ it('duplicates configuration and credentials without copying history or mutating
   const file = join(dir, 'copy.db')
   source.duplicateTo(file, 'Company (copy)')
   const copy = open(file)
-  expect(copy.getSettings(defaults)).toMatchObject({ workspaceName: 'Company (copy)', context: 'Workspace instructions', routerModel: 'sonnet', onboarding: { done: true } })
+  expect(copy.getSettings(defaults)).toMatchObject({ workspaceName: 'Company', workspaceLabel: 'Company (copy)', context: 'Workspace instructions', routerModel: 'sonnet', onboarding: { done: true } })
   expect(copy.getSettings(defaults).onboarding?.workspaceManagerSeen).toBeUndefined()
   expect(copy.getSettings(defaults).onboarding?.checklistHidden).toBe(true)
   expect(copy.agents().map((a) => a.name)).toEqual(['Aurora'])

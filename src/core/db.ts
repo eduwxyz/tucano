@@ -367,7 +367,7 @@ export class Db {
         `)
         const setup = target.db.prepare("SELECT value FROM settings WHERE key = 'onboarding'").get() as { value: string } | undefined
         const onboarding = setup ? JSON.parse(setup.value) as Settings['onboarding'] : undefined
-        target.setSettings({ workspaceName: name, onboarding: { ...onboarding, done: onboarding?.done !== false, workspaceManagerSeen: undefined } })
+        target.setSettings({ workspaceLabel: name, onboarding: { ...onboarding, done: onboarding?.done !== false, workspaceManagerSeen: undefined } })
         for (const r of target.routines()) {
           const trigger: Trigger | undefined = r.trigger?.kind === 'webhook' ? { kind: 'webhook', token: randomUUID().replaceAll('-', '') }
             : r.trigger?.kind === 'poll' ? { kind: 'poll', connectorId: r.trigger.connectorId, tool: r.trigger.tool, args: r.trigger.args, everyMinutes: r.trigger.everyMinutes } : undefined

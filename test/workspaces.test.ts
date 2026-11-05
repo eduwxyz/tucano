@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
 import { Workspaces, workspaceId } from '../src/main/workspaces'
-import { suggestWorkspaceCopyName, workspaceCreatedAt } from '../src/shared/workspaces'
+import { generalSettings, suggestWorkspaceCopyName, workspaceCreatedAt, workspaceLabel } from '../src/shared/workspaces'
 
 const dirs: string[] = []
 const root = (): string => { const dir = mkdtempSync(join(tmpdir(), 'tucano-workspaces-')); dirs.push(dir); return dir }
@@ -14,6 +14,19 @@ it('suggests the current name with the next available duplicate count', () => {
   expect(suggestWorkspaceCopyName('Company', ['Company', 'Company (2)', 'Company (3)'])).toBe('Company (4)')
   expect(suggestWorkspaceCopyName('Company', ['Company', 'Company (3)'])).toBe('Company (2)')
   expect(suggestWorkspaceCopyName('A'.repeat(120), [])).toHaveLength(120)
+})
+
+it("brings only the general settings to a new workspace, never what one holds", () => {
+  const all = { workspaceName: 'Edu', workspaceLabel: 'Empresa', context: 'about the company', routerModel: 'sonnet', memoryModel: 'haiku', memoryLearning: 'auto', language: 'en', defaultLimit: 5, quietHours: { from: '22:00', to: '07:00' }, wikiDir: '/vault', accounts: [{ id: 'a', engine: 'claude', name: 'Work' }], telegram: { chat: 1 }, jevKey: true, channelLayout: {}, onboarding: { done: true }, paused: true, theme: 'dark' }
+  expect(generalSettings(all)).toEqual({ workspaceName: 'Edu', routerModel: 'sonnet', memoryModel: 'haiku', memoryLearning: 'auto', language: 'en', defaultLimit: 5, quietHours: { from: '22:00', to: '07:00' } })
+  expect(generalSettings(null)).toEqual({})
+  expect(generalSettings([1])).toEqual({})
+})
+
+it("names a workspace by its own name, or else the person's", () => {
+  expect(workspaceLabel({ workspaceName: 'Edu', workspaceLabel: 'Empresa' })).toBe('Empresa')
+  expect(workspaceLabel({ workspaceName: 'Edu', workspaceLabel: '  ' })).toBe('Edu')
+  expect(workspaceLabel({ workspaceName: 'Edu' })).toBe('Edu')
 })
 
 it('uses unique UUIDv7 identities', () => {

@@ -181,6 +181,11 @@ export class Runner {
     for (const e of Object.values(this.deps.engines)) e.clean?.(this.deps.workDir, accountDirs)
   }
 
+  // The sessions let go are gone from disk: their processes exited and their files went after.
+  async settled(): Promise<void> {
+    await Promise.all(Object.values(this.deps.engines).map((e) => e.settle?.()))
+  }
+
   // For good (the workspace is being deleted): what's queued is dropped, what's running stops,
   // and the kept sessions go, with their transcripts.
   stopAll(): void {

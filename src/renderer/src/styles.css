@@ -454,6 +454,10 @@ h3 {
 .workspace-manager__name { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; text-align: left; }
 .workspace-manager__name > span:first-child { overflow-wrap: anywhere; font-weight: 600; }
 .workspace-manager__id { font-size: 11px; color: var(--text-3); }
+.workspace-manager__carry { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin-bottom: 12px; }
+.workspace-manager__carry input { margin-top: 3px; }
+.workspace-manager__carry span { display: flex; flex-direction: column; gap: 2px; }
+.workspace-manager__carry small { font-size: 12px; line-height: 1.4; }
 .workspace-manager__row > .row { flex-shrink: 0; }
 .workspace-manager__switch[aria-pressed='true'] { background: var(--ok-soft); color: var(--ok); }
 .workspace-manager__pause[aria-pressed='true'] { background: var(--warn-soft); color: var(--warn); }

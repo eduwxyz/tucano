@@ -1,6 +1,20 @@
 // The desktop registry exposes metadata and counts, never another workspace's content.
 import type { Settings } from './types'
 
+// What a workspace is called on screen: its own name, or else the person's (one workspace, as before).
+export const workspaceLabel = (s: Pick<Settings, 'workspaceName' | 'workspaceLabel'>): string => s.workspaceLabel?.trim() || s.workspaceName
+
+// What "bring the general settings" takes to a new workspace: how things work, not what it holds.
+// Never its context, wiki folder, accounts, keys or phone: those belong to each workspace.
+export const GENERAL_SETTINGS = ['workspaceName', 'language', 'routerModel', 'memoryModel', 'memoryLearning', 'defaultLimit', 'approvalTtlHours', 'runBudgetPct', 'runStallMinutes', 'quietHours', 'harnesses', 'sounds', 'voice', 'browserJev', 'wikiCapture', 'wikiEdits', 'wikiReview'] as const satisfies readonly (keyof Settings)[]
+export type GeneralSettings = Partial<Pick<Settings, (typeof GENERAL_SETTINGS)[number]>>
+
+export function generalSettings(s: unknown): GeneralSettings {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return {}
+  const from = s as Record<string, unknown>
+  return Object.fromEntries(GENERAL_SETTINGS.filter((k) => from[k] !== undefined).map((k) => [k, from[k]])) as GeneralSettings
+}
+
 export function isTheme(value: unknown): value is Settings['theme'] {
   return value === 'system' || value === 'light' || value === 'dark'
 }

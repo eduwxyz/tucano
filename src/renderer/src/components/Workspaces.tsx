@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { sortWorkspaces, type WorkspaceList } from '../../../shared/workspaces'
+import { sortWorkspaces, workspaceLabel, type WorkspaceList } from '../../../shared/workspaces'
 import { openDialog, useStore } from '../store'
 import { Icon } from './ui'
 
@@ -19,7 +19,7 @@ export function useWorkspaceList(): { list: WorkspaceList | null; error: string 
 }
 
 export function WorkspaceSelector(): ReactNode {
-  const name = useStore((s) => s.settings.workspaceName)
+  const name = useStore((s) => workspaceLabel(s.settings))
   const { list, error: loadError } = useWorkspaceList()
   const selectedId = list?.selected
   const workspaces = sortWorkspaces(list?.workspaces)
@@ -60,7 +60,7 @@ export function WorkspaceSelector(): ReactNode {
         <div className="workspace-picker__head">
           <span className="muted small">Workspaces</span>
           <div className="workspace-picker__actions">
-            <button className="icon-btn icon-btn--sm" role="menuitem" disabled={busy} title={L('Criar workspace', 'Create Workspace')} aria-label={L('Criar workspace', 'Create Workspace')} onClick={() => void perform(() => api.create())}><Icon name="plus" size={14} /></button>
+            <button className="icon-btn icon-btn--sm" role="menuitem" disabled={busy} title={L('Criar workspace', 'Create Workspace')} aria-label={L('Criar workspace', 'Create Workspace')} onClick={() => { setOpen(false); openDialog({ kind: 'workspaces', create: true }) }}><Icon name="plus" size={14} /></button>
             <button className="icon-btn icon-btn--sm" role="menuitem" disabled={busy} title={L('Gerenciar workspaces', 'Manage workspaces')} aria-label={L('Gerenciar workspaces', 'Manage workspaces')} onClick={() => { setOpen(false); openDialog({ kind: 'workspaces' }) }}><Icon name="gear" size={14} /></button>
           </div>
         </div>

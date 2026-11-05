@@ -60,7 +60,7 @@ import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello } from './tuca'
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
-import { isTheme } from '../shared/workspaces'
+import { generalSettings, isTheme, workspaceLabel } from '../shared/workspaces'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
@@ -76,6 +76,16 @@ mkdirSync(join(codexHome, '.codex'), { recursive: true })
 // Until the settings are read, the language of a new install: the Mac's.
 setLang(langOf(process.env['TUCANO_LOCALE']))
 initializeWorkspace(db)
+// A workspace made from the switcher starts with the name it was given there.
+if (db.created && process.env['TUCANO_WORKSPACE_LABEL']) db.setSettings({ workspaceLabel: process.env['TUCANO_WORKSPACE_LABEL'] })
+// And, if the person chose, the general settings of the one they were in; the introduction starts from them.
+if (db.created && process.env['TUCANO_WORKSPACE_SETTINGS']) {
+  try {
+    db.setSettings({ ...generalSettings(JSON.parse(process.env['TUCANO_WORKSPACE_SETTINGS'])), onboarding: { done: false, carried: true } })
+  } catch (e) {
+    console.error('[core] carried settings', e)
+  }
+}
 const appTheme = process.env['TUCANO_THEME']
 if (!serverMode && isTheme(appTheme)) db.setSettings({ theme: appTheme })
 // A new install has nothing new to show: the news start with the next update.
@@ -237,7 +247,7 @@ function workspaceSummary(): void {
   summaryTimer ??= setTimeout(() => {
     summaryTimer = undefined
     const current = db.getSettings(DEFAULTS)
-    const summary = { type: 'workspace-summary', name: current.workspaceName, paused: !!current.paused, unread: db.unread(), approvals: db.approvals().filter((a) => a.state === 'pending').length }
+    const summary = { type: 'workspace-summary', name: workspaceLabel(current), paused: !!current.paused, unread: db.unread(), approvals: db.approvals().filter((a) => a.state === 'pending').length }
     const wire = JSON.stringify(summary)
     if (wire !== lastSummary) process.parentPort.postMessage(summary)
     lastSummary = wire
@@ -339,6 +349,7 @@ process.parentPort.on('message', (e) => {
     void (async () => {
       await runner.idle()
       await memory.idle()
+      await runner.settled() // a Claude Code process writes its session's last prompt on its way out
       runner.cleanTranscripts()
       const agents = db.agents()
       for (const a of agents) if (a.computer) await computers.erase(a.id)
@@ -676,7 +687,7 @@ void ready.then(async () => {
   // A copy of the database once a day, the last 7 kept.
   const daily = (): void => {
     try {
-      backupIfDue(db, backups, db.getSettings(DEFAULTS).workspaceName)
+      backupIfDue(db, backups, workspaceLabel(db.getSettings(DEFAULTS)))
     } catch (e) {
       console.error('[backup]', e)
     }
@@ -984,7 +995,7 @@ const api: Api = {
       zip.close()
     }
   },
-  backupNow: () => backup(db, backups, db.getSettings(DEFAULTS).workspaceName),
+  backupNow: () => backup(db, backups, workspaceLabel(db.getSettings(DEFAULTS))),
   openBackups: () => {
     mkdirSync(backups, { recursive: true })
     toMain({ type: 'open_path', path: backups })

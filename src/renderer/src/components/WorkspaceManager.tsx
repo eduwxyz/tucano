@@ -1,18 +1,23 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { suggestWorkspaceCopyName, sortWorkspaces, type WorkspaceSummary } from '../../../shared/workspaces'
-import { updateSettings, useStore } from '../store'
+import { generalSettings, suggestWorkspaceCopyName, sortWorkspaces, workspaceLabel, type WorkspaceSummary } from '../../../shared/workspaces'
+import { getState, updateSettings, useStore } from '../store'
 import { Modal } from './Modal'
 import { Icon } from './ui'
 import { useWorkspaceList } from './Workspaces'
 
-export function WorkspaceManager({ onClose }: { onClose: () => void }): ReactNode {
+// `create`: opened from the switcher's +, straight to naming the new workspace.
+export function WorkspaceManager({ onClose, create = false }: { onClose: () => void; create?: boolean }): ReactNode {
   const { list, error: loadError } = useWorkspaceList()
   const selectedId = list?.selected
   const workspaces = sortWorkspaces(list?.workspaces)
   const onboarding = useStore((s) => s.settings.onboarding)
   const [confirm, setConfirm] = useState<WorkspaceSummary | null>(null)
   const [copyName, setCopyName] = useState('')
+  const [creating, setCreating] = useState(create)
+  const [newName, setNewName] = useState('')
+  const [carry, setCarry] = useState(true)
+  const here = useStore((s) => workspaceLabel(s.settings))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const api = window.tucano.workspaces
@@ -27,13 +32,39 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }): ReactNod
     try { await action() } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
-  const close = (): void => { if (!busy) { if (confirm) setConfirm(null); else onClose() } }
+  const back = (): void => { if (create) onClose(); else { setCreating(false); setError('') } }
+  const close = (): void => { if (!busy) { if (confirm) setConfirm(null); else if (creating) back(); else onClose() } }
+  const make = (): Promise<void> => perform(async () => {
+    if (!api || !newName.trim()) return
+    await api.create(newName.trim(), carry ? generalSettings(getState().settings) : undefined)
+  })
   const duplicate = (): Promise<void> => perform(async () => {
     if (!api || !confirm || !copyName.trim()) return
     const id = await api.duplicate(confirm.id, copyName.trim())
     await api.switch(id)
   })
   if (!api) return null
+  if (creating) return <Modal key="create" title={L('Criar workspace', 'Create Workspace')} onClose={close}>
+    <div className="workspace-manager__body">
+      <label className="field">
+        <span className="field__label">{L('Nome do workspace', 'Workspace name')}</span>
+        <input autoFocus maxLength={120} disabled={busy} value={newName} placeholder={L('Ex.: Empresa, Pessoal', 'E.g. Company, Personal')} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !busy && newName.trim()) { event.preventDefault(); void make() } }} />
+      </label>
+      <label className="check workspace-manager__carry">
+        <input type="checkbox" checked={carry} disabled={busy} onChange={(event) => setCarry(event.target.checked)} />
+        <span>
+          <strong>{L(`Trazer as configurações gerais de “${here}”`, `Bring the general settings of “${here}”`)}</strong>
+          <small className="muted">{L('Seu nome, o idioma, os modelos do roteador e da memória, limites, horário de silêncio e voz. A introdução começa deles.', 'Your name, the language, the router and memory models, limits, quiet hours and voice. The introduction starts from them.')}</small>
+        </span>
+      </label>
+      <p className="small muted">{L('Começa vazio, com a introdução: agentes, conversas, conectores, credenciais e memórias dos outros workspaces não vêm junto. Para levar a configuração de um deles, use Duplicar.', 'It starts empty, with the introduction: agents, conversations, connectors, credentials and memories from other workspaces don’t come along. To take one’s setup, use Duplicate.')}</p>
+      {error && <p className="field__error" role="alert">{error}</p>}
+    </div>
+    <footer className="modal__foot">
+      <button className="btn btn--ghost btn--sm" disabled={busy} onClick={back}>{L('Cancelar', 'Cancel')}</button>
+      <button className="btn btn--primary btn--sm" disabled={busy || !newName.trim()} onClick={() => void make()}>{busy ? L('Criando…', 'Creating…') : L('Criar workspace', 'Create Workspace')}</button>
+    </footer>
+  </Modal>
   if (confirm) return <Modal key="duplicate" title={L('Duplicar workspace', 'Duplicate workspace')} onClose={close}>
     <div className="workspace-manager__body">
       <p>{L(`Criar uma cópia independente de “${confirm.name}”?`, `Create an independent copy of “${confirm.name}”?`)}</p>
@@ -82,7 +113,7 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }): ReactNod
     {(error || loadError) && <p className="field__error modal__lead" role="alert">{error || loadError}</p>}
     <footer className="modal__foot">
       <button className="btn btn--ghost btn--sm" disabled={busy} onClick={onClose}>{L('Fechar', 'Close')}</button>
-      <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => void perform(() => api.create())}><Icon name="plus" size={14} />{L('Criar workspace', 'Create Workspace')}</button>
+      <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => { setError(''); setNewName(''); setCreating(true) }}><Icon name="plus" size={14} />{L('Criar workspace', 'Create Workspace')}</button>
     </footer>
   </Modal>
 }

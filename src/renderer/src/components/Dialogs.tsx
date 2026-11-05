@@ -75,7 +75,7 @@ function DialogBody(): ReactNode {
   const dialog = useStore((s) => s.dialog)
   const conv = useStore((s) => (s.dialog && 'id' in s.dialog ? s.conversations.find((c) => c.id === (s.dialog as { id: string }).id) : undefined))
   const close = (): void => openDialog(null)
-  if (dialog?.kind === 'workspaces') return <WorkspaceManager onClose={close} />
+  if (dialog?.kind === 'workspaces') return <WorkspaceManager onClose={close} create={dialog.create} />
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />

@@ -75,6 +75,7 @@ import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
 import { useWorkspaceList } from './Workspaces'
+import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
@@ -1584,7 +1585,7 @@ function TeamCard(): ReactNode {
   const download = (): void => {
     setNote('')
     exportTeam().then((md) => {
-      const safe = settings.workspaceName
+      const safe = workspaceLabel(settings)
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-z0-9]+/gi, '-')
@@ -1663,7 +1664,7 @@ function TeamCard(): ReactNode {
 }
 
 function WorkspaceDangerArea(): ReactNode {
-  const name = useStore((s) => s.settings.workspaceName)
+  const name = useStore((s) => workspaceLabel(s.settings))
   const defaultWorkspace = useStore((s) => s.defaultWorkspace)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1915,7 +1916,12 @@ export function SettingsPage(): ReactNode {
         {pane('geral') && (
           <Card title="Workspace">
             <p className="muted small">{L('Agentes, conversas, conectores e memórias ficam neste workspace. Os logins do Claude Code e OpenCode continuam compartilhados no computador. Um workspace não é uma sandbox do sistema.', 'Agents, conversations, connectors and memories stay in this workspace. Claude Code and OpenCode sign-ins are still shared on this computer. A workspace is not an OS sandbox.')}</p>
-            <Field label={L('Nome', 'Name')}>
+            {window.tucano.workspaces && (
+              <Field label={L('Nome do workspace', 'Workspace name')}>
+                <input value={settings.workspaceLabel ?? ''} placeholder={settings.workspaceName} maxLength={120} onChange={(e) => updateSettings({ workspaceLabel: e.target.value })} />
+              </Field>
+            )}
+            <Field label={L('Como os agentes te chamam', 'What the agents call you')}>
               <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
             </Field>
             <div className="field">

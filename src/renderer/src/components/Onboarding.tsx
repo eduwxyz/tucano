@@ -183,9 +183,11 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   const [computer, setComputer] = useState<Computer>('none')
   const [task, setTask] = useState(() => TEMPLATES()[0]!.tasks[0]!)
   const [busy, setBusy] = useState(false)
-  // A new install picks both models; seeing the introduction again starts from what's set.
-  const [routerModel, setRouterModel] = useState(hasAgents ? settings.routerModel : '')
-  const [memoryModel, setMemoryModel] = useState(hasAgents ? settings.memoryModel : '')
+  // A new install picks both models; seeing the introduction again, or a workspace that brought
+  // another's settings, starts from what's set.
+  const keep = hasAgents || !!settings.onboarding?.carried
+  const [routerModel, setRouterModel] = useState(keep ? settings.routerModel : '')
+  const [memoryModel, setMemoryModel] = useState(keep ? settings.memoryModel : '')
   const [skills, setSkills] = useState<string[]>([])
   const [grants, setGrants] = useState<Record<string, GrantLevel>>({})
   // The first agent comes from the Tuca's card, or from the form for who prefers it.
