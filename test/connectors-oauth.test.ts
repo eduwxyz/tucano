@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ConnectorManager } from '../src/core/connectors'
+import { ConnectorManager, sameLoopbackRedirect } from '../src/core/connectors'
 import { Db } from '../src/core/db'
 import { plainCipher, Secrets } from '../src/core/secrets'
 
@@ -19,6 +19,7 @@ let opened: string[]
 let registrations: number
 let refreshes: string[]
 let expireAccessToken: () => void
+let revokeRefreshTokens: () => void
 
 const body = async (req: import('node:http').IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = []
@@ -37,6 +38,7 @@ beforeEach(async () => {
     current = ''
   }
   const owner = new Map<string, string>()
+  revokeRefreshTokens = () => owner.clear()
 
   server = createServer((req, res) => {
     void (async () => {
@@ -132,5 +134,38 @@ describe('OAuth credentials across launches', () => {
     expect(registrations).toBe(1) // and no registration again
     expect(refreshes).toEqual(['client-1 (issued to client-1)'])
     await second.closeAll()
+  })
+
+  it('registers again for a new sign-in, so a server that wants the exact address still takes it', async () => {
+    const first = launch(51001)
+    const id = await first.add({ name: 'Atlassian', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await first.connect(id)
+    const state = new URL((await first.authorize(id))!).searchParams.get('state')!
+    await first.finishOAuth(state, 'code-1')
+    await first.closeAll()
+    expireAccessToken()
+    revokeRefreshTokens() // signed out on the server's side while the app was closed
+
+    const second = launch(51002)
+    await second.connect(id) // in the background: no browser, it waits to be signed in
+    expect(second.get(id)!.status).toBe('needs_auth')
+    expect(opened).toHaveLength(1)
+    const again = new URL((await second.authorize(id))!)
+    expect(registrations).toBe(2) // a registration with this launch's address
+    expect(again.searchParams.get('client_id')).toBe('client-2')
+    expect(again.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:51002/oauth/callback')
+    await second.closeAll()
+  })
+})
+
+describe('the loopback redirect, port aside', () => {
+  it('ignores only the port, and only on an http loopback address', () => {
+    expect(sameLoopbackRedirect('http://127.0.0.1:51001/oauth/callback', 'http://127.0.0.1:52002/oauth/callback')).toBe(true)
+    expect(sameLoopbackRedirect('http://[::1]:1/oauth/callback', 'http://[::1]:2/oauth/callback')).toBe(true)
+    expect(sameLoopbackRedirect('http://localhost:1/oauth/callback', 'http://localhost:2/oauth/callback')).toBe(true)
+    expect(sameLoopbackRedirect('http://127.0.0.1:1/oauth/callback', 'http://127.0.0.1:2/other')).toBe(false)
+    expect(sameLoopbackRedirect('http://127.0.0.1:1/oauth/callback', 'http://localhost:2/oauth/callback')).toBe(false)
+    expect(sameLoopbackRedirect('https://app.example.com:1/oauth/callback', 'https://app.example.com:2/oauth/callback')).toBe(false)
+    expect(sameLoopbackRedirect('https://127.0.0.1:1/oauth/callback', 'https://127.0.0.1:2/oauth/callback')).toBe(false)
   })
 })

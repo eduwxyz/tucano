@@ -16,6 +16,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Agentes no Grok.** Um agente pode rodar no Grok CLI, com a assinatura do grok.com, como roda no Cursor CLI. Cada resposta usa uma pasta própria: os seus plugins, skills e hooks não carregam, e só as ferramentas do Tucano ficam à mão.
 > - **Um conector que falha diz por quê.** O passo da resposta mostra o motivo em vermelho, e o agente recebe o mesmo motivo pra explicar, em vez de um ✗ sem nada.
 > - **Os passos mostram o que o agente fez.** Cada consulta mostra o SQL ou o que foi pedido, e o que voltou ("120 linhas"); um comando mostra o comando inteiro, e o SQL quando roda um; uma skill diz qual foi lida. Tudo aparece enquanto o agente trabalha, sem nenhum segredo na tela.
+> - **Um conector com login OAuth não pede pra entrar de novo a cada vez que o app abre.** O app se registrava de novo no servidor a cada abertura e perdia o token que renova o acesso; agora guarda o registro e renova sozinho.
 
 ### Added
 
@@ -31,6 +32,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **An OAuth connector stays signed in across launches.** The app listens for the sign-in callback on a new port each launch, and a saved registration was used only for the exact address it was made with, so every launch registered the app again and the refresh token, which belongs to the client that got it, was refused: the connector asked to sign in again. A loopback address now matches whatever its port (RFC 8252), so the connector refreshes on its own. A new sign-in still registers with the exact address, for servers that want it. Thanks [@GianCdM](https://github.com/GianCdM)! ([#100](https://github.com/eduwxyz/tucano/pull/100))
 - **A connector tool that fails says why.** The reply's step showed a bare ✗ next to the tool's name, and for some failures the agent got an empty result too. The step now shows the reason under its label (a few lines, all of it on a click), and the agent gets it: a reason only in the structured content or an embedded resource, an MCP error's code and data, a timeout in seconds, a result that doesn't match the tool's schema, or a session that couldn't reconnect. An approved call and a routine's poll say it the same way. Thanks [@rjgdias](https://github.com/rjgdias)! ([#133](https://github.com/eduwxyz/tucano/pull/133))
 - **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again.
 - **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring.
