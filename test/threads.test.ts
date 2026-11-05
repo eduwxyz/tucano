@@ -9,7 +9,7 @@ import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { consolidationPrompt, MAX_AFTER, Memories, memorySystem } from '../src/core/memory'
-import { routerSystem } from '../src/core/router'
+import { handoffSystem, routerSystem } from '../src/core/router'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -57,7 +57,7 @@ function put(conversationId: string, author: Author, text: string, threadId?: st
   return m
 }
 
-const agentTurns = (): Turn[] => turns.filter((t) => t.system !== routerSystem() && t.system !== memorySystem())
+const agentTurns = (): Turn[] => turns.filter((t) => t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== memorySystem())
 const replies = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
 const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'me')
 
