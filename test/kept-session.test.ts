@@ -353,9 +353,10 @@ describe('a Claude Code process kept open', () => {
     setTimeout(() => stop.abort(), 200)
     const cut = await collect(cli.turn(line('demore'), claudeParser(), stop.signal))
     expect(cut.some((e) => e.type === 'done')).toBe(false)
-    await new Promise((r) => setTimeout(r, 1500))
+    // taskkill on Windows takes its time, more so with the whole suite running
+    for (let i = 0; i < 100 && cli.alive; i++) await new Promise((r) => setTimeout(r, 100))
     expect(cli.alive).toBe(false)
-  })
+  }, 30_000)
 
   it('writes the next turn of a session to the process still open, and keeps only a few waiting', async () => {
     const engine = claudeEngine(() => bin, async () => ({ env: {} }))
