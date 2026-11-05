@@ -1,5 +1,6 @@
 // The gateway is a local MCP server and the only source of tools a CLI gets.
-// Each turn opens a session with its own secret URL and its own tool list;
+// Each turn opens a session with its own secret URL (a kept session's lasts
+// as long as it does) and its own tool list;
 // the gateway answers tools/list with exactly that list and refuses any call
 // outside it. The CLI never talks to connectors directly.
 import { randomBytes } from 'node:crypto'
@@ -22,6 +23,12 @@ export interface Session {
 }
 
 export const textResult = (text: string, isError = false): CallToolResult => ({ content: [{ type: 'text', text }], isError })
+
+// Between two turns of a kept session: the process may list its tools again, but nothing runs.
+const parked = (tools: ToolDef[]): Session => ({
+  tools,
+  call: async () => textResult(L('Nenhuma resposta está rodando agora.', 'No reply is running right now.'), true)
+})
 
 export class Gateway {
   private http: HttpServer | null = null
@@ -56,10 +63,22 @@ export class Gateway {
   }
 
   // Returns the URL to hand to the CLI, and a function that revokes it.
-  open(session: Session): { url: string; close: () => void } {
-    const token = randomBytes(24).toString('hex')
-    this.sessions.set(token, session)
-    return { url: `http://127.0.0.1:${this.port}/mcp/${token}`, close: () => this.sessions.delete(token) }
+  // With `token` (a kept session's), the URL stays the same from one turn to the next, since a
+  // process kept open can't be given another: closing then only parks it, with the same tool list
+  // and every call refused, until `release`.
+  open(session: Session, token?: string): { url: string; close: () => void } {
+    const t = token ?? randomBytes(24).toString('hex')
+    this.sessions.set(t, session)
+    const close = token
+      ? () => {
+          if (this.sessions.get(t) === session) this.sessions.set(t, parked(session.tools))
+        }
+      : () => this.sessions.delete(t)
+    return { url: `http://127.0.0.1:${this.port}/mcp/${t}`, close }
+  }
+
+  release(token: string): void {
+    this.sessions.delete(token)
   }
 
   private async handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> {

@@ -24,6 +24,7 @@ export interface Api {
   snapshot(): Snapshot
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
+  typing(p: { conversationId: string; threadId?: string }): void // the person is writing there: what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on

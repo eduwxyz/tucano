@@ -34,6 +34,7 @@ import {
   ROUTING,
   countedTokens,
   sendMessage,
+  typing,
   setTab,
   stopRun,
   summarizeNow,
@@ -1800,6 +1801,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
             onChange={(e) => {
               setText(e.target.value)
               updateMention(e.target.value, e.target.selectionStart)
+              if (e.target.value.trim()) typing(conversationId, threadId)
             }}
             onPaste={(e) => {
               const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
