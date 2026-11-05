@@ -4,13 +4,29 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Conversas longas não pesam mais enquanto um agente responde.** Cada palavra recebida redesenhava todas as mensagens; agora só a que mudou.
+> - **O navegador dos agentes abre páginas num servidor Linux que é um PC.** O Chrome esperava o chaveiro bloqueado da área de trabalho e nenhuma página carregava; no servidor ele agora usa o próprio armazenamento.
+> - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
+> - **Um agente só acorda outro quando precisa.** Quando um agente menciona outro na resposta, o router lê e chama só quem tem algo a fazer: um agradecimento ou um “combinado” não acordam ninguém. Na dúvida, chama.
+> - **O app abre fora do instalador mesmo com uma versão estranha.** O atualizador, que nem é usado ali, conferia a versão ao abrir e derrubava o app.
+> - **Agentes no Grok.** Um agente pode rodar no Grok CLI, com a assinatura do grok.com, como roda no Cursor CLI. Cada resposta usa uma pasta própria: os seus plugins, skills e hooks não carregam, e só as ferramentas do Tucano ficam à mão.
+> - **Um conector que falha diz por quê.** O passo da resposta mostra o motivo em vermelho, e o agente recebe o mesmo motivo pra explicar, em vez de um ✗ sem nada.
+> - **Os passos mostram o que o agente fez.** Cada consulta mostra o SQL ou o que foi pedido, e o que voltou ("120 linhas"); um comando mostra o comando inteiro, e o SQL quando roda um; uma skill diz qual foi lida. Tudo aparece enquanto o agente trabalha, sem nenhum segredo na tela.
+
+### Added
+
+- **Agents on Grok.** An agent can run on the [Grok CLI](https://x.ai/cli) with a grok.com subscription, the way it runs on Cursor CLI: sign in with `grok login` and pick a Grok model. Each reply runs in a folder and a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load, Grok's own shell and files stay off, and Tucano's tools are the only ones it has. An `XAI_API_KEY` in the environment is set aside when grok.com is signed in, so the subscription isn't billed per token. The official installer is macOS and Linux. Thanks [@matheus-apolonio](https://github.com/matheus-apolonio)! ([#87](https://github.com/eduwxyz/tucano/pull/87))
+
 ### Changed
 
+- **A reply's steps say what each call did, as it runs.** A connector call shows what it asked (the SQL, a path, a search) from the moment it starts, and what came back once it ends, in a few words: the rows of a table or a SQL answer, the items of a list, the lines of a long text. A command shows whole, or as **Ran SQL** with the SQL taken out of it, and ends with what it printed or its exit code and the last lines of stderr; reading a skill says which skill and file. Tokens, passwords, keys and auth headers are masked on the screen and in the log (the agent still gets the real output). The steps list stays open while the agent works, unless closed, and folds when the reply is done. Thanks [@rjgdias](https://github.com/rjgdias)! ([#135](https://github.com/eduwxyz/tucano/pull/135))
 - **An agent wakes another only when it needs to.** When an agent's reply mentions other agents, the router reads it first and hands the turn only to those asked to do something: a request, a question, a task, a decision. A thank-you, an "okay" or a credit wakes no one, and the decision shows as a step on the reply. In doubt, or if the router fails, everyone mentioned is called, as before; a mention in your own message still goes straight to the agent. Thanks [@eialanjones](https://github.com/eialanjones)! ([#139](https://github.com/eduwxyz/tucano/pull/139))
 - **Messages in a row go together.** What you send while an agent is still on your last message no longer starts a reply of its own: it waits in a **Message queue** over the field, and goes in the conversation only when the agent reads it: after the reply it was working on, in the order you sent it, just before the one reply to everything that came in, which reads it as more of the same request. In a channel it waits for the agent answering you there, or for the router's pick while it still picks, unless you name someone else. While it waits you can edit it, delete it, or **Steer** with it, which stops the agent and starts it again with it in hand, without redoing what's done. A message in another thread, or an answer to the agent's question, still gets its own reply.
 
 ### Fixed
 
+- **A connector tool that fails says why.** The reply's step showed a bare ✗ next to the tool's name, and for some failures the agent got an empty result too. The step now shows the reason under its label (a few lines, all of it on a click), and the agent gets it: a reason only in the structured content or an embedded resource, an MCP error's code and data, a timeout in seconds, a result that doesn't match the tool's schema, or a session that couldn't reconnect. An approved call and a routine's poll say it the same way. Thanks [@rjgdias](https://github.com/rjgdias)! ([#133](https://github.com/eduwxyz/tucano/pull/133))
 - **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again.
 - **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring.
 - **The server's page opens over plain HTTP on a private address,** such as Tailscale or a home network. It stayed blank: a browser outside a secure context has no `crypto.randomUUID`, which the app calls as it starts. The page now brings a small replacement for it, and one for the copy buttons.

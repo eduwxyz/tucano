@@ -8,6 +8,7 @@ import { firstSentence } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import { describeSchedule, MAX_AGENT_ROUTINES, nextRun, routineCap, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
+import { errorReason } from './connectors'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
 
@@ -204,7 +205,7 @@ export class Routines {
     if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error(L(`a ferramenta ${t.tool} não está liberada como leitura`, `the tool ${t.tool} isn't enabled for reading`))
     const r = await this.deps.connectors.call(t.connectorId, t.tool, t.args)
     const text = r.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n')
-    if (r.isError) throw new Error(text.slice(0, 200) || L('a ferramenta deu erro', 'the tool returned an error'))
+    if (r.isError) throw new Error(errorReason(r).slice(0, 200))
     return { items: eventItems(text), source: `${connector.name} · ${t.tool}` }
   }
 
