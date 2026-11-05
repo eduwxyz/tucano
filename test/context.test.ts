@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mentioned, systemPrompt, transcript } from '../src/core/context'
+import { mentioned, stamp, systemPrompt, transcript } from '../src/core/context'
 import type { Agent, Conversation, Message } from '../src/shared/types'
 
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({
@@ -71,6 +71,8 @@ describe('systemPrompt', () => {
 
 describe('transcript', () => {
   const at = new Date(2026, 9, 17, 14, 2).getTime()
+  const off = -new Date(at).getTimezoneOffset()
+  const stampZone = `UTC${off < 0 ? '-' : '+'}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`
   const messages: Message[] = [
     { id: 'm1', conversationId: 'c1', author: { kind: 'me' }, text: 'Oi, time', at },
     { id: 'm2', conversationId: 'c1', author: { kind: 'system' }, text: 'Router chamou Lia', at },
@@ -81,7 +83,20 @@ describe('transcript', () => {
 
   it('labels authors, marks the agent itself, skips system lines and empty messages', () => {
     const blocks = transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu' })
-    expect(blocks).toEqual(['Conversa em #engenharia, das mais antigas pras mais novas:', '[Edu · sáb 17/10 14:02]\nOi, time', '[Theo · agente · sáb 17/10 14:02]\nOi!', '[Lia (você) · agente · sáb 17/10 14:02]\nOlá'])
+    const when = `sáb 17/10/2026 14:02 (${stampZone}, unix ${Math.floor(at / 1000)})`
+    expect(blocks).toEqual(['Conversa em #engenharia, das mais antigas pras mais novas:', `[Edu · ${when}]\nOi, time`, `[Theo · agente · ${when}]\nOi!`, `[Lia (você) · agente · ${when}]\nOlá`])
+  })
+
+  it('gives each message its time with the year, the UTC offset and the Unix seconds, for tools that filter by time', () => {
+    expect(stamp(at)).toMatch(/^sáb 17\/10\/2026 14:02 \(UTC[+-]\d\d:\d\d, unix \d{10}\)$/)
+    expect(Number(/unix (\d+)/.exec(stamp(at))![1])).toBe(Math.floor(at / 1000))
+  })
+
+  it('tells an agent with connectors to read only the window it needs, and not to wait with sleep', () => {
+    const s = systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '' }, conversation: dm, peers: [], connectors: true })
+    expect(s).toContain('oldest = (unix da última mensagem − 3600)')
+    expect(s).toContain('Nunca espere com sleep')
+    expect(systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '' }, conversation: dm, peers: [] })).not.toContain('oldest')
   })
 
   it("keeps every block of a turn in the next one, so they come from the cache; a task goes last, with the time", () => {

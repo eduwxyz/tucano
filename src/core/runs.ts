@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, mentioned, snip, systemPrompt, transcript, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -24,6 +24,7 @@ import { textResult, type Gateway, type ToolDef } from './gateway'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { awaitDone, pendingOf, pollTool, sleepSeconds } from './waits'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -83,6 +84,7 @@ export interface RunnerDeps {
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
+  timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
 
 // What the runner needs from the connector manager.
@@ -114,9 +116,13 @@ export function resultText(r: CallToolResult): string {
   if (bytes.length <= MAX_RESULT_BYTES) return text
   // Cut on a whole character: a split one decodes as U+FFFD at the end.
   const kept = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8').replace(/�+$/, '')
+  // How much was left out, so the agent narrows the question instead of paging through the rest.
+  const kb = (n: number): string => `${Math.round(n / 1000).toLocaleString(locale())} KB`
+  const lines = (s: string): number => s.split('\n').length
+  const shown = Math.max(1, Math.round((MAX_RESULT_BYTES / bytes.length) * 100))
   return `${kept}\n${L(
-    `[… resultado cortado em ${MAX_RESULT_BYTES / 1000} KB: o resto não chegou. Se precisar dele, chame de novo pedindo menos de uma vez (paginação, filtro, menos campos).]`,
-    `[… result cut at ${MAX_RESULT_BYTES / 1000} KB: the rest didn't come through. If you need it, call again asking for less at once (pagination, a filter, fewer fields).]`
+    `[… resultado cortado: chegaram ${kb(MAX_RESULT_BYTES)} de ${kb(bytes.length)} (${shown}%, ${lines(kept)} de ${lines(text)} linhas). Não chame de novo pra ler o resto aos pedaços: se precisar de mais, pergunte de um jeito mais estreito (uma janela de tempo menor, um filtro, menos campos, uma agregação).]`,
+    `[… result cut: ${kb(MAX_RESULT_BYTES)} of ${kb(bytes.length)} came through (${shown}%, ${lines(kept)} of ${lines(text)} lines). Don't call again to read the rest piece by piece: if you need more, ask more narrowly (a shorter time window, a filter, fewer fields, an aggregate).]`
   )}`
 }
 
@@ -135,7 +141,7 @@ export interface RoutineEvent {
 }
 
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -625,6 +631,11 @@ export class Runner {
       seen.set(key, { result, n })
       return n
     }
+    // Calls per connector tool, whatever the arguments: paging a whole channel changes the cursor each
+    // time, so the repeat guard never sees it.
+    const callsOf = new Map<string, number>()
+    let sleeps = 0 // commands that started by sleeping
+    let refusedSleeps = 0
 
     let pending = ''
     let timer: NodeJS.Timeout | null = null
@@ -855,6 +866,20 @@ export class Runner {
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
+          // Sleeping to wait for something outside (a query, a job, a rate limit) holds the reply a minute
+          // at a time and makes nothing come sooner. The first runs; the next ones don't.
+          const slept = name === 'bash' && typeof args['command'] === 'string' ? sleepSeconds(args['command']) : 0
+          if (slept >= 20 && ++sleeps > SLEEPS_FREE) {
+            if (++refusedSleeps >= SLEEPS_STOP) halt('sleeping')
+            addSteps({ id: randomUUID(), label: L('Não esperou com sleep', "Didn't wait with sleep"), detail: snip(String(args['command']), 80), status: 'error' })
+            return textResult(
+              L(
+                `Não rodei: esperar com sleep não faz nada chegar mais cedo e segura a resposta. Um resultado de conector que volta pendente (uma consulta SQL rodando, um job) o app espera por você: chame a ferramenta de status dele uma vez (ex.: poll_sql_result) e ela só volta quando terminar, por até ${PENDING_WAIT_MINUTES} minutos. Se precisar esperar algo no seu computador, espere dentro de um comando só (um laço que confere e dorme). Se não há o que esperar, siga com o que já tem ou encerre dizendo o que falta.`,
+                `Not run: waiting with sleep makes nothing come sooner and holds the reply. A connector result that comes back pending (a SQL query running, a job) is awaited by the app for you: call its status tool once (e.g. poll_sql_result) and it only returns once it's done, for up to ${PENDING_WAIT_MINUTES} minutes. If you need to wait for something on your computer, wait inside one command (a loop that checks and sleeps). If there's nothing to wait for, go on with what you have or end saying what's left.`
+              ),
+              true
+            )
+          }
           const t0 = Date.now()
           const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
           const step: Step = { id: randomUUID(), label, detail, status: 'running' }
@@ -1121,9 +1146,40 @@ export class Runner {
         }
         try {
           const { [REASON_PARAM]: _reason, ...toolArgs } = args
-          const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
-          finish(r.isError ? 'error' : 'done')
-          return clip(r)
+          const first = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
+          const pending = pendingOf(first)
+          // Still running: the app waits for it here, with the connector's own status tool, instead of the
+          // agent sleeping and asking again.
+          const poller = pending && pollTool(db.tools(hit.connector.id), pending, (t) => allowed(t, db.agent(agent.id)?.grants[hit.connector.id]))
+          if (!pending || !poller) {
+            finish(first.isError ? 'error' : 'done')
+            return clip(first)
+          }
+          const w = await awaitDone(first, async (p) => this.deps.connectors!.call(hit.connector.id, poller.tool.name, pollTool([poller.tool], p, () => true)?.args ?? poller.args), {
+            maxMs: PENDING_WAIT_MINUTES * 60_000,
+            wait: this.deps.timers?.wait,
+            now: this.deps.timers?.now,
+            signal: control.ctl.signal
+          })
+          const took = w.ms >= 60_000 ? `${Math.round(w.ms / 60_000)} min` : `${Math.max(1, Math.round(w.ms / 1000))} s`
+          msg.run = { ...msg.run!, steps: msg.run!.steps.map((s) => (s.id === step.id ? { ...s, detail: `${detail} · ${L(`esperou ${took}`, `waited ${took}`)}` } : s)) }
+          finish(w.result.isError ? 'error' : 'done')
+          if (!w.pending) return clip(w.result)
+          const ids = Object.entries(poller.args).map(([k, v]) => `${k}=${v}`).join(', ')
+          const r = clip(w.result)
+          return {
+            ...r,
+            content: [
+              ...r.content,
+              {
+                type: 'text',
+                text: L(
+                  `[Ainda ${w.pending.state} depois de ${took} esperando (${w.polls} consultas a ${poller.tool.name}). Não fique esperando nem durma: diga a ${settings.workspaceName} que ainda está rodando (${ids}) e siga com o que já dá pra fazer, ou chame ${poller.tool.name} uma vez mais no fim.]`,
+                  `[Still ${w.pending.state} after waiting ${took} (${w.polls} checks with ${poller.tool.name}). Don't keep waiting or sleep: tell ${settings.workspaceName} it's still running (${ids}) and go on with what you can do, or call ${poller.tool.name} once more at the end.]`
+                )
+              }
+            ]
+          }
         } catch (e) {
           finish('error')
           return textResult(L(`A ferramenta falhou: ${e instanceof Error ? e.message : String(e)}`, `The tool failed: ${e instanceof Error ? e.message : String(e)}`), true)
@@ -1143,6 +1199,18 @@ export class Runner {
             true
           )
         }
+        const count = exposed.has(name) ? (callsOf.get(name) ?? 0) + 1 : 0
+        if (count) callsOf.set(name, count)
+        if (count > SAME_TOOL_STOP) {
+          if (++failing >= ERRORS_STOP) halt('errors')
+          return textResult(
+            L(
+              `Recusada: você já chamou ${name} ${SAME_TOOL_STOP} vezes nesta resposta. Trabalhe com o que já tem: escreva o que achou e o que falta. Se precisar de mais, use um recorte estreito (uma busca, um filtro de tempo) com outra ferramenta, ou peça a ${settings.workspaceName} pra continuar.`,
+              `Refused: you've already called ${name} ${SAME_TOOL_STOP} times in this reply. Work with what you have: write what you found and what's left. If you need more, use a narrow cut (a search, a time filter) with another tool, or ask ${settings.workspaceName} to go on.`
+            ),
+            true
+          )
+        }
         inFlight++
         acted = true
         sign()
@@ -1158,6 +1226,13 @@ export class Runner {
             const warning = L(
               `Atenção: esta chamada deu exatamente o mesmo resultado ${n} vezes nesta resposta. Repetir não vai mudar nada: mude de abordagem, ou encerre dizendo onde travou.`,
               `Careful: this call gave exactly the same result ${n} times in this reply. Repeating won't change anything: change your approach, or end saying where you got stuck.`
+            )
+            return { ...r, content: [...r.content, { type: 'text', text: warning }] }
+          } else if (count === SAME_TOOL_WARN) {
+            addSteps({ id: randomUUID(), label: L('Chamou a mesma ferramenta muitas vezes', 'Called the same tool many times'), detail: `${name} · ${count}×`, status: 'error' })
+            const warning = L(
+              `Atenção: você já chamou ${name} ${count} vezes nesta resposta. Se está paginando um histórico inteiro (um canal, logs, uma tabela), pare: peça só a janela que a tarefa precisa, com o filtro de tempo da ferramenta (ex.: oldest/latest em segundos Unix), uma busca ou um limite. Depois de ${SAME_TOOL_STOP} chamadas, ela é recusada nesta resposta.`,
+              `Careful: you've called ${name} ${count} times in this reply. If you're paging through a whole history (a channel, logs, a table), stop: ask only for the window the task needs, with the tool's time filter (e.g. oldest/latest in Unix seconds), a search or a limit. Past ${SAME_TOOL_STOP} calls, it's refused for this reply.`
             )
             return { ...r, content: [...r.content, { type: 'text', text: warning }] }
           }
@@ -1208,6 +1283,7 @@ export class Runner {
               skills: skills && mySkills,
               wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
               publish: repos,
+              connectors: exposed.size > 0,
               builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
             }),
             prompt: blocks.join('\n\n'),
@@ -1307,9 +1383,10 @@ export class Runner {
     const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
-    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
+    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
       const why = {
         loop: L(`repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`, `I repeated the same thing, with the same result, ${REPEAT_STOP} times. It looked like a loop`),
+        sleeping: L('fiquei tentando esperar com sleep por algo que não chegava', 'I kept trying to wait with sleep for something that wasn’t coming'),
         errors: L(`${ERRORS_STOP} ferramentas falharam seguidas`, `${ERRORS_STOP} tools failed in a row`),
         stall: L(`fiquei ${Math.round(stallMs / 60_000)} minutos sem nenhum sinal, travado`, `I went ${Math.round(stallMs / 60_000)} minutes without any sign of life, stuck`)
       }[control.reason]
