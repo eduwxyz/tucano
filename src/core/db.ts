@@ -289,10 +289,21 @@ export class Db {
     const { user_version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
     this.created = user_version === 0
     for (let v = user_version; v < MIGRATIONS.length; v++) {
-      this.tx(() => {
-        this.db.exec(MIGRATIONS[v]!)
-        this.db.exec(`PRAGMA user_version = ${v + 1}`)
-      })
+      try {
+        this.tx(() => {
+          this.db.exec(MIGRATIONS[v]!)
+          this.db.exec(`PRAGMA user_version = ${v + 1}`)
+        })
+      } catch (e) {
+        // A column may already exist (database created by another build). Skip it.
+        const msg = e instanceof Error ? e.message : String(e)
+        if (/duplicate column/i.test(msg)) {
+          console.error(`[db] migration ${v} skipped (column already exists)`)
+          this.db.exec(`PRAGMA user_version = ${v + 1}`)
+          continue
+        }
+        throw e
+      }
     }
   }
 
