@@ -153,7 +153,7 @@ describe('messages sent while the agent is still answering', () => {
     release()
     await r.idle()
     expect(turns).toHaveLength(2)
-    expect(replies().map((m) => m.threadId)).toEqual([mine().find((m) => m.text === 'primeiro assunto')!.id, 'outra'])
+    expect(replies().map((m) => m.threadId)).toEqual([undefined, 'outra']) // the first in the conversation, where the DM answers
   })
 })
 
