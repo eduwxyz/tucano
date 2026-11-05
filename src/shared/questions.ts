@@ -100,6 +100,15 @@ export function questionHeadline(questions: Question[]): string {
 
 // For the agent's context: a lone text question reads exactly as a question did before.
 export function describeQuestions(questions: Question[]): string {
+  return numberedQuestions(questions, '; ')
+}
+
+// For a text-only place (the phone): the question alone, or one numbered line per decision.
+export function questionsAsText(questions: Question[]): string {
+  return numberedQuestions(questions, '\n')
+}
+
+function numberedQuestions(questions: Question[], separator: string): string {
   if (questions.length === 1 && !questions[0]!.options) return questions[0]!.question
-  return questions.map((q, i) => `${i + 1}. ${q.question}${q.options ? ` (${q.options.map((o) => o.label).join(' | ')})` : ''}`).join('; ')
+  return questions.map((q, i) => `${i + 1}. ${q.question}${q.options ? ` (${q.options.map((o) => o.label).join(' | ')})` : ''}`).join(separator)
 }

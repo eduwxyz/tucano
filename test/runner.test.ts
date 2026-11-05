@@ -280,7 +280,7 @@ describe('ask_user through the gateway', () => {
     await r.send('c1', '@lia me pergunta o que faltar')
     await r.idle()
     const [asked] = agentMessages()
-    expect(asked?.run).toMatchObject({ status: 'waiting_input', question: 'Pra quando você precisa disso?' })
+    expect(asked?.run).toMatchObject({ status: 'waiting_input', questions: [{ question: 'Pra quando você precisa disso?', kind: 'text' }] })
     expect(asked?.run?.steps.map((s) => s.label)).toEqual(['Pensou', 'Perguntou a você', 'Respondeu'])
     expect(claude.turns[0]?.mcpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[a-f0-9]{48}$/)
 
@@ -293,6 +293,42 @@ describe('ask_user through the gateway', () => {
     expect((replies[1]!.author as { id: string }).id).toBe('a1')
     expect(claude.turns[1]?.prompt).toContain('pergunta enviada a Edu pela ferramenta ask_user: Pra quando você precisa disso?')
     expect(db.messages().some((m) => m.text.startsWith('Chamei'))).toBe(false)
+  })
+  const askingRunner = (): Runner =>
+    new Runner({
+      db,
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') },
+      settings: async () => settings,
+      emit: (e) => events.push(e),
+      workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
+      gateway
+    })
+
+  it('asks a list of decisions', async () => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia me ajuda a decidir')
+    await r.idle()
+    const [asked] = agentMessages()
+    expect(asked?.run).toMatchObject({
+      status: 'waiting_input',
+      questions: [
+        { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] },
+        { question: 'Pra quando?', kind: 'text' }
+      ]
+    })
+    expect(asked?.run?.question).toBeUndefined()
+    expect(asked?.run?.steps.find((s) => s.label === 'Perguntou a você')?.detail).toBe('Paginação no menu? (+1)')
+  })
+
+  it('gives the agent the error when the decisions are invalid', async () => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia decisões demais')
+    await r.idle()
+    const [asked] = agentMessages()
+    expect(asked?.run?.status).not.toBe('waiting_input')
+    expect(asked?.run?.questions).toBeUndefined()
   })
 })
 

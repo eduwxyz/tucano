@@ -21,6 +21,7 @@ import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type ToolDef } from './gateway'
+import { MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, type Question } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
@@ -47,15 +48,43 @@ export const ASK_USER: ToolDef = {
   name: 'ask_user',
   get description() {
     return L(
-      'Faz uma pergunta curta ao usuário quando falta uma informação pra continuar. Depois de chamar, encerre a resposta: a resposta do usuário chega na próxima mensagem.',
-      "Asks the user a short question when a piece of information is missing to go on. After calling it, end your reply: the user's answer comes in the next message."
+      'Pede ao usuário as decisões que faltam pra continuar. Escreva a análise e a proposta no texto da sua resposta, antes de chamar; aqui vão só as decisões, cada uma com uma pergunta curta e, quando der, opções curtas (detalhe em description). Tipos: single (uma opção), multiple (várias), text (resposta livre). De 1 a 4 decisões, de 2 a 4 opções. Depois de chamar, encerre a resposta: as respostas chegam na próxima mensagem.',
+      "Asks the user for the decisions missing to go on. Write your analysis and proposal in your reply's text, before calling; here go only the decisions, each with a short question and, when possible, short options (detail in description). Kinds: single (one option), multiple (several), text (free answer). 1 to 4 decisions, 2 to 4 options. After calling it, end your reply: the answers come in the next message."
     )
   },
   get inputSchema() {
     return {
       type: 'object' as const,
-      properties: { question: { type: 'string', description: L('A pergunta, curta e direta.', 'The question, short and direct.') } },
-      required: ['question']
+      properties: {
+        questions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_QUESTIONS,
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', description: L('A pergunta, curta e direta.', 'The question, short and direct.') },
+              kind: { type: 'string', enum: ['single', 'multiple', 'text'] },
+              options: {
+                type: 'array',
+                minItems: MIN_OPTIONS,
+                maxItems: MAX_OPTIONS,
+                description: L('Pra single e multiple.', 'For single and multiple.'),
+                items: {
+                  type: 'object',
+                  properties: {
+                    label: { type: 'string', description: L('Curto: o que aparece no botão.', 'Short: what shows on the button.') },
+                    description: { type: 'string', description: L('Opcional: o que essa opção implica.', 'Optional: what this option implies.') }
+                  },
+                  required: ['label']
+                }
+              }
+            },
+            required: ['question', 'kind']
+          }
+        },
+        question: { type: 'string', description: L('Forma antiga: uma pergunta de texto. Prefira questions.', 'Old form: one text question. Prefer questions.') }
+      }
     }
   }
 }
@@ -638,7 +667,7 @@ export class Runner {
 
     // Tools for this turn, served by the gateway under a URL only this turn knows:
     // ask_user plus the connector tools this agent's grants allow.
-    let question: string | undefined
+    let questions: Question[] | undefined
     let approval: Approval | undefined
     const memoryIds: string[] = []
     const artifactIds: string[] = []
@@ -736,11 +765,11 @@ export class Runner {
 
     const runTool = async (name: string, args: Record<string, unknown>): Promise<CallToolResult> => {
         if (name === ASK_USER.name) {
-          const q = typeof args['question'] === 'string' ? args['question'].trim() : ''
-          if (!q) return textResult(L('Faltou a pergunta.', 'Missing the question.'), true)
-          if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
-          question = q
-          addSteps({ id: randomUUID(), label: L('Perguntou a você', 'Asked you'), detail: q, status: 'done' })
+          const parsed = parseQuestions(args)
+          if ('error' in parsed) return textResult(parsed.error, true)
+          if (questions || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
+          questions = parsed.questions
+          addSteps({ id: randomUUID(), label: L('Perguntou a você', 'Asked you'), detail: questionHeadline(questions), status: 'done' })
           return textResult(
             L(
               `Pergunta enviada a ${settings.workspaceName}. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. A resposta chega na próxima mensagem.`,
@@ -893,7 +922,7 @@ export class Runner {
           if (out.artifact) artifactIds.push(out.artifact.id)
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
           if (out.approval) {
-            if (question || approval) {
+            if (questions || approval) {
               msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
               save()
               return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -955,7 +984,7 @@ export class Runner {
           const out = await apps.call(current, name, args)
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
           if (out.approval) {
-            if (question || approval) {
+            if (questions || approval) {
               msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
               save()
               return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -1002,7 +1031,7 @@ export class Runner {
           const title = typeof args['titulo'] === 'string' ? args['titulo'].trim() : ''
           if (!/^agent\/[A-Za-z0-9._\/-]+$/.test(branch)) return textResult(L('A branch precisa ser agent/<assunto>, já publicada com git push.', 'The branch must be agent/<topic>, already published with git push.'), true)
           if (!title) return textResult(L('Faltou o título.', 'Missing the title.'), true)
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+          if (questions || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           const prArgs = { repo, head: branch, base: typeof args['base'] === 'string' && args['base'].trim() ? args['base'].trim() : 'main', title, body: typeof args['descricao'] === 'string' ? args['descricao'] : '' }
           approval = {
             id: randomUUID(),
@@ -1037,7 +1066,7 @@ export class Runner {
           const c = this.deps.connectors?.list().find((x) => x.name === args['conector'])
           const nivel = args['nivel'] === 'read_write' ? 'read_write' : 'read'
           if (!c) return textResult(L('Esse conector não existe. Use um da lista.', "That connector doesn't exist. Use one from the list."), true)
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+          if (questions || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           const why = typeof args['motivo'] === 'string' ? args['motivo'].trim() : ''
           approval = {
             id: randomUUID(),
@@ -1078,7 +1107,7 @@ export class Runner {
         // "Sempre permitir": a sensitive tool approved for good runs like a write one (never a high-risk one).
         const always = current.cls === 'sensitive' && !current.highRisk && !!db.agent(agent.id)?.autoApprove?.includes(`${hit.connector.id}:${current.name}`)
         if (current.cls === 'sensitive' && !always) {
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+          if (questions || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           const { [REASON_PARAM]: why, ...callArgs } = args
           approval = {
             id: randomUUID(),
@@ -1253,7 +1282,7 @@ export class Runner {
         }
         // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
         // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
-        const reserve = !onReserve && !result && error && !control.reason && !acted && !question && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
+        const reserve = !onReserve && !result && error && !control.reason && !acted && !questions && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
         if (!reserve) break
         const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
         flush()
@@ -1304,7 +1333,7 @@ export class Runner {
       )
     }
 
-    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
+    const base = { depth: opts.depth, work, receipt, questions, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
@@ -1345,10 +1374,10 @@ export class Runner {
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: question ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        run: { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
-      if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
+      if (questions) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), questionHeadline(questions), conv.id, 'question', msg.threadId)
       else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
     } else {
       // What happened and what to do; the CLI's own words go folded under it.

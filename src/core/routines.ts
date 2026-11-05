@@ -10,6 +10,7 @@ import { describeSchedule, MAX_AGENT_ROUTINES, nextRun, routineCap, validTime, t
 import type { Db } from './db'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
+import { questionHeadline, questionsOf } from '../shared/questions'
 
 export { MAX_AGENT_ROUTINES } // the default; each agent's own is agent.maxRoutines
 
@@ -411,7 +412,7 @@ export function outcome(reply: Message): string {
     case 'waiting_approval':
       return L('Pediu aprovação pra continuar.', 'Asked for approval to go on.')
     case 'waiting_input':
-      return `${L('Perguntou', 'Asked')}: ${reply.run.question ?? ''}`.trim()
+      return `${L('Perguntou', 'Asked')}: ${questionHeadline(questionsOf(reply.run))}`.trim()
     case 'limit_reached':
       return L('Parou: chegou no limite de tokens do mês.', "Stopped: hit the month's token limit.")
     case 'paused':

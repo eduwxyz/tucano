@@ -7,6 +7,7 @@ import {
   isAnswered,
   parseQuestions,
   questionHeadline,
+  questionsAsText,
   questionsOf,
   type Question
 } from '../src/shared/questions'
@@ -103,5 +104,12 @@ describe('headline and description', () => {
   it('describes the decisions for the agent context, a lone text question exactly as before', () => {
     expect(describeQuestions([deadline])).toBe('Pra quando?')
     expect(describeQuestions([pagination, deadline])).toBe('1. Paginação no menu? (Busca remota | Scroll infinito); 2. Pra quando?')
+  })
+})
+
+describe('questionsAsText', () => {
+  it('is the question alone for one decision, and a numbered line each for more', () => {
+    expect(questionsAsText([deadline])).toBe('Pra quando?')
+    expect(questionsAsText([pagination, deadline])).toBe('1. Paginação no menu? (Busca remota | Scroll infinito)\n2. Pra quando?')
   })
 })

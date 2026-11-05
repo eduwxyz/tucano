@@ -187,6 +187,10 @@ describe('routines', () => {
     const base = { id: 'm', conversationId: 'c1', author: { kind: 'agent' as const, id: 'a1' }, at: 0 }
     expect(outcome({ ...base, text: '## Resumo\n\n**3 issues** vencidas: [ENG-1](https://x.y/1)', run: { status: 'done', steps: [] } })).toBe('Resumo 3 issues vencidas: ENG-1')
     expect(outcome({ ...base, text: '', run: { status: 'waiting_approval', steps: [] } })).toBe('Pediu aprovação pra continuar.')
+    expect(outcome({ ...base, text: '', run: { status: 'waiting_input', steps: [], question: 'Pra quando?' } })).toBe('Perguntou: Pra quando?')
+    expect(
+      outcome({ ...base, text: '', run: { status: 'waiting_input', steps: [], questions: [{ question: 'Paginação no menu?', kind: 'single', options: [{ label: 'a' }, { label: 'b' }] }, { question: 'Pra quando?', kind: 'text' }] } })
+    ).toBe('Perguntou: Paginação no menu? (+1)')
   })
 
   it('a one-off routine runs once and turns itself off', async () => {

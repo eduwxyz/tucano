@@ -58,6 +58,7 @@ import { Routines } from './routines'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello } from './tuca'
 import { seed } from './seed'
+import { questionsOf } from '../shared/questions'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
@@ -240,7 +241,7 @@ function toPhone(e: CoreEvent): void {
   if (e.type === 'approval' && e.approval.state === 'pending' && !sentToPhone.has(e.approval.id)) {
     sentToPhone.add(e.approval.id)
     void telegram.approvalAsked(e.approval, name(e.approval.agentId))
-  } else if (e.type === 'message' && e.message.run?.status === 'waiting_input' && e.message.run.question && e.message.author.kind === 'agent' && !sentToPhone.has(e.message.id)) {
+  } else if (e.type === 'message' && e.message.run?.status === 'waiting_input' && questionsOf(e.message.run).length > 0 && e.message.author.kind === 'agent' && !sentToPhone.has(e.message.id)) {
     sentToPhone.add(e.message.id)
     const conv = db.conversation(e.message.conversationId)
     void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM'))
