@@ -194,6 +194,7 @@ export class Runner {
   stopAll(): void {
     this.paused = true
     this.queue.length = 0
+    this.followups = new Followups() // the places the dropped queue held, and what was noted for later
     for (const c of this.controllers.values()) {
       c.reason = 'stopped'
       c.ctl.abort()
