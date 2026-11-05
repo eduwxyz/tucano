@@ -28,7 +28,7 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
 - **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
-- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o GitHub Copilot CLI, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
+- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o Grok, o GitHub Copilot CLI, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
 - **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
 
 ## O que ele faz
@@ -91,6 +91,7 @@ Dê a um agente os apps do seu computador, como Notas, Calendário ou Spotify, c
 | [GitHub Copilot CLI](https://github.com/features/copilot/cli) | Seu plano do Copilot (`copilot login`) | Roda com um `COPILOT_HOME` próprio e os hooks desligados, pra não carregar suas configurações, servidores MCP, plugins e hooks; só as ferramentas do Tucano (e a leitura de páginas, com a web) chegam ao modelo, então o shell, os arquivos e as skills do próprio Copilot ficam desligados; os modelos são os que o `copilot help config` lista, e o seu plano decide quais deles rodam |
 | [OpenCode](https://opencode.ai) | Os provedores que você configurou | Usa os modelos em que você tem login |
 | [Pi](https://pi.dev) | Os provedores que você configurou | Usa os modelos em que você tem login |
+| [Grok](https://x.ai/cli) | grok.com (`grok login`) | Roda com uma pasta pessoal própria, pra não carregar os seus servidores MCP, skills, hooks e plugins (do Grok e os instalados pro Claude Code ou Cursor); o shell e os arquivos do próprio Grok ficam desligados; só o gateway do Tucano; uma `XAI_API_KEY` no ambiente é retirada quando o grok.com está logado, pra a assinatura não ser cobrada como API. O instalador oficial é macOS e Linux |
 
 Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra corrigir, GPT pra revisar, Haiku pra rotear.
 
@@ -162,7 +163,7 @@ No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o
 flowchart LR
   subgraph Mac["Seu computador"]
     UI["Janela<br/>(React)"] <-->|MessagePort| Core["Núcleo<br/>SQLite · respostas · memória · rotinas"]
-    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · cursor · copilot · opencode · pi"]
+    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · cursor · grok · copilot · opencode · pi"]
     CLI -->|"URL secreta por turno<br/>só as ferramentas do agente"| GW["Gateway MCP do Tucano"]
     GW --> Tools["Conectores (MCP)<br/>computador · navegador · memória"]
     GW -.->|"ação de escrita"| OK{{"Sua aprovação"}}

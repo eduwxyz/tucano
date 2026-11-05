@@ -24,6 +24,7 @@ import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
+import { grokEngine } from './engines/grok'
 import { copilotAppDir, copilotEngine } from './engines/copilot'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
 import { fakeEngine } from './engines/fake'
@@ -96,7 +97,7 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
 }
 
 const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
-let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine, cursor: unknownEngine, copilot: unknownEngine }
+let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine, cursor: unknownEngine, grok: unknownEngine, copilot: unknownEngine }
 // The models OpenCode and Pi list (what the person has logins for), from the last check.
 let listed: Partial<Record<EngineId, string[]>> = {}
 // Codex's own catalog for this login (names and what each model is for), from the last check.
@@ -105,7 +106,7 @@ let codexCatalog: CodexModel[] = []
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 async function detect(): Promise<void> {
   if (fake) {
-    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, copilot: { installed: false, loggedIn: false } }
+    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, copilot: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
   } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
   await checkAccounts()
@@ -182,7 +183,7 @@ function watchAccount(id: string): void {
 const githubInfo = (): Settings['github'] => githubRef?.info()
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), copilot: fakeEngine('copilot') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') }
   : {
       claude: claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())),
       codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())),
@@ -190,6 +191,7 @@ const engineImpls: Record<EngineId, Engine> = fake
       pi: piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv),
       gemini: geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv),
       cursor: cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv),
+      grok: grokEngine(() => engines.grok.path, loginEnv),
       copilot: copilotEngine(() => engines.copilot.path, copilotAppDir(dataDir), loginEnv)
     }
 
@@ -716,6 +718,10 @@ const api: Api = {
     void runner.send(conversationId, text, images, threadId)
   },
 
+  typing: ({ conversationId, threadId }) => {
+    void runner.typing(conversationId, threadId).catch((e: unknown) => console.warn('[typing]', e))
+  },
+
   stopRun: ({ messageId }) => runner.stop(messageId),
 
   retryRun: ({ messageId }) => runner.retry(messageId),
@@ -753,6 +759,7 @@ const api: Api = {
     if (archived) {
       for (const m of db.messages()) if (m.author.kind === 'agent' && m.author.id === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
       routines.pauseAgent(id)
+      runner.forgetSessions({ agentId: id })
       if (agent.browser) void browser.close(id)
     }
     db.saveAgent({ ...agent, archived })
@@ -798,6 +805,7 @@ const api: Api = {
     for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
     for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
     for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
+    runner.forgetSessions({ conversationId: id })
     db.deleteConversation(id)
     emit({ type: 'conversation_removed', id })
   },
@@ -1211,7 +1219,10 @@ process.parentPort.on('message', (e) => {
   port.start()
 })
 
-process.on('exit', () => db.close())
+process.on('exit', () => {
+  for (const e of Object.values(engineImpls)) e.dispose?.() // the Claude Code processes kept open between replies
+  db.close()
+})
 // The app stops the core with SIGTERM, which by default skips the 'exit' handlers
 // above and leaves the agents' Chromes running with nothing to drive them.
 process.on('SIGTERM', () => process.exit(0))

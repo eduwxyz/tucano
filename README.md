@@ -28,7 +28,7 @@ Coding agents got good. Working with *several* of them is still a mess of termin
 
 - **A team, not a prompt box.** Agents with names, roles, tools and memory. They talk in channels, call each other with `@mentions` and hand work over: one finds the bug, another fixes it, a third reviews it, and you get the result.
 - **Your rules.** Each agent sees only the tools you give it, with *no access*, *read*, or *read and write* per tool. Merges, purchases, posts, emails and deletes become an approval tied to the exact action, on your computer or your phone.
-- **Runs on what you already have.** Agents think with the Claude Code, Codex, Cursor CLI, GitHub Copilot CLI, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
+- **Runs on what you already have.** Agents think with the Claude Code, Codex, Cursor CLI, Grok, GitHub Copilot CLI, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
 - **Everything stays on your computer.** Conversations, memory, logins, files. There is no Tucano server.
 
 ## What it does
@@ -91,6 +91,7 @@ Give an agent the apps on your computer, such as Notes, Calendar or Spotify, eac
 | [GitHub Copilot CLI](https://github.com/features/copilot/cli) | Your Copilot plan (`copilot login`) | Runs with a `COPILOT_HOME` of its own and hooks off, so your settings, MCP servers, plugins and hooks don't load; only Tucano's tools (and page reading, with the web) reach the model, so Copilot's own shell, files and skills stay off; the models are the ones `copilot help config` lists, and your plan decides which of them run |
 | [OpenCode](https://opencode.ai) | The providers you configured | Uses the models you have logins for |
 | [Pi](https://pi.dev) | The providers you configured | Uses the models you have logins for |
+| [Grok](https://x.ai/cli) | grok.com (`grok login`) | Runs with a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load; Grok's own shell and files stay off; only Tucano's gateway; an `XAI_API_KEY` in the environment is unset when grok.com is signed in, so the subscription isn't billed as API. The official installer is macOS and Linux |
 
 Each agent picks its harness and model, so a team can mix them: Opus to fix, GPT to review, Haiku to route.
 
@@ -162,7 +163,7 @@ On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps 
 flowchart LR
   subgraph Mac["Your computer"]
     UI["Window<br/>(React)"] <-->|MessagePort| Core["Core process<br/>SQLite · runs · memory · routines"]
-    Core -->|"one turn, isolated"| CLI["Harness CLI<br/>claude · codex · cursor · copilot · opencode · pi"]
+    Core -->|"one turn, isolated"| CLI["Harness CLI<br/>claude · codex · cursor · grok · copilot · opencode · pi"]
     CLI -->|"secret per-turn URL<br/>only this agent's tools"| GW["Tucano MCP gateway"]
     GW --> Tools["Connectors (MCP)<br/>computer · browser · memory"]
     GW -.->|"write action"| OK{{"Your approval"}}

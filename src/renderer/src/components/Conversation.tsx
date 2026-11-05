@@ -30,6 +30,7 @@ import {
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
+  typing,
   setTab,
   stopRun,
   summarizeNow,
@@ -879,8 +880,10 @@ function useNow(on: boolean): number {
 // steps it took. The steps themselves open on a click.
 function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
-  const [open, setOpen] = useState(false)
+  // Open while the agent works, so its steps read as they go, unless the person closes it; closed after.
+  const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
+  const open = toggled ?? working
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
@@ -948,14 +951,29 @@ function RunSteps({ message }: { message: Message }): ReactNode {
 }
 
 function StepRow({ step }: { step: Step }): ReactNode {
+  const [whole, setWhole] = useState(false)
+  const [allInput, setAllInput] = useState(false)
   return (
-    <li className={`step step--${step.status}`}>
+    <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}`}>
       <span className="step__icon">
         {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'done' ? 'check' : 'x'} size={12} />}
       </span>
       <span className="step__label">{step.label}</span>
       {step.note ? <span className="step__note">{step.note}</span> : step.detail && <code className="step__detail">{step.detail}</code>}
       {step.ms !== undefined && <span className="step__ms">{duration(step.ms)}</span>}
+      {step.input && (
+        // What it asked (the SQL, the path): two lines, the whole of it on a click.
+        <code className={`step__input${allInput ? ' is-whole' : ''}`} title={allInput ? undefined : L('Ver tudo', 'See all')} onClick={() => setAllInput(!allInput)}>
+          <span className="step__clamp">{step.input}</span>
+        </code>
+      )}
+      {step.output && <span className="step__output">→ {step.output}</span>}
+      {step.error && (
+        // Why it failed, in the tool's words: a few lines, the whole of it on a click.
+        <span className={`step__error${whole ? ' is-whole' : ''}`} title={whole ? undefined : L('Ver tudo', 'See all')} onClick={() => setWhole(!whole)}>
+          {step.error}
+        </span>
+      )}
     </li>
   )
 }
@@ -1691,6 +1709,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
             onChange={(e) => {
               setText(e.target.value)
               updateMention(e.target.value, e.target.selectionStart)
+              if (e.target.value.trim()) typing(conversationId, threadId)
             }}
             onPaste={(e) => {
               const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))

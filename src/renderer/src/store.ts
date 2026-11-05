@@ -133,7 +133,7 @@ let state: State = {
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, copilot: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, copilot: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -517,6 +517,16 @@ export const markRead = (id: string): void => set((s) => ({ ...s, conversations:
 // `threadId`: a reply in the thread that message started.
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
   if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
+}
+
+// The person is writing: the core gets what will answer ready. Once in a while per place, and
+// nobody needs to hear if it didn't work.
+const typed = new Map<string, number>()
+export const typing = (conversationId: string, threadId?: string): void => {
+  const where = `${conversationId}:${threadId ?? ''}`
+  if (Date.now() - (typed.get(where) ?? 0) < 20_000) return
+  typed.set(where, Date.now())
+  void call('typing', { conversationId, ...(threadId ? { threadId } : {}) }).catch(() => {})
 }
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
