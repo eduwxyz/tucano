@@ -955,7 +955,7 @@ const api: Api = {
   },
 
   // Validation errors come back to the form; connecting continues in the background.
-  addConnector: ({ input }) => connectors.add(input),
+  addConnector: ({ input }) => connectors.add(input, !serverMode), // a server hands the sign-in page over with Authorize instead
 
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
