@@ -1,7 +1,7 @@
 // Routines (spec §14, §17): requests for an agent that run on their own, at a
 // time or when something happens (a new item in a connector, a call on the Mac).
 import { L, lang, locale } from '../../../shared/lang'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   agentById,
   checkTrigger,
@@ -23,6 +23,7 @@ import {
 } from '../store'
 import { Card, Field, Sheet, Toggle } from './Pages'
 import { AgentAvatar, Icon, ownColor, shiftWeek, startOfWeek, weekRange } from './ui'
+import { Modal } from './Modal'
 
 const DAYS = (): string[] => (lang() === 'en' ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'])
 const DAY_NAMES = (): string[] => (lang() === 'en' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'])
@@ -62,7 +63,7 @@ const LAST = (): Partial<Record<RunStatus, { label: string; tone: string }>> => 
   interrupted: { label: L('interrompida', 'interrupted'), tone: '' }
 })
 
-export const webhookUrl = (token: string): string => `http://127.0.0.1:${WEBHOOK_PORT}/gatilho/${token}`
+export const webhookUrl = (token: string, port = WEBHOOK_PORT): string => `http://127.0.0.1:${port}/gatilho/${token}`
 
 // "Todo dia às 9h", "A cada 5 min, quando aparecer algo novo em Linear · list_issues"
 function describeRoutine(r: Pick<Routine, 'schedule' | 'trigger'>, connectorName?: string): string {
@@ -115,7 +116,6 @@ export function RoutinesPage(): ReactNode {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const typing = (e.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable]')
-      if (draft && e.key === 'Escape') return setDraft(null)
       if (draft || typing || e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'ArrowLeft') setWeek((w) => shiftWeek(w, -1))
       else if (e.key === 'ArrowRight') setWeek((w) => shiftWeek(w, 1))
@@ -256,11 +256,9 @@ export function RoutinesPage(): ReactNode {
       {open && <Popover occ={open.occ} rect={open.rect} now={now} onClose={() => setOpen(null)} onEdit={(r) => (setOpen(null), setDraft({ ...r }))} />}
 
       {draft && (
-        <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setDraft(null)}>
-          <div className="form-modal">
-            <RoutineForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
-          </div>
-        </div>
+        <Modal title={draft.id ? L('Editar rotina', 'Edit routine') : L('Nova rotina', 'New routine')} variant="form" onClose={() => setDraft(null)}>
+          <RoutineForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
+        </Modal>
       )}
     </Sheet>
   )
@@ -353,18 +351,47 @@ function Calendar({
   const [ghost, setGhost] = useState<{ day: number; min: number } | null>(null)
   const today = new Date(now).toDateString()
 
+  // A crowded hour grows taller (same for all seven days, so rows stay aligned) instead of
+  // pushing its routines into the next hours. Extra room accrues at the end of the hour.
+  const { offsets, total } = useMemo(() => {
+    const n = h1 - h0
+    const heights = Array.from({ length: n }, () => HOUR)
+    for (const d of days) {
+      const last = Array.from({ length: n }, () => -Infinity)
+      for (const o of occs.filter((x) => x.at >= d && x.at < d + DAY).sort((a, b) => a.at - b.at)) {
+        const t = new Date(o.at)
+        const i = t.getHours() - h0
+        if (i < 0 || i >= n) continue
+        const top = Math.max((t.getMinutes() / 60) * HOUR, (last[i] ?? -Infinity) + BLOCK + 2)
+        last[i] = top
+        heights[i] = Math.max(heights[i] ?? HOUR, Math.ceil(top + BLOCK + 2)) // whole pixels keep the hour lines sharp
+      }
+    }
+    const offsets: number[] = []
+    let sum = 0
+    for (const h of heights) {
+      offsets.push(sum)
+      sum += h
+    }
+    return { offsets, total: sum }
+  }, [days, occs, h0, h1])
+  const y = (hour: number, minute: number): number => (offsets[Math.max(0, Math.min(offsets.length - 1, hour - h0))] ?? 0) + (minute / 60) * HOUR
+
   // Opens on the first thing of the week (or now, when the week is empty).
   useEffect(() => {
     const el = scroller.current
     if (!el) return
     const focus = occs.length ? Math.min(...occs.map((o) => new Date(o.at).getHours())) : days.some((d) => new Date(d).toDateString() === today) ? new Date(now).getHours() : h0
-    el.scrollTop = Math.max(0, (focus - h0 - 1.5) * HOUR)
+    el.scrollTop = Math.max(0, y(focus, 0) - 1.5 * HOUR)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days[0]])
 
   const slot = (e: React.MouseEvent<HTMLDivElement>): number => {
-    const y = e.clientY - e.currentTarget.getBoundingClientRect().top
-    return Math.max(h0 * 60, Math.min(h1 * 60 - 30, h0 * 60 + Math.floor(y / (HOUR / 2)) * 30))
+    const py = e.clientY - e.currentTarget.getBoundingClientRect().top
+    let row = offsets.length - 1
+    while (row > 0 && (offsets[row] ?? 0) > py) row--
+    const half = Math.min(1, Math.floor(((py - (offsets[row] ?? 0)) / HOUR) * 2))
+    return Math.max(h0 * 60, Math.min(h1 * 60 - 30, (h0 + row) * 60 + half * 30))
   }
   const time = (min: number): string => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 
@@ -384,10 +411,10 @@ function Calendar({
         })}
       </div>
       <div className="cal__scroll" ref={scroller}>
-        <div className="cal__grid" style={{ height: (h1 - h0) * HOUR }}>
+        <div className="cal__grid" style={{ height: total }}>
           <div className="cal__hours">
             {Array.from({ length: h1 - h0 }, (_, i) => (
-              <span key={i} style={{ top: i * HOUR }}>
+              <span key={i} style={{ top: offsets[i] }}>
                 {String(h0 + i).padStart(2, '0')}:00
               </span>
             ))}
@@ -395,11 +422,16 @@ function Calendar({
           {days.map((d) => {
             const isToday = new Date(d).toDateString() === today
             const list = occs.filter((o) => o.at >= d && o.at < d + DAY).sort((a, b) => a.at - b.at)
-            // Blocks closer than their height slide down under each other; each still shows its time.
+            // Blocks closer than their height stack down under each other, but only inside their own hour (its row is tall enough).
             let bottom = -Infinity
+            let rowHour = -1
             const placed = list.map((o) => {
               const t = new Date(o.at)
-              const top = Math.max((t.getHours() - h0 + t.getMinutes() / 60) * HOUR, bottom + 2)
+              if (t.getHours() !== rowHour) {
+                rowHour = t.getHours()
+                bottom = -Infinity
+              }
+              const top = Math.max(y(rowHour, t.getMinutes()), bottom + 2)
               bottom = top + BLOCK
               return { o, top }
             })
@@ -407,13 +439,15 @@ function Calendar({
               <div
                 key={d}
                 className={`cal__col ${isToday ? 'is-today' : ''}`}
-                style={{ backgroundSize: `100% ${HOUR}px` }}
                 onMouseMove={(e) => e.target === e.currentTarget && setGhost({ day: d, min: slot(e) })}
                 onMouseLeave={() => setGhost(null)}
                 onClick={(e) => e.target === e.currentTarget && onSlot(d, time(slot(e)))}
               >
+                {offsets.map((top, i) => (
+                  <div key={i} className="cal__line" style={{ top }} />
+                ))}
                 {ghost?.day === d && (
-                  <div className="cal__ghost" style={{ top: (ghost.min / 60 - h0) * HOUR }}>
+                  <div className="cal__ghost" style={{ top: y(Math.floor(ghost.min / 60), ghost.min % 60) }}>
                     <Icon name="plus" size={11} /> {time(ghost.min)}
                   </div>
                 )}
@@ -447,7 +481,7 @@ function Calendar({
                     </button>
                   )
                 })}
-                {isToday && now >= d && <div className="cal__now" style={{ top: (new Date(now).getHours() - h0 + new Date(now).getMinutes() / 60) * HOUR }} />}
+                {isToday && now >= d && <div className="cal__now" style={{ top: y(new Date(now).getHours(), new Date(now).getMinutes()) }} />}
               </div>
             )
           })}
@@ -472,7 +506,8 @@ function Calendar({
 
 function Hook({ token }: { token: string }): ReactNode {
   const [copied, setCopied] = useState(false)
-  const cmd = `curl -d "${L('o que aconteceu', 'what happened')}" ${webhookUrl(token)}`
+  const port = useStore((s) => s.webhookPort)
+  const cmd = `curl -d "${L('o que aconteceu', 'what happened')}" ${webhookUrl(token, port)}`
   return (
     <div className="row row--center routine__hook">
       <code className="small grow truncate">{cmd}</code>

@@ -24,6 +24,7 @@ import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dia
 import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
+import { WorkspaceSelector } from './Workspaces'
 import { AgentAvatar, Icon, TucaMark, useJustEnded, type IconName } from './ui'
 
 // The wiki stays lit on any of its pages.
@@ -160,8 +161,7 @@ export function Sidebar(): ReactNode {
   })
   const channelMenu = (c: (typeof channels)[number]): MenuItem[] => [
     { label: L('Adicionar ou remover agentes…', 'Add or remove agents…'), icon: 'users', onClick: () => openDialog({ kind: 'members', id: c.id }) },
-    { label: L('Renomear…', 'Rename…'), icon: 'edit', onClick: () => openDialog({ kind: 'rename', id: c.id }) },
-    { label: L('Mudar o tema…', 'Change the topic…'), icon: 'hash', onClick: () => openDialog({ kind: 'topic', id: c.id }) },
+    { label: L('Configurações do canal…', 'Channel settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id: c.id }) },
     ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
     wikiItem(c.id, c.wikiCapture !== false),
     'separator',
@@ -189,6 +189,7 @@ export function Sidebar(): ReactNode {
   const dmMenu = (id: string, agentId: string, agentName: string): MenuItem[] => [
     { label: L(`Ver ${agentName}`, `See ${agentName}`), icon: 'eye', onClick: () => navigate({ kind: 'agent', id: agentId }) },
     { label: L('Marcar como lido', 'Mark as read'), icon: 'check', onClick: () => markRead(id) },
+    { label: L('Configurações da conversa…', 'Conversation settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id }) },
     wikiItem(id, s.conversations.find((x) => x.id === id)?.wikiCapture !== false),
     'separator',
     {
@@ -231,11 +232,10 @@ export function Sidebar(): ReactNode {
     <aside className="sidebar">
       <div className="sidebar__drag" />
       <div className="workspace">
-        <span className="workspace__logo">{s.settings.workspaceName.slice(0, 1)}</span>
-        <span className="workspace__name">{s.settings.workspaceName}</span>
+        <WorkspaceSelector />
         <button
           className={`icon-btn ${s.settings.paused ? 'is-paused' : ''}`}
-          title={s.settings.paused ? L('Retomar os agentes', 'Resume the agents') : L('Pausar tudo: nenhum agente começa a trabalhar e nenhuma rotina roda', 'Pause everything: no agent starts working and no routine runs')}
+          title={s.settings.paused ? L('Retomar os agentes deste workspace', 'Resume agents in this workspace') : L('Pausar este workspace: nenhum agente começa a trabalhar e nenhuma rotina roda', 'Pause this workspace: no agent starts working and no routine runs')}
           onClick={() => updateSettings({ paused: !s.settings.paused })}
         >
           <Icon name={s.settings.paused ? 'play' : 'pause'} />

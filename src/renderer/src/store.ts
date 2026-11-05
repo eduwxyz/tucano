@@ -62,7 +62,10 @@ export type View =
   | { kind: 'settings' }
 
 export interface State {
+  webhookPort: number
+  defaultWorkspace: boolean
   ready: boolean
+  threadSeen: Record<string, number> // thread root id → when I last had it open (what came after is new)
   navOpen: boolean // on a phone, the sidebar slid in over the view
   view: View | null
   me: { name: string; initials: string }
@@ -98,9 +101,10 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string }
 
-export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
+// `thread`: the replies to a message (its id), next to the conversation.
+export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
 
 const initials = (name: string): string =>
   name
@@ -110,8 +114,21 @@ const initials = (name: string): string =>
     .map((w) => w[0]!.toUpperCase())
     .join('') || 'EU'
 
+// When each thread was last seen, in this window's storage: only a convenience, so it may be empty.
+const SEEN_KEY = 'tucano.threadSeen'
+const loadSeen = (): Record<string, number> => {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, number>
+  } catch {
+    return {}
+  }
+}
+
 let state: State = {
+  webhookPort: 47717,
+  defaultWorkspace: true,
   ready: false,
+  threadSeen: loadSeen(),
   wikiRev: 0,
   voiceRev: 0,
   navOpen: false,
@@ -120,7 +137,7 @@ let state: State = {
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -207,31 +224,14 @@ function apply(e: CoreEvent): void {
   set((s) => {
     switch (e.type) {
       case 'message': {
-        const known = s.messages.some((m) => m.id === e.message.id)
-        const viewing = s.view?.kind === 'conversation' && s.view.id === e.message.conversationId
-        const fromAgent = e.message.author.kind === 'agent' || e.message.author.kind === 'routine'
-        // A reply that lands while you're elsewhere is new content too: the end of
-        // the run, or it stopping for your turn (a question, an approval — the
-        // states the core notifies). Counted once: if the badge already counts
-        // this conversation, the run's start is already in it.
-        const finished =
-          known && fromAgent && !viewing && e.message.run !== undefined
-          && ['done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(e.message.run.status)
-          && s.messages.find((m) => m.id === e.message.id)?.run?.status !== e.message.run.status
-          && (s.conversations.find((c) => c.id === e.message.conversationId)?.unread ?? 0) === 0
-        const conversations =
-          fromAgent && !viewing && (!known || finished)
-            ? s.conversations.map((c) => (c.id === e.message.conversationId ? { ...c, unread: (c.unread ?? 0) + 1 } : c))
-            : s.conversations
-        return { ...s, conversations, messages: upsert(s.messages, e.message) }
+        return { ...s, messages: upsert(s.messages, e.message) }
       }
       case 'delta':
         return { ...s, messages: s.messages.map((m) => (m.id === e.id ? { ...m, text: m.text + e.text } : m)) }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
       case 'conversation': {
-        const prev = s.conversations.find((c) => c.id === e.conversation.id)
-        return { ...s, conversations: upsert(s.conversations, { ...e.conversation, unread: prev?.unread }) }
+        return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
       case 'settings':
         return withSettings(s, e.settings)
@@ -284,7 +284,10 @@ function apply(e: CoreEvent): void {
 }
 
 export async function start(): Promise<void> {
-  window.tucano.onNavigate((id) => navigate({ kind: 'conversation', id }))
+  window.tucano.onNavigate((id, thread) => {
+    navigate({ kind: 'conversation', id })
+    if (thread) openThread(thread)
+  })
   window.tucano.onNavigatePage?.((page) => navigate({ kind: page }))
   window.tucano.onCoreDown?.(() => {
     disconnect()
@@ -293,7 +296,10 @@ export async function start(): Promise<void> {
   let viewing: string | null = null
   subscribe(() => {
     const id = state.view?.kind === 'conversation' ? state.view.id : null
-    if (id !== viewing) window.tucano.viewing((viewing = id))
+    if (id !== viewing) {
+      window.tucano.viewing((viewing = id))
+      if (id && state.ready) void call('markRead', { conversationId: id })
+    }
   })
   await connect(apply)
   const snap = await call('snapshot')
@@ -303,6 +309,8 @@ export async function start(): Promise<void> {
     return {
       ...withSettings(s, snap.settings),
       ready: true,
+      webhookPort: snap.webhookPort ?? 47717,
+      defaultWorkspace: snap.defaultWorkspace ?? true,
       view,
       agents: snap.agents,
       conversations: snap.conversations,
@@ -448,8 +456,8 @@ export function newAgentDraft(): Agent {
 export const newChannel = (name: string): Promise<string> => call('createChannel', { name })
 
 // A new channel opens with the window to pick who's in it.
-export async function createChannel(name: string): Promise<void> {
-  const id = await call('createChannel', { name })
+export async function createChannel(name: string, threads?: boolean): Promise<void> {
+  const id = await call('createChannel', { name, ...(threads ? { threads } : {}) })
   navigate({ kind: 'conversation', id })
   set((s) => ({ ...s, dialog: { kind: 'members', id } }))
 }
@@ -492,12 +500,25 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
+// Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
+export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
-export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
+export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = []): void => {
-  if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}) })
+// `threadId`: a reply in the thread that message started.
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
+  if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
+}
+
+// The person is writing: the core gets what will answer ready. Once in a while per place, and
+// nobody needs to hear if it didn't work.
+const typed = new Map<string, number>()
+export const typing = (conversationId: string, threadId?: string): void => {
+  const where = `${conversationId}:${threadId ?? ''}`
+  if (Date.now() - (typed.get(where) ?? 0) < 20_000) return
+  typed.set(where, Date.now())
+  void call('typing', { conversationId, ...(threadId ? { threadId } : {}) }).catch(() => {})
 }
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
@@ -516,6 +537,8 @@ export const forgetMemory = (id: string, reason?: string): void => void fire(L('
 export const purgeMemory = (id: string): void => void fire(L('Não consegui apagar a memória.', "I couldn't delete the memory."), 'purgeMemory', { id })
 export const editSummary = (conversationId: string, text: string): void => void fire(L('Não consegui salvar o resumo.', "I couldn't save the summary."), 'editSummary', { conversationId, text })
 export const summarizeNow = (conversationId: string): void => void fire(L('Não consegui resumir a conversa.', "I couldn't summarize the conversation."), 'summarizeNow', { conversationId })
+export const editThreadSummary = (rootId: string, text: string): void => void fire(L('Não consegui salvar o resumo.', "I couldn't save the summary."), 'editThreadSummary', { rootId, text })
+export const summarizeThreadNow = (rootId: string): void => void fire(L('Não consegui resumir a thread.', "I couldn't summarize the thread."), 'summarizeThreadNow', { rootId })
 
 // Saves one field of a stored agent without touching the rest of its page.
 export function patchAgent(agentId: string, patch: Partial<Agent>): void {
@@ -528,6 +551,16 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
+// I've seen this thread up to now (it's open, or was just closed).
+export const seeThread = (rootId: string): void =>
+  set((s) => {
+    const threadSeen = { ...s.threadSeen, [rootId]: Date.now() }
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify(threadSeen))
+    } catch {}
+    return { ...s, threadSeen }
+  })
 export const openLightbox = (items: { url: string; title: string; video?: boolean }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
 export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>

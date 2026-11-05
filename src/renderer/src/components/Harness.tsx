@@ -3,7 +3,7 @@
 // providers they have logins for. Here they pick which ones the agents use,
 // test them, and pick models from what each harness offers.
 import { L } from '../../../shared/lang'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import {
   ACCOUNT_ENGINES,
   addAccount,
@@ -203,6 +203,7 @@ export function HarnessList(): ReactNode {
 
 function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: EngineStatus; picked: boolean; toggle: () => void }): ReactNode {
   const [testing, setTesting] = useState(false)
+  const checkId = useId()
   const [model, setModel] = useState('')
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
   // No terminal could be opened: the command, for the person to run.
@@ -225,15 +226,16 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
   return (
     <div className={`harness ${picked ? 'is-picked' : ''} ${st.soon ? 'is-soon' : ''}`}>
       <div className="harness__head">
-        <button className={`harness__check ${picked ? 'is-on' : ''}`} disabled={!!st.soon || !st.installed} onClick={toggle} aria-label={L(`Usar o ${ENGINES[engine].label}`, `Use ${ENGINES[engine].label}`)}>
+        <button id={checkId} className={`harness__check ${picked ? 'is-on' : ''}`} disabled={!!st.soon || !st.installed} onClick={toggle} aria-label={L(`Usar o ${ENGINES[engine].label}`, `Use ${ENGINES[engine].label}`)}>
           {picked && <Icon name="check" size={12} />}
         </button>
-        <div className="grow">
+        {/* The name is the check's label: a click on it is a click on the check, disabled when it is. */}
+        <label className="grow harness__name" htmlFor={checkId}>
           <strong>{ENGINES[engine].label}</strong>
           <span className="harness__account">
             {!st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
           </span>
-        </div>
+        </label>
         {st.soon ? (
           <span className="tag">{L('em breve', 'coming soon')}</span>
         ) : found && st.route ? (

@@ -11,6 +11,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L } from '../shared/lang'
+import { workspacePorts } from './ports'
 import type { CoreEvent } from '../shared/rpc'
 import type { Agent, Artifact, ComputerInfo, Service } from '../shared/types'
 import type { Db } from './db'
@@ -20,7 +21,7 @@ import { artifactKind, badName, edited, manyMatches, clipOutput, diedAtStart, em
 
 const MAX_FILE = 200_000
 const MAX_SHOW_BYTES = 50 * 1024 * 1024
-const RESERVED_PORTS = [47_717, 47_718] // the app's own webhook and git proxy
+const RESERVED_PORTS = Object.values(workspacePorts()) // this workspace's webhook and git proxy
 
 // What the agent is told about this computer: the system, and what is usually installed.
 const installed = (): string => ({ mac: 'Homebrew, Python, Node…', linux: 'apt, Python, Node…', windows: 'Python, Node, git…' })[osOf()]

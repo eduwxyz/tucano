@@ -1,14 +1,24 @@
 import { L } from '../../shared/lang'
 import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../shared/rpc'
 import type { UpdateState } from '../../shared/types'
+import type { WorkspaceList, WorkspaceParts } from '../../shared/workspaces'
 
 declare global {
   interface Window {
     tucano: {
+      workspaces?: {
+        list: () => Promise<WorkspaceList>
+        create: (name?: string) => Promise<void>
+        delete: (id?: string) => Promise<void>
+        duplicate: (id: string, name?: string, parts?: WorkspaceParts) => Promise<string>
+        setPaused: (paused: boolean, id?: string) => Promise<void>
+        switch: (id: string) => Promise<void>
+        subscribe: (cb: (list: WorkspaceList) => void) => () => void
+      }
       connect: () => void
       pickFolder: () => Promise<string | null>
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
-      onNavigate: (cb: (conversationId: string) => void) => void
+      onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void
       onNavigatePage?: (cb: (page: 'skills') => void) => void // desktop only
       onCoreDown?: (cb: () => void) => void // desktop only: a browser reloads on its own
       viewing: (conversationId: string | null) => void

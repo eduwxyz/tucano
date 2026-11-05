@@ -40,13 +40,17 @@ describe('Jev router', () => {
     const body = api.body()
     expect(body.model).toBe('jev-latest')
     expect(body.questions.who.type).toBe('choice')
-    expect(Object.keys(body.questions.who.criteria)).toEqual(['lia', 'nina', '__ninguem'])
+    expect(Object.keys(body.questions.who.criteria)).toEqual(['lia', 'nina', '__todos', '__ninguem'])
     expect(body.state).toContain('[Edu] o build quebrou')
   })
 
   it('calls a second agent only when it is close, and nobody when that wins', async () => {
     expect(await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: typesafe({ lia: 0.5, theo: 0.35, nina: 0.15 }).f })).toMatchObject({ agents: [lia, theo] })
     expect(await routeJev({ key: 'k', messages, agents: [lia, nina], me: 'Edu', fetch: typesafe({ lia: 0.2, nina: 0.1, __ninguem: 0.7 }).f })).toMatchObject({ agents: [], reason: 'Jev, 70%' })
+  })
+
+  it('calls every agent when the message is for the whole group, like a greeting', async () => {
+    expect(await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: typesafe({ lia: 0.1, nina: 0.1, theo: 0.05, __todos: 0.75 }).f })).toMatchObject({ agents: [lia, nina, theo], reason: 'Jev, 75%' })
   })
 
   it('says what went wrong instead of guessing', async () => {
@@ -64,7 +68,7 @@ describe('in a channel', () => {
   let settings: Settings
   const engines = (): Record<EngineId, Engine> => {
     const base = fakeEngine('claude', { delayMs: 1 })
-    return { claude: { id: 'claude', run: (t) => (t.model === 'haiku' && routerTurns++, base.run(t)) }, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+    return { claude: { id: 'claude', run: (t) => (t.model === 'haiku' && routerTurns++, base.run(t)) }, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   }
   const runner = (f: typeof fetch, key: string | undefined): Runner =>
     new Runner({ db, engines: engines(), settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), jev: { key: async () => key, fetch: f } })
@@ -73,7 +77,7 @@ describe('in a channel', () => {
   beforeEach(() => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-jev-')), 'test.db'))
     routerTurns = 0
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'jev', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'jev', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(lia)
     db.saveAgent(nina)
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })

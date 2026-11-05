@@ -1,8 +1,11 @@
 // Builds what a turn sends to the engine: a system prompt (stable per agent)
-// and a prompt with the conversation transcript. The CLI keeps no session
-// between turns, so everything the agent knows comes from here.
+// and a prompt with the conversation transcript. Everything the agent knows
+// comes from here; a kept session (sessions.ts) gets it once, then only the
+// blocks of what's new.
 import { L, lang, locale } from '../shared/lang'
+import { MENTION } from '../shared/mention-text'
 import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Routine, type Settings, type Skill } from '../shared/types'
+import type { ToolDef } from './gateway'
 import { osOf, shellCommand, systemName } from './platform'
 
 export const HISTORY_LIMIT = 30
@@ -15,6 +18,7 @@ export function systemPrompt(opts: {
   memories?: { aboutMe: Memory[]; own: Memory[]; searchable?: number }
   canRemember?: boolean
   hasComputer?: boolean
+  computerOff?: string // it has a computer, but Docker is off right now: what the person has to do
   offline?: string[] // connectors it has access to that aren't connected right now
   macFolder?: string // a computer on this Mac (spec §23): where its commands start in this conversation
   web?: boolean
@@ -26,7 +30,7 @@ export function systemPrompt(opts: {
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, browser, apps, routines, skills, publish, builder, wiki } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, publish, builder, wiki } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -42,6 +46,14 @@ export function systemPrompt(opts: {
     settings.context.trim() && `## ${L('Sobre', 'About')} ${me}\n${settings.context.trim()}`,
     agent.instructions.trim() && `## ${L('Suas instruções', 'Your instructions')}\n${agent.instructions.trim()}`,
     hasComputer && macFolder && macSection(me, macFolder),
+    computerOff &&
+      [
+        L('## Seu computador', '## Your computer'),
+        L(
+          `Está fora do ar agora: ${computerOff} Nesta resposta você não tem comandos nem arquivos dele. Se o pedido precisar do computador, diga isso a ${me} em uma frase, com o que fazer, e não tente outro caminho; o que der pra responder sem ele, responda.`,
+          `It's down right now: ${computerOff} In this reply you have none of its commands or files. If the request needs the computer, tell ${me} so in one sentence, with what to do, and don't try another way; what you can answer without it, answer.`
+        )
+      ].join('\n'),
     hasComputer &&
       !macFolder &&
       [
@@ -261,19 +273,38 @@ export const clock = (at: number): string => {
 }
 
 // The conversation as blocks, one per message, oldest first. Nothing in them
-// changes between turns (no "now", no closing line), so the next turn starts
-// with the same blocks and reads them from the cache. `task` (to continue after
-// an approval, a routine…) goes last, with the time, since it may come later.
-// `images`: the names of the images attached to each message (by id).
-type TranscriptOpts = { agent: Agent; conversation: Conversation; messages: Message[]; agents: Agent[]; me: string; task?: string; summary?: string; images?: Map<string, string[]> }
+// changes between turns (no "now", no closing line), so a kept session can tell
+// what it already saw by its block. `task` (to continue after an approval, a
+// routine…) goes last, with the time, since it may come later.
+// `images`: the names of the images attached to each message (by id). `thread`: the message
+// that started the thread this reply is in (`messages` is then that thread, root first, and
+// `summary` the thread's own). `searchable`: the agent has buscar_threads and ler_thread.
+type TranscriptOpts = {
+  agent: Agent
+  conversation: Conversation
+  messages: Message[]
+  agents: Agent[]
+  me: string
+  task?: string
+  summary?: string
+  images?: Map<string, string[]>
+  thread?: Message
+  searchable?: boolean
+}
 
 export function transcript(opts: TranscriptOpts): string[] {
   return transcriptBlocks(opts).blocks
 }
 
+// One line of text, cut at `max` characters.
+export const snip = (text: string, max: number): string => {
+  const t = text.replace(/\s+/g, ' ').trim()
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t
+}
+
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
-  const { agent, conversation, messages, agents, me, task, summary, images } = opts
+  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable } = opts
   const name = (m: Message): string | null => {
     if (m.author.kind === 'me') return me
     if (m.author.kind === 'system') return null
@@ -295,20 +326,89 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
 
   const shown = messages.filter((m) => m.author.kind !== 'system' && body(m))
   const where = conversation.kind === 'dm' ? L(`DM com ${me}`, `DM with ${me}`) : `#${conversation.name}`
+  // Who started the thread this reply is in.
+  const starter = thread?.author
+  const starterName = starter?.kind === 'agent' ? agents.find((a) => a.id === starter.id)?.name : undefined
+  const by =
+    starter?.kind === 'me'
+      ? L(`por ${me}`, `by ${me}`)
+      : starter?.kind === 'agent'
+        ? starter.id === agent.id
+          ? L('por você', 'by you')
+          : L(`por ${starterName ?? 'um agente'}`, `by ${starterName ?? 'an agent'}`)
+        : starter?.kind === 'routine'
+          ? L(`por uma rotina de ${me}`, `by a routine of ${me}'s`)
+          : L('pelo app', 'by the app')
+  // A thread is a conversation of its own: the others reach it only when looked up.
+  const lookUp = L(
+    `Se ${me} falar de outra conversa, ou de algo combinado antes que não está aqui nem nas memórias, procure com buscar_threads e leia com ler_thread.`,
+    `If ${me} mentions another conversation, or something agreed before that isn't here or in the memories, look it up with buscar_threads and read it with ler_thread.`
+  )
+  const apart = searchable
+    ? thread
+      ? ` ${L(`Ela é uma conversa à parte: você não vê as outras threads de ${where}.`, `It's a conversation of its own: you don't see the other threads of ${where}.`)} ${lookUp}`
+      : ` ${L('As threads ficam à parte: daqui você só vê a mensagem que abriu cada uma.', 'Threads are kept apart: from here you only see the message that started each one.')} ${lookUp}`
+    : ''
   const head = [
-    summary?.trim() && `${L(`Resumo do que veio antes em ${where}`, `Summary of what came before in ${where}`)}:\n${summary.trim()}`,
-    `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
+    summary?.trim() &&
+      (thread
+        ? `${L('Resumo do começo desta thread (as mensagens mais antigas dela não vão inteiras)', "Summary of this thread's beginning (its oldest messages don't go in full)")}:\n${summary.trim()}`
+        : `${L(`Resumo do que veio antes em ${where}`, `Summary of what came before in ${where}`)}:\n${summary.trim()}`),
+    !thread && apart.trim(),
+    thread
+      ? L(
+          `Você está respondendo numa thread em ${where}, aberta ${by}.${apart} Abaixo, a mensagem que abriu a thread e as respostas dela, das mais antigas pras mais novas:`,
+          `You're replying in a thread in ${where}, started ${by}.${apart} Below, the message that started the thread and its replies, oldest to newest:`
+        )
+      : `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
   ].filter((b): b is string => !!b)
   const blockOf = new Map(shown.map((m, i) => [m.id, head.length + i]))
   const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${clock(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
   return { blocks, blockOf }
 }
 
+export const BUSCAR_THREADS: ToolDef = {
+  name: 'buscar_threads',
+  get description() {
+    return L(
+      'Procura nas outras threads das conversas em que você está (canais e DMs), por palavras que estariam nelas. Devolve as que mais batem, com o id de cada uma pra ler inteira com ler_thread. Sem resultado, o assunto não foi tratado nas conversas recentes: não invente.',
+      "Searches the other threads of the conversations you're in (channels and DMs), by words that would be in them. Returns the best matches, each with its id to read in full with ler_thread. With no result, the subject wasn't covered in the recent conversations: don't make it up."
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        busca: { type: 'string', description: L('Palavras-chave, ex.: "calendário rotinas PR".', 'Keywords, e.g. "calendar routines PR".') },
+        limite: { type: 'number', description: L('Quantas trazer, de 1 a 10. Padrão: 5.', 'How many to bring, 1 to 10. Default: 5.') }
+      },
+      required: ['busca']
+    }
+  }
+}
+
+export const LER_THREAD: ToolDef = {
+  name: 'ler_thread',
+  get description() {
+    return L(
+      'Lê uma outra thread das conversas em que você está: a mensagem que a abriu, o resumo dela e as respostas, pelo id que buscar_threads devolve. Use quando o que foi dito lá importa pra sua resposta.',
+      "Reads another thread of the conversations you're in: the message that opened it, its summary and its replies, by the id buscar_threads returns. Use it when what was said there matters for your reply."
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: { id: { type: 'string', description: L('O id da thread, como buscar_threads mostra.', 'The thread id, as buscar_threads shows it.') } },
+      required: ['id']
+    }
+  }
+}
+
 // @handles in the text that belong to the given agents, in order of appearance. Handles inside
 // code are quoted content, not a call (CODE_SPANS): a prompt shown in a fenced block, say.
 export function mentioned(text: string, agents: Agent[]): Agent[] {
   const found: Agent[] = []
-  for (const m of text.replace(CODE_SPANS, ' ').matchAll(/(^|[^\w@])@([a-z0-9][a-z0-9_-]{1,31})\b/gi)) {
+  for (const m of text.replace(CODE_SPANS, ' ').matchAll(MENTION)) {
     const a = agents.find((x) => x.handle.toLowerCase() === m[2]!.toLowerCase())
     if (a && !found.includes(a)) found.push(a)
   }

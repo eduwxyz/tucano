@@ -8,7 +8,7 @@ import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
-import { MAX_AFTER, Memories, memorySystem, parseConsolidation, WINDOW } from '../src/core/memory'
+import { MAX_AFTER, Memories, memorySystem, parseConsolidation, THREAD_QUIET_MS, WINDOW } from '../src/core/memory'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -27,7 +27,7 @@ let runner: Runner
 function setup(): void {
   const base = fakeEngine('claude', { delayMs: 1 })
   const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   const emit = (_: CoreEvent): void => {}
   const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
   memory = new Memories({ db, engines, settings: async () => settings, emit, workDir })
@@ -40,8 +40,8 @@ async function settle(): Promise<void> {
 }
 
 let clock = 1_000_000
-function put(conversationId: string, author: Author, text: string): Message {
-  const m: Message = { id: `m${clock}`, conversationId, author, text, at: clock++ }
+function put(conversationId: string, author: Author, text: string, threadId?: string): Message {
+  const m: Message = { id: `m${clock}`, conversationId, author, text, at: clock++, ...(threadId ? { threadId } : {}) }
   db.saveMessage(m)
   return m
 }
@@ -52,7 +52,7 @@ const active = (scope = 'me'): string[] => db.memories({ scope, state: 'active' 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   turns = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia'))
   db.saveAgent(agent('a2', 'theo'))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -81,7 +81,7 @@ describe('parseConsolidation', () => {
 })
 
 describe('summary (short term)', () => {
-  it('folds what leaves the window into the summary, and the next turn sees it plus every newer message', async () => {
+  it('folds what leaves the window into the summary, which a reply outside threads reads with every newer message', async () => {
     put('c1', { kind: 'me' }, 'ZEBRA é o cupom da campanha')
     for (let i = 1; i < MAX_AFTER + 10; i++) put('c1', i % 2 ? { kind: 'agent', id: 'a1' } : { kind: 'me' }, `mensagem ${i}`)
     const all = db.messagesAfter('c1', 0)
@@ -91,13 +91,19 @@ describe('summary (short term)', () => {
     expect(conv.summary).toContain('ZEBRA')
     expect(conv.summaryUntil).toBe(all[all.length - WINDOW - 1]!.at)
 
+    // Outside threads (a routine's reply): the summary and what came after it.
+    const outside = memory.window(conv, { id: 'x', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: '', at: clock })
+    expect(outside.summary).toContain('ZEBRA')
+    expect(outside.messages.map((m) => m.text)).not.toContain('ZEBRA é o cupom da campanha') // it left the window
+    expect(outside.messages.at(-1)?.text).toBe(`mensagem ${MAX_AFTER + 9}`)
+
+    // A thread is a conversation of its own: neither the summary nor those messages.
+    db.setThreads('c1', true)
     await runner.send('c1', '@lia qual é o cupom?')
     await settle()
     const prompt = agentTurns('lia')[0]!.prompt
-    expect(prompt).toContain('Resumo do que veio antes em #engenharia:')
-    expect(prompt).toContain('ZEBRA')
-    expect(prompt).not.toContain('\nZEBRA é o cupom') // the message itself left the window
-    expect(prompt).toContain(`mensagem ${MAX_AFTER + 9}`)
+    expect(prompt).not.toContain('ZEBRA')
+    expect(prompt).not.toContain(`mensagem ${MAX_AFTER + 9}`)
   })
 
   it('consolidates on its own once more than MAX_AFTER messages follow the summary', async () => {
@@ -113,6 +119,69 @@ describe('summary (short term)', () => {
     await settle()
     expect(db.conversation('d1')!.summary).toBeUndefined()
     expect(turns.some((t) => t.system === memorySystem())).toBe(false)
+  })
+})
+
+describe('a thread\'s own summary', () => {
+  it('a quiet thread gets its summary and the memories in it, once; a busy one waits', async () => {
+    const root = put('c1', { kind: 'me' }, 'qual café a gente compra?')
+    put('c1', { kind: 'agent', id: 'a1' }, 'tem o de sempre e um novo', root.id)
+    const last = put('c1', { kind: 'me' }, 'eu prefiro café sem açúcar', root.id)
+    const busy = put('c1', { kind: 'me' }, 'faz o relatório')
+    db.saveMessage({ ...put('c1', { kind: 'agent', id: 'a2' }, 'metade', busy.id), run: { status: 'working', depth: 1, steps: [] } })
+    for (let i = 0; i < WINDOW; i++) put('c1', { kind: 'me' }, `solta ${i}`) // outside threads, after both
+
+    const later = clock + THREAD_QUIET_MS
+    await memory.sweep(later)
+    await memory.idle()
+    expect(db.message(root.id)?.threadSummary).toMatchObject({ text: expect.stringContaining('Resumo de teste: qual café a gente') as string, until: last.at })
+    expect(db.memories().map((m) => [m.text, m.state])).toEqual([['Prefere café sem açúcar', 'pending']])
+    expect(db.message(busy.id)?.threadSummary).toBeUndefined() // a reply is still being written
+
+    // Nothing new since: no second call. And the conversation's summary reads the thread
+    // but doesn't learn from it again: that's the thread's.
+    const calls = turns.filter((t) => t.system === memorySystem()).length
+    await memory.sweep(later + 60_000)
+    await memory.idle()
+    expect(turns.filter((t) => t.system === memorySystem())).toHaveLength(calls)
+    await memory.consolidate('c1', true)
+    expect(db.memories()).toHaveLength(1)
+  })
+
+  it("not before it's quiet, nor for a question and its answer alone", async () => {
+    const root = put('c1', { kind: 'me' }, 'oi')
+    put('c1', { kind: 'agent', id: 'a1' }, 'oi!', root.id)
+    const busy = put('c1', { kind: 'me' }, 'pergunta longa')
+    put('c1', { kind: 'agent', id: 'a1' }, 'resposta', busy.id)
+    put('c1', { kind: 'me' }, 'e mais uma coisa', busy.id)
+    await memory.sweep(clock + 60_000) // a minute later: not quiet yet
+    await memory.sweep(clock + THREAD_QUIET_MS) // quiet: only the one with three messages
+    await memory.idle()
+    expect(db.message(root.id)?.threadSummary).toBeUndefined()
+    expect(db.message(busy.id)?.threadSummary?.text).toContain('Resumo de teste')
+  })
+
+  it("past MAX_AFTER replies, a reply reads the thread's summary, the message that opened it and the newest replies", async () => {
+    const root = put('c1', { kind: 'me' }, 'RAIZ: ZEBRA é o cupom')
+    for (let i = 0; i < MAX_AFTER + 5; i++) put('c1', i % 2 ? { kind: 'agent', id: 'a1' } : { kind: 'me' }, `resposta ${i}`, root.id)
+    await runner.send('c1', '@lia qual era o cupom?', [], root.id)
+    await settle() // the thread grew past MAX_AFTER: it gets its summary
+    expect(db.message(root.id)?.threadSummary?.text).toContain('ZEBRA')
+
+    await runner.send('c1', '@lia e agora?', [], root.id)
+    await settle()
+    const prompt = agentTurns('lia').at(-1)!.prompt
+    expect(prompt).toContain('Resumo do começo desta thread')
+    expect(prompt).toContain('RAIZ: ZEBRA é o cupom') // the message that opened it always goes
+    expect(prompt).not.toContain('\nresposta 0\n')
+    expect(prompt).toContain('@lia e agora?')
+  })
+
+  it('a hand edit keeps what the summary covers, and the thread shows it', () => {
+    const root = put('c1', { kind: 'me' }, 'raiz')
+    db.setThreadSummary(root.id, 'feito pelo modelo', root.at)
+    memory.editThreadSummary(root.id, '  corrigido à mão  ')
+    expect(db.message(root.id)?.threadSummary).toMatchObject({ text: 'corrigido à mão', until: root.at })
   })
 })
 

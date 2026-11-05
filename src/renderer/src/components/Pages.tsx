@@ -68,10 +68,14 @@ import { voiceRefusal } from '../../../shared/voice'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
+import { ConnectorGrid } from './ConnectorStore'
 import { ApprovalCard, toolWords } from './Conversation'
 import { confirmDialog } from './Dialogs'
+import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
+import { useWorkspaceList } from './Workspaces'
+import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
@@ -706,7 +710,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             <AgentAvatar agent={{ ...draft, name: draft.name || '?' }} size={72} />
             <strong className="profile-card__name">{draft.name || L('Sem nome', 'No name')}</strong>
             <span className="muted">@{draft.handle || 'handle'}</span>
-            {draft.role && <span className="tag">{draft.role}</span>}
+            {draft.role && <p className="profile-card__role">{draft.role}</p>}
             <div className="profile-card__rows">
               <div>
                 <span className="muted small">{L('Motor', 'Engine')}</span>
@@ -1098,18 +1102,21 @@ function ConnectorToken({ id }: { id: string }): ReactNode {
 
 export function ConnectorsPage(): ReactNode {
   const connectors = useStore((s) => s.connectors)
-  const agents = useStore((s) => s.agents)
   const [openId, setOpenId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const open = connectors.find((c) => c.id === openId)
 
   return (
     <Page
       title={L('Conectores', 'Connectors')}
-      subtitle={L('Servidores MCP conectados uma vez, pelo app. Os agentes nunca falam com eles direto: cada chamada passa pelas permissões e aprovações.', 'MCP servers connected once, by the app. Agents never talk to them directly: every call goes through permissions and approvals.')}
+      subtitle={L(
+        'Os serviços com que seus agentes trabalham. O login é pelo navegador e o acesso fica neste computador; cada chamada dos agentes passa pelas permissões e aprovações.',
+        'The services your agents work with. You sign in through the browser and the access stays on this computer; every call the agents make goes through permissions and approvals.'
+      )}
       actions={
         !adding && (
           <button className="btn btn--primary" onClick={() => setAdding(true)}>
-            <Icon name="plus" size={14} /> {L('Adicionar conector', 'Add connector')}
+            <Icon name="plus" size={14} /> {L('Adicionar personalizado', 'Add custom')}
           </button>
         )
       }
@@ -1122,119 +1129,102 @@ export function ConnectorsPage(): ReactNode {
           }}
         />
       )}
+      <ConnectorGrid status={STATUS()} onManage={setOpenId} />
       <HarnessMcps onAdded={setOpenId} />
-      {connectors.length === 0 && !adding && (
-        <div className="empty empty--card">
-          <Icon name="plug" size={22} />
-          <p>{L('Conecte Linear, GitHub, Notion… e os agentes passam a ler e agir neles, sempre com a sua permissão.', 'Connect Linear, GitHub, Notion… and the agents can read and act in them, always with your permission.')}</p>
-          <p className="muted small">{L('Funciona com qualquer servidor MCP: remoto, por URL, ou local, rodando como processo no seu computador.', 'Works with any MCP server: remote, by URL, or local, running as a process on your computer.')}</p>
-        </div>
-      )}
-      <div className="stack-list">
-        {connectors.map((c) => {
-          const users = agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none')
-          const open = openId === c.id
-          const fresh = c.tools.filter((t) => t.isNew).length
-          return (
-            <div key={c.id} className={`card connector ${open ? 'is-open' : ''}`}>
-              <button className="connector__head" onClick={() => setOpenId(open ? null : c.id)}>
-                <span className="connector__icon">
-                  <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} />
-                </span>
-                <span className="grow">
-                  <strong>{c.name}</strong>
-                  <span className="muted small mono truncate">{address(c)}</span>
-                </span>
-                {fresh > 0 && <span className="tag tag--warn">{L(`${fresh} nova${fresh === 1 ? '' : 's'}`, `${fresh} new`)}</span>}
-                <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
-                <span className="stack">
-                  {users.map((a) => (
-                    <span key={a.id} className="stack__item">
-                      <AgentAvatar agent={a} size={20} />
-                    </span>
-                  ))}
-                </span>
-                <span className={`chev ${open ? 'is-open' : ''}`}>
-                  <Icon name="chevron" size={14} />
-                </span>
-              </button>
-              {open && (
-                <div className="tools">
-                  {c.kind === 'stdio' && (
-                    <p className="warn-box">
-                      <Icon name="terminal" size={14} /> {L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}
-                    </p>
-                  )}
-                  {c.error && (
-                    <p className="note note--error">
-                      {c.error}
-                      {c.status === 'error' && ` ${L('Clique em Conectar de novo. Se continuar, confira o endereço e o login.', 'Click Reconnect. If it keeps happening, check the address and the sign-in.')}`}
-                    </p>
-                  )}
-                  {c.kind === 'remote' && c.auth === 'token' && <ConnectorToken id={c.id} />}
-                  <div className="row connector__actions">
-                    {c.status === 'needs_auth' && (
-                      <button className="btn btn--primary btn--sm" onClick={() => authorizeConnector(c.id)}>
-                        {L('Autorizar no navegador', 'Authorize in the browser')}
-                      </button>
-                    )}
-                    {c.status !== 'connecting' && (
-                      <button className="btn btn--sm" onClick={() => reconnectConnector(c.id)}>
-                        {c.status === 'connected' ? L('Atualizar ferramentas', 'Refresh tools') : L('Conectar de novo', 'Reconnect')}
-                      </button>
-                    )}
-                    <span className="grow" />
-                    <button
-                      className="btn btn--ghost btn--sm"
-                      onClick={() =>
-                        void confirmDialog({
-                          title: L(`Remover ${c.name}?`, `Remove ${c.name}?`),
-                          body: L('Os agentes perdem acesso às ferramentas dele. Pra voltar, é só adicionar o conector de novo.', 'The agents lose access to its tools. To get it back, just add the connector again.'),
-                          confirm: L(`Remover ${c.name}`, `Remove ${c.name}`)
-                        }).then((ok) => ok && removeConnector(c.id))
-                      }
-                    >
-                      {L('Remover', 'Remove')}
-                    </button>
-                  </div>
-                  {c.tools.length > 0 && (
-                    <div className="tools__head small muted">
-                      <span>{L('Ferramenta', 'Tool')}</span>
-                      <span>{L('Classe', 'Class')}</span>
-                      <span>{L('Alto risco', 'High risk')}</span>
-                      <span>{L('Ligada', 'On')}</span>
-                    </div>
-                  )}
-                  {c.tools.map((t) => (
-                    <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
-                      <code>
-                        {t.name}
-                        {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
-                      </code>
-                      <select value={t.cls} onChange={(e) => updateTool(c.id, t.name, { cls: e.target.value as ToolClass })}>
-                        {(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => (
-                          <option key={k} value={k}>
-                            {CLASS_LABEL()[k]}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="checkbox"
-                        disabled={t.cls !== 'sensitive'}
-                        checked={t.highRisk && t.cls === 'sensitive'}
-                        onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
-                      />
-                      <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
-                    </div>
-                  ))}
-                  <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {open && <ConnectorDetails c={open} onClose={() => setOpenId(null)} />}
     </Page>
+  )
+}
+
+// A connector's state, who uses it and its tools, in a window over the page.
+function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void }): ReactNode {
+  const users = useStore((s) => s.agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none'))
+  return (
+    <Modal title={c.name} onClose={onClose} className="connector-modal">
+      <div className="connector-modal__body">
+        <div className="row connector-modal__meta">
+          <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
+          <span className="muted small mono truncate grow">{address(c)}</span>
+        </div>
+        <p className="muted small">
+          {users.length ? (
+            <>
+              {L('Quem usa:', 'Used by:')} {users.map((a) => a.name).join(', ')}
+            </>
+          ) : (
+            L('Nenhum agente usa ainda. Dê acesso na página de cada agente, em Ferramentas.', "No agent uses it yet. Give access on each agent's page, under Tools.")
+          )}
+        </p>
+        {c.kind === 'stdio' && (
+          <p className="warn-box">
+            <Icon name="terminal" size={14} /> {L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}
+          </p>
+        )}
+        {c.error && (
+          <p className="note note--error">
+            {c.error}
+            {c.status === 'error' && ` ${L('Clique em Conectar de novo. Se continuar, confira o endereço e o login.', 'Click Reconnect. If it keeps happening, check the address and the sign-in.')}`}
+          </p>
+        )}
+        {c.kind === 'remote' && c.auth === 'token' && <ConnectorToken id={c.id} />}
+        <div className="row connector__actions">
+          {c.status === 'needs_auth' && (
+            <button className="btn btn--primary btn--sm" onClick={() => authorizeConnector(c.id)}>
+              {L('Autorizar no navegador', 'Authorize in the browser')}
+            </button>
+          )}
+          {c.status !== 'connecting' && (
+            <button className="btn btn--sm" onClick={() => reconnectConnector(c.id)}>
+              {c.status === 'connected' ? L('Atualizar ferramentas', 'Refresh tools') : L('Conectar de novo', 'Reconnect')}
+            </button>
+          )}
+          <span className="grow" />
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={() =>
+              void confirmDialog({
+                title: L(`Remover ${c.name}?`, `Remove ${c.name}?`),
+                body: L('Os agentes perdem acesso às ferramentas dele. Pra voltar, é só adicionar o conector de novo.', 'The agents lose access to its tools. To get it back, just add the connector again.'),
+                confirm: L(`Remover ${c.name}`, `Remove ${c.name}`)
+              }).then((ok) => ok && (removeConnector(c.id), onClose()))
+            }
+          >
+            {L('Remover', 'Remove')}
+          </button>
+        </div>
+        {c.tools.length > 0 && (
+          <div className="tools__head small muted">
+            <span>{L('Ferramenta', 'Tool')}</span>
+            <span>{L('Classe', 'Class')}</span>
+            <span>{L('Alto risco', 'High risk')}</span>
+            <span>{L('Ligada', 'On')}</span>
+          </div>
+        )}
+        {c.tools.map((t) => (
+          <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
+            <code>
+              {t.name}
+              {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
+            </code>
+            <select value={t.cls} onChange={(e) => updateTool(c.id, t.name, { cls: e.target.value as ToolClass })}>
+              {(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => (
+                <option key={k} value={k}>
+                  {CLASS_LABEL()[k]}
+                </option>
+              ))}
+            </select>
+            <input
+              type="checkbox"
+              disabled={t.cls !== 'sensitive'}
+              checked={t.highRisk && t.cls === 'sensitive'}
+              onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
+            />
+            <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
+          </div>
+        ))}
+        <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
+      </div>
+    </Modal>
   )
 }
 
@@ -1577,6 +1567,7 @@ function GithubCard({ info }: { info?: { user?: string; error?: string } }): Rea
 const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
+  const settings = useStore((s) => s.settings)
   // Grok Bot has no export: one of the person's agents there runs this skill and writes our .zip.
   const grokSkill = (): void => {
     const a = document.createElement('a')
@@ -1592,13 +1583,22 @@ function TeamCard(): ReactNode {
     )
   }
   const download = (): void => {
-    void exportTeam().then((md) => {
+    setNote('')
+    exportTeam().then((md) => {
+      const safe = workspaceLabel(settings)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/gi, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'workspace'
+      const file = `${L('time-tucano', 'tucano-team')}-${safe}-${new Date().toISOString().slice(0, 10)}.md`
       const a = document.createElement('a')
       a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }))
-      a.download = `${L('time-tucano', 'tucano-team')}-${new Date().toISOString().slice(0, 10)}.md`
+      a.download = file
       a.click()
       URL.revokeObjectURL(a.href)
-    })
+      setNote(L(`Exportação feita: ${file}.`, `Exported: ${file}.`))
+    }).catch((e: unknown) => setNote(e instanceof Error ? e.message : String(e)))
   }
   const failed = (e: unknown): void => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
   const upload = (file?: File): void => {
@@ -1623,7 +1623,7 @@ function TeamCard(): ReactNode {
       .then(setNote, failed)
   }
   return (
-    <Card title={L('Time e backup', 'Team and backup')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada. E uma cópia de tudo uma vez por dia (as últimas 7).', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot and Grok Bot come in too, with no connector and web search off. And a copy of everything once a day (the last 7).')}>
+    <Card title={L('Time', 'Team')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada.', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot and Grok Bot come in too, with no connector and web search off.')}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button className="btn btn--sm" onClick={download}>
           {L('Exportar time', 'Export team')}
@@ -1658,17 +1658,65 @@ function TeamCard(): ReactNode {
           {L('Skill pro Grok Bot (experimental)', 'Skill for Grok Bot (experimental)')}
         </button>
       </div>
-      <div className="row" style={{ marginTop: 8 }}>
-        <button className="btn btn--sm" onClick={() => void backupNow().then((f) => setNote(L(`Backup feito: ${f.split('/').pop()}`, `Backup done: ${f.split('/').pop()}`)))}>
-          {L('Fazer backup agora', 'Back up now')}
-        </button>
-        <button className="btn btn--sm btn--ghost" onClick={openBackups}>
-          {L('Abrir pasta', 'Open folder')}
-        </button>
-      </div>
       {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
     </Card>
   )
+}
+
+function WorkspaceDangerArea(): ReactNode {
+  const name = useStore((s) => workspaceLabel(s.settings))
+  const defaultWorkspace = useStore((s) => s.defaultWorkspace)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const remove = async (): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try { await window.tucano.workspaces?.delete() }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  return <section className="workspace-danger" aria-label={L('Área de perigo', 'Danger area')}>
+    <Card title={L('Área de perigo', 'Danger area')}>
+      <div className="workspace-danger__section">
+        <h3>{L('Backups', 'Backups')}</h3>
+        <p className="small muted">{L('Faça uma cópia antes de apagar dados. O backup automático guarda as últimas 7 cópias diárias.', 'Make a copy before deleting data. Automatic backup keeps the last 7 daily copies.')}</p>
+        <div className="row">
+          <button className="btn btn--sm" disabled={busy} onClick={() => { backupNow().then((file) => setNote(L(`Backup feito: ${file.split('/').pop()}`, `Backup done: ${file.split('/').pop()}`))).catch((e: unknown) => setError(String(e))) }}>{L('Fazer backup agora', 'Back up now')}</button>
+          <button className="btn btn--sm btn--ghost" onClick={openBackups}>{L('Abrir pasta', 'Open folder')}</button>
+        </div>
+        {note && <p className="small muted">{note}</p>}
+      </div>
+      {window.tucano.workspaces && <div className="workspace-danger__section">
+        <h3>{L('Excluir workspace', 'Delete workspace')}</h3>
+        <p className="small muted">{defaultWorkspace ? L('O workspace padrão não pode ser excluído. Você ainda pode fazer backup ou duplicá-lo.', 'The default workspace cannot be deleted. You can still back it up or duplicate it.') : L(`Excluir “${name}” apaga também seus backups locais, agentes, conversas, memórias, credenciais e rotinas. Copie o backup para fora deste workspace antes. Os outros workspaces e suas pastas de projetos ficam intactos.`, `Deleting “${name}” also deletes its local backups, agents, conversations, memories, credentials and routines. Copy your backup outside this workspace first. Other workspaces and project folders are kept.`)}</p>
+        <button className="btn btn--danger btn--sm" disabled={busy || defaultWorkspace} onClick={() => void remove()}>{busy ? L('Aguarde…', 'Please wait…') : L('Excluir workspace e todos os dados', 'Delete workspace and all data')}</button>
+      </div>}
+      {error && <p className="field__error" role="alert">{error}</p>}
+    </Card>
+  </section>
+}
+
+function WorkspaceTelegramNotice(): ReactNode {
+  const { list, error: loadError } = useWorkspaceList()
+  const workspace = list?.workspaces.find((w) => w.isDefault)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const switchWorkspace = async (): Promise<void> => {
+    if (!workspace || !window.tucano.workspaces) return
+    setBusy(true)
+    setError('')
+    try { await window.tucano.workspaces.switch(workspace.id) }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  return <Card title="Telegram" lead={L('O bot do Telegram fica no workspace padrão. Dois workspaces não podem consultar o mesmo token.', 'The Telegram bot stays in the default workspace. Two workspaces cannot poll the same token.')}>
+    {workspace ? <p className="muted small">
+      {L('Para configurar o Telegram, abra o workspace ', 'To configure Telegram, open workspace ')}
+      <button className="link" disabled={busy} title={L(`Trocar para ${workspace.name}`, `Switch to ${workspace.name}`)} onClick={() => void switchWorkspace()}>{workspace.name}</button>.
+    </p> : !loadError && <p className="muted small">{L('Carregando o workspace padrão…', 'Loading the default workspace…')}</p>}
+    {(error || loadError) && <p className="field__error" role="alert">{error || loadError}</p>}
+  </Card>
 }
 
 // The phone (spec §19): a Telegram bot of the user's own, paired with a code.
@@ -1804,48 +1852,50 @@ function VoiceCard(): ReactNode {
   return (
     <Card title={L('Ditado', 'Dictation')} lead={L('Fale em vez de digitar: clique no microfone do campo de mensagem, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros, e clique de novo para terminar. O áudio vira texto neste computador, sem internet, e o texto fica no campo para você revisar antes de enviar.', 'Speak instead of typing: click the microphone in the message field, or ⌥ Space on a Mac and Ctrl+Space elsewhere, and click again to finish. The audio becomes text on this computer, offline, and the text stays in the field for you to review before sending.')}>
       {status && !status.ready && <VoiceSetup status={status} />}
-      {status?.ready && (
-        <div className="voice-on">
-          <p className="small">
-            <Icon name="check" size={13} />{' '}
-            {status.ownModel
-              ? L(`Ativado, com o modelo ${choice(status.ownModel).name} (${choice(status.ownModel).size}).`, `On, with the ${choice(status.ownModel).name} model (${choice(status.ownModel).size}).`)
-              : L(`Ativado, com o modelo que já estava instalado: ${status.model?.split(/[\\/]/).pop()}.`, `On, with the model already installed: ${status.model?.split(/[\\/]/).pop()}.`)}
-          </p>
-          {status.downloading ? (
-            <VoiceSetup status={status} />
-          ) : (
-            status.ownModel && (
-              <div className="row">
-                <button className="btn btn--sm" onClick={() => void voiceDownload(other)}>
-                  {L(`Trocar pelo ${choice(other).name} (${choice(other).size})`, `Switch to ${choice(other).name} (${choice(other).size})`)}
-                </button>
-                <button className="btn btn--ghost btn--sm" onClick={() => void voiceRemoveModel(status.ownModel!)}>
-                  {L('Remover o modelo', 'Remove the model')}
-                </button>
-              </div>
-            )
-          )}
-          {status.error && <p className="field__error">{status.error}</p>}
-        </div>
-      )}
-      <label className="row row--center small">
-        <input type="checkbox" checked={!voice?.hidden} onChange={(e) => save({ hidden: !e.target.checked })} />
-        {L('Mostrar o microfone no campo de mensagem', 'Show the microphone in the message field')}
-      </label>
-      <details className="voice-advanced">
-        <summary className="small muted">{L('Avançado', 'Advanced')}</summary>
+      <div className="voice-prefs">
+        {status?.ready && (
+          <div className="voice-on">
+            <p className="small">
+              <Icon name="check" size={13} />{' '}
+              {status.ownModel
+                ? L(`Ativado, com o modelo ${choice(status.ownModel).name} (${choice(status.ownModel).size}).`, `On, with the ${choice(status.ownModel).name} model (${choice(status.ownModel).size}).`)
+                : L(`Ativado, com o modelo que já estava instalado: ${status.model?.split(/[\\/]/).pop()}.`, `On, with the model already installed: ${status.model?.split(/[\\/]/).pop()}.`)}
+            </p>
+            {status.downloading ? (
+              <VoiceSetup status={status} />
+            ) : (
+              status.ownModel && (
+                <div className="row">
+                  <button className="btn btn--sm" onClick={() => void voiceDownload(other)}>
+                    {L(`Trocar pelo ${choice(other).name} (${choice(other).size})`, `Switch to ${choice(other).name} (${choice(other).size})`)}
+                  </button>
+                  <button className="btn btn--ghost btn--sm" onClick={() => void voiceRemoveModel(status.ownModel!)}>
+                    {L('Remover o modelo', 'Remove the model')}
+                  </button>
+                </div>
+              )
+            )}
+            {status.error && <p className="field__error">{status.error}</p>}
+          </div>
+        )}
         <label className="row row--center small">
-          <input type="checkbox" checked={!!voice?.detect} onChange={(e) => save({ detect: e.target.checked })} />
-          {L('Detectar o idioma, em vez de usar o do app', 'Detect the language, instead of using the app’s')}
+          <input type="checkbox" checked={!voice?.hidden} onChange={(e) => save({ hidden: !e.target.checked })} />
+          {L('Mostrar o microfone no campo de mensagem', 'Show the microphone in the message field')}
         </label>
-        <Field label={L('Caminho do whisper-cli', 'Path to whisper-cli')} hint={status?.bin && !voice?.bin ? L(`Em uso: ${status.bin}`, `In use: ${status.bin}`) : L('Opcional: sem isso, o app usa o que veio com ele.', 'Optional: without it, the app uses the one it came with.')}>
-          <input defaultValue={voice?.bin ?? ''} placeholder="/opt/homebrew/bin/whisper-cli" onBlur={(e) => save({ bin: e.target.value.trim() || undefined })} />
-        </Field>
-        <Field label={L('Caminho do modelo', 'Path to the model')} hint={status?.model && !voice?.model ? L(`Em uso: ${status.model}`, `In use: ${status.model}`) : L('Opcional: um modelo ggml (.bin) que você já tenha.', 'Optional: a ggml model (.bin) you already have.')} error={error}>
-          <input defaultValue={voice?.model ?? ''} placeholder="/caminho/para/ggml-large-v3-turbo.bin" onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
-        </Field>
-      </details>
+        <details className="voice-advanced">
+          <summary className="small muted">{L('Avançado', 'Advanced')}</summary>
+          <label className="row row--center small">
+            <input type="checkbox" checked={!!voice?.detect} onChange={(e) => save({ detect: e.target.checked })} />
+            {L('Detectar o idioma, em vez de usar o do app', 'Detect the language, instead of using the app’s')}
+          </label>
+          <Field label={L('Caminho do whisper-cli', 'Path to whisper-cli')} hint={status?.bin && !voice?.bin ? L(`Em uso: ${status.bin}`, `In use: ${status.bin}`) : L('Opcional: sem isso, o app usa o que veio com ele.', 'Optional: without it, the app uses the one it came with.')}>
+            <input defaultValue={voice?.bin ?? ''} placeholder="/opt/homebrew/bin/whisper-cli" onBlur={(e) => save({ bin: e.target.value.trim() || undefined })} />
+          </Field>
+          <Field label={L('Caminho do modelo', 'Path to the model')} hint={status?.model && !voice?.model ? L(`Em uso: ${status.model}`, `In use: ${status.model}`) : L('Opcional: um modelo ggml (.bin) que você já tenha.', 'Optional: a ggml model (.bin) you already have.')} error={error}>
+            <input defaultValue={voice?.model ?? ''} placeholder="/caminho/para/ggml-large-v3-turbo.bin" onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
+          </Field>
+        </details>
+      </div>
     </Card>
   )
 }
@@ -1853,6 +1903,7 @@ function VoiceCard(): ReactNode {
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
   const packaged = useStore((s) => s.packaged)
+  const defaultWorkspace = useStore((s) => s.defaultWorkspace)
   // At work, Jev and Telegram stay: the person decides, told what leaves the gateway.
   const work = onGateway(settings)
   const tabs = SETTINGS_TABS()
@@ -1864,7 +1915,13 @@ export function SettingsPage(): ReactNode {
       <div className="agent-form">
         {pane('geral') && (
           <Card title="Workspace">
-            <Field label={L('Nome', 'Name')}>
+            <p className="muted small">{L('Agentes, conversas, conectores e memórias ficam neste workspace. Os logins do Claude Code e OpenCode continuam compartilhados no computador. Um workspace não é uma sandbox do sistema.', 'Agents, conversations, connectors and memories stay in this workspace. Claude Code and OpenCode sign-ins are still shared on this computer. A workspace is not an OS sandbox.')}</p>
+            {window.tucano.workspaces && (
+              <Field label={L('Nome do workspace', 'Workspace name')}>
+                <input value={settings.workspaceLabel ?? ''} placeholder={settings.workspaceName} maxLength={120} onChange={(e) => updateSettings({ workspaceLabel: e.target.value })} />
+              </Field>
+            )}
+            <Field label={L('Como os agentes te chamam', 'What the agents call you')}>
               <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
             </Field>
             <div className="field">
@@ -1971,7 +2028,7 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
-        {pane('integracoes') && <PhoneCard info={settings.telegram} />}
+        {pane('integracoes') && (defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />)}
 
         {pane('modelos') && (
           <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', 'A small model summarizes what leaves each conversation’s window and, from the same stretch, picks what’s worth remembering about you.')}>
@@ -1998,8 +2055,9 @@ export function SettingsPage(): ReactNode {
                 <strong>{L('Abrir ao ligar o computador', 'Open when the computer starts')}</strong>
                 <p className="muted small">{packaged ? L('Assim nenhuma rotina depende de você lembrar de abrir o app.', 'So no routine depends on you remembering to open the app.') : L('Só no app instalado. Rodando com npm run dev, fica desligado.', 'Only in the installed app. Running with npm run dev, it stays off.')}</p>
               </div>
-              <Toggle on={!!settings.openAtLogin && packaged} onChange={(v) => packaged && updateSettings({ openAtLogin: v })} />
+              <Toggle on={!!settings.openAtLogin && packaged && defaultWorkspace} onChange={(v) => packaged && defaultWorkspace && updateSettings({ openAtLogin: v })} />
             </div>
+            {!defaultWorkspace && <p className="muted small">{L('Abrir ao ligar o computador é uma configuração do app: ajuste no workspace padrão. Todos os workspaces iniciam juntos.', 'Opening at login is an app setting: change it in the default workspace. All workspaces start together.')}</p>}
             <div className="key-row">
               <Icon name="moon" />
               <div className="grow">
@@ -2059,6 +2117,7 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
+        {pane('geral') && <WorkspaceDangerArea />}
       </div>
     </Page>
   )

@@ -7,7 +7,7 @@ import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotoc
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { L } from '../shared/lang'
 import { friendly } from '../shared/errors'
@@ -21,6 +21,9 @@ const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
 const CONNECT_TIMEOUT_MS = 20_000
 const MAX_STDIO_FAILURES = 3
+// A connection that dropped on its own (the server's process ended, the network went), or an attempt that
+// failed for a passing reason, is tried again after these waits; then it waits for a call or the button.
+const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 60_000, 300_000]
 
 // The authorization page sent the browser back without a code: why, and what to do.
 export function notAuthorized(url: URL): string {
@@ -40,12 +43,44 @@ export function connectError(e: unknown): string {
   return raw
 }
 
+// The text of a tool's result: its text blocks, the text of embedded resources, and the structured content
+// when that's all there is (a server may put an error's reason only there).
+export function contentText(r: Pick<CallToolResult, 'content' | 'structuredContent'>): string {
+  const text = (r.content ?? [])
+    .map((c) => (c.type === 'text' ? c.text : c.type === 'resource' && 'text' in c.resource ? c.resource.text : `[${c.type}]`))
+    .join('\n')
+  if (text.trim() || !r.structuredContent) return text
+  return JSON.stringify(r.structuredContent)
+}
+
+// Why a tool returned an error: what it said, or that it said nothing (an empty failure would show a bare ✗).
+export function errorReason(r: Pick<CallToolResult, 'content' | 'structuredContent'>): string {
+  return contentText(r).trim() || L('O servidor devolveu um erro sem mensagem.', 'The server returned an error with no message.')
+}
+
+// Why a tool call threw, in words: a timeout says how long it waited, an MCP error keeps the code and the
+// data the server sent with it (the SDK's message leaves the data out).
+export function callError(e: unknown, timeoutMs = CALL_TIMEOUT_MS): string {
+  if (e instanceof McpError) {
+    if (e.code === ErrorCode.RequestTimeout) {
+      const s = Math.round(timeoutMs / 1000)
+      return L(`O servidor não respondeu em ${s} s e a chamada foi cancelada.`, `The server didn't answer in ${s} s, so the call was cancelled.`)
+    }
+    const message = e.message.replace(/^(MCP error -?\d+:\s*)+/, '') // a server's own McpError arrives wrapped twice
+    const data = e.data === undefined || e.data === null ? '' : typeof e.data === 'string' ? e.data : JSON.stringify(e.data)
+    return `${message} (${L('código', 'code')} ${e.code})${data ? `: ${data}` : ''}`
+  }
+  const message = (e instanceof Error ? e.message : String(e)).trim()
+  return message || L('A chamada falhou sem mensagem.', 'The call failed with no message.')
+}
+
 export interface ConnectorDeps {
   db: Db
   secrets: Secrets
   emit: (e: CoreEvent) => void
   openUrl: (url: string) => void
   oauthCallbackUrl: () => string
+  callTimeoutMs?: number // how long a tool call may take; tests shorten it
 }
 
 interface Live {
@@ -55,7 +90,16 @@ interface Live {
   error?: string
   failures: number
   connecting?: Promise<void>
+  retry?: NodeJS.Timeout // the next try after a drop
+  retries?: number // tries since it last worked
+  passing?: boolean // the last attempt failed for a reason that may go away by itself (network, timeout)
 }
+
+// The call never ran, so it can go again on a new connection: the server forgot this session (it expired
+// while idle), or the client had no connection to send it on. Not "Connection closed": the SDK gives that to
+// every call already sent when the connection drops, which the server may have run (a write would go twice).
+export const staleSession = (e: unknown): boolean =>
+  (e instanceof StreamableHTTPError && e.code === 404) || (e instanceof Error && /session not found|no valid session|invalid session id|^not connected$/i.test(e.message))
 
 const key = (id: string, what: string): string => `connector:${id}:${what}`
 
@@ -81,6 +125,7 @@ export class ConnectorManager {
   private oauthStates = new Map<string, { connectorId: string; transport: StreamableHTTPClientTransport }>()
   private authUrls = new Map<string, string>() // a connector's last authorization page
   private doneStates = new Set<string>() // finished already (the callback got there first): not an expired one
+  private closing = false // the app is quitting: nothing reconnects
 
   constructor(private deps: ConnectorDeps) {}
 
@@ -111,7 +156,8 @@ export class ConnectorManager {
     if (c) this.deps.emit({ type: 'connector', connector: c })
   }
 
-  async add(input: ConnectorInput): Promise<string> {
+  // `interactive`: someone just added it, so an OAuth sign-in opens the browser now instead of waiting for Authorize.
+  async add(input: ConnectorInput, interactive = false): Promise<string> {
     const name = input.name.trim()
     if (!name) throw new Error(L('Dê um nome ao conector.', 'Give the connector a name.'))
     const id = randomUUID()
@@ -128,7 +174,7 @@ export class ConnectorManager {
       if (Object.keys(env).length) await this.deps.secrets.setJson(key(id, 'env'), env)
     }
     this.emitConnector(id)
-    void this.connect(id)
+    void this.connect(id, interactive)
     return id
   }
 
@@ -144,6 +190,7 @@ export class ConnectorManager {
   }
 
   async remove(id: string): Promise<void> {
+    clearTimeout(this.live.get(id)?.retry)
     await this.disconnect(id)
     this.live.delete(id)
     this.deps.db.removeConnector(id)
@@ -160,6 +207,8 @@ export class ConnectorManager {
   }
 
   async closeAll(): Promise<void> {
+    this.closing = true
+    for (const l of this.live.values()) clearTimeout(l.retry)
     await Promise.all([...this.live.keys()].map((id) => this.disconnect(id)))
   }
 
@@ -245,8 +294,12 @@ export class ConnectorManager {
       } else if (e instanceof Error && /timed out/i.test(e.message)) {
         await client.close().catch(() => {})
         this.setStatus(id, 'error', L(`O servidor não respondeu em ${CONNECT_TIMEOUT_MS / 1000} s. Confira o endereço e a sua rede.`, `The server didn't answer in ${CONNECT_TIMEOUT_MS / 1000} s. Check the address and your network.`))
+        this.live.get(id)!.passing = true
+        this.reconnectLater(id)
       } else {
         this.setStatus(id, 'error', connectError(e))
+        this.live.get(id)!.passing = true
+        this.reconnectLater(id)
       }
       return
     }
@@ -254,10 +307,14 @@ export class ConnectorManager {
     l.client = client
     l.transport = transport
     l.failures = 0
+    l.retries = 0
+    l.passing = false
+    // Closed by us (disconnect clears the client first) it stays closed; closed on its own, it comes back.
     transport.onclose = () => {
       if (this.live.get(id)?.client === client) {
         l.client = undefined
         this.setStatus(id, 'disconnected')
+        this.reconnectLater(id)
       }
     }
     try {
@@ -266,6 +323,25 @@ export class ConnectorManager {
     } catch (e) {
       this.setStatus(id, 'error', e instanceof Error ? e.message : String(e))
     }
+  }
+
+  // Connects again after a wait that grows with each try, while the connector exists and nothing else has
+  // brought it back. A failure that won't pass by itself (a refused token, a sign-in to finish) stops it.
+  private reconnectLater(id: string): void {
+    const l = this.live.get(id)
+    if (!l || l.retry || this.closing) return
+    const attempt = l.retries ?? 0
+    if (attempt >= RECONNECT_DELAYS_MS.length) return
+    l.retry = setTimeout(() => {
+      l.retry = undefined
+      if (this.closing || !this.deps.db.connector(id) || this.live.get(id)?.client) return
+      l.retries = attempt + 1
+      void this.connect(id).then(() => {
+        const now = this.live.get(id)
+        if (now && !now.client && (now.status === 'disconnected' || now.passing)) this.reconnectLater(id)
+      })
+    }, RECONNECT_DELAYS_MS[attempt])
+    l.retry.unref?.()
   }
 
   private async refreshTools(id: string): Promise<void> {
@@ -285,8 +361,9 @@ export class ConnectorManager {
   }
 
   // Runs a tool on the real server, reconnecting on demand. Stdio servers that
-  // keep failing are marked as having a problem.
+  // keep failing are marked as having a problem. What it throws says why, in words.
   async call(id: string, name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    const timeout = this.deps.callTimeoutMs ?? CALL_TIMEOUT_MS
     let l = this.live.get(id)
     if (!l?.client) {
       await this.connect(id)
@@ -294,13 +371,28 @@ export class ConnectorManager {
     }
     if (!l?.client) throw new Error(L(`O conector ${this.deps.db.connector(id)?.name ?? id} não está conectado`, `The connector ${this.deps.db.connector(id)?.name ?? id} isn't connected`) + (l?.error ? `: ${l.error}.` : '.'))
     try {
-      const r = (await l.client.callTool({ name, arguments: args }, undefined, { timeout: CALL_TIMEOUT_MS })) as CallToolResult
+      const r = (await l.client.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult
       l.failures = 0
       return r
     } catch (e) {
+      let failure = e
+      if (staleSession(e)) {
+        await this.connect(id)
+        const again = this.live.get(id)?.client
+        if (again) {
+          try {
+            return (await again.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult
+          } catch (e2) {
+            failure = e2
+          }
+        } else {
+          const why = this.live.get(id)?.error
+          throw new Error(L('A sessão com o servidor expirou e não deu pra conectar de novo', 'The session with the server expired and it could not connect again') + (why ? `: ${why}` : '.'), { cause: e })
+        }
+      }
       const c = this.deps.db.connector(id)
       if (c?.kind === 'stdio' && ++l.failures >= MAX_STDIO_FAILURES) this.setStatus(id, 'error', L(`Falhou ${l.failures} vezes seguidas.`, `Failed ${l.failures} times in a row.`))
-      throw e
+      throw new Error(callError(failure, timeout), { cause: failure })
     }
   }
 

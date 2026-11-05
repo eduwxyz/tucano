@@ -262,6 +262,9 @@ h3 {
   border: 3px solid transparent;
   background-clip: content-box;
 }
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 
 /* ---------- layout ---------- */
 .app {
@@ -420,6 +423,7 @@ h3 {
   padding: 0 12px 10px 14px;
 }
 .workspace__logo {
+  flex-shrink: 0;
   width: 26px;
   height: 26px;
   border-radius: 7px;
@@ -433,7 +437,43 @@ h3 {
 .workspace__name {
   font-weight: 600;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.workspace-picker { position: relative; flex: 1; min-width: 0; }
+.workspace-picker__check { display: flex; align-items: center; width: 14px; flex-shrink: 0; }
+.workspace-picker__head { display: flex; align-items: center; justify-content: space-between; padding: 2px 8px 5px; }
+.workspace-picker__actions { display: flex; align-items: center; gap: 4px; }
+.modal__card.workspace-manager { width: min(600px, calc(100vw - 32px)); }
+.workspace-manager__body { min-height: 0; overflow-y: auto; padding-bottom: 12px; }
+.workspace-manager__list { min-height: 0; max-height: 50vh; overflow-y: auto; }
+.workspace-manager__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
+.workspace-manager__row + .workspace-manager__row { border-top: 1px solid var(--border); }
+.workspace-manager__name { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; text-align: left; }
+.workspace-manager__name > span:first-child { overflow-wrap: anywhere; font-weight: 600; }
+.workspace-manager__id { font-size: 11px; color: var(--text-3); }
+.workspace-manager__parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
+.workspace-manager__carry { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; }
+.workspace-manager__carry.is-locked { opacity: 0.55; cursor: not-allowed; }
+.workspace-manager__carry input { margin-top: 3px; }
+.workspace-manager__carry span { display: flex; flex-direction: column; gap: 2px; }
+.workspace-manager__carry small { font-size: 12px; line-height: 1.4; }
+.workspace-manager__row > .row { flex-shrink: 0; }
+.workspace-manager__switch[aria-pressed='true'] { background: var(--ok-soft); color: var(--ok); }
+.workspace-manager__pause[aria-pressed='true'] { background: var(--warn-soft); color: var(--warn); }
+.workspace-manager__row .workspace-manager__delete { color: var(--danger); }
+.workspace-manager__row .workspace-manager__delete:hover { background: var(--danger-soft); }
+.workspace-manager__row .workspace-manager__delete:disabled { color: var(--text-3); background: transparent; cursor: not-allowed; }
+.workspace-danger .card { border-color: var(--danger); }
+.workspace-danger .card__head h2 { color: var(--danger); }
+.workspace-danger__section + .workspace-danger__section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+.workspace-danger__section h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.workspace-picker__button, .workspace-picker__label { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.workspace-picker__button { width: 100%; padding: 4px; margin: -4px; box-sizing: content-box; border: 1px solid transparent; border-radius: 7px; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.workspace-picker__button:hover, .workspace-picker__button:focus-visible { border-color: var(--border); }
+.workspace-picker__menu { position: absolute; top: calc(100% + 8px); left: 0; width: 260px; max-width: calc(100vw - 32px); max-height: 60vh; overflow-y: auto; padding: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); box-shadow: 0 8px 28px #0002; z-index: 50; }
 .sidebar__scroll {
   flex: 1;
   overflow-y: auto;
@@ -736,6 +776,24 @@ h3 {
   align-items: center;
   gap: 8px;
 }
+/* The conversation's name opens its settings. */
+.topbar__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.topbar__name:hover {
+  background: var(--hover);
+}
 .topbar__topic {
   color: var(--text-3);
   font-size: 13px;
@@ -743,6 +801,11 @@ h3 {
   padding-left: 10px;
   margin-left: 2px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar__role {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -857,6 +920,17 @@ h3 {
   border-color: var(--danger);
   color: #fff;
 }
+.btn--danger:hover {
+  background: var(--danger);
+}
+.btn--danger:not(:disabled):hover {
+  background: color-mix(in srgb, var(--danger) 88%, #000);
+  border-color: color-mix(in srgb, var(--danger) 88%, #000);
+}
+.btn--danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
 .btn--ghost {
   border-color: transparent;
   background: transparent;
@@ -921,6 +995,31 @@ h3 {
   overflow-y: auto;
   padding: 24px 0 12px;
 }
+/* "Go to the end": rides the bottom of the list while you read further up. */
+.messages__jump {
+  position: sticky;
+  bottom: 12px;
+  height: 0;
+  display: flex;
+  justify-content: center;
+}
+.messages__jump-btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-100%);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text-2);
+  box-shadow: var(--shadow-panel);
+  transition: var(--transition-ui);
+  --pop-y: 0;
+  animation: pop var(--dur-base) var(--ease-out);
+}
+.messages__jump-btn:hover {
+  color: var(--text);
+}
 .messages--empty {
   display: grid;
   place-items: center;
@@ -975,6 +1074,7 @@ h3 {
   max-width: none;
 }
 .msg {
+  position: relative;
   display: grid;
   grid-template-columns: 34px 1fr;
   gap: 12px;
@@ -1119,6 +1219,26 @@ h3 {
 .md a {
   color: var(--accent);
 }
+/* An agent's @handle in a message: its chip, in its color, that opens its profile. */
+/* Inline, not flex: its text then sits on the line's baseline, like the words around it. */
+.mention {
+  display: inline;
+  white-space: nowrap;
+  padding: 2px 5px 2px 2px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--agent, var(--accent)) 75%, var(--text));
+  background: color-mix(in srgb, var(--agent, var(--accent)) 14%, transparent);
+  transition: var(--transition-ui);
+}
+.mention:hover {
+  background: color-mix(in srgb, var(--agent, var(--accent)) 24%, transparent);
+}
+.mention .avatar {
+  vertical-align: middle;
+  margin-right: 4px;
+}
 /* A long link or word breaks instead of pushing the message out of the conversation. */
 .md {
   max-width: 100%;
@@ -1255,6 +1375,61 @@ h3 {
   color: var(--text-2);
   font-size: 12.5px;
   line-height: 1.4;
+}
+.step--why {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.step__error {
+  flex-basis: 100%;
+  padding-left: 26px; /* under the label, past the icon */
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.step__input {
+  flex-basis: 100%;
+  margin-left: 26px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: pointer;
+}
+.step__clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.step__input.is-whole {
+  cursor: text;
+}
+.step__input.is-whole .step__clamp {
+  display: block;
+}
+.step__output {
+  flex-basis: 100%;
+  padding-left: 26px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.step__error.is-whole {
+  display: block;
+  cursor: text;
 }
 .step__ms {
   margin-left: auto;
@@ -1478,6 +1653,35 @@ h3 {
 }
 .composer textarea:focus {
   box-shadow: none;
+}
+/* The field's text is drawn by the copy behind it (Composer), so a @handle can take its agent's color.
+   Both lay out the same: the copy takes the field's size, padding and type from the script. */
+.composer__field {
+  position: relative;
+}
+.composer__field textarea {
+  position: relative;
+  color: transparent;
+  caret-color: var(--text);
+}
+.composer__field textarea::placeholder {
+  color: var(--text-3);
+}
+.composer__mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--text);
+  pointer-events: none;
+}
+.composer__mirror mark {
+  color: color-mix(in srgb, var(--agent, var(--accent)) 75%, var(--text));
+  background: color-mix(in srgb, var(--agent, var(--accent)) 16%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent, var(--accent)) 16%, transparent);
+  border-radius: 3px;
 }
 .composer__bar {
   display: flex;
@@ -1791,6 +1995,13 @@ h3 {
   font-size: 16px;
   margin-top: 8px;
 }
+.profile-card__role {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
 .profile-card__rows {
   width: 100%;
   margin-top: 14px;
@@ -1962,7 +2173,7 @@ h3 {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 .toggle.is-on {
-  background: var(--ok);
+  background: var(--accent);
 }
 .toggle.is-on::after {
   transform: translateX(14px);
@@ -2345,6 +2556,298 @@ h3 {
 /* the agent's browser, live */
 .side-panel--browser {
   width: min(56%, 920px);
+}
+/* a thread: the message that started it, set apart, then its replies */
+.side-panel--thread {
+  width: min(42%, 560px);
+}
+.side-panel__where {
+  font-size: 12.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-panel--thread .messages {
+  padding-top: 14px;
+}
+.side-panel--thread .msg {
+  padding-inline: 16px;
+}
+.side-panel--thread .system-line {
+  padding: 4px 16px 4px 62px;
+}
+.side-panel--thread .composer-wrap {
+  padding-inline: 16px;
+}
+/* The root sits on the panel's paper, like the conversation it came from. */
+.thread__lead {
+  display: grid;
+  gap: 4px;
+}
+.thread__lead > .msg {
+  margin-inline: 10px;
+  padding: 10px 12px;
+  width: auto;
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-panel);
+  animation: none;
+}
+.thread__lead > .msg .msg__reply {
+  display: none;
+}
+/* Mine too reads as the thread's heading here: my face and name, no bubble. */
+.thread__lead > .msg--me {
+  grid-template-columns: 34px 1fr;
+}
+.thread__lead > .msg--me .msg__gutter {
+  display: block;
+}
+.thread__lead > .msg--me .msg__head {
+  display: flex;
+}
+.thread__lead > .msg--me .msg__body {
+  justify-self: stretch;
+  max-width: none;
+  align-items: stretch;
+}
+.thread__lead > .msg--me .md {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+.thread__divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 26px 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.thread__divider::before,
+.thread__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.thread__divider span {
+  --pop-scale: 0.9;
+  --pop-y: 0;
+  animation: pop var(--dur-base) var(--ease-out) backwards;
+}
+
+/* A router's note: what it did, and why, quietly, on one line. */
+.system-line__why {
+  flex: 1 1 0; /* the headline wraps only when it doesn't fit alone; the why takes what's left, or nothing */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.system-line__why::before {
+  content: '· ';
+}
+.system-line > p {
+  min-width: 0;
+}
+.system-line > .muted {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* A reply's receipt and "Guardar na wiki", on one quiet line that shows on hover. */
+.msg__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 14px;
+  margin-top: 4px;
+}
+.msg__meta .receipt,
+.msg__meta .wiki-keep {
+  margin: 0;
+}
+
+/* The message whose thread is open on the side, lit, so the two sides read as one. */
+.msg.is-thread-open::before {
+  content: '';
+  position: absolute;
+  inset: 0 12px;
+  z-index: -1;
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  opacity: 0.55;
+  animation: fade var(--dur-enter) var(--ease-out) backwards;
+}
+.msg {
+  isolation: isolate;
+}
+
+/* "Reply in thread" shows on hover: by my bubble, or at the corner of an agent's reply. */
+.msg__reply {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: var(--transition-ui);
+}
+.msg--me .msg__body {
+  position: relative;
+}
+.msg--me .msg__reply {
+  top: 6px;
+  right: calc(100% + 6px);
+}
+.msg:hover .msg__reply,
+.msg__reply:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .msg__reply {
+    opacity: 1;
+  }
+}
+.thread-link {
+  --rise: 3px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 3px 9px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgba(60, 40, 20, 0.04);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: var(--transition-ui);
+}
+.thread-link:hover,
+.thread-link.is-open {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.thread-link.is-open {
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.thread-link__faces {
+  display: inline-flex;
+}
+.thread-link__faces > * {
+  border-radius: 28%;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.thread-link.is-open .thread-link__faces > * {
+  box-shadow: none;
+}
+.thread-link__faces > * + * {
+  margin-left: -5px;
+}
+.thread-link__count {
+  color: var(--accent);
+  font-weight: 600;
+  /* Keyed by the count: each new reply pops it in. */
+  --pop-scale: 0.85;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
+}
+.thread-link__when {
+  display: inline-grid;
+  color: var(--text-3);
+}
+/* "há 2 min" gives way to "Ver thread" on hover, in the same spot. */
+.thread-link__ago,
+.thread-link__see {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.thread-link__see {
+  opacity: 0;
+  transform: translateY(3px);
+  color: var(--text);
+}
+.thread-link:hover .thread-link__ago {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+.thread-link:hover .thread-link__see {
+  opacity: 1;
+  transform: none;
+}
+.thread-link > .icon {
+  margin-left: -3px;
+  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.thread-link:hover > .icon {
+  transform: translateX(2px);
+  color: var(--text-2);
+}
+/* New since I last had it open: a dot, and how many. */
+.thread-link__dot {
+  width: 7px;
+  height: 7px;
+  margin: 0 -2px 0 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  --pop-scale: 0.4;
+  --pop-y: 0;
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
+}
+.thread-link__fresh {
+  font-weight: 500;
+}
+/* Something waits on me in there: said in the warning's color, with a quiet pulse. */
+.thread-link.is-asking {
+  border-color: transparent;
+  background: var(--warn-soft);
+}
+.thread-link__asks {
+  color: var(--warn);
+  font-weight: 600;
+}
+.thread-link__asks::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
+}
+/* With no reply yet, what the system did, small and quiet. */
+.thread-note {
+  --rise: 3px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  transition: var(--transition-ui);
+}
+.thread-note:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.thread-note.is-pending span {
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
 }
 .live-badge {
   display: inline-flex;
@@ -4226,6 +4729,9 @@ table.csv th {
   display: block;
   font-size: 14px;
 }
+.harness__check:not(:disabled) + .harness__name {
+  cursor: pointer;
+}
 .harness__account {
   display: block;
   font-size: 12.5px;
@@ -4391,6 +4897,9 @@ table.csv th {
 .search {
   animation: pop var(--dur-base) var(--ease-out) backwards;
 }
+.modal__card, .form-modal {
+  animation: cal-pop 0.18s var(--ease);
+}
 .modal__card {
   width: min(460px, calc(100vw - 32px));
   max-height: calc(100vh - 80px);
@@ -4409,8 +4918,45 @@ table.csv th {
   margin-bottom: 6px;
   font-size: 15px;
 }
+.modal__actions { display: flex; align-items: center; gap: 8px; }
 .modal__lead {
   margin: 0 0 12px;
+}
+/* What's new after an update: wider, and the notes scroll while the buttons stay. */
+.modal__card.whats-new {
+  width: min(560px, calc(100vw - 32px));
+}
+.whats-new__body {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.whats-new__body p {
+  margin: 0;
+}
+.whats-new__release h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.whats-new__release h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.whats-new__release ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 5px;
+}
+.whats-new__thanks {
+  margin-top: 10px !important;
 }
 .modal__foot {
   display: flex;
@@ -5749,8 +6295,15 @@ kbd {
 .cal__col {
   position: relative;
   border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  background-image: linear-gradient(color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
   cursor: cell;
+}
+.cal__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  pointer-events: none;
 }
 .cal__col.is-today {
   background-color: color-mix(in srgb, var(--accent) 3%, transparent);
@@ -7474,20 +8027,163 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-pop__close { position: absolute; top: 8px; right: 8px; }
 .voice-pop__hide { justify-self: start; font-size: 12px; color: var(--text-3); }
 .voice-setup { display: grid; gap: 10px; justify-items: start; }
-.voice-setup__choices { display: grid; gap: 6px; width: 100%; }
-.voice-choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
-.voice-choice small { color: var(--text-2); font-size: 12px; }
-.voice-choice:hover { border-color: var(--border-strong); }
-.voice-choice.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.voice-setup__choices, .choices { display: grid; gap: 6px; width: 100%; }
+.voice-choice, .choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
+.voice-choice small, .choice small { color: var(--text-2); font-size: 12px; }
+.voice-choice:hover, .choice:hover { border-color: var(--border-strong); }
+.voice-choice.is-on, .choice.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
 .voice-setup__bar { width: 100%; height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; }
 .voice-setup__bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.25s; }
 .voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
 .voice-on { display: grid; gap: 8px; }
 .voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
-.voice-advanced { display: grid; gap: 10px; }
+/* The card doesn't space its children: the model's line, the microphone and Avançado get a gap here. */
+.voice-prefs { display: grid; gap: 14px; }
+/* Closed, the folded part keeps no room: the gap only between what shows when it's open. */
+.voice-advanced[open] { display: grid; gap: 10px; }
 .voice-advanced summary { cursor: pointer; }
 .voice-pop > .btn { justify-self: start; }
 .voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
 .voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
 .voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+
+
+/* ---------- the connector store ---------- */
+.catalog {
+  display: grid;
+  gap: 18px;
+}
+.catalog__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 100%);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text-3);
+}
+.catalog__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 7px 0;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.catalog__group h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.catalog__group h3 .muted {
+  font-weight: 400;
+}
+.catalog__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 8px;
+}
+.catalog__card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.catalog__logo {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.catalog__logo b {
+  font-weight: 700;
+  line-height: 1;
+}
+.catalog__text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.catalog__text strong {
+  font-size: 13.5px;
+}
+.catalog__about {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.catalog__error {
+  color: var(--danger);
+}
+.catalog__card.is-mine {
+  cursor: pointer;
+}
+.catalog__card.is-mine:hover {
+  border-color: var(--border-strong);
+}
+.catalog__card.is-mine:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.catalog__logo--own {
+  width: 36px;
+  height: 36px;
+  background: var(--bg);
+  color: var(--text-2);
+}
+.catalog__state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.catalog__more {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The state's color, from the tag tones the rest of the app uses. */
+.catalog__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.catalog__dot.tag--ok {
+  background: var(--ok);
+}
+.catalog__dot.tag--warn {
+  background: var(--warn, #d97706);
+}
+.catalog__dot.tag--danger {
+  background: var(--danger);
+}
+/* A connector's details, over the page: the tools scroll, the head stays. */
+.modal__card.connector-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+.connector-modal__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+.connector-modal__meta {
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.catalog__card .btn {
+  flex: none;
+}
