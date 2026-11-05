@@ -749,6 +749,11 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.topbar__role {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .topbar__actions {
   display: flex;
   align-items: center;
@@ -1140,15 +1145,6 @@ h3 {
 .md strong {
   font-weight: 600;
 }
-/* A @handle, in a message and as it's typed: the ring makes room without moving the text. */
-.mention,
-.md strong.mention {
-  font-weight: inherit;
-  border-radius: 3px;
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-  color: var(--accent);
-}
 .md ul,
 .md ol {
   margin: 0 0 8px;
@@ -1156,6 +1152,26 @@ h3 {
 }
 .md a {
   color: var(--accent);
+}
+/* An agent's @handle in a message: its chip, in its color, that opens its profile. */
+/* Inline, not flex: its text then sits on the line's baseline, like the words around it. */
+.mention {
+  display: inline;
+  white-space: nowrap;
+  padding: 2px 5px 2px 2px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--agent, var(--accent)) 75%, var(--text));
+  background: color-mix(in srgb, var(--agent, var(--accent)) 14%, transparent);
+  transition: var(--transition-ui);
+}
+.mention:hover {
+  background: color-mix(in srgb, var(--agent, var(--accent)) 24%, transparent);
+}
+.mention .avatar {
+  vertical-align: middle;
+  margin-right: 4px;
 }
 /* A long link or word breaks instead of pushing the message out of the conversation. */
 .md {
@@ -1517,7 +1533,8 @@ h3 {
 .composer textarea:focus {
   box-shadow: none;
 }
-/* The field's text is drawn by the mirror behind it, so a mention can wear its color as it's typed. */
+/* The field's text is drawn by the copy behind it (Composer), so a @handle can take its agent's color.
+   Both lay out the same: the copy takes the field's size, padding and type from the script. */
 .composer__field {
   position: relative;
 }
@@ -1526,22 +1543,24 @@ h3 {
   color: transparent;
   caret-color: var(--text);
 }
-.composer__field textarea,
-.composer__mirror {
-  scrollbar-gutter: stable;
-}
 .composer__field textarea::placeholder {
   color: var(--text-3);
 }
 .composer__mirror {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
   overflow: hidden;
-  padding: 13px 16px 4px;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   color: var(--text);
   pointer-events: none;
+}
+.composer__mirror mark {
+  color: color-mix(in srgb, var(--agent, var(--accent)) 75%, var(--text));
+  background: color-mix(in srgb, var(--agent, var(--accent)) 16%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent, var(--accent)) 16%, transparent);
+  border-radius: 3px;
 }
 .composer__bar {
   display: flex;
@@ -1855,6 +1874,13 @@ h3 {
   font-size: 16px;
   margin-top: 8px;
 }
+.profile-card__role {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
 .profile-card__rows {
   width: 100%;
   margin-top: 14px;
@@ -2026,7 +2052,7 @@ h3 {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 .toggle.is-on {
-  background: var(--ok);
+  background: var(--accent);
 }
 .toggle.is-on::after {
   transform: translateX(14px);
@@ -2495,6 +2521,7 @@ h3 {
 
 /* A router's note: what it did, and why, quietly, on one line. */
 .system-line__why {
+  flex: 1 1 0; /* the headline wraps only when it doesn't fit alone; the why takes what's left, or nothing */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2504,12 +2531,8 @@ h3 {
 .system-line__why::before {
   content: '· ';
 }
-/* The headline wraps only when it doesn't fit alone; the why takes what's left, or nothing. */
 .system-line > p {
   min-width: 0;
-}
-.system-line__why {
-  flex: 1 1 0;
 }
 .system-line > .muted {
   margin-left: auto;
@@ -4585,6 +4608,9 @@ table.csv th {
   display: block;
   font-size: 14px;
 }
+.harness__check:not(:disabled) + .harness__name {
+  cursor: pointer;
+}
 .harness__account {
   display: block;
   font-size: 12.5px;
@@ -6108,8 +6134,15 @@ kbd {
 .cal__col {
   position: relative;
   border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  background-image: linear-gradient(color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
   cursor: cell;
+}
+.cal__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  pointer-events: none;
 }
 .cal__col.is-today {
   background-color: color-mix(in srgb, var(--accent) 3%, transparent);
@@ -7843,10 +7876,14 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
 .voice-on { display: grid; gap: 8px; }
 .voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
-.voice-advanced { display: grid; gap: 10px; }
+/* The card doesn't space its children: the model's line, the microphone and Avançado get a gap here. */
+.voice-prefs { display: grid; gap: 14px; }
+/* Closed, the folded part keeps no room: the gap only between what shows when it's open. */
+.voice-advanced[open] { display: grid; gap: 10px; }
 .voice-advanced summary { cursor: pointer; }
 .voice-pop > .btn { justify-self: start; }
 .voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
 .voice-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); white-space: nowrap; }
 .voice-clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+

@@ -134,7 +134,7 @@ describe('grants', () => {
     const r = runner((_, tools) => ({ tool: tools.find((t) => t.endsWith('__create_task')) ?? 'tarefas__create_task', args: { title: 'invasora' } }))
     await r.send('d1', 'oi')
     await r.idle()
-    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'tarefas__list_tasks']) // it can ask for more, not take it
+    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'buscar_threads', 'ler_thread', 'tarefas__list_tasks']) // it can ask for more, not take it
     expect(seen.results[0]).toMatchObject({ isError: true })
     expect(textOf(seen.results[0])).toContain('não permitida')
     expect(tasks().some((t) => t.title === 'invasora')).toBe(false)
@@ -253,6 +253,45 @@ describe('approvals', () => {
     await r.idle()
     expect(db.approvals()[0]).toMatchObject({ state: 'expired', outcome: 'Expirou sem decisão.' })
     expect(seen.turns.at(-1)?.prompt).toContain('expirou sem decisão')
+  })
+
+  it("approved while the reply is still being written: the reply's last save keeps the decision (#121)", async () => {
+    db.saveAgent(agent('read_write'))
+    // A "model" that asks, then goes on writing; I approve before it ends.
+    let r!: Runner
+    let asked = false
+    const engine: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        seen.turns.push(turn)
+        if (turn.mcpUrl && !asked) {
+          asked = true
+          const client = new Client({ name: 'scripted', version: '0' })
+          await client.connect(new StreamableHTTPClientTransport(new URL(turn.mcpUrl)))
+          await client.callTool({ name: 'tarefas__delete_task', arguments: { id: 2, _motivo: 'duplicada' } })
+          await client.close()
+          await r.decide(db.approvals()[0]!.id, 'approved')
+        }
+        yield { type: 'text', delta: 'pedi pra apagar e sigo escrevendo' }
+        yield { type: 'done', text: 'pedi pra apagar e sigo escrevendo', usage: { inputTokens: 10, cacheReadTokens: 0, outputTokens: 2 } }
+      }
+    }
+    r = new Runner({
+      db,
+      engines: { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') },
+      settings: async () => settings,
+      emit: (e) => events.push(e),
+      workDir: join(dir, 'work'),
+      gateway,
+      connectors
+    })
+    await r.send('d1', 'apaga a tarefa 2')
+    await r.idle()
+
+    expect(db.approvals()[0]).toMatchObject({ state: 'approved', outcome: 'Executou.' })
+    const reply = agentMessages()[0]!
+    expect(reply.run?.status).toBe('done') // not waiting for an approval that was given
+    expect(reply.run?.steps.map((s) => s.label)).toEqual(expect.arrayContaining(['Pediu aprovação', 'Aprovado']))
   })
 })
 
