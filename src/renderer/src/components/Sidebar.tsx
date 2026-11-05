@@ -1,6 +1,6 @@
 import { L } from '../../../shared/lang'
 import { isWaiting, waitingIn, waitingTitle } from './waiting'
-import { useCallback, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { useCallback, useId, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
   archiveAgent,
@@ -100,10 +100,19 @@ function GroupFold({ id, label, unread, waiting, head, naming, children }: { id:
 const unreadIn = (conversations: { unread?: number }[]): number => conversations.reduce((sum, c) => sum + (c.unread ?? 0), 0)
 
 // An agent waits on me there (a question, an approval): it shows instead of the working dot, since it's my turn.
+// A solid speech bubble with the "?" cut out of it, so it reads on any row (hovered, active).
 function WaitingMark({ title }: { title: string }): ReactNode {
+  const mask = `waiting-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
   return (
     <span className="waiting-mark" title={title} aria-label={title}>
-      <Icon name="question" size={14} />
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        <mask id={mask}>
+          <rect width="24" height="24" fill="white" />
+          <path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.7" fill="none" stroke="black" strokeWidth="2.1" strokeLinecap="round" />
+          <circle cx="12" cy="16.3" r="1.2" fill="black" />
+        </mask>
+        <path mask={`url(#${mask})`} fill="currentColor" d="M12 2.5c5.5 0 9.5 3.9 9.5 8.8s-4 8.8-9.5 8.8c-1.2 0-2.4-.2-3.5-.5L3.5 21.5l1.4-4.3C3.4 15.7 2.5 13.6 2.5 11.3 2.5 6.4 6.5 2.5 12 2.5Z" />
+      </svg>
     </span>
   )
 }
