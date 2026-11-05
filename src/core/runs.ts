@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, ROUTING, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, mentioned, snip, systemPrompt, transcript, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -137,7 +137,8 @@ export interface RoutineEvent {
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'steered' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
 // An agent answering in a conversation: replies running there, their thread, and my messages waiting for them.
-type Line = { n: number; threadId?: string; waiting: string[]; steered?: boolean }
+// `mine`: it answers my message (not another agent's or a routine's), so my next one may wait for it.
+type Line = { n: number; threadId?: string; waiting: string[]; steered?: boolean; mine?: boolean }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -147,6 +148,8 @@ export class Runner {
   // Who is answering where right now (agent + conversation), the thread it answers in, and my messages
   // that came in meanwhile: they wait, and go together in one follow-up once it's done.
   private working = new Map<string, Line>()
+  // My messages waiting for the router's pick, by place: the conversation and the thread (or '').
+  private holds = new Map<string, Line>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
 
@@ -178,6 +181,17 @@ export class Runner {
     // The agent is still on my last message here: this one is almost always more of the same (a detail, a
     // correction). It goes in that reply's thread and waits, instead of starting a reply of its own.
     const line = asked || this.paused ? undefined : this.lineFor(conv, body, thread)
+    // The router is still picking who answers my last message here: this one waits for its pick, then
+    // goes in that agent's line (or, if no one or several were picked, gets an answer of its own).
+    const hold = line || asked || this.paused || mentioned(body, this.members(conv)).length ? undefined : this.holds.get(`${conv.id}:${thread ?? ''}`)
+    if (hold) {
+      const waiting: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
+      for (const img of pictures) this.keepImage(waiting, img)
+      db.saveMessage(waiting)
+      hold.waiting.push(waiting.id)
+      emit({ type: 'message', message: { ...waiting, queued: ROUTING } })
+      return
+    }
     if (line) {
       const waiting: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(line.threadId ? { threadId: line.threadId } : {}) }
       for (const img of pictures) this.keepImage(waiting, img)
@@ -404,6 +418,10 @@ export class Runner {
   private async routeAndRun(conv: Conversation, members: Agent[], threadId?: string): Promise<void> {
     const { db, engines } = this.deps
     this.routing++
+    const place = `${conv.id}:${threadId ?? ''}`
+    const hold: Line = { n: 0, waiting: [], threadId }
+    this.holds.set(place, hold)
+    let picked: Agent[] = []
     const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
       this.update(note, { text: L(`Não consegui escolher quem responde (${why}). Mencione um agente com **@nome**.`, `I couldn't pick who answers (${why}). Mention an agent with **@name**.`), run: undefined })
@@ -424,7 +442,7 @@ export class Runner {
       if (settings.routerModel === JEV_MODEL) {
         const key = await this.deps.jev?.key()
         const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
+        if (!('error' in j)) return this.routed(conv, note, (picked = j.agents), `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
         fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
       }
 
@@ -437,13 +455,43 @@ export class Runner {
       const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       if ('error' in r) return fail(r.error)
-      this.routed(conv, note, r.agents, `${r.reason}${fellBack}`)
+      this.routed(conv, note, (picked = r.agents), `${r.reason}${fellBack}`)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
+      if (this.holds.get(place) === hold) this.holds.delete(place)
+      this.handOn(conv, members, hold, picked)
       this.routing--
       this.checkIdle()
     }
+  }
+
+  // My messages that waited for the router: with one agent picked, they wait in its line like any other;
+  // otherwise they go in the conversation now and the router reads them again.
+  private handOn(conv: Conversation, members: Agent[], hold: Line, picked: Agent[]): void {
+    const { db, emit } = this.deps
+    if (!hold.waiting.length) return
+    const only = picked.length === 1 ? picked[0]! : undefined
+    if (only) {
+      // Its reply may not have started yet (others ahead of it): the line is there for it when it does.
+      const key = `${only.id}:${conv.id}`
+      const line = this.working.get(key) ?? { n: 0, waiting: [], threadId: hold.threadId, mine: true }
+      this.working.set(key, line)
+      line.waiting.push(...hold.waiting)
+      for (const id of hold.waiting) {
+        const m = db.message(id)
+        if (m) emit({ type: 'message', message: { ...m, queued: only.id } })
+      }
+      return
+    }
+    const at = Date.now()
+    hold.waiting.forEach((id, i) => {
+      const m = db.message(id)
+      if (!m) return
+      db.setMessageAt(id, at + i)
+      emit({ type: 'message', message: { ...m, at: at + i } })
+    })
+    if (!this.paused) void this.routeAndRun(conv, members, hold.threadId)
   }
 
   private routed(conv: Conversation, note: Message, agents: Agent[], reason: string): void {
@@ -493,16 +541,23 @@ export class Runner {
   private lineFor(conv: Conversation, body: string, thread: string | undefined): (Line & { agentId: string }) | undefined {
     const members = this.members(conv)
     const named = mentioned(body, members).slice(0, MAX_MENTIONS)
-    const to = named.length ? named : conv.kind === 'dm' || members.length === 1 ? members : []
+    const here = (w: Line | undefined): w is Line => !!w && (!thread || thread === w.threadId)
+    // A channel, no one named: the one agent answering me here right now takes it, as in a DM.
+    const busy = members.filter((a) => {
+      const w = this.working.get(`${a.id}:${conv.id}`)
+      return here(w) && !!w.mine
+    })
+    const to = named.length ? named : conv.kind === 'dm' || members.length === 1 ? members : busy
     if (to.length !== 1) return undefined
     const w = this.working.get(`${to[0]!.id}:${conv.id}`)
-    if (!w || (thread && thread !== w.threadId)) return undefined
+    if (!here(w)) return undefined
     return Object.assign(w, { agentId: to[0]!.id })
   }
 
   // The line my message waits in, and the agent it waits for.
   private lineOf(messageId: string): { w: Line; agentId: string } | undefined {
     for (const [key, w] of this.working) if (w.waiting.includes(messageId)) return { w, agentId: key.slice(0, key.lastIndexOf(':')) }
+    for (const w of this.holds.values()) if (w.waiting.includes(messageId)) return { w, agentId: ROUTING }
     return undefined
   }
 
@@ -511,7 +566,7 @@ export class Runner {
     const { db } = this.deps
     const m = db.message(messageId)
     const line = this.lineOf(messageId)
-    if (!m || !line) return
+    if (!m || !line || line.agentId === ROUTING) return // no one to steer while the router picks
     line.w.steered = true
     const live = db
       .recentMessages(m.conversationId, 60)
@@ -554,6 +609,7 @@ export class Runner {
     const w: Line = this.working.get(key) ?? { n: 0, waiting: [] }
     w.n++
     w.threadId = opts.existing ? opts.existing.threadId : opts.threadId
+    w.mine = opts.depth === 1 && !opts.routine
     this.working.set(key, w)
     let msg: Message | undefined
     try {

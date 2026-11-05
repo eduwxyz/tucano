@@ -8,6 +8,8 @@ import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
+import { routerSystem } from '../src/core/router'
+import { ROUTING } from '../src/shared/types'
 
 const ready = { installed: true, loggedIn: true }
 
@@ -16,6 +18,8 @@ let gateway: Gateway
 let settings: Settings
 let turns: Turn[]
 let gates: (() => void)[] // one per turn: lets it finish
+let routerGates: (() => void)[] // the router's picks, held until let go
+const pick = (): void => routerGates.splice(0).forEach((go) => go())
 const release = (): void => gates.splice(0).forEach((go) => go())
 let events: Message[]
 let removed: string[]
@@ -24,6 +28,12 @@ let removed: string[]
 const slow: Engine = {
   id: 'claude',
   async *run(turn) {
+    // The router answers as the fake one does, once let go.
+    if (turn.system === routerSystem()) {
+      await new Promise<void>((resolve) => routerGates.push(resolve))
+      yield* fakeEngine('claude').run(turn)
+      return
+    }
     turns.push(turn)
     await new Promise<void>((resolve) => {
       gates.push(resolve)
@@ -39,6 +49,7 @@ function runner(): Runner {
   turns = []
   events = []
   removed = []
+  routerGates = []
   gates = []
   const engines: Record<EngineId, Engine> = { claude: slow, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
   return new Runner({ db, engines, settings: async () => settings, emit: (e) => (e.type === 'message' ? events.push(e.message) : e.type === 'message_removed' ? removed.push(e.id) : 0), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
@@ -203,5 +214,62 @@ describe('the queue over the field', () => {
     // A message no longer in line can't be changed or taken back.
     r.cancelQueued(mine()[0]!.id)
     expect(db.message(mine()[0]!.id)).toBeDefined()
+  })
+})
+
+describe('the queue in a channel', () => {
+  const channel = (): void => {
+    db.saveAgent({ id: 'ana', name: 'Ana', handle: 'ana', role: '', color: 'pink', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
+    db.createConversation({ id: 'ch', kind: 'channel', name: 'eng', members: ['teo', 'ana'] })
+  }
+
+  it('with no one named, my next message waits for the agent answering me there', async () => {
+    channel()
+    const r = runner()
+    await r.send('ch', '@teo revisa o PR 12')
+    await until(() => turns.length === 1)
+    await r.send('ch', 'e olha os testes')
+    expect(events.at(-1)).toMatchObject({ text: 'e olha os testes', queued: 'teo' })
+    expect(turns).toHaveLength(1) // no router, no reply of its own
+    release()
+    await until(() => turns.length === 2)
+    expect(turns[1]!.prompt).toContain('olha os testes')
+    release()
+    await r.idle()
+    expect(turns).toHaveLength(2)
+  })
+
+  it('while the router still picks, my next message waits for its pick and goes in that line', async () => {
+    channel()
+    const r = runner()
+    await r.send('ch', 'revisa o PR 12')
+    await until(() => routerGates.length === 1)
+    await r.send('ch', 'e olha os testes')
+    // Held: no second "picking who answers", and the app keeps it over the field.
+    expect(events.at(-1)).toMatchObject({ text: 'e olha os testes', queued: ROUTING })
+    expect(routerGates).toHaveLength(1)
+    pick()
+    await until(() => turns.length === 1)
+    const picked = (replies()[0]!.author as { id: string }).id
+    expect(events.findLast((m) => m.text === 'e olha os testes')?.queued).toBe(picked)
+    release()
+    await until(() => turns.length === 2)
+    expect(turns[1]!.prompt).toContain('olha os testes')
+    release()
+    await r.idle()
+    expect(turns).toHaveLength(2)
+    expect(db.messages().filter((m) => m.author.kind === 'system')).toHaveLength(1)
+  })
+
+  it('naming someone else is another request: it gets its own answer', async () => {
+    channel()
+    const r = runner()
+    await r.send('ch', '@teo revisa o PR 12')
+    await until(() => turns.length === 1)
+    await r.send('ch', '@ana e você, olha os números')
+    await until(() => turns.length === 2)
+    expect(events.findLast((m) => m.text.includes('olha os números'))?.queued).toBeUndefined()
+    release()
+    await r.idle()
   })
 })

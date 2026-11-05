@@ -31,6 +31,7 @@ import {
   editQueued,
   cancelQueued,
   ACCESS_REQUEST,
+  ROUTING,
   countedTokens,
   sendMessage,
   setTab,
@@ -329,6 +330,8 @@ function QueuePanel({ items }: { items: Message[] }): ReactNode {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
   const [steering, setSteering] = useState<string | null>(null)
   const who = agent?.name ?? L('O agente', 'The agent')
+  // The router is still picking: no one to steer yet.
+  const picking = items.every((m) => m.queued === ROUTING)
   const save = (): void => {
     if (editing?.text.trim()) editQueued(editing.id, editing.text)
     setEditing(null)
@@ -338,7 +341,11 @@ function QueuePanel({ items }: { items: Message[] }): ReactNode {
       <div className="queue__head">
         <Icon name="clock" size={13} />
         <strong>{L('Fila de mensagens', 'Message queue')}</strong>
-        <span className="muted">{L(`Aguardando · ${who} está respondendo e lê na sequência`, `Waiting · ${who} is replying and reads these next`)}</span>
+        <span className="muted">
+          {picking
+            ? L('Aguardando · escolhendo quem responde', 'Waiting · picking who answers')
+            : L(`Aguardando · ${who} está respondendo e lê na sequência`, `Waiting · ${who} is replying and reads these next`)}
+        </span>
       </div>
       <ol className="queue__list">
         {items.map((m, i) => (
@@ -366,18 +373,20 @@ function QueuePanel({ items }: { items: Message[] }): ReactNode {
               <span className="queue__text">{m.text}</span>
             )}
             <span className="queue__actions">
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                disabled={steering === m.id}
-                title={L(`${who} para o que está fazendo e recomeça já com esta mensagem`, `${who} stops what it's doing and starts again with this message`)}
-                onClick={() => {
-                  setSteering(m.id)
-                  steer(m.id)
-                }}
-              >
-                {steering === m.id ? L('Orientando…', 'Steering…') : L('Orientar', 'Steer')}
-              </button>
+              {m.queued !== ROUTING && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={steering === m.id}
+                  title={L(`${who} para o que está fazendo e recomeça já com esta mensagem`, `${who} stops what it's doing and starts again with this message`)}
+                  onClick={() => {
+                    setSteering(m.id)
+                    steer(m.id)
+                  }}
+                >
+                  {steering === m.id ? L('Orientando…', 'Steering…') : L('Orientar', 'Steer')}
+                </button>
+              )}
               <button type="button" className="icon-btn" title={L('Editar mensagem', 'Edit message')} aria-label={L(`Editar mensagem na fila ${i + 1}`, `Edit queued message ${i + 1}`)} onClick={() => setEditing({ id: m.id, text: m.text })}>
                 <Icon name="edit" size={14} />
               </button>
