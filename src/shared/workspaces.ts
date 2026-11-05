@@ -8,11 +8,12 @@ export const workspaceLabel = (s: Pick<Settings, 'workspaceName' | 'workspaceLab
 // folder, accounts, keys or phone).
 export const GENERAL_SETTINGS = ['workspaceName', 'language', 'routerModel', 'memoryModel', 'memoryLearning', 'defaultLimit', 'approvalTtlHours', 'runBudgetPct', 'runStallMinutes', 'quietHours', 'harnesses', 'sounds', 'voice', 'browserJev', 'wikiCapture', 'wikiEdits', 'wikiReview'] as const satisfies readonly (keyof Settings)[]
 // What a new workspace takes from another, each picked when creating it (a duplicate takes it all).
+// The wiki isn't copied: the new workspace uses the same one, and what one keeps the other reads.
 // Never messages, memories, approvals, usage, computers' files, browser sessions or extra logins.
-export const WORKSPACE_PARTS = ['general', 'context', 'agents', 'channels', 'skills', 'connectors', 'routines'] as const
+export const WORKSPACE_PARTS = ['general', 'context', 'wiki', 'agents', 'channels', 'skills', 'connectors', 'routines'] as const
 export type WorkspacePart = (typeof WORKSPACE_PARTS)[number]
 export type WorkspaceParts = Record<WorkspacePart, boolean>
-export const ALL_PARTS: WorkspaceParts = { general: true, context: true, agents: true, channels: true, skills: true, connectors: true, routines: true }
+export const ALL_PARTS: WorkspaceParts = { general: true, context: true, wiki: true, agents: true, channels: true, skills: true, connectors: true, routines: true }
 
 export function workspaceParts(raw: unknown): WorkspaceParts {
   const from = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}

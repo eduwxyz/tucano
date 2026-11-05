@@ -202,7 +202,7 @@ it('brings only what was picked to a new workspace, and what depends on it comes
   source.saveSkill({ id: 'own', name: 'For Lia', description: 'x', body: 'y', agents: ['lia'], state: 'active', createdAt: 1, updatedAt: 1 })
   source.saveRoutine({ id: 'daily', name: 'Daily', agentId: 'lia', conversationId: 'eng', prompt: 'p', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 1 })
   source.saveRoutine({ id: 'poll', name: 'Poll', agentId: 'lia', conversationId: 'dm', prompt: 'p', schedule: { days: [], time: '09:00' }, enabled: true, createdAt: 1, trigger: { kind: 'poll', connectorId: 'linear', tool: 'list', args: {}, everyMinutes: 5 } })
-  const none = { general: false, context: false, agents: false, channels: false, skills: false, connectors: false, routines: false }
+  const none = { general: false, context: false, wiki: false, agents: false, channels: false, skills: false, connectors: false, routines: false }
 
   // The general settings only: an empty workspace whose introduction starts from them.
   source.duplicateTo(join(dir, 'general.db'), 'General', { ...none, general: true })
@@ -234,6 +234,10 @@ it('brings only what was picked to a new workspace, and what depends on it comes
   expect(skills.agents()).toEqual([])
   expect(skills.routines()).toEqual([])
   expect(skills.getSettings(defaults).onboarding).toEqual({ done: false })
+
+  // The wiki: the same folder as the source's (its own one, inside its data, here).
+  source.duplicateTo(join(dir, 'wiki.db'), 'Wiki', { ...none, wiki: true }, join(dir, 'source-wiki'))
+  expect(open(join(dir, 'wiki.db')).getSettings(defaults).wikiDir).toBe(join(dir, 'source-wiki'))
 
   // Everything: the duplicate, as before (context and the wiki folder too).
   source.duplicateTo(join(dir, 'all.db'), 'All')

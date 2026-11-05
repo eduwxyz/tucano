@@ -342,7 +342,8 @@ export class Db {
   // VACUUM removes deleted history from its pages; no engine/browser files copy.
   // The extra Claude Code and Codex logins stay too (their folders, and the Mac's keychain,
   // are the source's): the copy's agents use the usual login.
-  duplicateTo(file: string, name: string, parts: WorkspaceParts = ALL_PARTS): void {
+  // `wikiDir`: the source's wiki folder, which the copy uses too when the wiki comes along.
+  duplicateTo(file: string, name: string, parts: WorkspaceParts = ALL_PARTS, wikiDir?: string): void {
     if (existsSync(file)) throw new Error('Workspace destination already exists')
     // Keep the unsanitized snapshot with its source, not in the new workspace.
     // A crash before sanitizing must not leave source memories in the copy.
@@ -369,6 +370,8 @@ export class Db {
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
         `)
         target.keepOnly(parts)
+        if (!parts.wiki) target.db.prepare("DELETE FROM settings WHERE key = 'wikiDir'").run() // its own, empty
+        else if (wikiDir) target.setSettings({ wikiDir })
         const setup = target.db.prepare("SELECT value FROM settings WHERE key = 'onboarding'").get() as { value: string } | undefined
         const onboarding = setup ? JSON.parse(setup.value) as Settings['onboarding'] : undefined
         // With its agents, a set-up workspace needs no introduction; without, it starts from what came.

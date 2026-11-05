@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
 import { app, BrowserWindow, session, type MediaAccessPermissionRequest, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
@@ -117,6 +117,7 @@ type CoreRequest =
   | { type: 'workspace-cleaned'; agentIds?: string[]; error?: string }
   | { type: 'workspace-duplicated'; error?: string }
   | { type: 'workspace-paused'; error?: string }
+  | { type: 'wiki-relocated'; error?: string }
   | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
@@ -404,7 +405,7 @@ async function switchWorkspace(id: string): Promise<void> {
 function trustedWorkspaceRequest(event: Electron.IpcMainInvokeEvent): void {
   if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Not the app window')
 }
-function requestWorkspace(runtime: Runtime, request: object, response: 'workspace-cleaned' | 'workspace-duplicated' | 'workspace-paused'): Promise<string[]> {
+function requestWorkspace(runtime: Runtime, request: object, response: 'workspace-cleaned' | 'workspace-duplicated' | 'workspace-paused' | 'wiki-relocated'): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { cleanup(); reject(new Error('Workspace operation timed out')) }, 180_000)
     const onExit = (): void => { cleanup(); reject(new Error('Workspace stopped before the operation finished')) }
@@ -483,13 +484,19 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
   if (id !== undefined && typeof id !== 'string') throw new Error('Invalid workspace')
   const workspace = id === undefined ? registry.selected() : registry.get(id as string)
   if (workspace.isDefault) throw new Error(L('O workspace padrão não pode ser excluído.', 'The default workspace cannot be deleted.'))
+  // Workspaces made with this one's wiki brought along use its folder: the wiki stays, moved to them.
+  const inside = (p: string): boolean => p === workspace.dataDir || p.startsWith(workspace.dataDir + sep)
+  const sharers = registry.list().filter((w) => w.id !== workspace.id && inside(cores.get(w.id)?.wikiFolder ?? ''))
+  if (sharers.some((w) => cores.get(w.id)?.summary.status !== 'ready'))
+    throw new Error(L(`A wiki deste workspace também é a de ${sharers.map((w) => `“${w.name}”`).join(', ')}, que não está pronto agora. Tente de novo daqui a pouco.`, `This workspace's wiki is also ${sharers.map((w) => `“${w.name}”`).join(', ')}'s, which isn't ready right now. Try again in a moment.`))
   switching = true
   try {
     const answer = await dialog.showMessageBox(mainWindow!, {
       type: 'warning',
       title: L('Excluir workspace', 'Delete workspace'),
       message: L(`Excluir “${workspace.name}” e todos os seus dados?`, `Delete “${workspace.name}” and all its data?`),
-      detail: L('Conversas, agentes, memórias, credenciais, rotinas e backups deste workspace serão apagados. Não dá para desfazer. Pastas de projetos e outros workspaces ficam intactos.', 'Conversations, agents, memories, credentials, routines and backups in this workspace will be deleted. This cannot be undone. Project folders and other workspaces are kept.'),
+      detail: L('Conversas, agentes, memórias, credenciais, rotinas e backups deste workspace serão apagados. Não dá para desfazer. Pastas de projetos e outros workspaces ficam intactos.', 'Conversations, agents, memories, credentials, routines and backups in this workspace will be deleted. This cannot be undone. Project folders and other workspaces are kept.') +
+        (sharers.length ? L(` A wiki fica: ela também é a de “${sharers[0]!.name}” e passa para a pasta dele.`, ` The wiki stays: it's also “${sharers[0]!.name}”'s, and moves to its folder.`) : ''),
       buttons: [L('Cancelar', 'Cancel'), L('Excluir todos os dados', 'Delete all data')], defaultId: 0, cancelId: 0, noLink: true
     })
     if (answer.response !== 1) return
@@ -503,6 +510,18 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
       runtime.child.once('exit', () => { clearTimeout(timer); resolve() })
       if (!runtime.child.kill()) { clearTimeout(timer); reject(new Error('Could not stop workspace')) }
     })
+    // Each wiki folder still in use moves to the first workspace using it, and they all follow it.
+    for (const folder of new Set(sharers.map((w) => cores.get(w.id)!.wikiFolder))) {
+      const using = sharers.filter((w) => cores.get(w.id)!.wikiFolder === folder)
+      const to = join(using[0]!.dataDir, `wiki-${workspace.id.slice(-7)}`)
+      renameSync(folder, to)
+      try {
+        for (const w of using) await requestWorkspace(cores.get(w.id)!, { type: 'wiki-relocate', path: to }, 'wiki-relocated')
+      } catch (error) {
+        renameSync(to, folder) // back where they all look for it; nothing is deleted
+        throw error
+      }
+    }
     const active = registry.selected().id === workspace.id
     registry.deleteData(workspace.id)
     cores.delete(workspace.id)

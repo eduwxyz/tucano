@@ -303,7 +303,7 @@ const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error)
 // Agents' browsers too (spec §24).
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown } | undefined
   if (r?.type === 'workspace-pause') {
     try {
       if (closing || typeof r.paused !== 'boolean') throw new Error('Workspace cannot change pause state right now')
@@ -323,11 +323,21 @@ process.parentPort.on('message', (e) => {
     try {
       if (closing || !r.targetDir || !r.name) throw new Error('Workspace cannot be duplicated right now')
       mkdirSync(r.targetDir, { recursive: true, mode: 0o700 })
-      db.duplicateTo(join(r.targetDir, 'tucano.db'), r.name, r.parts === undefined ? undefined : workspaceParts(r.parts))
+      db.duplicateTo(join(r.targetDir, 'tucano.db'), r.name, r.parts === undefined ? undefined : workspaceParts(r.parts), wiki.dir)
       process.parentPort.postMessage({ type: 'workspace-duplicated' })
     } catch (error) {
       process.parentPort.postMessage({ type: 'workspace-duplicated', error: error instanceof Error ? error.message : String(error) })
     }
+    return
+  }
+  // The workspace whose folder held this wiki is being deleted: the folder moved here.
+  if (r?.type === 'wiki-relocate') {
+    void Promise.resolve()
+      .then(() => api.setWikiDir({ dir: typeof r.path === 'string' ? r.path : '' }))
+      .then(
+        () => process.parentPort.postMessage({ type: 'wiki-relocated' }),
+        (e: unknown) => process.parentPort.postMessage({ type: 'wiki-relocated', error: e instanceof Error ? e.message : String(e) })
+      )
     return
   }
   if (r?.type === 'delete-workspace') {
