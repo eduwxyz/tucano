@@ -421,13 +421,36 @@ function ReportBasis({ id }: { id: string }): ReactNode {
 // conversation yet, since the agent hasn't read them. They go in, in this order, when it's done and
 // takes them all in one reply. Until then each can be changed, taken back, or sent at once ("Orientar":
 // the agent stops and starts again with it in hand).
+function QueuedReply({ message }: { message: Message }): ReactNode {
+  const agent = useStore((s) => (message.queued ? agentById(s, message.queued) : undefined))
+  const name = agent?.name ?? L('O agente', 'The agent')
+  const why = message.run?.steps[0]?.detail ?? L('esperando a vez', 'waiting its turn')
+  return (
+    <li className="queue__item queue__item--reply" aria-label={L(`${name} vai responder: ${why}`, `${name} will reply: ${why}`)}>
+      {agent ? <AgentAvatar agent={agent} size={16} /> : <span className="queue__n" />}
+      <span className="queue__text">
+        <strong>{name}</strong> <span className="muted">· {why}</span>
+      </span>
+      <span className="queue__actions">
+        <button type="button" className="btn btn--ghost btn--sm" title={L(`${name} não vai responder isso`, `${name} won't reply to this`)} onClick={() => stopRun(message.id)}>
+          {L('Cancelar', 'Cancel')}
+        </button>
+      </span>
+    </li>
+  )
+}
+
 function QueuePanel({ items }: { items: Message[] }): ReactNode {
-  const agent = useStore((s) => (items[0]?.queued ? agentById(s, items[0].queued) : undefined))
+  const mine = items.filter((m) => m.author.kind === 'me')
+  const agent = useStore((s) => (mine[0]?.queued ? agentById(s, mine[0].queued) : undefined))
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
   const [steering, setSteering] = useState<string | null>(null)
   const who = agent?.name ?? L('O agente', 'The agent')
   // The router is still picking: no one to steer yet.
-  const picking = items.every((m) => m.queued === ROUTING)
+  const picking = mine.length > 0 && mine.every((m) => m.queued === ROUTING)
+  const position = (m: Message): number => mine.indexOf(m) + 1
+  // Its reply here hasn't started (the agent is on something else): there's nothing here to interrupt yet.
+  const behindReply = (m: Message): boolean => items.some((r) => r.author.kind === 'agent' && r.queued === m.queued)
   const save = (): void => {
     if (editing?.text.trim()) editQueued(editing.id, editing.text)
     setEditing(null)
@@ -438,15 +461,19 @@ function QueuePanel({ items }: { items: Message[] }): ReactNode {
         <Icon name="clock" size={13} />
         <strong>{L('Fila de mensagens', 'Message queue')}</strong>
         <span className="muted">
-          {picking
+          {!mine.length
+            ? L('Aguardando · respostas esperando a vez', 'Waiting · replies waiting their turn')
+            : picking
             ? L('Aguardando · escolhendo quem responde', 'Waiting · picking who answers')
+            : mine.some(behindReply)
+            ? L(`Aguardando · ${who} termina o que está fazendo e lê na sequência`, `Waiting · ${who} finishes what it's doing and reads these next`)
             : L(`Aguardando · ${who} está respondendo e lê na sequência`, `Waiting · ${who} is replying and reads these next`)}
         </span>
       </div>
       <ol className="queue__list">
-        {items.map((m, i) => (
-          <li key={m.id} className={`queue__item ${editing?.id === m.id ? 'is-editing' : ''}`} aria-label={L(`Mensagem na fila ${i + 1}: ${m.text}`, `Queued message ${i + 1}: ${m.text}`)}>
-            <span className="queue__n">{i + 1}</span>
+        {items.map((m) => m.author.kind === 'agent' ? <QueuedReply key={m.id} message={m} /> : (
+          <li key={m.id} className={`queue__item ${editing?.id === m.id ? 'is-editing' : ''}`} aria-label={L(`Mensagem na fila ${position(m)}: ${m.text}`, `Queued message ${position(m)}: ${m.text}`)}>
+            <span className="queue__n">{position(m)}</span>
             {editing?.id === m.id ? (
               <textarea
                 className="queue__edit"
@@ -466,10 +493,10 @@ function QueuePanel({ items }: { items: Message[] }): ReactNode {
                 }}
               />
             ) : (
-              <span className="queue__text">{m.text}</span>
+              <span className="queue__text">{m.text || L('(imagem)', '(image)')}</span>
             )}
             <span className="queue__actions">
-              {m.queued !== ROUTING && (
+              {m.queued !== ROUTING && !behindReply(m) && (
                 <button
                   type="button"
                   className="btn btn--ghost btn--sm"
@@ -483,10 +510,10 @@ function QueuePanel({ items }: { items: Message[] }): ReactNode {
                   {steering === m.id ? L('Orientando…', 'Steering…') : L('Orientar', 'Steer')}
                 </button>
               )}
-              <button type="button" className="icon-btn" title={L('Editar mensagem', 'Edit message')} aria-label={L(`Editar mensagem na fila ${i + 1}`, `Edit queued message ${i + 1}`)} onClick={() => setEditing({ id: m.id, text: m.text })}>
+              <button type="button" className="icon-btn" title={L('Editar mensagem', 'Edit message')} aria-label={L(`Editar mensagem na fila ${position(m)}`, `Edit queued message ${position(m)}`)} onClick={() => setEditing({ id: m.id, text: m.text })}>
                 <Icon name="edit" size={14} />
               </button>
-              <button type="button" className="icon-btn" title={L('Excluir mensagem', 'Delete message')} aria-label={L(`Excluir mensagem na fila ${i + 1}`, `Delete queued message ${i + 1}`)} onClick={() => cancelQueued(m.id)}>
+              <button type="button" className="icon-btn" title={L('Excluir mensagem', 'Delete message')} aria-label={L(`Excluir mensagem na fila ${position(m)}`, `Delete queued message ${position(m)}`)} onClick={() => cancelQueued(m.id)}>
                 <Icon name="trash" size={14} />
               </button>
             </span>

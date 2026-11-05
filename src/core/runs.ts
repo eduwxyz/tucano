@@ -156,6 +156,7 @@ export class Runner {
   private queue: { job: () => Promise<unknown>; agentId?: string }[] = []
   private busy = new Set<string>() // agents with a reply running: their next one waits
   private dropped = new Set<string>() // queued replies stopped before they started
+  private waitingReplies = new Set<string>() // replies waiting their turn: over the field, not in the conversation yet
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
@@ -343,6 +344,7 @@ export class Runner {
     const m = this.deps.db.message(messageId)
     if (m?.author.kind !== 'agent' || m.run?.status !== 'working') return
     this.dropped.add(messageId)
+    this.enterConversation(m)
     this.update(m, { run: { ...m.run, status: 'stopped', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, label: L('Cancelado', 'Cancelled'), status: 'error' as const } : s)) } })
   }
 
@@ -648,7 +650,7 @@ export class Runner {
     const delegation = opts.delegation && { ...opts.delegation, reported: undefined }
     const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
     // Nothing of what it was before (a question, an approval card) while it waits its turn.
-    this.update(msg, { text: '', run: { status: 'working', depth: 1, steps: [{ id: randomUUID(), label: L('Na fila', 'Queued'), status: 'running' }], ...(delegation ? { delegation } : {}), ...(opts.round ? { round: opts.round } : {}), ...(opts.reportOf ? { reportOf: opts.reportOf } : {}), ...(opts.root ? { root: opts.root } : {}) } })
+    this.waitTurn(agent, msg, { text: '', run: { status: 'working', depth: 1, steps: [{ id: randomUUID(), label: L('Na fila', 'Queued'), status: 'running' }], ...(delegation ? { delegation } : {}), ...(opts.round ? { round: opts.round } : {}), ...(opts.reportOf ? { reportOf: opts.reportOf } : {}), ...(opts.root ? { root: opts.root } : {}) } })
     this.enqueue(async () => {
       const me = (await this.deps.settings()).workspaceName
       const then = typeof opts.then === 'function' ? opts.then(me) : opts.then
@@ -780,12 +782,31 @@ export class Runner {
 
   // A reply for an agent, in line behind what it's doing. When it's busy, the reply shows up at once as
   // queued, so it's clear it's coming and in what order.
+  // A reply that has to wait its turn: not in the conversation yet, since nothing has happened. The app
+  // shows it over the field, and it goes in when it starts, after what came in meanwhile.
+  private waitTurn(agent: Agent, msg: Message, patch: Partial<Message>): void {
+    Object.assign(msg, patch)
+    this.waitingReplies.add(msg.id)
+    this.deps.db.saveMessage(msg)
+    this.deps.emit({ type: 'message', message: { ...msg, queued: agent.id } })
+  }
+
+  private enterConversation(msg: Message): void {
+    if (!this.waitingReplies.delete(msg.id)) return
+    msg.at = Date.now()
+    this.deps.db.setMessageAt(msg.id, msg.at)
+    this.deps.emit({ type: 'message', message: { ...msg } })
+  }
+
   private start(agent: Agent, conv: Conversation, opts: TurnOpts): void {
     if (this.busy.has(agent.id) && !opts.existing) {
       const msg: Message = { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
-      this.update(msg, {
+      this.waitTurn(agent, msg, {
         run: { status: 'working', depth: opts.depth, steps: [{ id: randomUUID(), label: L('Na fila', 'Queued'), detail: L('termina o que está fazendo antes', 'finishing what it is doing first'), status: 'running' }], ...(opts.task ? { task: opts.task } : {}) }
       })
+      // It answers me: my next message here waits for it, as it would while it runs.
+      const key = `${agent.id}:${conv.id}`
+      if (opts.depth === 1 && !opts.routine && !opts.delegation && !opts.task && !this.working.has(key)) this.working.set(key, { n: 0, waiting: [], threadId: opts.threadId, mine: true })
       opts = { ...opts, existing: msg }
     }
     this.enqueue(() => this.execute(agent, conv, opts), agent.id)
@@ -859,6 +880,17 @@ export class Runner {
     for (const [key, w] of this.working) if (w.waiting.includes(messageId)) return { w, agentId: key.slice(0, key.lastIndexOf(':')) }
     for (const w of this.holds.values()) if (w.waiting.includes(messageId)) return { w, agentId: ROUTING }
     return undefined
+  }
+
+  // What waits over the field instead of in the conversation, for when the app reads everything again.
+  withQueue(messages: Message[]): Message[] {
+    const queued = new Map<string, string>()
+    for (const [key, w] of this.working) for (const id of w.waiting) queued.set(id, key.slice(0, key.lastIndexOf(':')))
+    for (const w of this.holds.values()) for (const id of w.waiting) queued.set(id, ROUTING)
+    return messages.map((m) => {
+      const q = queued.get(m.id) ?? (m.author.kind === 'agent' && this.waitingReplies.has(m.id) ? m.author.id : undefined)
+      return q ? { ...m, queued: q } : m
+    })
   }
 
   // My message still in line, changed before the agent reads it.
@@ -955,6 +987,7 @@ export class Runner {
     const { db, emit, engines } = this.deps
     // Stopped while it waited: it ends as it is, and what waits on it (a manager) goes on.
     if (opts.existing && this.dropped.delete(opts.existing.id)) return db.message(opts.existing.id) ?? opts.existing
+    if (opts.existing) this.enterConversation(opts.existing)
     const settings = await this.deps.settings()
     this.budget = settings.requestBudget ?? REQUEST_BUDGET
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued

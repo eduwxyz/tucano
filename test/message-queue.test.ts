@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -12,6 +12,7 @@ import { routerSystem } from '../src/core/router'
 import { ROUTING } from '../src/shared/types'
 
 const ready = { installed: true, loggedIn: true }
+const DATA = mkdtempSync(join(tmpdir(), 'mq-data-'))
 
 let db: Db
 let gateway: Gateway
@@ -52,7 +53,7 @@ function runner(): Runner {
   routerGates = []
   gates = []
   const engines: Record<EngineId, Engine> = { claude: slow, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
-  return new Runner({ db, engines, settings: async () => settings, emit: (e) => (e.type === 'message' ? events.push(e.message) : e.type === 'message_removed' ? removed.push(e.id) : 0), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
+  return new Runner({ dataDir: DATA, db, engines, settings: async () => settings, emit: (e) => (e.type === 'message' ? events.push(e.message) : e.type === 'message_removed' ? removed.push(e.id) : 0), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
 }
 
 const until = async (ok: () => boolean): Promise<void> => {
@@ -311,5 +312,48 @@ describe('the queue in a channel', () => {
     expect(events.findLast((m) => m.text.includes('olha os números'))?.queued).toBeUndefined()
     release()
     await r.idle()
+  })
+})
+
+describe('around the queue', () => {
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64').toString('base64')
+  const image = { name: 'print.png', mime: 'image/png', data: PNG }
+
+  it('a queued message keeps its image; taken back, the image goes with it', async () => {
+    const r = runner()
+    await r.send('dm', 'revisa o PR 12')
+    await until(() => turns.length === 1)
+    await r.send('dm', 'olha este print', [image])
+    const kept = mine()[1]!
+    const [art] = db.artifactsOf(kept.id)
+    expect(art?.name).toBe('print.png')
+    expect(existsSync(join(DATA, 'artifacts', art!.id))).toBe(true)
+    r.cancelQueued(kept.id)
+    expect(db.artifactsOf(kept.id)).toEqual([])
+    expect(existsSync(join(DATA, 'artifacts', art!.id))).toBe(false)
+    release()
+    await r.idle()
+  })
+
+  it('a reply stopped at an approval or a question is over: my message is not queued behind it', async () => {
+    const r = runner()
+    for (const status of ['waiting_approval', 'waiting_input'] as const) {
+      db.saveMessage({ id: status, conversationId: 'dm', author: { kind: 'agent', id: 'teo' }, text: '', at: Date.now(), run: { status, steps: [], ...(status === 'waiting_input' ? { question: 'qual?' } : {}) } })
+      const before = turns.length
+      await r.send('dm', `resposta com ${status}`)
+      await until(() => turns.length === before + 1)
+      expect(events.findLast((m) => m.text === `resposta com ${status}`)?.queued).toBeUndefined()
+      release()
+      await r.idle()
+    }
+  })
+
+  it('paused: nothing queues, and it says no one answers', async () => {
+    const r = runner()
+    r.setPaused(true)
+    await r.send('dm', 'teste')
+    expect(events.some((m) => m.queued)).toBe(false)
+    expect(turns).toHaveLength(0)
+    expect(db.messages().at(-1)?.text).toContain('pausados')
   })
 })

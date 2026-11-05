@@ -703,7 +703,7 @@ const api: Api = {
     settings: settings(),
     agents: db.agents(),
     conversations: db.conversations(),
-    messages: db.messages(),
+    messages: runner.withQueue(db.messages()),
     connectors: connectors.list(),
     approvals: db.approvals(),
     memories: db.memories(),
