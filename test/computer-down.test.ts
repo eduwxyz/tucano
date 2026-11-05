@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
-import { dockerProblem } from '../src/core/computer'
+import { dockerProblem, formatExec } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
@@ -52,7 +52,7 @@ describe('a computer whose Docker is off', () => {
     expect(dockerProblem('Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?')).toContain('não está rodando')
     expect(dockerProblem('permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock')).toContain('usermod')
     expect(dockerProblem('spawn docker ENOENT')).toContain('não está instalado')
-    expect(dockerProblem('\ndocker: no answer within 15s')).toContain('não está respondendo') // stuck: every docker command waits
+    expect(dockerProblem('', true)).toContain('não está respondendo') // a quick check that never answered: stuck, every docker command waits
     expect(dockerProblem('Error: No such container: tucano-lia')).toBeUndefined() // Docker is fine: the box just isn't there yet
   })
 
@@ -66,28 +66,35 @@ describe('a computer whose Docker is off', () => {
     expect(reply().run!.error).toContain(NO_DOCKER)
   })
 
-  it('the same error from different calls stops the reply at the third, whatever broke', async () => {
-    // An engine that tries one command after another, each different, as a stuck agent does.
+  it('searching where nothing matches is no failure: commands that find nothing keep going', async () => {
+    // A grep with no match exits 1 and prints nothing, the same text from every one: not a sign that
+    // something around them is broken, so the reply goes on to its answer.
     const tries: Engine = {
       id: 'claude',
       async *run(turn) {
-        for (const command of ['git status', 'ls /work', 'cat config.yaml', 'glab auth status', 'curl gitlab.com', 'echo hi']) {
+        for (const command of ['grep -rn TODO src', 'grep -rn FIXME src', 'grep -rn XXX src', 'grep -rn HACK src', 'ls src']) {
           if (turn.signal.aborted) return
           await callTool(turn.mcpUrl!, 'bash', { command }).catch(() => null)
           yield { type: 'text', delta: '.' }
         }
-        if (!turn.signal.aborted) yield { type: 'done', text: 'fim', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+        if (!turn.signal.aborted) yield { type: 'done', text: 'Nenhum TODO, FIXME, XXX ou HACK no projeto.', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
     const engines: Record<EngineId, Engine> = { claude: tries, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
     const ran: string[] = []
-    const computers = { call: async (_a: Agent, _n: string, args: Record<string, unknown>) => (ran.push(String(args['command'])), { result: textResult('fatal: o serviço não respondeu', true) }) }
+    const computers = {
+      call: async (_a: Agent, _n: string, args: Record<string, unknown>) => {
+        const command = String(args['command'])
+        ran.push(command)
+        const ls = command.startsWith('ls')
+        return { result: textResult(formatExec({ code: ls ? 0 : 1, stdout: ls ? 'app.ts' : '', stderr: '' }, 120), !ls) }
+      }
+    }
     const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'cd-w-')), gateway, computers })
-    await r.send('dm', 'confere o gitlab')
+    await r.send('dm', 'tem algum TODO, FIXME, XXX ou HACK no projeto?')
     await r.idle()
-    expect(ran).toEqual(['git status', 'ls /work', 'cat config.yaml'])
-    expect(reply().run).toMatchObject({ status: 'failed' })
-    expect(reply().run!.error).toContain('o mesmo erro voltou 3 vezes')
+    expect(ran).toHaveLength(5)
+    expect(reply().run).toMatchObject({ status: 'done' })
   })
 
   it('still off at the next message: no computer tools, and the agent is told why', async () => {

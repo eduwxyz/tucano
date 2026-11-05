@@ -189,16 +189,15 @@ export const noDockerAccess = (): string =>
 // No docker command at all: spawn fails before Docker can say anything.
 export const dockerMissing = (): string =>
   L('O Docker não está instalado neste computador. Instale o Docker (docs.docker.com/get-docker).', "Docker isn't installed on this computer. Install Docker (docs.docker.com/get-docker).")
-// A quick docker call that never answered: the daemon is stuck (on Linux, a service that fails to start
-// behind its socket leaves every docker command waiting).
-const NO_ANSWER = 'docker: no answer within'
+// A quick docker call that never answered (`late`): the daemon is stuck (on Linux, a service that fails to
+// start behind its socket leaves every docker command waiting).
 export const dockerStuck = (): string =>
   osOf() === 'linux'
     ? L('O Docker não está respondendo. Reinicie o serviço (sudo systemctl restart docker) ou o Docker Desktop.', "Docker isn't answering. Restart the service (sudo systemctl restart docker) or Docker Desktop.")
     : L('O Docker não está respondendo. Reinicie o Docker Desktop.', "Docker isn't answering. Restart Docker Desktop.")
-// What a failed docker call says about Docker itself, if anything.
-export function dockerProblem(stderr: string): string | undefined {
-  if (stderr.includes(NO_ANSWER)) return dockerStuck()
+// What a failed docker call says about Docker itself, if anything. `late`: it was killed by its timeout.
+export function dockerProblem(stderr: string, late = false): string | undefined {
+  if (late) return dockerStuck()
   if (/spawn docker ENOENT/i.test(stderr)) return dockerMissing()
   if (/permission denied[^\n]*docker\.sock/i.test(stderr)) return noDockerAccess()
   if (/daemon|connect to the docker/i.test(stderr)) return noDocker()
@@ -327,7 +326,7 @@ const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
 // ---------- docker ----------
 
-type Exec = { code: number; stdout: string; stderr: string }
+type Exec = { code: number; stdout: string; stderr: string; late?: boolean } // late: killed by its timeout
 
 function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Exec> {
   return new Promise((resolve) => {
@@ -351,7 +350,7 @@ function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: num
     child.on('close', (code) => {
       if (timer) clearTimeout(timer)
       opts.signal?.removeEventListener('abort', kill)
-      resolve({ code: code ?? -1, stdout, stderr: late ? `${stderr}\n${NO_ANSWER} ${Math.round(opts.timeoutMs! / 1000)}s` : stderr })
+      resolve({ code: code ?? -1, stdout, stderr, ...(late ? { late } : {}) })
     })
     child.stdin.on('error', () => {})
     child.stdin.end(opts.stdin ?? '')
@@ -434,7 +433,7 @@ export class Computers {
     if (!agent.computer) return this.set(agent.id, { state: 'off', services: [] })
     const r = await docker(['inspect', '-f', '{{.State.Running}}', this.name(agent.id)], { timeoutMs: 10_000 })
     if (r.code !== 0) {
-      const problem = dockerProblem(r.stderr)
+      const problem = dockerProblem(r.stderr, r.late)
       return this.set(agent.id, { state: problem ? 'no_docker' : 'stopped', detail: problem, services: [] })
     }
     if (r.stdout.trim() !== 'true') return this.set(agent.id, { state: 'stopped', services: [] })
@@ -499,7 +498,7 @@ export class Computers {
       if (this.infos.get(agentId)?.state !== 'running') this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
       return
     }
-    const problem = dockerProblem(state.stderr)
+    const problem = dockerProblem(state.stderr, state.late)
     if (problem) {
       this.set(agentId, { state: 'no_docker', detail: problem })
       throw new Error(L(`O Docker não está disponível neste computador: ${problem} Peça pro usuário resolver.`, `Docker isn't available on this computer: ${problem} Ask the user to fix it.`))
