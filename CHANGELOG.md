@@ -6,10 +6,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 > **Em português:**
 > - **Conversas longas não pesam mais enquanto um agente responde.** Cada palavra recebida redesenhava todas as mensagens; agora só a que mudou.
+> - **O navegador dos agentes abre páginas num servidor Linux que é um PC.** O Chrome esperava o chaveiro bloqueado da área de trabalho e nenhuma página carregava; no servidor ele agora usa o próprio armazenamento.
+> - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
 
 ### Fixed
 
 - **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again.
+- **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring.
 - **The server's page opens over plain HTTP on a private address,** such as Tailscale or a home network. It stayed blank: a browser outside a secure context has no `crypto.randomUUID`, which the app calls as it starts. The page now brings a small replacement for it, and one for the copy buttons.
 
 ## [0.2.11] - 2026-11-05
