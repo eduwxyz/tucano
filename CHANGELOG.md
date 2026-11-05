@@ -7,6 +7,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Fixed
 
 - **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in.
+- **Claude replies finish about 2 seconds sooner, at times 10.** After each reply Claude Code made one more model call, a summary of the turn that Tucano never reads, and only then said it was done and exited. That call is now off for the Claude Code that Tucano runs, so a reply ends when its text does, and what waits on it (the next agent in line, a team's report) starts right away. Your own Claude Code in the terminal isn't touched.
+- **Agents see what a connector returns, even when it's long.** A result over Claude Code's own cut (about 50 KB, like the comments of a big merge request) was saved to a file the agent can't read, so it called again and again and answered without the data. Tucano now cuts a result at 40 KB, counted in bytes so accents don't push it over, and tells the agent to ask again with pagination or a filter if it needs the rest.
 
 ## [0.2.10] - 2026-11-04
 
