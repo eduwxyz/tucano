@@ -20,7 +20,8 @@ import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
-import { textResult, type Gateway, type ToolDef } from './gateway'
+import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
@@ -144,8 +145,19 @@ export class Runner {
   private controllers = new Map<string, Control>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
+  private sessions: Sessions
 
-  constructor(private deps: RunnerDeps) {}
+  constructor(private deps: RunnerDeps) {
+    this.sessions = new Sessions({
+      exists: (id) => !!deps.db.message(id),
+      forget: (s) => {
+        for (const e of Object.values(deps.engines)) e.release?.(s.id)
+        deps.gateway?.release(s.token)
+      }
+    })
+    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir) // left by an earlier run of the app
+    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
 
   setPaused(paused: boolean): void {
     this.paused = paused
@@ -1130,7 +1142,7 @@ export class Runner {
         }
       }
 
-    const session = this.deps.gateway?.open({
+    const tools: Session = {
       tools: toolDefs,
       call: async (name, args) => {
         if (overBudget) {
@@ -1167,10 +1179,10 @@ export class Runner {
           sign()
         }
       }
-    })
+    }
 
     let progress = { tokens: 0, cacheRead: 0 }
-    let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'> } | null = null
+    let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'>; context?: number } | null = null
     let error: string | null = null
     let thrown: unknown // what the engine threw, if it did: a bug reads differently from a CLI's own words
 
@@ -1184,35 +1196,56 @@ export class Runner {
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
+    const system = systemPrompt({
+      agent,
+      settings,
+      conversation: conv,
+      peers,
+      memories: promptMemories,
+      canRemember,
+      hasComputer: !!computers,
+      computerOff,
+      browser: !!browser,
+      apps: apps ? agent.apps : undefined,
+      offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
+      macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
+      web: agent.web !== false,
+      routines: routines?.forAgent(agent.id),
+      skills: skills && mySkills,
+      wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
+      publish: repos,
+      builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
+    })
+
+    // A kept session: the reply goes on from this agent's last one here (this conversation, or this
+    // thread) with only what's new since. Not while another agent is still writing a message this
+    // reply would see half of: that one goes the usual way, and the session takes it all next time.
+    const sessionKey = `${agent.id}:${conv.id}:${msg.threadId ?? ''}`
+    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs, gateway: !!this.deps.gateway })
+    const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
+    const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
+    let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, restart: !!opts.existing, task: !!task }) : undefined
+    let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
+    const session = this.deps.gateway?.open(tools, plan?.token)
+    const whole = { prompt: blocks.join('\n\n'), blocks, images }
+    // Resumed: the new messages' blocks, then the task's, with their images.
+    const since = (p: SessionPlan): typeof whole => {
+      const at = p.send.map((id) => blockOf.get(id)!)
+      if (task) at.push(blocks.length - 1)
+      const pos = new Map(at.map((b, i) => [b, i]))
+      const sent = at.map((i) => blocks[i]!)
+      return { prompt: sent.join('\n\n'), blocks: sent, images: images.flatMap((img) => (pos.has(img.block) ? [{ ...img, block: pos.get(img.block)! }] : [])) }
+    }
+    let input = plan?.resume ? since(plan) : whole
     try {
       for (;;) {
         try {
           const events = engines[engineId].run({
             model: modelName,
             effort: agent.effort,
-            system: systemPrompt({
-              agent,
-              settings,
-              conversation: conv,
-              peers,
-              memories: promptMemories,
-              canRemember,
-              hasComputer: !!computers,
-              computerOff,
-              browser: !!browser,
-              apps: apps ? agent.apps : undefined,
-              offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
-              macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
-              web: agent.web !== false,
-              routines: routines?.forAgent(agent.id),
-              skills: skills && mySkills,
-              wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
-              publish: repos,
-              builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
-            }),
-            prompt: blocks.join('\n\n'),
-            blocks,
-            images,
+            system,
+            ...input,
+            session: plan && { id: plan.id, resume: plan.resume, keep: true },
             cwd,
             signal: control.ctl.signal,
             mcpUrl: session?.url,
@@ -1258,6 +1291,10 @@ export class Runner {
         const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
         flush()
         msg.text = '' // the CLI's own "you've hit your limit", when it wrote it as text
+        // The reserve starts from the whole conversation: the session stays with the main model.
+        lost = plan
+        plan = undefined
+        input = whole
         onReserve = true
         modelId = agent.fallbackModelId!
         modelName = reserve.model.id
@@ -1274,6 +1311,8 @@ export class Runner {
       clearInterval(stall)
       flush()
       session?.close()
+      if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown })
+      if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, reply: msg.id, context: result?.context })
       this.controllers.delete(msg.id)
     }
 

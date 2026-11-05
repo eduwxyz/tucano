@@ -1209,7 +1209,10 @@ process.parentPort.on('message', (e) => {
   port.start()
 })
 
-process.on('exit', () => db.close())
+process.on('exit', () => {
+  for (const e of Object.values(engineImpls)) e.dispose?.() // the Claude Code processes kept open between replies
+  db.close()
+})
 // The app stops the core with SIGTERM, which by default skips the 'exit' handlers
 // above and leaves the agents' Chromes running with nothing to drive them.
 process.on('SIGTERM', () => process.exit(0))
