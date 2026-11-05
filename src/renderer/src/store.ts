@@ -40,7 +40,10 @@ import {
   type Os,
   type LocalInfo,
   type VoiceModelId,
-  type VoiceStatus
+  type VoiceStatus,
+  type TeamChoice,
+  type TeamPackageInfo,
+  type TeamUpdate
 } from '../../shared/types'
 import { call, connect, disconnect } from './rpc'
 
@@ -599,7 +602,10 @@ export const setTelegramToken = (token: string | null): Promise<void> => call('s
 export const unpairTelegram = (): void => void fire(L('Não consegui desconectar o Telegram.', "I couldn't disconnect Telegram."), 'unpairTelegram')
 export const setGithubToken = (token: string | null): Promise<void> => call('setGithubToken', { token })
 export const exportTeam = (): Promise<string> => call('exportTeam')
-export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
+export const previewTeam = (text: string): Promise<TeamUpdate> => call('previewTeam', { text })
+export const importTeam = (text: string, choices: Record<string, TeamChoice>): Promise<string> => call('importTeam', { text, choices })
+export const teams = (): Promise<TeamPackageInfo[]> => call('teams')
+export const forgetTeam = (id: string): Promise<void> => call('forgetTeam', { id })
 export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)
 export const backupNow = (): Promise<string> => call('backupNow')
 export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')
