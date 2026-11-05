@@ -8,6 +8,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Conversas longas não pesam mais enquanto um agente responde.** Cada palavra recebida redesenhava todas as mensagens; agora só a que mudou.
 > - **O navegador dos agentes abre páginas num servidor Linux que é um PC.** O Chrome esperava o chaveiro bloqueado da área de trabalho e nenhuma página carregava; no servidor ele agora usa o próprio armazenamento.
 > - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
+> - **Um agente só acorda outro quando precisa.** Quando um agente menciona outro na resposta, o router lê e chama só quem tem algo a fazer: um agradecimento ou um “combinado” não acordam ninguém. Na dúvida, chama.
+
+### Changed
+
+- **An agent wakes another only when it needs to.** When an agent's reply mentions other agents, the router reads it first and hands the turn only to those asked to do something: a request, a question, a task, a decision. A thank-you, an "okay" or a credit wakes no one, and the decision shows as a step on the reply. In doubt, or if the router fails, everyone mentioned is called, as before; a mention in your own message still goes straight to the agent. Thanks [@eialanjones](https://github.com/eialanjones)! ([#139](https://github.com/eduwxyz/tucano/pull/139))
 
 ### Fixed
 
