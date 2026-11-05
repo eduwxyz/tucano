@@ -4,7 +4,7 @@
 // can read Linear.
 import { L } from '../shared/lang'
 import type { Agent, Connector, Message } from '../shared/types'
-import type { Engine, Usage } from './engines/types'
+import type { Engine, TurnShape, Usage } from './engines/types'
 import type { ThreadDigest } from './memory'
 
 export const ROUTER_HISTORY = 10
@@ -106,6 +106,9 @@ export function parseRoute(text: string, agents: Agent[]): { agents: Agent[]; re
   return { agents: picked.slice(0, MAX_ROUTED), reason: why }
 }
 
+// The router's turn without its prompt: the same for every message, so its process can start ahead.
+export const routerTurn = (model: string, cwd: string): TurnShape => ({ model, effort: 'low', system: routerSystem(), cwd })
+
 export async function route(opts: {
   engine: Engine
   model: string
@@ -121,14 +124,7 @@ export async function route(opts: {
   let text = ''
   let usage: Usage | undefined
   let error: string | undefined
-  for await (const ev of opts.engine.run({
-    model: opts.model,
-    effort: 'low',
-    system: routerSystem(),
-    prompt: routerPrompt(opts),
-    cwd: opts.cwd,
-    signal: AbortSignal.timeout(60_000)
-  })) {
+  for await (const ev of opts.engine.run({ ...routerTurn(opts.model, opts.cwd), prompt: routerPrompt(opts), signal: AbortSignal.timeout(60_000) })) {
     if (ev.type === 'text') text += ev.delta
     else if (ev.type === 'done') {
       text = ev.text || text

@@ -44,6 +44,9 @@ export type EngineEvent =
   | { type: 'done'; text: string; usage: Usage; context?: number }
   | { type: 'error'; message: string }
 
+// A turn's settings without what it says: enough to start its process ahead of time.
+export type TurnShape = Omit<Turn, 'prompt' | 'blocks' | 'images' | 'signal' | 'session'>
+
 export interface Engine {
   id: EngineId
   run(turn: Turn): AsyncIterable<EngineEvent>
@@ -51,4 +54,7 @@ export interface Engine {
   release?(sessionId: string): void // a session that won't be resumed: its process and its file go
   clean?(workDir: string): void // sessions left from an earlier run of the app, by agents under workDir
   dispose?(): void // the app is quitting: processes kept open close
+  // Starting the CLI takes about a second before any model call; these do it ahead of time.
+  warm?(turn: TurnShape): void // a process ready for the next turn with these settings and no session (the router's)
+  rewarm?(sessionId: string): void // the session's process again, if it closed, ready for its next turn
 }

@@ -523,6 +523,16 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
   if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
 }
 
+// The person is writing: the core gets what will answer ready. Once in a while per place, and
+// nobody needs to hear if it didn't work.
+const typed = new Map<string, number>()
+export const typing = (conversationId: string, threadId?: string): void => {
+  const where = `${conversationId}:${threadId ?? ''}`
+  if (Date.now() - (typed.get(where) ?? 0) < 20_000) return
+  typed.set(where, Date.now())
+  void call('typing', { conversationId, ...(threadId ? { threadId } : {}) }).catch(() => {})
+}
+
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })

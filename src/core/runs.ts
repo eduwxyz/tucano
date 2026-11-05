@@ -23,7 +23,7 @@ import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
-import { route } from './router'
+import { route, routerTurn } from './router'
 import { allowed, approvalHash, canonical } from './policy'
 import { briefFor, colleaguesOf, DELEGAR, delegarTool, PEDIR_AJUDA, pedirAjudaTool, requestCap, MAX_DELEGATION_DEPTH, MAX_DELEGATIONS, MAX_TEAM_ROUNDS, resultsTask, settled, teamOf } from './delegation'
 import { actionLabel, actionVerb, chainMode, COMPUTADOR, gate, shellActions, toolActions, type ActionKind, type ActionRules } from '../shared/actions'
@@ -180,6 +180,35 @@ export class Runner {
 
   setPaused(paused: boolean): void {
     this.paused = paused
+  }
+
+  // The person is writing here. What will answer gets its Claude Code started now, so the reply
+  // doesn't wait the second that takes: in a DM (or a channel of one agent), the agent's kept
+  // session, if its process closed; in a channel of several, the router. A first reply has no
+  // session to start yet, and a mention or a pending question skips the router: then the
+  // process started waits a couple of minutes and goes.
+  async typing(conversationId: string, threadId?: string): Promise<void> {
+    const { db, engines } = this.deps
+    const conv = db.conversation(conversationId)
+    if (!conv || this.paused) return
+    const members = this.members(conv)
+    const settings = await this.deps.settings()
+    const ready = (engine: EngineId): boolean => !!settings.engines[engine]?.installed && !!settings.engines[engine]?.loggedIn
+    if (conv.kind === 'dm' || members.length === 1) {
+      const agent = members[0]
+      // A message outside threads in a conversation that answers in them opens a new thread: nothing is kept there yet.
+      if (!agent || (conv.threads && !threadId)) return
+      const engine = modelInfo(agent.modelId)?.engine ?? 'claude'
+      const id = this.sessions.idOf(`${agent.id}:${conv.id}:${threadId ?? ''}`)
+      if (id && ready(engine)) engines[engine].rewarm?.(id)
+      return
+    }
+    if (members.length < 2 || settings.routerModel === JEV_MODEL) return
+    const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+    if (!ready(model.engine)) return
+    const cwd = join(this.deps.workDir, '_router')
+    mkdirSync(cwd, { recursive: true })
+    engines[model.engine].warm?.(routerTurn(model.id, cwd))
   }
 
   // Saves the human message and decides who answers it: mentioned agents

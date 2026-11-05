@@ -721,6 +721,10 @@ const api: Api = {
     void runner.send(conversationId, text, images, threadId)
   },
 
+  typing: ({ conversationId, threadId }) => {
+    void runner.typing(conversationId, threadId).catch((e: unknown) => console.warn('[typing]', e))
+  },
+
   stopRun: ({ messageId }) => runner.stop(messageId),
 
   retryRun: ({ messageId }) => runner.retry(messageId),
