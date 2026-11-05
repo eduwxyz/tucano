@@ -32,7 +32,10 @@ const MAX_MENTIONS = 3
 const MAX_DEPTH = 3 // agent replies chained from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
-const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
+// Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
+// or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
+// can't here (no file tools), so it calls again and again and answers without the data.
+export const MAX_RESULT_BYTES = 40_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
@@ -67,7 +70,7 @@ export interface RunnerDeps {
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
-  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac'>> // without it, no agent has a computer
+  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
@@ -107,7 +110,14 @@ export function resultText(r: CallToolResult): string {
   const text = r.content
     .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
     .join('\n')
-  return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n${L(`[… resultado cortado em ${MAX_RESULT_CHARS} caracteres]`, `[… result cut at ${MAX_RESULT_CHARS} characters]`)}` : text
+  const bytes = Buffer.from(text, 'utf8')
+  if (bytes.length <= MAX_RESULT_BYTES) return text
+  // Cut on a whole character: a split one decodes as U+FFFD at the end.
+  const kept = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8').replace(/�+$/, '')
+  return `${kept}\n${L(
+    `[… resultado cortado em ${MAX_RESULT_BYTES / 1000} KB: o resto não chegou. Se precisar dele, chame de novo pedindo menos de uma vez (paginação, filtro, menos campos).]`,
+    `[… result cut at ${MAX_RESULT_BYTES / 1000} KB: the rest didn't come through. If you need it, call again asking for less at once (pagination, a filter, fewer fields).]`
+  )}`
 }
 
 // Text is clipped; images go through (screenshots, charts), a few at most.
@@ -124,7 +134,8 @@ export interface RoutineEvent {
   body: string // the item itself, clipped
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
+// msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -559,7 +570,12 @@ export class Runner {
     const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
     // The Tuca proposes agents; nobody else does.
     const builds = !!this.deps.gateway && agent.kind === 'tuca'
-    const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
+    // why, so it says so in a sentence instead of spending a call on each tool to find out.
+    const computerOff = computers ? await computers.unavailable?.(agent) : undefined
+    if (computerOff) computers = undefined
+    let computerDown: string | undefined // found off in the middle of the turn: what the person has to do
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
     const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
@@ -568,7 +584,7 @@ export class Runner {
     // The wiki: for agents that may read it, once it has a page.
     const wiki = this.deps.gateway && this.deps.wiki && wikiAccess(agent) !== 'none' && this.deps.wiki.count() > 0 ? this.deps.wiki : undefined
 
-    const control: Control = { ctl: new AbortController() }
+    const control: Control = { ctl: new AbortController(), msg }
     this.controllers.set(msg.id, control)
     const halt = (reason: NonNullable<Control['reason']>): void => {
       if (control.reason) return
@@ -628,7 +644,9 @@ export class Runner {
     const exposed = new Map<string, Exposed>()
     const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
-      if (c.status !== 'connected') continue
+      // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
+      // (a refused token, a sign-in to finish) takes them away.
+      if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
@@ -841,6 +859,11 @@ export class Runner {
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
           const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          // No tool of the computer can work: the turn ends here, before the model tries the next one.
+          if (out.down) {
+            computerDown = out.down
+            halt('computer')
+          }
           if (out.artifact) artifactIds.push(out.artifact.id)
           if (out.service && !services.includes(out.service)) services.push(out.service)
           msg.run = {
@@ -1172,10 +1195,11 @@ export class Runner {
               memories: promptMemories,
               canRemember,
               hasComputer: !!computers,
+              computerOff,
               computerSetup: settings.computerSetup,
               browser: !!browser,
               apps: apps ? agent.apps : undefined,
-              offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
+              offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
               macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
               web: agent.web !== false,
               routines: routines?.forAgent(agent.id),
@@ -1291,6 +1315,17 @@ export class Runner {
         text: msg.text ? `${msg.text} …` : '',
         run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
       })
+    } else if (control.reason === 'computer') {
+      save({
+        text: msg.text ? `${msg.text} …` : '',
+        run: {
+          ...base,
+          ...again,
+          status: 'failed',
+          steps: closeThinking('error', L('Parou', 'Stopped')),
+          error: L(`Parei: meu computador não está funcionando. ${computerDown ?? ''} Depois é só mandar de novo.`, `I stopped: my computer isn't working. ${computerDown ?? ''} Then just send it again.`)
+        }
+      })
     } else if (overBudget && control.reason !== 'limit') {
       // Wrapped up at the budget, or cut past it: either way it can go on from here.
       save({
@@ -1303,10 +1338,12 @@ export class Runner {
         run: { ...base, ...again, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
       })
     } else if (result) {
+      // Approved or refused before the run ended: nothing is left to wait for.
+      const waiting = approval && db.approval(approval.id)?.state === 'pending'
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        run: { ...base, status: question ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
@@ -1482,10 +1519,15 @@ export class Runner {
     db.setApprovalOutcome(id, outcome)
     emit({ type: 'approval', approval: db.approval(id)! })
 
-    const msg = db.message(ap.messageId)
+    // Approved while the agent is still replying: add the step to the live reply, which saves it when it ends.
+    const live = this.controllers.get(ap.messageId)?.msg
+    const msg = live ?? db.message(ap.messageId)
     if (msg?.run) {
       const label = decision === 'approved' ? L('Aprovado', 'Approved') : decision === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
-      this.update(msg, {
+      if (live) {
+        live.run!.steps.push({ id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' })
+        this.update(live, {})
+      } else this.update(msg, {
         run: {
           ...msg.run,
           status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
