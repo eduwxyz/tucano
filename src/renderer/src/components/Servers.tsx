@@ -1,5 +1,5 @@
-// Settings › Servers: Tucanos that run on a server (yours, or your company's), each opened in a
-// window of its own. Desktop only; the pairing link comes from the server (`server.js link`).
+// Settings › Servers: Tucanos that run on a server (yours, or your company's), shown in this
+// window over the app. Desktop only; the pairing link comes from the server (`server.js link`).
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { confirmDialog } from './Dialogs'
@@ -48,8 +48,8 @@ export function ServersCard(): ReactNode {
       <Card
         title={L('Servidores', 'Servers')}
         lead={L(
-          'Um Tucano que roda num servidor, ligado o tempo todo, aberto aqui como um app. Cada um abre na própria janela, com os agentes e as conversas de lá; nada deste computador vai pra ele.',
-          'A Tucano running on a server, always on, opened here like an app. Each one opens in its own window, with its agents and conversations; nothing on this computer goes to it.'
+          'Um Tucano que roda num servidor, ligado o tempo todo, aberto aqui mesmo: escolha na lista do topo da barra lateral, e volte pela faixa de cima. Os agentes e as conversas são os de lá; nada deste computador vai pra ele.',
+          'A Tucano running on a server, always on, opened right here: pick it in the list at the top of the sidebar, and come back from the bar above it. The agents and conversations are the server’s; nothing on this computer goes to it.'
         )}
       >
         <div className="key-row">
@@ -99,5 +99,50 @@ export function ServersCard(): ReactNode {
         {error && <p className="note note--error">{error}</p>}
       </Card>
     </>
+  )
+}
+
+// The servers, live: the list and which one is on screen.
+export function useServers(): Server[] {
+  const api = window.tucano?.servers
+  const [list, setList] = useState<Server[]>([])
+  useEffect(() => {
+    if (!api) return
+    let alive = true
+    const load = (): void => void api.list().then((l) => alive && setList(l))
+    load()
+    api.onChanged(load)
+    return () => {
+      alive = false
+    }
+  }, [api])
+  return list
+}
+
+// Over a server's page, which fills the rest of the window: which Tucano it is, the other
+// servers, and the way back to this computer's (src/main/servers.ts keeps BAR px for it).
+export function ServerBar(): ReactNode {
+  const servers = useServers()
+  const on = servers.find((s) => s.open)
+  if (!on) return null
+  const api = window.tucano.servers!
+  return (
+    <div className="server-bar">
+      <Icon name="globe" size={14} />
+      <span className="server-bar__name">
+        {L('Tucano em', 'Tucano at')} <strong>{on.name}</strong>
+      </span>
+      <span className="grow" />
+      {servers
+        .filter((s) => !s.open)
+        .map((s) => (
+          <button key={s.id} className="btn btn--ghost btn--sm" onClick={() => api.open(s.id)}>
+            {s.name}
+          </button>
+        ))}
+      <button className="btn btn--sm" onClick={() => api.local()}>
+        <Icon name="laptop" size={14} /> {L('Voltar pra este computador', 'Back to this computer')}
+      </button>
+    </div>
   )
 }

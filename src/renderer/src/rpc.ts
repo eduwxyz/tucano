@@ -28,10 +28,11 @@ declare global {
       checkUpdates: () => void
       installUpdate: () => void
       servers?: {
-        // desktop only: Tucanos on servers, each in its own window
+        // desktop only: Tucanos on servers, shown in this window over the app; open: the one on screen
         list: () => Promise<{ id: string; name: string; origin: string; open: boolean }[]>
         pair: (link: string) => Promise<'paired' | 'cancelled' | 'invalid' | 'unsafe'>
         open: (id: string) => void
+        local: () => void // back to this computer's Tucano
         forget: (id: string) => Promise<boolean>
         onChanged: (cb: () => void) => void
       }

@@ -565,6 +565,7 @@ function showWindow(conversationId?: string, page?: 'skills', threadId?: string)
   win.show()
   win.focus()
   if (!conversationId && !page) return
+  servers.showLocal() // a conversation of this computer's: its Tucano on screen
   const go = (): void => (page ? win.webContents.send('navigate-page', page) : win.webContents.send('navigate', conversationId, threadId))
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go)
   else go()
@@ -627,6 +628,9 @@ function createWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
   mainWindow = win
+  // A server on screen keeps the window's size (servers.ts), and comes back in a window made again.
+  win.on('resize', () => servers.place())
+  win.webContents.once('did-finish-load', () => servers.place())
   win.on('closed', () => {
     if (mainWindow === win) {
       cores.get(registry.selected().id)?.child.postMessage({ type: 'viewing', conversationId: null })
@@ -672,7 +676,7 @@ if (process.env['TUCANO_DATA']) app.setPath('userData', process.env['TUCANO_DATA
 const quitOnly = process.argv.includes('--quit')
 const primary = app.requestSingleInstanceLock() && !quitOnly
 if (!primary) app.quit()
-// Tucanos on servers, each in its own window (servers.ts). The keychain keeps their access, as it
+// Tucanos on servers, shown in the app's window (servers.ts). The keychain keeps their access, as it
 // keeps the core's secrets; where it can't, nothing is saved.
 const servers = new Servers({
   dataDir,
@@ -688,6 +692,7 @@ const servers = new Servers({
     setMenu()
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('servers')
   },
+  window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
   showLocal: () => showWindow()
 })
 // Settings › Servers, on the app's own page only (fromApp): the list without tokens, pairing with a
@@ -695,6 +700,7 @@ const servers = new Servers({
 ipcMain.handle('servers:list', (e) => (fromApp(e) ? servers.summary() : []))
 ipcMain.handle('servers:pair', (e, link: unknown) => (fromApp(e) && typeof link === 'string' && link.length < 4096 ? servers.pair(link, false) : 'invalid'))
 ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.show(id))
+ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
 ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
 // A tucano://connect link: on a Mac the system hands it over by open-url; on Windows and Linux it
 // comes as an argument, to this instance or (the app already open) to second-instance.
