@@ -6,6 +6,7 @@
 // the person lands in a channel watching it work. Then "Primeiros passos" in the sidebar
 // walks through the rest, checking itself off as each feature gets used.
 import { L, lang } from '../../../shared/lang'
+import { RECOMMENDED_SKILL_BODY_LENGTH, skillLengthNote } from '../../../shared/skills'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ENGINES,
@@ -661,6 +662,7 @@ function SkillsStep({ picked, setPicked, onBack, onNext }: { picked: string[]; s
                 <strong>{k.name}</strong> <span className="tag">{k.origin}</span>
                 <span className="onb-skill__desc">{k.description}</span>
                 {k.scripts && <span className="small warn-text">{L('Tem scripts: precisa de um agente com computador.', 'It has scripts: needs an agent with a computer.')}</span>}
+                {k.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <span className="small warn-text" role="status">{skillLengthNote(k.bodyLength)}</span>}
               </span>
             </button>
           ))}

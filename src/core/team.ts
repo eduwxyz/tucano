@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
+import { overlongSkillNote } from '../shared/skills'
 import { describeSchedule, MAX_AGENT_ROUTINES, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
@@ -126,6 +127,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
   const connectors = db.connectors()
   const connectorId = (name: string): string | undefined => connectors.find((c) => c.name === name)?.id
   const added = { agents: 0, skills: 0, channels: 0, routines: 0, skipped: [] as string[] }
+  const longSkills: string[] = []
 
   for (const a of data.agents ?? []) {
     if (db.agents().some((x) => x.handle === a.handle)) continue
@@ -156,6 +158,8 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
 
   for (const k of data.skills ?? []) {
     if (db.skills().some((x) => x.state === 'active' && x.name === k.name)) continue
+    const note = overlongSkillNote(k.name, k.body.length)
+    if (note) longSkills.push(note)
     const at = Date.now()
     db.saveSkill({ id: randomUUID(), name: k.name, description: k.description, body: k.body, agents: k.agents.flatMap((h) => byHandle(h) ?? []), state: 'active', createdAt: at, updatedAt: at })
     added.skills++
@@ -205,7 +209,8 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
     added.routines && L(`${added.routines} rotina${added.routines > 1 ? 's' : ''} (desligadas)`, `${added.routines} routine${added.routines > 1 ? 's' : ''} (off)`)
   ].filter(Boolean)
   const done = parts.length ? L(`Importei ${parts.join(', ')}.`, `Imported ${parts.join(', ')}.`) : L('Nada novo: tudo já existia aqui.', 'Nothing new: everything already existed here.')
-  return `${done}${added.skipped.length ? L(` Ficou de fora: ${added.skipped.join('; ')}.`, ` Left out: ${added.skipped.join('; ')}.`) : ''}`
+  const long = longSkills.length ? L(` Skills longas: ${longSkills.join('; ')}.`, `Long skills: ${longSkills.join('; ')}.`) : ''
+  return `${done}${added.skipped.length ? L(` Ficou de fora: ${added.skipped.join('; ')}.`, ` Left out: ${added.skipped.join('; ')}.`) : ''}${long}`
 }
 
 // ---------- backups ----------

@@ -25,6 +25,7 @@ import {
   type SkillVersion,
   isTeam
 } from '../store'
+import { RECOMMENDED_SKILL_BODY_LENGTH, skillLengthNote } from '../../../shared/skills'
 import { Card, Field, Sheet } from './Pages'
 import { confirmDialog } from './Dialogs'
 import { ago, AgentAvatar, Icon, time } from './ui'
@@ -230,6 +231,7 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
       )}
       <section className="read-group">
         <h2>{L('Receita', 'Recipe')}</h2>
+        {k.source && k.body.length > RECOMMENDED_SKILL_BODY_LENGTH && <p className="hint hint--warn" role="status">{skillLengthNote(k.body.length)}</p>}
         {k.body.trim() ? (
           <article className="recipe">
             <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
@@ -324,6 +326,7 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
                       {on && <span className="tag tag--ok">{L('em uso', 'in use')}</span>}
                     </span>
                     <span className="skill-add__desc">{l.description}</span>
+                    {l.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <span className="warn-text small" role="status">{skillLengthNote(l.bodyLength)}</span>}
                   </button>
                 )
               })}
@@ -336,6 +339,7 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
             </button>
             <h3>{picked.name}</h3>
             <p>{picked.description}</p>
+            {picked.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <p className="warn-text small" role="status">{skillLengthNote(picked.bodyLength)}</p>}
             {picked.scripts && <p className="warn-text small">{L('Tem scripts: só roda com um agente que tenha computador (Linux ou este computador).', 'It has scripts: it only runs with an agent that has a computer (Linux or this computer).')}</p>}
             <span className="skill-add__label">{L('Quem usa?', 'Who uses it?')}</span>
             <AgentPicker value={agents} onChange={setAgents} />
@@ -434,6 +438,7 @@ function Proposal({ proposal: p }: { proposal: Skill }): ReactNode {
         </span>
       </header>
       {p.reason && <p className="proposal__why">“{p.reason}”</p>}
+      {p.body.length > RECOMMENDED_SKILL_BODY_LENGTH && <p className="hint hint--warn" role="status">{skillLengthNote(p.body.length)}</p>}
       {current ? (
         <Diff before={`${current.description}\n\n${current.body}`} after={`${p.description}\n\n${p.body}`} />
       ) : (
@@ -513,9 +518,12 @@ function SkillForm({ draft, onChange, onClose }: { draft: SkillInput; onChange: 
             {L('Ligada a', 'Linked to')} <span className="mono">{draft.source}</span>: {L('a receita muda lá, e os agentes leem sempre a versão de agora. Aqui você escolhe quem usa.', 'the recipe changes there, and agents always read the current version. Here you pick who uses it.')}
           </p>
         ) : (
-          <Field label={L('Receita', 'Recipe')} hint={L('Os passos, em Markdown: comandos exatos, armadilhas, como conferir.', 'The steps, in Markdown: exact commands, pitfalls, how to check.')}>
-            <textarea rows={10} className="mono" value={draft.body} onChange={(e) => set({ body: e.target.value })} />
-          </Field>
+          <>
+            <Field label={L('Receita', 'Recipe')} hint={L('Os passos, em Markdown: comandos exatos, armadilhas, como conferir.', 'The steps, in Markdown: exact commands, pitfalls, how to check.')}>
+              <textarea rows={10} className="mono" value={draft.body} onChange={(e) => set({ body: e.target.value })} />
+            </Field>
+            {draft.body.length > RECOMMENDED_SKILL_BODY_LENGTH && <p className="hint hint--warn" role="status">{skillLengthNote(draft.body.length)}</p>}
+          </>
         )}
         <Field label={L('Quem usa', 'Who uses it')}>
           <AgentPicker value={draft.agents} onChange={(agents) => set({ agents })} />
