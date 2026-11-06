@@ -3,6 +3,8 @@ import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiRevie
 import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
+  webhookPort?: number
+  defaultWorkspace?: boolean
   settings: Settings
   agents: Agent[]
   conversations: Conversation[]
@@ -17,13 +19,16 @@ export interface Snapshot {
   skills: Skill[]
   platform: Os
   packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
+  isolatedComputers: boolean // agents can have an isolated Linux computer: Docker is there (not inside a server's container)
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
 }
 
 export interface Api {
+  markRead(p: { conversationId: string }): void
   snapshot(): Snapshot
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
+  typing(p: { conversationId: string; threadId?: string }): void // the person is writing there: what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
@@ -37,6 +42,8 @@ export interface Api {
   openDm(p: { agentId: string }): string
   ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with his conversation; fresh starts a new session
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
+  applyProposal(p: { messageId: string }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched
+  dismissProposal(p: { messageId: string }): void
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
@@ -140,6 +147,7 @@ export interface Api {
   wikiRunReview(): void // reviews now, in the background; a 'wiki' event when done
   wikiDismissFinding(p: { id: string }): void // and refuses its fix
   wikiImport(p: { dir: string }): WikiImport // an Obsidian vault copied in, as it is
+  wikiImportZip(p: { path: string }): WikiImport // the same, from a .zip sent to a server (src/server's /upload)
   setWikiCapture(p: { conversationId: string; on: boolean }): void
   setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now

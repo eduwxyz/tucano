@@ -12,6 +12,7 @@ import { L } from '../shared/lang'
 import type { Agent } from '../shared/types'
 import type { Db } from './db'
 import type { Secrets } from './secrets'
+import { workspacePorts } from './ports'
 
 export const GIT_PROXY_PORT = 47_718
 export const GITHUB = 'github' // the approvals' connector id for abrir_pr
@@ -100,7 +101,7 @@ export class GitHub {
     }
   }
 
-  listen(port = GIT_PROXY_PORT): Server {
+  listen(port = workspacePorts().git): Server {
     this.server = createServer((req, res) => void this.proxy(req, res).catch((e: unknown) => send(res, 502, `Tucano: ${e instanceof Error ? e.message : String(e)}\n`)))
     this.server.on('error', (e) => console.error(`[github] porta ${port}:`, e.message))
     this.server.listen(port, '127.0.0.1')
@@ -151,7 +152,7 @@ export class GitHub {
   // The git config that sends an agent's GitHub traffic through the proxy.
   gitRemote(agentId: string): string | undefined {
     const t = this.agentToken(agentId)
-    return t && `http://host.docker.internal:${GIT_PROXY_PORT}/git/${t}/`
+    return t && `http://host.docker.internal:${workspacePorts().git}/git/${t}/`
   }
 
   // The folder lent to this agent whose repository is `repo`, and whether it may change it.
@@ -272,4 +273,3 @@ function read(req: IncomingMessage, max: number): Promise<Buffer> {
     req.on('error', fail)
   })
 }
-

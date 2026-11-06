@@ -6,7 +6,7 @@ import { L } from '../../../shared/lang'
 import { catalogInput, CATEGORIES, entryOf, searchCatalog, type CatalogEntry } from '../../../shared/connector-catalog'
 import { LOGOS } from '../connector-logos'
 import { addConnector, authorizeConnector, useStore, type Connector } from '../store'
-import { Modal } from './Dialogs'
+import { Modal } from './Modal'
 import { Icon } from './ui'
 
 // A light brand color takes a dark mark, so every tile reads in both themes.

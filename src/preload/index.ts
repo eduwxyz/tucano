@@ -8,6 +8,19 @@ ipcRenderer.on('core:port', (event) => {
 })
 
 contextBridge.exposeInMainWorld('tucano', {
+  workspaces: {
+    list: () => ipcRenderer.invoke('workspaces:list'),
+    create: (name?: string) => ipcRenderer.invoke('workspaces:create', name),
+    delete: (id?: string) => ipcRenderer.invoke('workspaces:delete', id),
+    duplicate: (id: string, name?: string, parts?: object) => ipcRenderer.invoke('workspaces:duplicate', id, name, parts),
+    setPaused: (paused: boolean, id?: string) => ipcRenderer.invoke('workspaces:pause', paused, id),
+    switch: (id: string) => ipcRenderer.invoke('workspaces:switch', id),
+    subscribe: (cb: (list: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, list: unknown): void => cb(list)
+      ipcRenderer.on('workspaces', listener)
+      return () => ipcRenderer.removeListener('workspaces', listener)
+    }
+  },
   connect: (): void => ipcRenderer.send('core:connect'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
