@@ -55,7 +55,7 @@ import { Memories } from './memory'
 import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
-import { DatabricksCli } from './databricks'
+import { DatabricksCli, findCli } from './databricks'
 import { giveJobSkill, JobWatches } from './job-watches'
 import { jobWatchConfig } from '../shared/job-watch'
 import { Runner } from './runs'
@@ -637,6 +637,7 @@ const runner: Runner = new Runner({
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
   jobs: jobWatches,
+  jobsFound: () => !!findCli(),
   skills,
   wiki,
   wikiCurator: curator,

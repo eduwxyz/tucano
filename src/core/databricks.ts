@@ -1,8 +1,11 @@
 // The Databricks CLI, on the login the person already has. Every call goes through the command rules and
 // runs without a shell. What comes back is turned into one reading, whichever format the API answered in.
 import { execFile } from 'node:child_process'
+import { existsSync, readdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { posix, win32 } from 'node:path'
 import { L } from '../shared/lang'
-import type { JobReading, JobReadErrorKind, JobState, JobTask, JobWatchSettings, SparkReading } from '../shared/job-watch'
+import type { DatabricksProfile, DatabricksStatus, JobReading, JobReadErrorKind, JobState, JobTask, JobWatchSettings, SparkReading } from '../shared/job-watch'
 import { checkCli } from './cli-policy'
 import { maskSecrets } from './step-text'
 
@@ -11,8 +14,70 @@ const MAX_BUFFER = 16 * 1024 * 1024
 const MAX_MESSAGE = 400
 const MAX_OUTPUT = 8_000
 const BASELINE_RUNS = 10
+const FOUND_FOR_MS = 10 * 60_000 // what was found stands this long; a failed login looks again sooner
 
 export type CliErrorKind = JobReadErrorKind | 'gone'
+
+// Where the CLI is: on the PATH, or where it's usually installed. An app opened from the desktop doesn't always
+// see the terminal's PATH. Only a real program counts: a .cmd can't run without a shell.
+export function findCli(o: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; home?: string; exists?: (p: string) => boolean; list?: (dir: string) => string[] } = {}): string | undefined {
+  const env = o.env ?? process.env
+  const platform = o.platform ?? process.platform
+  const home = o.home ?? homedir()
+  const exists = o.exists ?? existsSync
+  const list =
+    o.list ??
+    ((dir: string): string[] => {
+      try {
+        return readdirSync(dir)
+      } catch {
+        return []
+      }
+    })
+  const windows = platform === 'win32'
+  const path = windows ? win32 : posix
+  const pathVar = env['PATH'] ?? env['Path'] ?? ''
+  const dirs = pathVar.split(windows ? ';' : ':').filter(Boolean)
+  if (windows) {
+    const local = env['LOCALAPPDATA'] ?? path.join(home, 'AppData', 'Local')
+    const packages = path.join(local, 'Microsoft', 'WinGet', 'Packages')
+    dirs.push(
+      path.join(local, 'Microsoft', 'WinGet', 'Links'),
+      ...list(packages).filter((d) => /^databricks/i.test(d)).map((d) => path.join(packages, d)),
+      path.join(home, 'scoop', 'shims'),
+      path.join(local, 'Programs', 'databricks'),
+      path.join(env['ProgramFiles'] ?? 'C:\\Program Files', 'Databricks'),
+      path.join(env['ProgramFiles'] ?? 'C:\\Program Files', 'Databricks', 'CLI')
+    )
+  } else {
+    dirs.push('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', path.join(home, '.local', 'bin'), path.join(home, 'bin'), path.join(home, '.databricks', 'bin'))
+  }
+  const name = windows ? 'databricks.exe' : 'databricks'
+  return dirs.map((d) => path.join(d.replace(/^"|"$/g, ''), name)).find((p) => exists(p))
+}
+
+// The profiles `databricks auth profiles` lists. Only names, addresses and whether the login works.
+export function parseProfiles(out: string): DatabricksProfile[] {
+  try {
+    return list(obj(JSON.parse(out))['profiles']).flatMap((p) => {
+      const name = text(p['name'])
+      if (!name) return []
+      const host = text(p['host'])
+      return [{ name, ...(host ? { host } : {}), ...(typeof p['valid'] === 'boolean' ? { valid: p['valid'] } : {}) }]
+    })
+  } catch {
+    return []
+  }
+}
+
+// Which one to use, with nobody choosing: the one the environment names, or DEFAULT, or the first whose login
+// works. Undefined leaves it to the CLI, as when the environment holds the login itself.
+export function chooseProfile(profiles: DatabricksProfile[], env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env['DATABRICKS_CONFIG_PROFILE']) return env['DATABRICKS_CONFIG_PROFILE']
+  if (env['DATABRICKS_HOST']) return undefined
+  const working = profiles.filter((p) => p.valid !== false)
+  return (working.find((p) => p.name === 'DEFAULT') ?? working[0] ?? profiles.find((p) => p.name === 'DEFAULT') ?? profiles[0])?.name
+}
 
 export class CliError extends Error {
   constructor(
@@ -203,22 +268,56 @@ function failure(r: CliResult): CliError {
   return new CliError('transient', short || L('A CLI do Databricks falhou.', 'The Databricks CLI failed.'))
 }
 
-export class DatabricksCli {
-  constructor(private deps: { config: () => JobWatchSettings; exec?: CliExec }) {}
+type Found = { cliPath: string; profile?: string; profiles: DatabricksProfile[] }
 
-  private withApp(args: string[]): string[] {
-    const { profile } = this.deps.config()
-    return [...args, '--output', 'json', ...(profile ? ['--profile', profile] : [])]
+export class DatabricksCli {
+  private found: { key: string; at: number; value: Promise<Found> } | undefined
+
+  constructor(private deps: { config: () => JobWatchSettings; exec?: CliExec; find?: () => string | undefined; env?: NodeJS.ProcessEnv; now?: () => number }) {}
+
+  private exec(file: string, args: string[]): Promise<CliResult> {
+    return (this.deps.exec ?? realExec)(file, args, { timeoutMs: TIMEOUT_MS, maxBuffer: MAX_BUFFER })
   }
 
-  // Runs one command, if the rules allow it.
+  // What's set in Settings wins; the rest is found once and kept for a while.
+  private resolve(): Promise<Found> {
+    const { cliPath, profile } = this.deps.config()
+    const key = `${cliPath ?? ''}|${profile ?? ''}`
+    const now = this.deps.now?.() ?? Date.now()
+    if (this.found && this.found.key === key && now - this.found.at < FOUND_FOR_MS) return this.found.value
+    const value = (async (): Promise<Found> => {
+      const file = cliPath || (this.deps.find ?? findCli)() || 'databricks'
+      // Asked even with a profile set: the list is what Settings offers. Only when it isn't set does it decide.
+      const r = await this.exec(file, ['auth', 'profiles', '--output', 'json'])
+      const profiles = r.code === 0 ? parseProfiles(r.stdout) : []
+      const chosen = profile ?? chooseProfile(profiles, this.deps.env ?? process.env)
+      return { cliPath: file, profiles, ...(chosen ? { profile: chosen } : {}) }
+    })()
+    this.found = { key, at: now, value }
+    return value
+  }
+
+  private forget(): void {
+    this.found = undefined
+  }
+
+  // Runs one command, if the rules allow it. Nothing starts for one they refuse, not even the search.
   async run(args: string[]): Promise<string> {
     const config = this.deps.config()
-    const argv = this.withApp(args)
+    const asked = [...args, '--output', 'json']
+    const first = checkCli(asked, config)
+    if (!first.ok) throw new CliError('refused', first.reason)
+    const { cliPath, profile } = await this.resolve()
+    const argv = [...asked, ...(profile ? ['--profile', profile] : [])]
     const verdict = checkCli(argv, config)
     if (!verdict.ok) throw new CliError('refused', verdict.reason)
-    const r = await (this.deps.exec ?? realExec)(config.cliPath || 'databricks', argv, { timeoutMs: TIMEOUT_MS, maxBuffer: MAX_BUFFER })
-    if (r.code !== 0) throw failure(r)
+    const r = await this.exec(cliPath, argv)
+    if (r.code !== 0) {
+      const e = failure(r)
+      // The CLI was installed, or the person signed in, since the last search.
+      if (e.kind === 'auth' || e.kind === 'no_cli') this.forget()
+      throw e
+    }
     return r.stdout
   }
 
@@ -282,16 +381,18 @@ export class DatabricksCli {
     return clip(maskSecrets(parts.join('\n\n')), MAX_OUTPUT) || L('A task não deixou saída.', 'The task left no output.')
   }
 
-  // For the Settings button: is it there, and does the login work?
-  async check(): Promise<{ ok: boolean; text: string }> {
-    const config = this.deps.config()
-    const version = await (this.deps.exec ?? realExec)(config.cliPath || 'databricks', ['--version'], { timeoutMs: TIMEOUT_MS, maxBuffer: MAX_BUFFER })
-    if (version.code !== 0) return { ok: false, text: failure(version).message }
+  // For Settings: finds everything again, and says whether the login works.
+  async check(): Promise<DatabricksStatus> {
+    this.forget()
+    const { cliPath, profile, profiles } = await this.resolve()
+    const found = { profiles, ...(profile ? { profile } : {}) }
+    const version = await this.exec(cliPath, ['--version'])
+    if (version.code !== 0) return { ok: false, text: failure(version).message, ...found }
     try {
       const me = obj(parseJson(await this.run(['current-user', 'me'])))
-      return { ok: true, text: `${version.stdout.trim()} · ${text(me['userName']) ?? L('login ok', 'signed in')}` }
+      return { ok: true, text: `${version.stdout.trim()} · ${text(me['userName']) ?? L('login ok', 'signed in')}`, cliPath, ...found }
     } catch (e) {
-      return { ok: false, text: e instanceof Error ? e.message : String(e) }
+      return { ok: false, text: e instanceof Error ? e.message : String(e), cliPath, ...found }
     }
   }
 }

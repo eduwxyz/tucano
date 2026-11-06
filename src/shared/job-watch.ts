@@ -89,8 +89,8 @@ export interface JobWatch {
 }
 
 export interface JobWatchSettings {
-  cliPath?: string // unset: `databricks` on the PATH
-  profile?: string
+  cliPath?: string // unset: found on its own, on the PATH and where it's usually installed
+  profile?: string // unset: found on its own, from `databricks auth profiles`
   commands: string[] // "jobs list-runs --job-id --limit": a command and the flags it may take; the rest is refused
   apiPaths: string[] // where `api get` may go
   sparkApiBase?: string // "/driver-proxy-api/o/0/{cluster}/40001/api/v1"; unset: no Spark numbers
@@ -111,6 +111,20 @@ export interface JobWatchSettings {
 export interface JobSkillState {
   seeded: boolean
   given: string[]
+}
+
+// What the app found by itself, for the Settings card.
+export interface DatabricksProfile {
+  name: string
+  host?: string
+  valid?: boolean
+}
+export interface DatabricksStatus {
+  ok: boolean
+  text: string
+  cliPath?: string
+  profile?: string // the one in use, saved or found
+  profiles: DatabricksProfile[]
 }
 
 export const JOB_WATCH_DEFAULTS: JobWatchSettings = {

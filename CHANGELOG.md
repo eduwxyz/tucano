@@ -6,7 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Added
 
-- **An agent follows a Databricks run.** Ask it to follow a job or a run: the app checks through the Databricks CLI, on the login you already have and spending no tokens, shows a live card with state, tasks, shuffle, spill and memory, and wakes the agent only on a failure, the end or a possible stall (no progress, a straggler task, a run far past its median). The analysis goes in the card's thread. Off by default for each agent (**Tools › Follow jobs**), with the allowed commands and every limit in **Settings › Agents**; starting and canceling jobs are off too, and ask for approval when on. Spark's numbers need the **Spark API address**, still to be checked against a real workspace.
+- **An agent follows a Databricks run.** Ask it to follow a job or a run: the app checks through the Databricks CLI, on the login you already have and spending no tokens, shows a live card with state, tasks, shuffle, spill and memory, and wakes the agent only on a failure, the end or a possible stall (no progress, a straggler task, a run far past its median). The analysis goes in the card's thread. It finds the CLI and the profile on its own. Off by default for each agent (**Tools › Follow jobs**), with the allowed commands and every limit in **Settings › Agents**; starting and canceling jobs are off too, and ask for approval when on. Spark's numbers need the **Spark API address**, still to be checked against a real workspace.
 
 ## [0.2.14] - 2026-11-06
 

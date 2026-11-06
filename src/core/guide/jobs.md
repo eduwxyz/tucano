@@ -5,8 +5,9 @@ O app consulta o run sozinho, sem gastar tokens, e mostra estado, tasks e métri
 
 ## Ligar
 1. Instale e autentique a CLI do Databricks na máquina onde o Tucano roda (`databricks auth login`).
-2. Em **Configurações › Agentes › Jobs do Databricks**, escolha o **Perfil da CLI** e clique em **Testar a CLI**.
-3. Na página do agente, aba **Ferramentas**, ligue **Acompanhar jobs**.
+2. Na página do agente, aba **Ferramentas**, ligue **Acompanhar jobs**.
+
+O app acha a CLI e o perfil sozinho, e mostra o que achou em **Configurações › Agentes › Jobs do Databricks**. Lá dá para escolher outro perfil.
 
 ## Usar
 Peça em palavras: "Acompanha o job 123456789" ou "Acompanha o run 8841 e me avisa se travar". Com um job, o agente segue o run ativo mais recente. Sem run ativo, ele avisa e **não inicia nada**.
@@ -34,7 +35,7 @@ Ao ligar **Acompanhar jobs**, o agente recebe a skill **analisar-job-databricks*
 
 ## Quando dá errado
 - **Respondeu sem cartão:** confira se **Acompanhar jobs** está ligado nesse agente, e abra os passos da resposta. Se **Acompanhar job** falhou, o motivo está lá.
-- **Sem acesso:** rode `databricks auth login --profile <perfil>`. O acompanhamento volta sozinho.
-- **Não acha a CLI:** informe o **Caminho da CLI** nas Configurações.
+- **Sem acesso:** rode `databricks auth login`. O acompanhamento volta sozinho.
+- **Não acha a CLI:** instale-a e clique em **Procurar de novo**. Se ela estiver em outro lugar, informe o caminho nas Configurações. Uma CLI só dentro do WSL não é encontrada.
 - **Sem leitura há X minutos:** é falha na consulta, não no job. O app tenta de novo com mais espaço entre as tentativas.
 - **App fechado:** ao abrir, ele retoma. As métricas do intervalo ficam de fora, e o job continua rodando no Databricks.

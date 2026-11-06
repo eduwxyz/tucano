@@ -1,7 +1,7 @@
 // A Databricks run an agent follows: the live card under its message, and the settings.
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { commandWords, isFinal, isReadCommand, JOB_WATCH_DEFAULTS, jobWatchConfig, type JobState, type JobTask, type JobWatch, type JobWatchSettings } from '../../../shared/job-watch'
+import { commandWords, isFinal, isReadCommand, JOB_WATCH_DEFAULTS, jobWatchConfig, type DatabricksStatus, type JobState, type JobTask, type JobWatch, type JobWatchSettings } from '../../../shared/job-watch'
 import { safeUrl } from '../links'
 import { cancelJobRun, checkDatabricks, stopJobWatch, updateSettings, useStore } from '../store'
 import { confirmDialog } from './Dialogs'
@@ -157,7 +157,7 @@ export function JobWatchCard({ id }: { id: string }): ReactNode {
           {w.readErrorKind === 'auth' ? (
             <>
               {L('O login expirou. Rode ', 'The login expired. Run ')}
-              <code>databricks auth login --profile {'<perfil>'}</code>
+              <code>databricks auth login</code>
             </>
           ) : (
             w.readError
@@ -218,7 +218,14 @@ export function JobWatchSettingsCard(): ReactNode {
   const set = (patch: Partial<JobWatchSettings>): void => updateSettings({ jobWatch: { ...saved, ...patch } })
   const [commands, setCommands] = useState(c.commands.join('\n'))
   const [paths, setPaths] = useState(c.apiPaths.join('\n'))
-  const [check, setCheck] = useState<{ ok: boolean; text: string } | 'checking' | null>(null)
+  const [check, setCheck] = useState<DatabricksStatus | 'checking' | null>(null)
+  const detect = (): void => {
+    setCheck('checking')
+    checkDatabricks().then(setCheck, (e: unknown) => setCheck({ ok: false, text: e instanceof Error ? e.message : String(e), profiles: [] }))
+  }
+  // Nothing to fill in: it looks as the card opens, and again when a choice changes.
+  useEffect(detect, [saved?.profile])
+  const status = check !== 'checking' ? check : null
 
   // A command that doesn't only read asks before it goes on the list; running it asks again, each time.
   const saveCommands = async (): Promise<void> => {
@@ -246,27 +253,39 @@ export function JobWatchSettingsCard(): ReactNode {
       title={L('Jobs do Databricks', 'Databricks jobs')}
       lead={L('Como o app acompanha os runs pela CLI do Databricks, com o login que você já tem. Cada agente precisa ter Acompanhar jobs ligado, na aba Ferramentas.', 'How the app follows runs through the Databricks CLI, on the login you already have. Each agent needs Follow jobs on, in its Tools tab.')}
     >
-      <div className="grid2">
-        <Field label={L('Perfil da CLI', 'CLI profile')} hint={L('Prefira um perfil só de leitura: é o Databricks que garante isso, não o app.', 'Prefer a read-only profile: Databricks is what enforces that, not the app.')}>
-          <input value={saved?.profile ?? ''} placeholder="DEFAULT" onChange={(e) => set({ profile: e.target.value })} />
-        </Field>
-        <Field label={L('Caminho da CLI', 'CLI path')} hint={L('Vazio: procura databricks no PATH.', 'Empty: looks for databricks on the PATH.')}>
-          <input value={saved?.cliPath ?? ''} placeholder="databricks" onChange={(e) => set({ cliPath: e.target.value })} />
-        </Field>
-      </div>
-      <div className="row row--center">
-        <button
-          className="btn btn--sm"
-          onClick={() => {
-            setCheck('checking')
-            checkDatabricks().then(setCheck, (e: unknown) => setCheck({ ok: false, text: e instanceof Error ? e.message : String(e) }))
-          }}
-        >
-          {L('Testar a CLI', 'Test the CLI')}
+      <div className="key-row">
+        <div className="grow">
+          <strong>{L('CLI e login', 'CLI and login')}</strong>
+          {check === 'checking' && <p className="muted small">{L('Procurando…', 'Looking…')}</p>}
+          {status && <p className={`small ${status.ok ? 'job-settings__ok' : 'job-settings__bad'}`}>{status.text}</p>}
+          {status?.cliPath && <p className="muted small job-settings__path">{status.cliPath}</p>}
+          {status && !status.ok && <p className="muted small">{L('Instale a CLI do Databricks e rode databricks auth login. O app acha os dois sozinho.', 'Install the Databricks CLI and run databricks auth login. The app finds both on its own.')}</p>}
+        </div>
+        <button className="btn btn--sm" onClick={detect}>
+          {L('Procurar de novo', 'Look again')}
         </button>
-        {check === 'checking' && <span className="muted small">{L('Testando…', 'Testing…')}</span>}
-        {check && check !== 'checking' && <span className={`small ${check.ok ? 'job-settings__ok' : 'job-settings__bad'}`}>{check.text}</span>}
       </div>
+      <Field label={L('Perfil', 'Profile')} hint={L('O app escolhe sozinho. Prefira um perfil só de leitura: é o Databricks que garante isso, não o app.', 'The app picks on its own. Prefer a read-only profile: Databricks is what enforces that, not the app.')}>
+        <select value={saved?.profile ?? ''} onChange={(e) => set({ profile: e.target.value })}>
+          <option value="">{status?.profile && !saved?.profile ? L(`Automático (${status.profile})`, `Automatic (${status.profile})`) : L('Automático', 'Automatic')}</option>
+          {[...(status?.profiles.map((p) => p.name) ?? []), ...(saved?.profile ? [saved.profile] : [])]
+            .filter((n, i, all) => all.indexOf(n) === i)
+            .map((n) => {
+              const p = status?.profiles.find((x) => x.name === n)
+              return (
+                <option key={n} value={n}>
+                  {[n, p?.host, p?.valid === false ? L('sem login', 'not signed in') : ''].filter(Boolean).join(' · ')}
+                </option>
+              )
+            })}
+        </select>
+      </Field>
+      <details className="job-settings__more">
+        <summary>{L('A CLI está em outro lugar', 'The CLI is somewhere else')}</summary>
+        <Field label={L('Caminho da CLI', 'CLI path')} hint={L('Só se o app não achar sozinho.', 'Only if the app can’t find it on its own.')}>
+          <input value={saved?.cliPath ?? ''} placeholder={status?.cliPath ?? 'databricks'} spellCheck={false} onChange={(e) => set({ cliPath: e.target.value })} onBlur={detect} />
+        </Field>
+      </details>
 
       <Field label={L('Comandos permitidos', 'Allowed commands')} hint={L('Um por linha, com as opções que ele pode usar. O que não estiver aqui é bloqueado.', 'One per line, with the flags it may use. What isn’t here is blocked.')}>
         <textarea rows={7} value={commands} spellCheck={false} onChange={(e) => setCommands(e.target.value)} onBlur={() => void saveCommands()} />

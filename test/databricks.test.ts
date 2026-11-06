@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CliError, DatabricksCli, parseJson, parseRun, parseSpark, stateOf, type CliExec } from '../src/core/databricks'
+import { chooseProfile, CliError, DatabricksCli, findCli, parseJson, parseProfiles, parseRun, parseSpark, stateOf, type CliExec } from '../src/core/databricks'
 import { jobWatchConfig } from '../src/shared/job-watch'
 
 describe('reading the state of a run', () => {
@@ -111,6 +111,151 @@ describe('Spark’s numbers', () => {
   })
 })
 
+describe('finding the CLI', () => {
+  const at = (...paths: string[]) => (p: string): boolean => paths.includes(p)
+
+  it('takes it from the PATH first', () => {
+    expect(findCli({ platform: 'win32', home: 'C:\\Users\\g', env: { PATH: 'C:\\a;C:\\tools' }, exists: at('C:\\tools\\databricks.exe'), list: () => [] })).toBe('C:\\tools\\databricks.exe')
+    expect(findCli({ platform: 'linux', home: '/home/g', env: { PATH: '/a:/tools' }, exists: at('/tools/databricks'), list: () => [] })).toBe('/tools/databricks')
+  })
+
+  it('reads the PATH under the name Windows gives it', () => {
+    expect(findCli({ platform: 'win32', home: 'C:\\Users\\g', env: { Path: 'C:\\tools' }, exists: at('C:\\tools\\databricks.exe'), list: () => [] })).toBe('C:\\tools\\databricks.exe')
+  })
+
+  it('looks where winget and scoop install it, for an app that doesn’t see the terminal’s PATH', () => {
+    const env = { PATH: '', LOCALAPPDATA: 'C:\\L' }
+    expect(findCli({ platform: 'win32', home: 'C:\\U', env, exists: at('C:\\L\\Microsoft\\WinGet\\Links\\databricks.exe'), list: () => [] })).toBe('C:\\L\\Microsoft\\WinGet\\Links\\databricks.exe')
+    expect(findCli({ platform: 'win32', home: 'C:\\U', env, exists: at('C:\\L\\Microsoft\\WinGet\\Packages\\Databricks.DatabricksCLI_x\\databricks.exe'), list: () => ['Other.App', 'Databricks.DatabricksCLI_x'] })).toBe('C:\\L\\Microsoft\\WinGet\\Packages\\Databricks.DatabricksCLI_x\\databricks.exe')
+    expect(findCli({ platform: 'win32', home: 'C:\\U', env, exists: at('C:\\U\\scoop\\shims\\databricks.exe'), list: () => [] })).toBe('C:\\U\\scoop\\shims\\databricks.exe')
+  })
+
+  it('looks where Homebrew and the installer put it', () => {
+    expect(findCli({ platform: 'darwin', home: '/Users/g', env: { PATH: '' }, exists: at('/opt/homebrew/bin/databricks'), list: () => [] })).toBe('/opt/homebrew/bin/databricks')
+    expect(findCli({ platform: 'linux', home: '/home/g', env: { PATH: '' }, exists: at('/home/g/.local/bin/databricks'), list: () => [] })).toBe('/home/g/.local/bin/databricks')
+  })
+
+  it('doesn’t take a .cmd, which can’t run without a shell', () => {
+    expect(findCli({ platform: 'win32', home: 'C:\\U', env: { PATH: 'C:\\npm' }, exists: at('C:\\npm\\databricks.cmd'), list: () => [] })).toBeUndefined()
+  })
+
+  it('says so when it isn’t anywhere', () => {
+    expect(findCli({ platform: 'linux', home: '/h', env: { PATH: '/a' }, exists: () => false, list: () => [] })).toBeUndefined()
+  })
+})
+
+describe('finding the profile', () => {
+  it('reads what the CLI lists', () => {
+    expect(parseProfiles('{"profiles":[{"name":"DEFAULT","host":"https://a","cloud":"aws","auth_type":"pat","valid":true},{"name":"dev","valid":false},{"host":"x"}]}')).toEqual([{ name: 'DEFAULT', host: 'https://a', valid: true }, { name: 'dev', valid: false }])
+    expect(parseProfiles('not json')).toEqual([])
+    expect(parseProfiles('{}')).toEqual([])
+  })
+
+  it('takes DEFAULT, then the first login that works', () => {
+    const ok = (name: string) => ({ name, valid: true })
+    expect(chooseProfile([ok('dev'), ok('DEFAULT')], {})).toBe('DEFAULT')
+    expect(chooseProfile([{ name: 'DEFAULT', valid: false }, ok('dev')], {})).toBe('dev')
+    expect(chooseProfile([{ name: 'a', valid: false }, ok('b'), ok('c')], {})).toBe('b')
+  })
+
+  it('still names one when no login works, so the error says which', () => {
+    expect(chooseProfile([{ name: 'a', valid: false }, { name: 'DEFAULT', valid: false }], {})).toBe('DEFAULT')
+    expect(chooseProfile([{ name: 'a', valid: false }], {})).toBe('a')
+  })
+
+  it('leaves it to the CLI with nothing listed', () => {
+    expect(chooseProfile([], {})).toBeUndefined()
+  })
+
+  it('follows the environment', () => {
+    expect(chooseProfile([{ name: 'DEFAULT', valid: true }], { DATABRICKS_CONFIG_PROFILE: 'prod' })).toBe('prod')
+    expect(chooseProfile([{ name: 'DEFAULT', valid: true }], { DATABRICKS_HOST: 'https://a' })).toBeUndefined()
+  })
+})
+
+describe('using what it found', () => {
+  const profiles = '{"profiles":[{"name":"leitura","host":"https://a","valid":true}]}'
+  const running = JSON.stringify({ state: { life_cycle_state: 'RUNNING' } })
+  const setup = (patch: Parameters<typeof jobWatchConfig>[0] = {}, find: () => string | undefined = () => 'C:\\found\\databricks.exe') => {
+    const calls: { file: string; args: string[] }[] = []
+    let clock = 0
+    const exec: CliExec = async (file, args) => {
+      calls.push({ file, args })
+      return { stdout: args[0] === 'auth' ? profiles : running, stderr: '', code: 0 }
+    }
+    const cli = new DatabricksCli({ exec, find, env: {}, config: () => jobWatchConfig(patch), now: () => clock })
+    return { cli, calls, tick: (ms: number) => (clock += ms) }
+  }
+
+  it('runs with no settings at all', async () => {
+    const { cli, calls } = setup()
+    await cli.reading('1')
+    expect(calls.at(-1)).toEqual({ file: 'C:\\found\\databricks.exe', args: ['jobs', 'get-run', '1', '--output', 'json', '--profile', 'leitura'] })
+  })
+
+  it('lets what’s set win', async () => {
+    const { cli, calls } = setup({ cliPath: 'C:\\mine.exe', profile: 'meu' })
+    await cli.reading('1')
+    expect(calls.at(-1)).toEqual({ file: 'C:\\mine.exe', args: ['jobs', 'get-run', '1', '--output', 'json', '--profile', 'meu'] })
+  })
+
+  it('searches once, and again after a while', async () => {
+    const { cli, calls, tick } = setup()
+    await cli.reading('1')
+    await cli.reading('1')
+    expect(calls.filter((c) => c.args[0] === 'auth')).toHaveLength(1)
+    tick(11 * 60_000)
+    await cli.reading('1')
+    expect(calls.filter((c) => c.args[0] === 'auth')).toHaveLength(2)
+  })
+
+  it('searches again right after a login is refused, so signing in is enough', async () => {
+    let refuse = true
+    const calls: string[][] = []
+    const exec: CliExec = async (_f, args) => {
+      calls.push(args)
+      if (args[0] === 'auth') return { stdout: profiles, stderr: '', code: 0 }
+      return refuse ? { stdout: '', stderr: 'Error: Invalid access token', code: 1 } : { stdout: running, stderr: '', code: 0 }
+    }
+    const cli = new DatabricksCli({ exec, find: () => 'x', env: {}, config: () => jobWatchConfig() })
+    await expect(cli.reading('1')).rejects.toMatchObject({ kind: 'auth' })
+    refuse = false
+    await cli.reading('1')
+    expect(calls.filter((a) => a[0] === 'auth')).toHaveLength(2)
+  })
+
+  it('goes on without a profile on a CLI too old to list them', async () => {
+    const calls: string[][] = []
+    const exec: CliExec = async (_f, args) => {
+      calls.push(args)
+      return args[0] === 'auth' ? { stdout: '', stderr: 'unknown command', code: 1 } : { stdout: running, stderr: '', code: 0 }
+    }
+    await new DatabricksCli({ exec, find: () => 'x', env: {}, config: () => jobWatchConfig() }).reading('1')
+    expect(calls.at(-1)).toEqual(['jobs', 'get-run', '1', '--output', 'json'])
+  })
+
+  it('searches for nothing when the rules refuse the command', async () => {
+    const { cli, calls } = setup({ commands: [] })
+    await expect(cli.reading('1')).rejects.toMatchObject({ kind: 'refused' })
+    expect(calls).toEqual([])
+  })
+
+  it('tells Settings what it found, and looks again each time', async () => {
+    const { calls, ...rest } = setup({ commands: ['current-user me'] })
+    const status = await rest.cli.check()
+    expect(status).toMatchObject({ cliPath: 'C:\\found\\databricks.exe', profile: 'leitura', profiles: [{ name: 'leitura', host: 'https://a', valid: true }] })
+    await rest.cli.check()
+    expect(calls.filter((c) => c.args[0] === 'auth')).toHaveLength(2)
+  })
+
+  it('says there’s no CLI when it isn’t anywhere', async () => {
+    const exec: CliExec = async () => ({ stdout: '', stderr: 'spawn ENOENT', code: 1, failure: 'missing' })
+    const cli = new DatabricksCli({ exec, find: () => undefined, env: {}, config: () => jobWatchConfig() })
+    await expect(cli.reading('1')).rejects.toMatchObject({ kind: 'no_cli' })
+    expect(await cli.check()).toMatchObject({ ok: false, profiles: [] })
+  })
+})
+
 describe('calling the CLI', () => {
   const answers = (fn: (args: string[]) => { stdout?: string; stderr?: string; code?: number; failure?: 'missing' | 'timeout' }) => {
     const calls: { file: string; args: string[] }[] = []
@@ -121,12 +266,12 @@ describe('calling the CLI', () => {
     }
     return { calls, exec }
   }
-  const cli = (exec: CliExec, patch: Parameters<typeof jobWatchConfig>[0] = {}): DatabricksCli => new DatabricksCli({ exec, config: () => jobWatchConfig(patch) })
+  const cli = (exec: CliExec, patch: Parameters<typeof jobWatchConfig>[0] = {}): DatabricksCli => new DatabricksCli({ exec, find: () => undefined, env: {}, config: () => jobWatchConfig({ profile: 'p', ...patch }) })
 
   it('always sets the format and the profile', async () => {
     const { calls, exec } = answers(() => ({ stdout: JSON.stringify({ state: { life_cycle_state: 'RUNNING' } }) }))
     await cli(exec, { profile: 'leitura', cliPath: 'C:\\db.exe' }).reading('8841')
-    expect(calls[0]).toEqual({ file: 'C:\\db.exe', args: ['jobs', 'get-run', '8841', '--output', 'json', '--profile', 'leitura'] })
+    expect(calls.at(-1)).toEqual({ file: 'C:\\db.exe', args: ['jobs', 'get-run', '8841', '--output', 'json', '--profile', 'leitura'] })
   })
 
   it('never starts what the rules refuse', async () => {
@@ -157,7 +302,7 @@ describe('calling the CLI', () => {
   it('finds active runs and the median of the good ones', async () => {
     const { exec } = answers((args) => ({
       stdout: JSON.stringify(
-        String(args[2]).includes('active_only')
+        args[0] === 'auth' ? {} : String(args[2]).includes('active_only')
           ? { runs: [{ run_id: 9 }, { run_id: 8 }] }
           : { runs: [
               { state: { life_cycle_state: 'TERMINATED', result_state: 'SUCCESS' }, run_duration: 100 },
@@ -181,6 +326,7 @@ describe('calling the CLI', () => {
   it('reads Spark through the allowed paths, with the cluster in the address', async () => {
     const paths: string[] = []
     const { exec } = answers((args) => {
+      if (args[0] === 'auth') return { stdout: '{}' }
       const path = args[2]!
       paths.push(path)
       if (path.endsWith('/applications')) return { stdout: '[{"id":"app-1"}]' }
@@ -197,7 +343,7 @@ describe('calling the CLI', () => {
 
   it('reports whether it’s there and signed in', async () => {
     const ok = answers((args) => (args[0] === '--version' ? { stdout: 'Databricks CLI v0.200\n' } : { stdout: '{"userName":"a@b.c"}' }))
-    expect(await cli(ok.exec).check()).toEqual({ ok: true, text: 'Databricks CLI v0.200 · a@b.c' })
+    expect(await cli(ok.exec).check()).toMatchObject({ ok: true, text: 'Databricks CLI v0.200 · a@b.c', cliPath: 'databricks', profile: 'p' })
     const missing = answers(() => ({ failure: 'missing', code: 1 }))
     expect((await cli(missing.exec).check()).ok).toBe(false)
   })

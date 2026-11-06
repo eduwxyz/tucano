@@ -28,10 +28,12 @@ let toolAnswers: string[]
 let calls: string[][]
 let runState: object
 let script: ((url: string) => Promise<void>) | undefined
+let found: boolean
 
 const run = (): string => JSON.stringify({ run_id: 8841, job_id: 123, run_name: 'vendas_diarias', start_time: Date.now() - 60_000, ...runState, tasks: [] })
 
 const exec: CliExec = async (_file, args) => {
+  if (args[0] === 'auth') return { stdout: '{}', stderr: '', code: 0 }
   calls.push(args)
   if (args[0] === 'jobs' && args[1] === 'get-run') return { stdout: run(), stderr: '', code: 0 }
   if (args[0] === 'api') return { stdout: JSON.stringify({ runs: [] }), stderr: '', code: 0 }
@@ -72,17 +74,18 @@ beforeEach(async () => {
   toolAnswers = []
   calls = []
   runState = { state: { life_cycle_state: 'RUNNING' } }
+  found = false
   settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
   gateway = new Gateway()
   await gateway.start()
   db.saveAgent(agent)
   db.createConversation({ id: 'dm', kind: 'dm', name: 'theo', members: ['theo'] })
   const config = () => jobWatchConfig(settings.jobWatch)
-  const cli = new DatabricksCli({ exec, config })
+  const cli = new DatabricksCli({ exec, config, find: () => undefined, env: {} })
   const engines = Object.fromEntries((['codex', 'opencode', 'pi', 'gemini', 'cursor', 'grok'] as EngineId[]).map((e) => [e, fakeEngine(e)])) as Record<EngineId, Engine>
   engines.claude = engine('claude')
   jobs = new JobWatches({ db, emit: () => {}, cli, config, runner: { runJobEvent: (w, e) => runner.runJobEvent(w, e) } })
-  runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'jw-w-')), gateway, jobs })
+  runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'jw-w-')), gateway, jobs, jobsFound: () => found })
 })
 afterEach(() => gateway.stop())
 
@@ -109,7 +112,7 @@ describe('following a run through the agent', () => {
     await jobs.tick() // the first check is due only after the interval
     const w = db.jobWatches()[0]!
     if (w.status === 'watching') {
-      const later = new JobWatches({ db, emit: () => {}, cli: new DatabricksCli({ exec, config: () => jobWatchConfig() }), config: () => jobWatchConfig(), runner: { runJobEvent: (x, e) => runner.runJobEvent(x, e) } })
+      const later = new JobWatches({ db, emit: () => {}, cli: new DatabricksCli({ exec, config: () => jobWatchConfig(), find: () => undefined, env: {} }), config: () => jobWatchConfig(), runner: { runJobEvent: (x, e) => runner.runJobEvent(x, e) } })
       await later.tick()
       await later.idle()
     }
@@ -136,6 +139,13 @@ describe('what the agent is told about jobs', () => {
   it('with it off and the app set up, where to turn it on', async () => {
     db.saveAgent({ ...agent, jobWatch: false })
     settings.jobWatch = { profile: 'leitura' }
+    await ask(async () => {})
+    expect(system()).toContain('turning on Follow jobs')
+  })
+
+  it('with it off and the CLI on this machine, where to turn it on', async () => {
+    db.saveAgent({ ...agent, jobWatch: false })
+    found = true
     await ask(async () => {})
     expect(system()).toContain('turning on Follow jobs')
   })

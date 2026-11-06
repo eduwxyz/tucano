@@ -4,7 +4,7 @@ import { useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
-import type { JobWatch } from '../../shared/job-watch'
+import type { DatabricksStatus, JobWatch } from '../../shared/job-watch'
 import {
   type Account,
   type AccountEngine,
@@ -630,7 +630,7 @@ export const loadUsage = (): Promise<UsageReport> => call('usage')
 export const removeRoutine = (id: string): void => void fire(L('Não consegui remover a rotina.', "I couldn't remove the routine."), 'removeRoutine', { id })
 export const stopJobWatch = (id: string): void => void fire(L('Não consegui parar de acompanhar.', "I couldn't stop following it."), 'stopJobWatch', { id })
 export const cancelJobRun = (id: string): Promise<void> => call('cancelJobRun', { id })
-export const checkDatabricks = (): Promise<{ ok: boolean; text: string }> => call('checkDatabricks')
+export const checkDatabricks = (): Promise<DatabricksStatus> => call('checkDatabricks')
 export const runRoutine = (id: string): void => void fire(L('Não consegui rodar a rotina.', "I couldn't run the routine."), 'runRoutine', { id })
 // A @handle from a name: "Lúcia M." → "luciam".
 export const slug = (name: string): string =>

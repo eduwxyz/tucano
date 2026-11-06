@@ -94,6 +94,7 @@ export interface RunnerDeps {
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   jobs?: Pick<JobWatches, 'call' | 'approved'> // without it, no agent follows Databricks runs
+  jobsFound?: () => boolean // the Databricks CLI is on this machine, so an agent with the option off can say where it is
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
@@ -1503,7 +1504,7 @@ export class Runner {
       web: agent.web !== false,
       routines: routines?.forAgent(agent.id),
       skills: skills && mySkills,
-      jobs: jobs ? 'on' : this.deps.gateway && this.deps.jobs && settings.jobWatch ? 'off' : undefined,
+      jobs: jobs ? 'on' : this.deps.gateway && this.deps.jobs && (settings.jobWatch || this.deps.jobsFound?.()) ? 'off' : undefined,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
       connectors: exposed.size > 0,
       builder: proposes

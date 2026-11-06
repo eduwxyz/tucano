@@ -28,11 +28,15 @@ Permitir que um agente acompanhe um job do Databricks a partir de um `job_id` ou
 - Autenticação por token próprio do Tucano.
 - Reparar runs (`repair-run`).
 
+## Sem configuração obrigatória
+
+O app acha a CLI e o perfil sozinho, com `databricks auth profiles`, chamada fixa do próprio app, e mostra o resultado nas Configurações. O perfil e o caminho só são informados à mão para escolher outro. O achado vale por 10 minutos, e um login recusado ou uma CLI ausente faz procurar de novo.
+
 ## Etapa 0: validação obrigatória
 
 Antes de construir as métricas do Spark, validar com a CLI do usuário, num cluster em execução:
 
-1. A CLI está instalada onde o Tucano roda, e o perfil autentica. O botão **Testar a CLI** confere isso.
+1. A CLI está instalada onde o Tucano roda, e o perfil autentica. As Configurações mostram o resultado.
 2. `databricks api get` alcança a API de monitoramento do Spark pelo proxy do driver. Não há documentação oficial confirmando esse caminho. A validação também define o formato exato do caminho e como obter a organização, o cluster e a porta.
 3. As respostas trazem progresso por etapa, shuffle, spill e memória dos executores.
 4. Os nomes das flags da CLI e o formato de `jobs get-run` e `jobs list-runs` na versão instalada batem com esta spec.
@@ -135,7 +139,7 @@ Liberados por padrão:
 - `jobs get-run-output`
 - `jobs list-runs`
 - `clusters get`
-- `current-user me`, para o botão **Testar a CLI**
+- `current-user me`, para conferir o login nas Configurações
 - `api get`, só nos caminhos da lista: `/api/2.1/jobs/runs/list` e `/driver-proxy-api/`
 
 Cada entrada da lista traz as flags aceitas, como `jobs list-runs --job-id --limit`. Para achar runs, o app usa `api get`, porque ele traz uma página só, e a listagem da CLI pode percorrer todo o histórico.
@@ -211,9 +215,9 @@ O cartão diz "Possível travamento", nunca uma certeza. Se o progresso voltar, 
 
 | Configuração | Padrão | Mínimo |
 |---|---|---|
-| Caminho da CLI | Procurar no PATH | Não se aplica |
+| Caminho da CLI | Achado sozinho, no PATH e nas pastas comuns de instalação | Não se aplica |
 | Endereço da API do Spark | Vazio: sem métricas do Spark | Não se aplica |
-| Perfil da CLI | Escolhido pelo usuário | Não se aplica |
+| Perfil da CLI | Achado sozinho: o do ambiente, senão `DEFAULT`, senão o primeiro com login válido | Não se aplica |
 | Intervalo entre consultas | 30 s | 15 s |
 | Jobs ao mesmo tempo | 5 | 1 |
 | Tempo máximo de acompanhamento | 24 h | 1 h |
