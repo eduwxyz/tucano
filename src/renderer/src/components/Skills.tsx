@@ -3,6 +3,7 @@
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
+import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import {
   agentById,
@@ -27,6 +28,7 @@ import {
 import { Card, Field, Sheet } from './Pages'
 import { confirmDialog } from './Dialogs'
 import { ago, AgentAvatar, Icon, time } from './ui'
+import { Modal } from './Modal'
 
 type Place = { kind: 'list' } | { kind: 'skill'; id: string } | { kind: 'review' }
 
@@ -62,11 +64,9 @@ export function SkillsPage(): ReactNode {
   const toList = (): void => setPlace({ kind: 'list' })
 
   const form = draft && (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setDraft(null)}>
-      <div className="form-modal">
-        <SkillForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
-      </div>
-    </div>
+    <Modal title={draft.id ? L('Editar skill', 'Edit skill') : L('Nova skill', 'New skill')} variant="form" onClose={() => setDraft(null)}>
+      <SkillForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
+    </Modal>
   )
 
   if (open)
@@ -232,7 +232,7 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
         <h2>{L('Receita', 'Recipe')}</h2>
         {k.body.trim() ? (
           <article className="recipe">
-            <Markdown remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
+            <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
           </article>
         ) : (
           <p className="read-empty">{L(`A receita é lida de ${k.source} a cada uso.`, `The recipe is read from ${k.source} on every use.`)}</p>
@@ -442,7 +442,7 @@ function Proposal({ proposal: p }: { proposal: Skill }): ReactNode {
             <span>{L('Quando usar:', 'When to use:')}</span> {p.description}
           </p>
           <article className="recipe recipe--box">
-            <Markdown remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
+            <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
           </article>
           <p className="proposal__who">
             {L('Vale pra', 'For')} <Who ids={p.agents} />. {L('Depois de aprovar, dá pra liberar pra outros agentes.', 'After approving, you can open it to other agents.')}

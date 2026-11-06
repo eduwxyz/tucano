@@ -5,7 +5,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import type { TeamChange, TeamChoice, TeamItemKind, TeamPackageInfo, TeamUpdate } from '../../../shared/types'
 import { forgetTeam, importTeam, teams } from '../store'
-import { confirmDialog, Modal } from './Dialogs'
+import { confirmDialog } from './Dialogs'
+import { Modal } from './Modal'
 import { Diff } from './Skills'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))

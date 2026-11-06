@@ -49,10 +49,17 @@ export function parseTeamFile(text: string): TeamFile {
 
 // ---------- backups ----------
 
-// A copy of the database (secrets stay encrypted for this Mac's keychain).
-export function backup(db: Db, dir: string): string {
+// A copy of the database (secrets stay encrypted for this Mac's keychain), named by
+// when and then which workspace: names sort by date, so the oldest go first.
+export function backup(db: Db, dir: string, workspaceName?: string): string {
   mkdirSync(dir, { recursive: true })
-  const file = join(dir, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.db`)
+  const safe = (workspaceName ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+  const file = join(dir, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}${safe ? `-${safe}` : ''}.db`)
   if (existsSync(file)) rmSync(file)
   db.backupTo(file)
   const old = readdirSync(dir)
@@ -64,7 +71,7 @@ export function backup(db: Db, dir: string): string {
 }
 
 // Once a day, at startup or while the app stays open.
-export function backupIfDue(db: Db, dir: string): void {
+export function backupIfDue(db: Db, dir: string, workspaceName?: string): void {
   const last = existsSync(dir)
     ? readdirSync(dir)
         .filter((f) => f.endsWith('.db'))
@@ -72,6 +79,6 @@ export function backupIfDue(db: Db, dir: string): void {
         .sort()
         .at(-1)
     : undefined
-  if (!last || Date.now() - last > DAY) backup(db, dir)
+  if (!last || Date.now() - last > DAY) backup(db, dir, workspaceName)
 }
 

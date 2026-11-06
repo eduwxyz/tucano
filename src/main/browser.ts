@@ -32,7 +32,7 @@ export class Browsers {
   private titles = new Map<string, string>() // "Lia's browser · close the window to hand it back", from the core
   private quitting = false
 
-  constructor(private onShown: (agentId: string, shown: boolean) => void) {}
+  constructor(private onShown: (agentId: string, shown: boolean) => void, private namespace = '') {}
 
   // "{page} — Lia's browser · close the window to hand it back".
   private titled(agentId: string, page: string): string {
@@ -47,7 +47,7 @@ export class Browsers {
   }
 
   private partition(agentId: string): string {
-    return `persist:navegador-${agentId}`
+    return `persist:navegador-${this.namespace}${agentId}`
   }
 
   private win(agentId: string): BrowserWindow {
