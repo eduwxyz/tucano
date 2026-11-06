@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { asSaid, saidAt, type Agent, type EngineId, type Message, type RunStatus, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
@@ -77,6 +77,14 @@ describe('replies that overlap', () => {
   const whose = (m: Message): string => (m.author.kind === 'agent' ? m.author.id : m.author.kind)
   const of = (id: string): Message => db.messages().find((m) => whose(m) === id)!
 
+  // Lia is asked first and is at work when Theo is asked: two messages, since agents called in one may take turns.
+  const overlap = async (r: Runner): Promise<void> => {
+    await r.send('c', '@lia bom dia')
+    await vi.waitFor(() => expect(turns).toHaveLength(1))
+    await r.send('c', '@theo bom dia')
+    await r.idle()
+  }
+
   beforeEach(() => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ro-db-')), 'test.db'))
     db.saveAgent(agent('lia', 'lia'))
@@ -85,29 +93,27 @@ describe('replies that overlap', () => {
   })
 
   it('shows the one that ended last below the other, with the time it ended', async () => {
-    const r = runner()
-    await r.send('c', '@lia @theo bom dia')
-    await r.idle()
+    await overlap(runner())
 
-    expect(of('lia').at).toBeLessThanOrEqual(of('theo').at) // she started first…
+    expect(of('lia').at).toBeLessThan(of('theo').at) // she started first…
     expect(of('lia').run!.endedAt!).toBeGreaterThan(of('theo').run!.endedAt!) // …and ended last
-    expect(asSaid(db.messages()).map(whose)).toEqual(['me', 'theo', 'lia'])
+    expect(asSaid(db.messages()).map(whose)).toEqual(['me', 'me', 'theo', 'lia'])
     expect(saidAt(of('lia'))).toBe(of('lia').run!.endedAt)
   })
 
   it('goes on with the session it had: what the other said while it worked is simply new to it', async () => {
     const r = runner()
-    await r.send('c', '@lia @theo bom dia')
-    await r.idle()
+    await overlap(r)
     await r.send('c', '@lia e agora?')
     await r.idle()
 
     const [first, second] = turns
     expect(second!.session).toEqual({ id: first!.session!.id, resume: true, keep: true })
-    expect(second!.blocks).toHaveLength(2)
-    expect(second!.blocks![0]).toMatch(/^\[theo · agente/)
-    expect(second!.blocks![1]).toMatch(/e agora\?$/)
-    expect(db.messages().map(whose)).toEqual(['me', 'lia', 'theo', 'me', 'lia']) // agents read in the order they started
+    expect(second!.blocks).toHaveLength(3)
+    expect(second!.blocks![0]).toMatch(/theo bom dia$/)
+    expect(second!.blocks![1]).toMatch(/^\[theo · agente/)
+    expect(second!.blocks![2]).toMatch(/e agora\?$/)
+    expect(db.messages().map(whose)).toEqual(['me', 'lia', 'me', 'theo', 'me', 'lia']) // agents read in the order they started
   })
 
   it('marks the end of a reply that failed, and a new end when it is tried again', async () => {
