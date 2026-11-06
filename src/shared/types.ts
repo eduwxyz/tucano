@@ -278,6 +278,7 @@ export interface Settings {
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
+  chainDepth?: number // agent replies in a row from one human message; default CHAIN_DEPTH
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
@@ -402,6 +403,10 @@ export const SAME_TOOL_STOP = 60 // ...and past it, that tool is refused for the
 export const SLEEPS_FREE = 1 // commands that start by sleeping 20 s or more: the first runs, the next ones are refused
 export const SLEEPS_STOP = 4 // refused sleeps in a reply before it stops
 export const PENDING_WAIT_MINUTES = 5 // a connector result still running (a SQL statement) is awaited by the app this long
+export const CHAIN_DEPTH = 3 // agent replies chained from one human message before Tucano stops them
+export const MAX_CHAIN_DEPTH = 10
+// Agents mentioning each other can't loop and burn tokens with nobody watching: a whole number from 1 to MAX_CHAIN_DEPTH, whatever reached the core.
+export const chainDepthCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.min(MAX_CHAIN_DEPTH, Math.max(1, Math.round(n as number))) : CHAIN_DEPTH)
 
 // What a reply counts against limits: a token read from the cache costs about a
 // tenth of a new one, so it counts a tenth.
