@@ -489,6 +489,8 @@ export const addConnector = (input: ConnectorInput): Promise<string> => call('ad
 export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
 export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
 export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
+export const googleApp = (): Promise<{ clientId: string } | null> => call('googleApp')
+export const setGoogleApp = (clientId: string, clientSecret: string): Promise<void> => call('setGoogleApp', { clientId, clientSecret })
 // On a server the authorization page comes back to be opened here, then pasted back.
 export const authorizeConnector = (id: string): void =>
   void call('authorizeConnector', { id }).then(

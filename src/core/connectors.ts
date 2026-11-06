@@ -12,6 +12,7 @@ import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } fr
 import { L } from '../shared/lang'
 import { friendly } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
+import { googleScopes } from '../shared/connector-catalog'
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify } from './policy'
@@ -81,6 +82,7 @@ export interface ConnectorDeps {
   openUrl: (url: string) => void
   oauthCallbackUrl: () => string
   callTimeoutMs?: number // how long a tool call may take; tests shorten it
+  googleScopes?: (url: string | undefined) => string[] | undefined // which servers are Google's; tests point it at their own
 }
 
 interface Live {
@@ -102,6 +104,24 @@ export const staleSession = (e: unknown): boolean =>
   (e instanceof StreamableHTTPError && e.code === 404) || (e instanceof Error && /session not found|no valid session|invalid session id|^not connected$/i.test(e.message))
 
 const key = (id: string, what: string): string => `connector:${id}:${what}`
+const GOOGLE_APP = 'google:app'
+
+// The OAuth client the person made in their Google Cloud project: Google takes no app it hasn't met.
+export interface GoogleApp {
+  clientId: string
+  clientSecret: string
+}
+
+// Google's authorization page, asking only for the scopes the connector's tools need (its servers list
+// the full ones too, which the SDK would ask for), and for a refresh token: Google gives one only
+// offline, and only on consent, so a connector doesn't stop working an hour after signing in.
+export function googleAuthorization(url: URL, scopes: string[]): URL {
+  const u = new URL(url)
+  u.searchParams.set('scope', scopes.join(' '))
+  u.searchParams.set('access_type', 'offline')
+  u.searchParams.set('prompt', 'consent')
+  return u
+}
 
 // The gateway's callback port changes on every launch, and RFC 8252 §7.3 has an
 // authorization server treat a loopback redirect as port-agnostic. Comparing the
@@ -177,6 +197,32 @@ export class ConnectorManager {
     this.emitConnector(id)
     void this.connect(id, interactive)
     return id
+  }
+
+  async googleApp(): Promise<{ clientId: string } | null> {
+    const app = await this.deps.secrets.getJson<GoogleApp>(GOOGLE_APP)
+    return app ? { clientId: app.clientId } : null
+  }
+
+  // Saves the person's Google app. Another one leaves the Google connectors signed in to the old one
+  // without a way to renew: they sign in again, with this one.
+  async setGoogleApp(input: GoogleApp): Promise<void> {
+    const clientId = input.clientId.trim()
+    const clientSecret = input.clientSecret.trim()
+    if (!/^[\w.-]+\.apps\.googleusercontent\.com$/.test(clientId)) throw new Error(L('Esse não parece um ID do cliente do Google: ele termina em .apps.googleusercontent.com.', "That doesn't look like a Google client ID: it ends in .apps.googleusercontent.com."))
+    if (!clientSecret) throw new Error(L('Cole a chave secreta do cliente.', 'Paste the client secret.'))
+    const before = await this.deps.secrets.getJson<GoogleApp>(GOOGLE_APP)
+    await this.deps.secrets.setJson(GOOGLE_APP, { clientId, clientSecret })
+    if (before && before.clientId === clientId) return
+    for (const c of this.deps.db.connectors()) {
+      if (c.kind !== 'remote' || !this.google(c.url)) continue
+      await this.deps.secrets.set(key(c.id, 'oauth_tokens'), undefined)
+      void this.connect(c.id)
+    }
+  }
+
+  private google(url: string | undefined): string[] | undefined {
+    return (this.deps.googleScopes ?? googleScopes)(url)
   }
 
   // Sets or replaces the token of a connector that signs in with one, and connects with it.
@@ -255,6 +301,10 @@ export class ConnectorManager {
       { listChanged: { tools: { onChanged: () => void this.refreshTools(id).catch(() => {}) } } }
     )
     let transport: Transport
+    if (c.kind === 'remote' && c.auth === 'oauth' && this.google(c.url) && !(await this.deps.secrets.getJson<GoogleApp>(GOOGLE_APP))) {
+      this.setStatus(id, 'error', L('Falta o seu app do Google: em Conectores, clique em Conectar num conector do Google e siga os passos.', 'Your Google app is missing: in Connectors, click Connect on a Google connector and follow the steps.'))
+      return
+    }
     if (c.kind === 'remote') {
       const headers: Record<string, string> = {}
       if (c.auth === 'token') {
@@ -263,7 +313,7 @@ export class ConnectorManager {
       }
       const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
         requestInit: { headers },
-        authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive) : undefined
+        authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, this.google(c.url)) : undefined
       })
       transport = http
     } else {
@@ -440,7 +490,9 @@ export class ConnectorManager {
     return true
   }
 
-  private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean): OAuthClientProvider {
+  // `google`: the scopes of one of Google's servers, which signs in with the person's Google app
+  // instead of registering one.
+  private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, google?: string[]): OAuthClientProvider {
     const { secrets } = this.deps
     const redirectUrl = this.deps.oauthCallbackUrl()
     let state = ''
@@ -466,23 +518,28 @@ export class ConnectorManager {
       // redirect). Signing in again, it must be the exact address: a server that
       // doesn't take any port on loopback would turn the new one away, so it registers again.
       clientInformation: async () => {
+        if (google) {
+          const app = await secrets.getJson<GoogleApp>(GOOGLE_APP)
+          return app && { client_id: app.clientId, client_secret: app.clientSecret }
+        }
         const info = await secrets.getJson<OAuthClientInformationMixed & { redirect_uris?: string[] }>(key(id, 'oauth_client'))
         const fits = (u: string): boolean => (interactive ? u === redirectUrl : sameLoopbackRedirect(u, redirectUrl))
         return info && (!info.redirect_uris || info.redirect_uris.some(fits)) ? info : undefined
       },
-      saveClientInformation: (info) => secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] }),
+      saveClientInformation: (info) => (google ? undefined : secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] })),
       tokens: () => secrets.getJson<OAuthTokens>(key(id, 'oauth_tokens')),
       saveTokens: (t) => secrets.setJson(key(id, 'oauth_tokens'), t),
       saveCodeVerifier: (v) => secrets.set(key(id, 'oauth_verifier'), v),
       codeVerifier: async () => (await secrets.get(key(id, 'oauth_verifier'))) ?? '',
-      redirectToAuthorization: (url) => {
+      redirectToAuthorization: (page) => {
         if (!interactive) return // never pop a browser on a background reconnect
+        const url = google ? googleAuthorization(page, google) : page
         this.oauthStates.set(state || url.searchParams.get('state') || '', { connectorId: id, transport: transport() })
         this.authUrls.set(id, url.toString())
         this.deps.openUrl(url.toString())
       },
       invalidateCredentials: async (scope) => {
-        if (scope === 'all' || scope === 'client') await secrets.set(key(id, 'oauth_client'), undefined)
+        if ((scope === 'all' || scope === 'client') && !google) await secrets.set(key(id, 'oauth_client'), undefined) // the Google app is the person's
         if (scope === 'all' || scope === 'tokens') await secrets.set(key(id, 'oauth_tokens'), undefined)
         if (scope === 'all' || scope === 'verifier') await secrets.set(key(id, 'oauth_verifier'), undefined)
       }

@@ -1,10 +1,12 @@
 // The Connectors page's grid: what's added, then what's ready to add, by category. One click signs
 // in through the browser (or needs no sign-in); anything else goes in by hand, with "Adicionar personalizado".
-import { useState, type ReactNode } from 'react'
+// Google's sign in with an app the person makes once in Google Cloud, which the first one walks them through.
+import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { CATALOG, CATEGORIES, sameServer, searchCatalog, type CatalogEntry } from '../../../shared/connector-catalog'
+import { CATALOG, CATEGORIES, GOOGLE_APIS, sameServer, searchCatalog, type CatalogEntry } from '../../../shared/connector-catalog'
 import { LOGOS } from '../connector-logos'
-import { addConnector, authorizeConnector, useStore, type Connector } from '../store'
+import { addConnector, authorizeConnector, googleApp, openExternal, setGoogleApp, useStore, type Connector } from '../store'
+import { Modal } from './Modal'
 import { Icon } from './ui'
 
 // A light brand color takes a dark mark, so every tile reads in both themes.
@@ -43,12 +45,18 @@ export function ConnectorGrid({ status, onManage }: { status: Status; onManage: 
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<{ id: string; text: string } | null>(null)
+  const [google, setGoogle] = useState<{ clientId: string } | null | undefined>(undefined) // undefined: not read yet
+  const [setup, setSetup] = useState<{ then?: CatalogEntry } | null>(null)
+  useEffect(() => {
+    void googleApp().then(setGoogle, () => setGoogle(null))
+  }, [])
   const entryOf = (c: Connector): CatalogEntry | undefined => (c.kind === 'remote' ? CATALOG.find((e) => sameServer(c.url, e.url)) : undefined)
   const words = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
   const mine = connectors.filter((c) => !words || `${c.name} ${entryOf(c)?.about() ?? ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(words))
   const found = searchCatalog(query).filter((e) => !connectors.some((c) => c.kind === 'remote' && sameServer(c.url, e.url)))
 
   const connect = (c: CatalogEntry): void => {
+    if (c.google && !google) return setSetup({ then: c })
     setBusy(c.id)
     setError(null)
     addConnector({ name: c.name, kind: 'remote', url: c.url, auth: c.auth })
@@ -127,7 +135,13 @@ export function ConnectorGrid({ status, onManage }: { status: Status; onManage: 
           <div key={cat.id} className="catalog__group">
             <h3>
               {cat.name} <span className="muted">{entries.length}</span>
+              {cat.id === 'google' && google && (
+                <button className="btn btn--ghost btn--sm catalog__google-app" title={google.clientId} onClick={() => setSetup({})}>
+                  {L('Seu app do Google', 'Your Google app')}
+                </button>
+              )}
             </h3>
+            {cat.id === 'google' && !google && <p className="muted small catalog__note">{L('O Google pede um app seu, criado uma vez no Google Cloud: o primeiro Conectar mostra como, em 5 passos. Depois, os cinco entram com um clique.', 'Google asks for an app of your own, made once in Google Cloud: the first Connect shows how, in 5 steps. After that, all five sign in with one click.')}</p>}
             <div className="catalog__grid">
               {entries.map((c) => (
                 <div key={c.id} className="catalog__card">
@@ -151,6 +165,105 @@ export function ConnectorGrid({ status, onManage }: { status: Status; onManage: 
           </div>
         )
       })}
+      {setup && (
+        <GoogleSetup
+          current={google ?? null}
+          connecting={!!setup.then}
+          onClose={() => setSetup(null)}
+          onSaved={(app) => {
+            setGoogle(app)
+            const then = setup.then
+            setSetup(null)
+            if (then) {
+              setBusy(then.id)
+              addConnector({ name: then.name, kind: 'remote', url: then.url, auth: then.auth })
+                .catch((e: unknown) => setError({ id: then.id, text: e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e) }))
+                .finally(() => setBusy(null))
+            }
+          }}
+        />
+      )}
     </section>
+  )
+}
+
+const cloud = (path: string): string => `https://console.cloud.google.com/${path}`
+
+// The person's own app in Google Cloud, step by step: Google signs in only apps registered with it, and
+// a Google app of Tucano's own isn't verified yet. Made once, it serves the five connectors.
+function GoogleSetup({ current, connecting, onClose, onSaved }: { current: { clientId: string } | null; connecting: boolean; onClose: () => void; onSaved: (app: { clientId: string }) => void }): ReactNode {
+  const [clientId, setClientId] = useState(current?.clientId ?? '')
+  const [secret, setSecret] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const link = (href: string, text: string): ReactNode => (
+    <button type="button" className="link" onClick={() => openExternal(href)}>
+      {text}
+    </button>
+  )
+  const save = (): void => {
+    setBusy(true)
+    setError('')
+    setGoogleApp(clientId, secret)
+      .then(() => onSaved({ clientId: clientId.trim() }))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <Modal title={L('Seu app do Google', 'Your Google app')} onClose={onClose} className="google-setup">
+      <p className="muted small modal__lead">
+        {L(
+          'O Google só deixa entrar apps cadastrados nele. Você cria o seu uma vez, em uns 10 minutos, e o Gmail, o Drive, o Calendar, o Docs e o Sheets entram com ele. Fica tudo na sua conta: os dados vão do Google direto pro seu computador.',
+          'Google only lets in apps registered with it. You make yours once, in about 10 minutes, and Gmail, Drive, Calendar, Docs and Sheets sign in with it. It all stays in your account: the data goes from Google straight to your computer.'
+        )}
+      </p>
+      <ol className="google-setup__steps">
+        <li>
+          {link(cloud('projectcreate'), L('Crie um projeto no Google Cloud', 'Create a project in Google Cloud'))}
+          {L(', com o nome que quiser (Tucano, por exemplo).', ', named as you like (Tucano, say).')}
+        </li>
+        <li>
+          {link(cloud(`flows/enableapi?apiid=${GOOGLE_APIS.join(',')}`), L('Ative as APIs', 'Turn on the APIs'))}
+          {L(': com o projeto escolhido no topo, clique em Próxima e em Ativar. São as do Gmail, Drive, Calendar, Docs e Sheets e a MCP de cada um.', ': with the project chosen at the top, click Next and Enable. They are Gmail, Drive, Calendar, Docs and Sheets, and the MCP one of each.')}
+        </li>
+        <li>
+          {link(cloud('auth/overview'), L('Configure a tela de login', 'Set up the sign-in screen'))}
+          {L(
+            ' (Google Auth Platform › Começar): o nome do app e o seu e-mail; em Público-alvo, Externo (ou Interno, numa conta Google Workspace de empresa). Depois, em Público-alvo › Usuários de teste, adicione o seu e-mail.',
+            ' (Google Auth Platform › Get started): the app name and your email; under Audience, External (or Internal, in a company Google Workspace account). Then, under Audience › Test users, add your email.'
+          )}
+        </li>
+        <li>
+          {link(cloud('auth/clients/create'), L('Crie o cliente', 'Create the client'))}
+          {L(': em Tipo de aplicativo, App para computador; marque ', ': under Application type, Desktop app; tick ')}
+          <b>{L('Usar este cliente para um agente com IA', 'Use this client for an AI-powered agent')}</b>
+          {L(' (sem isso o Google recusa os conectores) e clique em Criar.', " (without it Google turns the connectors away) and click Create.")}
+        </li>
+        <li>{L('Copie o ID do cliente e a chave secreta do cliente que aparecem e cole aqui:', 'Copy the client ID and the client secret it shows and paste them here:')}</li>
+      </ol>
+      <label className="field">
+        <span className="field__label">{L('ID do cliente', 'Client ID')}</span>
+        <input autoFocus spellCheck={false} disabled={busy} value={clientId} placeholder="1234567890-abc….apps.googleusercontent.com" onChange={(e) => setClientId(e.target.value)} />
+      </label>
+      <label className="field">
+        <span className="field__label">{L('Chave secreta do cliente', 'Client secret')}</span>
+        <input type="password" spellCheck={false} disabled={busy} value={secret} placeholder={current ? L('A mesma, ou uma nova', 'The same, or a new one') : 'GOCSPX-…'} onChange={(e) => setSecret(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && (e.preventDefault(), save())} />
+      </label>
+      <p className="muted small">
+        {L(
+          'Com o app em teste, o Google pede pra entrar de novo a cada 7 dias. Pra não pedir, em Público-alvo clique em Publicar app: no login vai aparecer “O Google não verificou este app”. É o seu próprio app: clique em Avançado e continue.',
+          'While the app is in testing, Google asks you to sign in again every 7 days. To stop that, click Publish app under Audience: the sign-in will say “Google hasn’t verified this app”. It’s your own app: click Advanced and go on.'
+        )}
+      </p>
+      {error && <p className="catalog__error small">{error}</p>}
+      <div className="modal__foot">
+        <button className="btn btn--ghost" onClick={onClose}>
+          {L('Cancelar', 'Cancel')}
+        </button>
+        <button className="btn btn--primary" disabled={busy || !clientId.trim() || !secret.trim()} onClick={save}>
+          {busy ? L('Salvando…', 'Saving…') : connecting ? L('Salvar e conectar', 'Save and connect') : L('Salvar', 'Save')}
+        </button>
+      </div>
+    </Modal>
   )
 }

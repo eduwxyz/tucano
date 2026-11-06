@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Gmail, Google Calendar, Google Drive, Google Docs and Google Sheets in the connector store**, through Google's own MCP servers. Google signs in only apps registered with it, so the first one walks you through making yours in Google Cloud, once, in five steps with a link for each; the other four then sign in with one click. Each asks only for what its tools need: Gmail searches, reads, drafts and labels but never sends nor deletes for good, and Drive writes only the files it made or opened. The Tuca's guide explains the steps and what to check when Google turns a sign-in away.
+
 ## [0.2.13] - 2026-11-06
 
 > **Em português:**

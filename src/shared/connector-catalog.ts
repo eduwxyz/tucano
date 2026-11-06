@@ -2,9 +2,11 @@
 // met (Tucano) can sign in to by itself, through the browser (OAuth with dynamic registration and
 // PKCE), or that need no sign-in at all. Each was probed on 2026-11-05; a server that only takes an
 // app registered ahead of time (HubSpot, Box, Asana's current one) isn't here: it's added by hand.
+// Google's are the exception: its sign-in takes no app it hasn't met either, so the person registers
+// one in their own Google Cloud project, once, and all of Google's connectors sign in with it.
 import { L } from './lang'
 
-export type CatalogCategory = 'dev' | 'work' | 'business' | 'design' | 'research' | 'finance'
+export type CatalogCategory = 'google' | 'dev' | 'work' | 'business' | 'design' | 'research' | 'finance'
 
 export interface CatalogEntry {
   id: string // also the logo's key
@@ -13,9 +15,11 @@ export interface CatalogEntry {
   auth: 'oauth' | 'none'
   category: CatalogCategory
   about: () => string // a few words: what the agents get
+  google?: string[] // one of Google's: signs in with the person's Google app, asking for these scopes
 }
 
 export const CATEGORIES = (): { id: CatalogCategory; name: string }[] => [
+  { id: 'google', name: 'Google' },
   { id: 'dev', name: L('Programação', 'Development') },
   { id: 'work', name: L('Projetos e tarefas', 'Projects and tasks') },
   { id: 'business', name: L('Negócio e dados', 'Business and data') },
@@ -33,7 +37,21 @@ const e = (id: string, name: string, url: string, category: CatalogCategory, pt:
   about: () => L(pt, en)
 })
 
+// Google's own MCP servers. The scopes are what their tools need, short of the full ones: Gmail
+// drafts but never sends nor deletes for good, Drive reads all and writes only what it made or opened.
+const DRIVE = ['drive.readonly', 'drive.file']
+const g = (id: string, name: string, host: string, pt: string, en: string, scopes: string[]): CatalogEntry => ({
+  ...e(id, name, `https://${host}.googleapis.com/mcp/v1`, 'google', pt, en),
+  google: scopes.map((s) => `https://www.googleapis.com/auth/${s}`)
+})
+
 export const CATALOG: CatalogEntry[] = [
+  g('gmail', 'Gmail', 'gmailmcp', 'E-mails, rascunhos e marcadores', 'Email, drafts and labels', ['gmail.modify']),
+  g('google-calendar', 'Google Calendar', 'calendarmcp', 'Eventos, convites e horários livres', 'Events, invites and free time', ['calendar.events', 'calendar.calendarlist.readonly', 'calendar.events.freebusy']),
+  g('google-drive', 'Google Drive', 'drivemcp', 'Buscar, ler e criar arquivos', 'Find, read and create files', DRIVE),
+  g('google-docs', 'Google Docs', 'docsmcp', 'Ler, criar e editar documentos', 'Read, create and edit documents', [...DRIVE, 'documents']),
+  g('google-sheets', 'Google Sheets', 'sheetsmcp', 'Ler, criar e editar planilhas', 'Read, create and edit spreadsheets', [...DRIVE, 'spreadsheets']),
+
   e('linear', 'Linear', 'https://mcp.linear.app/mcp', 'dev', 'Issues, projetos e ciclos', 'Issues, projects and cycles'),
   e('sentry', 'Sentry', 'https://mcp.sentry.dev/mcp', 'dev', 'Erros e falhas em produção', 'Errors and crashes in production'),
   e('vercel', 'Vercel', 'https://mcp.vercel.com', 'dev', 'Deploys, logs e projetos', 'Deploys, logs and projects'),
@@ -101,3 +119,9 @@ export function searchCatalog(query: string, entries: CatalogEntry[] = CATALOG):
   const text = (c: CatalogEntry): string => `${c.name} ${c.about()} ${CATEGORIES().find((k) => k.id === c.category)?.name ?? ''}`.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
   return entries.filter((c) => words.every((w) => text(c).includes(w)))
 }
+
+// The scopes a Google connector asks for, by its address; undefined for any other server.
+export const googleScopes = (url: string | undefined): string[] | undefined => CATALOG.find((c) => c.google && sameServer(url, c.url))?.google
+
+// What the person turns on in their Google Cloud project, in one page: each service's API and its MCP API.
+export const GOOGLE_APIS = ['gmail', 'calendar-json', 'drive', 'docs', 'sheets'].flatMap((a) => [`${a}.googleapis.com`, `${a === 'calendar-json' ? 'calendar' : a}mcp.googleapis.com`])

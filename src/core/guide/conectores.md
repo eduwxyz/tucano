@@ -9,6 +9,9 @@ Um conector é um servidor MCP: ele dá aos agentes ferramentas de um serviço (
 3. **Conectar**: o login abre no navegador. O acesso fica neste computador.
 4. Dê acesso aos agentes: na página de cada um, **Ferramentas** › **Ferramentas e acesso**.
 
+## Os do Google
+Gmail, Calendar, Drive, Docs e Sheets pedem um app seu no Google Cloud, criado uma vez: veja **google**.
+
 ## Personalizado
 **Adicionar personalizado** (Add custom) pra qualquer servidor MCP, inclusive os internos da empresa:
 - **Remoto (URL)**: o **URL do servidor MCP** e a **Autenticação**: **OAuth** (abre o navegador pra autorizar), **Token** (vai no cabeçalho Authorization: Bearer) ou **Nenhuma**.
@@ -30,5 +33,6 @@ Nos agentes, o nível por conector é **Sem acesso**, **Ler** (só as de leitura
 - **precisa autorizar**: **Autorizar no navegador** e entre de novo. Um conector OAuth renova sozinho entre aberturas do app; se o servidor recusar a renovação, ele pede login de novo.
 - **não conectou**: **Conectar de novo**. Se continuar, confira o endereço e o login.
 - O pedido de autorização expirou: feche e clique em **Conectar** de novo.
+- Um do Google que não conecta: veja **google**.
 - Ferramenta que o agente precisa não aparece: veja se está ligada na página do conector, se o agente tem o nível certo e use **Atualizar ferramentas**.
 - **Remover** tira o acesso de todos os agentes; pra voltar, adicione de novo.

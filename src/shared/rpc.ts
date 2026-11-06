@@ -68,6 +68,8 @@ export interface Api {
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
   setConnectorToken(p: { id: string; token: string }): Promise<void>
+  googleApp(): Promise<{ clientId: string } | null> // the person's Google app, which the Google connectors sign in with; its secret stays in the core
+  setGoogleApp(p: { clientId: string; clientSecret: string }): Promise<void>
   authorizeConnector(p: { id: string }): Promise<{ url?: string }> // url: on a server, the page to open in the person's browser
   finishConnectorAuth(p: { url: string }): Promise<boolean> // on a server: the address the authorization page ended on
   harnessMcps(): Promise<HarnessMcp[]> // the MCP servers set up in Claude Code, Codex and OpenCode

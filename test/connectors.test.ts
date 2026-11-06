@@ -107,6 +107,106 @@ describe('OAuth signed in from a page on another machine (Tucano as a server)', 
   })
 })
 
+// Google's sign-in takes no app it hasn't met: its connectors sign in with the person's own.
+describe("Google's connectors", () => {
+  let google: Server
+  let gBase: string
+  const calls: string[] = []
+  const tokenBodies: string[] = []
+  let gConnectors: ConnectorManager
+  let secrets: Secrets
+
+  beforeEach(async () => {
+    calls.length = 0
+    tokenBodies.length = 0
+    google = createServer((req, res) => {
+      calls.push(req.url ?? '')
+      const json = (body: unknown, status = 200): void => void res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
+      if (req.url?.startsWith('/.well-known/oauth-protected-resource'))
+        return json({ resource: `${gBase}/mcp/v1`, authorization_servers: [gBase], scopes_supported: ['https://mail.google.com/', 'https://www.googleapis.com/auth/gmail.modify'] })
+      if (req.url?.startsWith('/.well-known/oauth-authorization-server'))
+        return json({ issuer: gBase, authorization_endpoint: `${gBase}/o/oauth2/v2/auth`, token_endpoint: `${gBase}/token`, response_types_supported: ['code'], code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'] })
+      if (req.url === '/token') {
+        let body = ''
+        req.on('data', (c: Buffer) => (body += c))
+        req.on('end', () => {
+          tokenBodies.push(`${body}&auth=${req.headers.authorization ?? ''}`)
+          json({ access_token: 'ya29.x', refresh_token: '1//r', token_type: 'Bearer', expires_in: 3600 })
+        })
+        return
+      }
+      res.writeHead(401, { 'www-authenticate': `Bearer resource_metadata="${gBase}/.well-known/oauth-protected-resource"` }).end()
+    })
+    await new Promise<void>((resolve) => google.listen(0, '127.0.0.1', resolve))
+    gBase = `http://127.0.0.1:${(google.address() as AddressInfo).port}`
+    secrets = new Secrets(db, plainCipher)
+    gConnectors = new ConnectorManager({
+      db,
+      secrets,
+      emit: () => {},
+      openUrl: () => {},
+      oauthCallbackUrl: () => 'http://127.0.0.1:1/oauth/callback',
+      googleScopes: (url) => (url?.startsWith(gBase) ? ['https://www.googleapis.com/auth/gmail.modify'] : undefined)
+    })
+  })
+
+  afterEach(async () => {
+    await gConnectors.settled() // a connect under way would outlive the database
+    await gConnectors.closeAll()
+    await new Promise((resolve) => google.close(resolve))
+  })
+
+  it('says to make the Google app first when there is none', async () => {
+    const id = await gConnectors.add({ name: 'Gmail', kind: 'remote', url: `${gBase}/mcp/v1`, auth: 'oauth' })
+    await gConnectors.authorize(id)
+    expect(gConnectors.get(id)!.error).toMatch(/app do Google/)
+    expect(calls).toEqual([]) // it didn't even try
+  })
+
+  it("takes only a Google client ID, and never shows the secret back", async () => {
+    await expect(gConnectors.setGoogleApp({ clientId: 'abc', clientSecret: 's' })).rejects.toThrow(/googleusercontent/)
+    await expect(gConnectors.setGoogleApp({ clientId: '1-a.apps.googleusercontent.com', clientSecret: ' ' })).rejects.toThrow(/chave secreta/)
+    await gConnectors.setGoogleApp({ clientId: ' 1-a.apps.googleusercontent.com ', clientSecret: 'GOCSPX-s' })
+    expect(await gConnectors.googleApp()).toEqual({ clientId: '1-a.apps.googleusercontent.com' })
+  })
+
+  it('signs in with that app, asking for its scopes and a refresh token, and renews with its secret', async () => {
+    await gConnectors.setGoogleApp({ clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-s' })
+    const id = await gConnectors.add({ name: 'Gmail', kind: 'remote', url: `${gBase}/mcp/v1`, auth: 'oauth' })
+    await gConnectors.connect(id)
+    const page = new URL((await gConnectors.authorize(id))!)
+    expect(page.pathname).toBe('/o/oauth2/v2/auth')
+    expect(page.searchParams.get('client_id')).toBe('1-a.apps.googleusercontent.com')
+    expect(page.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/gmail.modify') // not the full mail.google.com the server lists
+    expect(page.searchParams.get('access_type')).toBe('offline')
+    expect(page.searchParams.get('prompt')).toBe('consent')
+    expect(calls.some((u) => u.startsWith('/register'))).toBe(false)
+
+    await gConnectors.finishOAuthFromUrl(`http://127.0.0.1:1/oauth/callback?code=c1&state=${page.searchParams.get('state')}`).catch(() => {})
+    // The code, then a renewal: this fake server turns every token away, so the connector renews at once.
+    const bodies = tokenBodies.map((b) => new URLSearchParams(b))
+    expect(bodies[0]!.get('code')).toBe('c1')
+    expect(bodies.some((b) => b.get('grant_type') === 'refresh_token' && b.get('refresh_token') === '1//r')).toBe(true)
+    // Basic, as Google lists first: the ID and the secret in the header.
+    for (const b of bodies) expect(b.get('auth')).toBe(`Basic ${Buffer.from('1-a.apps.googleusercontent.com:GOCSPX-s').toString('base64')}`)
+    expect(await secrets.getJson(`connector:${id}:oauth_tokens`)).toMatchObject({ refresh_token: '1//r' })
+    expect(await secrets.getJson(`connector:${id}:oauth_client`)).toBeUndefined() // the app is kept once, for all of them
+  })
+
+  it('signs the Google connectors out when the app changes, and keeps them with the same one', async () => {
+    await gConnectors.setGoogleApp({ clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-s' })
+    const gmail = await gConnectors.add({ name: 'Gmail', kind: 'remote', url: `${gBase}/mcp/v1`, auth: 'oauth' })
+    const other = await gConnectors.add({ name: 'Linear', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await secrets.setJson(`connector:${gmail}:oauth_tokens`, { access_token: 'a', token_type: 'Bearer' })
+    await secrets.setJson(`connector:${other}:oauth_tokens`, { access_token: 'b', token_type: 'Bearer' })
+    await gConnectors.setGoogleApp({ clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-new' })
+    expect(await secrets.getJson(`connector:${gmail}:oauth_tokens`)).toBeDefined()
+    await gConnectors.setGoogleApp({ clientId: '2-b.apps.googleusercontent.com', clientSecret: 'GOCSPX-b' })
+    expect(await secrets.getJson(`connector:${gmail}:oauth_tokens`)).toBeUndefined()
+    expect(await secrets.getJson(`connector:${other}:oauth_tokens`)).toBeDefined()
+  })
+})
+
 describe('a connector with a token', () => {
   it('asks for the token, not for a browser, and takes it without being removed', async () => {
     let seen: string | undefined

@@ -8181,6 +8181,29 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .catalog__error {
   color: var(--danger);
 }
+.catalog__group h3 .catalog__google-app {
+  margin-left: 6px;
+  font-weight: 400;
+}
+.catalog__note {
+  margin: -2px 0 8px;
+}
+.modal__card.google-setup {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.google-setup__steps {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.google-setup .field + .field {
+  margin-top: 10px;
+}
 .catalog__card.is-mine {
   cursor: pointer;
 }
