@@ -11,6 +11,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **Gmail, Google Calendar, Google Drive, Google Docs and Google Sheets in the connector store**, through Google's own MCP servers. Google signs in only apps registered with it, so the first one walks you through making yours in Google Cloud, once, in five steps with a link for each; the other four then sign in with one click. Each asks only for what its tools need: Gmail searches, reads, drafts and labels but never sends nor deletes for good, and Drive writes only the files it made or opened. The Tuca's guide explains the steps and what to check when Google turns a sign-in away.
 - **Slack in the connector store**, through Slack's own MCP server. Slack takes only directory apps or a workspace's internal apps, so the first Connect makes yours from a link that fills it all in (permissions, MCP on, the address to come back to): pick the workspace, create, paste its Client ID and Secret. Agents act as you, with a user token, through the same classes and approvals. The sign-in comes back through the workspace's fixed webhook port, since Slack takes only the address registered in the app. Google's or Slack's app can be changed from the connector's page.
 
+### Fixed
+
+- **An agent on Codex writes files on its computer again, instead of saying the session is read-only.** Codex runs in a read-only, empty sandbox on purpose, and tells the model so; newer models (GPT-6-Astra) took that for the agent's computer and answered "this session has read-only filesystem access" without trying `write_file`, or tried Codex's own `apply_patch` and gave up. It showed when an agent fell back to a Codex reserve model. An agent with a computer is now told that sandbox isn't its computer. Agents also no longer send you to the Tuca to get access back: he can't change it.
+
+
 ## [0.2.13] - 2026-11-06
 
 > **Em português:**
