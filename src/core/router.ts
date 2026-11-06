@@ -136,12 +136,19 @@ export function replyExcerpt(reply: string, handles: string[]): string {
   const wanted = new Set(handles.map((h) => h.toLowerCase()))
   // Same rule as `mentioned`: a handle inside code doesn't count. Blanking keeps the offsets.
   const plain = text.replace(CODE_SPANS, (s) => ' '.repeat(s.length))
-  const spans: [number, number][] = [[0, lineEnd(text, OPENING)]]
+  // The first and the last mention of each candidate: the ask is usually one of them, and a reply
+  // that names someone on every line still goes in bounded.
+  const at = new Map<string, number[]>()
   for (const m of plain.matchAll(MENTION)) {
-    if (!wanted.has(m[2]!.toLowerCase())) continue
-    const at = m.index + m[1]!.length
-    spans.push([lineStart(text, Math.max(0, at - BEFORE)), lineEnd(text, Math.min(text.length, at + AFTER))])
+    const h = m[2]!.toLowerCase()
+    if (!wanted.has(h)) continue
+    const i = m.index + m[1]!.length
+    const seen = at.get(h)
+    if (!seen) at.set(h, [i])
+    else seen[1] = i
   }
+  const spans: [number, number][] = [[0, lineEnd(text, OPENING)]]
+  for (const i of [...at.values()].flat()) spans.push([lineStart(text, Math.max(0, i - BEFORE)), lineEnd(text, Math.min(text.length, i + AFTER))])
   spans.sort((a, b) => a[0] - b[0])
   const merged: [number, number][] = []
   for (const [from, to] of spans) {

@@ -130,6 +130,14 @@ describe('replyExcerpt', () => {
     expect(out).not.toContain('@lia')
   })
 
+  it('stays bounded when a long reply names someone on every line', () => {
+    const busy = Array.from({ length: 400 }, (_, i) => `Item ${i + 1}: @nina confere o módulo ${i + 1}.`).join('\n')
+    const out = replyExcerpt(busy, ['nina'])
+    expect(out).toContain('Item 400:')
+    expect(out).not.toContain('Item 200:')
+    expect(out.length).toBeLessThan(1000 + 2 * (600 + 1200) + 500)
+  })
+
   it('goes into the hand-off prompt, which says it was cut', () => {
     const p = handoffPrompt({ reply: `${plan}\n\n${ask}`, author: lia, candidates: [nina], messages: [], members: team, me: 'Edu' })
     expect(p).toContain(ask)
