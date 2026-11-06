@@ -12,7 +12,7 @@ import type { ThreadDigest } from './memory'
 
 export const ROUTER_HISTORY = 10
 export const MAX_ROUTED = 2 // agents in one layer, answering at once
-export const MAX_LAYERS = 2 // layers in one plan: who answers at once, then who waits for them
+export const MAX_LAYERS = 3 // sequential layers in one plan
 export const MAX_PLANNED = 3 // agents in one plan, counting every layer
 
 // The router's answer: the layers of who answers, in order. One layer is the
@@ -58,7 +58,7 @@ export const routerSystem = (): string =>
     ].join('\n'),
     [
       'You decide which agents in a work chat should answer the last human message, and in what order.',
-      'Reply ONLY with JSON, no text around it, in the format {"plano": [["..."], ["..."]], "everyone": false, "reason": "..."}:',
+      'Reply ONLY with JSON, no text around it, in the format {"plano": [["..."], ["..."], ["..."]], "everyone": false, "reason": "..."}:',
       `- "plano": 0 to ${MAX_LAYERS} layers, each with 0 to ${MAX_ROUTED} handles (at most ${MAX_PLANNED} handles in the whole plan), only from the list of agents. Every agent in a layer answers at once; the next layer only starts when the one before is done, and then it reads what it wrote.`,
       '- Prefer 1 agent. Use 2 handles in the same layer when the replies do not depend on each other (two subjects, two different systems). Use sequential layers when a reply depends on the previous one: one finds the information, another writes, and a third can measure or review the result.',
       '- "everyone": true when the message is for the whole group (a greeting, "everyone", a question for all, an introduction): then every agent answers, in a single layer.',

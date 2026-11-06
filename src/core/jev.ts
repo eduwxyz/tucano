@@ -16,7 +16,7 @@ export const JEV_SECRET = 'typesafe:key'
 const API = 'https://api.typesafe.ai/v1'
 const NOBODY = '__ninguem' // can't clash with a handle: handles never start with "_"
 const EVERYONE = '__todos'
-const DONE = '__encerrar' // "no one else", the second layer's way out
+const DONE = '__encerrar' // "no one else", any later layer's way out
 const SECOND_AT = 0.3 // a second agent is called when the model gives it at least this
 const TIMEOUT_MS = 10_000
 

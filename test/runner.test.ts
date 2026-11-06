@@ -124,29 +124,36 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Ninguém precisa responder')
   })
 
-  it('a plan of two layers: the next one waits for the one before and reads what it wrote', async () => {
-    db.saveAgent(agent('a2', 'theo')) // both on the same engine, so every turn is seen here
+  it('runs three sequential layers in order, and each reads the earlier replies', async () => {
+    db.saveAgent(agent('a2', 'theo', { modelId: 'sonnet' }))
+    db.saveAgent(agent('a3', 'may'))
+    db.createConversation({ id: 'c3', kind: 'channel', name: 'engenharia', members: ['a1', 'a2', 'a3'] })
     const r = runner(
       fakeEngine('claude', {
         delayMs: 1,
-        route: () => ({ plano: [['lia'], ['theo']], reason: 'um acha, o outro escreve' }),
-        reply: (t) => (t.prompt.includes('primeiro passo pronto') ? 'segundo passo, com o que a Lia achou' : 'primeiro passo pronto')
+        route: () => ({ plano: [['lia'], ['theo'], ['may']], reason: 'find, write, measure' }),
+        reply: (t) => t.system.startsWith('Você é lia')
+          ? 'primeiro passo pronto'
+          : t.system.startsWith('Você é may')
+            ? 'terceiro passo, usando as duas respostas anteriores'
+            : 'segundo passo pronto, com o que a Lia achou'
       })
     )
-    await r.send('c1', 'acha o erro e escreve o texto')
+    await r.send('c3', 'acha o erro, escreve o texto e mede o resultado')
     await r.idle()
-    expect(db.messages().find((m) => m.author.kind === 'system')!.text).toContain('Chamei **lia**; depois **theo** · um acha, o outro escreve')
     const replies = agentMessages()
-    expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a1', 'a2'])
-    expect(replies[1]!.text).toBe('segundo passo, com o que a Lia achou')
-    expect(claude.turns).toHaveLength(3) // the router, then one turn per layer
-    // The plan is not only on the screen: each layer reads it in its own prompt.
-    const [first, second] = [claude.turns[1]!.prompt, claude.turns[2]!.prompt]
-    expect(first).toContain('O roteador dividiu esta mensagem em 2 camadas')
-    expect(first).toContain('- 1ª camada: lia\n- 2ª camada: theo')
+    expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a1', 'a2', 'a3'])
+    expect(replies[2]!.text).toBe('terceiro passo, usando as duas respostas anteriores')
+    expect(claude.turns).toHaveLength(4) // the router, then one turn per layer
+    const [first, second, third] = claude.turns.slice(1).map((turn) => turn.prompt)
+    expect(first).toContain('O roteador dividiu esta mensagem em 3 camadas')
+    expect(first).toContain('- 1ª camada: lia\n- 2ª camada: theo\n- 3ª camada: may')
     expect(first).toContain('Você é da 1ª camada')
-    expect(first).toContain('Motivo do plano: um acha, o outro escreve')
+    expect(first).toContain('Motivo do plano: find, write, measure')
     expect(second).toContain('Você é da 2ª camada')
+    expect(third).toContain('Você é da 3ª camada')
+    expect(third).toContain('primeiro passo pronto')
+    expect(third).toContain('segundo passo pronto, com o que a Lia achou')
   })
 
   it('does not hand off to a planned agent, but still hands off to an unplanned one', async () => {
