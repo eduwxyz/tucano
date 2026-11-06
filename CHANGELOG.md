@@ -4,13 +4,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
-> **Em português:**
-> - **Decisões, uma de cada vez.** Quando um agente precisa de você, a proposta vem na mensagem e as decisões aparecem no lugar da caixa de texto, com opções pra clicar ou apertar o número, "Outra coisa" e "Pular". Com mais de uma, você confere tudo antes de enviar. O canal ou a DM em que um agente espera você mostra um balão com "?" na barra lateral.
-
-### Added
-
-- **Decisions, one at a time.** When an agent needs you, its proposal comes in the message and its decisions take the place of the message box: a single choice, several choices or a short text, with options to click or pick by number, "Something else" and "Skip". With more than one, you check every answer before sending, and the agent's message keeps a summary of what you chose. A channel or DM where an agent waits on you, for an answer or an approval, shows a speech bubble with a "?" in the sidebar, and says who. Agents are told to keep each question short and to put the context in their reply; a question longer than 200 characters goes back to them. On Telegram the decisions arrive as text, and a reply still answers.
-
 ## [0.2.12] - 2026-11-05
 
 > **Em português:**
