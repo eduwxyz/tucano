@@ -248,7 +248,7 @@ export async function detectAntigravity(): Promise<{ status: EngineStatus; model
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
   const v = await run(path, ['--version'])
   const home = antigravityLoginDir()
-  const signedIn = existsSync(join(home, 'oauth_creds.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
+  const signedIn = existsSync(join(home, 'oauth_creds.json')) || existsSync(join(home, 'google_accounts.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
   const models = antigravityModels(path)
   return {
     status: {

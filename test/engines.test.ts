@@ -271,7 +271,7 @@ describe('Gemini stream', () => {
 describe('Gemini config', () => {
   it('runs headless with stream-json, auto-approving tools (the gateway decides), the model alone', () => {
     const args = antigravityArgs({ model: 'gemini-2.5-pro' })
-    expect(args).toEqual(['-p', '', '--output-format', 'stream-json', '--approval-mode', 'yolo', '-m', 'gemini-2.5-pro'])
+    expect(args).toEqual(['--output-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'gemini-2.5-pro', '-p=-'])
   })
 
   it('gives each turn a fresh home with the gateway as its only MCP server and no built-in tools', () => {
@@ -319,8 +319,8 @@ describe('Gemini config', () => {
 
   it('lists default models when no bin path is provided', () => {
     const list = antigravityModels()
-    expect(list).toContain('antigravity/gemini-3.8-flash')
-    expect(list).toContain('antigravity/gemini-3.1-pro-preview')
+    expect(list).toContain('antigravity/gemini-3.8-flash-medium')
+    expect(list).toContain('antigravity/gemini-4-argon-medium')
   })
 
   it('dynamically extracts models from an installed @google/gemini-cli package', () => {

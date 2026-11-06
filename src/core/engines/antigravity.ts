@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
@@ -33,6 +34,29 @@ export function antigravityParser(): Parser {
       const ev = parseJson(line)
       if (!ev) return []
       const out: EngineEvent[] = []
+      const event = ev['event']
+      if (event === 'step_update') {
+        const step = (ev['step_update'] ?? {}) as Record<string, unknown>
+        if (step['step_type'] === 'agent_response' && typeof step['text_delta'] === 'string' && step['text_delta']) {
+          text += step['text_delta']
+          out.push({ type: 'text', delta: step['text_delta'] })
+        } else if (step['step_type'] === 'tool' && (step['tool_name'] === GEMINI_WEB || step['tool_name'] === 'search_web')) {
+          const info = (step['tool_info'] ?? {}) as Record<string, unknown>
+          const params = (info['parameters'] ?? {}) as Record<string, unknown>
+          out.push({ type: 'web', action: 'search', detail: String(params['query'] ?? params['Query'] ?? '') })
+        }
+      } else if (event === 'result') {
+        const result = (ev['result'] ?? {}) as Record<string, unknown>
+        const status = String(result['status'] ?? '').toUpperCase()
+        if (status === 'ERROR') {
+          failed = true
+          error = (typeof result['error'] === 'string' && result['error']) || error || L('O Antigravity terminou com erro.', 'Antigravity ended with an error.')
+        } else if (status === 'SUCCESS') {
+          if (typeof result['response'] === 'string' && result['response'] && !text) text = result['response']
+          const u = (result['usage'] ?? {}) as Record<string, unknown>
+          usage = { inputTokens: num(u['input_tokens']), cacheReadTokens: num(u['cache_read_tokens']), outputTokens: num(u['output_tokens']) }
+        }
+      }
       const type = ev['type']
       if (type === 'message' && ev['role'] === 'assistant' && typeof ev['content'] === 'string' && ev['content']) {
         text += ev['content']
@@ -41,14 +65,13 @@ export function antigravityParser(): Parser {
         const params = (ev['parameters'] ?? {}) as Record<string, unknown>
         out.push({ type: 'web', action: 'search', detail: String(params['query'] ?? '') })
       } else if (type === 'error' && ev['severity'] === 'error' && typeof ev['message'] === 'string') {
-        // A warning isn't fatal; the terminal result decides. Keep the last hard error.
         error = ev['message']
       } else if (type === 'result') {
         const err = ev['error'] as { message?: unknown } | undefined
         if (ev['status'] === 'error' || err) {
           failed = true
           error = (typeof err?.message === 'string' && err.message) || error || L('O Antigravity terminou com erro.', 'Antigravity ended with an error.')
-        } else {
+        } else if (!usage) {
           const s = (ev['stats'] ?? {}) as Record<string, unknown>
           usage = { inputTokens: num(s['input_tokens']), cacheReadTokens: num(s['cached']), outputTokens: num(s['output_tokens']) }
         }
@@ -64,17 +87,26 @@ export function antigravityParser(): Parser {
   }
 }
 
-// Headless, one shot: the prompt on stdin (big prompts don't fit an argument),
-// stream-json out, the model named, and yolo so a tool call never waits on a
-// terminal prompt — the gateway is the only tool source and it decides what
-// runs, so auto-approving at the CLI is right. The system prompt and the MCP
-// server come from the home (geminiHome).
+// Headless, one shot: `-p=-` reads the prompt from stdin (Antigravity CLI 1.5+),
+// stream-json out, the model named, and --dangerously-skip-permissions so a tool
+// call never waits on a terminal prompt — the gateway is the only tool source
+// and it decides what runs. Flags before `-p=-` so the CLI does not swallow them.
 export function antigravityArgs(turn: Pick<Turn, 'model'>): string[] {
-  return ['-p', '', '--output-format', 'stream-json', '--approval-mode', 'yolo', '-m', turn.model]
+  return ['--output-format', 'stream-json', '--dangerously-skip-permissions', '--model', turn.model, '-p=-']
 }
 
-// GEMINI_CLI_HOME is the CLI's home: its files (login included) live in .gemini/ under it.
-const userHomeOf = (): string => join(process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
+// Person login lives under ~/.gemini or %LOCALAPPDATA%\agy (Antigravity install).
+function antigravityUserGeminiDir(): string {
+  const candidates = [join(homedir(), '.gemini')]
+  if (process.env['LOCALAPPDATA']) {
+    candidates.push(join(process.env['LOCALAPPDATA'], 'agy', '.gemini'))
+    candidates.push(join(process.env['LOCALAPPDATA'], 'agy'))
+  }
+  for (const c of candidates) {
+    if (existsSync(join(c, 'oauth_creds.json')) || existsSync(join(c, 'google_accounts.json'))) return c
+  }
+  return candidates[0]!
+}
 
 // Where the app keeps the Gemini homes, in its data folder.
 export const antigravityAppDir = (dataDir: string): string => join(dataDir, 'antigravity')
@@ -100,7 +132,7 @@ function linkOrCopy(target: string, at: string): void {
 // as the only MCP server and turns the built-in tools off; the person's login
 // (OAuth credentials, or an env-based key/gateway) is brought in; the agent's
 // instructions go to a file the CLI reads as the system prompt.
-export function antigravityHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, userHome = userHomeOf()): string {
+export function antigravityHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, userHome = antigravityUserGeminiDir()): string {
   mkdirSync(appDir, { recursive: true })
   const home = join(appDir, randomBytes(8).toString('hex'))
   const dot = join(home, '.gemini')
@@ -163,7 +195,7 @@ export function antigravityEngine(bin: () => string | undefined, appDir: string,
         yield { type: 'error', message: L('O Antigravity não está instalado. Veja em Configurações.', "Antigravity isn't installed. See Settings.") }
         return
       }
-      const model = turn.model.includes('/') ? turn.model.slice(turn.model.indexOf('/') + 1) : turn.model
+      const model = resolveAntigravityCliModel(turn.model, path)
       const home = antigravityHome(appDir, turn)
       // Provider keys may live in the person's shell (an SSO helper prints the
       // token), which an app opened from Finder doesn't get.
@@ -183,9 +215,65 @@ export function antigravityEngine(bin: () => string | undefined, appDir: string,
   }
 }
 
-// Dynamically extracts model definitions from the installed @google/gemini-cli
-// bundle when available, matching what the CLI exposes in `/model`.
+// Dynamically lists model ids from `agy models` (native Antigravity CLI) or,
+// for npm shims, from the @google/gemini-cli bundle.
+const LEGACY_ANTIGRAVITY_MODELS: Record<string, string> = {
+  'gemini-2.5-flash': 'gemini-3.8-flash-medium',
+  'gemini-2.5-flash-lite': 'gemini-3.8-flash-low',
+  'gemini-2.5-pro': 'gemini-4-argon-medium',
+  'gemini-3.8-flash': 'gemini-3.8-flash-medium',
+  'gemini-3-flash-preview': 'gemini-3.8-flash-medium',
+  'gemini-3.1-pro-preview': 'gemini-4-argon-medium'
+}
+
+let cachedCliModels: { bin: string; ids: string[] } | undefined
+
+function parseAgyModelsOutput(text: string): string[] {
+  const ids: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith('Fetching')) continue
+    const id = line.split(/\t/)[0]?.trim()
+    if (id && /^[a-z0-9.-]+$/i.test(id)) ids.push(id)
+  }
+  return ids
+}
+
+function antigravityCliModelIds(binPath: string): string[] {
+  if (cachedCliModels?.bin === binPath) return cachedCliModels.ids
+  try {
+    const out = execFileSync(binPath, ['models'], { encoding: 'utf8', timeout: 30_000, windowsHide: true })
+    const ids = parseAgyModelsOutput(out)
+    if (ids.length > 0) {
+      cachedCliModels = { bin: binPath, ids }
+      return ids
+    }
+  } catch {
+    // fall through to bundle scrape
+  }
+  cachedCliModels = { bin: binPath, ids: [] }
+  return []
+}
+
+/** Picks an id the installed `agy` accepts from a Tucano model string. */
+export function resolveAntigravityCliModel(model: string, binPath?: string): string {
+  const id = model.includes('/') ? model.slice(model.indexOf('/') + 1) : model
+  const available = binPath ? antigravityCliModelIds(binPath) : []
+  if (available.includes(id)) return id
+  const mapped = LEGACY_ANTIGRAVITY_MODELS[id]
+  if (mapped && available.includes(mapped)) return mapped
+  if (available.length > 0) {
+    const hint = id.includes('pro') || id.includes('argon') ? 'gemini-4-argon-medium' : 'gemini-3.8-flash-medium'
+    if (available.includes(hint)) return hint
+    return available[0]!
+  }
+  return mapped ?? id
+}
+
 export function detectAntigravityCliModels(binPath?: string): string[] {
+  if (binPath) {
+    const fromCli = antigravityCliModelIds(binPath)
+    if (fromCli.length > 0) return fromCli.map((m) => `antigravity/${m}`)
+  }
   if (!binPath) return []
   try {
     const real = realpathSync(binPath)
@@ -230,14 +318,13 @@ export function antigravityModels(binPath?: string): string[] {
   const dynamic = detectAntigravityCliModels(binPath)
   if (dynamic.length > 0) return dynamic
   return [
-    'antigravity/gemini-3.1-pro-preview',
-    'antigravity/gemini-3-flash-preview',
-    'antigravity/gemini-3.8-flash',
-    'antigravity/gemini-3.5-flash-lite',
-    'antigravity/gemini-2.5-pro',
-    'antigravity/gemini-2.5-flash',
-    'antigravity/gemini-2.5-flash-lite',
-    'antigravity/gemma-4-31b-it',
-    'antigravity/gemma-4-26b-a4b-it'
+    'antigravity/gemini-4-argon-medium',
+    'antigravity/gemini-4-argon-high',
+    'antigravity/gemini-4-argon-low',
+    'antigravity/gemini-3.8-flash-medium',
+    'antigravity/gemini-3.8-flash-high',
+    'antigravity/gemini-3.8-flash-low',
+    'antigravity/claude-sonnet-5-5-medium',
+    'antigravity/claude-opus-5-5-medium'
   ]
 }
