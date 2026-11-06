@@ -4958,6 +4958,20 @@ table.csv th {
 .whats-new__thanks {
   margin-top: 10px !important;
 }
+.whats-new__body--paged {
+  /* the same height on every page: the window doesn't jump as they turn */
+  height: min(400px, calc(100vh - 200px));
+  align-content: start;
+}
+.whats-new__pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+}
+.whats-new__back svg {
+  transform: scaleX(-1);
+}
 .modal__foot {
   display: flex;
   align-items: center;
