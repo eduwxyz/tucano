@@ -928,8 +928,8 @@ export class Runner {
           addSteps({ id: randomUUID(), label: what, detail: p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : Object.keys(p.changes).join(', '), status: 'done' })
           return textResult(
             L(
-              'A proposta está no card, com Aplicar e Descartar. Termine com uma frase curta, sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
-              'The proposal is in the card, with Apply and Discard. Finish with one short sentence, without repeating what the card shows. One proposal per reply: the next one replaces this one.'
+              'A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar. Termine com uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
+              "The proposal is in the card, with Apply and Discard, and has NOT happened yet: it only happens when the person applies it. Finish with one short sentence saying they just need to apply it (or ask for a change), without repeating what the card shows. One proposal per reply: the next one replaces this one."
             )
           )
         }

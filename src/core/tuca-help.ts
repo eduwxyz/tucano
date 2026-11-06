@@ -140,8 +140,8 @@ export const PROPOR_ROTINA: ToolDef = {
   name: 'propor_rotina',
   get description() {
     return L(
-      'Propõe uma rotina num horário pra um agente: um pedido que ele faz sozinho nos dias e na hora escolhidos. Vira um card com Aplicar e Descartar. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
-      'Proposes a scheduled routine for an agent: a request it does on its own on the chosen days and time. It becomes a card with Apply and Discard. Triggers (webhook, connector) the person sets in Routines.'
+      'Cria uma rotina num horário pra um agente (um pedido que ele faz sozinho nos dias e na hora escolhidos), como um card com Aplicar e Descartar. Use em vez de explicar como criar uma rotina. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
+      'Makes a scheduled routine for an agent (a request it does on its own on the chosen days and time), as a card with Apply and Discard. Use it instead of explaining how to make a routine. Triggers (webhook, connector) the person sets in Routines.'
     )
   },
   get inputSchema() {
