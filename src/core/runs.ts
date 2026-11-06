@@ -36,6 +36,10 @@ const GITHUB = 'github'
 const ABRIR_PR = 'abrir_pr'
 
 const MAX_CONCURRENT = 4
+// Replies to something the person just did (a message, an approval, a retry) go ahead of routines,
+// hand-offs and follow-ups, and may run past MAX_CONCURRENT up to this: four routines running
+// mustn't keep a reply to the person waiting for minutes.
+export const MAX_CONCURRENT_URGENT = 6
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
@@ -153,7 +157,7 @@ type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: stri
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 export class Runner {
-  private queue: (() => Promise<unknown>)[] = []
+  private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
@@ -248,7 +252,18 @@ export class Runner {
       if (id && ready(engine)) engines[engine].rewarm?.(id)
       return
     }
-    if (members.length < 2 || settings.routerModel === JEV_MODEL) return
+    if (members.length < 2) return
+    // In a channel, whoever answered last here is the likeliest to answer again: its session too.
+    const lastAgent = db
+      .recentMessages(conv.id, 20, conv.threads ? (threadId ?? null) : undefined)
+      .reverse()
+      .flatMap(({ author }) => (author.kind === 'agent' ? members.filter((a) => a.id === author.id) : []))[0]
+    if (lastAgent) {
+      const engine = modelInfo(lastAgent.modelId)?.engine ?? 'claude'
+      const id = this.sessions.idOf(replyKey(lastAgent.id, conv.id, threadId))
+      if (id && ready(engine)) engines[engine].rewarm?.(id)
+    }
+    if (settings.routerModel === JEV_MODEL) return
     const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
     if (!ready(model.engine)) return
     const cwd = join(this.deps.workDir, '_router')
@@ -307,7 +322,7 @@ export class Runner {
         return
       }
     }
-    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn }))
+    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn }), true)
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -342,7 +357,7 @@ export class Runner {
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }))
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }), true)
   }
 
   // A reply paused at its budget goes on in a new reply that knows what it did:
@@ -372,7 +387,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }))
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }), true)
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -543,18 +558,22 @@ export class Runner {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
     this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
-    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: note.threadId }))
+    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: note.threadId }), true)
   }
 
-  private enqueue(job: () => Promise<unknown>): void {
-    this.queue.push(job)
+  // `urgent`: it answers something the person just did (see MAX_CONCURRENT_URGENT).
+  private enqueue(job: () => Promise<unknown>, urgent = false): void {
+    this.queue.push({ job, urgent })
     this.pump()
   }
 
   private pump(): void {
-    while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
+    for (;;) {
       if (this.paused) return // paused: nothing new starts, queued work waits
-      const job = this.queue.shift()!
+      const urgent = this.queue.findIndex((q) => q.urgent)
+      const at = this.active < MAX_CONCURRENT ? (urgent >= 0 ? urgent : this.queue.length > 0 ? 0 : -1) : this.active < MAX_CONCURRENT_URGENT ? urgent : -1
+      if (at < 0) return
+      const { job } = this.queue.splice(at, 1)[0]!
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
         .catch((e: unknown) => console.error('[runner]', e))
@@ -1784,7 +1803,7 @@ export class Runner {
         }
       })
     }
-    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }))
+    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }), true)
   }
 
   async expireApprovals(): Promise<void> {
@@ -1817,7 +1836,8 @@ export class Runner {
         work: asked.run?.work,
         threadId: asked.threadId,
         task: L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
-      })
+      }),
+      true
     )
   }
 

@@ -58,6 +58,15 @@ describe('while the person types', () => {
     expect(warmed).toEqual(['warm haiku'])
   })
 
+  it('in a channel, also starts the session of whoever answered last there', async () => {
+    const r = runner()
+    await r.send('c1', '@theo oi')
+    await r.idle()
+    warmed.length = 0
+    await r.typing('c1')
+    expect(warmed).toEqual([`rewarm ${turns[0]!.session!.id}`, 'warm haiku'])
+  })
+
   it('starts nothing for a new thread, when paused, or with the router’s harness signed out', async () => {
     const r = runner()
     await r.typing('c2') // answers in threads: a new message opens a new one
