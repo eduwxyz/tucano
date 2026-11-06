@@ -142,4 +142,13 @@ describe.runIf(process.platform !== 'win32')('what a path can do', () => {
     const [sig] = url.pathname.slice(1).split('/')
     expect(verifyLocalUrl('chave', new URL(`tucano://local/${sig}/${Buffer.from('/etc/passwd').toString('base64url')}`))).toBeNull()
   })
+
+  it("on a server, the same signature under the server's own /local/ path", () => {
+    const path = localUrl('chave', '/home/tucano/work/relatório.pdf', '/local')
+    expect(path.startsWith('/local/')).toBe(true)
+    // What src/server does with the address it's asked for.
+    const asked = (p: string): string | null => verifyLocalUrl('chave', new URL(p.replace(/^\/local/, ''), 'tucano://local'))
+    expect(asked(path)).toBe('/home/tucano/work/relatório.pdf')
+    expect(asked(path.replace(/\/[^/]+$/, `/${Buffer.from('/home/tucano/.tucano-server/server.key').toString('base64url')}`))).toBeNull()
+  })
 })

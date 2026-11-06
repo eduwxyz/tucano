@@ -769,6 +769,7 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
   const on = kind === 'linux'
   const state = on ? (info && info.state !== 'off' ? info.state : 'stopped') : 'off'
   const st = COMPUTER_STATE()[state]!
+  const isolated = useStore((s) => s.isolatedComputers)
 
   return (
     <Card
@@ -779,22 +780,24 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
       )}
     >
       <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Computador', 'Computer')}>
-        {COMPUTER_CHOICES().map((c) => (
-          <button
-            key={c.value}
-            role="radio"
-            aria-checked={kind === c.value}
-            className={kind === c.value ? 'is-active' : ''}
-            onClick={() => {
-              if (kind === c.value) return
-              if (c.value === 'mac') return setConfirmMac(true)
-              setConfirmMac(false)
-              onChange(c.value)
-            }}
-          >
-            {c.label}
-          </button>
-        ))}
+        {COMPUTER_CHOICES()
+          .filter((c) => c.value !== 'linux' || isolated || kind === 'linux') // on a server without Docker there's none to have
+          .map((c) => (
+            <button
+              key={c.value}
+              role="radio"
+              aria-checked={kind === c.value}
+              className={kind === c.value ? 'is-active' : ''}
+              onClick={() => {
+                if (kind === c.value) return
+                if (c.value === 'mac') return setConfirmMac(true)
+                setConfirmMac(false)
+                onChange(c.value)
+              }}
+            >
+              {c.label}
+            </button>
+          ))}
       </div>
       {confirmMac && kind !== 'mac' && (
         <div className="mac-confirm">

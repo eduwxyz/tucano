@@ -18,6 +18,7 @@ declare global {
       connect: () => void
       pickFolder: () => Promise<string | null>
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
+      upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)
       onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void
       onNavigatePage?: (cb: (page: 'skills') => void) => void // desktop only
       onCoreDown?: (cb: () => void) => void // desktop only: a browser reloads on its own

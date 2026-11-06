@@ -252,6 +252,7 @@ export interface VoiceStatus {
 export interface LocalInfo {
   kind: 'image' | 'video' | 'pdf' | 'folder' | 'file'
   url?: string // to see it here: images and videos
+  download?: string // on a server, where the file isn't on this computer: to save it here
 }
 
 export interface Settings {

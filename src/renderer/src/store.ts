@@ -87,6 +87,7 @@ export interface State {
   voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
   platform: Os
   packaged: boolean
+  isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
@@ -161,6 +162,7 @@ let state: State = {
   skills: [],
   platform: 'mac',
   packaged: false,
+  isolatedComputers: true,
   panel: null,
   dialog: null,
   tabs: {},
@@ -325,6 +327,7 @@ export async function start(): Promise<void> {
       skills: snap.skills,
       platform: snap.platform,
       packaged: snap.packaged,
+      isolatedComputers: snap.isolatedComputers,
       demoServer: snap.demoServer
     }
   })
@@ -578,7 +581,14 @@ export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'
 export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
 // A page an agent serves, as this browser reaches it: on a server, at the server's
 // address (it passes running services through on a private network).
-export const reachable = (url: string): string => (windowless() ? url.replace(/^http:\/\/127\.0\.0\.1:/, `http://${location.hostname}:`) : url)
+// A page an agent serves on the server's loopback, from here. Behind https it has an address of its
+// own, reached through this server (src/server/preview.ts); on a private address, the same port there.
+export const reachable = (url: string): string => {
+  if (!windowless()) return url
+  const m = /^http:\/\/127\.0\.0\.1:(\d+)(.*)$/.exec(url)
+  if (!m) return url
+  return location.protocol === 'https:' ? `${location.origin}/preview/${m[1]}${m[2] || '/'}` : `http://${location.hostname}:${m[1]}${m[2]}`
+}
 export const browserInput = (agentId: string, input: BrowserInput): void => void call('browserInput', { agentId, input }).catch(() => {})
 // In a browser (Tucano as a server) the page opens it itself: the server has no screen.
 export const openExternal = (url: string): void =>

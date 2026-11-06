@@ -5,10 +5,10 @@ import { voiceRefusal } from '../shared/voice'
 import { ModelDownload, Transcriber, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
-import { basename, join } from 'node:path'
+import { basename, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
@@ -45,7 +45,7 @@ import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { applyForeignTeam, readForeignZip } from './agent-import'
-import { zipFromBuffer, zipFromFile } from './zip'
+import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
@@ -66,6 +66,7 @@ const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
 // Run by the server (src/server): no window, and the screens are in a browser elsewhere.
 const serverMode = process.env['TUCANO_SERVER'] === '1'
+const publicUrl = process.env['TUCANO_URL']?.replace(/\/+$/, '')
 const runtimePorts = workspacePorts()
 const defaultWorkspace = process.env['TUCANO_DEFAULT_WORKSPACE'] !== '0'
 mkdirSync(dataDir, { recursive: true })
@@ -367,6 +368,17 @@ process.parentPort.on('message', (e) => {
     return
   }
   if (r?.type === 'power') return routines.setAwake(r.awake === true)
+  // A server's /oauth/callback: the code the provider sent back, checked against the state only this core made.
+  if (r?.type === 'oauth-callback') {
+    const { state = '', code = '', error = '' } = (r.data ?? {}) as { state?: string; code?: string; error?: string }
+    const reply = (ok: boolean, why?: string): void => process.parentPort.postMessage({ type: 'oauth-result', id: r.id, data: { ok, why } })
+    if (!code) return reply(false, error === 'access_denied' ? L('Você recusou o acesso na página do serviço.', 'You declined access on the service’s page.') : L('A autorização não voltou com o código.', 'The authorization came back without a code.'))
+    void connectors.finishOAuth(state, code).then(
+      (ok) => reply(ok, ok ? undefined : L('Esse pedido de autorização venceu. Tente de novo pelo app.', 'That authorization request expired. Try again from the app.')),
+      (e: unknown) => reply(false, e instanceof Error ? e.message : String(e))
+    )
+    return
+  }
   if (r?.type === 'browser-shown') return browser.setShown(r.agentId ?? '', r.shown === true)
   if (r?.type === 'browser-result') {
     const p = pages.get(r.id)
@@ -468,7 +480,8 @@ const chrome =
         (agentId, shown) => browser.setShown(agentId, shown),
         undefined,
         (agentId, jpeg) => browser.frame(agentId, jpeg),
-        serverMode
+        serverMode,
+        serverMode ? 10 * 60_000 : undefined // on a server, an idle agent's Chrome gives its memory back
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -490,7 +503,8 @@ delete process.env['TUCANO_LOCAL_KEY']
 // computer, and not on Windows yet, where paths don't look like this.
 function localReach(messageId: string): LocalReach | undefined {
   const message = db.message(messageId)
-  if (serverMode || isWin || message?.author.kind !== 'agent') return undefined
+  // On a server a cited file is saved down instead of shown in Finder (src/server's /local/), so it counts there too.
+  if (isWin || message?.author.kind !== 'agent') return undefined
   const agent = db.agent(message.author.id)
   if (!agent) return undefined
   return { agentId: agent.id, own: computers.folder(agent.id), dataRoot: dataDir, limited: isLimited(agent) }
@@ -518,7 +532,9 @@ const connectors = new ConnectorManager({
   emit,
   // On a server there's nothing to open it in: authorizeConnector hands it to the page.
   openUrl: (url) => serverMode || toMain({ type: 'open', url }),
-  oauthCallbackUrl: () => gateway.url('/oauth/callback')
+  // On a server behind https (TUCANO_URL), the provider sends the person back to the server's own
+  // address, which src/server hands over here; on a desktop, to the gateway on this computer.
+  oauthCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : gateway.url('/oauth/callback'))
 })
 gateway.route('/oauth/callback', async (url) => {
   const code = url.searchParams.get('code')
@@ -837,6 +853,9 @@ const api: Api = {
     skills: db.skills(),
     platform: osOf(),
     packaged: process.env['TUCANO_PACKAGED'] === '1',
+    // On a desktop it's always offered (the page says when Docker is missing); a server without Docker,
+    // inside a container, can't have one, so it isn't.
+    isolatedComputers: !serverMode || onPath('docker'),
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
 
@@ -918,7 +937,11 @@ const api: Api = {
     const reach = localReach(messageId)
     const found = reach && resolveLocal(path, reach)
     if (!found) return null
-    return { kind: found.kind, ...((found.kind === 'image' || found.kind === 'video') && localKey ? { url: localUrl(localKey, found.path) } : {}) }
+    const base = serverMode ? '/local' : undefined
+    const seen = (found.kind === 'image' || found.kind === 'video') && localKey ? { url: localUrl(localKey, found.path, base) } : {}
+    // On a server the file isn't on the person's computer: showing it in Finder means nothing, saving it does.
+    const saved = serverMode && localKey && found.kind !== 'folder' ? { download: `${localUrl(localKey, found.path, base)}?download=1` } : {}
+    return { kind: found.kind, ...seen, ...saved }
   },
   openLocal: ({ messageId, path, how }) => {
     const reach = localReach(messageId)
@@ -1261,6 +1284,21 @@ const api: Api = {
   },
   wikiDismissFinding: ({ id }) => wiki.dismissFinding(id),
   wikiImport: ({ dir }) => wiki.importVault(dir, settings().workspaceName || L('Você', 'You')),
+  // On a server: a vault zipped on the person's computer and sent up. Only from the uploads folder
+  // the server writes to; unpacked apart, copied in as any vault, then both go.
+  wikiImportZip: ({ path }) => {
+    const uploads = join(dataDir, 'uploads')
+    if (!serverMode || typeof path !== 'string' || !resolve(path).startsWith(uploads + sep) || !path.toLowerCase().endsWith('.zip')) throw new Error(L('Envie o vault como um arquivo .zip.', 'Send the vault as a .zip file.'))
+    const unpacked = mkdtempSync(join(uploads, 'vault-'))
+    const zip = zipFromFile(path)
+    try {
+      return wiki.importVault(extractZip(zip, unpacked), settings().workspaceName || L('Você', 'You'))
+    } finally {
+      zip.close()
+      rmSync(unpacked, { recursive: true, force: true })
+      rmSync(path, { force: true })
+    }
+  },
   setWikiCapture: ({ conversationId, on }) => {
     db.setWikiCapture(conversationId, on)
     const c = db.conversation(conversationId)
