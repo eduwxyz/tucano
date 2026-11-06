@@ -4,6 +4,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+
 ## [0.2.14] - 2026-11-06
 
 > **Em português:**
