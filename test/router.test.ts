@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { handoffPrompt, handoffSystem, parseRoute, routerPrompt, routerSystem } from '../src/core/router'
+import { handoffPrompt, handoffSystem, parseRoute, planBrief, routerPrompt, routerSystem } from '../src/core/router'
 import type { Agent, Connector, Message } from '../src/shared/types'
 
 const agent = (id: string, handle: string, role: string, instructions = ''): Agent => ({
@@ -63,6 +63,34 @@ describe('parseRoute', () => {
     expect(parseRoute('acho que a Lia', team)).toBeNull()
     expect(parseRoute('{"who":"lia"}', team)).toBeNull()
     expect(parseRoute('{handles: [lia]}', team)).toBeNull()
+  })
+})
+
+describe('planBrief', () => {
+  it('tells every layer of a plan which one is theirs and who answers next', () => {
+    const plan = [[lia], [nina]]
+    const first = planBrief(plan, lia, 'um acha, o outro escreve')
+    expect(first).toContain('O roteador dividiu esta mensagem em 2 camadas')
+    expect(first).toContain('- 1ª camada: Lia\n- 2ª camada: Nina')
+    expect(first).toContain('Você é da 1ª camada')
+    expect(first).toContain('A camada seguinte só começa quando a sua terminar')
+    expect(first).toContain('Motivo do plano: um acha, o outro escreve')
+    expect(planBrief(plan, nina, '')).toContain('Você é da 2ª camada')
+  })
+
+  it('names the agents of a layer of two, and says nothing without a reason', () => {
+    const first = planBrief([[lia, nina], [agent('a3', 'theo', 'Dados')]], lia, '')
+    expect(first).toContain('- 1ª camada: Lia e Nina')
+    expect(first).not.toContain('Motivo do plano')
+  })
+
+  it('says nothing for a single layer, which has no order to keep', () => {
+    expect(planBrief([[lia, nina]], lia, 'dois assuntos')).toBe('')
+    expect(planBrief([], lia, '')).toBe('')
+  })
+
+  it('says nothing for an agent that is not in the plan', () => {
+    expect(planBrief([[lia], [nina]], agent('a3', 'theo', 'Dados'), 'um acha, o outro escreve')).toBe('')
   })
 })
 

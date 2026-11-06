@@ -21,6 +21,29 @@ export const MAX_PLANNED = 3 // agents in one plan, counting every layer
 export type TurnPlan = Agent[][]
 export const planAgents = (plan: TurnPlan): Agent[] => plan.flat()
 
+// What an agent of a plan is told about it: the layers, which one is theirs, and that the next
+// one waits for them. A layer that knows another answers after it hands over what it found
+// instead of the finished work, which is what happened twice over in the same thread. A plan of
+// one layer has no order to keep, so nobody is told anything and the reply reads as it always
+// did. Empty string: nothing to say to this agent.
+export function planBrief(plan: TurnPlan, agent: Agent, reason: string): string {
+  const layers = plan.filter((l) => l.length > 0)
+  const mine = layers.findIndex((l) => l.some((a) => a.id === agent.id))
+  if (layers.length < 2 || mine < 0) return ''
+  const names = (l: Agent[]): string => l.map((a) => a.name).join(L(' e ', ' and '))
+  const layer = (i: number): string => L(`${i + 1}ª camada`, `layer ${i + 1}`)
+  return [
+    L(`O roteador dividiu esta mensagem em ${layers.length} camadas, uma depois da outra:`, `The router split this message into ${layers.length} layers, one after the other:`),
+    ...layers.map((l, i) => `- ${layer(i)}: ${names(l)}`),
+    mine === 0
+      ? L('Você é da 1ª camada, e responde agora. A camada seguinte só começa quando a sua terminar, e aí lê o que ficou escrito aqui.', 'You are in the 1st layer, answering now. The next layer only starts when yours is done, and then reads what was written here.')
+      : L(`Você é da ${layer(mine)}, e responde agora, depois da camada anterior, que já escreveu acima.`, `You are in ${layer(mine)}, answering now, after the layer before, which already wrote above.`),
+    reason ? L(`Motivo do plano: ${reason}`, `Plan reason: ${reason}`) : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 export const routerSystem = (): string =>
   L(
     [

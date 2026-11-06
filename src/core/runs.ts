@@ -25,7 +25,7 @@ import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey, type Followup } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
-import { ROUTER_HISTORY, route, routerTurn, screenHandoff, type TurnPlan } from './router'
+import { ROUTER_HISTORY, planBrief, route, routerTurn, screenHandoff, type TurnPlan } from './router'
 import { allowed, approvalHash, canonical } from './policy'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
@@ -543,7 +543,9 @@ export class Runner {
 
   // The plan's layers, in order: everyone in a layer answers at once, and the next layer is
   // queued when the whole layer is done, so it reads what they wrote. Each agent takes its own
-  // place in the queue, like any other reply.
+  // place in the queue, like any other reply. Every agent of a layer is told the plan it is part
+  // of (`planBrief`), so a layer knows another one answers after it: the note on the screen says
+  // it, and the agents read it in their own prompt.
   private routed(conv: Conversation, note: Message, plan: TurnPlan, reason: string): void {
     const why = reason ? ` · ${reason}` : ''
     const layers = plan.filter((l) => l.length > 0)
@@ -552,7 +554,7 @@ export class Runner {
     const called = layers.map((l) => l.map((a) => `**${a.name}**`).join(and)).join(L('; depois ', '; then '))
     this.update(note, { text: `${L('Chamei', 'Called')} ${called}${why}`, run: undefined })
     const run = (i: number): void => {
-      const done = layers[i]!.map((a) => this.enqueue(() => this.execute(a, conv, { depth: 1, threadId: note.threadId })))
+      const done = layers[i]!.map((a) => this.enqueue(() => this.execute(a, conv, { depth: 1, threadId: note.threadId, task: planBrief(layers, a, reason) || undefined })))
       if (layers[i + 1]) void Promise.all(done).then(() => run(i + 1))
       else {
         // The last layer is queued: idle waits for it, not for the layers still to come.

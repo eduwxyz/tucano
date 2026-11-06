@@ -140,6 +140,22 @@ describe('Runner', () => {
     expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a1', 'a2'])
     expect(replies[1]!.text).toBe('segundo passo, com o que a Lia achou')
     expect(claude.turns).toHaveLength(3) // the router, then one turn per layer
+    // The plan is not only on the screen: each layer reads it in its own prompt.
+    const [first, second] = [claude.turns[1]!.prompt, claude.turns[2]!.prompt]
+    expect(first).toContain('O roteador dividiu esta mensagem em 2 camadas')
+    expect(first).toContain('- 1ª camada: lia\n- 2ª camada: theo')
+    expect(first).toContain('Você é da 1ª camada')
+    expect(first).toContain('Motivo do plano: um acha, o outro escreve')
+    expect(second).toContain('Você é da 2ª camada')
+  })
+
+  it('a plan of one layer tells the agents nothing about an order', async () => {
+    db.saveAgent(agent('a2', 'theo')) // both on the same engine, so every turn is seen here
+    const r = runner(fakeEngine('claude', { delayMs: 1, route: () => ({ plano: [['lia', 'theo']], reason: 'dois assuntos' }) }))
+    await r.send('c1', 'duas coisas ao mesmo tempo')
+    await r.idle()
+    expect(claude.turns).toHaveLength(3) // the router, then the two agents
+    expect(claude.turns.slice(1).every((t) => !t.prompt.includes('O roteador dividiu'))).toBe(true)
   })
 
   it('a layer of two agents answers at once', async () => {
