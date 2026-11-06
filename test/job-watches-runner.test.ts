@@ -124,6 +124,41 @@ describe('following a run through the agent', () => {
   })
 })
 
+describe('what the agent is told about jobs', () => {
+  const system = (): string => JSON.stringify(turns.at(-1))
+
+  it('with the option on, to show a run in the card first', async () => {
+    await ask(async () => {})
+    expect(system()).toContain('## Databricks jobs')
+    expect(system()).toContain('call acompanhar_job first')
+  })
+
+  it('with it off and the app set up, where to turn it on', async () => {
+    db.saveAgent({ ...agent, jobWatch: false })
+    settings.jobWatch = { profile: 'leitura' }
+    await ask(async () => {})
+    expect(system()).toContain('turning on Follow jobs')
+  })
+
+  it('nothing when the app was never set up', async () => {
+    db.saveAgent({ ...agent, jobWatch: false })
+    await ask(async () => {})
+    expect(system()).not.toContain('Databricks jobs')
+  })
+
+  it('a run read without a card points back to it', async () => {
+    await ask((url) => use(url, 'ver_job', { run_id: '8841' }))
+    expect(toolAnswers.at(-1)).toContain('call acompanhar_job to show it')
+  })
+
+  it('shows the card for a run that has already ended', async () => {
+    runState = { state: { life_cycle_state: 'TERMINATED', result_state: 'SUCCESS' } }
+    const m = await ask((url) => use(url, 'acompanhar_job', { run_id: '8841' }))
+    expect(m.run?.jobWatchIds).toHaveLength(1)
+    expect(db.jobWatches()[0]).toMatchObject({ status: 'ended' })
+  })
+})
+
 describe('actions', () => {
   beforeEach(() => {
     settings.jobWatch = { actions: true }

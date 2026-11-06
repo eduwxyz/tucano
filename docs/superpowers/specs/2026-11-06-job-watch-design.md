@@ -165,6 +165,10 @@ Só aparecem para agentes com **Acompanhar jobs** ligado na aba **Ferramentas**,
 
 A saída de jobs é tratada como dado, nunca como instrução. Ela é limitada em tamanho e passa pela remoção de segredos de `step-text.ts`.
 
+**Prompt:** com a opção ligada, o agente é instruído a chamar `acompanhar_job` sempre que falarem de um job ou run específico, mesmo já terminado, porque é o que mostra o cartão. Com a opção desligada e o app já configurado, ele é instruído a dizer onde ligá-la.
+
+**Skill padrão:** ao ligar a opção num agente, ele recebe a skill `analisar-job-databricks`, criada na primeira vez. Depois ela é uma skill comum: o que a pessoa editar, tirar ou apagar fica assim. O cartão não depende dela.
+
 ## Ciclo de um acompanhamento
 
 1. Com `job_id`, procurar o run ativo com `jobs list-runs --job-id <id> --active-only`. Sem run ativo, responder ao agente e não criar acompanhamento.

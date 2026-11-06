@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CliError } from '../src/core/databricks'
 import { Db } from '../src/core/db'
-import { JobWatches, jobEventTask, jobSummary, jobTools, type JobWatchDeps } from '../src/core/job-watches'
+import { giveJobSkill, JOB_SKILL_NAME, JobWatches, jobEventTask, jobSummary, jobTools, type JobWatchDeps } from '../src/core/job-watches'
+import { Skills } from '../src/core/skills'
 import { jobWatchConfig, type JobEvent, type JobReading, type JobWatch, type JobWatchSettings, type SparkReading } from '../src/shared/job-watch'
 import type { Agent, Message } from '../src/shared/types'
 
@@ -524,6 +525,55 @@ describe('what the agent is told', () => {
 
   it('says when the metrics are missing, not zero', () => {
     expect(jobSummary(running())).toMatch(/indisponíveis|unavailable/)
+  })
+})
+
+describe('the analysis skill that comes with it', () => {
+  let skills: Skills
+  const deps = () => ({ skills: () => db.skills(), save: (s: Parameters<Skills['save']>[0]) => skills.save(s) })
+  const active = () => db.skills().find((s) => s.name === JOB_SKILL_NAME && s.state === 'active')
+  beforeEach(() => {
+    skills = new Skills({ db, emit: () => {} })
+  })
+
+  it('is created for the first agent turned on, and only for it', () => {
+    const state = giveJobSkill(deps(), undefined, [pm, { id: 'off', archived: false }])
+    expect(active()?.agents).toEqual(['a1'])
+    expect(state).toEqual({ seeded: true, given: ['a1'] })
+    expect(skills.forAgent('off')).toEqual([])
+  })
+
+  it('isn’t created when no agent has the option', () => {
+    expect(giveJobSkill(deps(), undefined, [{ id: 'off', archived: false }])).toEqual({ seeded: false, given: [] })
+    expect(active()).toBeUndefined()
+  })
+
+  it('goes to each agent turned on later', () => {
+    const state = giveJobSkill(deps(), undefined, [pm])
+    giveJobSkill(deps(), state, [pm, { id: 'a2', archived: false, jobWatch: true }])
+    expect(active()?.agents).toEqual(['a1', 'a2'])
+  })
+
+  it('leaves an agent the person took off it', () => {
+    const state = giveJobSkill(deps(), undefined, [pm, { id: 'a2', archived: false, jobWatch: true }])
+    const s = active()!
+    skills.save({ id: s.id, name: s.name, description: s.description, body: s.body, agents: ['a2'] })
+    giveJobSkill(deps(), state, [pm, { id: 'a2', archived: false, jobWatch: true }])
+    expect(active()?.agents).toEqual(['a2'])
+  })
+
+  it('doesn’t come back once the person deletes it', () => {
+    const state = giveJobSkill(deps(), undefined, [pm])
+    db.removeSkill(active()!.id)
+    const next = giveJobSkill(deps(), state, [pm, { id: 'a2', archived: false, jobWatch: true }])
+    expect(active()).toBeUndefined()
+    expect(next.given).toEqual(['a1', 'a2'])
+  })
+
+  it('keeps what the person edited, and one already for everyone', () => {
+    const own = skills.save({ name: JOB_SKILL_NAME, description: 'minha', body: 'minha receita', agents: [] })
+    giveJobSkill(deps(), undefined, [pm])
+    expect(db.skill(own.id)).toMatchObject({ body: 'minha receita', agents: [] })
   })
 })
 

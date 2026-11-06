@@ -1,7 +1,7 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ChannelLayout } from './channel-layout'
-import type { JobWatchSettings } from './job-watch'
+import type { JobSkillState, JobWatchSettings } from './job-watch'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -294,6 +294,7 @@ export interface Settings {
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   jobWatch?: Partial<JobWatchSettings> // following Databricks runs: the CLI, what it may run, the limits
+  jobSkill?: JobSkillState // the analysis skill that comes with it
 }
 
 // Which chirp a notification plays: a knock when an agent needs me, two notes when the work

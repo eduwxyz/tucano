@@ -26,11 +26,12 @@ export function systemPrompt(opts: {
   apps?: AgentApp[] // the person's own apps it may use
   routines?: Routine[] // its own, when it can schedule
   skills?: Skill[] // the active ones it follows, when it has skill tools
+  jobs?: 'on' | 'off' // following Databricks runs: it has the tools, or it doesn't but the app is set up for it
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
   connectors?: boolean // it has connector tools (Slack, Databricks…)
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, builder, wiki, connectors } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, jobs, skills, builder, wiki, connectors } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -94,6 +95,16 @@ export function systemPrompt(opts: {
         `## Suas skills\nReceitas que ${me} aprovou pra tipos de tarefa. Quando a tarefa bater com o "quando usar", leia a receita com ler_skill antes de começar e siga.`,
         `## Your skills\nRecipes ${me} approved for kinds of task. When the task matches the "when to use", read the recipe with ler_skill before starting and follow it.`
       )}\n${skills.map((k) => `- ${k.name}: ${k.description}`).join('\n')}`,
+    jobs === 'on' &&
+      L(
+        `## Jobs do Databricks\nQuando ${me} falar de um job ou run específico (acompanhar, ver como está, checar, analisar), chame acompanhar_job primeiro, mesmo que o run já tenha terminado: é isso que mostra o cartão na conversa. Não rode a CLI no seu computador nem fique consultando de novo. Para detalhes, use ver_job depois.`,
+        `## Databricks jobs\nWhen ${me} brings up a specific job or run (follow, see how it's doing, check, analyze), call acompanhar_job first, even if the run has ended: that's what shows the card in the conversation. Don't run the CLI on your computer or keep checking again. For details, use ver_job after.`
+      ),
+    jobs === 'off' &&
+      L(
+        `## Jobs do Databricks\nSe ${me} pedir para acompanhar um job ou run do Databricks, diga que para isso é preciso ligar Acompanhar jobs na sua página, em Ferramentas.`,
+        `## Databricks jobs\nIf ${me} asks to follow a Databricks job or run, say that it takes turning on Follow jobs on your page, under Tools.`
+      ),
     routines &&
       routines.length > 0 &&
       `${L(

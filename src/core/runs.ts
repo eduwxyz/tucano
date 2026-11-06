@@ -1503,6 +1503,7 @@ export class Runner {
       web: agent.web !== false,
       routines: routines?.forAgent(agent.id),
       skills: skills && mySkills,
+      jobs: jobs ? 'on' : this.deps.gateway && this.deps.jobs && settings.jobWatch ? 'off' : undefined,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
       connectors: exposed.size > 0,
       builder: proposes

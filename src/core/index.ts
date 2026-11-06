@@ -56,7 +56,7 @@ import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { DatabricksCli } from './databricks'
-import { JobWatches } from './job-watches'
+import { giveJobSkill, JobWatches } from './job-watches'
 import { jobWatchConfig } from '../shared/job-watch'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
@@ -582,6 +582,12 @@ const jobWatches = new JobWatches({
 
 // A proposal waits for a decision: the knock at the door, and a click opens Skills.
 const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, body, undefined, undefined, { kind: 'approval', page: 'skills' }) })
+// The analysis skill that comes with following jobs, for each agent as it's turned on.
+function syncJobSkill(): void {
+  const before = settings().jobSkill
+  const jobSkill = giveJobSkill({ skills: () => db.skills(), save: (s) => skills.save(s) }, before, db.agents())
+  if (JSON.stringify(before) !== JSON.stringify(jobSkill)) db.setSettings({ jobSkill })
+}
 // The wiki's folder is the truth (Markdown, as Obsidian opens it); TUCANO_WIKI points it elsewhere.
 // The default folder keeps wiki.db; another folder gets an index of its own, so going back finds the old one.
 const wikiHome = join(dataDir, 'wiki')
@@ -713,6 +719,7 @@ void ready.then(async () => {
   }
   routines.start()
   jobWatches.start()
+  syncJobSkill()
   // A copy of the database once a day, the last 7 kept.
   const daily = (): void => {
     try {
@@ -891,6 +898,7 @@ const api: Api = {
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
+    if (clean.jobWatch) syncJobSkill()
     // A Linux computer starts right away when turned on (the first time downloads the system) and stops when
     // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
     if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})

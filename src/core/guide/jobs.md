@@ -30,15 +30,10 @@ Estado, duração e tasks vêm da API de Jobs. Shuffle, spill, memória e progre
 - As regras valem para as ferramentas do Tucano. Um agente em **Este computador** roda comandos como você, então use um perfil só de leitura, ou deixe ele em **Linux isolado** ou sem computador.
 
 ## Skill de análise
-Uma skill deixa a análise do seu jeito. Crie em **Skills**, com **Quando usar** "ao analisar um alerta, uma falha ou a conclusão de um job do Databricks", e uma receita como:
-
-1. Use `ver_job` para ler as métricas e achar a etapa ou task afetada.
-2. Em caso de falha, leia a saída da task e cite o erro original.
-3. Compare a duração com a mediana dos últimos runs.
-4. Responda com o que aconteceu, a causa provável, o grau de certeza e o próximo passo.
-5. Nunca cancele, reinicie ou altere o job sem aprovação.
+Ao ligar **Acompanhar jobs**, o agente recebe a skill **analisar-job-databricks**, com uma receita de análise. Ela não é necessária para o cartão: só define como o agente escreve a análise. Mude a receita em **Skills**, ou tire o agente dela: o que você mudar ou apagar fica assim.
 
 ## Quando dá errado
+- **Respondeu sem cartão:** confira se **Acompanhar jobs** está ligado nesse agente, e abra os passos da resposta. Se **Acompanhar job** falhou, o motivo está lá.
 - **Sem acesso:** rode `databricks auth login --profile <perfil>`. O acompanhamento volta sozinho.
 - **Não acha a CLI:** informe o **Caminho da CLI** nas Configurações.
 - **Sem leitura há X minutos:** é falha na consulta, não no job. O app tenta de novo com mais espaço entre as tentativas.

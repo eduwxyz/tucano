@@ -106,6 +106,13 @@ export interface JobWatchSettings {
   spillAction: 'card' | 'wake'
 }
 
+// The analysis skill that comes with following jobs: which agents already got it, so one taken off it, or
+// a skill the person deleted, stays that way.
+export interface JobSkillState {
+  seeded: boolean
+  given: string[]
+}
+
 export const JOB_WATCH_DEFAULTS: JobWatchSettings = {
   commands: ['jobs get', 'jobs get-run', 'jobs get-run-output', 'jobs list-runs --job-id --active-only --completed-only --limit --expand-tasks --page-token', 'clusters get', 'current-user me', 'api get'],
   apiPaths: ['/api/2.1/jobs/runs/list', '/driver-proxy-api/'],
