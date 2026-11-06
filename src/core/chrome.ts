@@ -324,7 +324,8 @@ export class ChromeBrowsers {
   private async shutDown(t: Tab): Promise<void> {
     t.closedAll = undefined // this is the app closing it, not the person handing it back
     await Promise.race([t.send('Browser.close').catch(() => {}), wait(2000)])
-    await exited(t.proc, 5000)
+    // Usually under a second; a loaded machine (a server, CI) can take several to write them.
+    await exited(t.proc, 15_000)
     t.close()
     await gone(t.proc)
   }
