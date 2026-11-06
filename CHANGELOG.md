@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **An agent's Chrome gets more time to open.** The first open on a slow computer could pass the 15 s it had, and the agent got an error instead of the page. It now gets 30 s.
+
 ## [0.2.14] - 2026-11-06
 
 > **Em português:**
