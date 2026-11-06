@@ -493,7 +493,7 @@ export class Db {
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
-      ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {})
+      ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : str(r['kind']) === 'removed' ? { kind: 'removed' as const } : {})
     }
   }
 

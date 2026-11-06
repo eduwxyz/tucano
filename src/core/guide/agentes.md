@@ -1,5 +1,5 @@
 # Agentes
-> Criar um agente, instruções, modelo, limites, ferramentas e acesso, memória, aparência e arquivar.
+> Criar um agente, instruções, modelo, limites, ferramentas e acesso, memória, aparência, arquivar e excluir.
 
 ## Criar
 - Com o Tuca: o **+** ao lado de **Agentes** na barra lateral abre o Tuca. Conte a tarefa, ele propõe um agente num card: **Criar**, **Editar antes** ou **Descartar**.
@@ -27,6 +27,9 @@ Clique no agente na barra lateral (ou **Ver perfil** na conversa). Ela tem quatr
 
 ## Arquivar
 No menu do agente na barra lateral (clique com o botão direito), **Arquivar…**. Ele sai da barra lateral, para de responder e as rotinas dele desligam. Histórico e recibos ficam. Pra voltar: **Arquivados**, no fim da lista de agentes, **Reativar** (as rotinas você liga de novo em Rotinas).
+
+## Excluir
+**Excluir** fica na página do agente, no menu da barra lateral e em **Arquivados**. É para sempre: vão as configurações, as DMs, as rotinas, as memórias e skills só dele, o computador com tudo que está lá e os logins do navegador. As mensagens nos canais e os recibos ficam, e as pastas emprestadas não são tocadas. O @handle fica livre. O Tuca não pode ser excluído. Em dúvida, arquive.
 
 ## Quando dá errado
 - Não responde: veja se o motor dele está **Pronto** em Configurações › Modelos e se ele não bateu o limite do mês (**Uso e limites**).

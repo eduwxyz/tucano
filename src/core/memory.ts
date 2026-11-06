@@ -561,6 +561,11 @@ export class Memories {
     if (this.deps.db.memory(id)?.state === 'forgotten') this.remove(id)
   }
 
+  // A deleted agent's own memories go, even the record of what it forgot. Those about the person stay.
+  forgetAgent(agentId: string): void {
+    for (const m of this.deps.db.memories({ scope: agentId })) this.remove(m.id)
+  }
+
   editSummary(conversationId: string, text: string): void {
     this.deps.db.setSummary(conversationId, text.trim())
     const conv = this.deps.db.conversation(conversationId)
