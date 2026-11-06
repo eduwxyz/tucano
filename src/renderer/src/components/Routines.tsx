@@ -66,7 +66,7 @@ const LAST = (): Partial<Record<RunStatus, { label: string; tone: string }>> => 
 export const webhookUrl = (token: string, port = WEBHOOK_PORT): string => `http://127.0.0.1:${port}/gatilho/${token}`
 
 // "Todo dia às 9h", "A cada 5 min, quando aparecer algo novo em Linear · list_issues"
-function describeRoutine(r: Pick<Routine, 'schedule' | 'trigger'>, connectorName?: string): string {
+export function describeRoutine(r: Pick<Routine, 'schedule' | 'trigger'>, connectorName?: string): string {
   const t = r.trigger
   if (!t) return describeSchedule(r.schedule)
   if (t.kind === 'webhook') return L('Quando chamada neste computador', 'When called on this computer')

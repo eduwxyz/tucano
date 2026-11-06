@@ -13,9 +13,10 @@ import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser 
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
-import { ABRIR_PR, GITHUB, type GitHub } from './github'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderSection, draftFrom, PROPOR_AGENTE } from './tuca'
+import { availableModels, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
+import { LER_GUIA, readGuide } from './guide'
+import { proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
@@ -29,6 +30,10 @@ import { allowed, approvalHash, canonical } from './policy'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
+
+// An old approval of the push-from-the-computer PRs (they left Tucano): still decided, never run.
+const GITHUB = 'github'
+const ABRIR_PR = 'abrir_pr'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -85,7 +90,6 @@ export interface RunnerDeps {
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
-  github?: Pick<GitHub, 'pushable' | 'openPr'> // without it, agents can't open PRs
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds'> // without it, agents have no wiki
@@ -729,8 +733,10 @@ export class Runner {
     // threads, of the conversations this agent is in, are looked up.
     const canSeekThreads = !!this.deps.gateway && (!!msg.threadId || db.threadRoots(conv.id).size > 0)
     const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
-    // The Tuca proposes agents; nobody else does.
-    const builds = !!this.deps.gateway && agent.kind === 'tuca'
+    // Any agent may propose agents, teams, routines and channels (a card the person applies); only the
+    // Tuca helps with Tucano itself, with the guide and a look at the workspace.
+    const proposes = !!this.deps.gateway
+    const helps = proposes && agent.kind === 'tuca'
     let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
     // why, so it says so in a sentence instead of spending a call on each tool to find out.
@@ -808,7 +814,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
       // (a refused token, a sign-in to finish) takes them away.
@@ -836,36 +842,14 @@ export class Runner {
             }
           }
         : undefined
-    // abrir_pr: when a folder lent to this agent is a GitHub repository it can push to.
-    const repos = (this.deps.gateway && this.deps.github?.pushable(agent)) || []
-    const prTool: ToolDef | undefined = repos.length
-      ? {
-          name: ABRIR_PR,
-          description: L(
-            `Pede pra abrir uma pull request em ${repos.join(' ou ')} com uma branch agent/* que você já publicou com git push. Vira um pedido de aprovação; aprovada, o app abre a PR e você recebe o link.`,
-            `Asks to open a pull request on ${repos.join(' or ')} from an agent/* branch you already published with git push. It becomes an approval request; once approved, the app opens the PR and you get the link.`
-          ),
-          inputSchema: {
-            type: 'object',
-            properties: {
-              ...(repos.length > 1 ? { repositorio: { type: 'string', enum: repos } } : {}),
-              branch: { type: 'string', description: L('A branch publicada, ex.: agent/lembrete-duplicado.', 'The published branch, e.g. agent/duplicate-reminder.') },
-              titulo: { type: 'string' },
-              descricao: { type: 'string', description: L('Em Markdown: o que mudou, por quê, como foi testado, o que falta conferir (ex.: o build no Xcode).', "In Markdown: what changed, why, how it was tested, what's left to check (e.g. the Xcode build).") },
-              base: { type: 'string', description: L('A branch de destino. Default: main.', 'The target branch. Default: main.') }
-            },
-            required: [...(repos.length > 1 ? ['repositorio'] : []), 'branch', 'titulo', 'descricao']
-          }
-        }
-      : undefined
     const toolDefs: ToolDef[] = [
       ASK_USER,
       ...(accessTool ? [accessTool] : []),
-      ...(prTool ? [prTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
-      ...(builds ? [PROPOR_AGENTE] : []),
+      ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
+      ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -912,7 +896,55 @@ export class Runner {
           )
         }
 
-        if (name === PROPOR_AGENTE.name && builds) {
+        if (name === LER_GUIA.name && helps) {
+          const page = readGuide(args['pagina'])
+          if (!page.error) addSteps({ id: randomUUID(), label: L('Leu o guia', 'Read the guide'), detail: String(args['pagina']), status: 'done' })
+          return textResult(page.text, page.error)
+        }
+
+        if (name === VER_ESTADO.name && helps) {
+          addSteps({ id: randomUUID(), label: L('Olhou o workspace', 'Looked at the workspace'), detail: String(args['area'] ?? L('tudo', 'all')), status: 'done' })
+          const now = Date.now()
+          return textResult(
+            workspaceState(args['area'], {
+              settings: await this.deps.settings(),
+              connectors: this.deps.connectors?.list() ?? [],
+              agents: db.agents().filter((a) => a.kind !== 'tuca'),
+              conversations: db.conversations(),
+              routines: db.routines(),
+              approvals: db.approvals(),
+              failures: db.recentFailures(now - 7 * 24 * 3_600_000),
+              lastRun: (r) => {
+                const run = r.lastMessageId ? db.message(r.lastMessageId)?.run : undefined
+                return run && { status: run.status, ...(run.error ? { error: run.error } : {}) }
+              },
+              now
+            })
+          )
+        }
+
+        if ((name === PROPOR_TIME.name || PROPOSAL_TOOLS().some((t) => t.name === name)) && proposes) {
+          const now = await this.deps.settings()
+          const usable = (id: string): boolean => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn }
+          const r =
+            name === PROPOR_TIME.name
+              ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
+              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations(), connectors: this.deps.connectors?.list() ?? [], usable })
+          if (!r.proposal) return textResult(r.error!, true)
+          msg.run = { ...msg.run!, proposal: r.proposal }
+          const p = r.proposal
+          const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : p.kind === 'team' ? L('Propôs um time', 'Proposed a team') : L('Propôs um canal', 'Proposed a channel')
+          const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
+          addSteps({ id: randomUUID(), label: what, detail, status: 'done' })
+          return textResult(
+            L(
+              'A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar. Termine com uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
+              "The proposal is in the card, with Apply and Discard, and has NOT happened yet: it only happens when the person applies it. Finish with one short sentence saying they just need to apply it (or ask for a change), without repeating what the card shows. One proposal per reply: the next one replaces this one."
+            )
+          )
+        }
+
+        if (name === PROPOR_AGENTE.name && proposes) {
           const now = await this.deps.settings()
           const r = draftFrom(args, {
             usable: (id) => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn },
@@ -1188,44 +1220,6 @@ export class Runner {
           return clip(out.result)
         }
 
-        if (name === ABRIR_PR && prTool) {
-          const repo = repos.length > 1 ? repos.find((r) => r === args['repositorio']) : repos[0]
-          if (!repo) return textResult(L(`Diga o repositório: ${repos.join(' ou ')}.`, `Say the repository: ${repos.join(' or ')}.`), true)
-          const branch = typeof args['branch'] === 'string' ? args['branch'].trim().replace(/^refs\/heads\//, '') : ''
-          const title = typeof args['titulo'] === 'string' ? args['titulo'].trim() : ''
-          if (!/^agent\/[A-Za-z0-9._\/-]+$/.test(branch)) return textResult(L('A branch precisa ser agent/<assunto>, já publicada com git push.', 'The branch must be agent/<topic>, already published with git push.'), true)
-          if (!title) return textResult(L('Faltou o título.', 'Missing the title.'), true)
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
-          const prArgs = { repo, head: branch, base: typeof args['base'] === 'string' && args['base'].trim() ? args['base'].trim() : 'main', title, body: typeof args['descricao'] === 'string' ? args['descricao'] : '' }
-          approval = {
-            id: randomUUID(),
-            hash: approvalHash(GITHUB, ABRIR_PR, prArgs),
-            agentId: agent.id,
-            conversationId: conv.id,
-            messageId: msg.id,
-            connectorId: GITHUB,
-            connectorName: 'GitHub',
-            tool: ABRIR_PR,
-            args: prArgs,
-            why: title,
-            highRisk: false,
-            state: 'pending',
-            createdAt: Date.now(),
-            expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
-          }
-          db.createApproval(approval)
-          emit({ type: 'approval', approval })
-          msg.run = { ...msg.run!, approvalId: approval.id }
-          addSteps({ id: randomUUID(), label: L('Pediu pra abrir a PR', 'Asked to open the PR'), detail: `${branch} → ${prArgs.base}`, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} quer abrir uma PR`, `${agent.name} wants to open a PR`), `${repo}: ${title}`, conv.id, 'approval', msg.threadId)
-          return textResult(
-            L(
-              `Pedido de PR criado. A PR ainda NÃO existe. Encerre sua resposta agora dizendo em uma frase o que vai na PR. Quando ${settings.workspaceName} aprovar, você recebe o link numa nova mensagem.`,
-              `PR request created. The PR does NOT exist yet. End your reply now saying in one sentence what goes in the PR. When ${settings.workspaceName} approves, you get the link in a new message.`
-            )
-          )
-        }
-
         if (name === ACCESS_REQUEST && accessTool) {
           const c = this.deps.connectors?.list().find((x) => x.name === args['conector'])
           const nivel = args['nivel'] === 'read_write' ? 'read_write' : 'read'
@@ -1456,9 +1450,10 @@ export class Runner {
       routines: routines?.forAgent(agent.id),
       skills: skills && mySkills,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
-      publish: repos,
       connectors: exposed.size > 0,
-      builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
+      builder: proposes
+        ? [builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId, tuca: helps, me: settings.workspaceName }), helps && helperSection()].filter(Boolean).join('\n\n')
+        : undefined
     })
 
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
@@ -1587,7 +1582,7 @@ export class Runner {
       )
     }
 
-    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
+    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -1682,33 +1677,13 @@ export class Runner {
     let ok = false // whether the approved thing went through
     let task: string
     if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
-      if (decision === 'approved') {
-        try {
-          const work = db.message(ap.messageId)?.run?.work
-          const cost = work ? db.costByWork(0).find((w) => w.work === work) : undefined
-          const footer = L(
-            `\n\n---\nFeita por ${agent?.name ?? 'um agente'} no Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens em ${cost.replies} resposta${cost.replies > 1 ? 's' : ''} até aqui` : ''}.`,
-            `\n\n---\nMade by ${agent?.name ?? 'an agent'} in Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens in ${cost.replies} repl${cost.replies > 1 ? 'ies' : 'y'} so far` : ''}.`
-          )
-          const pr = await this.deps.github!.openPr({ ...ap.args, body: `${String(ap.args['body'] ?? '')}${footer}` })
-          ok = true
-          outcome = L(`Abriu a PR #${pr.number}.`, `Opened PR #${pr.number}.`)
-          task = L(`${me} aprovou, e o app abriu a PR #${pr.number}: ${pr.url}\n\nAvise ${me} com o link em uma frase.`, `${me} approved, and the app opened PR #${pr.number}: ${pr.url}\n\nTell ${me} with the link in one sentence.`)
-        } catch (e) {
-          const err = e instanceof Error ? e.message : String(e)
-          outcome = L(`Falhou: ${err}`, `Failed: ${err}`)
-          task = L(
-            `${me} aprovou a PR, mas ela não abriu: ${err}. Conte a ${me} e diga o que fazer (a branch foi publicada? já existe uma PR dela?).`,
-            `${me} approved the PR, but it didn't open: ${err}. Tell ${me} and say what to do (was the branch published? is there already a PR for it?).`
-          )
-        }
-      } else {
-        outcome = decision === 'refused' ? L('Nada foi aberto.', 'Nothing was opened.') : expired
-        task = L(
-          `${me} ${decision === 'refused' ? `recusou a PR${reason ? `: "${reason}"` : ''}` : 'não respondeu ao pedido de PR'}. Nada foi aberto. Responda considerando isso.`,
-          `${me} ${decision === 'refused' ? `turned down the PR${reason ? `: "${reason}"` : ''}` : "didn't answer the PR request"}. Nothing was opened. Reply with that in mind.`
-        )
-      }
+      // A PR asked for before pushing from the agent's computer left Tucano: nothing is opened.
+      // The GitHub connector does it now, with the person's approval like any of its tools.
+      outcome = decision === 'expired' ? expired : L('Nada foi aberto: abrir PR assim saiu do Tucano.', 'Nothing was opened: opening a PR this way left Tucano.')
+      task = L(
+        `${me} ${decision === 'approved' ? 'aprovou' : decision === 'refused' ? 'recusou' : 'não respondeu a'} um pedido de PR antigo, mas abrir PR pelo computador saiu do Tucano e nada foi aberto. Se você tem o conector do GitHub, abra a PR por ele; senão, diga a ${me} que ele precisa dar a você o conector do GitHub.`,
+        `${me} ${decision === 'approved' ? 'approved' : decision === 'refused' ? 'turned down' : "didn't answer"} an old PR request, but opening a PR from the computer left Tucano and nothing was opened. If you have the GitHub connector, open the PR with it; otherwise, tell ${me} you need the GitHub connector.`
+      )
     } else if (ap.connectorId === APPS) {
       // A click or key in one of the person's apps: made on the same app, on the same element.
       const onde = typeof ap.args['onde'] === 'string' ? ap.args['onde'] : ''
@@ -1736,7 +1711,9 @@ export class Runner {
       }
     } else if (ap.connectorId === NAVEGADOR) {
       // A click in the agent's browser: made only on the same page, on the same button.
-      const what = L(`clicar em "${String(ap.args['alvo'] ?? '')}"`, `clicking "${String(ap.args['alvo'] ?? '')}"`)
+      const alvo = String(ap.args['alvo'] ?? '') || L('um elemento sem nome', 'an element with no name')
+      const key = typeof ap.args['tecla'] === 'string' ? (ap.args['tecla'] === 'enter' ? 'Enter' : L('Espaço', 'Space')) : undefined
+      const what = key ? L(`apertar ${key} em "${alvo}"`, `pressing ${key} on "${alvo}"`) : L(`clicar em "${alvo}"`, `clicking "${alvo}"`)
       if (decision === 'approved' && agent?.browser && this.deps.browser) {
         const r = await this.deps.browser.approved(agent, ap.args)
         ok = r.ok

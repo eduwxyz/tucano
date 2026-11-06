@@ -385,7 +385,7 @@ function Backstage({ u }: { u: UsageReport }): ReactNode {
   const rows = [
     { key: 'router', name: L('Roteador', 'Router'), what: L('escolhe quem responde nos canais', 'picks who replies in channels'), tokens: of('router') },
     { key: 'memory', name: L('Memória', 'Memory'), what: L('resume conversas e sugere memórias', 'summarizes conversations and suggests memories'), tokens: of('memory') },
-    ...(tuca ? [{ key: 'tuca', name: 'Tuca', what: L('monta agentes com você', 'builds agents with you'), tokens: of(tuca.id) }] : [])
+    ...(tuca ? [{ key: 'tuca', name: 'Tuca', what: L('te ajuda com o Tucano e monta agentes', 'helps you with Tucano and builds agents'), tokens: of(tuca.id) }] : [])
   ]
   const total = rows.reduce((a, r) => a + r.tokens, 0)
   return (

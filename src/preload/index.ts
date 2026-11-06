@@ -45,5 +45,16 @@ contextBridge.exposeInMainWorld('tucano', {
     ipcRenderer.on('update', (_e, state: unknown) => cb(state))
   },
   checkUpdates: (): void => ipcRenderer.send('update:check'),
-  installUpdate: (): void => ipcRenderer.send('update:install')
+  installUpdate: (): void => ipcRenderer.send('update:install'),
+  // Tucanos on servers, shown in this window over the app (Settings › Servers, the workspace list).
+  servers: {
+    list: (): Promise<unknown> => ipcRenderer.invoke('servers:list'),
+    pair: (link: string): Promise<unknown> => ipcRenderer.invoke('servers:pair', link),
+    open: (id: string): void => ipcRenderer.send('servers:open', id),
+    local: (): void => ipcRenderer.send('servers:local'),
+    forget: (id: string): Promise<unknown> => ipcRenderer.invoke('servers:forget', id),
+    onChanged: (cb: () => void): void => {
+      ipcRenderer.on('servers', () => cb())
+    }
+  }
 })

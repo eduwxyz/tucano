@@ -4,6 +4,47 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-11-06
+
+> **Em português:**
+> - **Google e Slack nos conectores.** Gmail, Calendar, Drive, Docs e Sheets, pelos servidores oficiais do Google, e o Slack, pelo dele. Os dois só aceitam apps cadastrados neles, então o primeiro Conectar mostra como criar o seu, uma vez: 5 passos no Google, 2 no Slack (o link já traz tudo preenchido). Depois, é um clique.
+> - **Mais seis conectores, e segredos no 1Password.** GitHub, Dynatrace, Snowflake, Metabase, Azure DevOps e AWS CloudWatch: a loja pede o endereço ou o token numa janela. No lugar de um token, dá pra pôr uma referência do 1Password (op://…), lida a cada conexão.
+> - **O Tucano num servidor, pronto pra outras pessoas.** Entrar por link, as páginas que os agentes servem abrindo pelo servidor, arquivos que sobem e descem, o login dos conectores terminando sozinho e as notificações no navegador.
+> - **O app abre os seus Tucanos em servidores.** Um link tucano://connect pareia o app com um Tucano num servidor, que aparece na mesma janela, com uma barra pra voltar; ficam em Configurações › Servidores.
+>
+> **Correção:** um agente no Codex volta a salvar arquivos no computador dele, em vez de dizer que a sessão é só leitura. Acontecia quando um agente caía no modelo reserva do Codex.
+
+### Added
+
+- **Tucano as a server, ready for other people to use.** Sign in by a link (`server.js link` prints it; `TUCANO_URL` behind a proxy), and twenty wrong tokens from one address lock it out for ten minutes. Pages agents serve open at `https://<port>-<address>`, through the server, with a sign-in of their own, WebSockets included. A file sent with a message goes up to the server, a cited one comes down, an Obsidian vault comes in as a .zip, and folders are picked on the server. OAuth connectors finish on the server's own address, with nothing to paste; notifications reach the browser, and a connection that goes quiet comes back with the drafts kept. An idle agent's Chrome closes after ten minutes and reopens on the same page.
+- **The desktop app opens your Tucanos on servers.** A `tucano://connect` link (`server.js link` prints it, next to the browser's) pairs the app with a Tucano on a server: its page shows over the app in the same window, in a view with no bridge to this computer, under a bar to go back, signed in with a token the system's keychain keeps. **Settings › Servers** lists them, pairs a pasted link and forgets one; the workspace list, the Window menu and the tray open them, and the server on screen when the app quit comes back at launch.
+- **Six more connectors in the store, for services that ask a few things first:** GitHub (a personal access token), Dynatrace and Snowflake (your instance and a token), Metabase (your address, then the browser sign-in), and Azure DevOps and AWS CloudWatch, which run the service's official server on this computer (with npx and uv). The store asks for what each needs in a window and adds the connector as the custom form would.
+- **A connector's secrets can stay in 1Password.** In place of a token or a variable of a local connector's command, an `op://Vault/Item/field` reference: Tucano keeps only the reference and reads the value with the 1Password CLI on each connection, and says what to do when the CLI is missing, signed out or locked, or the item isn't there.
+- **Gmail, Google Calendar, Google Drive, Google Docs and Google Sheets in the connector store**, through Google's own MCP servers. Google signs in only apps registered with it, so the first one walks you through making yours in Google Cloud, once, in five steps with a link for each; the other four then sign in with one click. Each asks only for what its tools need: Gmail searches, reads, drafts and labels but never sends nor deletes for good, and Drive writes only the files it made or opened. The Tuca's guide explains the steps and what to check when Google turns a sign-in away.
+- **Slack in the connector store**, through Slack's own MCP server. Slack takes only directory apps or a workspace's internal apps, so the first Connect makes yours from a link that fills it all in (permissions, MCP on, the address to come back to): pick the workspace, create, paste its Client ID and Secret. Agents act as you, with a user token, through the same classes and approvals. The sign-in comes back through the workspace's fixed webhook port, since Slack takes only the address registered in the app. Google's or Slack's app can be changed from the connector's page.
+
+### Fixed
+
+- **An agent on Codex writes files on its computer again, instead of saying the session is read-only.** Codex runs in a read-only, empty sandbox on purpose, and tells the model so; newer models (GPT-6-Astra) took that for the agent's computer and answered "this session has read-only filesystem access" without trying `write_file`, or tried Codex's own `apply_patch` and gave up. It showed when an agent fell back to a Codex reserve model. An agent with a computer is now told that sandbox isn't its computer. Agents also no longer send you to the Tuca to get access back: he can't change it.
+
+
+## [0.2.13] - 2026-11-06
+
+> **Em português:**
+> - **Segurança: duas correções.** Um link na resposta de um agente não abre mais um arquivo local como se fosse o app ([GHSA-6pvc-g4mm-34rq](https://github.com/eduwxyz/tucano/security/advisories/GHSA-6pvc-g4mm-34rq)), e Enter, Espaço ou um clique num botão sem nome no navegador de um agente não passam mais sem a sua aprovação quando publicam, enviam ou apagam ([GHSA-4q39-94jc-xhq8](https://github.com/eduwxyz/tucano/security/advisories/GHSA-4q39-94jc-xhq8)). Atualize.
+> - **Qualquer agente cria por você.** Peça a um agente um agente novo, um time de agentes com um canal, uma rotina, um canal ou uma mudança num agente, e ele propõe num card com Aplicar e Descartar: nada muda até você aplicar.
+> - **O Tuca te ajuda com o Tucano.** Ele faz o que dá em vez de ensinar o passo a passo, explica o resto lendo um guia do app, e descobre por que algo não está dando certo olhando o workspace: motores, conectores, limites, rotinas e os erros das respostas, nunca o que foi dito nas conversas. Quando cita uma tela, manda um botão que leva até ela.
+
+### Security
+
+- **A link in an agent's reply can't open a local file as the app anymore.** The window only ever shows the app, only the app's own page talks to its main process, and message links keep only http, https and mailto ([GHSA-6pvc-g4mm-34rq](https://github.com/eduwxyz/tucano/security/advisories/GHSA-6pvc-g4mm-34rq)). Thanks to @rayanneblima.
+- **Enter, Space or a click on a nameless button in an agent's browser ask for your approval** when they publish, send or delete, as a click on a risky button did; clicks are judged by the page's own words, not the agent's ([GHSA-4q39-94jc-xhq8](https://github.com/eduwxyz/tucano/security/advisories/GHSA-4q39-94jc-xhq8)). Thanks to @marcossimo.
+
+### Added
+
+- **Any agent makes things for you, as cards you apply.** Ask an agent for a new agent, a team, a routine, a channel or a change to an agent, and it proposes it: a new agent as before; a team of 2 to 8 agents with a channel for them, created at once with **Create team**; a scheduled routine for any agent (an agent's own still go through scheduling it itself); a channel with its agents; or a change to an agent that exists, shown as before and after. Each is a card with **Apply** and **Discard**, applied the way the screens do it, and nothing changes until you apply it. Agents are told to propose when you ask or when it clearly solves what you asked, not in the middle of other work.
+- **The Tuca helps you with Tucano.** He does what he can instead of explaining how, asking only for what's missing, even when you ask "how do I…?". The rest he explains from a guide of the app (17 pages, from agents and connectors to workspaces and troubleshooting) he reads before answering, so he doesn't make up screens; other agents send those questions to him. Asked why something isn't working, he looks at the workspace first: harnesses and sign-ins, connectors and their errors, each agent's model, access and limit, routines and how their last run ended, and the replies that failed in the last week with their error, never what was said in conversations. When he mentions a screen, the message shows a button that opens it. A Tuca made before is brought up to date when the app starts, unless his instructions were rewritten by hand.
+
 ## [0.2.12] - 2026-11-05
 
 > **Em português:**
@@ -310,6 +351,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.14]: https://github.com/eduwxyz/tucano/compare/v0.2.13...v0.2.14
+[0.2.13]: https://github.com/eduwxyz/tucano/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/eduwxyz/tucano/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/eduwxyz/tucano/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/eduwxyz/tucano/compare/v0.2.9...v0.2.10
