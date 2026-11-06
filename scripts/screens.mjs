@@ -55,9 +55,22 @@ await shot('03-router-escolheu')
 await send('@lia antes de sugerir qualquer coisa, use a ferramenta de pergunta pra me perguntar qual é o meu prazo.')
 await settle()
 await shot('04-pergunta')
-await send('Até sexta.')
+await win.fill('.decisions__text', 'Até sexta.')
+await win.keyboard.press('Enter')
 await settle()
 await shot('05-respondeu-pergunta')
+
+// Several decisions: one at a time in place of the message box, then a review before sending.
+await send('@lia me ajuda a decidir')
+await settle()
+await win.waitForSelector('.decisions')
+await shot('05a-decisoes')
+await win.locator('.decisions__option').first().click()
+await win.keyboard.type('Até sexta.')
+await win.keyboard.press('Enter')
+await shot('05b-decisoes-revisao')
+await win.locator('.decisions .btn--primary').click()
+await settle()
 
 // Handoff: Lia mentions Theo, who answers next.
 await send('@lia peça pro Theo calcular a mediana de 3, 9 e 4, mencionando ele com arroba. Você não calcula.')

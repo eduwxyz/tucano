@@ -614,6 +614,23 @@ h3 {
   background: var(--ok);
   animation: fade var(--dur-enter) var(--ease-in) 1.2s reverse forwards;
 }
+/* An agent waits on me in that conversation: it arrives with a short pop, then stays still. */
+.waiting-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  animation: rise var(--dur-enter) var(--ease-spring) backwards;
+}
+.section__head .waiting-mark,
+.channel-group__head .waiting-mark {
+  margin-left: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting-mark {
+    animation: none;
+  }
+}
 .inline-form {
   display: flex;
   align-items: center;
@@ -1519,12 +1536,12 @@ h3 {
 }
 /* A request (or a question) arriving: it rises in, rings twice to be seen, and goes quiet. */
 .approval--pending,
-.question:not(.is-answered) {
+.decisions {
   --rise: 6px;
   animation: rise 280ms var(--ease-out) backwards;
 }
 .approval--pending::after,
-.question:not(.is-answered)::after {
+.decisions::after {
   content: '';
   position: absolute;
   inset: -1px;
@@ -2229,40 +2246,280 @@ h3 {
   --pulse-min: 0.45;
   animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
 }
-.question {
+/* The decisions an agent asked: the message box turns into them, one at a time. The bar on
+   top has a segment per decision, filled as each is answered. */
+.decisions {
   position: relative;
   --ring: var(--accent-soft);
-  margin-top: 8px;
-  border: 1px solid var(--accent);
-  background: var(--accent-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 14px 14px 8px;
+  outline: none;
+}
+.decisions:focus-within {
+  box-shadow: var(--shadow), 0 0 0 4px var(--accent-soft);
+}
+.decisions__body {
+  outline: none;
+}
+.decisions__progress {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px;
+  margin-bottom: 12px;
+}
+.decisions__progress:has(> :only-child) {
+  display: none;
+}
+.decisions__segment {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+.decisions__segment.is-done {
+  background: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.decisions__segment.is-current {
+  background: var(--accent);
+}
+.decisions__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0 4px 10px;
+}
+.decisions__question {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  text-wrap: pretty;
+}
+.decisions__nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.decisions__next .icon {
+  transform: rotate(180deg);
+}
+.decisions__count {
+  min-width: 52px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.decisions__prose,
+.answers__prose {
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.decisions__prose {
+  margin: 0 4px 10px;
+  padding-right: 6px;
+}
+.decisions__prose > :first-child,
+.answers__prose > :first-child {
+  margin-top: 0;
+}
+.decisions__prose > :last-child,
+.answers__prose > :last-child {
+  margin-bottom: 0;
+}
+.decisions__prose code,
+.answers__prose code {
+  font: 0.92em var(--mono);
+  background: var(--code-bg);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.answers__prose {
+  max-height: none;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.decisions__options {
+  display: flex;
+  flex-direction: column;
+}
+.decisions__option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 8px;
   border-radius: var(--radius);
-  padding: 10px 12px;
-  max-width: 560px;
-  transition: border-color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
+  text-align: left;
+  color: var(--text);
+  transition: var(--transition-ui);
 }
-.question p {
-  margin: 2px 0 0;
-  font-weight: 500;
+.decisions__option + .decisions__option {
+  margin-top: 1px;
 }
-.question .hint {
-  margin-top: 6px;
+.decisions__option.is-focus {
+  background: var(--hover);
 }
-.question.is-answered {
-  border-color: var(--border);
+.decisions__option.is-on {
+  background: var(--accent-soft);
+}
+.decisions__key {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  transition: var(--transition-ui);
+}
+.decisions__option.is-on .decisions__key {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.decisions__label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.decisions__detail {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.decisions__option--other {
+  cursor: text;
+}
+.decisions__option--other .decisions__key {
+  border-style: dashed;
+  color: var(--text-3);
+}
+.decisions__option--other input {
+  flex: 1;
+  border: 0;
+  padding: 0;
   background: transparent;
+  box-shadow: none;
+  font-size: 13.5px;
 }
-.question.is-answered p {
-  font-weight: 400;
+.decisions__text {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  border-radius: var(--radius);
+}
+.decisions__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 0;
+}
+.decisions__hint {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.decisions__review {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.decisions__review-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  width: 100%;
+  padding: 9px 8px;
+  border-radius: var(--radius);
+  text-align: left;
+  transition: var(--transition-ui);
+}
+.decisions__review-row:hover {
+  background: var(--hover);
+}
+.decisions__review li + li .decisions__review-row {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+.decisions__review-question {
+  font-size: 13px;
   color: var(--text-2);
 }
-.question__label {
-  font-size: 11.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.decisions__review-answer {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.is-skipped {
+  color: var(--text-3);
+  font-weight: 400;
+  font-style: italic;
+}
+/* On the agent's message: what is waiting, or what I chose. */
+.answers {
+  margin-top: 8px;
+  max-width: 560px;
+}
+.answers.is-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
   color: var(--accent);
 }
-.question.is-answered .question__label {
+.answers__label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.answers__list {
+  margin: 4px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.answers__list dt {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.answers__list dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.answers__questions {
+  margin: 2px 0 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.answers__questions:has(> :only-child) {
+  list-style: none;
+  padding-left: 0;
+  white-space: pre-wrap;
+}
+.answers__note {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
   color: var(--text-3);
 }
 .retry {

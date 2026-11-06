@@ -6,6 +6,7 @@ import { L, lang, locale } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Routine, type Settings, type Skill } from '../shared/types'
 import type { ToolDef } from './gateway'
+import { describeQuestions, questionsOf } from '../shared/questions'
 import { osOf, shellCommand, systemName } from './platform'
 
 export const HISTORY_LIMIT = 30
@@ -343,7 +344,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
     [
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
-      m.run?.question && L(`(pergunta enviada a ${me} pela ferramenta ask_user: ${m.run.question})`, `(question sent to ${me} with the ask_user tool: ${m.run.question})`)
+      questionsOf(m.run).length > 0 && L(`(pergunta enviada a ${me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`)
     ]
       .filter(Boolean)
       .join('\n\n')

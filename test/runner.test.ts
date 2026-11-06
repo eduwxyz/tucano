@@ -381,7 +381,7 @@ describe('ask_user through the gateway', () => {
     await r.send('c1', '@lia me pergunta o que faltar')
     await r.idle()
     const [asked] = agentMessages()
-    expect(asked?.run).toMatchObject({ status: 'waiting_input', question: 'Pra quando você precisa disso?' })
+    expect(asked?.run).toMatchObject({ status: 'waiting_input', questions: [{ question: 'Pra quando você precisa disso?', kind: 'text' }] })
     expect(asked?.run?.steps.map((s) => s.label)).toEqual(['Pensou', 'Perguntou a você', 'Respondeu'])
     expect(claude.turns[0]?.mcpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[a-f0-9]{48}$/)
 
@@ -394,6 +394,124 @@ describe('ask_user through the gateway', () => {
     expect((replies[1]!.author as { id: string }).id).toBe('a1')
     expect(claude.turns[1]?.prompt).toContain('pergunta enviada a Edu pela ferramenta ask_user: Pra quando você precisa disso?')
     expect(db.messages().some((m) => m.text.startsWith('Chamei'))).toBe(false)
+  })
+  const askingRunner = (): Runner =>
+    new Runner({
+      db,
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') },
+      settings: async () => settings,
+      emit: (e) => events.push(e),
+      workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
+      gateway
+    })
+
+  it('asks a list of decisions', async () => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia me ajuda a decidir')
+    await r.idle()
+    const [asked] = agentMessages()
+    expect(asked?.run).toMatchObject({
+      status: 'waiting_input',
+      questions: [
+        { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] },
+        { question: 'Pra quando?', kind: 'text' }
+      ]
+    })
+    expect(asked?.run?.question).toBeUndefined()
+    expect(asked?.run?.steps.find((s) => s.label === 'Perguntou a você')?.detail).toBe('Paginação no menu? (+1)')
+  })
+
+  it('gives the agent the error when the decisions are invalid', async () => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia decisões demais')
+    await r.idle()
+    const [asked] = agentMessages()
+    expect(asked?.run?.status).not.toBe('waiting_input')
+    expect(asked?.run?.questions).toBeUndefined()
+  })
+
+  const askDecisions = async (): Promise<{ r: Runner; asked: Message }> => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia me ajuda a decidir')
+    await r.idle()
+    return { r, asked: agentMessages()[0]! }
+  }
+  const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'me')
+
+  it('sends the answers of a question older than the last 50 messages', async () => {
+    const { r, asked } = await askDecisions()
+    for (let i = 0; i < 60; i++) db.saveMessage({ id: `routine-${i}`, conversationId: asked.conversationId, author: { kind: 'system' }, text: `Rotina ${i}`, at: asked.at + 1000 + i, ...(asked.threadId ? { threadId: asked.threadId } : {}) })
+    r.answer(asked.id, 0, { chosen: [1] })
+    r.answer(asked.id, 1, { text: 'até sexta' })
+    await r.submitAnswers(asked.id)
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(mine().at(-1)?.text).toContain('Scroll infinito')
+  })
+
+  it('answers the question on the card, not a newer one waiting in the same place', async () => {
+    const { r, asked } = await askDecisions()
+    const newer: Message = { ...asked, id: 'newer', author: { kind: 'agent', id: 'a2' }, at: asked.at + 1000, run: { status: 'waiting_input', steps: [], questions: [{ question: 'Outra?', kind: 'text' }] } }
+    db.saveMessage(newer)
+    r.answer(asked.id, 0, { skipped: true })
+    r.answer(asked.id, 1, { text: 'até sexta' })
+    await r.submitAnswers(asked.id)
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(db.message('newer')?.run?.status).toBe('waiting_input')
+  })
+
+  it('keeps partial answers on the question and sends them as my message', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 0, { chosen: [1] })
+    expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [1] }, null])
+    r.answer(asked.id, 1, { text: 'sexta' })
+    await r.submitAnswers(asked.id)
+    await r.idle()
+    expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(db.message(asked.id)?.run?.answeredInText).toBeUndefined()
+    expect(claude.turns[1]?.prompt).toContain('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
+  })
+
+  it('sends the partial answers along with a free reply', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 0, { chosen: [0] })
+    await r.send('c1', 'o resto eu explico: depois do deploy', [], asked.threadId)
+    await r.idle()
+    expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Busca remota\n\no resto eu explico: depois do deploy')
+    expect(db.message(asked.id)?.run).toMatchObject({ status: 'done', answeredInText: true })
+  })
+
+  it('ignores answers to a question already sent, out of range, or to an unknown option', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 9, { text: 'x' })
+    r.answer(asked.id, 0, { chosen: [7] })
+    r.answer(asked.id, -1, { text: 'x' })
+    r.answer('nope', 0, { chosen: [0] })
+    expect(db.message(asked.id)?.run?.answers).toBeUndefined()
+    r.answer(asked.id, 0, { chosen: [0] })
+    await r.submitAnswers(asked.id)
+    await r.idle()
+    r.answer(asked.id, 0, { chosen: [1] })
+    expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [0] }, null])
+  })
+
+  it('sends only once', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 0, { skipped: true })
+    await Promise.all([r.submitAnswers(asked.id), r.submitAnswers(asked.id)])
+    await r.idle()
+    expect(mine()).toHaveLength(2)
+  })
+
+  it('clears an answer with null', async () => {
+    const { r, asked } = await askDecisions()
+    r.answer(asked.id, 0, { chosen: [0] })
+    r.answer(asked.id, 1, { text: 'sexta' })
+    r.answer(asked.id, 0, null)
+    expect(db.message(asked.id)?.run?.answers).toEqual([null, { text: 'sexta' }])
   })
 })
 

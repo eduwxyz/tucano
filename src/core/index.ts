@@ -60,6 +60,7 @@ import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } f
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
+import { isNewQuestion } from '../shared/questions'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
@@ -264,7 +265,7 @@ function toPhone(e: CoreEvent): void {
   if (e.type === 'approval' && e.approval.state === 'pending' && !sentToPhone.has(e.approval.id)) {
     sentToPhone.add(e.approval.id)
     void telegram.approvalAsked(e.approval, name(e.approval.agentId))
-  } else if (e.type === 'message' && e.message.run?.status === 'waiting_input' && e.message.run.question && e.message.author.kind === 'agent' && !sentToPhone.has(e.message.id)) {
+  } else if (e.type === 'message' && e.message.author.kind === 'agent' && isNewQuestion(e.message) && !sentToPhone.has(e.message.id)) {
     sentToPhone.add(e.message.id)
     const conv = db.conversation(e.message.conversationId)
     void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM'))
@@ -851,6 +852,10 @@ const api: Api = {
   sendMessage: ({ conversationId, text, images, threadId }) => {
     void runner.send(conversationId, text, images, threadId)
   },
+
+  answerQuestion: ({ messageId, index, answer }) => runner.answer(messageId, index, answer),
+
+  submitAnswers: ({ messageId }) => runner.submitAnswers(messageId),
 
   typing: ({ conversationId, threadId }) => {
     void runner.typing(conversationId, threadId).catch((e: unknown) => console.warn('[typing]', e))

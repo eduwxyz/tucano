@@ -1,4 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
+import type { Answer } from './questions'
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider } from './connector-catalog'
 import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
@@ -29,6 +30,8 @@ export interface Api {
   snapshot(): Snapshot
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
+  answerQuestion(p: { messageId: string; index: number; answer: Answer | null }): void // one decision answered on the card; null clears it
+  submitAnswers(p: { messageId: string }): void // sends the decisions answered, as my message
   typing(p: { conversationId: string; threadId?: string }): void // the person is writing there: what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void

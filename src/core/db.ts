@@ -668,6 +668,14 @@ export class Db {
     return (this.db.prepare('SELECT * FROM messages ORDER BY at').all() as Row[]).map((r) => this.toMessage(r))
   }
 
+  // The latest question waiting for me, however much was said after it. `threadId`: in that thread; null: outside threads.
+  waitingQuestion(conversationId: string, threadId: string | null): Message | undefined {
+    const where = threadId === null ? 'thread_id IS NULL' : 'thread_id = ?'
+    const args = threadId === null ? [conversationId] : [conversationId, threadId]
+    const row = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ? AND ${where} AND json_extract(run, '$.status') = 'waiting_input' ORDER BY at DESC LIMIT 1`).get(...args) as Row | undefined
+    return row ? this.toMessage(row) : undefined
+  }
+
   // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
   recentMessages(conversationId: string, limit: number, threadId?: string | null): Message[] {
     const where = threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?'

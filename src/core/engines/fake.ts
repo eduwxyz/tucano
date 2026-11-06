@@ -120,6 +120,17 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         await new Promise((r) => setTimeout(r, Number(/pergunte em (\d+) ?s/i.exec(last)![1]) * 1000))
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'
+      } else if (/decis(õ|o)es demais/i.test(last) && turn.mcpUrl) {
+        await callTool(turn.mcpUrl, 'ask_user', { questions: Array.from({ length: 5 }, (_, i) => ({ question: `Decisão ${i + 1}?`, kind: 'text' })) })
+        reply = 'Tentei perguntar demais.'
+      } else if (/decid/i.test(last) && turn.mcpUrl) {
+        await callTool(turn.mcpUrl, 'ask_user', {
+          questions: [
+            { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] },
+            { question: 'Pra quando?', kind: 'text' }
+          ]
+        })
+        reply = 'Te mandei duas decisões.'
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'

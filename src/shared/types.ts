@@ -1,6 +1,7 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ChannelLayout } from './channel-layout'
+import type { Answer, Question } from './questions'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -164,7 +165,10 @@ export interface Run {
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
-  question?: string // asked with ask_user; answered by the next human message here
+  question?: string // before decisions: what ask_user asked. Read it with questionsOf
+  questions?: Question[] // the decisions asked with ask_user; answered by the next human message here
+  answers?: (Answer | null)[] // what I answered so far, by decision, before sending
+  answeredInText?: true // my reply had text of my own, beyond the decisions answered
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
   artifactIds?: string[] // files and screenshots shown in this reply

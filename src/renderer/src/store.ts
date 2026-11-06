@@ -2,6 +2,7 @@
 // is kept in sync by its events; actions go to the core over RPC.
 import { useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
+import type { Answer } from '../../shared/questions'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
@@ -95,6 +96,7 @@ export interface State {
   demoServer?: { command: string; args: string[] }
   toasts: Toast[] // short notes at the bottom: an action that didn't go through
   coreDown: boolean // the core's process ended; a banner offers to reopen
+  dismissedQuestions: string[] // questions whose card I closed to answer in writing, while the app is open
 }
 
 export interface Toast {
@@ -168,7 +170,8 @@ let state: State = {
   dialog: null,
   tabs: {},
   toasts: [],
-  coreDown: false
+  coreDown: false,
+  dismissedQuestions: []
 }
 
 // ---------- store plumbing ----------
@@ -519,6 +522,10 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
   if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
 }
 
+export const answerQuestion = (messageId: string, index: number, answer: Answer | null): void =>
+  void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerQuestion', { messageId, index, answer })
+export const submitAnswers = (messageId: string): Promise<void> => fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitAnswers', { messageId })
+
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
 // nobody needs to hear if it didn't work.
 const typed = new Map<string, number>()
@@ -574,6 +581,8 @@ export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>
   set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
 export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog, navOpen: dialog ? false : s.navOpen }))
+export const dismissQuestion = (messageId: string): void => set((s) => ({ ...s, dismissedQuestions: [...s.dismissedQuestions, messageId] }))
+export const reopenQuestion = (messageId: string): void => set((s) => ({ ...s, dismissedQuestions: s.dismissedQuestions.filter((id) => id !== messageId) }))
 export const setTab = (page: string, tab: string): void => set((s) => ({ ...s, tabs: { ...s.tabs, [page]: tab } }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
