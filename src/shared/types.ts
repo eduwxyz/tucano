@@ -328,6 +328,9 @@ export interface BrowserElement {
   checked?: boolean
   disabled?: boolean
   inView: boolean
+  focused?: boolean // where a key goes now
+  multiline?: boolean // a text area or an editable block: Enter there often sends (a comment, a message)
+  submits?: string // a field in a form: the label of the button that sends it (what Enter does)
 }
 
 export interface BrowserReply {
