@@ -20,7 +20,7 @@ const day = (at: number): string => new Date(at).toLocaleDateString(locale(), { 
 const PROBLEM = (): Record<Problem['kind'], string> => ({
   failed: L('Falhou', 'Failed'),
   cut: L('Foi cortada (loop ou travou)', 'Cut off (a loop, or it stalled)'),
-  paused: L('Parou no teto de tokens', 'Stopped at the token ceiling'),
+  paused: L('Parou no limite por resposta', 'Stopped at the per-reply limit'),
   refused: L('Você recusou uma ação', 'You refused an action')
 })
 
@@ -83,7 +83,7 @@ export function ReportPage(): ReactNode {
       }
     >
       {!report ? (
-        <p className="read-empty">{L('Calculando…', 'Crunching…')}</p>
+        <p className="read-empty">{L('Fazendo as contas…', 'Doing the math…')}</p>
       ) : (
         <>
           <Headline report={report} thisWeek={thisWeek} />

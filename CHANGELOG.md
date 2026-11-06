@@ -2,6 +2,271 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
+## [Unreleased]
+
+## [0.2.14] - 2026-11-06
+
+> **Em português:**
+> - **Google e Slack nos conectores.** Gmail, Calendar, Drive, Docs e Sheets, pelos servidores oficiais do Google, e o Slack, pelo dele. Os dois só aceitam apps cadastrados neles, então o primeiro Conectar mostra como criar o seu, uma vez: 5 passos no Google, 2 no Slack (o link já traz tudo preenchido). Depois, é um clique.
+> - **Mais seis conectores, e segredos no 1Password.** GitHub, Dynatrace, Snowflake, Metabase, Azure DevOps e AWS CloudWatch: a loja pede o endereço ou o token numa janela. No lugar de um token, dá pra pôr uma referência do 1Password (op://…), lida a cada conexão.
+> - **O Tucano num servidor, pronto pra outras pessoas.** Entrar por link, as páginas que os agentes servem abrindo pelo servidor, arquivos que sobem e descem, o login dos conectores terminando sozinho e as notificações no navegador.
+> - **O app abre os seus Tucanos em servidores.** Um link tucano://connect pareia o app com um Tucano num servidor, que aparece na mesma janela, com uma barra pra voltar; ficam em Configurações › Servidores.
+>
+> **Correção:** um agente no Codex volta a salvar arquivos no computador dele, em vez de dizer que a sessão é só leitura. Acontecia quando um agente caía no modelo reserva do Codex.
+
+### Added
+
+- **Tucano as a server, ready for other people to use.** Sign in by a link (`server.js link` prints it; `TUCANO_URL` behind a proxy), and twenty wrong tokens from one address lock it out for ten minutes. Pages agents serve open at `https://<port>-<address>`, through the server, with a sign-in of their own, WebSockets included. A file sent with a message goes up to the server, a cited one comes down, an Obsidian vault comes in as a .zip, and folders are picked on the server. OAuth connectors finish on the server's own address, with nothing to paste; notifications reach the browser, and a connection that goes quiet comes back with the drafts kept. An idle agent's Chrome closes after ten minutes and reopens on the same page.
+- **The desktop app opens your Tucanos on servers.** A `tucano://connect` link (`server.js link` prints it, next to the browser's) pairs the app with a Tucano on a server: its page shows over the app in the same window, in a view with no bridge to this computer, under a bar to go back, signed in with a token the system's keychain keeps. **Settings › Servers** lists them, pairs a pasted link and forgets one; the workspace list, the Window menu and the tray open them, and the server on screen when the app quit comes back at launch.
+- **Six more connectors in the store, for services that ask a few things first:** GitHub (a personal access token), Dynatrace and Snowflake (your instance and a token), Metabase (your address, then the browser sign-in), and Azure DevOps and AWS CloudWatch, which run the service's official server on this computer (with npx and uv). The store asks for what each needs in a window and adds the connector as the custom form would.
+- **A connector's secrets can stay in 1Password.** In place of a token or a variable of a local connector's command, an `op://Vault/Item/field` reference: Tucano keeps only the reference and reads the value with the 1Password CLI on each connection, and says what to do when the CLI is missing, signed out or locked, or the item isn't there.
+- **Gmail, Google Calendar, Google Drive, Google Docs and Google Sheets in the connector store**, through Google's own MCP servers. Google signs in only apps registered with it, so the first one walks you through making yours in Google Cloud, once, in five steps with a link for each; the other four then sign in with one click. Each asks only for what its tools need: Gmail searches, reads, drafts and labels but never sends nor deletes for good, and Drive writes only the files it made or opened. The Tuca's guide explains the steps and what to check when Google turns a sign-in away.
+- **Slack in the connector store**, through Slack's own MCP server. Slack takes only directory apps or a workspace's internal apps, so the first Connect makes yours from a link that fills it all in (permissions, MCP on, the address to come back to): pick the workspace, create, paste its Client ID and Secret. Agents act as you, with a user token, through the same classes and approvals. The sign-in comes back through the workspace's fixed webhook port, since Slack takes only the address registered in the app. Google's or Slack's app can be changed from the connector's page.
+
+### Fixed
+
+- **An agent on Codex writes files on its computer again, instead of saying the session is read-only.** Codex runs in a read-only, empty sandbox on purpose, and tells the model so; newer models (GPT-6-Astra) took that for the agent's computer and answered "this session has read-only filesystem access" without trying `write_file`, or tried Codex's own `apply_patch` and gave up. It showed when an agent fell back to a Codex reserve model. An agent with a computer is now told that sandbox isn't its computer. Agents also no longer send you to the Tuca to get access back: he can't change it.
+
+
+## [0.2.13] - 2026-11-06
+
+> **Em português:**
+> - **Segurança: duas correções.** Um link na resposta de um agente não abre mais um arquivo local como se fosse o app ([GHSA-6pvc-g4mm-34rq](https://github.com/eduwxyz/tucano/security/advisories/GHSA-6pvc-g4mm-34rq)), e Enter, Espaço ou um clique num botão sem nome no navegador de um agente não passam mais sem a sua aprovação quando publicam, enviam ou apagam ([GHSA-4q39-94jc-xhq8](https://github.com/eduwxyz/tucano/security/advisories/GHSA-4q39-94jc-xhq8)). Atualize.
+> - **Qualquer agente cria por você.** Peça a um agente um agente novo, um time de agentes com um canal, uma rotina, um canal ou uma mudança num agente, e ele propõe num card com Aplicar e Descartar: nada muda até você aplicar.
+> - **O Tuca te ajuda com o Tucano.** Ele faz o que dá em vez de ensinar o passo a passo, explica o resto lendo um guia do app, e descobre por que algo não está dando certo olhando o workspace: motores, conectores, limites, rotinas e os erros das respostas, nunca o que foi dito nas conversas. Quando cita uma tela, manda um botão que leva até ela.
+
+### Security
+
+- **A link in an agent's reply can't open a local file as the app anymore.** The window only ever shows the app, only the app's own page talks to its main process, and message links keep only http, https and mailto ([GHSA-6pvc-g4mm-34rq](https://github.com/eduwxyz/tucano/security/advisories/GHSA-6pvc-g4mm-34rq)). Thanks to @rayanneblima.
+- **Enter, Space or a click on a nameless button in an agent's browser ask for your approval** when they publish, send or delete, as a click on a risky button did; clicks are judged by the page's own words, not the agent's ([GHSA-4q39-94jc-xhq8](https://github.com/eduwxyz/tucano/security/advisories/GHSA-4q39-94jc-xhq8)). Thanks to @marcossimo.
+
+### Added
+
+- **Any agent makes things for you, as cards you apply.** Ask an agent for a new agent, a team, a routine, a channel or a change to an agent, and it proposes it: a new agent as before; a team of 2 to 8 agents with a channel for them, created at once with **Create team**; a scheduled routine for any agent (an agent's own still go through scheduling it itself); a channel with its agents; or a change to an agent that exists, shown as before and after. Each is a card with **Apply** and **Discard**, applied the way the screens do it, and nothing changes until you apply it. Agents are told to propose when you ask or when it clearly solves what you asked, not in the middle of other work.
+- **The Tuca helps you with Tucano.** He does what he can instead of explaining how, asking only for what's missing, even when you ask "how do I…?". The rest he explains from a guide of the app (17 pages, from agents and connectors to workspaces and troubleshooting) he reads before answering, so he doesn't make up screens; other agents send those questions to him. Asked why something isn't working, he looks at the workspace first: harnesses and sign-ins, connectors and their errors, each agent's model, access and limit, routines and how their last run ended, and the replies that failed in the last week with their error, never what was said in conversations. When he mentions a screen, the message shows a button that opens it. A Tuca made before is brought up to date when the app starts, unless his instructions were rewritten by hand.
+
+## [0.2.12] - 2026-11-05
+
+> **Em português:**
+> - **Workspaces.** Empresa e emprego, por exemplo, separados: cada workspace tem seus agentes, conversas, conectores, memórias e rotinas, e um não vê o outro. Você troca pelo nome no topo da barra lateral, e as rotinas de todos continuam rodando. Ao criar um, você escolhe o que levar do atual.
+> - **Agentes no Grok.** Um agente pode rodar no Grok CLI, com a assinatura do grok.com, como roda no Cursor CLI. Cada resposta usa uma pasta própria: os seus plugins, skills e hooks não carregam, e só as ferramentas do Tucano ficam à mão.
+> - **Os agentes do Claude respondem mais rápido e gastam menos do plano em conversas longas.** Cada agente continua a mesma sessão do Claude Code na conversa e manda só o que é novo; entre uma resposta e outra o processo fica aberto por 5 minutos. O primeiro trecho da resposta chega quase 1 segundo antes, e uma conversa longa não é mandada inteira de novo a cada resposta.
+> - **A resposta começa enquanto você digita.** O Tucano já abre o Claude Code de quem vai responder: o router escolhe quem responde num canal em 1,5 s em vez de 2,8 s, e numa DM parada há mais de 5 minutos a resposta começa meio segundo antes.
+> - **Os passos mostram o que o agente fez.** Cada consulta mostra o SQL ou o que foi pedido, e o que voltou ("120 linhas"); um comando mostra o comando inteiro, e o SQL quando roda um; uma skill diz qual foi lida. Tudo aparece enquanto o agente trabalha, sem nenhum segredo na tela.
+> - **Um agente só acorda outro quando precisa.** Quando um agente menciona outro na resposta, o router lê e chama só quem tem algo a fazer: um agradecimento ou um “combinado” não acordam ninguém. Na dúvida, chama.
+> - **Uma triagem de alarmes leva minutos, não meia hora.** Uma consulta de conector que volta ainda rodando (um SQL demorado) o app espera sozinho, com a ferramenta de status do conector, em vez de o agente dormir e perguntar de novo; um agente com conectores lê só a janela que precisa, e é avisado quando pagina um histórico inteiro.
+> - **Um agente responde uma vez de cada vez na mesma conversa.** Quando outro agente passa a vez pra quem já está respondendo ali, não abre uma segunda resposta ao lado: fica anotado, e quando a resposta acaba vem uma só, que lê tudo o que chegou no meio. Em outras conversas e threads ele segue em paralelo.
+> - **Um conector que falha diz por quê.** O passo da resposta mostra o motivo em vermelho, e o agente recebe o mesmo motivo pra explicar, em vez de um ✗ sem nada.
+> - **As novidades vêm em páginas,** como esta: quatro tópicos por vez, com setas pra passar.
+> - **Correções.** Uma rotina que roda ao abrir o app espera os conectores, um conector com login OAuth não pede pra entrar de novo a cada abertura, conversas longas não pesam enquanto um agente responde, o navegador dos agentes abre páginas num servidor Linux, a página do servidor abre por HTTP num endereço privado, o app abre fora do instalador, e o tucano aparece na dock do Linux.
+>
+> Obrigado ao Bruno, ao Dias, ao Alan, ao Matheus, ao Gian, ao João Vitor, ao Daniel, ao Cleiton e ao Luan!
+
+### Added
+
+- **Workspaces.** Keep a company and a day job, say, apart: each workspace has its own agents, conversations, connectors and credentials, memories, routines, engine folders and browser sessions, and none sees another's. Switch from the name at the top of the sidebar, which shows the others' unread and pending approvals (and nothing else of them); every workspace's routines and triggers keep running while another is on screen, each on its own webhook and git proxy ports. Creating one asks what to bring from the workspace you're in, each ticked on its own: the general settings (your name, language, router and memory models, limits, quiet hours), the context, the wiki (the same one, not a copy: what one keeps the other reads), agents, channels, skills, connectors with their credentials, routines. What depends on something left behind comes without it (agents without connectors have no grants), and with nothing ticked it starts empty with the introduction. Duplicating ticks everything; never messages, memories or usage. Settings › General names the workspace apart from what the agents call you, and its Danger area deletes a workspace with all its data, Claude Code's transcripts of its agents included. The folder you had is the default workspace, unchanged, and keeps Telegram and opening at login. It's a separation of data, not an OS sandbox: an agent on your computer still reaches the same disk. Thanks [@b7s](https://github.com/b7s)! ([#63](https://github.com/eduwxyz/tucano/pull/63))
+- **Agents on Grok.** An agent can run on the [Grok CLI](https://x.ai/cli) with a grok.com subscription, the way it runs on Cursor CLI: sign in with `grok login` and pick a Grok model. Each reply runs in a folder and a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load, Grok's own shell and files stay off, and Tucano's tools are the only ones it has. An `XAI_API_KEY` in the environment is set aside when grok.com is signed in, so the subscription isn't billed per token. The official installer is macOS and Linux. Thanks [@matheus-apolonio](https://github.com/matheus-apolonio)! ([#87](https://github.com/eduwxyz/tucano/pull/87))
+
+### Changed
+
+- **What's new after an update comes in pages.** A big release was one long list to scroll; it now shows four topics at a time, with arrows (and ← →) to turn them, and the same window height on every page.
+- **An alarm triage takes minutes, not half an hour.** A connector query that comes back still running (a slow Databricks SQL statement) is now awaited by the app with the connector's own status tool, backing off from 2 to 15 s for up to five minutes, and the agent gets the finished result in the one call it made, instead of sleeping a minute and asking again. A status tool the agent calls itself, or a write that starts a job, still answers right away. An agent with connectors sees each message's time with the year, the UTC offset and the Unix seconds, and is told to read only the window a task needs (the last hour, for something happening now) and to narrow a cut result before paging the rest, which now says how much was left out. Two guards catch what's left: a connector read called 15 times in a reply gets a note to narrow it, and past 60 it's refused for that reply; and for an agent with connectors, a bare `sleep` of 20 s or more with nothing checked after it runs once per reply. Writes, and a sleep before checking something on the computer, are never counted. A reproduced triage (30 days of alarms in Slack, a 3-minute query) went from 439 agent calls and 40 minutes to 2 calls and 3.4 minutes. Thanks [@rjgdias](https://github.com/rjgdias)! ([#137](https://github.com/eduwxyz/tucano/pull/137))
+- **Claude agents reply faster, and long conversations spend less of the plan.** An agent now keeps its Claude Code session for each conversation and thread: its first reply sends the conversation, and the next ones only what's new since (other people's and agents' messages, and the task). The process stays open for five minutes after a reply (two at most at a time), so the next reply skips starting Claude Code. Measured with Haiku in a DM of about 16k tokens, the first words of a reply come about 0.9 s sooner (1.45 s instead of 2.33 s). Past the conversation's window, where each reply used to write the whole history to the prompt cache again (about 16,600 tokens), it now writes about 200. The session starts over when the agent's instructions, memories or tools change, a message it saw is edited, its last reply was stopped or failed, or after an hour idle. Thanks [@rjgdias](https://github.com/rjgdias)! ([#147](https://github.com/eduwxyz/tucano/pull/147))
+- **Replies get going while you type.** As you write, Tucano starts Claude Code for whoever will answer, so the reply doesn't wait the second it takes to start: in a channel of several agents, a process for the router, which then picks who answers in about 1.5 s instead of 2.8 s; in a DM whose agent's process closed after its five idle minutes, that process again, and the first words come about 0.6 s sooner. A process started for the router that goes unused (you mentioned someone, or didn't send) closes after two minutes. Thanks [@rjgdias](https://github.com/rjgdias)! ([#148](https://github.com/eduwxyz/tucano/pull/148))
+- **A reply's steps say what each call did, as it runs.** A connector call shows what it asked (the SQL, a path, a search) from the moment it starts, and what came back once it ends, in a few words: the rows of a table or a SQL answer, the items of a list, the lines of a long text. A command shows whole, or as **Ran SQL** with the SQL taken out of it, and ends with what it printed or its exit code and the last lines of stderr; reading a skill says which skill and file. Tokens, passwords, keys and auth headers are masked on the screen and in the log (the agent still gets the real output). The steps list stays open while the agent works, unless closed, and folds when the reply is done. Thanks [@rjgdias](https://github.com/rjgdias)! ([#135](https://github.com/eduwxyz/tucano/pull/135))
+- **An agent wakes another only when it needs to.** When an agent's reply mentions other agents, the router reads it first and hands the turn only to those asked to do something: a request, a question, a task, a decision. A thank-you, an "okay" or a credit wakes no one, and the decision shows as a step on the reply. In doubt, or if the router fails, everyone mentioned is called, as before; a mention in your own message still goes straight to the agent. Thanks [@eialanjones](https://github.com/eialanjones)! ([#139](https://github.com/eduwxyz/tucano/pull/139))
+
+### Fixed
+
+- **An OAuth connector stays signed in across launches.** The app listens for the sign-in callback on a new port each launch, and a saved registration was used only for the exact address it was made with, so every launch registered the app again and the refresh token, which belongs to the client that got it, was refused: the connector asked to sign in again. A loopback address now matches whatever its port (RFC 8252), so the connector refreshes on its own. A new sign-in still registers with the exact address, for servers that want it. Thanks [@GianCdM](https://github.com/GianCdM)! ([#100](https://github.com/eduwxyz/tucano/pull/100))
+- **A routine that runs as the app opens finds its connectors.** Routines missed while the app was closed, and any due right as it opens, ran on the first check, before the connectors had finished connecting: the agent was told its tools were offline and ran without them. A routine now waits for the connectors still connecting, up to a minute, then runs anyway (with a line in the log); with none connecting it starts at once, as before. Thanks [@jvitorcarvalho](https://github.com/jvitorcarvalho)! ([#152](https://github.com/eduwxyz/tucano/pull/152))
+- **An agent replies once at a time in the same conversation or thread.** When another agent handed the turn to one already replying there, a second reply of it started next to the first, each working from the conversation as it was when it began. The hand-off is now noted instead, and the caller's step says so ("already replying here, will see this next"); when the current reply ends well, one follow-up reply reads everything that came in meanwhile, in the same Claude Code session. A reply that stopped, failed, hit a limit or waits on you gets no follow-up, since you act there anyway. The same agent elsewhere still runs in parallel, and the hand-off router is told who is already replying, and that waiting for someone's update isn't a request. Thanks [@eialanjones](https://github.com/eialanjones)! ([#151](https://github.com/eduwxyz/tucano/pull/151))
+- **A connector tool that fails says why.** The reply's step showed a bare ✗ next to the tool's name, and for some failures the agent got an empty result too. The step now shows the reason under its label (a few lines, all of it on a click), and the agent gets it: a reason only in the structured content or an embedded resource, an MCP error's code and data, a timeout in seconds, a result that doesn't match the tool's schema, or a session that couldn't reconnect. An approved call and a routine's poll say it the same way. Thanks [@rjgdias](https://github.com/rjgdias)! ([#133](https://github.com/eduwxyz/tucano/pull/133))
+- **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again. Thanks [@Luan1Schons](https://github.com/Luan1Schons)! ([#132](https://github.com/eduwxyz/tucano/pull/132))
+- **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring. Thanks [@daniellcar](https://github.com/daniellcar)! ([#143](https://github.com/eduwxyz/tucano/pull/143))
+- **The server's page opens over plain HTTP on a private address,** such as Tailscale or a home network. It stayed blank: a browser outside a secure context has no `crypto.randomUUID`, which the app calls as it starts. The page now brings a small replacement for it, and one for the copy buttons. Thanks [@daniellcar](https://github.com/daniellcar)! ([#142](https://github.com/eduwxyz/tucano/pull/142))
+- **The toucan shows in the Linux dock and app menu.** The .deb showed a generic gear: the icon was a single 1024 px image, under a size the icon theme doesn't list, so the dock found nothing. It now installs the toucan at every size from 16 to 1024 px. Thanks [@cleitoncsalvagni](https://github.com/cleitoncsalvagni)! ([#140](https://github.com/eduwxyz/tucano/pull/140))
+- **The app opens unpacked even when its version isn't one the updater accepts.** The updater was made as the app started, and making it checks the version, so an unpacked build reporting one like `0.0` stopped before its window opened. It's now made only when updates are on. Thanks [@b7s](https://github.com/b7s)! ([#123](https://github.com/eduwxyz/tucano/pull/123))
+
+## [0.2.11] - 2026-11-05
+
+> **Em português:**
+> - **As respostas voltam pra conversa.** Os agentes respondem logo abaixo da mensagem, como num chat. Quem prefere threads liga nas configurações do canal, que abrem clicando no nome dele no topo.
+> - **Conectores prontos.** 34 serviços, como Notion, Sentry, Vercel, Jira, Stripe e Canva, conectam com um clique e o login no navegador. Os outros continuam em Adicionar personalizado.
+> - **Novidades na tela.** Depois de uma atualização, o Tucano mostra uma vez o que entrou na versão, no idioma do app.
+> - **Menções com cara de agente.** Um @nome vira uma etiqueta com a cor e a foto do agente, na mensagem e enquanto você digita.
+> - **Cada thread fica na dela.** Um agente numa thread não mistura o que acontece nas outras, e procura nelas quando você fala de outra conversa.
+> - **Respostas do Claude mais rápidas.** Terminam uns 2 segundos antes, às vezes 10.
+> - **Conectores ficam conectados.** Uma conexão que cai volta sozinha, e um resultado longo chega inteiro ao agente.
+> - **Docker desligado é avisado na hora.** O agente para na primeira tentativa e diz o que fazer, em vez de tentar ferramenta por ferramenta.
+> - **Correções.** Uma thread abre na mensagem mais recente e cabe na tela, uma aprovação decidida durante a resposta não se perde, uma hora cheia do calendário cresce em vez de empurrar rotinas, o cargo longo de um agente quebra a linha, e o ditado ficou mais arrumado.
+>
+> Obrigado ao Dias, ao Alan, ao Cleiton e ao Bruno!
+
+### Added
+
+- **Connectors ready to add.** **Connectors** lists 34 services by category (development, projects and tasks, business and data, design and websites, research, finance), each through its official MCP server: Notion, Sentry, Vercel, Cloudflare, Jira and Confluence, Stripe, PostHog, Canva and more. **Connect** opens the sign-in in the browser right away, the access stays on this computer, and what's already added says so. A search finds a service by name or by what it does. Anything else goes in with **Add custom**, as before. ([#128](https://github.com/eduwxyz/tucano/pull/128))
+- **What's new, after an update.** The first time Tucano opens on a new version, a window in the middle of the screen shows what came in, in the app's language, once. Skipping versions shows the ones skipped too, up to three, and **See the full notes** opens the release page. A new install doesn't show it. ([#127](https://github.com/eduwxyz/tucano/pull/127))
+- **@mentions are chips** with the agent's color and picture, in the messages and in the field as you type. Thanks [@rjgdias](https://github.com/rjgdias)! ([#109](https://github.com/eduwxyz/tucano/pull/109))
+
+### Changed
+
+- **Answers come in the conversation again, and threads are a choice of each conversation.** Since 0.2.10 every message opened a thread with its answers. Now a channel or a DM answers in the conversation, like a chat, unless its settings say **In threads, one per message**: then each message opens a thread with its answers, as before. The settings open from the conversation's name at its top or from its menu in the sidebar, and hold a channel's name and topic too; a new channel asks where its agents answer. A thread you open by hand, with a message's reply button, works either way, and the threads you already have stay as they are. An answer in the conversation reads the conversation and the message that opened each thread; what was said inside a thread it looks up when it needs it, as it does from another thread. ([#126](https://github.com/eduwxyz/tucano/pull/126))
+- **Each thread keeps to itself.** An agent replying in a thread reads that thread only, not the conversation's other threads, so two subjects in parallel no longer mix. When you mention another conversation, it looks the others up with `buscar_threads` and `ler_thread`. A long thread gets a summary of its own, and the memories in it are kept once it grows or goes quiet; the book button in its header shows and edits that summary. ([#120](https://github.com/eduwxyz/tucano/pull/120))
+
+### Fixed
+
+- **A thread opens at its latest message,** like in Slack, instead of at the message that started it: a long thread no longer has to be scrolled all the way down to see where it is. Scrolling up still stays put when a reply comes in. Thanks [@rjgdias](https://github.com/rjgdias)! ([#119](https://github.com/eduwxyz/tucano/pull/119))
+- **The thread panel stays inside its bounds,** and a button takes you back to the end of a conversation you scrolled up in. Thanks [@cleitoncsalvagni](https://github.com/cleitoncsalvagni)! ([#107](https://github.com/eduwxyz/tucano/pull/107))
+- **An approval decided while the agent is still replying stays decided;** the reply's last save used to put it back to waiting. Thanks [@eialanjones](https://github.com/eialanjones)! ([#122](https://github.com/eduwxyz/tucano/pull/122))
+- **Claude replies finish about 2 seconds sooner, at times 10.** After each reply Claude Code made one more model call, a summary of the turn that Tucano never reads, and only then said it was done and exited. That call is now off for the Claude Code that Tucano runs, so a reply ends when its text does, and what waits on it (the next agent in line, a team's report) starts right away. Your own Claude Code in the terminal isn't touched. Thanks [@rjgdias](https://github.com/rjgdias)! ([#108](https://github.com/eduwxyz/tucano/pull/108))
+- **Agents see what a connector returns, even when it's long.** A result over Claude Code's own cut (about 50 KB, like the comments of a big merge request) was saved to a file the agent can't read, so it called again and again and answered without the data. Tucano now cuts a result at 40 KB, counted in bytes so accents don't push it over, and tells the agent to ask again with pagination or a filter if it needs the rest. Thanks [@rjgdias](https://github.com/rjgdias)! ([#108](https://github.com/eduwxyz/tucano/pull/108))
+- **Connectors stay connected.** A local connector whose process ended (a crash, or one that quits when idle) stayed **Disconnected** for good, and its tools went away from the agents, so nothing ever brought it back; and a remote one whose server forgot an idle session failed every call while still showing **Connected**. Now a connection that drops on its own comes back by itself, after a wait that grows from 2 seconds to 5 minutes, and a call on a forgotten session opens a new one and goes through. A connector that's only reconnecting keeps its tools; one that needs you (a refused token, a sign-in to finish) doesn't, and isn't retried. Thanks [@rjgdias](https://github.com/rjgdias)! ([#114](https://github.com/eduwxyz/tucano/pull/114))
+- **An agent stops at once when its computer can't run.** With Docker off, out of reach or not installed, every command and file read failed, and the agent tried tool after tool, spending tokens to find out the same thing. Now the first call that finds Docker down ends the reply, which says what to do (start Docker, join the docker group, install it) and can be tried again. While Docker stays off, the next replies don't get the computer's tools at all: the agent is told it's down and says so in a sentence, answering what it can without it. A Docker that doesn't answer at all counts as down too, like one that's off. Thanks [@rjgdias](https://github.com/rjgdias)! ([#112](https://github.com/eduwxyz/tucano/pull/112))
+- **A crowded hour on the routines calendar grows** to fit what's in it, instead of pushing routines into the hours after. Thanks [@eialanjones](https://github.com/eialanjones)! ([#105](https://github.com/eduwxyz/tucano/pull/105))
+- **A long agent role wraps** in its card instead of spilling out of it. Thanks [@cleitoncsalvagni](https://github.com/cleitoncsalvagni)! ([#103](https://github.com/eduwxyz/tucano/pull/103))
+- **The dictation settings are spaced out,** the advanced part folds, and switches turn on in the app's accent color. Thanks [@b7s](https://github.com/b7s)! ([#124](https://github.com/eduwxyz/tucano/pull/124))
+
+## [0.2.10] - 2026-11-04
+
+> **Em português:**
+> - **Threads.** Cada resposta a uma mensagem, e o que ela dispara, fica na thread dela, que abre na lateral. Na conversa aparecem só as mensagens que abriram uma thread, com quem participou, quantas respostas e o que espera por você.
+> - **Um "bom dia" chama todo mundo.** Uma mensagem pro grupo chama todos os agentes do canal.
+> - **Ditado.** Clique no microfone, fale e clique de novo, e o texto cai no campo pra você revisar. Tudo roda no seu computador, sem internet, e o modelo baixa com um clique.
+> - **Canais em grupos.** Os canais podem ser arrastados e organizados em grupos que recolhem.
+> - **Caminhos de arquivo viram link** na mensagem de um agente.
+> - **Token de conector.** Dá pra trocar o token sem remover o conector.
+> - **Erros mais claros.** Dizem o que aconteceu e o que fazer.
+> - **Correções.** Os agentes no Gemini passam a ler as configurações do Tucano, o modelo reserva entra no limite de 5 horas do Claude Code, as rotinas mandam a resposta inteira pro Telegram e, no Windows, o Tucano não trava mais a atualização de outros apps.
+>
+> Obrigado à Rayanne, ao Gabriel, ao Alan, ao Cleiton e ao Kayo!
+
+### Added
+
+- **Threads.** Every answer to a message, and what it sets off (routing notes, questions, approvals, replies between agents), goes in the thread of that message, and you can reply there too. The conversation shows the messages that started a thread, each with a pill: who took part, how many replies, when, what's new and what waits on you. The thread opens on the side, and Esc closes it. An agent reads the conversation's recent messages plus the whole thread it replies in. A question waits in its thread and is answered from inside it, while what you write in the channel stays in the channel. Notifications open the thread, and an answer from Telegram goes back to it. Your existing messages stay in the conversation as they were. ([#101](https://github.com/eduwxyz/tucano/pull/101))
+- **A greeting reaches everyone.** A message meant for the whole group, like a "good morning", can call every agent in the channel, past the usual two. ([#101](https://github.com/eduwxyz/tucano/pull/101))
+- **Dictation.** Click the microphone in the message field, or press ⌥ Space on a Mac and Ctrl+Space elsewhere, speak, and click again; holding it and letting go works too, and Esc cancels. The audio becomes text on this computer, offline, with [whisper.cpp](https://github.com/ggml-org/whisper.cpp), and the text stays in the field for you to review; it's never sent on its own. `whisper-cli` comes inside the app, and the first click offers a model to download (Recommended, 574 MB, or Light, 190 MB), checked before it's kept. **Settings › General › Dictation** switches or removes the model and hides the microphone, and a whisper you installed yourself still works. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#60](https://github.com/eduwxyz/tucano/pull/60))
+- **Reorder and group channels.** Drag a channel, or use **Move up** and **Move down** in its menu, and put channels in groups that fold, like the sidebar's sections. Removing a group never deletes a channel. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#77](https://github.com/eduwxyz/tucano/pull/77))
+- **File paths in agents' messages are links,** when the file exists and that agent can reach it: an image or video opens in the app, a folder or PDF in the system, anything else is shown in the file manager, and nothing is run. The app's data, other agents' folders and places like `.ssh` never become links. Off on a server, and on Windows for now. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#61](https://github.com/eduwxyz/tucano/pull/61))
+- **Change a connector's token without removing it.** A connector that signs in with a token has a field to save a new one, which reconnects, and a refused token no longer offers a browser sign-in that can't work for it. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#80](https://github.com/eduwxyz/tucano/pull/80), [#99](https://github.com/eduwxyz/tucano/pull/99))
+
+### Changed
+
+- **Errors in plain words.** A failure says what happened and what to do (signed out, plan limit and when it frees up, offline, a missing command, a full disk, a service down), with the raw text folded underneath. Actions that fail show a toast, the app warns when its core stops, confirmations use the app's own dialog, and approvals show tool names as words with a short summary of the arguments. ([#96](https://github.com/eduwxyz/tucano/pull/96))
+- **Gemini models come from your Gemini CLI,** read from the installed package, so newer ones show up; the fixed list stays as a fallback. Thanks [@simionatoambrosio](https://github.com/simionatoambrosio)! ([#90](https://github.com/eduwxyz/tucano/pull/90))
+- **The wiki keeps knowledge, not a record of the task.** The curator leaves out what an agent did and keeps what changed (a new phone number replaces the old one on its page), and the review flags pages that read like a log and offers to condense them. ([#95](https://github.com/eduwxyz/tucano/pull/95))
+
+### Fixed
+
+- **Agents on Gemini pick up Tucano's settings,** so they reach Tucano's tools and follow the access you gave them. Thanks [@simionatoambrosio](https://github.com/simionatoambrosio)! ([#89](https://github.com/eduwxyz/tucano/pull/89))
+- On Windows, Tucano no longer **keeps other Electron apps' `app.asar` open** while listing apps, which made their updates fail (T3 Code, Obsidian, Bruno…). Thanks [@kayotimoteo](https://github.com/kayotimoteo) for the diagnosis! ([#97](https://github.com/eduwxyz/tucano/issues/97), [#98](https://github.com/eduwxyz/tucano/pull/98))
+- The **reserve model takes over on Claude Code's 5-hour and weekly limits**; it only knew the general limit message. Thanks [@eialanjones](https://github.com/eialanjones)! ([#88](https://github.com/eduwxyz/tucano/pull/88))
+- A **routine's whole reply goes to Telegram**, split between lines into several messages, instead of the 140-character summary; the desktop notification stays short. Thanks [@cleitoncsalvagni](https://github.com/cleitoncsalvagni)! ([#84](https://github.com/eduwxyz/tucano/pull/84))
+
+## [0.2.9] - 2026-11-03
+
+> **Em português:**
+> - **Wiki.** O que você e o seu time sabem, em páginas ligadas, que os agentes consultam antes de responder e citam.
+> - **Curador.** Lê as conversas e os documentos que você traz (PDF, Word, planilha, link ou anotação) e escreve nas páginas, citando de onde veio. Mudar uma página que já existe espera a sua aprovação, se você quiser.
+> - **Mapa e revisão.** A wiki aparece como um mapa que você arrasta, e uma revisão aponta o que não bate, o que ficou velho e o que está repetido.
+> - **Obsidian.** A wiki é uma pasta de Markdown que o Obsidian abre, e um cofre que você já tem entra como está, com pastas, links e anexos.
+> - **Agentes do OpenBot e do Grok Bot** podem ser trazidos pro Tucano.
+
+### Added
+
+- **A wiki.** What you and the team know, as linked pages, one wiki per workspace and separate from Memory. The pages are a folder of plain Markdown that Obsidian opens as is; Tucano indexes it for search, links and history, and picks up edits made in other apps. Agents read it before answering and cite pages as `[[Title]]`; each agent's page can turn its access off. ([#94](https://github.com/eduwxyz/tucano/pull/94))
+  - **A curator** (the memory's model) reads a conversation once it settles, and the files, links and notes you bring in: PDF, Word, spreadsheets, CSV, text and web pages, with the original kept. It writes what lasts into the pages and cites the source. New pages go in right away; a change to a page that exists waits for you, or goes in on its own, as you set. Every change has history and Undo, and one made on a page that changed since can be redone on the newer version. Capture can be turned off for a channel or a DM, and **Keep in the wiki** on a message keeps it on purpose.
+  - **A map** of the pages: drag it, zoom it, pull a page and the ones it links to follow. A page opens in a panel over it; links show a preview on hover; ⌘K (Ctrl K) searches.
+  - **A review**, by hand or once a week: broken links, names that several pages mention with no page of their own, pages nothing links to, and, read by the model, pages that disagree, facts that got old and duplicates. All of it waits for you as suggestions.
+  - **Import an Obsidian vault** as it is: folders, frontmatter (tags, aliases and the rest are kept on edit), links with paths, aliases and headings, and attachments. The vault itself isn't changed. The wiki can also point at a vault in place.
+  - The wiki isn't part of a team export.
+- **Import agents from OpenBot and Grok Bot.** **Settings › Team & backup › Import from another app…** reads OpenBot's transfer export, and a zip that a Grok Bot agent makes with a skill Tucano gives you (experimental). Agents keep their name, role, instructions, photo, color and skills; they arrive with no connectors, web search off, routines off and memories waiting for your confirmation, and are never added to a channel that already exists. A summary lists what came in, what was left out and why. ([#91](https://github.com/eduwxyz/tucano/pull/91))
+
+## [0.2.8] - 2026-11-03
+
+> **Em português:** os agentes agora também rodam no Cursor CLI, na sua conta do Cursor, com a mesma governança dos outros: só as ferramentas do Tucano, limite de gasto e nada dos seus hooks, plugins ou skills pessoais. Uma imagem do chat abre do tamanho da janela, com zoom, e as setas passam pelas outras imagens da conversa. Cada agente pode ter uma cor própria, uma foto ou um personagem desenhado do Open Bot Avatar, que se mexe e pisca. E cada agente tem o seu limite de rotinas ligadas, em vez de 10 pra todos. Obrigado à Rayanne e ao b7s!
+
+### Added
+
+- **Cursor CLI.** Agents can run on [Cursor CLI](https://cursor.com/cli), on your Cursor account, with the same governance as the other harnesses: Cursor's own file reads, writes and shell stay off, only Tucano's tools load, and spend comes from the usage Cursor reports. Each reply runs with a home folder of its own, so your hooks, plugins, skills and `~/.cursor/mcp.json` servers don't load. Images attached in the chat go along with the message. Each reply adds about 10k tokens of Cursor's own prompt, and the per-reply budget can't pause a Cursor reply midway, since Cursor reports usage only at the end. ([#79](https://github.com/eduwxyz/tucano/pull/79))
+- **Images open the size of the window.** Clicking an image in the chat opens it over the whole window: the wheel zooms where the pointer is, dragging moves it, a double click switches between fit and actual size, and the arrow keys go through the conversation's other images. Esc or a click outside closes it. HTML, documents and videos still open in the side panel. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#58](https://github.com/eduwxyz/tucano/pull/58))
+- **An agent's own color or picture.** An agent's page has a color picker next to the eight colors, and takes a PNG, JPEG or WebP that replaces the face wherever the agent shows. A picture stays on its computer and isn't part of a team export. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#59](https://github.com/eduwxyz/tucano/pull/59))
+- **Drawn avatars.** An agent can also be one of 22 characters from [Open Bot Avatar](https://github.com/DominikScholz/open-bot-avatar), in the agent's color, on its page and in onboarding. Large ones move and blink, follow the pointer with their eyes, and look like they're thinking while the agent works. A team export carries the character and the color. ([#76](https://github.com/eduwxyz/tucano/pull/76))
+- **A routine limit for each agent.** **Harness and model › Max. enabled routines** sets how many routines an agent can have on at once, 10 by default; it was 10 for every agent. Thanks [@b7s](https://github.com/b7s)! ([#66](https://github.com/eduwxyz/tucano/pull/66))
+
+## [0.2.7] - 2026-11-02
+
+> **Em português:** cada agente pode ter um modelo reserva: quando a assinatura do modelo principal chega no limite, a resposta continua no reserva em vez de parar com erro, e a seguinte já volta pro principal. Dá pra entrar com mais de uma conta do Claude Code e do Codex (a do trabalho e a pessoal, por exemplo), escolher a conta de cada agente e usar uma outra conta como reserva. O Tucano agora também sai pra Mac com Intel. E um botão em Configurações desliga o som das notificações.
+
+### Added
+
+- **A reserve model for each agent.** On an agent's page, **Harness and model › Reserve model**, off by default. When the main model's subscription is out (Claude Code's 5-hour or weekly limit, Codex's usage limit, Gemini's quota or a provider's 429), the reply goes on with the reserve instead of stopping with an error. It moves only when the main model failed before doing anything, so no action runs twice, and only once per reply: the next reply starts on the main model again. The reply's steps show the move. ([#70](https://github.com/eduwxyz/tucano/pull/70))
+- **More than one Claude Code or Codex account.** **Settings › Models › Accounts** adds more logins, like a work account beside a personal one, and each agent picks its account on its page. You sign in through the CLI itself, in a terminal; Tucano never sees the credentials. An agent on an account that's signed out says so, instead of falling back to your usual login. The subscription windows shown in the app are still the usual login's. Accounts stay on this computer and aren't part of a team export. ([#71](https://github.com/eduwxyz/tucano/pull/71))
+- **The reserve can be another account** of the same harness: when one Claude Code account is out, the agent goes on with the same model on another. Turning the reserve on picks another account of the main harness, when there is one. ([#72](https://github.com/eduwxyz/tucano/pull/72))
+- **Intel Macs.** Tucano is released for Intel Macs too (`tucano-mac-x64.dmg`), and the Terminal install picks your chip's build, even in a Terminal running under Rosetta. ([#69](https://github.com/eduwxyz/tucano/pull/69))
+- A **Sounds** switch in **Settings › General › Notifications** turns the chirp off; notifications still show. Muting Tucano in the system didn't stop it. ([#67](https://github.com/eduwxyz/tucano/pull/67))
+
+## [0.2.6] - 2026-11-01
+
+> **Em português:** agora dá pra recolher as seções da barra lateral (canais, mensagens diretas e agentes), e uma seção recolhida continua mostrando as não lidas. E uma leva de correções, quase toda da comunidade: o Chrome do agente não perde mais um login recente ao fechar, agentes num modelo do Gemini rodam mesmo no Gemini (antes caíam no Claude), "Tentar de novo" numa rotina lembra o evento que a disparou, links longos não saem mais da conversa, e, nos apps do computador, os rótulos seguem o seu idioma e um texto com "ã" não chega mais pela metade. Obrigado à Rayanne e à Brisa!
+
+### Added
+
+- **Fold the sidebar's sections.** Channels, direct messages and agents each fold from their header. A folded section stays folded after a restart, keeps its **+** button and shows its unread count, and the conversation you're in stays visible in it. Thanks [@BrisaTielly](https://github.com/BrisaTielly)! ([#62](https://github.com/eduwxyz/tucano/pull/62))
+
+### Fixed
+
+- An agent's **Chrome keeps a recent login** when it closes, including one you made by hand after taking the browser over. Tucano now asks Chrome to close and waits for it, instead of killing it before it saved its cookies. A login made right before quitting Tucano can still be lost. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#53](https://github.com/eduwxyz/tucano/pull/53))
+- Agents on a **Gemini** model run on Gemini; they fell back to Claude. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#47](https://github.com/eduwxyz/tucano/pull/47))
+- Tuca proposes agents on **Gemini** models too, from what your signed-in Gemini CLI lists. ([#50](https://github.com/eduwxyz/tucano/pull/50))
+- **Try again** on a routine's reply runs it with what it was asked, the event that triggered it or its scheduled instructions; the agent started without them. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#54](https://github.com/eduwxyz/tucano/pull/54))
+- **Long links and words** break inside a message instead of pushing it out of the conversation, and a wide table scrolls by itself. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#48](https://github.com/eduwxyz/tucano/pull/48))
+- Typing key by key in an app, a character with no key (such as "ã") no longer **vanishes from the text**: nothing is typed, and the agent is told which characters, so it can write them another way. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#57](https://github.com/eduwxyz/tucano/pull/57))
+- The labels of **app actions** follow the language you chose, not the one Tucano started in. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#56](https://github.com/eduwxyz/tucano/pull/56))
+- The model Codex ranks first (priority 0) stays at the **top of the list** instead of going to the end. Thanks [@rayanneblima](https://github.com/rayanneblima)! ([#55](https://github.com/eduwxyz/tucano/pull/55))
+
+## [0.2.5] - 2026-11-01
+
+> **Em português:** os agentes agora usam os apps do seu computador, como Notas, Calendário e Spotify, no Mac, no Windows e no Linux. Você escolhe quais apps cada agente usa e se ele só lê ou também mexe. Ele lê a janela pela acessibilidade do sistema e clica e escreve sem mexer no seu mouse, e o que envia, paga, publica, agenda ou apaga espera a sua aprovação. Feito sobre o agent-desktop, open source da Vercel Labs. Obrigado!
+
+### Added
+
+- **Your own apps.** On an agent's **Tools** tab, **Computer apps** gives it apps on your computer, each **read only** or **read and use**, picked from your system's own list, with their icons, open ones first. The agent opens an app, reads its window as a numbered list, and clicks, writes and presses keys in it, without moving your mouse. A click or key that sends, pays, publishes, schedules or deletes, and Return right after writing, asks for your approval, showing what it would confirm; an approval lets that one action through. On macOS (it needs the Accessibility permission), Windows (Start menu and Store apps) and Linux (the application menu, through AT-SPI). It runs on [agent-desktop](https://github.com/vercel-labs/agent-desktop) by Vercel Labs, which Tucano can install for you. ([#31](https://github.com/eduwxyz/tucano/pull/31))
+
+### Fixed
+
+- An approved step no longer shows as **failed** in a reply's steps. ([#31](https://github.com/eduwxyz/tucano/pull/31))
+
+## [0.2.4] - 2026-11-01
+
+> **Em português:** o Codex mostra os modelos que a sua conta tem, os mais novos primeiro (como o GPT-6-Astra), em vez de três fixos. E no Windows o login dos harnesses ficou mais confiável: funciona com acento no nome do usuário (como `C:\Users\Glaúcia`), e um login ou instalação feito no terminal aparece sozinho no Tucano, sem clicar em "Verificar de novo".
+
+### Changed
+
+- **Codex lists your account's models**, newest first and by their names (GPT-6-Astra, GPT-5.6-Sol…), from Codex's own catalog, instead of a fixed three; Tuca proposes agents from the same list. Agents already on a GPT-5.6 model keep it. ([#33](https://github.com/eduwxyz/tucano/pull/33))
+
+### Fixed
+
+- On Windows, **signing in to a harness works from a user folder with accents** (`C:\Users\Glaúcia`); the sign-in console broke on them. ([#34](https://github.com/eduwxyz/tucano/pull/34))
+- A sign-in or an install finished in the terminal **shows up by itself**, on any screen; before, outside onboarding, it waited for **Check again**. ([#34](https://github.com/eduwxyz/tucano/pull/34))
+- On Windows, the install command to paste uses `npm.cmd`, which PowerShell runs even where scripts are disabled. ([#34](https://github.com/eduwxyz/tucano/pull/34))
+
+## [0.2.3] - 2026-10-31
+
+> **Em português:** o Tucano agora dá pra usar no celular, abrindo o app de um servidor seu pelo navegador. Uma rotina que falha tenta de novo sozinha, duas vezes, antes de desistir. Os canais mostram quando um agente está trabalhando, e uma resposta que chega enquanto você está fora marca o canal como não lido. Você escolhe o modelo do Tuca, e um papel longo não esconde mais o nome do agente na barra lateral. Obrigado ao Gian, ao Andrey e ao Marcelo!
+
+### Added
+
+- **Use Tucano on a phone.** Opened from a phone (Tucano on a server), the sidebar becomes a drawer behind a ☰ button, the view takes the full width and side panels cover the screen; the conversation, agent page, report, routines and onboarding fit a narrow screen, and inputs don't make iOS zoom. The desktop is unchanged. ([#28](https://github.com/eduwxyz/tucano/pull/28))
+- **A failed routine tries again**, twice, after 1 and then 5 minutes, before giving up; the reply says when the next try is, and you're notified once, with the final outcome. Only failures are retried (not a reached limit, an approval or a question), and retrying by hand or turning the routine off stops the tries. ([#30](https://github.com/eduwxyz/tucano/pull/30))
+- **Choose Tuca's model** on the screen where you talk to Tuca, in onboarding and when building a new agent. Changing it starts a fresh conversation, and the choice is kept for the next ones. Thanks [@anota-ai-andrey](https://github.com/anota-ai-andrey)! ([#23](https://github.com/eduwxyz/tucano/pull/23))
+- **Channels show when an agent is working** in them, with the same pulse as DMs. Thanks [@GianCdM](https://github.com/GianCdM)! ([#21](https://github.com/eduwxyz/tucano/pull/21))
+
+### Fixed
+
+- A reply that finishes **while you're away** from a conversation now marks it unread, even if you were watching when it started. Thanks [@GianCdM](https://github.com/GianCdM)! ([#21](https://github.com/eduwxyz/tucano/pull/21))
+- A **long agent role** no longer pushes the agent's name out of the sidebar: it's cut with an ellipsis and shows in full on hover. Thanks [@marcelogrcia](https://github.com/marcelogrcia)! ([#29](https://github.com/eduwxyz/tucano/pull/29))
+
 ## [0.2.2] - 2026-10-31
 
 > **Em português:** o Tucano agora roda num servidor seu, como uma VPS, e você usa pelo navegador, do computador ou do celular. As rotinas continuam rodando com o seu computador desligado. Os agentes também passam a rodar no Gemini CLI. E instalar um harness ficou mais fácil: um botão **Instalar** abre o terminal já com o comando, e no Windows o Tucano acha o Claude Code mesmo quando o instalador não o pôs no PATH.
@@ -86,6 +351,18 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.14]: https://github.com/eduwxyz/tucano/compare/v0.2.13...v0.2.14
+[0.2.13]: https://github.com/eduwxyz/tucano/compare/v0.2.12...v0.2.13
+[0.2.12]: https://github.com/eduwxyz/tucano/compare/v0.2.11...v0.2.12
+[0.2.11]: https://github.com/eduwxyz/tucano/compare/v0.2.10...v0.2.11
+[0.2.10]: https://github.com/eduwxyz/tucano/compare/v0.2.9...v0.2.10
+[0.2.9]: https://github.com/eduwxyz/tucano/compare/v0.2.8...v0.2.9
+[0.2.8]: https://github.com/eduwxyz/tucano/compare/v0.2.7...v0.2.8
+[0.2.7]: https://github.com/eduwxyz/tucano/compare/v0.2.6...v0.2.7
+[0.2.6]: https://github.com/eduwxyz/tucano/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/eduwxyz/tucano/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/eduwxyz/tucano/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/eduwxyz/tucano/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/eduwxyz/tucano/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/eduwxyz/tucano/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/eduwxyz/tucano/compare/v0.1.2...v0.2.0

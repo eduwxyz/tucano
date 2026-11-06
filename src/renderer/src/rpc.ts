@@ -1,17 +1,41 @@
+import { L } from '../../shared/lang'
 import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../shared/rpc'
 import type { UpdateState } from '../../shared/types'
+import type { WorkspaceList, WorkspaceParts } from '../../shared/workspaces'
 
 declare global {
   interface Window {
     tucano: {
+      workspaces?: {
+        list: () => Promise<WorkspaceList>
+        create: (name?: string) => Promise<void>
+        delete: (id?: string) => Promise<void>
+        duplicate: (id: string, name?: string, parts?: WorkspaceParts) => Promise<string>
+        setPaused: (paused: boolean, id?: string) => Promise<void>
+        switch: (id: string) => Promise<void>
+        subscribe: (cb: (list: WorkspaceList) => void) => () => void
+      }
       connect: () => void
       pickFolder: () => Promise<string | null>
-      onNavigate: (cb: (conversationId: string) => void) => void
+      pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
+      upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)
+      onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void
+      onNavigatePage?: (cb: (page: 'skills') => void) => void // desktop only
+      onCoreDown?: (cb: () => void) => void // desktop only: a browser reloads on its own
       viewing: (conversationId: string | null) => void
       updateState: () => Promise<UpdateState>
       onUpdate: (cb: (state: UpdateState) => void) => void
       checkUpdates: () => void
       installUpdate: () => void
+      servers?: {
+        // desktop only: Tucanos on servers, shown in this window over the app; open: the one on screen
+        list: () => Promise<{ id: string; name: string; origin: string; open: boolean }[]>
+        pair: (link: string) => Promise<'paired' | 'cancelled' | 'invalid' | 'unsafe'>
+        open: (id: string) => void
+        local: () => void // back to this computer's Tucano
+        forget: (id: string) => Promise<boolean>
+        onChanged: (cb: () => void) => void
+      }
     }
   }
 }
@@ -43,8 +67,18 @@ export function connect(onEvent: (e: CoreEvent) => void): Promise<void> {
   })
 }
 
+// The core's process ended: nothing in flight will be answered, and nothing new goes out.
+let down = false
+const downError = (): Error => new Error(L('O Tucano parou de funcionar. Reabra pra continuar.', 'Tucano stopped working. Reopen it to go on.'))
+export function disconnect(): void {
+  down = true
+  port = null
+  for (const p of pending.values()) p.reject(downError())
+  pending.clear()
+}
+
 export function call<M extends Method>(method: M, ...params: Params<M> extends undefined ? [] : [Params<M>]): Promise<Result<M>> {
-  if (!port) return Promise.reject(new Error('core not connected'))
+  if (!port) return Promise.reject(down ? downError() : new Error(L('O Tucano ainda está abrindo. Tente de novo em instantes.', 'Tucano is still starting. Try again in a moment.')))
   const id = ++seq
   const req: Request = { id, method, params: params[0] }
   return new Promise((resolve, reject) => {

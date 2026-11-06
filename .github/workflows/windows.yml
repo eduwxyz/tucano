@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to attach the Windows files to (e.g. v0.2.0)
-        required: true
+        description: Release tag to attach the Windows files to (e.g. v0.2.0); empty for a test build, kept as an artifact
+        required: false
   pull_request:
     paths:
       - package.json
@@ -44,6 +44,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: node scripts/whisper.mjs win x64 # dictation's whisper-cli, packed in the app
       - name: Build the installer
         run: npx electron-builder --win nsis --x64 --publish never --config.directories.output=dist-win
       - run: ls -la dist-win && cat dist-win/latest.yml

@@ -2,8 +2,12 @@
 // is kept in sync by its events; actions go to the core over RPC.
 import { useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
-import type { CoreEvent } from '../../shared/rpc'
+import type { CoreEvent, Method, Params } from '../../shared/rpc'
+import type { AppProvider } from '../../shared/connector-catalog'
 import {
+  type Account,
+  type AccountEngine,
+  MAX_AGENT_ROUTINES,
   MODELS,
   modelInfo,
   type EngineId,
@@ -34,9 +38,12 @@ import {
   type UsageReport,
   type Trigger,
   type ImageUpload,
-  type Os
+  type Os,
+  type LocalInfo,
+  type VoiceModelId,
+  type VoiceStatus
 } from '../../shared/types'
-import { call, connect } from './rpc'
+import { call, connect, disconnect } from './rpc'
 
 export * from '../../shared/types'
 
@@ -49,13 +56,17 @@ export type View =
   | { kind: 'usage' }
   | { kind: 'connectors' }
   | { kind: 'memory' }
+  | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
   | { kind: 'skills' }
   | { kind: 'report' }
   | { kind: 'settings' }
 
 export interface State {
+  webhookPort: number
+  defaultWorkspace: boolean
   ready: boolean
+  threadSeen: Record<string, number> // thread root id → when I last had it open (what came after is new)
   navOpen: boolean // on a phone, the sidebar slid in over the view
   view: View | null
   me: { name: string; initials: string }
@@ -63,6 +74,7 @@ export interface State {
   models: Model[]
   agents: Agent[]
   connectors: Connector[]
+  lightbox: { items: { url: string; title: string; video?: boolean }[]; index: number } | null
   conversations: Conversation[]
   messages: Message[]
   approvals: Approval[]
@@ -72,17 +84,29 @@ export interface State {
   browsers: BrowserView[]
   routines: Routine[]
   skills: Skill[]
+  wikiRev: number // goes up when a wiki page changes: the wiki screens read again
+  voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
   platform: Os
   packaged: boolean
+  isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
   demoServer?: { command: string; args: string[] }
+  toasts: Toast[] // short notes at the bottom: an action that didn't go through
+  coreDown: boolean // the core's process ended; a banner offers to reopen
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export interface Toast {
+  id: number
+  text: string
+  leaving?: boolean // fading out
+}
 
-export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string }
+
+// `thread`: the replies to a message (its id), next to the conversation.
+export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
 
 const initials = (name: string): string =>
   name
@@ -92,15 +116,30 @@ const initials = (name: string): string =>
     .map((w) => w[0]!.toUpperCase())
     .join('') || 'EU'
 
+// When each thread was last seen, in this window's storage: only a convenience, so it may be empty.
+const SEEN_KEY = 'tucano.threadSeen'
+const loadSeen = (): Record<string, number> => {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, number>
+  } catch {
+    return {}
+  }
+}
+
 let state: State = {
+  webhookPort: 47717,
+  defaultWorkspace: true,
   ready: false,
+  threadSeen: loadSeen(),
+  wikiRev: 0,
+  voiceRev: 0,
   navOpen: false,
   view: null,
   me: { name: 'Eu', initials: 'EU' },
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -112,6 +151,7 @@ let state: State = {
   models: MODELS,
   agents: [],
   connectors: [],
+  lightbox: null,
   conversations: [],
   messages: [],
   approvals: [],
@@ -123,9 +163,12 @@ let state: State = {
   skills: [],
   platform: 'mac',
   packaged: false,
+  isolatedComputers: true,
   panel: null,
   dialog: null,
-  tabs: {}
+  tabs: {},
+  toasts: [],
+  coreDown: false
 }
 
 // ---------- store plumbing ----------
@@ -184,31 +227,14 @@ function apply(e: CoreEvent): void {
   set((s) => {
     switch (e.type) {
       case 'message': {
-        const known = s.messages.some((m) => m.id === e.message.id)
-        const viewing = s.view?.kind === 'conversation' && s.view.id === e.message.conversationId
-        const fromAgent = e.message.author.kind === 'agent' || e.message.author.kind === 'routine'
-        // A reply that lands while you're elsewhere is new content too: the end of
-        // the run, or it stopping for your turn (a question, an approval — the
-        // states the core notifies). Counted once: if the badge already counts
-        // this conversation, the run's start is already in it.
-        const finished =
-          known && fromAgent && !viewing && e.message.run !== undefined
-          && ['done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(e.message.run.status)
-          && s.messages.find((m) => m.id === e.message.id)?.run?.status !== e.message.run.status
-          && (s.conversations.find((c) => c.id === e.message.conversationId)?.unread ?? 0) === 0
-        const conversations =
-          fromAgent && !viewing && (!known || finished)
-            ? s.conversations.map((c) => (c.id === e.message.conversationId ? { ...c, unread: (c.unread ?? 0) + 1 } : c))
-            : s.conversations
-        return { ...s, conversations, messages: upsert(s.messages, e.message) }
+        return { ...s, messages: upsert(s.messages, e.message) }
       }
       case 'delta':
         return { ...s, messages: s.messages.map((m) => (m.id === e.id ? { ...m, text: m.text + e.text } : m)) }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
       case 'conversation': {
-        const prev = s.conversations.find((c) => c.id === e.conversation.id)
-        return { ...s, conversations: upsert(s.conversations, { ...e.conversation, unread: prev?.unread }) }
+        return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
       case 'settings':
         return withSettings(s, e.settings)
@@ -252,16 +278,31 @@ function apply(e: CoreEvent): void {
         return { ...s, skills: upsert(s.skills, e.skill).sort((a, b) => a.name.localeCompare(b.name)) }
       case 'skill_removed':
         return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
+      case 'wiki':
+        return { ...s, wikiRev: s.wikiRev + 1 }
+      case 'voice':
+        return { ...s, voiceRev: s.voiceRev + 1 }
     }
   })
 }
 
 export async function start(): Promise<void> {
-  window.tucano.onNavigate((id) => navigate({ kind: 'conversation', id }))
+  window.tucano.onNavigate((id, thread) => {
+    navigate({ kind: 'conversation', id })
+    if (thread) openThread(thread)
+  })
+  window.tucano.onNavigatePage?.((page) => navigate({ kind: page }))
+  window.tucano.onCoreDown?.(() => {
+    disconnect()
+    set((s) => ({ ...s, coreDown: true }))
+  })
   let viewing: string | null = null
   subscribe(() => {
     const id = state.view?.kind === 'conversation' ? state.view.id : null
-    if (id !== viewing) window.tucano.viewing((viewing = id))
+    if (id !== viewing) {
+      window.tucano.viewing((viewing = id))
+      if (id && state.ready) void call('markRead', { conversationId: id })
+    }
   })
   await connect(apply)
   const snap = await call('snapshot')
@@ -271,6 +312,8 @@ export async function start(): Promise<void> {
     return {
       ...withSettings(s, snap.settings),
       ready: true,
+      webhookPort: snap.webhookPort ?? 47717,
+      defaultWorkspace: snap.defaultWorkspace ?? true,
       view,
       agents: snap.agents,
       conversations: snap.conversations,
@@ -285,6 +328,7 @@ export async function start(): Promise<void> {
       skills: snap.skills,
       platform: snap.platform,
       packaged: snap.packaged,
+      isolatedComputers: snap.isolatedComputers,
       demoServer: snap.demoServer
     }
   })
@@ -305,6 +349,49 @@ export function conversationTitle(s: State, c: Conversation): string {
   return agentById(s, c.name)?.name ?? L('Agente', 'Agent')
 }
 
+// ---------- toasts ----------
+
+const TOAST_MS = 5_000
+const TOAST_EXIT_MS = 160 // the fade out, in styles.css
+
+let toastSeq = 0
+const toastTimers = new Map<number, ReturnType<typeof setTimeout>>()
+let toastsHeld = false
+const toastLater = (id: number): void => void toastTimers.set(id, setTimeout(() => dismissToast(id), TOAST_MS))
+export function toast(text: string): void {
+  const id = ++toastSeq
+  set((s) => ({ ...s, toasts: [...s.toasts.slice(-2), { id, text }] })) // three at most
+  if (!toastsHeld) toastLater(id)
+}
+
+// While the pointer or the focus is on them, the toasts wait: someone is reading, or about to close one.
+export function holdToasts(hold: boolean): void {
+  if (hold === toastsHeld) return
+  toastsHeld = hold
+  for (const t of toastTimers.values()) clearTimeout(t)
+  toastTimers.clear()
+  if (!hold) for (const t of state.toasts) if (!t.leaving) toastLater(t.id)
+}
+
+export function dismissToast(id: number): void {
+  clearTimeout(toastTimers.get(id))
+  toastTimers.delete(id)
+  if (!state.toasts.some((t) => t.id === id && !t.leaving)) return
+  set((s) => ({ ...s, toasts: s.toasts.map((t) => (t.id === id ? { ...t, leaving: true } : t)) }))
+  setTimeout(() => set((s) => ({ ...s, toasts: s.toasts.filter((t) => t.id !== id) })), TOAST_EXIT_MS)
+}
+
+// An action nobody waits on: if the core says no, a toast says what didn't happen, and why.
+// With the core down the banner already says it.
+function fire<M extends Method>(failed: string, method: M, ...params: Params<M> extends undefined ? [] : [Params<M>]): Promise<void> {
+  return call(method, ...params).then(
+    () => {},
+    (e: unknown) => {
+      if (!state.coreDown) toast(`${failed} ${e instanceof Error && e.message ? e.message : L('Tente de novo.', 'Try again.')}`)
+    }
+  )
+}
+
 // ---------- actions ----------
 
 export const setNav = (navOpen: boolean): void => set((s) => ({ ...s, navOpen }))
@@ -321,12 +408,29 @@ export const navigate = (view: View): void =>
 
 export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void {
   set((s) => withSettings(s, { ...s.settings, ...patch })) // optimistic, so typing stays instant
-  void call('updateSettings', { patch })
+  void fire(L('Não consegui salvar a configuração.', "I couldn't save the setting."), 'updateSettings', { patch })
 }
 
-export const refreshEngines = (): void => void call('refreshEngines')
+export const refreshEngines = (): void => void fire(L('Não consegui conferir os modelos.', "I couldn't check the models."), 'refreshEngines')
+export const voiceStatus = (): Promise<VoiceStatus> => call('voiceStatus')
+export const voiceDownload = (model: VoiceModelId): Promise<void> => call('voiceDownload', { model })
+export const voiceCancelDownload = (): Promise<void> => call('voiceCancelDownload')
+export const voiceRemoveModel = (model: VoiceModelId): Promise<void> => call('voiceRemoveModel', { model })
+export const transcribe = async (id: string, audio: string): Promise<string> => (await call('transcribe', { id, audio })).text
+export const cancelTranscribe = (id: string): Promise<void> => call('cancelTranscribe', { id })
 export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
+// More logins of Claude Code and Codex, each signed into in a terminal.
+export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })
+export const loginAccount = (id: string): Promise<{ opened: boolean; command: string }> => call('loginAccount', { id })
+export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
+// The person's own apps, through agent-desktop.
+export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> => call('desktopStatus')
+export type InstalledApp = { name: string; bundleId?: string; path?: string; running?: boolean; icon?: string }
+export const installedApps = (): Promise<InstalledApp[]> => call('installedApps')
+export const openApps = (): Promise<{ name: string; bundleId?: string }[]> => call('openApps')
+export const installDesktop = (): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installDesktop')
+export const desktopPermissions = (): void => void fire(L('Não consegui abrir as permissões.', "I couldn't open the permissions."), 'desktopPermissions')
 
 export function saveAgent(agent: Agent, channelIds: string[]): Promise<void> {
   return call('saveAgent', { agent, channelIds })
@@ -343,6 +447,7 @@ export function newAgentDraft(): Agent {
     modelId: 'sonnet',
     effort: 'medium',
     limit: state.settings.defaultLimit,
+    maxRoutines: MAX_AGENT_ROUTINES,
     used: 0,
     grants: {},
     memory: 'auto',
@@ -355,8 +460,8 @@ export function newAgentDraft(): Agent {
 export const newChannel = (name: string): Promise<string> => call('createChannel', { name })
 
 // A new channel opens with the window to pick who's in it.
-export async function createChannel(name: string): Promise<void> {
-  const id = await call('createChannel', { name })
+export async function createChannel(name: string, threads?: boolean): Promise<void> {
+  const id = await call('createChannel', { name, ...(threads ? { threads } : {}) })
   navigate({ kind: 'conversation', id })
   set((s) => ({ ...s, dialog: { kind: 'members', id } }))
 }
@@ -367,7 +472,9 @@ export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: 
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.
 export const openTuca = (): void => navigate({ kind: 'tuca', from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
-export const settleDraft = (messageId: string, agentId?: string): void => void call('settleDraft', { messageId, agentId })
+export const applyProposal = (messageId: string): Promise<{ id: string }> => call('applyProposal', { messageId })
+export const dismissProposal = (messageId: string): void => void call('dismissProposal', { messageId }).catch(() => {})
+export const settleDraft = (messageId: string, agentId?: string): void => void fire(L('Não consegui salvar o cartão.', "I couldn't save the card."), 'settleDraft', { messageId, agentId })
 
 export async function openDm(agentId: string): Promise<void> {
   const id = await call('openDm', { agentId })
@@ -380,14 +487,20 @@ export function setGrant(agentId: string, connectorId: string, level: GrantLevel
 }
 
 export const updateTool = (connectorId: string, name: string, patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>>): void =>
-  void call('updateTool', { connectorId, name, patch })
+  void fire(L('Não consegui salvar a ferramenta.', "I couldn't save the tool."), 'updateTool', { connectorId, name, patch })
 
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
-export const removeConnector = (id: string): void => void call('removeConnector', { id })
-export const reconnectConnector = (id: string): void => void call('reconnectConnector', { id })
+export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
+export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
+export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
+export const ownApp = (provider: AppProvider): Promise<{ clientId?: string; redirectUrl: string }> => call('ownApp', { provider })
+export const setOwnApp = (provider: AppProvider, clientId: string, clientSecret: string): Promise<void> => call('setOwnApp', { provider, clientId, clientSecret })
 // On a server the authorization page comes back to be opened here, then pasted back.
 export const authorizeConnector = (id: string): void =>
-  void call('authorizeConnector', { id }).then((r) => r.url && openDialog({ kind: 'oauth', id, url: r.url }))
+  void call('authorizeConnector', { id }).then(
+    (r) => r.url && openDialog({ kind: 'oauth', id, url: r.url }),
+    (e: unknown) => state.coreDown || toast(`${L('Não consegui abrir a autorização.', "I couldn't open the authorization.")} ${e instanceof Error ? e.message : ''}`.trim())
+  )
 export const finishConnectorAuth = (url: string): Promise<boolean> => call('finishConnectorAuth', { url })
 export const harnessMcps = (): Promise<HarnessMcp[]> => call('harnessMcps')
 export const importHarnessMcp = (key: string): Promise<string> => call('importHarnessMcp', { key })
@@ -395,80 +508,121 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
+// Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
+export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
-export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
+export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = []): void => {
-  if (text.trim() || images.length) void call('sendMessage', { conversationId, text, ...(images.length ? { images } : {}) })
+// `threadId`: a reply in the thread that message started.
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
+  if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
 }
 
-export const stopRun = (messageId: string): void => void call('stopRun', { messageId })
-export const retryRun = (messageId: string): void => void call('retryRun', { messageId })
-export const continueRun = (messageId: string): void => void call('continueRun', { messageId })
+// The person is writing: the core gets what will answer ready. Once in a while per place, and
+// nobody needs to hear if it didn't work.
+const typed = new Map<string, number>()
+export const typing = (conversationId: string, threadId?: string): void => {
+  const where = `${conversationId}:${threadId ?? ''}`
+  if (Date.now() - (typed.get(where) ?? 0) < 20_000) return
+  typed.set(where, Date.now())
+  void call('typing', { conversationId, ...(threadId ? { threadId } : {}) }).catch(() => {})
+}
+
+export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
+export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
+export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
-  void call('decideApproval', { id, decision, reason, always })
+  void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })
 
-export const addMemory = (scope: MemoryScope, text: string): void => void call('addMemory', { scope, text })
-export const editMemory = (id: string, text: string): void => void call('editMemory', { id, text })
-export const confirmMemory = (id: string): void => void call('confirmMemory', { id })
-export const decideMemory = (id: string, accept: boolean): void => void call('decideMemory', { id, accept })
-export const forgetMemory = (id: string, reason?: string): void => void call('forgetMemory', { id, reason })
-export const purgeMemory = (id: string): void => void call('purgeMemory', { id })
-export const editSummary = (conversationId: string, text: string): void => void call('editSummary', { conversationId, text })
-export const summarizeNow = (conversationId: string): void => void call('summarizeNow', { conversationId })
+const memoryFailed = (): string => L('Não consegui salvar a memória.', "I couldn't save the memory.")
+export const addMemory = (scope: MemoryScope, text: string): void => void fire(memoryFailed(), 'addMemory', { scope, text })
+export const editMemory = (id: string, text: string): void => void fire(memoryFailed(), 'editMemory', { id, text })
+export const confirmMemory = (id: string): void => void fire(memoryFailed(), 'confirmMemory', { id })
+export const decideMemory = (id: string, accept: boolean): void => void fire(memoryFailed(), 'decideMemory', { id, accept })
+export const forgetMemory = (id: string, reason?: string): void => void fire(L('Não consegui esquecer a memória.', "I couldn't forget the memory."), 'forgetMemory', { id, reason })
+export const purgeMemory = (id: string): void => void fire(L('Não consegui apagar a memória.', "I couldn't delete the memory."), 'purgeMemory', { id })
+export const editSummary = (conversationId: string, text: string): void => void fire(L('Não consegui salvar o resumo.', "I couldn't save the summary."), 'editSummary', { conversationId, text })
+export const summarizeNow = (conversationId: string): void => void fire(L('Não consegui resumir a conversa.', "I couldn't summarize the conversation."), 'summarizeNow', { conversationId })
+export const editThreadSummary = (rootId: string, text: string): void => void fire(L('Não consegui salvar o resumo.', "I couldn't save the summary."), 'editThreadSummary', { rootId, text })
+export const summarizeThreadNow = (rootId: string): void => void fire(L('Não consegui resumir a thread.', "I couldn't summarize the thread."), 'summarizeThreadNow', { rootId })
 
 // Saves one field of a stored agent without touching the rest of its page.
 export function patchAgent(agentId: string, patch: Partial<Agent>): void {
   const agent = agentById(state, agentId)
   if (!agent) return
   const channelIds = state.conversations.filter((c) => c.kind === 'channel' && c.members.includes(agentId)).map((c) => c.id)
-  void saveAgent({ ...agent, ...patch }, channelIds)
+  void fire(L('Não consegui salvar o agente.', "I couldn't save the agent."), 'saveAgent', { agent: { ...agent, ...patch }, channelIds })
 }
 
+export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
+export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
+// I've seen this thread up to now (it's open, or was just closed).
+export const seeThread = (rootId: string): void =>
+  set((s) => {
+    const threadSeen = { ...s.threadSeen, [rootId]: Date.now() }
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify(threadSeen))
+    } catch {}
+    return { ...s, threadSeen }
+  })
+export const openLightbox = (items: { url: string; title: string; video?: boolean }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
+export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
+export const moveLightbox = (by: number): void =>
+  set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
 export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog, navOpen: dialog ? false : s.navOpen }))
 export const setTab = (page: string, tab: string): void => set((s) => ({ ...s, tabs: { ...s.tabs, [page]: tab } }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
-  void call('computerAction', { agentId, action })
-export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })
-export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void call('browserAction', { agentId, action })
+  void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
+export const stopService = (agentId: string, name: string): void => void fire(L('Não consegui parar o serviço.', "I couldn't stop the service."), 'stopService', { agentId, name })
+export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
 export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
 // A page an agent serves, as this browser reaches it: on a server, at the server's
 // address (it passes running services through on a private network).
-export const reachable = (url: string): string => (windowless() ? url.replace(/^http:\/\/127\.0\.0\.1:/, `http://${location.hostname}:`) : url)
+// A page an agent serves on the server's loopback, from here. Behind https it has an address of its
+// own, reached through this server (src/server/preview.ts); on a private address, the same port there.
+export const reachable = (url: string): string => {
+  if (!windowless()) return url
+  const m = /^http:\/\/127\.0\.0\.1:(\d+)(.*)$/.exec(url)
+  if (!m) return url
+  return location.protocol === 'https:' ? `${location.origin}/preview/${m[1]}${m[2] || '/'}` : `http://${location.hostname}:${m[1]}${m[2]}`
+}
 export const browserInput = (agentId: string, input: BrowserInput): void => void call('browserInput', { agentId, input }).catch(() => {})
 // In a browser (Tucano as a server) the page opens it itself: the server has no screen.
 export const openExternal = (url: string): void =>
-  (window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? void window.open(url, '_blank', 'noopener') : void call('openExternal', { url })
+  (window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? void window.open(url, '_blank', 'noopener') : void fire(L('Não consegui abrir o link.', "I couldn't open the link."), 'openExternal', { url })
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
-export const engineModels = (engine: EngineId): Promise<{ models: string[]; error?: string }> => call('engineModels', { engine })
+export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
 export const localSkills = (): Promise<LocalSkill[]> => call('localSkills')
 export const linkSkill = (source: string, agents: string[] = []): Promise<Skill> => call('linkSkill', { source, agents })
-export const decideSkill = (id: string, approve: boolean): void => void call('decideSkill', { id, approve })
-export const restoreSkill = (skillId: string, versionId: number): void => void call('restoreSkill', { skillId, versionId })
-export const archiveSkill = (id: string, archived: boolean): void => void call('archiveSkill', { id, archived })
-export const removeSkill = (id: string): void => void call('removeSkill', { id })
+export const decideSkill = (id: string, approve: boolean): void =>
+  void fire(approve ? L('Não consegui aprovar a skill.', "I couldn't approve the skill.") : L('Não consegui recusar a skill.', "I couldn't refuse the skill."), 'decideSkill', { id, approve })
+export const restoreSkill = (skillId: string, versionId: number): void => void fire(L('Não consegui restaurar a versão.', "I couldn't restore the version."), 'restoreSkill', { skillId, versionId })
+export const archiveSkill = (id: string, archived: boolean): void =>
+  void fire(archived ? L('Não consegui arquivar a skill.', "I couldn't archive the skill.") : L('Não consegui reativar a skill.', "I couldn't bring the skill back."), 'archiveSkill', { id, archived })
+export const removeSkill = (id: string): void => void fire(L('Não consegui remover a skill.', "I couldn't remove the skill."), 'removeSkill', { id })
 export const skillVersions = (skillId: string): Promise<SkillVersion[]> => call('skillVersions', { skillId })
 export const checkTrigger = (trigger: Trigger): Promise<string> => call('checkTrigger', { trigger })
 export const setTelegramToken = (token: string | null): Promise<void> => call('setTelegramToken', { token })
-export const unpairTelegram = (): void => void call('unpairTelegram')
-export const setGithubToken = (token: string | null): Promise<void> => call('setGithubToken', { token })
+export const unpairTelegram = (): void => void fire(L('Não consegui desconectar o Telegram.', "I couldn't disconnect Telegram."), 'unpairTelegram')
 export const exportTeam = (): Promise<string> => call('exportTeam')
 export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
+export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)
 export const backupNow = (): Promise<string> => call('backupNow')
-export const openBackups = (): void => void call('openBackups')
+export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })
 export const loadUsage = (): Promise<UsageReport> => call('usage')
-export const removeRoutine = (id: string): void => void call('removeRoutine', { id })
-export const runRoutine = (id: string): void => void call('runRoutine', { id })
+export const removeRoutine = (id: string): void => void fire(L('Não consegui remover a rotina.', "I couldn't remove the routine."), 'removeRoutine', { id })
+export const runRoutine = (id: string): void => void fire(L('Não consegui rodar a rotina.', "I couldn't run the routine."), 'runRoutine', { id })
 // A @handle from a name: "Lúcia M." → "luciam".
 export const slug = (name: string): string =>
   name
@@ -493,4 +647,5 @@ export async function lendFolder(agentId: string): Promise<string | null> {
   }
 }
 
-export const folderAction = (agentId: string, name: string, action: 'read_only' | 'read_write' | 'return'): void => void call('folderAction', { agentId, name, action })
+export const folderAction = (agentId: string, name: string, action: 'read_only' | 'read_write' | 'return'): void =>
+  void fire(L('Não consegui mudar o acesso à pasta.', "I couldn't change the folder's access."), 'folderAction', { agentId, name, action })

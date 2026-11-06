@@ -1,7 +1,8 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { isWin, killTree, spawnable } from '../platform'
 import type { EngineEvent } from './types'
+import { OUT_OF_QUOTA } from '../../shared/errors'
 
 // A parser turns the CLI's JSONL stdout into engine events. It is pure so it
 // can be tested against recorded output from the real CLIs.
@@ -63,6 +64,112 @@ export async function* runCli(opts: {
   }
 }
 
+// A CLI that stays open between turns, reading one JSON message per turn on stdin (Claude Code with
+// `--input-format stream-json`). A turn's events come until its parser reports the end of it (`done`
+// or `error`); a stop kills the process, since what it was doing can't be trusted to go on.
+export class LiveCli {
+  private readonly child: ChildProcess
+  private lines: string[] = []
+  private wake: (() => void) | null = null
+  private stderr = ''
+  private code: number | null | undefined // set once it exited
+  private turning = false
+  private exits: (() => void)[] = []
+
+  constructor(opts: { bin: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv }) {
+    const s = spawnable(opts.bin, opts.args)
+    this.child = spawn(s.file, s.args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+    this.child.stderr!.setEncoding('utf8')
+    this.child.stderr!.on('data', (chunk: string) => {
+      this.stderr = (this.stderr + chunk).slice(-8000)
+    })
+    this.child.stdin!.on('error', () => {}) // it may exit before reading
+    createInterface({ input: this.child.stdout!, crlfDelay: Infinity }).on('line', (line) => {
+      if (!this.turning || !line.trim()) return // between turns there's nothing to read
+      this.lines.push(line)
+      this.wake?.()
+    })
+    const exit = (code: number | null): void => {
+      if (this.code !== undefined) return
+      this.code = code
+      this.wake?.()
+      for (const done of this.exits.splice(0)) done()
+    }
+    this.child.on('close', exit)
+    this.child.on('error', (err) => {
+      this.stderr += `
+${err.message}`
+      exit(-1)
+    })
+  }
+
+  get alive(): boolean {
+    return this.code === undefined
+  }
+
+  get busy(): boolean {
+    return this.turning
+  }
+
+  // Once it has exited (at once if it already has).
+  exited(): Promise<void> {
+    return this.alive ? new Promise((resolve) => this.exits.push(resolve)) : Promise.resolve()
+  }
+
+  async *turn(input: string, parser: Parser, signal: AbortSignal): AsyncIterable<EngineEvent> {
+    if (this.turning) throw new Error('a turn is already running in this process')
+    this.turning = true
+    this.lines = []
+    const stop = (): void => {
+      this.kill()
+      this.wake?.()
+    }
+    signal.addEventListener('abort', stop, { once: true })
+    try {
+      if (this.alive && !signal.aborted) this.child.stdin!.write(input)
+      for (;;) {
+        if (signal.aborted) return
+        const line = this.lines.shift()
+        if (line !== undefined) {
+          const events = parser.line(line)
+          yield* events
+          if (events.some((e) => e.type === 'done' || e.type === 'error')) return
+          continue
+        }
+        if (!this.alive) {
+          yield* parser.end(this.code ?? null, this.stderr)
+          return
+        }
+        await new Promise<void>((resolve) => (this.wake = resolve))
+        this.wake = null
+      }
+    } finally {
+      signal.removeEventListener('abort', stop)
+      this.turning = false
+    }
+  }
+
+  kill(): void {
+    if (!this.alive) return
+    const pid = this.child.pid
+    if (isWin && pid) return killTree(pid)
+    this.child.kill('SIGTERM')
+    setTimeout(() => this.alive && this.child.kill('SIGKILL'), 5_000).unref()
+  }
+
+  // No more turns: it exits on its own once stdin closes (killed if it doesn't).
+  end(): void {
+    if (!this.alive) return
+    this.child.stdin!.end()
+    setTimeout(() => this.kill(), 10_000).unref()
+  }
+
+  // The app is quitting: nothing async, the process may be gone before taskkill would run.
+  killNow(): void {
+    if (this.alive) this.child.kill()
+  }
+}
+
 export function parseJson(line: string): Record<string, unknown> | null {
   try {
     const v: unknown = JSON.parse(line)
@@ -71,6 +178,12 @@ export function parseJson(line: string): Record<string, unknown> | null {
     return null
   }
 }
+
+// The CLI's own words when the subscription or the provider is out for now: Claude Code's
+// "You've hit your limit" and 5-hour or weekly limit, Codex's "usage limit", Gemini's quota
+// (RESOURCE_EXHAUSTED), OpenCode's and the providers' 429s. Not Tucano's own monthly limit,
+// which never reaches here as an engine error.
+export const outOfQuota = (message: string): boolean => OUT_OF_QUOTA.test(message)
 
 export const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 

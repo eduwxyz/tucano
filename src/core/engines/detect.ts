@@ -4,12 +4,14 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
-import { ENGINES, type EngineId, type EngineStatus } from '../../shared/types'
+import { ENGINES, type AccountEngine, type EngineId, type EngineStatus } from '../../shared/types'
 import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
 import { geminiModels } from './gemini'
+import { cursorSignedIn, parseCursorModels } from './cursor'
+import { grokLogin, parseGrokModels } from './grok'
 import { hermesAppDir, userHermesProviders, warmHermes } from './hermes'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -103,6 +105,34 @@ const gatewayHost = (url: string | undefined): string | undefined => {
 }
 
 // Checks the app's own Codex login (see codexEnv), not the user's.
+// Whether another login of Claude Code or Codex (Settings › Accounts) is signed in, and on which
+// plan, from the CLI's own status for that folder. The parsing is pure, to test it on their output.
+export function accountLogin(engine: AccountEngine, out: { code: number; stdout: string; stderr: string }): { loggedIn: boolean; detail?: string } {
+  if (engine === 'claude') {
+    let status: Record<string, unknown> = {}
+    try {
+      status = JSON.parse(out.stdout) as Record<string, unknown>
+    } catch {
+      // not signed in, or an older CLI
+    }
+    if (status['loggedIn'] !== true) return { loggedIn: false }
+    const plan = typeof status['subscriptionType'] === 'string' ? status['subscriptionType'] : undefined
+    const email = typeof status['email'] === 'string' ? status['email'] : undefined
+    const what = status['authMethod'] === 'claude.ai' ? `${L('Plano Claude', 'Claude plan')}${plan ? ` ${plan[0]!.toUpperCase()}${plan.slice(1)}` : ''}` : L('Chave de API', 'API key')
+    return { loggedIn: true, detail: email ? `${what} · ${email}` : what }
+  }
+  const text = `${out.stdout}\n${out.stderr}`
+  const loggedIn = out.code === 0 && /logged in/i.test(text) && !/not logged in/i.test(text)
+  return loggedIn ? { loggedIn, detail: /chatgpt/i.test(text) ? L('Plano ChatGPT', 'ChatGPT plan') : L('Chave de API', 'API key') } : { loggedIn }
+}
+
+export const accountDir = (dataDir: string, id: string): string => join(dataDir, 'accounts', id)
+
+export async function accountStatus(engine: AccountEngine, bin: string, dir: string): Promise<{ loggedIn: boolean; detail?: string }> {
+  const out = engine === 'claude' ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir }) : await run(bin, ['login', 'status'], 15_000, codexEnv(dir))
+  return accountLogin(engine, out)
+}
+
 export async function detectCodex(home: string): Promise<EngineStatus> {
   const path = await which('codex')
   if (!path) return { installed: false, loggedIn: false }
@@ -120,6 +150,45 @@ export async function detectCodex(home: string): Promise<EngineStatus> {
     ...(loggedIn ? { route: viaChatGpt ? ('plan' as const) : ('apikey' as const) } : {}),
     account: loggedIn ? (viaChatGpt ? L('Plano ChatGPT · login próprio do Tucano', "ChatGPT plan · Tucano's own login") : L('Chave de API', 'API key')) : L('Precisa de um login próprio do Tucano', "Needs Tucano's own login"),
     warning: loggedIn && !viaChatGpt ? apiKeyWarning() : undefined
+  }
+}
+
+// The models Codex offers this login, newest first, from its own catalog: `codex debug models`
+// (its cache when that command isn't there). Hidden ones (internal, retired) are left out.
+export interface CodexModel {
+  slug: string
+  label: string
+  description?: string
+}
+
+// 0 is the top of the list, not a missing priority.
+const priorityOf = (p: unknown): number => (typeof p === 'number' ? p : 999)
+
+export function parseCodexCatalog(json: string): CodexModel[] {
+  try {
+    const d = JSON.parse(json) as { models?: unknown } | unknown[]
+    const list = (Array.isArray(d) ? d : Array.isArray(d.models) ? d.models : []) as { slug?: unknown; display_name?: unknown; description?: unknown; visibility?: unknown; priority?: unknown }[]
+    return list
+      .filter((m) => typeof m.slug === 'string' && m.slug && (m.visibility === undefined || m.visibility === 'list'))
+      .sort((a, b) => priorityOf(a.priority) - priorityOf(b.priority))
+      .map((m) => ({
+        slug: m.slug as string,
+        label: typeof m.display_name === 'string' && m.display_name ? m.display_name : (m.slug as string),
+        ...(typeof m.description === 'string' && m.description ? { description: m.description } : {})
+      }))
+  } catch {
+    return []
+  }
+}
+
+export async function codexModels(path: string, home: string): Promise<CodexModel[]> {
+  const r = await run(path, ['debug', 'models'], 15_000, codexEnv(home))
+  const list = r.code === 0 ? parseCodexCatalog(r.stdout) : []
+  if (list.length) return list
+  try {
+    return parseCodexCatalog(readFileSync(join(home, '.codex', 'models_cache.json'), 'utf8'))
+  } catch {
+    return []
   }
 }
 
@@ -170,11 +239,82 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
   return { status: listedStatus(path, v.stdout, models, 'pi (e /login)'), models }
 }
 
-// The model ids Hermes can run, from its provider cache: one entry per
-// credential (a provider slug, or `custom:<url>#<fingerprint>` for an endpoint
-// in the person's config), each with the models its catalog lists. A custom
-// endpoint is labelled with the config key it belongs to, not the host: that
-// is the name the CLI routes with.
+// Gemini CLI. Its model list isn't offered by an offline command, so the known
+// current models are used; "signed in" is whether a login is in place — the
+// OAuth credentials in the home, or an API key / Vertex in the environment.
+export async function detectGemini(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('gemini')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  const home = join(process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
+  const signedIn = existsSync(join(home, 'oauth_creds.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
+  const models = geminiModels(path)
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: signedIn,
+      ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com gemini', 'Not signed in: sign in with gemini') })
+    },
+    models: signedIn ? models : []
+  }
+}
+
+// Grok's CLI. `grok models` says whether the grok.com login is in place and
+// lists the models that login can run. An API key, with no subscription login,
+// still counts as signed in, and the screen warns that it bills per token.
+export async function detectGrok(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('grok')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const [v, list] = await Promise.all([run(path, ['--version']), run(path, ['models'], 30_000, { ...process.env, NO_COLOR: '1' })])
+  const text = `${list.stdout}\n${list.stderr}`
+  const login = grokLogin(text)
+  const models = login.loggedIn ? parseGrokModels(list.stdout) : []
+  const viaKey = login.loggedIn && !login.plan
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: login.loggedIn && models.length > 0,
+      ...(login.loggedIn && models.length ? { route: login.plan ? ('plan' as const) : ('apikey' as const) } : {}),
+      account: models.length
+        ? login.plan
+          ? `Grok · ${models.length} ${L('modelos', 'models')}`
+          : L('Chave de API', 'API key')
+        : L('Sem login: entre com grok login', 'Not signed in: sign in with grok login'),
+      ...(viaKey ? { warning: apiKeyWarning() } : {})
+    },
+    models
+  }
+}
+
+// Cursor's agent CLI, by its unique name (it also installs a plain `agent`).
+// `status` says whether it's signed in; `models` lists what the account can run.
+export async function detectCursor(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('cursor-agent')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const [v, st] = await Promise.all([run(path, ['--version']), run(path, ['status'], 20_000, { ...process.env, NO_OPEN_BROWSER: '1' })])
+  const signedIn = cursorSignedIn(st.stdout + st.stderr)
+  const models = signedIn ? parseCursorModels((await run(path, ['models'], 30_000, { ...process.env, NO_OPEN_BROWSER: '1' })).stdout) : []
+  return {
+    status: {
+      installed: true,
+      path,
+      version: v.stdout.trim().match(/^[\w.-]+/)?.[0] ?? version(v.stdout),
+      loggedIn: signedIn && models.length > 0,
+      ...(signedIn && models.length ? { route: 'providers' as const, account: `Cursor · ${models.length} ${L('modelos', 'models')}` } : { account: signedIn ? L('Sem modelos: confira o plano do Cursor', 'No models: check your Cursor plan') : L('Sem login: entre com cursor-agent login', 'Not signed in: sign in with cursor-agent login') })
+    },
+    models
+  }
+}
+
+// Hermes, the CLI the app itself runs on. Its model list comes from its own
+// provider cache: one entry per credential (a provider slug, or
+// `custom:<url>#<fingerprint>` for an endpoint in the person's config), each
+// with the models its catalog lists. A custom endpoint is labelled with the
+// config key it belongs to, not the host: that is the name its --provider takes.
 export function parseHermesModels(
   file = join(process.env['HERMES_HOME'] || join(homedir(), '.hermes'), 'provider_models_cache.json'),
   providers: Record<string, string> = {}
@@ -240,31 +380,17 @@ export async function detectHermes(): Promise<{ status: EngineStatus; models: st
   return { status, models }
 }
 
-// Gemini CLI. Its model list isn't offered by an offline command, so the known
-// current models are used; "signed in" is whether a login is in place — the
-// OAuth credentials in the home, or an API key / Vertex in the environment.
-export async function detectGemini(): Promise<{ status: EngineStatus; models: string[] }> {
-  const path = await which('gemini')
-  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
-  const v = await run(path, ['--version'])
-  const home = process.env['GEMINI_CLI_HOME'] || join(homedir(), '.gemini')
-  const signedIn = existsSync(join(home, 'oauth_creds.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
-  const models = geminiModels()
-  return {
-    status: {
-      installed: true,
-      path,
-      version: version(v.stdout),
-      loggedIn: signedIn,
-      ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com gemini', 'Not signed in: sign in with gemini') })
-    },
-    models: signedIn ? models : []
-  }
-}
-
-export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {
+export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
-  const [claude, codex, opencode, pi, gemini, hermes] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini(), detectHermes()])
-  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status, hermes: hermes.status }, listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, hermes: hermes.models } }
+  // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
+  const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
+  const [claude, codex, opencode, pi, gemini, cursor, grok, hermes] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini(), detectCursor(), detectGrok(), detectHermes()])
+  // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
+  const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
+  return {
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status, cursor: cursor.status, grok: grok.status, hermes: hermes.status },
+    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, cursor: cursor.models, grok: grok.models, hermes: hermes.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    codexCatalog
+  }
 }

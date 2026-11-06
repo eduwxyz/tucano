@@ -3,10 +3,11 @@
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
+import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
-import { agentById, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { agentById, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
-import { Icon, type IconName } from './ui'
+import { Icon, ownColor, type IconName } from './ui'
 
 const KIND_LABEL = (): Record<Artifact['kind'], string> => ({
   image: L('Imagem', 'Image'),
@@ -21,13 +22,19 @@ const KIND_LABEL = (): Record<Artifact['kind'], string> => ({
 
 export const bytes = (n: number): string => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`)
 
+// The window's size, with the conversation's other images a key away.
+function showImages(a: Artifact): void {
+  const images = getState().artifacts.filter((x) => x.kind === 'image' && x.conversationId === a.conversationId)
+  openLightbox(images.map((x) => ({ url: artifactUrl(x), title: x.title })), Math.max(0, images.findIndex((x) => x.id === a.id)))
+}
+
 export function ArtifactCard({ id }: { id: string }): ReactNode {
   const a = useStore((s) => s.artifacts.find((x) => x.id === id))
   const open = useStore((s) => s.panel?.kind === 'artifact' && s.panel.id === id)
   if (!a) return null
   if (a.kind === 'image')
     return (
-      <button className={`artifact-image ${open ? 'is-open' : ''}`} onClick={() => openPanel({ kind: 'artifact', id })} title={a.title}>
+      <button className="artifact-image" onClick={() => showImages(a)} title={a.title}>
         <img src={artifactUrl(a)} alt={a.title} />
         <span className="artifact-image__caption">{a.title}</span>
       </button>
@@ -163,7 +170,7 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
     <div className={`screen ${onOpen ? 'screen--button' : ''}`} onClick={onOpen} role={onOpen ? 'button' : undefined}>
       <img className="screen__frame" src={view.frame} alt={view.title} draggable={false} />
       {c && !view.shown && agent && (
-        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
+        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ ...ownColor(agent), transform: `translate(${c.x * 100}%, ${c.y * 100}%)` }}>
           <i key={c.at} className="screen__ripple" />
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
             <path d="m4 2 16 8-7 2-3 7L4 2Z" />
@@ -284,7 +291,7 @@ export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }
   const name = useStore((s) => agentById(s, agentId)?.name ?? L('agente', 'agent'))
   const open = useStore((s) => s.panel?.kind === 'browser' && s.panel.agentId === agentId)
   const show = (): void => openPanel({ kind: 'browser', agentId })
-  const status = view?.shown ? L('você está no controle', 'you’re in control') : view?.doing ? `${view.doing.label.toLowerCase()} ${view.doing.detail}` : view?.log.at(-1)?.label.toLowerCase() ?? L('parado', 'idle')
+  const status = view?.shown ? L('você está no controle', 'you’re in control') : view?.doing ? `${view.doing.label.toLowerCase()}${view.doing.detail ? ` ${view.doing.detail}` : ''}` : view?.log.at(-1)?.label.toLowerCase() ?? L('em espera', 'idle')
 
   if (big)
     return (
@@ -362,7 +369,7 @@ export function SidePanel(): ReactNode {
   const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId) : undefined))
   const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
   const [reload, setReload] = useState(0)
-  if (!panel) return null
+  if (!panel || panel.kind === 'thread') return null // a thread is drawn by its conversation
 
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? L(`Navegador de ${browserName ?? 'agente'}`, `${browserName ?? 'Agent'}'s browser`) : '')
   return (
@@ -395,9 +402,9 @@ export function SidePanel(): ReactNode {
             // Same origin is the service's own (127.0.0.1:port), not the app's.
             <iframe key={reload} src={reachable(service.url)} sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals" title={service.name} />
           ) : (
-            <p className="empty">{L('Esse serviço não está rodando.', 'This service isn’t running.')}</p>
+            <p className="empty">{L('Esse serviço parou. Peça pro agente subir de novo na conversa.', 'This service stopped. Ask the agent in the conversation to start it again.')}</p>
           ))}
-        {panel.kind === 'artifact' && !artifact && <p className="empty">{L('Arquivo não encontrado.', 'File not found.')}</p>}
+        {panel.kind === 'artifact' && !artifact && <p className="empty">{L('Esse arquivo não existe mais. Peça pro agente gerar de novo.', 'This file no longer exists. Ask the agent to make it again.')}</p>}
         {panel.kind === 'browser' && <BrowserPanel agentId={panel.agentId} />}
       </div>
     </aside>
@@ -412,8 +419,8 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
     setText(null)
     if (textual)
       void call('artifactText', { id: artifact.id }).then(
-        (t) => setText(t ?? L('(não consegui abrir o arquivo)', '(couldn’t open the file)')),
-        () => setText(L('(não consegui abrir o arquivo)', '(couldn’t open the file)'))
+        (t) => setText(t ?? L('(o arquivo não abriu: pode ter sido movido ou apagado. Peça pro agente gerar de novo.)', '(the file didn’t open: it may have been moved or deleted. Ask the agent to make it again.)')),
+        () => setText(L('(o arquivo não abriu: pode ter sido movido ou apagado. Peça pro agente gerar de novo.)', '(the file didn’t open: it may have been moved or deleted. Ask the agent to make it again.)'))
       )
   }, [artifact.id, textual])
 
@@ -435,7 +442,7 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
     case 'pdf':
       return <iframe src={url} title={artifact.title} />
     case 'markdown':
-      return <div className="side-panel__doc md">{text !== null && <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>}</div>
+      return <div className="side-panel__doc md">{text !== null && <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{text}</Markdown>}</div>
     case 'csv':
       return <div className="side-panel__doc">{text !== null && <CsvTable text={text} tab={artifact.name.endsWith('.tsv')} />}</div>
     case 'text':

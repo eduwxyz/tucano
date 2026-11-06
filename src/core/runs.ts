@@ -1,24 +1,39 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
+import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
-import { HISTORY_LIMIT, mentioned, systemPrompt, transcriptBlocks } from './context'
-import { BUSCAR_MEMORIAS, LEMBRAR, type Memories } from './memory'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, mentioned, snip, systemPrompt, transcript, transcriptBlocks } from './context'
+import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
+import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
+import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
-import { ABRIR_PR, GITHUB, type GitHub } from './github'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderSection, draftFrom, PROPOR_AGENTE } from './tuca'
+import { availableModels, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
+import { LER_GUIA, readGuide } from './guide'
+import { proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
-import { textResult, type Gateway, type ToolDef } from './gateway'
+import { accountDir } from './engines/detect'
+import { outOfQuota } from './engines/cli'
+import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { Followups, replyKey, type Followup } from './followups'
+import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
-import { route } from './router'
+import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
+import { callError, contentText, errorReason } from './connectors'
+import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
+
+// An old approval of the push-from-the-computer PRs (they left Tucano): still decided, never run.
+const GITHUB = 'github'
+const ABRIR_PR = 'abrir_pr'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -27,12 +42,17 @@ const MAX_MENTIONS = 3
 const MAX_DEPTH = 3 // agent replies chained from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
-const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
+// Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
+// or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
+// can't here (no file tools), so it calls again and again and answers without the data.
+export const MAX_RESULT_BYTES = 40_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
 const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
+const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
+const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
 const THOUGHT = (): string => L('Pensou', 'Thought') // the thinking step, closed
 
 export const ASK_USER: ToolDef = {
@@ -62,16 +82,19 @@ export interface RunnerDeps {
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
-  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac'>> // without it, no agent has a computer
+  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
+  apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
-  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done') => void
+  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string) => void // threadId: a click opens that thread too
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
-  github?: Pick<GitHub, 'pushable' | 'openPr'> // without it, agents can't open PRs
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
+  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds'> // without it, agents have no wiki
+  wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
+  timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
 
 // What the runner needs from the connector manager.
@@ -96,10 +119,19 @@ const tokenCount = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toLocaleString(locale(), { maximumFractionDigits: 1 })} ${L('mi', 'M')}` : `${Math.round(n / 1000).toLocaleString(locale())}${L(' mil', 'k')}`
 
 export function resultText(r: CallToolResult): string {
-  const text = r.content
-    .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
-    .join('\n')
-  return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n${L(`[… resultado cortado em ${MAX_RESULT_CHARS} caracteres]`, `[… result cut at ${MAX_RESULT_CHARS} characters]`)}` : text
+  const text = r.isError ? errorReason(r) : contentText(r)
+  const bytes = Buffer.from(text, 'utf8')
+  if (bytes.length <= MAX_RESULT_BYTES) return text
+  // Cut on a whole character: a split one decodes as U+FFFD at the end.
+  const kept = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8').replace(/�+$/, '')
+  // How much was left out, so the agent narrows the question instead of paging through the rest.
+  const kb = (n: number): string => `${Math.round(n / 1000).toLocaleString(locale())} KB`
+  const lines = (s: string): number => s.split('\n').length
+  const shown = Math.max(1, Math.round((MAX_RESULT_BYTES / bytes.length) * 100))
+  return `${kept}\n${L(
+    `[… resultado cortado: chegaram ${kb(MAX_RESULT_BYTES)} de ${kb(bytes.length)} (${shown}%, ${lines(kept)} de ${lines(text)} linhas). Se precisar de mais, pergunte de um jeito mais estreito (uma janela de tempo menor, um filtro, menos campos, uma agregação); leia o resto em partes só se precisar mesmo de tudo.]`,
+    `[… result cut: ${kb(MAX_RESULT_BYTES)} of ${kb(bytes.length)} came through (${shown}%, ${lines(kept)} of ${lines(text)} lines). If you need more, ask more narrowly (a shorter time window, a filter, fewer fields, an aggregate); read the rest in parts only if you really need all of it.]`
+  )}`
 }
 
 // Text is clipped; images go through (screenshots, charts), a few at most.
@@ -116,7 +148,9 @@ export interface RoutineEvent {
   body: string // the item itself, clipped
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
+// msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -125,24 +159,126 @@ export class Runner {
   private controllers = new Map<string, Control>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
+  private sessions: Sessions
+  private followups = new Followups()
 
-  constructor(private deps: RunnerDeps) {}
+  constructor(private deps: RunnerDeps) {
+    this.sessions = new Sessions({
+      exists: (id) => !!deps.db.message(id),
+      // The token first: a failure letting the process or its file go must not keep it, nor the reply.
+      forget: (s) => {
+        deps.gateway?.release(s.token)
+        for (const e of Object.values(deps.engines))
+          try {
+            e.release?.(s.id)
+          } catch (err) {
+            console.error('[sessions] release', err)
+          }
+      }
+    })
+    // Left by an earlier run of the app, under the usual login and each account's.
+    this.cleanTranscripts()
+    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
+
+  // What the engines keep outside the app's folder (Claude Code's transcripts, in ~/.claude) for
+  // agents here, but not of a session still kept.
+  cleanTranscripts(): void {
+    const accounts = this.deps.dataDir ? join(this.deps.dataDir, 'accounts') : undefined
+    let accountDirs: string[] = []
+    try {
+      if (accounts) accountDirs = readdirSync(accounts).map((d) => join(accounts, d))
+    } catch {
+      // no accounts
+    }
+    for (const e of Object.values(this.deps.engines)) e.clean?.(this.deps.workDir, accountDirs)
+  }
+
+  // The sessions let go are gone from disk: their processes exited and their files went after.
+  async settled(): Promise<void> {
+    await Promise.all(Object.values(this.deps.engines).map((e) => e.settle?.()))
+  }
+
+  // For good (the workspace is being deleted): what's queued is dropped, what's running stops,
+  // and the kept sessions go, with their transcripts.
+  stopAll(): void {
+    this.paused = true
+    this.queue.length = 0
+    this.followups = new Followups() // the places the dropped queue held, and what was noted for later
+    for (const c of this.controllers.values()) {
+      c.reason = 'stopped'
+      c.ctl.abort()
+    }
+    this.sessions.dropWhere(() => true)
+    this.checkIdle()
+  }
+
+  // An archived agent's sessions, or a deleted conversation's, go now: their process and the
+  // transcript Claude Code keeps on disk.
+  forgetSessions(of: { agentId?: string; conversationId?: string }): void {
+    this.sessions.dropWhere((key) => {
+      const [agent, conversation] = key.split(':')
+      return (of.agentId !== undefined && agent === of.agentId) || (of.conversationId !== undefined && conversation === of.conversationId)
+    })
+  }
 
   setPaused(paused: boolean): void {
     this.paused = paused
+    if (!paused) this.pump() // resumed: any queued work that was blocked can go on
+  }
+
+  // The person is writing here. What will answer gets its Claude Code started now, so the reply
+  // doesn't wait the second that takes: in a DM (or a channel of one agent), the agent's kept
+  // session, if its process closed; in a channel of several, the router. A first reply has no
+  // session to start yet, and a mention or a pending question skips the router: then the
+  // process started waits a couple of minutes and goes.
+  async typing(conversationId: string, threadId?: string): Promise<void> {
+    const { db, engines } = this.deps
+    const conv = db.conversation(conversationId)
+    if (!conv || this.paused) return
+    const members = this.members(conv)
+    const settings = await this.deps.settings()
+    const ready = (engine: EngineId): boolean => !!settings.engines[engine]?.installed && !!settings.engines[engine]?.loggedIn
+    if (conv.kind === 'dm' || members.length === 1) {
+      const agent = members[0]
+      // A message outside threads in a conversation that answers in them opens a new thread: nothing is kept there yet.
+      if (!agent || (conv.threads && !threadId)) return
+      const engine = modelInfo(agent.modelId)?.engine ?? 'claude'
+      const id = this.sessions.idOf(replyKey(agent.id, conv.id, threadId))
+      if (id && ready(engine)) engines[engine].rewarm?.(id)
+      return
+    }
+    if (members.length < 2 || settings.routerModel === JEV_MODEL) return
+    const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+    if (!ready(model.engine)) return
+    const cwd = join(this.deps.workDir, '_router')
+    mkdirSync(cwd, { recursive: true })
+    engines[model.engine].warm?.(routerTurn(model.id, cwd))
   }
 
   // Saves the human message and decides who answers it: mentioned agents
   // first, then whoever asked a pending question, then the DM agent or the
-  // only agent in the channel, and otherwise the router.
-  async send(conversationId: string, text: string, images: ImageUpload[] = []): Promise<void> {
+  // only agent in the channel, and otherwise the router. The answers, and
+  // everything else it sets off, go in its thread (`threadId`, or its own when
+  // the conversation answers in threads) or else in the conversation.
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const body = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
     if (!conv || (!body && pictures.length === 0)) return
+    // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
+    // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
+    const root = threadId ? db.message(threadId) : undefined
+    const thread = root?.conversationId === conv.id ? (root.threadId ?? root.id) : undefined
+    // A question an agent left waiting is answered by my next message in its thread. What I
+    // write outside threads stays outside: it only answers a question that is outside too.
+    const asked = this.pendingQuestion(conv.id, thread)
 
-    const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now() }
+    const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
+    // An answer goes in the thread of what it answers. A message of mine outside one opens it
+    // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
+    const replyIn = thread ?? (conv.threads ? mine.id : undefined)
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
@@ -150,7 +286,6 @@ export class Runner {
     const members = this.members(conv)
     let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
 
-    const asked = this.pendingQuestion(conv.id)
     if (asked) {
       this.update(asked, { run: { ...asked.run!, status: 'done' } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
@@ -158,21 +293,21 @@ export class Runner {
     }
 
     if (members.length === 0) {
-      this.post(conv.id, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
+      this.post(conv.id, replyIn, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
       return
     }
     if (this.paused) {
-      this.post(conv.id, L('Os agentes estão pausados: ninguém responde até você retomar (botão no topo da barra lateral).', 'The agents are paused: no one answers until you resume (button at the top of the sidebar).'))
+      this.post(conv.id, replyIn, L('Os agentes estão pausados: ninguém responde até você retomar (botão no topo da barra lateral).', 'The agents are paused: no one answers until you resume (button at the top of the sidebar).'))
       return
     }
     if (responders.length === 0) {
       if (conv.kind === 'dm' || members.length === 1) responders = members
       else if (members.length > 1) {
-        void this.routeAndRun(conv, members)
+        void this.routeAndRun(conv, members, replyIn)
         return
       }
     }
-    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
+    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn }))
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -202,6 +337,7 @@ export class Runner {
   retry(messageId: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
+    if (this.paused) return // nobody starts working while paused
     if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status)) return
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
@@ -215,6 +351,7 @@ export class Runner {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (msg?.run?.status !== 'paused' || msg.author.kind !== 'agent') return
+    if (this.paused) return // nobody starts working while paused
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
@@ -225,6 +362,7 @@ export class Runner {
       .slice(-40)
       .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : ''}`)
     const task = [
+      msg.run.task, // what it was asked: a trigger's event is only there
       L(
         `Você pausou a sua última resposta ao chegar no teto de gasto dela, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
         `You paused your last reply when it reached its spending cap, and ${me} asked you to go on. What you wrote is in your last message above.`
@@ -234,13 +372,14 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work }))
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }))
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
   // Resolves with the agent's reply once that run ends, or undefined when it can't run.
   async runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> {
     const { db, emit } = this.deps
+    if (this.paused) return undefined // routines don't run while paused
     const conv = db.conversation(r.conversationId)
     const agent = db.agent(r.agentId)
     if (!conv || !agent || agent.archived) return undefined
@@ -270,6 +409,7 @@ export class Runner {
 
   // A routine's reply that failed, run again in place with the same request.
   async retryRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined> {
+    if (this.paused) return undefined // routines don't run while paused
     const { db } = this.deps
     const msg = db.message(messageId)
     const conv = db.conversation(r.conversationId)
@@ -331,15 +471,16 @@ export class Runner {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
   }
 
-  private pendingQuestion(conversationId: string): Message | undefined {
+  // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
+  private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
     return this.deps.db
-      .recentMessages(conversationId, 50)
+      .recentMessages(conversationId, 50, threadId ?? null)
       .reverse()
       .find((m) => m.run?.status === 'waiting_input')
   }
 
-  private post(conversationId: string, text: string, run?: Run): Message {
-    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now(), run }
+  private post(conversationId: string, threadId: string | undefined, text: string, run?: Run): Message {
+    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now(), run, ...(threadId ? { threadId } : {}) }
     this.deps.db.saveMessage(m)
     this.deps.emit({ type: 'message', message: m })
     return m
@@ -351,16 +492,21 @@ export class Runner {
     this.deps.emit({ type: 'message', message: { ...m } })
   }
 
-  private async routeAndRun(conv: Conversation, members: Agent[]): Promise<void> {
+  // The router reads the thread it picks for, and the conversation's other threads in a line each.
+  private async routeAndRun(conv: Conversation, members: Agent[], threadId?: string): Promise<void> {
     const { db, engines } = this.deps
+    if (this.paused) return // nobody starts working while paused
     this.routing++
-    const note = this.post(conv.id, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
+    const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
       this.update(note, { text: L(`Não consegui escolher quem responde (${why}). Mencione um agente com **@nome**.`, `I couldn't pick who answers (${why}). Mention an agent with **@name**.`), run: undefined })
     try {
       const settings = await this.deps.settings()
+      const { messages, threads } = contextWindow(db, note, 20)
       const input = {
-        messages: db.recentMessages(conv.id, 20),
+        messages,
+        threads,
+        thread: threadId ? db.message(threadId) : undefined,
         agents: members,
         me: settings.workspaceName,
         connectors: this.deps.connectors?.list()
@@ -397,7 +543,7 @@ export class Runner {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
     this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
-    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
+    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: note.threadId }))
   }
 
   private enqueue(job: () => Promise<unknown>): void {
@@ -407,6 +553,7 @@ export class Runner {
 
   private pump(): void {
     while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
+      if (this.paused) return // paused: nothing new starts, queued work waits
       const job = this.queue.shift()!
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
@@ -420,20 +567,65 @@ export class Runner {
     }
   }
 
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean }): Promise<Message> {
+  // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
+  // The agent's reserve, when it can take the reply: its model, and the account it runs on (unset: its harness's
+  // usual login). None when it's the very login and model that just ran out, or when its login isn't ready.
+  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
+    const model = agent.fallbackModelId ? modelInfo(agent.fallbackModelId) : undefined
+    if (!model?.id) return undefined
+    // An account of another harness (the reserve's model changed since) means the usual login, like the agent's own.
+    const account = agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
+    if (agent.fallbackModelId === agent.modelId && account?.id === from?.id) return undefined
+    const status = settings.engines[model.engine]
+    if (!status?.installed || (account ? !account.loggedIn : !status.loggedIn)) return undefined
+    return { model, account }
+  }
+
+  // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
+  // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
+  // `reserved`: this reply was queued by handOff, which already holds its place.
+  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+    const threadId = opts.existing ? opts.existing.threadId : opts.threadId
+    const key = replyKey(agent.id, conv.id, threadId)
+    const { reserved, ...rest } = opts
+    this.followups.start(key, reserved)
+    let msg: Message
+    let f: Followup | undefined
+    try {
+      msg = await this.reply(agent, conv, rest)
+    } finally {
+      this.followups.end(key)
+      f = this.followups.take(key) // taken even when the reply threw: a stale follow-up must not wait for the next one
+    }
+    if (f && msg.run?.status === 'done' && !this.paused) {
+      this.followups.reserve(key)
+      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }))
+    }
+    return msg
+  }
+
+  // `threadId`: the reply goes in that thread (an existing reply keeps its own).
+  private async reply(agent: Agent, conv: Conversation, opts: ReplyOpts): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
     const model = modelInfo(agent.modelId)
-    const engineId: EngineId = model?.engine ?? 'claude'
-    const engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
+    // The model this reply runs on: the agent's, or its reserve once the main one's subscription is out.
+    let modelId = agent.modelId
+    let onReserve = false // the reserve takes a reply once
+    let modelName = model?.id ?? agent.modelId
+    let engineId: EngineId = model?.engine ?? 'claude'
+    let engineLabel = `${ENGINES[engineId].label} · ${model?.label ?? agent.modelId}`
 
-    const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now() }
+    const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
     const started = Date.now()
     let stepStarted = started
     const thinking = (): Step => ({ id: randomUUID(), label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' })
     msg.text = ''
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()] }
+    // "Try again" passes no task: it repeats the one of the reply it's redoing.
+    const task = opts.task ?? opts.existing?.run?.task
+    const again = task ? { task } : {}
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
@@ -455,18 +647,36 @@ export class Runner {
     if (used >= agent.limit) {
       save({
         text: L('Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.', "I stopped: I've used all my tokens for this month. It can be raised on my page."),
-        run: { status: 'limit_reached', depth: opts.depth, steps: [] }
+        run: { status: 'limit_reached', depth: opts.depth, steps: [], ...again }
       })
       return msg
     }
 
-    const status = settings.engines[engineId]
-    if (!status.installed || !status.loggedIn) {
+    // Another login of this harness (Settings › Accounts), when the agent has one.
+    let account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    if (account && !account.loggedIn) {
       save({
         run: {
           status: 'failed',
           depth: opts.depth,
           steps: [],
+          ...again,
+          error: L(
+            `A conta “${account.name}” do ${ENGINES[engineId].label} não está logada. Entre nela em Configurações › Modelos › Contas e mande de novo.`,
+            `The “${account.name}” ${ENGINES[engineId].label} account isn't signed in. Sign in under Settings › Models › Accounts and send it again.`
+          )
+        }
+      })
+      return msg
+    }
+    const status = settings.engines[engineId]
+    if (!status.installed || (!status.loggedIn && !account)) {
+      save({
+        run: {
+          status: 'failed',
+          depth: opts.depth,
+          steps: [],
+          ...again,
           error: L(
             `O ${ENGINES[engineId].label} ${status.installed ? 'não está logado' : 'não está instalado'}. Resolva em Configurações e mande de novo.`,
             `${ENGINES[engineId].label} ${status.installed ? "isn't signed in" : "isn't installed"}. Fix it in Settings and send it again.`
@@ -483,13 +693,7 @@ export class Runner {
     const members = this.members(conv)
     const peers = members.filter((a) => a.id !== agent.id)
     const memory = this.deps.memory
-    const { summary, messages: history } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? {
-      summary: undefined,
-      messages: db
-        .recentMessages(conv.id, HISTORY_LIMIT + 40)
-        .filter((m) => m.id !== msg.id && m.at <= msg.at)
-        .slice(-HISTORY_LIMIT)
-    }
+    const { summary, messages: history } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // What this reply counts toward: given (a chain, a routine's issue), or an issue named in the message it answers.
     const asked = [...history].reverse().find((m) => m.author.kind === 'me' || m.author.kind === 'routine')
     const work = opts.work ?? opts.existing?.run?.work ?? (asked ? workIn(asked.text) : undefined)
@@ -497,15 +701,29 @@ export class Runner {
     // Past the prompt's budget, the older memories are searched instead: the tool shows up only then.
     const promptMemories = memory?.forPrompt(agent)
     const canSearch = !!this.deps.gateway && !!promptMemories?.searchable
-    // The Tuca proposes agents; nobody else does.
-    const builds = !!this.deps.gateway && agent.kind === 'tuca'
-    const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    // A thread sees only itself, and the conversation only what's outside threads: the other
+    // threads, of the conversations this agent is in, are looked up.
+    const canSeekThreads = !!this.deps.gateway && (!!msg.threadId || db.threadRoots(conv.id).size > 0)
+    const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
+    // Any agent may propose agents, teams, routines and channels (a card the person applies); only the
+    // Tuca helps with Tucano itself, with the guide and a look at the workspace.
+    const proposes = !!this.deps.gateway
+    const helps = proposes && agent.kind === 'tuca'
+    let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
+    // why, so it says so in a sentence instead of spending a call on each tool to find out.
+    const computerOff = computers ? await computers.unavailable?.(agent) : undefined
+    if (computerOff) computers = undefined
+    let computerDown: string | undefined // found off in the middle of the turn: what the person has to do
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
+    const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
     const skills = this.deps.gateway ? this.deps.skills : undefined
     const mySkills = skills?.forAgent(agent.id) ?? []
+    // The wiki: for agents that may read it, once it has a page.
+    const wiki = this.deps.gateway && this.deps.wiki && wikiAccess(agent) !== 'none' && this.deps.wiki.count() > 0 ? this.deps.wiki : undefined
 
-    const control: Control = { ctl: new AbortController() }
+    const control: Control = { ctl: new AbortController(), msg }
     this.controllers.set(msg.id, control)
     const halt = (reason: NonNullable<Control['reason']>): void => {
       if (control.reason) return
@@ -520,6 +738,7 @@ export class Runner {
     const seen = new Map<string, { result: string; n: number }>()
     let failing = 0 // tool calls failing in a row
     let inFlight = 0 // a tool running has its own timeout, so it isn't silence
+    let acted = false // called a tool or searched the web: a failed turn then isn't redone on the reserve model
     let lastSign = Date.now()
     let overBudget = false
     let refusedOver = 0
@@ -542,6 +761,11 @@ export class Runner {
       seen.set(key, { result, n })
       return n
     }
+    // Calls per connector tool, whatever the arguments: paging a whole channel changes the cursor each
+    // time, so the repeat guard never sees it.
+    const callsOf = new Map<string, number>()
+    let sleeps = 0 // commands that started by sleeping
+    let refusedSleeps = 0
 
     let pending = ''
     let timer: NodeJS.Timeout | null = null
@@ -562,9 +786,11 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
-      if (c.status !== 'connected') continue
+      // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
+      // (a refused token, a sign-in to finish) takes them away.
+      if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
@@ -588,39 +814,20 @@ export class Runner {
             }
           }
         : undefined
-    // abrir_pr: when a folder lent to this agent is a GitHub repository it can push to.
-    const repos = (this.deps.gateway && this.deps.github?.pushable(agent)) || []
-    const prTool: ToolDef | undefined = repos.length
-      ? {
-          name: ABRIR_PR,
-          description: L(
-            `Pede pra abrir uma pull request em ${repos.join(' ou ')} com uma branch agent/* que você já publicou com git push. Vira um pedido de aprovação; aprovada, o app abre a PR e você recebe o link.`,
-            `Asks to open a pull request on ${repos.join(' or ')} from an agent/* branch you already published with git push. It becomes an approval request; once approved, the app opens the PR and you get the link.`
-          ),
-          inputSchema: {
-            type: 'object',
-            properties: {
-              ...(repos.length > 1 ? { repositorio: { type: 'string', enum: repos } } : {}),
-              branch: { type: 'string', description: L('A branch publicada, ex.: agent/lembrete-duplicado.', 'The published branch, e.g. agent/duplicate-reminder.') },
-              titulo: { type: 'string' },
-              descricao: { type: 'string', description: L('Em Markdown: o que mudou, por quê, como foi testado, o que falta conferir (ex.: o build no Xcode).', "In Markdown: what changed, why, how it was tested, what's left to check (e.g. the Xcode build).") },
-              base: { type: 'string', description: L('A branch de destino. Default: main.', 'The target branch. Default: main.') }
-            },
-            required: [...(repos.length > 1 ? ['repositorio'] : []), 'branch', 'titulo', 'descricao']
-          }
-        }
-      : undefined
     const toolDefs: ToolDef[] = [
       ASK_USER,
       ...(accessTool ? [accessTool] : []),
-      ...(prTool ? [prTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
-      ...(builds ? [PROPOR_AGENTE] : []),
+      ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
+      ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
+      ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
+      ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
+      ...(wiki ? WIKI_TOOLS : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
@@ -661,7 +868,55 @@ export class Runner {
           )
         }
 
-        if (name === PROPOR_AGENTE.name && builds) {
+        if (name === LER_GUIA.name && helps) {
+          const page = readGuide(args['pagina'])
+          if (!page.error) addSteps({ id: randomUUID(), label: L('Leu o guia', 'Read the guide'), detail: String(args['pagina']), status: 'done' })
+          return textResult(page.text, page.error)
+        }
+
+        if (name === VER_ESTADO.name && helps) {
+          addSteps({ id: randomUUID(), label: L('Olhou o workspace', 'Looked at the workspace'), detail: String(args['area'] ?? L('tudo', 'all')), status: 'done' })
+          const now = Date.now()
+          return textResult(
+            workspaceState(args['area'], {
+              settings: await this.deps.settings(),
+              connectors: this.deps.connectors?.list() ?? [],
+              agents: db.agents().filter((a) => a.kind !== 'tuca'),
+              conversations: db.conversations(),
+              routines: db.routines(),
+              approvals: db.approvals(),
+              failures: db.recentFailures(now - 7 * 24 * 3_600_000),
+              lastRun: (r) => {
+                const run = r.lastMessageId ? db.message(r.lastMessageId)?.run : undefined
+                return run && { status: run.status, ...(run.error ? { error: run.error } : {}) }
+              },
+              now
+            })
+          )
+        }
+
+        if ((name === PROPOR_TIME.name || PROPOSAL_TOOLS().some((t) => t.name === name)) && proposes) {
+          const now = await this.deps.settings()
+          const usable = (id: string): boolean => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn }
+          const r =
+            name === PROPOR_TIME.name
+              ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
+              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations(), connectors: this.deps.connectors?.list() ?? [], usable })
+          if (!r.proposal) return textResult(r.error!, true)
+          msg.run = { ...msg.run!, proposal: r.proposal }
+          const p = r.proposal
+          const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : p.kind === 'team' ? L('Propôs um time', 'Proposed a team') : L('Propôs um canal', 'Proposed a channel')
+          const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
+          addSteps({ id: randomUUID(), label: what, detail, status: 'done' })
+          return textResult(
+            L(
+              'A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar. Termine com uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
+              "The proposal is in the card, with Apply and Discard, and has NOT happened yet: it only happens when the person applies it. Finish with one short sentence saying they just need to apply it (or ask for a change), without repeating what the card shows. One proposal per reply: the next one replaces this one."
+            )
+          )
+        }
+
+        if (name === PROPOR_AGENTE.name && proposes) {
           const now = await this.deps.settings()
           const r = draftFrom(args, {
             usable: (id) => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn },
@@ -689,6 +944,48 @@ export class Runner {
           return textResult(found.map((m) => `- [${m.id}] ${m.text} (${about(m)}, ${new Date(m.confirmedAt).toLocaleDateString(locale())})`).join('\n'))
         }
 
+        if (name === BUSCAR_THREADS.name && canSeekThreads) {
+          const busca = typeof args['busca'] === 'string' ? args['busca'].trim() : ''
+          if (!busca) return textResult(L('Faltou o que buscar.', 'Missing what to search for.'), true)
+          const convs = myConversations()
+          const hits = searchThreads(db, convs.map((c) => c.id), busca, msg.threadId, typeof args['limite'] === 'number' ? args['limite'] : 5)
+          addSteps({ id: randomUUID(), label: L('Buscou nas threads', 'Searched threads'), detail: `${busca} · ${hits.length === 1 ? L('1 achada', '1 found') : L(`${hits.length} achadas`, `${hits.length} found`)}`, status: 'done' })
+          if (!hits.length) return textResult(L(`Nenhuma thread com "${busca}". Tente outras palavras; se não achar, o assunto não foi tratado nas conversas recentes.`, `No thread with "${busca}". Try other words; if nothing turns up, the subject wasn't covered in the recent conversations.`))
+          const who = (m: Message): string => (m.author.kind === 'me' ? settings.workspaceName : m.author.kind === 'agent' ? (db.agent(m.author.id)?.name ?? L('agente', 'agent')) : L('rotina', 'routine'))
+          const lines = hits.map((h) => {
+            const c = convs.find((x) => x.id === h.conversationId)
+            const where = c?.kind === 'dm' ? L('DM', 'DM') : `#${c?.name ?? '?'}`
+            const opened = h.root ? `${who(h.root)}: "${snip(h.root.text, 200)}"` : L('(a mensagem que abriu foi apagada)', '(the message that opened it was deleted)')
+            const gist = h.root?.threadSummary?.text.trim()
+              ? `${L('resumo', 'summary')}: "${snip(h.root.threadSummary.text, 400)}"`
+              : h.last
+                ? `${L('última resposta', 'last reply')} (${who(h.last)}): "${snip(h.last.text, 300)}"`
+                : L('sem resposta', 'no reply')
+            return `- [${h.id}] ${where} · ${clock(h.at)} · ${opened} · ${gist}`
+          })
+          return textResult(lines.join('\n'))
+        }
+
+        if (name === LER_THREAD.name && canSeekThreads) {
+          const id = typeof args['id'] === 'string' ? args['id'].trim().replace(/^\[|\]$/g, '') : ''
+          const found = id ? db.message(id) : undefined
+          const c = found && myConversations().find((x) => x.id === found.conversationId)
+          // Only threads of the conversations it's in, and not the one it's replying in (that's in the prompt).
+          const root = c && found ? (found.threadId ? db.message(found.threadId) : found) : undefined
+          if (!c || !root || root.id === msg.threadId) return textResult(L('Não achei essa thread nas suas conversas. Use um id que buscar_threads devolveu.', "I couldn't find that thread in your conversations. Use an id buscar_threads returned."), true)
+          const replies = db.recentMessages(c.id, HISTORY_LIMIT + 1, root.id).filter((m) => m.id !== msg.id)
+          const older = replies.length > HISTORY_LIMIT && root.threadSummary?.text.trim()
+          const where = c.kind === 'dm' ? L(`DM com ${settings.workspaceName}`, `DM with ${settings.workspaceName}`) : `#${c.name}`
+          addSteps({ id: randomUUID(), label: L('Leu uma thread', 'Read a thread'), detail: snip(root.text, 80), status: 'done' })
+          return textResult(
+            [
+              L(`Thread em ${where}:`, `Thread in ${where}:`),
+              ...(older ? [`${L('Resumo do começo dela', 'Summary of its beginning')}:\n${root.threadSummary!.text.trim()}`] : []),
+              ...transcript({ agent, conversation: c, messages: [root, ...replies.slice(-HISTORY_LIMIT)], agents: db.agents(), me: settings.workspaceName }).slice(1)
+            ].join('\n\n')
+          )
+        }
+
         if (name === LEMBRAR.name && canRemember) {
           const current = db.agent(agent.id) ?? agent // the mode may have changed mid-turn
           if (current.memory === 'read') return textResult(L('Sua memória está só leitura agora.', 'Your memory is read-only right now.'), true)
@@ -700,9 +997,17 @@ export class Runner {
           return textResult(r.reply)
         }
 
+        if (wiki && WIKI_TOOL_NAMES.has(name)) {
+          const r = wikiCall(wiki, name, args)
+          addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: 'done' })
+          return textResult(r.text, r.error)
+        }
+
         if (skills && SKILL_TOOL_NAMES.has(name)) {
           const r = name === LER_SKILL.name ? skills.read(agent, args) : skills.propose(db.agent(agent.id) ?? agent, args)
-          if (r.skill) addSteps({ id: randomUUID(), label: name === LER_SKILL.name ? L('Leu a skill', 'Read the skill') : L('Propôs uma skill', 'Proposed a skill'), detail: r.skill.name, status: 'done' })
+          const file = name === LER_SKILL.name && typeof args['arquivo'] === 'string' && args['arquivo'].trim() ? ` · ${args['arquivo'].trim()}` : ''
+          if (r.skill) addSteps({ id: randomUUID(), label: name === LER_SKILL.name ? L('Leu a skill', 'Read the skill') : L('Propôs uma skill', 'Proposed a skill'), detail: r.skill.name + file, status: r.error ? 'error' : 'done', ...(r.error ? { error: r.reply } : {}) })
+          else if (name === LER_SKILL.name && r.error) addSteps({ id: randomUUID(), label: L('Leu a skill', 'Read the skill'), detail: String(args['nome'] ?? '') + file, status: 'error', error: r.reply })
           return textResult(r.reply, r.error)
         }
 
@@ -719,20 +1024,53 @@ export class Runner {
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
+          // An agent with connectors sleeping with nothing checked after it is waiting for something outside
+          // (a query, a job): that holds the reply a minute at a time and makes nothing come sooner. The first
+          // runs; the next ones don't. A sleep before checking something here (a server, a build) always runs.
+          const slept = exposed.size && name === 'bash' && typeof args['command'] === 'string' ? idleSleepSeconds(args['command']) : 0
+          if (slept >= 20 && ++sleeps > SLEEPS_FREE) {
+            if (++refusedSleeps >= SLEEPS_STOP) halt('sleeping')
+            addSteps({ id: randomUUID(), label: L('Não esperou com sleep', "Didn't wait with sleep"), detail: snip(String(args['command']), 80), status: 'error' })
+            return textResult(
+              L(
+                `Não rodei: dormir sem conferir nada não faz nada chegar mais cedo e segura a resposta. Uma consulta de conector que volta ainda rodando (um SQL demorado) o app espera por você, por até ${PENDING_WAIT_MINUTES} minutos: rode-a uma vez só. Se precisar esperar algo no seu computador, durma e confira no mesmo comando (ex.: sleep 30 && curl …, ou um laço). Se não há o que esperar, siga com o que já tem ou encerre dizendo o que falta.`,
+                `Not run: sleeping without checking anything makes nothing come sooner and holds the reply. A connector query that comes back still running (a slow SQL) is awaited by the app for you, for up to ${PENDING_WAIT_MINUTES} minutes: run it only once. If you need to wait for something on your computer, sleep and check in the same command (e.g. sleep 30 && curl …, or a loop). If there's nothing to wait for, go on with what you have or end saying what's left.`
+              ),
+              true
+            )
+          }
           const t0 = Date.now()
           const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
-          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          // A command shows whole (or the SQL it runs, pulled out), masked, from the moment it starts.
+          const command = name === 'bash' && typeof args['command'] === 'string' ? commandStep(args['command']) : undefined
+          const step: Step = command
+            ? { id: randomUUID(), label: command.sql ? L('Rodou SQL', 'Ran SQL') : label, detail: command.detail, input: command.input, status: 'running' }
+            : { id: randomUUID(), label, detail: maskSecrets(detail), status: 'running' }
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
           const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          const failed = !!out.result.isError
+          const end: Pick<Step, 'output' | 'error'> = command
+            ? execSummary(resultText(out.result), failed)
+            : failed
+              ? { error: maskSecrets(errorReason(out.result)) }
+              : SUMMED_COMPUTER_TOOLS.has(name)
+                ? { output: resultSummary(resultText(out.result)) }
+                : {}
+          if (end.error && end.error.length > STEP_ERROR_MAX) end.error = `${end.error.slice(0, STEP_ERROR_MAX)}…`
+          // No tool of the computer can work: the turn ends here, before the model tries the next one.
+          if (out.down) {
+            computerDown = out.down
+            halt('computer')
+          }
           if (out.artifact) artifactIds.push(out.artifact.id)
           if (out.service && !services.includes(out.service)) services.push(out.service)
           msg.run = {
             ...msg.run!,
             artifactIds: artifactIds.length ? [...artifactIds] : undefined,
             services: services.length ? [...services] : undefined,
-            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status: out.result.isError ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
+            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...end, status: failed ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
           }
           stepStarted = Date.now()
           save()
@@ -783,7 +1121,7 @@ export class Runner {
             }
             stepStarted = Date.now()
             save()
-            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval')
+            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval', msg.threadId)
             return textResult(
               L(
                 `Pedido de aprovação criado, com o print da tela. O clique ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -801,42 +1139,57 @@ export class Runner {
           return clip(out.result)
         }
 
-        if (name === ABRIR_PR && prTool) {
-          const repo = repos.length > 1 ? repos.find((r) => r === args['repositorio']) : repos[0]
-          if (!repo) return textResult(L(`Diga o repositório: ${repos.join(' ou ')}.`, `Say the repository: ${repos.join(' or ')}.`), true)
-          const branch = typeof args['branch'] === 'string' ? args['branch'].trim().replace(/^refs\/heads\//, '') : ''
-          const title = typeof args['titulo'] === 'string' ? args['titulo'].trim() : ''
-          if (!/^agent\/[A-Za-z0-9._\/-]+$/.test(branch)) return textResult(L('A branch precisa ser agent/<assunto>, já publicada com git push.', 'The branch must be agent/<topic>, already published with git push.'), true)
-          if (!title) return textResult(L('Faltou o título.', 'Missing the title.'), true)
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
-          const prArgs = { repo, head: branch, base: typeof args['base'] === 'string' && args['base'].trim() ? args['base'].trim() : 'main', title, body: typeof args['descricao'] === 'string' ? args['descricao'] : '' }
-          approval = {
-            id: randomUUID(),
-            hash: approvalHash(GITHUB, ABRIR_PR, prArgs),
-            agentId: agent.id,
-            conversationId: conv.id,
-            messageId: msg.id,
-            connectorId: GITHUB,
-            connectorName: 'GitHub',
-            tool: ABRIR_PR,
-            args: prArgs,
-            why: title,
-            highRisk: false,
-            state: 'pending',
-            createdAt: Date.now(),
-            expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
-          }
-          db.createApproval(approval)
-          emit({ type: 'approval', approval })
-          msg.run = { ...msg.run!, approvalId: approval.id }
-          addSteps({ id: randomUUID(), label: L('Pediu pra abrir a PR', 'Asked to open the PR'), detail: `${branch} → ${prArgs.base}`, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} quer abrir uma PR`, `${agent.name} wants to open a PR`), `${repo}: ${title}`, conv.id, 'approval')
-          return textResult(
-            L(
-              `Pedido de PR criado. A PR ainda NÃO existe. Encerre sua resposta agora dizendo em uma frase o que vai na PR. Quando ${settings.workspaceName} aprovar, você recebe o link numa nova mensagem.`,
-              `PR request created. The PR does NOT exist yet. End your reply now saying in one sentence what goes in the PR. When ${settings.workspaceName} approves, you get the link in a new message.`
+        // The person's own apps: each action a step; a click that sends, pays or deletes, an approval.
+        if (apps && APP_TOOL_NAMES.has(name)) {
+          const current = db.agent(agent.id)
+          if (!current?.apps?.length) return textResult(L('Seus apps foram desligados.', 'Your apps were turned off.'), true)
+          const t0 = Date.now()
+          const { label, detail } = appStep(name, args)
+          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          flush()
+          msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
+          save()
+          const out = await apps.call(current, name, args)
+          const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
+          if (out.approval) {
+            if (question || approval) {
+              msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
+              save()
+              return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+            }
+            approval = {
+              id: randomUUID(),
+              hash: approvalHash(APPS, name, out.approval.args),
+              agentId: agent.id,
+              conversationId: conv.id,
+              messageId: msg.id,
+              connectorId: APPS,
+              connectorName: L('Apps do computador', 'Computer apps'),
+              tool: name,
+              args: out.approval.args,
+              why: out.approval.why,
+              highRisk: false,
+              state: 'pending',
+              createdAt: Date.now(),
+              expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+            }
+            db.createApproval(approval)
+            emit({ type: 'approval', approval })
+            msg.run = { ...msg.run!, approvalId: approval.id, steps: [...close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }), thinking()] }
+            stepStarted = Date.now()
+            save()
+            this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`, conv.id, 'approval', msg.threadId)
+            return textResult(
+              L(
+                `Pedido de aprovação criado. A ação ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
+                `Approval request created. The action has NOT happened yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
+              )
             )
-          )
+          }
+          msg.run = { ...msg.run!, steps: [...close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {}), thinking()] }
+          stepStarted = Date.now()
+          save()
+          return clip(out.result)
         }
 
         if (name === ACCESS_REQUEST && accessTool) {
@@ -865,7 +1218,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu acesso', 'Asked for access'), detail: `${c.name} · ${nivel === 'read' ? L('ler', 'read') : L('ler e escrever', 'read and write')}`, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} pede acesso ao ${c.name}`, `${agent.name} asks for access to ${c.name}`), why || (nivel === 'read' ? L('Pra ler.', 'To read.') : L('Pra ler e escrever.', 'To read and write.')), conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} pede acesso ao ${c.name}`, `${agent.name} asks for access to ${c.name}`), why || (nivel === 'read' ? L('Pra ler.', 'To read.') : L('Pra ler e escrever.', 'To read and write.')), conv.id, 'approval', msg.threadId)
           return textResult(
             L(
               `Pedido de acesso enviado. Encerre sua resposta agora dizendo em uma frase o que pediu e por quê. Se ${settings.workspaceName} liberar, você continua numa nova mensagem.`,
@@ -906,7 +1259,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${detail}${approval.why ? `: ${approval.why}` : ''}`, conv.id, 'approval')
+          this.deps.notify?.(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${toolLabel(current.name)} · ${hit.connector.name}${approval.why ? `: ${approval.why}` : ''}`, conv.id, 'approval', msg.threadId)
           return textResult(
             L(
               `Pedido de aprovação criado. A ação ainda NÃO foi executada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -917,27 +1270,68 @@ export class Runner {
 
         const t0 = Date.now()
         const step: Step = { id: randomUUID(), label: current.cls === 'read' ? L('Consultou', 'Looked up') : always ? L('Executou (sempre permitido)', 'Ran (always allowed)') : L('Executou', 'Ran'), detail, status: 'running' }
+        // What it asked (the SQL, the path) shows while it runs; what came back, when it's done.
+        const { [REASON_PARAM]: _reason, ...toolArgs } = args
+        const input = keyArg(toolArgs)
+        if (input) step.input = input
         flush()
         msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
         save()
-        const finish = (status: 'done' | 'error'): void => {
-          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0 } : s)), thinking()] }
+        // A failure keeps its reason on the step: a bare ✗ leaves nobody knowing why.
+        const finish = (status: 'done' | 'error', why?: string, output?: string): void => {
+          const error = why && maskSecrets(why)
+          if (error) console.warn(`[connector] ${detail} failed: ${error}`)
+          const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : output ? { output } : {}
+          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s)), thinking()] }
           stepStarted = Date.now()
           save()
         }
         try {
           const { [REASON_PARAM]: _reason, ...toolArgs } = args
-          const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
-          finish(r.isError ? 'error' : 'done')
-          return clip(r)
+          const first = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
+          // A query still running: the app waits for it here, with the connector's own status tool, instead
+          // of the agent sleeping and asking again. Not a status tool the agent called itself (asking whether a
+          // deploy finished wants the answer now), nor a write (starting a job doesn't mean waiting for it).
+          const pending = current.cls === 'read' && !isStatusTool(current.name) ? pendingOf(first) : undefined
+          const poller = pending && pollTool(db.tools(hit.connector.id), pending, (t) => allowed(t, db.agent(agent.id)?.grants[hit.connector.id]))
+          const done = (r: CallToolResult): void => (r.isError ? finish('error', errorReason(r)) : finish('done', undefined, resultSummary(resultText(r))))
+          if (!pending || !poller) {
+            done(first)
+            return clip(first)
+          }
+          const w = await awaitDone(first, async (p) => this.deps.connectors!.call(hit.connector.id, poller.tool.name, pollTool([poller.tool], p, () => true)?.args ?? poller.args), {
+            maxMs: PENDING_WAIT_MINUTES * 60_000,
+            wait: this.deps.timers?.wait,
+            now: this.deps.timers?.now,
+            signal: control.ctl.signal
+          })
+          const took = w.ms >= 60_000 ? `${Math.round(w.ms / 60_000)} min` : `${Math.max(1, Math.round(w.ms / 1000))} s`
+          msg.run = { ...msg.run!, steps: msg.run!.steps.map((s) => (s.id === step.id ? { ...s, detail: `${detail} · ${L(`esperou ${took}`, `waited ${took}`)}` } : s)) }
+          done(w.result)
+          if (!w.pending) return clip(w.result)
+          const ids = Object.entries(poller.args).map(([k, v]) => `${k}=${v}`).join(', ')
+          const r = clip(w.result)
+          return {
+            ...r,
+            content: [
+              ...r.content,
+              {
+                type: 'text',
+                text: L(
+                  `[Ainda ${w.pending.state} depois de ${took} esperando (${w.polls} consultas a ${poller.tool.name}). Não fique esperando nem durma: diga a ${settings.workspaceName} que ainda está rodando (${ids}) e siga com o que já dá pra fazer, ou chame ${poller.tool.name} uma vez mais no fim.]`,
+                  `[Still ${w.pending.state} after waiting ${took} (${w.polls} checks with ${poller.tool.name}). Don't keep waiting or sleep: tell ${settings.workspaceName} it's still running (${ids}) and go on with what you can do, or call ${poller.tool.name} once more at the end.]`
+                )
+              }
+            ]
+          }
         } catch (e) {
-          finish('error')
-          return textResult(L(`A ferramenta falhou: ${e instanceof Error ? e.message : String(e)}`, `The tool failed: ${e instanceof Error ? e.message : String(e)}`), true)
+          const why = callError(e)
+          finish('error', why)
+          return textResult(L(`A ferramenta falhou: ${why}`, `The tool failed: ${why}`), true)
         }
       }
 
-    const agentKey = agent.id
-    this.deps.gateway?.agentTurn(agentKey, {
+    const tools: Session = {
       tools: toolDefs,
       call: async (name, args) => {
         if (overBudget) {
@@ -950,7 +1344,21 @@ export class Runner {
             true
           )
         }
+        // Only reads: paging a history is reading, and many writes in a row (filing 80 issues) are the work.
+        const count = exposed.get(name)?.tool.cls === 'read' ? (callsOf.get(name) ?? 0) + 1 : 0
+        if (count) callsOf.set(name, count)
+        if (count > SAME_TOOL_STOP) {
+          if (++failing >= ERRORS_STOP) halt('errors')
+          return textResult(
+            L(
+              `Recusada: você já chamou ${name} ${SAME_TOOL_STOP} vezes nesta resposta. Trabalhe com o que já tem: escreva o que achou e o que falta. Se precisar de mais, use um recorte estreito (uma busca, um filtro de tempo) com outra ferramenta, ou peça a ${settings.workspaceName} pra continuar.`,
+              `Refused: you've already called ${name} ${SAME_TOOL_STOP} times in this reply. Work with what you have: write what you found and what's left. If you need more, use a narrow cut (a search, a time filter) with another tool, or ask ${settings.workspaceName} to go on.`
+            ),
+            true
+          )
+        }
         inFlight++
+        acted = true
         sign()
         try {
           const r = await runTool(name, args)
@@ -966,6 +1374,13 @@ export class Runner {
               `Careful: this call gave exactly the same result ${n} times in this reply. Repeating won't change anything: change your approach, or end saying where you got stuck.`
             )
             return { ...r, content: [...r.content, { type: 'text', text: warning }] }
+          } else if (count === SAME_TOOL_WARN) {
+            addSteps({ id: randomUUID(), label: L('Chamou a mesma ferramenta muitas vezes', 'Called the same tool many times'), detail: `${name} · ${count}×`, status: 'error' })
+            const warning = L(
+              `Atenção: você já chamou ${name} ${count} vezes nesta resposta. Se está paginando um histórico inteiro (um canal, logs, uma tabela), pare: peça só a janela que a tarefa precisa, com o filtro de tempo da ferramenta (ex.: oldest/latest em segundos Unix), uma busca ou um limite. Depois de ${SAME_TOOL_STOP} chamadas, ela é recusada nesta resposta.`,
+              `Careful: you've called ${name} ${count} times in this reply. If you're paging through a whole history (a channel, logs, a table), stop: ask only for the window the task needs, with the tool's time filter (e.g. oldest/latest in Unix seconds), a search or a limit. Past ${SAME_TOOL_STOP} calls, it's refused for this reply.`
+            )
+            return { ...r, content: [...r.content, { type: 'text', text: warning }] }
           }
           return r
         } finally {
@@ -973,91 +1388,155 @@ export class Runner {
           sign()
         }
       }
-    })
+    }
 
     let progress = { tokens: 0, cacheRead: 0 }
-    let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'> } | null = null
+    let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'>; context?: number } | null = null
     let error: string | null = null
+    let thrown: unknown // what the engine threw, if it did: a bug reads differently from a CLI's own words
 
     // Images I attached: every message says which it had; the newest go in as images.
     const ids = new Set(history.map((m) => m.id))
     const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary, images: names })
+    const thread = msg.threadId ? db.message(msg.threadId) : undefined
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0 })
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
+    const system = systemPrompt({
+      agent,
+      settings,
+      conversation: conv,
+      peers,
+      memories: promptMemories,
+      canRemember,
+      hasComputer: !!computers,
+      computerOff,
+      browser: !!browser,
+      apps: apps ? agent.apps : undefined,
+      offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
+      macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
+      web: agent.web !== false,
+      routines: routines?.forAgent(agent.id),
+      skills: skills && mySkills,
+      wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
+      connectors: exposed.size > 0,
+      builder: proposes
+        ? [builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId, tuca: helps, me: settings.workspaceName }), helps && helperSection()].filter(Boolean).join('\n\n')
+        : undefined
+    })
+
+    // A kept session: the reply goes on from this agent's last one here (this conversation, or this
+    // thread) with only what's new since. Not while another agent is still writing a message this
+    // reply would see half of: that one goes the usual way, and the session takes it all next time.
+    const sessionKey = replyKey(agent.id, conv.id, msg.threadId)
+    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs, gateway: !!this.deps.gateway })
+    const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
+    const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
+    let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, restart: !!opts.existing, task: !!task }) : undefined
+    let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
+    // An engine whose daemon holds the MCP connection between turns keeps the URL it was given
+    // (Hermes): its token is the agent's, not the turn's. Every other engine gets a fresh one,
+    // or the token of the session it keeps.
+    const token = plan?.token ?? (engines[engineId].keepsMcp ? this.deps.gateway?.agentToken(agent.id) : undefined)
+    const session = this.deps.gateway?.open(tools, token)
+    const whole = { prompt: blocks.join('\n\n'), blocks, images }
+    // Resumed: the new messages' blocks, then the task's, with their images.
+    const since = (p: SessionPlan): typeof whole => {
+      const at = p.send.map((id) => blockOf.get(id)!)
+      if (task) at.push(blocks.length - 1)
+      const pos = new Map(at.map((b, i) => [b, i]))
+      const sent = at.map((i) => blocks[i]!)
+      return { prompt: sent.join('\n\n'), blocks: sent, images: images.flatMap((img) => (pos.has(img.block) ? [{ ...img, block: pos.get(img.block)! }] : [])) }
+    }
+    let input = plan?.resume ? since(plan) : whole
     try {
-      const events = engines[engineId].run({
-        model: model?.id ?? agent.modelId,
-        effort: agent.effort,
-        system: systemPrompt({
-          agent,
-          settings,
-          conversation: conv,
-          peers,
-          memories: promptMemories,
-          canRemember,
-          hasComputer: !!computers,
-          browser: !!browser,
-          offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
-          macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent) : undefined,
-          web: agent.web !== false,
-          routines: routines?.forAgent(agent.id),
-          skills: skills && mySkills,
-          publish: repos,
-          builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
-        }),
-        prompt: blocks.join('\n\n'),
-        blocks,
-        images,
-        cwd,
-        agentKey: agent.id,
-        signal: control.ctl.signal,
-        mcpUrl: this.deps.gateway?.agentUrl(agentKey),
-        web: agent.web !== false
-      })
-      for await (const ev of events) {
-        sign()
-        if (ev.type === 'text') {
-          msg.text += ev.delta
-          pending += ev.delta
-          timer ??= setTimeout(flush, DELTA_FLUSH_MS)
-        } else if (ev.type === 'progress') {
-          progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
-          const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
-          if (used + counted > agent.limit) halt('limit')
-          else if (counted > budget) {
-            if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
-            overBudget = true
-            if (counted > budget * BUDGET_OVERRUN) halt('budget')
+      for (;;) {
+        try {
+          const events = engines[engineId].run({
+            model: modelName,
+            effort: agent.effort,
+            system,
+            ...input,
+            session: plan && { id: plan.id, resume: plan.resume, keep: true },
+            cwd,
+            signal: control.ctl.signal,
+            mcpUrl: session?.url,
+            web: agent.web !== false,
+            agentKey: agent.id,
+            account: account && this.deps.dataDir ? accountDir(this.deps.dataDir, account.id) : undefined
+          })
+          for await (const ev of events) {
+            sign()
+            if (ev.type === 'text') {
+              msg.text += ev.delta
+              pending += ev.delta
+              timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+            } else if (ev.type === 'progress') {
+              progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
+              const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
+              if (used + counted > agent.limit) halt('limit')
+              else if (counted > budget) {
+                if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
+                overBudget = true
+                if (counted > budget * BUDGET_OVERRUN) halt('budget')
+              }
+            } else if (ev.type === 'quota') {
+              if (!account) this.deps.onQuota?.(ev.quota) // the windows shown are the usual login's
+            } else if (ev.type === 'web') {
+              // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
+              acted = true
+              addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })
+              if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
+            } else if (ev.type === 'done') {
+              result = ev
+            } else if (ev.type === 'error') {
+              error = ev.message
+            }
           }
-        } else if (ev.type === 'quota') {
-          this.deps.onQuota?.(ev.quota)
-        } else if (ev.type === 'web') {
-          // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
-          addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })
-          if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
-        } else if (ev.type === 'done') {
-          result = ev
-        } else if (ev.type === 'error') {
-          error = ev.message
+        } catch (e) {
+          error = e instanceof Error ? e.message : String(e)
+          thrown = e
         }
+        // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
+        // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
+        const reserve = !onReserve && !result && error && !control.reason && !acted && !question && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
+        if (!reserve) break
+        const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
+        flush()
+        msg.text = '' // the CLI's own "you've hit your limit", when it wrote it as text
+        // The reserve starts from the whole conversation: the session stays with the main model.
+        lost = plan
+        plan = undefined
+        input = whole
+        onReserve = true
+        modelId = agent.fallbackModelId!
+        modelName = reserve.model.id
+        engineId = reserve.model.engine
+        engineLabel = `${ENGINES[engineId].label} · ${reserve.model.label}`
+        account = reserve.account
+        const to = `${engineLabel}${account ? ` (${account.name})` : ''}`
+        addSteps({ id: randomUUID(), label: L('Foi pro modelo reserva', 'Moved to the reserve model'), detail: L(`${from} está sem limite agora; segue no ${to}`, `${from} is out of quota for now; going on with ${to}`), status: 'done' })
+        error = null
+        thrown = undefined
+        progress = { tokens: 0, cacheRead: 0 }
       }
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e)
     } finally {
       clearInterval(stall)
       flush()
+      session?.close()
+      if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown })
+      if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, reply: msg.id, context: result?.context })
       this.controllers.delete(msg.id)
     }
 
     const ms = Date.now() - started
     const receipt: Receipt | undefined = result
-      ? { model: agent.modelId, ms, ...result.usage }
+      ? { model: modelId, ms, ...result.usage }
       : progress.tokens > 0
-        ? { model: agent.modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
+        ? { model: modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
     const usedNow = db.usedThisMonth(agent.id)
@@ -1065,6 +1544,7 @@ export class Runner {
       const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
       this.post(
         conv.id,
+        msg.threadId,
         L(
           `**${agent.name}** já usou ${pct} do limite do mês (${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens). Dá pra aumentar na página dele.`,
           `**${agent.name}** has used ${pct} of the month's limit (${tokenCount(usedNow)} of ${tokenCount(agent.limit)} tokens). It can be raised on their page.`
@@ -1073,53 +1553,80 @@ export class Runner {
       this.deps.notify?.(
         L(`${agent.name} usou ${pct} do limite do mês`, `${agent.name} used ${pct} of the month's limit`),
         L(`${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens. Dá pra aumentar na página dele.`, `${tokenCount(usedNow)} of ${tokenCount(agent.limit)} tokens. It can be raised on their page.`),
-        conv.id
+        conv.id,
+        undefined,
+        msg.threadId
       )
     }
 
-    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
+    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal }
     if (control.reason === 'stopped') {
-      save({ run: { ...base, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
-    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
+      save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
+    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
       const why = {
         loop: L(`repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`, `I repeated the same thing, with the same result, ${REPEAT_STOP} times. It looked like a loop`),
+        sleeping: L('fiquei tentando esperar com sleep por algo que não chegava', 'I kept trying to wait with sleep for something that wasn’t coming'),
         errors: L(`${ERRORS_STOP} ferramentas falharam seguidas`, `${ERRORS_STOP} tools failed in a row`),
         stall: L(`fiquei ${Math.round(stallMs / 60_000)} minutos sem nenhum sinal, travado`, `I went ${Math.round(stallMs / 60_000)} minutes without any sign of life, stuck`)
       }[control.reason]
       save({
         text: msg.text ? `${msg.text} …` : '',
-        run: { ...base, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
+        run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
+      })
+    } else if (control.reason === 'computer') {
+      save({
+        text: msg.text ? `${msg.text} …` : '',
+        run: {
+          ...base,
+          ...again,
+          status: 'failed',
+          steps: closeThinking('error', L('Parou', 'Stopped')),
+          error: L(`Parei: meu computador não está funcionando. ${computerDown ?? ''} Depois é só mandar de novo.`, `I stopped: my computer isn't working. ${computerDown ?? ''} Then just send it again.`)
+        }
       })
     } else if (overBudget && control.reason !== 'limit') {
       // Wrapped up at the budget, or cut past it: either way it can go on from here.
       save({
         text: msg.text.trim() ? msg.text : (result?.text ?? ''),
-        run: { ...base, status: 'paused', budget, steps: closeThinking('done', L('Pausou', 'Paused')) }
+        run: { ...base, ...again, status: 'paused', budget, steps: closeThinking('done', L('Pausou', 'Paused')) }
       })
     } else if (control.reason === 'limit') {
       save({
         text: msg.text ? `${msg.text} …` : '',
-        run: { ...base, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
+        run: { ...base, ...again, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
       })
     } else if (result) {
+      // Approved or refused before the run ended: nothing is left to wait for.
+      const waiting = approval && db.approval(approval.id)?.state === 'pending'
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        run: { ...base, status: question ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
-      if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question')
-      else if (!approval && !this.chain(agent, conv, msg, opts.depth) && !opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done')
+      if (question) this.deps.notify?.(L(`${agent.name} te perguntou`, `${agent.name} asked you`), question, conv.id, 'question', msg.threadId)
+      else if (!approval) {
+        const finished = (): void => {
+          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
+        }
+        const next = this.mentions(agent, conv, msg)
+        if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, finished)
+        else finished()
+      }
     } else {
-      save({ run: { ...base, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: error ?? L('O motor terminou sem resposta.', 'The engine ended without a reply.') } })
+      // What happened and what to do; the CLI's own words go folded under it.
+      const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
+      save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: failure.text, ...(failure.detail ? { errorDetail: failure.detail } : {}) } })
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
     const st = msg.run?.status
-    if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done')
+    if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId)
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
     void memory?.consolidate(conv.id)
+    if (msg.threadId) void memory?.consolidateThread(msg.threadId, 'grown')
+    if (!opts.routine && msg.run?.status === 'done') this.deps.wikiCurator?.afterReply(conv.id)
     return msg
   }
 
@@ -1131,7 +1638,7 @@ export class Runner {
     const ap = db.approval(id)
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason)) return
     const owner = db.agent(ap.agentId)
-    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
+    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), `${ap.connectorId}:${ap.tool}`] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
     }
@@ -1144,39 +1651,49 @@ export class Runner {
     const ran = L('Executou.', 'Ran.')
 
     let outcome: string
+    let ok = false // whether the approved thing went through
     let task: string
     if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
-      if (decision === 'approved') {
-        try {
-          const work = db.message(ap.messageId)?.run?.work
-          const cost = work ? db.costByWork(0).find((w) => w.work === work) : undefined
-          const footer = L(
-            `\n\n---\nFeita por ${agent?.name ?? 'um agente'} no Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens em ${cost.replies} resposta${cost.replies > 1 ? 's' : ''} até aqui` : ''}.`,
-            `\n\n---\nMade by ${agent?.name ?? 'an agent'} in Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens in ${cost.replies} repl${cost.replies > 1 ? 'ies' : 'y'} so far` : ''}.`
-          )
-          const pr = await this.deps.github!.openPr({ ...ap.args, body: `${String(ap.args['body'] ?? '')}${footer}` })
-          outcome = L(`Abriu a PR #${pr.number}.`, `Opened PR #${pr.number}.`)
-          task = L(`${me} aprovou, e o app abriu a PR #${pr.number}: ${pr.url}\n\nAvise ${me} com o link em uma frase.`, `${me} approved, and the app opened PR #${pr.number}: ${pr.url}\n\nTell ${me} with the link in one sentence.`)
-        } catch (e) {
-          const err = e instanceof Error ? e.message : String(e)
-          outcome = L(`Falhou: ${err}`, `Failed: ${err}`)
-          task = L(
-            `${me} aprovou a PR, mas ela não abriu: ${err}. Conte a ${me} e diga o que fazer (a branch foi publicada? já existe uma PR dela?).`,
-            `${me} approved the PR, but it didn't open: ${err}. Tell ${me} and say what to do (was the branch published? is there already a PR for it?).`
-          )
-        }
+      // A PR asked for before pushing from the agent's computer left Tucano: nothing is opened.
+      // The GitHub connector does it now, with the person's approval like any of its tools.
+      outcome = decision === 'expired' ? expired : L('Nada foi aberto: abrir PR assim saiu do Tucano.', 'Nothing was opened: opening a PR this way left Tucano.')
+      task = L(
+        `${me} ${decision === 'approved' ? 'aprovou' : decision === 'refused' ? 'recusou' : 'não respondeu a'} um pedido de PR antigo, mas abrir PR pelo computador saiu do Tucano e nada foi aberto. Se você tem o conector do GitHub, abra a PR por ele; senão, diga a ${me} que ele precisa dar a você o conector do GitHub.`,
+        `${me} ${decision === 'approved' ? 'approved' : decision === 'refused' ? 'turned down' : "didn't answer"} an old PR request, but opening a PR from the computer left Tucano and nothing was opened. If you have the GitHub connector, open the PR with it; otherwise, tell ${me} you need the GitHub connector.`
+      )
+    } else if (ap.connectorId === APPS) {
+      // A click or key in one of the person's apps: made on the same app, on the same element.
+      const onde = typeof ap.args['onde'] === 'string' ? ap.args['onde'] : ''
+      const where = onde === 'menu de contexto' ? L(', no menu que abre com o clique direito (app_clicar com botao_direito)', ', in the menu a right click opens (app_clicar with botao_direito)') : onde === 'barra de menus' ? L(', na barra de menus (app_menu)', ', in the menu bar (app_menu)') : ''
+      const what = typeof ap.args['texto'] === 'string' ? L(`confirmar "${ap.args['texto']}" no ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `clique em "${String(ap.args['alvo'] ?? '')}"`})`, `confirming "${ap.args['texto']}" in ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `click on "${String(ap.args['alvo'] ?? '')}"`})`) : typeof ap.args['tecla'] === 'string' ? L(`apertar ${ap.args['tecla']} no ${String(ap.args['app'])}`, `pressing ${ap.args['tecla']} in ${String(ap.args['app'])}`) : L(`clicar em "${String(ap.args['alvo'] ?? '')}" no ${String(ap.args['app'])}${where}`, `clicking "${String(ap.args['alvo'] ?? '')}" in ${String(ap.args['app'])}${where}`)
+      if (decision === 'approved' && agent?.apps?.length && this.deps.apps) {
+        const r = await this.deps.apps.approved(agent, ap.args)
+        ok = r.ok
+        outcome = r.ok ? L('Liberado: o agente faz agora.', 'Allowed: the agent does it now.') : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
+        task = r.ok
+          ? L(
+              `${me} aprovou ${what}. Faça agora: leia o app de novo, deixe a tela como estava quando você pediu (selecione o item, se precisar) e faça exatamente essa ação, pelo mesmo caminho; desta vez ela passa sem pedir, uma vez só, nos próximos 30 minutos. Depois confira o resultado e conte a ${me}.`,
+              `${me} approved ${what}. Do it now: read the app again, set the screen as it was when you asked (select the item, if needed) and do exactly that action, the same way; this time it goes through without asking, once, within the next 30 minutes. Then check the result and tell ${me}.`
+            )
+          : L(`${me} aprovou ${what}, mas não deu: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but it couldn't be done: ${r.text} Tell ${me} in one sentence.`)
+      } else if (decision === 'approved') {
+        outcome = L('Não executou: esse agente não tem mais esse app.', "Didn't run: this agent no longer has that app.")
+        task = L(`${me} aprovou ${what}, mas você não tem mais esse app. Avise ${me} em uma frase.`, `${me} approved ${what}, but you no longer have that app. Tell ${me} in one sentence.`)
       } else {
-        outcome = decision === 'refused' ? L('Nada foi aberto.', 'Nothing was opened.') : expired
+        outcome = decision === 'refused' ? L('Nada foi feito.', 'Nothing was done.') : expired
         task = L(
-          `${me} ${decision === 'refused' ? `recusou a PR${reason ? `: "${reason}"` : ''}` : 'não respondeu ao pedido de PR'}. Nada foi aberto. Responda considerando isso.`,
-          `${me} ${decision === 'refused' ? `turned down the PR${reason ? `: "${reason}"` : ''}` : "didn't answer the PR request"}. Nothing was opened. Reply with that in mind.`
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi feito. Responda considerando isso.`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was done. Reply with that in mind.`
         )
       }
     } else if (ap.connectorId === NAVEGADOR) {
       // A click in the agent's browser: made only on the same page, on the same button.
-      const what = L(`clicar em "${String(ap.args['alvo'] ?? '')}"`, `clicking "${String(ap.args['alvo'] ?? '')}"`)
+      const alvo = String(ap.args['alvo'] ?? '') || L('um elemento sem nome', 'an element with no name')
+      const key = typeof ap.args['tecla'] === 'string' ? (ap.args['tecla'] === 'enter' ? 'Enter' : L('Espaço', 'Space')) : undefined
+      const what = key ? L(`apertar ${key} em "${alvo}"`, `pressing ${key} on "${alvo}"`) : L(`clicar em "${alvo}"`, `clicking "${alvo}"`)
       if (decision === 'approved' && agent?.browser && this.deps.browser) {
         const r = await this.deps.browser.approved(agent, ap.args)
+        ok = r.ok
         outcome = r.ok ? ran : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
         task = r.ok
           ? L(`${me} aprovou ${what}, e o app clicou. A página agora:\n${r.text}\n\nContinue a partir daqui e conte o resultado a ${me}.`, `${me} approved ${what}, and the app clicked. The page now:\n${r.text}\n\nGo on from here and tell ${me} the result.`)
@@ -1199,6 +1716,7 @@ export class Runner {
         const fresh = db.agent(agent.id)!
         db.saveAgent({ ...fresh, grants: { ...fresh.grants, [ap.connectorId]: nivel } })
         emit({ type: 'agent', agent: db.agent(agent.id)! })
+        ok = true
         outcome = L(`Acesso liberado: ${label}.`, `Access granted: ${label}.`)
         task = L(
           `${me} liberou o seu acesso ao ${ap.connectorName} (${label}). As ferramentas dele já estão com você. Continue de onde parou.`,
@@ -1223,7 +1741,8 @@ export class Runner {
       } else {
         try {
           const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
-          outcome = r.isError ? L('Executou, com erro.', 'Ran, with an error.') : ran
+          ok = !r.isError
+          outcome = r.isError ? L(`Executou, com erro: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`) : ran
           task = L(
             `${me} aprovou o seu pedido ${call}. O app executou exatamente essa chamada${r.isError ? ' e ela devolveu um erro' : ''}. Resultado:\n${resultText(r)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
             `${me} approved your request ${call}. The app ran exactly that call${r.isError ? ' and it returned an error' : ''}. Result:\n${resultText(r)}\n\nGo on from here and tell ${me} the result.`
@@ -1247,18 +1766,23 @@ export class Runner {
     db.setApprovalOutcome(id, outcome)
     emit({ type: 'approval', approval: db.approval(id)! })
 
-    const msg = db.message(ap.messageId)
+    // Approved while the agent is still replying: add the step to the live reply, which saves it when it ends.
+    const live = this.controllers.get(ap.messageId)?.msg
+    const msg = live ?? db.message(ap.messageId)
     if (msg?.run) {
       const label = decision === 'approved' ? L('Aprovado', 'Approved') : decision === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
-      this.update(msg, {
+      if (live) {
+        live.run!.steps.push({ id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' })
+        this.update(live, {})
+      } else this.update(msg, {
         run: {
           ...msg.run,
           status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
-          steps: [...msg.run.steps, { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && outcome.startsWith(ran) ? 'done' : 'error' }]
+          steps: [...msg.run.steps, { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' }]
         }
       })
     }
-    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work }))
+    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }))
   }
 
   async expireApprovals(): Promise<void> {
@@ -1289,23 +1813,85 @@ export class Runner {
       this.execute(agent, conv, {
         depth: 1,
         work: asked.run?.work,
+        threadId: asked.threadId,
         task: L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
       })
     )
   }
 
-  // An agent that mentions another agent of the conversation hands it the turn,
+  // An agent that mentions another agent of the conversation may hand it the turn,
   // up to MAX_DEPTH replies in a row without a human message in between.
-  // Whether the conversation goes on with another agent.
-  private chain(agent: Agent, conv: Conversation, msg: Message, depth: number): boolean {
-    if (this.paused) return false
-    const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
-    if (next.length === 0) return false
-    if (depth >= MAX_DEPTH) {
-      this.post(conv.id, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
-      return false
+  // The agents a reply mentions (none while paused).
+  private mentions(agent: Agent, conv: Conversation, msg: Message): Agent[] {
+    if (this.paused) return []
+    return mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+  }
+
+  // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
+  // router can't say, everyone mentioned is called. `finished` runs when no one gets the turn.
+  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, finished: () => void): Promise<void> {
+    const { db, engines } = this.deps
+    const and = L(' e ', ' and ')
+    const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
+    this.routing++
+    try {
+      const keyOf = (a: Agent): string => replyKey(a.id, conv.id, msg.threadId)
+      const isBusy = (a: Agent): boolean => this.followups.busy(keyOf(a))
+      let called = next
+      let step = { label: L('Chamou', 'Called'), detail: list(next), ms: 0 }
+      const failed = (why: string): void => {
+        console.warn('[handoff]', why)
+        step.detail = `${list(next)} · ${L('não consegui avaliar, chamei todos', "couldn't screen it, called everyone")}`
+      }
+      try {
+        const settings = await this.deps.settings()
+        // Jev stays for human messages: here 'jev' isn't a model, so this falls to Haiku.
+        const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+        const status = settings.engines[model.engine]
+        if (!status.installed || !status.loggedIn) failed(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+        else {
+          const cwd = join(this.deps.workDir, '_router')
+          mkdirSync(cwd, { recursive: true })
+          const { messages } = contextWindow(db, msg, ROUTER_HISTORY)
+          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
+          if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
+          step.ms = r.ms
+          if ('error' in r) failed(r.error)
+          else {
+            called = r.agents
+            const why = r.reason ? ` · ${r.reason}` : ''
+            step = called.length ? { ...step, detail: `${list(called)}${why}` } : { label: L('Ninguém precisa responder', 'No one needs to answer'), detail: r.reason, ms: r.ms }
+          }
+        }
+      } catch (e) {
+        failed(e instanceof Error ? e.message : String(e))
+      }
+      // Paused while the router was thinking: call no one.
+      if (this.paused) called = []
+      // Nothing awaits from here to the enqueues, so who is busy now is who is busy when they're called.
+      const busy = called.filter(isBusy)
+      if (!this.paused) {
+        if (busy.length) step.detail = `${step.detail ? `${step.detail} · ` : ''}${busy.length === called.length ? '' : `${list(busy)}: `}${busy.length > 1 ? L('já estão respondendo aqui, veem isto na próxima resposta', 'already replying here, will see this next') : L('já está respondendo aqui, vê isto na próxima resposta', 'already replying here, will see this next')}`
+        // Seconds have passed: other code may have saved this reply meanwhile (the wiki, a draft), so add to what's stored.
+        const saved = db.message(msg.id) ?? msg
+        if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
+      }
+      if (called.length === 0) return finished()
+      if (depth >= MAX_DEPTH) {
+        this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
+        return finished()
+      }
+      // A noted follow-up counts as someone taking the turn: the agent will answer it, so no "done" yet.
+      for (const a of called) {
+        if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work })
+        else {
+          this.followups.reserve(keyOf(a))
+          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true }))
+        }
+      }
+    } finally {
+      this.routing--
+      this.checkIdle()
     }
-    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work }))
-    return true
   }
 }

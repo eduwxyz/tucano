@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
-import { describeSchedule, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
+import { describeSchedule, MAX_AGENT_ROUTINES, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
+import { cleanLook } from './agent-look'
 import type { Db } from './db'
 
 const FENCE = 'tucano-team'
@@ -21,6 +22,8 @@ interface TeamFile {
     name: string
     role: string
     color: AgentColor
+    customColor?: string
+    avatar?: Agent['avatar'] // the drawn one; a picture stays on its computer
     instructions: string
     model: string
     effort: Effort
@@ -52,6 +55,8 @@ export function exportTeam(db: Db): string {
       name: a.name,
       role: a.role,
       color: a.color,
+      ...(a.customColor ? { customColor: a.customColor } : {}),
+      ...(a.avatar ? { avatar: a.avatar } : {}),
       instructions: a.instructions,
       model: a.modelId,
       effort: a.effort,
@@ -130,9 +135,12 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
       handle: a.handle,
       role: a.role ?? '',
       color: a.color ?? 'sky',
+      customColor: a.customColor,
+      avatar: a.avatar,
       instructions: a.instructions ?? '',
       modelId: modelInfo(a.model)?.id ? a.model : 'sonnet',
       effort: a.effort ?? 'medium',
+      maxRoutines: MAX_AGENT_ROUTINES,
       limit: a.limit || defaultLimit,
       used: 0,
       grants: Object.fromEntries(Object.entries(a.grants ?? {}).flatMap(([name, g]) => (connectorId(name) ? [[connectorId(name)!, g]] : (added.skipped.push(L(`acesso de @${a.handle} ao ${name}`, `@${a.handle}'s access to ${name}`)), [])))),
@@ -141,7 +149,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
       web: a.web,
       archived: false
     }
-    db.saveAgent(agent)
+    db.saveAgent(cleanLook(agent))
     added.agents++
   }
   const byHandle = (h: string): string | undefined => db.agents().find((x) => x.handle === h)?.id
@@ -202,10 +210,17 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
 
 // ---------- backups ----------
 
-// A copy of the database (secrets stay encrypted for this Mac's keychain).
-export function backup(db: Db, dir: string): string {
+// A copy of the database (secrets stay encrypted for this Mac's keychain), named by
+// when and then which workspace: names sort by date, so the oldest go first.
+export function backup(db: Db, dir: string, workspaceName?: string): string {
   mkdirSync(dir, { recursive: true })
-  const file = join(dir, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.db`)
+  const safe = (workspaceName ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+  const file = join(dir, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}${safe ? `-${safe}` : ''}.db`)
   if (existsSync(file)) rmSync(file)
   db.backupTo(file)
   const old = readdirSync(dir)
@@ -217,7 +232,7 @@ export function backup(db: Db, dir: string): string {
 }
 
 // Once a day, at startup or while the app stays open.
-export function backupIfDue(db: Db, dir: string): void {
+export function backupIfDue(db: Db, dir: string, workspaceName?: string): void {
   const last = existsSync(dir)
     ? readdirSync(dir)
         .filter((f) => f.endsWith('.db'))
@@ -225,6 +240,6 @@ export function backupIfDue(db: Db, dir: string): void {
         .sort()
         .at(-1)
     : undefined
-  if (!last || Date.now() - last > DAY) backup(db, dir)
+  if (!last || Date.now() - last > DAY) backup(db, dir, workspaceName)
 }
 

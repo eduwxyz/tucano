@@ -1,14 +1,19 @@
-// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi, Hermes), each used
+// The harnesses agents run on (Claude Code, Codex, OpenCode, Pi), each used
 // as the person set it up: their plan, their company's gateway or the
 // providers they have logins for. Here they pick which ones the agents use,
 // test them, and pick models from what each harness offers.
 import { L } from '../../../shared/lang'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import {
+  ACCOUNT_ENGINES,
+  addAccount,
   ENGINES,
   ENGINE_IDS,
+  loginAccount,
+  removeAccount,
   MODELS,
   startsPicked,
+  codexValue,
   customModel,
   engineModels,
   harnessMcps,
@@ -16,10 +21,16 @@ import {
   installEngine,
   loginEngine,
   modelInfo,
+  navigate,
   openExternal,
+  rememberModels,
+  setTab,
   testEngine,
   updateSettings,
   useStore,
+  type Account,
+  type AccountEngine,
+  type Agent,
   type EngineId,
   type EngineStatus,
   type HarnessMcp,
@@ -41,26 +52,39 @@ export interface ModelOption {
 }
 
 // A model list asked once per harness and route (and again after "Verificar de novo").
-const lists = new Map<string, Promise<{ models: string[]; error?: string }>>()
+type Listed = { models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }
+const lists = new Map<string, Promise<Listed>>()
 
-// What a harness offers: the app's list on a plan; what OpenCode, Pi or Hermes list; what the gateway lists.
+// What a harness offers: the app's list on Claude's plan; Codex's own catalog (newest first);
+// what OpenCode or Pi list; what the gateway lists.
 export function useEngineModels(engine: EngineId | undefined): { options: ModelOption[]; loading: boolean; error?: string } {
   const st = useStore((s) => (engine ? s.settings.engines[engine] : undefined))
   const plan = !!engine && (engine === 'claude' || engine === 'codex') && st?.route !== 'gateway'
-  const id = engine && st?.installed && !plan ? `${engine}|${st.route}|${st.gateway ?? ''}|${st.account ?? ''}` : ''
-  const [got, setGot] = useState<{ id: string; models: string[]; error?: string } | null>(null)
+  const fixed = plan && engine === 'claude'
+  const id = engine && st?.installed && !fixed ? `${engine}|${st.route}|${st.gateway ?? ''}|${st.account ?? ''}` : ''
+  const [got, setGot] = useState<({ id: string } & Listed) | null>(null)
   useEffect(() => {
     if (!id || !engine) return
     if (!lists.has(id)) lists.set(id, engineModels(engine).catch((e: unknown) => ({ models: [], error: String(e) })))
     let live = true
-    void lists.get(id)!.then((r) => live && setGot({ id, ...r }))
+    void lists.get(id)!.then((r) => {
+      // Codex's names, for wherever a model shows (an agent's page, a card).
+      if (engine === 'codex' && r.labels) rememberModels(Object.entries(r.labels).map(([slug, l]) => ({ id: slug, engine, label: l.label, hint: l.hint ?? '' })))
+      if (live) setGot({ id, ...r })
+    })
     return () => {
       live = false
     }
   }, [id, engine])
   if (!engine) return { options: [], loading: false }
-  if (plan) return { options: MODELS.filter((m) => m.engine === engine).map((m) => ({ value: m.id, label: m.label, hint: m.hint })), loading: false }
   const mine = got?.id === id ? got : undefined
+  const app = (): ModelOption[] => MODELS.filter((m) => m.engine === engine).map((m) => ({ value: m.id, label: m.label, hint: m.hint }))
+  if (fixed) return { options: app(), loading: false }
+  // Codex on a plan or a key: its catalog, the app's own list until it comes (or if it can't).
+  if (plan)
+    return mine?.models.length
+      ? { options: mine.models.map((slug) => ({ value: codexValue(slug), label: mine.labels?.[slug]?.label ?? slug, hint: L('', mine.labels?.[slug]?.hint ?? '') || undefined })), loading: false }
+      : { options: app(), loading: false }
   return { options: (mine?.models ?? []).map((m) => ({ value: customModel(engine, m), label: m })), loading: !!id && !mine, error: mine?.error }
 }
 
@@ -82,7 +106,15 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
 
   // A harness's own card passes just that harness: it's already chosen there, so no select.
   const fixed = engines?.length === 1 && !jev
-  if (!engine && !jev) return <p className="hint hint--warn">{L('Nenhum harness pronto. Veja em Configurações → Modelos.', 'No harness ready. See Settings → Models.')}</p>
+  if (!engine && !jev)
+    return (
+      <p className="hint hint--warn">
+        {L('Nenhum Claude Code ou Codex pronto ainda.', 'No Claude Code or Codex ready yet.')}{' '}
+        <button className="link" onClick={() => (setTab('settings', 'modelos'), navigate({ kind: 'settings' }))}>
+          {L('Configurar', 'Set up')}
+        </button>
+      </p>
+    )
   return (
     <div className="model-picker">
       {!fixed && (
@@ -171,6 +203,7 @@ export function HarnessList(): ReactNode {
 
 function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: EngineStatus; picked: boolean; toggle: () => void }): ReactNode {
   const [testing, setTesting] = useState(false)
+  const checkId = useId()
   const [model, setModel] = useState('')
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
   // No terminal could be opened: the command, for the person to run.
@@ -193,15 +226,16 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
   return (
     <div className={`harness ${picked ? 'is-picked' : ''} ${st.soon ? 'is-soon' : ''}`}>
       <div className="harness__head">
-        <button className={`harness__check ${picked ? 'is-on' : ''}`} disabled={!!st.soon || !st.installed} onClick={toggle} aria-label={L(`Usar o ${ENGINES[engine].label}`, `Use ${ENGINES[engine].label}`)}>
+        <button id={checkId} className={`harness__check ${picked ? 'is-on' : ''}`} disabled={!!st.soon || !st.installed} onClick={toggle} aria-label={L(`Usar o ${ENGINES[engine].label}`, `Use ${ENGINES[engine].label}`)}>
           {picked && <Icon name="check" size={12} />}
         </button>
-        <div className="grow">
+        {/* The name is the check's label: a click on it is a click on the check, disabled when it is. */}
+        <label className="grow harness__name" htmlFor={checkId}>
           <strong>{ENGINES[engine].label}</strong>
           <span className="harness__account">
             {!st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
           </span>
-        </div>
+        </label>
         {st.soon ? (
           <span className="tag">{L('em breve', 'coming soon')}</span>
         ) : found && st.route ? (
@@ -235,7 +269,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
       </div>
       {manual && !st.loggedIn && (
         <div className="harness__body">
-          <span className="hint">{L('Não achei um terminal pra abrir. Pra entrar, cole no seu terminal:', "Couldn't find a terminal to open. To sign in, paste in your terminal:")}</span>
+          <span className="hint">{L('Não deu pra abrir um terminal daqui. Pra entrar, cole isto no seu terminal:', "A terminal couldn't be opened from here. To sign in, paste this in your terminal:")}</span>
           <code className="harness__cmd">{manual}</code>
         </div>
       )}
@@ -250,14 +284,15 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
       )}
       {!st.installed && (
         <div className="harness__body">
+          {/* npm.cmd: PowerShell blocks npm's .ps1 on a fresh Windows (scripts disabled). */}
           <span className="hint">{windows ? L('Ou cole no PowerShell:', 'Or paste in PowerShell:') : L('Ou cole no terminal:', 'Or paste in a terminal:')}</span>
-          <code className="harness__cmd">{(windows && ENGINES[engine].windows) || ENGINES[engine].install}</code>
+          <code className="harness__cmd">{windows ? (ENGINES[engine].windows ?? ENGINES[engine].install).replace(/^npm /, 'npm.cmd ') : ENGINES[engine].install}</code>
           {ENGINES[engine].min && <span className="hint">{L(`Precisa da ${ENGINES[engine].min} ou mais nova.`, `Needs ${ENGINES[engine].min} or newer.`)}</span>}
         </div>
       )}
       {st.warning && <p className="hint hint--warn harness__body">{st.warning}</p>}
       {st.route === 'gateway' && picked && <p className="hint harness__body">{L(`Os agentes usam esse mesmo gateway. A telemetria do ${ENGINES[engine].label} fica desligada, pra nada sair por fora dele.`, `Agents use this same gateway. ${ENGINES[engine].label}'s telemetry stays off, so nothing leaves around it.`)}</p>}
-      {st.soon && st.installed && <p className="hint harness__body">{L(`Já achei a sua configuração. O Tucano ainda não roda agentes no ${ENGINES[engine].label}: chega numa próxima versão.`, `Found your setup. Tucano doesn't run agents on ${ENGINES[engine].label} yet: it's coming in a future version.`)}</p>}
+      {st.soon && st.installed && <p className="hint harness__body">{L(`A sua configuração já foi encontrada. O Tucano ainda não roda agentes no ${ENGINES[engine].label}: chega numa próxima versão.`, `Your setup was found. Tucano doesn't run agents on ${ENGINES[engine].label} yet: it's coming in a future version.`)}</p>}
       {testing && (
         <div className="harness__body">
           <div className="harness__test">
@@ -319,7 +354,7 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
   return (
     <section className="card from-harness">
       <div className="from-harness__head">
-        <strong>{L('Nos seus harnesses', 'In your harnesses')}</strong>
+        <strong>{L('No Claude Code, Codex e outros que você usa', 'In Claude Code, Codex and others you use')}</strong>
         <span className="muted small">{L('Os servidores MCP que você já configurou. Ao adicionar, os agentes passam a usar pelo Tucano, com as permissões e aprovações daqui.', 'The MCP servers you already set up. Once added, agents use them through Tucano, with the permissions and approvals set here.')}</span>
       </div>
       {found.map((m) => (
@@ -348,5 +383,102 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
         </div>
       ))}
     </section>
+  )
+}
+
+// More logins of Claude Code and Codex: a work account beside a personal one. Each lives in a
+// folder of its own and is signed into through the CLI, in a terminal; an agent picks one on its page.
+export function AccountsCard(): ReactNode {
+  const accounts = useStore((s) => s.settings.accounts ?? [])
+  const engines = useStore((s) => s.settings.engines)
+  const [engine, setEngine] = useState<AccountEngine>('claude')
+  const [name, setName] = useState('')
+  const [manual, setManual] = useState<Record<string, string>>({})
+  const [removing, setRemoving] = useState<string | null>(null)
+  const add = async (): Promise<void> => {
+    const a = await addAccount(engine, name)
+    setName('')
+    const r = await loginAccount(a.id)
+    if (!r.opened) setManual((m) => ({ ...m, [a.id]: r.command }))
+  }
+  return (
+    <div className="accounts">
+      {accounts.map((a: Account) => (
+        <div key={a.id} className="key-row">
+          <Icon name="user" />
+          <div className="grow">
+            <strong>{a.name}</strong>
+            <p className="muted small">
+              {ENGINES[a.engine].label} · {a.loggedIn ? (a.detail ?? L('Pronta', 'Ready')) : L('Falta entrar', 'Not signed in')}
+            </p>
+            {manual[a.id] && !a.loggedIn && (
+              <>
+                <span className="hint">{L('Não deu pra abrir um terminal daqui. Pra entrar, cole isto no seu terminal:', "A terminal couldn't be opened from here. To sign in, paste this in your terminal:")}</span>
+                <code className="harness__cmd">{manual[a.id]}</code>
+              </>
+            )}
+          </div>
+          {!a.loggedIn && (
+            <button className="btn btn--sm btn--primary" onClick={() => void loginAccount(a.id).then((r) => setManual((m) => ({ ...m, [a.id]: r.opened ? '' : r.command })))}>
+              {L('Entrar', 'Sign in')}
+            </button>
+          )}
+          {removing === a.id ? (
+            <button className="btn btn--sm btn--danger" onClick={() => void removeAccount(a.id).then(() => setRemoving(null))}>
+              {L('Remover mesmo', 'Remove it')}
+            </button>
+          ) : (
+            <button className="btn btn--ghost btn--sm" onClick={() => setRemoving(a.id)}>
+              {L('Remover', 'Remove')}
+            </button>
+          )}
+        </div>
+      ))}
+      <div className="row row--center accounts__add">
+        <select value={engine} onChange={(e) => setEngine(e.target.value as AccountEngine)}>
+          {ACCOUNT_ENGINES.filter((e) => engines[e].installed).map((e) => (
+            <option key={e} value={e}>
+              {ENGINES[e].label}
+            </option>
+          ))}
+        </select>
+        <input className="grow" placeholder={L('Nome da conta (ex.: Trabalho)', 'Account name (e.g. Work)')} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
+        <button className="btn btn--sm" disabled={!engines[engine].installed} onClick={() => void add()}>
+          {L('Adicionar e entrar', 'Add and sign in')}
+        </button>
+      </div>
+      {removing && (
+        <p className="hint hint--warn">
+          {L(
+            `Os agentes dessa conta voltam pro login de sempre do ${ENGINES[accounts.find((a) => a.id === removing)?.engine ?? 'claude'].label}, e o login dela sai deste computador.`,
+            `Its agents go back to ${ENGINES[accounts.find((a) => a.id === removing)?.engine ?? 'claude'].label}’s usual login, and its sign-in leaves this computer.`
+          )}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// Which login of its harness an agent runs on: the usual one, or one of the accounts added in Settings.
+export function AccountPicker({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const engine = modelInfo(draft.modelId)?.engine
+  const accounts = useStore((s) => (s.settings.accounts ?? []).filter((a) => a.engine === engine))
+  if (!accounts.length || !engine) return null
+  const value = accounts.some((a) => a.id === draft.accountId) ? draft.accountId! : ''
+  const chosen = accounts.find((a) => a.id === value)
+  return (
+    <label className="field">
+      <span className="field__label">{L('Conta', 'Account')}</span>
+      <select value={value} onChange={(e) => patch({ accountId: e.target.value || undefined })}>
+        <option value="">{L(`A de sempre do ${ENGINES[engine].label}`, `${ENGINES[engine].label}’s usual one`)}</option>
+        {accounts.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name}
+            {a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')}
+          </option>
+        ))}
+      </select>
+      {chosen && !chosen.loggedIn && <span className="hint hint--warn">{L('Essa conta ainda não entrou: o agente não responde até você entrar nela em Configurações › Modelos.', 'This account isn’t signed in yet: the agent won’t reply until you sign in under Settings › Models.')}</span>}
+    </label>
   )
 }

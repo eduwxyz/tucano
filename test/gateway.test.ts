@@ -23,37 +23,51 @@ beforeEach(async () => {
 afterEach(() => gateway.stop())
 
 describe('Gateway', () => {
-  it('gives an agent one stable URL, and lists the tools of the current turn', async () => {
-    gateway.agentTurn('iris', { tools: [tool('ask_user')], call: async () => textResult('ok') })
-    const url = gateway.agentUrl('iris')
-    gateway.agentTurn('rafa', { tools: [tool('list_issues'), tool('create_issue')], call: async () => textResult('ok') })
-    const ci = await connect(url)
-    expect(gateway.agentUrl('iris')).toBe(url) // stable across turns
-    expect((await ci.listTools()).tools.map((t) => t.name)).toEqual(['ask_user'])
-    // next turn swaps the tools under the same URL
-    gateway.agentTurn('iris', { tools: [tool('bash')], call: async () => textResult('ok') })
-    expect((await ci.listTools()).tools.map((t) => t.name)).toEqual(['bash'])
-    await ci.close()
-    const cr = await connect(gateway.agentUrl('rafa'))
-    expect((await cr.listTools()).tools.map((t) => t.name)).toEqual(['list_issues', 'create_issue'])
-    await cr.close()
+  it('lists only the tools of the session behind the URL', async () => {
+    const a = gateway.open({ tools: [tool('ask_user')], call: async () => textResult('ok') })
+    const b = gateway.open({ tools: [tool('list_issues'), tool('create_issue')], call: async () => textResult('ok') })
+    const ca = await connect(a.url)
+    const cb = await connect(b.url)
+    expect((await ca.listTools()).tools.map((t) => t.name)).toEqual(['ask_user'])
+    expect((await cb.listTools()).tools.map((t) => t.name)).toEqual(['list_issues', 'create_issue'])
+    await Promise.all([ca.close(), cb.close()])
   })
 
-  it('runs listed tools and refuses anything else without calling the agent', async () => {
+  it('runs listed tools and refuses anything else without calling the session', async () => {
     const calls: string[] = []
-    gateway.agentTurn('iris', { tools: [tool('list_issues')], call: async (name) => (calls.push(name), textResult(`ran ${name}`)) })
-    const client = await connect(gateway.agentUrl('iris'))
+    const s = gateway.open({ tools: [tool('list_issues')], call: async (name) => (calls.push(name), textResult(`ran ${name}`)) })
+    const client = await connect(s.url)
     expect(await client.callTool({ name: 'list_issues', arguments: {} })).toMatchObject({ content: [{ text: 'ran list_issues' }] })
     expect(await client.callTool({ name: 'merge_pull_request', arguments: {} })).toMatchObject({ isError: true, content: [{ text: 'Tool not allowed: merge_pull_request' }] })
     expect(calls).toEqual(['list_issues'])
     await client.close()
   })
 
-  it('rejects unknown tokens and stops serving a forgotten agent', async () => {
-    gateway.agentTurn('iris', { tools: [tool('ask_user')], call: async () => textResult('ok') })
-    const base = gateway.agentUrl('iris').replace(/[a-f0-9]{48}$/, '')
+  it('rejects unknown and revoked URLs', async () => {
+    const s = gateway.open({ tools: [tool('ask_user')], call: async () => textResult('ok') })
+    const base = s.url.replace(/[a-f0-9]{48}$/, '')
     expect((await fetch(`${base}${'0'.repeat(48)}`, { method: 'POST' })).status).toBe(404)
+    s.close()
+    await expect(connect(s.url)).rejects.toThrow()
+  })
+
+  // Hermes: the CLI's own daemon keeps the MCP connection from one turn to the next, so the
+  // agent's URL is the same every turn — parked between them, its tools listed and nothing running.
+  it('keeps one URL per agent for an engine that holds its connection', async () => {
+    const token = gateway.agentToken('iris')
+    const first = gateway.open({ tools: [tool('ask_user')], call: async () => textResult('ok') }, token)
+    const client = await connect(first.url)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['ask_user'])
+    first.close()
+    // The next turn swaps the tools under the same URL, which the daemon still points at.
+    const second = gateway.open({ tools: [tool('bash')], call: async (name) => textResult(`ran ${name}`) }, gateway.agentToken('iris'))
+    expect(second.url).toBe(first.url)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['bash'])
+    expect(await client.callTool({ name: 'bash', arguments: {} })).toMatchObject({ content: [{ text: 'ran bash' }] })
+    await client.close()
+    // The agent is gone: its URL stops answering, and a new agent gets its own.
+    expect(gateway.agentToken('rafa')).not.toBe(token)
     gateway.agentForget('iris')
-    await expect(connect(gateway.agentUrl('iris'))).rejects.toThrow()
+    await expect(connect(first.url)).rejects.toThrow()
   })
 })

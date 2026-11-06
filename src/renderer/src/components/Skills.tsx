@@ -3,6 +3,7 @@
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
+import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import {
   agentById,
@@ -25,7 +26,9 @@ import {
   isTeam
 } from '../store'
 import { Card, Field, Sheet } from './Pages'
+import { confirmDialog } from './Dialogs'
 import { ago, AgentAvatar, Icon, time } from './ui'
+import { Modal } from './Modal'
 
 type Place = { kind: 'list' } | { kind: 'skill'; id: string } | { kind: 'review' }
 
@@ -61,11 +64,9 @@ export function SkillsPage(): ReactNode {
   const toList = (): void => setPlace({ kind: 'list' })
 
   const form = draft && (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setDraft(null)}>
-      <div className="form-modal">
-        <SkillForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
-      </div>
-    </div>
+    <Modal title={draft.id ? L('Editar skill', 'Edit skill') : L('Nova skill', 'New skill')} variant="form" onClose={() => setDraft(null)}>
+      <SkillForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
+    </Modal>
   )
 
   if (open)
@@ -147,9 +148,19 @@ export function SkillsPage(): ReactNode {
                   <span className="skill-line__desc">{k.description}</span>
                 </span>
                 <button className="text-btn" onClick={() => archiveSkill(k.id, false)}>
-                  {L('Reativar', 'Bring back')}
+                  {L('Reativar', 'Reactivate')}
                 </button>
-                <button className="text-btn" onClick={() => removeSkill(k.id)}>
+                <button
+                  className="text-btn"
+                  onClick={() =>
+                    void confirmDialog({
+                      title: L(`Apagar a skill “${k.name}”?`, `Delete the skill “${k.name}”?`),
+                      body: L('Ela some da lista e nenhum agente volta a usar. Não dá pra desfazer.', "It leaves the list and no agent uses it again. This can't be undone."),
+                      confirm: L(`Apagar “${k.name}”`, `Delete “${k.name}”`),
+                      danger: true
+                    }).then((ok) => ok && removeSkill(k.id))
+                  }
+                >
                   {L('Apagar', 'Delete')}
                 </button>
               </div>
@@ -221,7 +232,7 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
         <h2>{L('Receita', 'Recipe')}</h2>
         {k.body.trim() ? (
           <article className="recipe">
-            <Markdown remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
+            <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
           </article>
         ) : (
           <p className="read-empty">{L(`A receita é lida de ${k.source} a cada uso.`, `The recipe is read from ${k.source} on every use.`)}</p>
@@ -386,7 +397,7 @@ function History({ skill }: { skill: Skill }): ReactNode {
   useEffect(() => {
     void skillVersions(skill.id).then(setVersions)
   }, [skill.id, skill.updatedAt])
-  if (!versions) return <p className="muted small">{L('Carregando…', 'Loading…')}</p>
+  if (!versions) return <p className="muted small">{L('Buscando o histórico…', 'Fetching the history…')}</p>
   if (versions.length === 0) return <p className="muted small">{L('Nenhuma mudança ainda: esta é a primeira versão.', 'No changes yet: this is the first version.')}</p>
   return (
     <div className="skill__history">
@@ -431,7 +442,7 @@ function Proposal({ proposal: p }: { proposal: Skill }): ReactNode {
             <span>{L('Quando usar:', 'When to use:')}</span> {p.description}
           </p>
           <article className="recipe recipe--box">
-            <Markdown remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
+            <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
           </article>
           <p className="proposal__who">
             {L('Vale pra', 'For')} <Who ids={p.agents} />. {L('Depois de aprovar, dá pra liberar pra outros agentes.', 'After approving, you can open it to other agents.')}

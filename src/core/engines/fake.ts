@@ -2,24 +2,45 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { L } from '../../shared/lang'
 import { memorySystem } from '../memory'
-import { routerSystem } from '../router'
+import { curatorSystem } from '../wiki-curator'
+import { handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
 // Deterministic engine for tests and screenshots. Never spawns anything, but
 // behaves like the real ones where it matters: it routes when given the
 // router prompt, and calls ask_user through the gateway when asked to ask.
-export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (turn: Turn) => string } = {}): Engine {
+// `sessions`: it takes kept sessions like Claude Code does, and `released` gets the ones let go;
+// `warmed` gets what was started ahead ("warm <model>", "rewarm <session id>").
+export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (turn: Turn) => string; sessions?: boolean; released?: string[]; warmed?: string[] } = {}): Engine {
   const delay = opts.delayMs ?? 25
   return {
     id,
+    ...(opts.sessions
+      ? {
+          sessions: true,
+          release: (sessionId: string) => void opts.released?.push(sessionId),
+          warm: (t: { model: string }) => void opts.warmed?.push(`warm ${t.model}`),
+          rewarm: (sessionId: string) => void opts.warmed?.push(`rewarm ${sessionId}`)
+        }
+      : {}),
     async *run(turn): AsyncIterable<EngineEvent> {
       const last = lastMessage(turn.prompt)
+      // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
+      // harness, or another account of Claude, whose limit is still there).
+      if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== handoffSystem() && turn.system !== memorySystem()) {
+        yield { type: 'error', message: "You've hit your limit · resets 5pm" }
+        return
+      }
       let reply: string
       let spend = 0 // "gaste N tokens": a reply that costs that much, to see the budget pause
       if (turn.system === routerSystem()) {
         reply = JSON.stringify(fakeRoute(turn.prompt))
+      } else if (turn.system === handoffSystem()) {
+        reply = JSON.stringify(fakeHandoff(turn.prompt))
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
+      } else if (turn.system === curatorSystem()) {
+        reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
       } else if (turn.mcpUrl && (turn.system.includes('## Pra montar agentes') || turn.system.includes('## For building agents'))) {
@@ -42,6 +63,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         } else reply = L('Legal! Que tipo de tarefa você quer delegar? Me dá um exemplo de algo que você fez essa semana.', 'Nice! What kind of task do you want to delegate? Give me an example of something you did this week.')
       } else if (/pe[çc]a pr[oa] (\w+)/i.test(last)) {
         reply = `@${/pe[çc]a pr[oa] (\w+)/i.exec(last)![1]!.toLowerCase()}, pode ajudar aqui?`
+      } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
+        // A thank-you that mentions someone: the hand-off screening lets no one answer it.
+        reply = `Valeu, @${/agrade[çc]a (?:a|ao|à) (\w+)/i.exec(last)![1]!.toLowerCase()}! Ficou ótimo.`
       } else if (turn.mcpUrl && /(lista|liste|mostra|quais).*tarefas/i.test(last)) {
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'list_tasks'), {})
         reply = `Suas tarefas:\n\n${textOf(r)}`
@@ -49,6 +73,20 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /(?:consulte|run the sql) `([^`]+)`/i.test(last)) {
+        // A SQL connector's tool (Databricks' execute_sql_read_only), to see its steps and errors.
+        const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!
+        const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'execute_sql_read_only'), { statement })
+        reply = textOf(r)
+      } else if (turn.mcpUrl && /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.test(last)) {
+        // A skill that runs a CLI (a databricks-query skill and the databricks command): read it, then run.
+        const [, skill, first, then] = /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.exec(last)!
+        await callTool(turn.mcpUrl, 'ler_skill', { nome: skill })
+        for (const command of [first!, then].filter(Boolean)) await callTool(turn.mcpUrl, 'bash', { command })
+        reply = L(
+          'Rodei o SQL pela skill: Sudeste lidera, depois Sul e Nordeste. O segundo comando falhou: o token foi recusado.',
+          'I ran the SQL through the skill: Southeast leads, then South and Northeast. The second command failed: the token was refused.'
+        )
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`
@@ -133,6 +171,15 @@ function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
 }
 
+// Courtesy replies don't hand the turn; anything else does, to every mentioned agent.
+function fakeHandoff(prompt: string): { handles: string[]; reason: string } {
+  const [head = '', rest = ''] = prompt.split('<reply>\n')
+  const reply = rest.slice(0, rest.lastIndexOf('\n</reply>'))
+  const body = reply.replace(/^(?:@[\w-]+|[\s,.!:;-])+/, '')
+  if (!body.includes('?') && /^(valeu|obrigad|combinado|ok\b|beleza|👍|thanks|got it|fico esperando|aguardo)/i.test(body)) return { handles: [], reason: 'agradecimento, ninguém precisa responder' }
+  return { handles: [...head.matchAll(/^- ([a-z0-9_-]+): /gim)].map((m) => m[1]!), reason: 'pedido' }
+}
+
 // Summarizes by listing the first words of each message, and learns "prefiro X"
 // from any author: the memory module must drop what an agent said.
 function fakeConsolidation(prompt: string): { summary: string; memories: { op: string; text: string; evidence: number[] }[] } {
@@ -167,4 +214,19 @@ export async function callTool(url: string, name: string, args: Record<string, u
   } finally {
     await client.close()
   }
+}
+
+// The wiki's curator, for trying it without an engine: a page the stretch names gets a line
+// under History; a stretch with numbers or a decision becomes a page of its own.
+function fakeCuration(prompt: string): { guardar: boolean; motivo: string; titulo_fonte: string; mudancas: Record<string, string>[] } {
+  const stretch = prompt.split(/\n## [^\n]*(?:Trecho|Stretch)[^\n]*\n/)[1]?.split('\n\nResponda')[0]?.split('\n\nReply')[0] ?? ''
+  const titles = [...prompt.matchAll(/^- \[\[([^\]]+)\]\]/gm)].map((m) => m[1]!)
+  const named = titles.find((t) => t.toLowerCase().split(/\s+/).filter((w) => w.length >= 5).some((w) => stretch.toLowerCase().includes(w)))
+  const plain = stretch.replace(/\*\*[^*]+\*\* \([^)]*\): /g, '').replace(/\s+/g, ' ').trim()
+  const line = plain.length > 160 ? `${plain.slice(0, 157)}…` : plain
+  const day = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  const mudancas: Record<string, string>[] = []
+  if (named) mudancas.push({ op: 'append', pagina: named, secao: L('Histórico', 'History'), texto: `- **${day}:** ${line}` })
+  if (/\d|decid|fech|guarda/i.test(plain) && !named) mudancas.push({ op: 'create', pagina: plain.split(/[.!?:]/)[0]!.split(' ').slice(0, 5).join(' '), tipo: L('Assunto', 'Topic'), texto: `${line}\n\n## ${L('Detalhes', 'Details')}\n- ${line}` })
+  return { guardar: mudancas.length > 0, motivo: L('Um fato que vale lembrar.', 'A fact worth remembering.'), titulo_fonte: plain.split(/[.!?]/)[0]!.slice(0, 60) || L('Trecho de conversa', 'Conversation excerpt'), mudancas }
 }

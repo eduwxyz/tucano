@@ -4,18 +4,22 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L, locale } from '../shared/lang'
+import { firstSentence } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
-import { describeSchedule, nextRun, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
+import { describeSchedule, MAX_AGENT_ROUTINES, nextRun, routineCap, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
+import { errorReason } from './connectors'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
+
+export { MAX_AGENT_ROUTINES } // the default; each agent's own is agent.maxRoutines
 
 export const TICK_MS = 30_000
 export const LATE_GRACE_MS = 12 * 3_600_000 // a run missed by more than this is skipped
 const LATE_AFTER_MS = 2 * 60_000 // later than this is "atrasada" in the conversation
+export const CONNECTORS_WAIT_MS = 60_000 // a run waits this long, at most, for connectors still connecting
 // A reply that fails is tried again in place, after these waits; then it stays failed.
 export const RETRY_WAITS_MS = [60_000, 5 * 60_000]
-export const MAX_AGENT_ROUTINES = 10 // active ones per agent, so an agent can't schedule itself without end
 
 const DAY_KEYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab']
 const DAY_KEYS_EN = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] // also understood
@@ -82,9 +86,12 @@ export interface RoutineDeps {
     retryRoutine?(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined>
   }
   connectors?: { call(id: string, tool: string, args: Record<string, unknown>): Promise<CallToolResult>; list(): Connector[] }
+  connectorsReady?: () => Promise<void> | undefined // settles when the connectors connecting have finished (or failed); undefined when none is
+  connectorsWaitMs?: number // how long a run waits for that (tests shorten it)
   blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
+  paused?: () => boolean // paused: a call from outside says so instead of starting a run
   emit: (e: CoreEvent) => void
-  notify?: (title: string, body: string, conversationId: string) => void
+  notify?: (title: string, shortText: string, conversationId: string, fullText?: string) => void
   now?: () => number
   wait?: (ms: number) => Promise<void> // between tries (tests skip it)
 }
@@ -202,7 +209,7 @@ export class Routines {
     if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error(L(`a ferramenta ${t.tool} não está liberada como leitura`, `the tool ${t.tool} isn't enabled for reading`))
     const r = await this.deps.connectors.call(t.connectorId, t.tool, t.args)
     const text = r.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n')
-    if (r.isError) throw new Error(text.slice(0, 200) || L('a ferramenta deu erro', 'the tool returned an error'))
+    if (r.isError) throw new Error(errorReason(r).slice(0, 200))
     return { items: eventItems(text), source: `${connector.name} · ${t.tool}` }
   }
 
@@ -211,6 +218,7 @@ export class Routines {
   // the rest wait for the next check, which comes right after that run.
   private async check(r: Routine): Promise<void> {
     if (r.trigger?.kind !== 'poll' || this.checking.has(r.id) || this.running.has(r.id)) return
+    if (this.deps.blocked?.()) return
     this.checking.add(r.id)
     const t = r.trigger
     try {
@@ -232,7 +240,8 @@ export class Routines {
   }
 
   // A call to http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>, from something on this Mac.
-  webhook(token: string, body: string): 'ok' | 'unknown' | 'busy' {
+  webhook(token: string, body: string): 'ok' | 'unknown' | 'busy' | 'paused' {
+    if (this.deps.paused?.()) return 'paused'
     const r = this.deps.db.routines().find((x) => x.trigger?.kind === 'webhook' && x.trigger.token === token)
     if (!r || !r.enabled) return 'unknown'
     if (this.running.has(r.id)) return 'busy'
@@ -253,7 +262,8 @@ export class Routines {
     const replaces = text('substitui')
     const prev = replaces ? this.deps.db.routine(replaces) : undefined
     if (replaces && prev?.agentId !== agent.id) return fail(L(`Não achei uma rotina sua com id ${replaces}.`, `I couldn't find a routine of yours with id ${replaces}.`))
-    if (!prev && this.forAgent(agent.id).length >= MAX_AGENT_ROUTINES) return fail(L(`Você já tem ${MAX_AGENT_ROUTINES} rotinas ligadas. Cancele uma antes.`, `You already have ${MAX_AGENT_ROUTINES} routines on. Cancel one first.`))
+    const max = routineCap(agent.maxRoutines)
+    if (!prev && this.forAgent(agent.id).length >= max) return fail(L(`Você já tem ${max} rotinas ligadas. Cancele uma antes.`, `You already have ${max} routines on. Cancel one first.`))
 
     const keys = Array.isArray(args['dias']) ? (args['dias'] as unknown[]).map((d) => {
           const k = String(d).toLowerCase().normalize('NFD').replace(/[^a-z]/g, '').slice(0, 3)
@@ -335,18 +345,42 @@ export class Routines {
     )
   }
 
+  private connectorsSettled(): Promise<void> | undefined {
+    const pending = this.deps.connectorsReady?.()
+    return pending && this.waitFor(pending)
+  }
+
+  private async waitFor(pending: Promise<void>): Promise<void> {
+    const ms = this.deps.connectorsWaitMs ?? CONNECTORS_WAIT_MS
+    let timer: NodeJS.Timeout | undefined
+    const timedOut = new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), ms)))
+    timer?.unref()
+    try {
+      const done = await Promise.race([pending.then(() => 'ready' as const, () => 'ready' as const), timedOut])
+      if (done === 'timeout') console.warn(`[routines] connectors still connecting after ${Math.round(ms / 1000)}s: running the routine without waiting`)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   // One run of a routine at a time: if the last one is still going, this one skips.
   // `more`: a connector check left new items, so check again when this run ends.
   private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
     this.running.add(id)
-    const run = this.runWithRetries(r, when)
+    // The first tick comes before the connectors have connected, with what was missed while the
+    // app was closed and what is due right then: a run waits for them (a little), or the agent
+    // starts without its tools. With none connecting, it starts right now, as before.
+    const wait = this.connectorsSettled()
+    const run = (wait ? wait.then(() => this.runWithRetries(r, when)) : this.runWithRetries(r, when))
       .then((reply) => {
         if (!reply) return
         const latest = this.deps.db.routine(id)
         if (latest) this.store({ ...latest, lastAt: this.now(), lastMessageId: reply.id })
-        this.deps.notify?.(`${agentName(this.deps.db, r.agentId)} · ${r.name}`, outcome(reply), r.conversationId)
+        const title = `${agentName(this.deps.db, r.agentId)} · ${r.name}`
+        const fullText = reply.run?.status === 'done' ? reply.text.trim() : ''
+        this.deps.notify?.(title, outcome(reply), r.conversationId, fullText || undefined)
       })
       .catch((e: unknown) => console.error('[routines]', e))
       .finally(() => {
@@ -381,7 +415,8 @@ export async function retrying(
     const wait = RETRY_WAITS_MS[i]!
     const base = reply.run.error ?? ''
     const min = Math.round(wait / 60_000)
-    note(reply, `${plain(base)}. ${L(`Tento de novo em ${min} min (tentativa ${i + 2} de ${tries}).`, `Trying again in ${min} min (try ${i + 2} of ${tries}).`)}`)
+    // The headline only: the rest of the error says "try again later", and this is the later.
+    note(reply, `${firstSentence(plain(base))} ${L(`Tento de novo em ${min} min (tentativa ${i + 2} de ${tries}).`, `Trying again in ${min} min (try ${i + 2} of ${tries}).`)}`)
     await deps.wait(wait)
     const now = deps.db.message(reply.id)
     if (now?.run?.status !== 'failed' || !deps.enabled()) {
@@ -411,7 +446,8 @@ export function outcome(reply: Message): string {
     case 'paused':
       return L('Pausou no teto da resposta. Abra pra continuar.', "Paused at the reply's cap. Open it to go on.")
     case 'failed':
-      return `${L('Falhou', 'Failed')}: ${reply.run.error ?? L('erro desconhecido', 'unknown error')}`
+      // The headline only (what happened); the rest is in the conversation.
+      return `${reply.run.error ? firstSentence(reply.run.error) : L('Falhou.', 'Failed.')} ${L('Abra pra resolver.', 'Open it to fix it.')}`
     case 'stopped':
       return L('Foi interrompida.', 'Was interrupted.')
   }

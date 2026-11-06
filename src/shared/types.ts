@@ -1,10 +1,12 @@
 // Domain types shared by the core (utility process) and the renderer.
+import type { AvatarDefinition } from 'open-bot-avatar'
+import type { ChannelLayout } from './channel-layout'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'hermes' | 'gemini'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor' | 'grok' | 'hermes'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -28,7 +30,8 @@ export interface UpdateState {
   next?: string // the newer version, while it downloads and once it's ready
   percent?: number
   checkedAt?: number
-  error?: string
+  error?: string // what went wrong, for people
+  errorKind?: 'offline' | 'other' // 'other': the app can be downloaded by hand from the releases page
 }
 
 export interface EngineStatus {
@@ -55,10 +58,22 @@ export interface Agent {
   handle: string
   role: string
   color: AgentColor
+  customColor?: string // a color of the person's own (#rrggbb), over `color`
+  picture?: string // a small picture (data URL), over the face
+  avatar?: AvatarDefinition // a drawn character (open-bot-avatar), over the face; a picture wins over it
+  wiki?: WikiAccess // what it can do with the wiki; 'read' when unset
   instructions: string
   modelId: string
+  // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
+  // only when the main model failed before doing anything, and the next reply tries the main one again.
+  fallbackModelId?: string
+  // The login the reserve runs on: one of settings.accounts, of the reserve's harness; unset: that harness's usual login.
+  // With it, the reserve can be the same model on another account, when the main account's limit is out.
+  fallbackAccountId?: string
+  accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
   limit: number // tokens per month
+  maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   used: number // tokens used this month, computed from receipts
   grants: Record<string, GrantLevel>
   memory: MemoryMode
@@ -66,10 +81,17 @@ export interface Agent {
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
+  apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
+}
+
+// One of the person's apps given to an agent, by the name the system shows.
+export interface AgentApp {
+  name: string
+  level: 'read' | 'read_write'
 }
 
 // A folder of the Mac mounted in an agent's computer at /projetos/<name>.
@@ -95,6 +117,8 @@ export interface Conversation {
   summaryUntil?: number // `at` of the last message the summary covers
   summaryAt?: number
   unread?: number
+  wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
+  threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -114,6 +138,9 @@ export interface Step {
   label: string
   detail?: string
   note?: string // what the agent said while working, before this step's tool call
+  error?: string // why it failed, in the tool's own words
+  input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
+  output?: string // what came back, in a few words ("120 rows")
   status: StepStatus
   ms?: number
 }
@@ -134,17 +161,21 @@ export interface Run {
   steps: Step[]
   receipt?: Receipt
   approvalId?: string
-  error?: string
+  error?: string // what happened and what to do, for people (src/shared/errors.ts)
+  errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   question?: string // asked with ask_user; answered by the next human message here
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
+  wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
   artifactIds?: string[] // files and screenshots shown in this reply
   services?: string[] // services started in this reply, by name, on the author's computer
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
+  task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
+  proposal?: Proposal // what an agent proposed (a change to an agent, a routine, a channel, a team), shown as a card
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
@@ -155,6 +186,7 @@ export interface AgentDraft {
   instructions: string
   modelId: string
   effort: Effort
+  maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   web: boolean
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
@@ -162,6 +194,19 @@ export interface AgentDraft {
   state?: 'created' | 'dismissed'
   agentId?: string // once created
 }
+
+// What the Tuca may propose to change in an agent that exists.
+export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
+
+// A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
+// with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,
+// routine or channel it made or changed; `error`: why applying it didn't work.
+export type Proposal = (
+  | { kind: 'agent'; agentId: string; changes: AgentChanges; before?: AgentChanges } // before: those fields as they were
+  | { kind: 'routine'; routine: RoutineInput }
+  | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
+  | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean } } // several agents at once, and a channel with them
+) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string }
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
 
@@ -173,17 +218,59 @@ export interface Message {
   at: number
   run?: Run
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
+  threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
+  threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+}
+
+// A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.
+export interface ThreadSummary {
+  text: string
+  until: number
+  at: number
+}
+
+// Dictation with whisper-cli. Unset paths are looked for in the usual places.
+export interface VoiceSettings {
+  bin?: string
+  model?: string
+  detect?: boolean // I speak other languages: whisper finds out which, instead of using the app's
+  hidden?: boolean // no microphone button in the message field
+}
+
+export type VoiceModelId = 'recommended' | 'light' // the models the app downloads by itself
+
+export interface VoiceStatus {
+  bin?: string
+  model?: string
+  ready: boolean
+  ownModel?: VoiceModelId // the model in use is one the app downloaded
+  downloaded?: VoiceModelId[]
+  downloading?: { model: VoiceModelId; received: number; total: number }
+  error?: string // the last download failed
+}
+
+export interface LocalInfo {
+  kind: 'image' | 'video' | 'pdf' | 'folder' | 'file'
+  url?: string // to see it here: images and videos
+  download?: string // on a server, where the file isn't on this computer: to save it here
 }
 
 export interface Settings {
-  workspaceName: string
+  workspaceName: string // the person's name: what the agents call them
+  workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  voice?: VoiceSettings
+  channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
+  wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
+  wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
+  wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
+  wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
   theme: 'system' | 'light' | 'dark'
@@ -195,11 +282,35 @@ export interface Settings {
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
   quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)
-  github?: { user?: string; error?: string } // computed: the GitHub account the app pushes and opens PRs with (spec §22)
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
-  onboarding?: { done: boolean; checklistHidden?: boolean }
+  onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean; carried?: boolean } // carried: the general settings came from another workspace
+  folded?: string[] // the ids of what I folded in the sidebar
+  sounds?: boolean // the toucan's chirp on a notification; unset: on
+  seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
+  accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+}
+
+// Which chirp a notification plays: a knock when an agent needs me, two notes when the work
+// is done, none when I turned the sounds off. The system's own notification is always silent,
+// so this is the only sound the app makes.
+export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, sounds: boolean | undefined): 'chama' | 'pronto' | null {
+  if (sounds === false) return null
+  return kind === 'approval' || kind === 'question' ? 'chama' : 'pronto'
+}
+
+// Another login of a harness (a work account beside a personal one), in a folder of its own
+// in the app's data: Claude Code's CLAUDE_CONFIG_DIR (with its own Keychain entry), Codex's
+// CODEX_HOME. The person signs in through the CLI itself; the app never sees the credentials.
+export const ACCOUNT_ENGINES = ['claude', 'codex'] as const satisfies readonly EngineId[]
+export type AccountEngine = (typeof ACCOUNT_ENGINES)[number]
+export interface Account {
+  id: string
+  engine: AccountEngine
+  name: string // what the person calls it ("Trabalho")
+  loggedIn?: boolean // computed, from the CLI's own status
+  detail?: string // computed: the plan it's on, as the CLI says
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
@@ -217,6 +328,9 @@ export interface BrowserElement {
   checked?: boolean
   disabled?: boolean
   inView: boolean
+  focused?: boolean // where a key goes now
+  multiline?: boolean // a text area or an editable block: Enter there often sends (a comment, a message)
+  submits?: string // a field in a form: the label of the button that sends it (what Enter does)
 }
 
 export interface BrowserReply {
@@ -272,11 +386,22 @@ export interface TelegramInfo {
 
 // Guards per reply (spec §3), so nothing runs away unattended (a routine at 3 a.m.)
 // without cutting long work that is going somewhere.
+// Routines an agent can have on at once, so it can't schedule itself without end. Each agent can
+// change it on its page (no upper bound: the monthly limit still holds); this is the default.
+export const MAX_AGENT_ROUTINES = 10
+// A whole number, at least 1: what the core enforces, whatever reached it.
+export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
+
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops
 export const ERRORS_STOP = 8 // tool calls failing in a row
+export const SAME_TOOL_WARN = 15 // one connector tool called this many times in a reply (paging a whole history): told to narrow it
+export const SAME_TOOL_STOP = 60 // ...and past it, that tool is refused for the rest of the reply
+export const SLEEPS_FREE = 1 // commands that start by sleeping 20 s or more: the first runs, the next ones are refused
+export const SLEEPS_STOP = 4 // refused sleeps in a reply before it stops
+export const PENDING_WAIT_MINUTES = 5 // a connector result still running (a SQL statement) is awaited by the app this long
 
 // What a reply counts against limits: a token read from the cache costs about a
 // tenth of a new one, so it counts a tenth.
@@ -293,6 +418,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
   gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
+  cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
+  grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' },
   hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
@@ -334,11 +461,24 @@ export const customModel = (engine: EngineId, name: string): string => `${engine
 // A model to run with: a custom one with no name yet falls back to the default.
 export const usable = (m: Model | undefined): Model | undefined => (m?.id ? m : undefined)
 
+// Models a harness lists on its own (Codex's catalog), known once it's read: their names
+// show everywhere (an agent's page, Tuca's list), not just in the picker.
+const found = new Map<string, Model>()
+export const rememberModels = (list: Model[]): void => {
+  for (const m of list) found.set(customModel(m.engine, m.id), m)
+}
+// A Codex model as an agent keeps it: the app's own ids stay as they were, the rest go by name.
+export const codexValue = (slug: string): string => (MODELS.some((m) => m.id === slug) ? slug : customModel('codex', slug))
+
 export const modelInfo = (id: string): Model | undefined => {
   const listed = MODELS.find((m) => m.id === id)
   if (listed) return listed
-  const m = /^(claude|codex|opencode|pi|hermes):(.*)$/s.exec(id)
-  return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: L('Nome próprio', 'Custom name') } : undefined
+  const known = found.get(id)
+  if (known) return known
+  const engine = ENGINE_IDS.find((e) => id.startsWith(`${e}:`))
+  if (!engine) return undefined
+  const name = id.slice(engine.length + 1).trim()
+  return { id: name, engine, label: name, hint: L('Nome próprio', 'Custom name') }
 }
 
 export interface ConnectorTool {
@@ -712,4 +852,97 @@ export interface Report {
   agents: AgentReport[]
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
+}
+
+// ---------- the wiki ----------
+export type WikiAccess = 'none' | 'read'
+export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
+export interface WikiPageInfo {
+  title: string
+  kind: string // the page's tipo, from its frontmatter
+  summary: string // its first line worth reading
+  updatedAt: number
+  updatedBy: string // 'me', an agent's id, or 'outside' (changed in another app)
+}
+export interface WikiPage extends WikiPageInfo {
+  body: string // the Markdown, without the frontmatter
+  meta: Record<string, string>
+  hash: string // of the file as read: a save made on an older copy is refused
+  links: string[] // the titles it links to
+  missing: string[] // of those, the ones with no page yet
+  backlinks: string[] // the pages that link to it
+  file: string // where it is, inside the wiki's folder
+}
+export interface WikiHit {
+  title: string
+  kind: string
+  snippet: string // the matching part, with **marks**
+}
+export interface WikiVersion {
+  id: number
+  title: string
+  at: number
+  by: string
+  action: 'create' | 'edit' | 'delete'
+  before: string | null
+  after: string | null
+  reason?: string
+}
+export interface WikiSource {
+  id: string
+  file: string // "fontes/<date> <title>", inside the wiki's folder (a [[link]] target)
+  title: string
+  kind: 'conversation' | 'message' | 'note' | 'file' | 'link'
+  origin: { conversationId?: string; messageIds?: string[]; url?: string; original?: string } // original: the file as it came, inside the wiki's folder
+  status?: 'reading' | 'done' | 'failed' // a file, a link or a note while the curator reads it
+  error?: string
+  changes?: number // how many change packages it became
+  addedBy: string // 'me', 'auto' (the curator) or an agent's id
+  addedAt: number
+}
+// One change in a package: write a new page, add under a section of one, or swap an exact passage.
+export interface WikiOp {
+  op: 'create' | 'append' | 'replace'
+  page: string
+  kind?: string // for a new page
+  section?: string // for append: the ## heading it goes under (made if missing)
+  text?: string // create, append
+  old?: string // replace
+  new?: string // replace
+}
+export interface WikiChange {
+  id: string
+  at: number
+  by: string // 'auto' (the curator) or 'me'
+  state: 'pending' | 'applied' | 'refused' | 'conflict' | 'undone'
+  ops: WikiOp[]
+  reason?: string // why the curator thought it worth keeping
+  source?: { id: string; title: string; file: string }
+  decidedAt?: number
+}
+// What a review of the wiki found: something broken, missing or that no longer adds up.
+export interface WikiFinding {
+  id: string
+  at: number
+  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' // log: a page that reads like a record of what was done
+  pages: string[] // the pages it is about
+  text: string // what's wrong, in a sentence (Markdown, with [[links]])
+  name?: string // broken, missing: the page it would take
+  change?: WikiChange // the fix it suggests, waiting for approval
+}
+// What came in from an Obsidian vault.
+export interface WikiImport {
+  from: string // the vault's name
+  pages: number
+  attachments: number // images, PDFs and the like, copied along
+  skipped: string[] // files already in the wiki, left as they were
+  links: number // links between pages, in the whole wiki now
+  missing: number // links to pages nobody wrote yet
+  kinds: [string, number][] // the kinds the new pages got (their tipo, folder or first tag)
+}
+export interface WikiReview {
+  at?: number // the last review
+  running: boolean
+  error?: string // the last review failed
+  findings: WikiFinding[] // still open
 }

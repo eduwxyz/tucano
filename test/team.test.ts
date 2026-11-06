@@ -1,7 +1,8 @@
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { examples } from 'open-bot-avatar'
 import type { Agent } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { claudeParser } from '../src/core/engines/claude'
@@ -18,7 +19,7 @@ describe('the team as a file', () => {
     const a = fresh()
     a.saveConnector({ id: 'lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth' })
     a.saveAgent(agent('s', 'staff', { grants: { lin: 'read' } }))
-    a.saveAgent(agent('p', 'pm', { role: 'Produto', computer: false }))
+    a.saveAgent(agent('p', 'pm', { role: 'Produto', computer: false, customColor: '#ff00aa', picture: 'data:image/webp;base64,AAAA', avatar: examples[0] }))
     a.createConversation({ id: 'c1', kind: 'channel', name: 'simula-oab', members: ['s', 'p'] })
     a.saveSkill({ id: 'k', name: 'testes-do-core', description: 'Ao rodar testes', body: 'swift test', agents: ['s'], state: 'active', createdAt: 1, updatedAt: 1 })
     a.saveRoutine({ id: 'r', name: 'Issues novas', agentId: 'p', conversationId: 'c1', prompt: 'Planeje.', schedule: { days: [], time: '' }, trigger: { kind: 'poll', connectorId: 'lin', tool: 'list_issues', args: { label: 'agente' }, everyMinutes: 5 }, enabled: true, createdAt: 1 })
@@ -33,6 +34,10 @@ describe('the team as a file', () => {
     expect(importTeam(b, md, 2_000_000)).toBe('Importei 2 agentes, 1 skill, 1 canal, 1 rotina (desligadas).')
     const staff = b.agents().find((x) => x.handle === 'staff')!
     expect(staff).toMatchObject({ modelId: 'opus', grants: { lin2: 'read' }, computer: false })
+    // The drawn avatar and the color travel; the picture stays on its computer.
+    const pm = b.agents().find((x) => x.handle === 'pm')!
+    expect(pm).toMatchObject({ customColor: '#ff00aa', avatar: { id: examples[0]!.id } })
+    expect(pm.picture).toBeUndefined()
     expect(b.skills()[0]).toMatchObject({ name: 'testes-do-core', agents: [staff.id] })
     expect(b.routines()[0]).toMatchObject({ enabled: false, trigger: { kind: 'poll', connectorId: 'lin2' } })
     expect(importTeam(b, md, 2_000_000)).toBe('Nada novo: tudo já existia aqui.')
@@ -45,6 +50,16 @@ describe('the team as a file', () => {
     const file = backup(a, mkdtempSync(join(tmpdir(), 'bk-')))
     expect(existsSync(file)).toBe(true)
     expect(new Db(file).agents()[0]!.handle).toBe('staff')
+  })
+
+  it("keeps a backup named after the workspace, beside a week of older ones", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bk-'))
+    for (let d = 1; d <= 7; d++) writeFileSync(join(dir, `tucano-2026-10-0${d}-09-00.db`), '')
+    const file = backup(fresh(), dir, 'Empresa São Paulo')
+    expect(file.endsWith('-Empresa-Sao-Paulo.db')).toBe(true)
+    expect(existsSync(file)).toBe(true)
+    expect(readdirSync(dir)).toHaveLength(7)
+    expect(existsSync(join(dir, 'tucano-2026-10-01-09-00.db'))).toBe(false) // the oldest went
   })
 })
 

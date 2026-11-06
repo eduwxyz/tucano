@@ -186,8 +186,19 @@ export const noDocker = (): string =>
 // On Linux, a user outside the docker group gets "permission denied" on its socket.
 export const noDockerAccess = (): string =>
   L('Seu usuário não tem acesso ao Docker. Rode sudo usermod -aG docker $USER, saia e entre de novo na sessão.', "Your user has no access to Docker. Run sudo usermod -aG docker $USER, then log out and back in.")
-// What a failed docker call says about Docker itself, if anything.
-export function dockerProblem(stderr: string): string | undefined {
+// No docker command at all: spawn fails before Docker can say anything.
+export const dockerMissing = (): string =>
+  L('O Docker não está instalado neste computador. Instale o Docker (docs.docker.com/get-docker).', "Docker isn't installed on this computer. Install Docker (docs.docker.com/get-docker).")
+// A quick docker call that never answered (`late`): the daemon is stuck (on Linux, a service that fails to
+// start behind its socket leaves every docker command waiting).
+export const dockerStuck = (): string =>
+  osOf() === 'linux'
+    ? L('O Docker não está respondendo. Reinicie o serviço (sudo systemctl restart docker) ou o Docker Desktop.', "Docker isn't answering. Restart the service (sudo systemctl restart docker) or Docker Desktop.")
+    : L('O Docker não está respondendo. Reinicie o Docker Desktop.', "Docker isn't answering. Restart Docker Desktop.")
+// What a failed docker call says about Docker itself, if anything. `late`: it was killed by its timeout.
+export function dockerProblem(stderr: string, late = false): string | undefined {
+  if (late) return dockerStuck()
+  if (/spawn docker ENOENT/i.test(stderr)) return dockerMissing()
   if (/permission denied[^\n]*docker\.sock/i.test(stderr)) return noDockerAccess()
   if (/daemon|connect to the docker/i.test(stderr)) return noDocker()
   return undefined
@@ -315,7 +326,7 @@ const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
 // ---------- docker ----------
 
-type Exec = { code: number; stdout: string; stderr: string }
+type Exec = { code: number; stdout: string; stderr: string; late?: boolean } // late: killed by its timeout
 
 function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Exec> {
   return new Promise((resolve) => {
@@ -325,7 +336,13 @@ function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: num
     child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout = (stdout + d).slice(-2_000_000)))
     child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr = (stderr + d).slice(-200_000)))
     const kill = (): void => void child.kill('SIGKILL')
-    const timer = opts.timeoutMs ? setTimeout(kill, opts.timeoutMs) : null
+    let late = false // killed by the timeout, not by the caller
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          late = true
+          kill()
+        }, opts.timeoutMs)
+      : null
     opts.signal?.addEventListener('abort', kill, { once: true })
     child.on('error', (e) => {
       stderr += e.message
@@ -333,7 +350,7 @@ function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: num
     child.on('close', (code) => {
       if (timer) clearTimeout(timer)
       opts.signal?.removeEventListener('abort', kill)
-      resolve({ code: code ?? -1, stdout, stderr })
+      resolve({ code: code ?? -1, stdout, stderr, ...(late ? { late } : {}) })
     })
     child.stdin.on('error', () => {})
     child.stdin.end(opts.stdin ?? '')
@@ -344,6 +361,9 @@ export interface ToolOutcome {
   result: CallToolResult
   artifact?: Artifact
   service?: string
+  // The computer can't run at all (Docker is off or out of reach): what the person has to do. No other
+  // call will work either, so the turn ends here instead of trying tool after tool.
+  down?: string
 }
 
 export interface ComputerDeps {
@@ -351,12 +371,11 @@ export interface ComputerDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
-  gitRemote?: (agentId: string) => string | undefined // the app's GitHub proxy for this agent (spec §22)
 }
 
 export class Computers {
   private infos = new Map<string, ComputerInfo>()
-  private gitSet = new Set<string>() // computers whose git already goes through the proxy, this session
+  private gitSet = new Set<string>() // computers whose git was taken off the old GitHub proxy, this session
   private ports = new Map<string, Record<number, number>>()
   private starting = new Map<string, Promise<void>>()
   private prefix: string
@@ -397,13 +416,23 @@ export class Computers {
     this.deps.emit({ type: 'computer', computer: next })
   }
 
+  // Before a turn: when Docker was last seen off, whether it still is (what the person has to do), read
+  // again now. A quick `docker inspect`, which fails at once with the daemon down; nothing when it was fine,
+  // so a turn never waits on Docker for nothing.
+  async unavailable(agent: Agent): Promise<string | undefined> {
+    if (agent.computerKind === 'mac' || this.infos.get(agent.id)?.state !== 'no_docker') return undefined
+    await this.refresh(agent)
+    const info = this.infos.get(agent.id)
+    return info?.state === 'no_docker' ? info.detail : undefined
+  }
+
   // Reads the container's real state, for the agent page.
   async refresh(agent: Agent): Promise<void> {
     if (agent.computerKind === 'mac') return this.mac.refresh(agent)
     if (!agent.computer) return this.set(agent.id, { state: 'off', services: [] })
     const r = await docker(['inspect', '-f', '{{.State.Running}}', this.name(agent.id)], { timeoutMs: 10_000 })
     if (r.code !== 0) {
-      const problem = dockerProblem(r.stderr)
+      const problem = dockerProblem(r.stderr, r.late)
       return this.set(agent.id, { state: problem ? 'no_docker' : 'stopped', detail: problem, services: [] })
     }
     if (r.stdout.trim() !== 'true') return this.set(agent.id, { state: 'stopped', services: [] })
@@ -464,11 +493,11 @@ export class Computers {
     }
     if (state.code === 0 && running === 'true') {
       if (!this.ports.has(agentId)) await this.readPorts(agentId)
-      await this.pointGit(agentId)
+      await this.unpointGit(agentId)
       if (this.infos.get(agentId)?.state !== 'running') this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
       return
     }
-    const problem = dockerProblem(state.stderr)
+    const problem = dockerProblem(state.stderr, state.late)
     if (problem) {
       this.set(agentId, { state: 'no_docker', detail: problem })
       throw new Error(L(`O Docker não está disponível neste computador: ${problem} Peça pro usuário resolver.`, `Docker isn't available on this computer: ${problem} Ask the user to fix it.`))
@@ -520,19 +549,17 @@ export class Computers {
       await docker(['exec', name, 'bash', '-c', clean], { timeoutMs: 15_000 })
     }
     await this.readPorts(agentId)
-    await this.pointGit(agentId)
+    await this.unpointGit(agentId)
     this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
   }
 
-  // GitHub, by any of its URL forms, goes through the app's proxy, which adds the
-  // token outside the computer and lets through only what its lent folders allow.
-  private async pointGit(agentId: string): Promise<void> {
-    const via = this.deps.gitRemote?.(agentId)
-    if (!via || this.gitSet.has(agentId)) return
+  // A computer made when GitHub went through the app's proxy (push and PR from the agent's computer,
+  // since removed) still sends git there: those rewrites go, so git reaches GitHub as it would.
+  private async unpointGit(agentId: string): Promise<void> {
+    if (this.gitSet.has(agentId)) return
     const name = this.name(agentId)
-    for (const [from, match] of [['https://github.com/', '^https://github'], ['git@github.com:', '^git@github'], ['ssh://git@github.com/', '^ssh://']] as const) {
-      await docker(['exec', name, 'git', 'config', '--global', '--replace-all', `url.${via}.insteadOf`, from, match], { timeoutMs: 15_000 })
-    }
+    const drop = "for k in $(git config --global --name-only --get-regexp '^url\\..*/git/.*\\.insteadof$' 2>/dev/null | sed 's/\\.insteadof$//' | sort -u); do git config --global --remove-section \"$k\" 2>/dev/null; done; true"
+    await docker(['exec', name, 'bash', '-c', drop], { timeoutMs: 15_000 }).catch(() => {})
     this.gitSet.add(agentId)
   }
 
@@ -836,7 +863,9 @@ export class Computers {
     try {
       await this.ensure(agent.id)
     } catch (e) {
-      return { result: textResult(e instanceof Error ? e.message : String(e), true) }
+      const info = this.infos.get(agent.id)
+      const down = info?.state === 'no_docker' ? info.detail : undefined
+      return { result: textResult(e instanceof Error ? e.message : String(e), true), ...(down ? { down } : {}) }
     }
     switch (name) {
       case 'bash': {

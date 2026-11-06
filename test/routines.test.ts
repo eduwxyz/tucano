@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
-import { describeSchedule, nextRun, type Agent, type EngineId, type Message, type Routine, type Settings } from '../src/shared/types'
+import { describeSchedule, nextRun, routineCap, type Agent, type EngineId, type Message, type Routine, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
@@ -36,7 +36,7 @@ describe('schedule', () => {
 
 describe('routines', () => {
   const ready = { installed: true, loggedIn: true }
-  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, hermes: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({
     id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false, ...extra
   })
@@ -60,7 +60,7 @@ describe('routines', () => {
     clock = at(2026, 10, 19, 8, 0) // a Monday
     const base = fakeEngine('claude', { delayMs: 1 })
     const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes'), gemini: fakeEngine('gemini') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
     const emit = (_: CoreEvent): void => {}
     gateway = new Gateway()
     await gateway.start()
@@ -219,7 +219,7 @@ describe('routines', () => {
 
     await runner.send('d1', 'oi de novo') // its next turn sees the time and only its active routines
     await runner.idle()
-    expect(turns.at(-1)!.prompt).toMatch(/\[Edu · (dom|seg|ter|qua|qui|sex|sáb) \d\d\/\d\d \d\d:\d\d\]\noi de novo$/) // the time, with the weekday, in each message
+    expect(turns.at(-1)!.prompt).toMatch(/\[Edu · (dom|seg|ter|qua|qui|sex|sáb) \d\d\/\d\d \d\d:\d\d\]\noi de novo(\n|$)/) // the time, with the weekday, in each message
     expect(turns.at(-1)!.system).not.toContain('## Suas rotinas')
   })
 
@@ -238,6 +238,33 @@ describe('routines', () => {
     expect(routines.cancel(lia, mine.routine!.id).reply).toContain('apagada')
     expect(db.routines()).toHaveLength(MAX_AGENT_ROUTINES - 1)
   })
+
+  it("follows the agent's own limit, kept as a whole number of at least 1", () => {
+    const dm = db.conversation('d1')!
+    const ask = { nome: 'x', pedido: 'y', horario: '9:00' }
+    db.saveAgent({ ...db.agent('a1')!, maxRoutines: 2 })
+    const lia = db.agent('a1')!
+    expect(lia.maxRoutines).toBe(2) // survives a save and a load
+    const first = routines.schedule(lia, dm, ask)
+    routines.schedule(lia, dm, ask)
+    expect(routines.schedule(lia, dm, ask)).toMatchObject({ error: true, reply: expect.stringContaining('2 rotinas') as string })
+    expect(routines.schedule(lia, dm, { ...ask, horario: '10:00', substitui: first.routine!.id }).error).toBeFalsy() // replacing at the cap
+    expect(db.routines()).toHaveLength(2)
+
+    // Above the old fixed 10, with no upper bound.
+    db.saveAgent({ ...db.agent('a1')!, maxRoutines: 15 })
+    const busy = db.agent('a1')!
+    for (let i = 2; i < 15; i++) expect(routines.schedule(busy, dm, ask).error).toBeFalsy()
+    expect(routines.schedule(busy, dm, ask).error).toBe(true)
+
+    // Whatever reaches the core, the limit is a whole number, at least 1.
+    for (const [given, kept] of [[-3, 1], [0, 1], [2.7, 3], [Number.NaN, MAX_AGENT_ROUTINES]] as const) {
+      db.saveAgent({ ...db.agent('a1')!, maxRoutines: given })
+      expect(db.agent('a1')!.maxRoutines).toBe(kept)
+    }
+    expect(routines.schedule({ ...busy, maxRoutines: -3 }, db.conversation('d1')!, ask).reply).not.toContain('-3')
+    expect(routineCap(undefined)).toBe(MAX_AGENT_ROUTINES) // agents from before keep 10
+  })
 })
 
 describe('quiet hours', () => {
@@ -255,7 +282,7 @@ describe('quiet hours', () => {
 // A reply that fails is tried again in place, up to twice, and then stays failed.
 describe('routine retries', () => {
   const ready = { installed: true, loggedIn: true }
-  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false }
 
   let db: Db
@@ -267,6 +294,8 @@ describe('routine retries', () => {
   let turns: number
   let waits: number[]
   let notes: string[]
+  let fullTexts: (string | undefined)[]
+  let doneText: string
   let onWait: () => void
 
   beforeEach(async () => {
@@ -277,16 +306,18 @@ describe('routine retries', () => {
     turns = 0
     waits = []
     notes = []
+    fullTexts = []
+    doneText = 'Feito.'
     onWait = () => {}
     const flaky: Engine = {
       id: 'claude',
       async *run() {
         turns++
         if (turns <= failures) yield { type: 'error', message: `o provedor caiu (${turns})` }
-        else yield { type: 'done', text: 'Feito.', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+        else yield { type: 'done', text: doneText, usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const engines: Record<EngineId, Engine> = { claude: flaky, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), hermes: fakeEngine('hermes') }
+    const engines: Record<EngineId, Engine> = { claude: flaky, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
     gateway = new Gateway()
     await gateway.start()
     routines = new Routines({
@@ -295,7 +326,7 @@ describe('routine retries', () => {
       emit: () => {},
       now: () => clock,
       wait: async (ms) => (waits.push(ms), onWait()),
-      notify: (_title, body) => notes.push(body)
+      notify: (_title, shortText, _conversationId, fullText) => (notes.push(shortText), fullTexts.push(fullText))
     })
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-retry-w-')), gateway, routines })
   })
@@ -324,6 +355,21 @@ describe('routine retries', () => {
     expect(notes).toEqual(['Feito.'])
   })
 
+  it('a long result: the notification stays short, and the whole reply goes along for the phone', async () => {
+    failures = 0
+    doneText = `## Notícias de hoje\n\n${Array.from({ length: 5 }, (_, i) => `- Item ${i + 1}: ${'texto '.repeat(20).trim()}`).join('\n')}`
+    await fire()
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.length).toBeLessThanOrEqual(140)
+    expect(fullTexts).toEqual([doneText])
+  })
+
+  it('a failed routine sends only the short outcome to the phone', async () => {
+    failures = 99
+    await fire()
+    expect(fullTexts).toEqual([undefined])
+  })
+
   it('after the third failure it stops, says it tried three times, and notifies once', async () => {
     failures = 99
     await fire()
@@ -333,7 +379,7 @@ describe('routine retries', () => {
     expect(reply!.run).toMatchObject({ status: 'failed' })
     expect(reply!.run!.error).toBe('o provedor caiu (3). Tentei 3 vezes.')
     expect(notes).toHaveLength(1)
-    expect(notes[0]).toBe('Falhou: o provedor caiu (3). Tentei 3 vezes.')
+    expect(notes[0]).toBe('o provedor caiu (3). Abra pra resolver.') // the headline, and what to do
   })
 
   it('waiting, the reply says when the next try is', async () => {

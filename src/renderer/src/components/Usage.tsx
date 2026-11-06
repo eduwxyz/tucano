@@ -30,7 +30,7 @@ const shortTime = (at: number): string => {
 // The app's own turns go under one name; agents keep theirs.
 function whoOf(id: string, agents: Agent[]): { key: string; name: string; color: string } {
   const a = agents.find((x) => x.id === id)
-  if (a && isTeam(a)) return { key: a.id, name: a.name, color: `var(--c-${a.color})` }
+  if (a && isTeam(a)) return { key: a.id, name: a.name, color: a.customColor ?? `var(--c-${a.color})` }
   return { key: APP, name: L('Bastidores', 'Behind the scenes'), color: 'var(--text-3)' }
 }
 
@@ -76,7 +76,7 @@ export function UsagePage(): ReactNode {
   return (
     <Sheet wide title={L('Uso e limites', 'Usage and limits')} lede={subtitle}>
       {!u ? (
-        <p className="read-empty">{L('Calculando…', 'Crunching…')}</p>
+        <p className="read-empty">{L('Fazendo as contas…', 'Doing the math…')}</p>
       ) : (
         <>
           <Month u={u} claude={billing.find((b) => b.id === 'claude')?.status} />
@@ -385,7 +385,7 @@ function Backstage({ u }: { u: UsageReport }): ReactNode {
   const rows = [
     { key: 'router', name: L('Roteador', 'Router'), what: L('escolhe quem responde nos canais', 'picks who replies in channels'), tokens: of('router') },
     { key: 'memory', name: L('Memória', 'Memory'), what: L('resume conversas e sugere memórias', 'summarizes conversations and suggests memories'), tokens: of('memory') },
-    ...(tuca ? [{ key: 'tuca', name: 'Tuca', what: L('monta agentes com você', 'builds agents with you'), tokens: of(tuca.id) }] : [])
+    ...(tuca ? [{ key: 'tuca', name: 'Tuca', what: L('te ajuda com o Tucano e monta agentes', 'helps you with Tucano and builds agents'), tokens: of(tuca.id) }] : [])
   ]
   const total = rows.reduce((a, r) => a + r.tokens, 0)
   return (

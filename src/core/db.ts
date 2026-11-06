@@ -1,5 +1,43 @@
 import { DatabaseSync } from 'node:sqlite'
-import { CACHE_READ_WEIGHT, type Agent, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
+import { dirname, join } from 'node:path'
+import {
+  CACHE_READ_WEIGHT,
+  nextRun,
+  routineCap,
+  type Agent,
+  type AgentApp,
+  type AgentColor,
+  type Approval,
+  type ApprovalState,
+  type Artifact,
+  type ArtifactKind,
+  type Author,
+  type Connector,
+  type ConnectorAuth,
+  type ConnectorTool,
+  type Conversation,
+  type Effort,
+  type LentFolder,
+  type Memory,
+  type MemoryMode,
+  type MemoryState,
+  type Message,
+  type Receipt,
+  type Routine,
+  type RoutineRun,
+  type Run,
+  type Settings,
+  type Skill,
+  type SkillVersion,
+  type ThreadSummary,
+  type ToolClass,
+  type Trigger
+} from '../shared/types'
+
+const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -218,6 +256,55 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN kind TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN apps TEXT NOT NULL DEFAULT '[]';
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN fallback_model TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN account TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN fallback_account TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN max_routines INTEGER NOT NULL DEFAULT 10;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN custom_color TEXT;
+  ALTER TABLE agents ADD COLUMN picture TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN avatar TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN wiki TEXT;
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN wiki_capture INTEGER;
+  `,
+  `
+  ALTER TABLE messages ADD COLUMN thread_id TEXT;
+  CREATE INDEX messages_by_thread ON messages (conversation_id, thread_id, at);
+  `,
+  `
+  ALTER TABLE messages ADD COLUMN thread_summary TEXT;
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN threads INTEGER;
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS message_notifications (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL,
+    unread INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (message_id, phase)
+  );
+  INSERT OR IGNORE INTO message_notifications (message_id, phase)
+    SELECT id, COALESCE(json_extract(run, '$.status'), 'message') FROM messages;
+  CREATE INDEX IF NOT EXISTS message_notifications_unread ON message_notifications (message_id) WHERE unread = 1;
   `
 ]
 
@@ -235,10 +322,11 @@ export class Db {
   // "no agents", since someone may have deleted them all.
   created = false
 
-  constructor(file: string) {
+  constructor(private file: string) {
     this.db = new DatabaseSync(file)
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
-    this.migrate()
+    try { this.migrate(file) }
+    catch (error) { this.db.close(); throw error }
   }
 
   close(): void {
@@ -250,9 +338,92 @@ export class Db {
     this.db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`)
   }
 
-  private migrate(): void {
+  // Snapshot the live DB, then sanitize only the copy. Publish it only after
+  // VACUUM removes deleted history from its pages; no engine/browser files copy.
+  // The extra Claude Code and Codex logins stay too (their folders, and the Mac's keychain,
+  // are the source's): the copy's agents use the usual login.
+  // `wikiDir`: the source's wiki folder, which the copy uses too when the wiki comes along.
+  duplicateTo(file: string, name: string, parts: WorkspaceParts = ALL_PARTS, wikiDir?: string): void {
+    if (existsSync(file)) throw new Error('Workspace destination already exists')
+    // Keep the unsanitized snapshot with its source, not in the new workspace.
+    // A crash before sanitizing must not leave source memories in the copy.
+    const stagingDir = this.file === ':memory:' ? dirname(file) : join(dirname(this.file), 'backups')
+    mkdirSync(stagingDir, { recursive: true, mode: 0o700 })
+    const staging = join(stagingDir, `.workspace-copy-${randomUUID()}.preparing`)
+    let copy: Db | undefined
+    try {
+      this.backupTo(staging)
+      copy = new Db(staging)
+      const target = copy
+      target.db.exec('PRAGMA secure_delete = ON')
+      target.tx(() => {
+        target.db.exec(`
+          DELETE FROM messages;
+          DELETE FROM memories;
+          DELETE FROM approvals;
+          DELETE FROM receipts;
+          DELETE FROM artifacts;
+          DELETE FROM services;
+          UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL;
+          DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts');
+          UPDATE agents SET account = NULL, fallback_account = NULL;
+          DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
+        `)
+        target.keepOnly(parts)
+        if (!parts.wiki) target.db.prepare("DELETE FROM settings WHERE key = 'wikiDir'").run() // its own, empty
+        else if (wikiDir) target.setSettings({ wikiDir })
+        const setup = target.db.prepare("SELECT value FROM settings WHERE key = 'onboarding'").get() as { value: string } | undefined
+        const onboarding = setup ? JSON.parse(setup.value) as Settings['onboarding'] : undefined
+        // With its agents, a set-up workspace needs no introduction; without, it starts from what came.
+        const done = parts.agents && onboarding?.done !== false
+        target.setSettings({ workspaceLabel: name, onboarding: done ? { ...onboarding, done: true, workspaceManagerSeen: undefined } : { done: false, ...(parts.general ? { carried: true } : {}) } })
+        for (const r of target.routines()) {
+          const trigger: Trigger | undefined = r.trigger?.kind === 'webhook' ? { kind: 'webhook', token: randomUUID().replaceAll('-', '') }
+            : r.trigger?.kind === 'poll' ? { kind: 'poll', connectorId: r.trigger.connectorId, tool: r.trigger.tool, args: r.trigger.args, everyMinutes: r.trigger.everyMinutes } : undefined
+          target.saveRoutine({ ...r, lastAt: undefined, lastMessageId: undefined, trigger, nextAt: r.enabled && !trigger ? nextRun(r.schedule, Date.now()) : undefined })
+        }
+      })
+      target.db.exec('VACUUM; PRAGMA wal_checkpoint(TRUNCATE)')
+      target.close()
+      copy = undefined
+      renameSync(staging, file)
+    } finally {
+      copy?.close()
+      for (const path of [staging, `${staging}-wal`, `${staging}-shm`]) rmSync(path, { force: true })
+    }
+  }
+
+  // A copy keeps only what was picked to come along; what depends on something left behind goes,
+  // or comes without it: agents without connectors have no grants, a skill of agents left behind
+  // comes archived (with no agents it would apply to everyone), a routine needs its agent and place.
+  private keepOnly(parts: WorkspaceParts): void {
+    if (WORKSPACE_PARTS.every((p) => parts[p])) return
+    const kept = new Set(['seenVersion', 'theme', 'onboarding', ...(parts.general ? GENERAL_SETTINGS : []), ...(parts.context ? ['context'] : []), ...(parts.channels ? ['channelLayout', 'folded'] : [])])
+    for (const { key } of this.db.prepare('SELECT key FROM settings').all() as { key: string }[]) if (!kept.has(key)) this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+    if (!parts.general) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(JEV_KEY)
+    if (!parts.connectors) {
+      this.db.exec('DELETE FROM connectors; UPDATE agents SET grants = \'{}\', auto_approve = \'[]\'')
+      this.db.prepare('DELETE FROM secrets WHERE key <> ?').run(JEV_KEY) // the connectors' keys and logins, and GitHub's
+    }
+    if (!parts.agents) this.db.exec("DELETE FROM members; DELETE FROM conversations WHERE kind = 'dm'; DELETE FROM agents")
+    if (!parts.channels) this.db.exec("DELETE FROM conversations WHERE kind <> 'dm'")
+    if (!parts.skills) this.db.exec('DELETE FROM skill_versions; DELETE FROM skills')
+    else if (!parts.agents) this.db.exec("UPDATE skills SET state = 'archived' WHERE agents <> '[]'")
+    if (!parts.routines) this.db.exec('DELETE FROM routines')
+    const connectors = new Set(this.connectors().map((c) => c.id))
+    for (const r of this.routines())
+      if (!this.agent(r.agentId) || !this.conversation(r.conversationId) || (r.trigger?.kind === 'poll' && !connectors.has(r.trigger.connectorId))) this.removeRoutine(r.id)
+  }
+
+  private migrate(file: string): void {
     const { user_version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
     this.created = user_version === 0
+    // A copy from before the update, among the daily ones (and pruned with them).
+    if (user_version > 0 && user_version < MIGRATIONS.length && file !== ':memory:') {
+      const backups = join(dirname(file), 'backups')
+      mkdirSync(backups, { recursive: true })
+      this.backupTo(join(backups, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-schema-${user_version}.db`))
+    }
     for (let v = user_version; v < MIGRATIONS.length; v++) {
       this.tx(() => {
         this.db.exec(MIGRATIONS[v]!)
@@ -301,8 +472,12 @@ export class Db {
       color: str(r['color']) as AgentColor,
       instructions: str(r['instructions']),
       modelId: str(r['model']),
+      ...(str(r['account']) ? { accountId: str(r['account']) } : {}),
+      ...(str(r['fallback_model']) ? { fallbackModelId: str(r['fallback_model']) } : {}),
+      ...(str(r['fallback_account']) ? { fallbackAccountId: str(r['fallback_account']) } : {}),
       effort: str(r['effort']) as Effort,
       limit: Number(r['limit_tokens']),
+      maxRoutines: routineCap(Number(r['max_routines'])),
       used: this.usedThisMonth(str(r['id'])),
       grants: JSON.parse(str(r['grants']) || '{}') as Agent['grants'],
       memory: (str(r['memory_mode']) || 'auto') as MemoryMode,
@@ -310,6 +485,11 @@ export class Db {
       computerKind: str(r['computer_kind']) === 'mac' ? 'mac' : 'linux',
       web: r['web'] !== 0,
       browser: r['browser'] === 1,
+      apps: JSON.parse(str(r['apps']) || '[]') as AgentApp[],
+      ...(r['custom_color'] ? { customColor: str(r['custom_color']) } : {}),
+      ...(r['picture'] ? { picture: str(r['picture']) } : {}),
+      ...(r['avatar'] ? { avatar: JSON.parse(str(r['avatar'])) as Agent['avatar'] } : {}),
+      ...(r['wiki'] === 'none' || r['wiki'] === 'read' ? { wiki: r['wiki'] } : {}),
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
@@ -329,14 +509,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, computer_kind, web, browser, auto_approve, archived, kind, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, custom_color, picture, avatar, wiki, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
-           color = excluded.color, instructions = excluded.instructions, model = excluded.model, effort = excluded.effort,
-           limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind)`
+           color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
+           limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -354,7 +534,14 @@ export class Db {
   // ---------- conversations ----------
 
   conversations(): Conversation[] {
-    const rows = this.db.prepare('SELECT * FROM conversations ORDER BY created_at').all() as Row[]
+    // Only the unread rows are read (a partial index): a conversation with years of messages costs nothing here.
+    const rows = this.db
+      .prepare(
+        `SELECT c.*, COALESCE(u.n, 0) AS unread FROM conversations c
+         LEFT JOIN (SELECT m.conversation_id AS id, COUNT(*) AS n FROM message_notifications n JOIN messages m ON m.id = n.message_id WHERE n.unread = 1 GROUP BY m.conversation_id) u ON u.id = c.id
+         ORDER BY created_at`
+      )
+      .all() as Row[]
     const members = this.db.prepare('SELECT conversation_id, agent_id FROM members').all() as { conversation_id: string; agent_id: string }[]
     return rows.map((r) => ({
       id: str(r['id']),
@@ -364,7 +551,10 @@ export class Db {
       members: members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id),
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
-      summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined
+      summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
+      ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {}),
+      ...(r['threads'] === 1 ? { threads: true } : {}),
+      unread: Number(r['unread'])
     }))
   }
 
@@ -380,13 +570,23 @@ export class Db {
 
   createConversation(c: Omit<Conversation, 'unread'>): void {
     this.tx(() => {
-      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, created_at) VALUES (?, ?, ?, ?, ?)').run(c.id, c.kind, c.name, c.topic ?? null, Date.now())
+      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, threads, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(c.id, c.kind, c.name, c.topic ?? null, c.threads ? 1 : null, Date.now())
       for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(c.id, m)
     })
   }
 
   renameConversation(id: string, name: string): void {
     this.db.prepare('UPDATE conversations SET name = ? WHERE id = ?').run(name, id)
+  }
+
+  // Off: the wiki's curator leaves the conversation out. On is the default (stored as null).
+  setWikiCapture(id: string, on: boolean): void {
+    this.db.prepare('UPDATE conversations SET wiki_capture = ? WHERE id = ?').run(on ? null : 0, id)
+  }
+
+  // On: answers go in threads. Off, in the conversation, is the default (stored as null).
+  setThreads(id: string, on: boolean): void {
+    this.db.prepare('UPDATE conversations SET threads = ? WHERE id = ?').run(on ? 1 : null, id)
   }
 
   setTopic(id: string, topic: string | undefined): void {
@@ -425,6 +625,28 @@ export class Db {
 
   // ---------- messages ----------
 
+  markRead(conversationId: string): void {
+    this.db.prepare('UPDATE message_notifications SET unread = 0 WHERE unread = 1 AND message_id IN (SELECT id FROM messages WHERE conversation_id = ?)').run(conversationId)
+  }
+
+  unread(conversationId?: string): number {
+    const sql = 'SELECT COUNT(*) AS n FROM message_notifications n JOIN messages m ON m.id = n.message_id WHERE n.unread = 1'
+    const row = (conversationId ? this.db.prepare(`${sql} AND m.conversation_id = ?`).get(conversationId) : this.db.prepare(sql).get()) as { n: number }
+    return Number(row.n)
+  }
+
+  // True when this made the conversation's unread count go up.
+  recordActivity(message: Message, viewing: string | null): boolean {
+    if (message.author.kind !== 'agent' && message.author.kind !== 'routine') return false
+    const phase = message.run?.status ?? 'message'
+    if (phase !== 'message' && !['working', 'done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(phase)) return false
+    // A running reply counts once. If it was read while running, its completion
+    // is new content, but repeated terminal events and deltas must not count again.
+    const unread = message.conversationId !== viewing && (phase === 'working' || phase === 'message' || this.unread(message.conversationId) === 0)
+    const r = this.db.prepare('INSERT OR IGNORE INTO message_notifications (message_id, phase, unread) VALUES (?, ?, ?)').run(message.id, phase, unread ? 1 : 0)
+    return unread && Number(r.changes) > 0
+  }
+
   private toMessage(r: Row): Message {
     const kind = str(r['author_kind'])
     const author: Author =
@@ -436,7 +658,9 @@ export class Db {
       text: str(r['text']),
       at: Number(r['at']),
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
-      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined
+      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
+      threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
+      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {})
     }
   }
 
@@ -444,9 +668,37 @@ export class Db {
     return (this.db.prepare('SELECT * FROM messages ORDER BY at').all() as Row[]).map((r) => this.toMessage(r))
   }
 
-  recentMessages(conversationId: string, limit: number): Message[] {
-    const rows = this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY at DESC LIMIT ?').all(conversationId, limit) as Row[]
+  // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
+  recentMessages(conversationId: string, limit: number, threadId?: string | null): Message[] {
+    const where = threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?'
+    const args = typeof threadId === 'string' ? [conversationId, threadId, limit] : [conversationId, limit]
+    const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ?${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
+  }
+
+  // A thread's summary, on its first message; leave `until` out to keep it (a hand edit).
+  setThreadSummary(rootId: string, text: string, until?: number): void {
+    const kept = until ?? this.message(rootId)?.threadSummary?.until ?? 0
+    this.db.prepare('UPDATE messages SET thread_summary = ? WHERE id = ?').run(JSON.stringify({ text, until: kept, at: Date.now() } satisfies ThreadSummary), rootId)
+  }
+
+  // The messages that started a thread with replies in it.
+  threadRoots(conversationId: string): Set<string> {
+    const rows = this.db.prepare('SELECT DISTINCT thread_id FROM messages WHERE conversation_id = ? AND thread_id IS NOT NULL').all(conversationId) as Row[]
+    return new Set(rows.map((r) => str(r['thread_id'])))
+  }
+
+  // Threads quiet since `before`, active after `since`, with something said after their summary.
+  quietThreads(before: number, since: number): { id: string; conversationId: string; last: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.id, r.conversation_id, MAX(m.at) AS last, COALESCE(json_extract(r.thread_summary, '$.until'), 0) AS until
+         FROM messages r JOIN messages m ON m.thread_id = r.id
+         WHERE r.thread_id IS NULL AND m.author_kind != 'system'
+         GROUP BY r.id HAVING last < ? AND last > ? AND last > until ORDER BY last`
+      )
+      .all(before, since) as Row[]
+    return rows.map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']), last: Number(r['last']) }))
   }
 
   // Oldest first.
@@ -468,7 +720,7 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
       .run(
@@ -479,7 +731,8 @@ export class Db {
         m.text,
         m.at,
         m.run ? JSON.stringify(m.run) : null,
-        m.routine ? JSON.stringify(m.routine) : null
+        m.routine ? JSON.stringify(m.routine) : null,
+        m.threadId ?? null
       )
   }
 
@@ -658,6 +911,18 @@ export class Db {
       expiresAt: Number(r['expires_at']),
       decidedAt: r['decided_at'] ? Number(r['decided_at']) : undefined
     }
+  }
+
+  // The latest replies that ended badly, newest first: what went wrong, never what was said.
+  recentFailures(since: number, limit = 10): { agentId: string; conversationId: string; at: number; status: string; error?: string }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT author_id, conversation_id, at, json_extract(run, '$.status') AS status, json_extract(run, '$.error') AS error FROM messages
+         WHERE author_kind = 'agent' AND at >= ? AND json_extract(run, '$.status') IN ('failed', 'limit_reached', 'interrupted')
+         ORDER BY at DESC LIMIT ?`
+      )
+      .all(since, limit) as Row[]
+    return rows.map((r) => ({ agentId: str(r['author_id']), conversationId: str(r['conversation_id']), at: Number(r['at']), status: str(r['status']), ...(r['error'] ? { error: str(r['error']) } : {}) }))
   }
 
   approvals(): Approval[] {

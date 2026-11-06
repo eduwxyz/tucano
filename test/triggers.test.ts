@@ -11,7 +11,7 @@ import { eventItems, Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, hermes: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 const pm: Agent = { id: 'a1', name: 'PM', handle: 'pm', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false }
 const issue = (n: number, title: string) => ({ id: `uuid-${n}`, identifier: `SIM-${n}`, title, description: `detalhes ${n}` })
 
@@ -37,7 +37,7 @@ beforeEach(() => {
   issues = [issue(1, 'Lembrete duplicado')]
   failing = undefined
   const base = fakeEngine('claude', { delayMs: 1 })
-  const engines: Record<EngineId, Engine> = { claude: { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes'), gemini: fakeEngine('gemini') }
+  const engines: Record<EngineId, Engine> = { claude: { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
   const connectors = {
     list: () => [{ id: 'lin', name: 'Linear' } as Connector],
     call: async () => (failing ? textResult(failing, true) : textResult(JSON.stringify({ issues }))) // the shape Linear's MCP answers with
@@ -132,5 +132,62 @@ describe('eventItems', () => {
     expect(eventItems(JSON.stringify({ data: { workflow_runs: [{ id: 1, name: 'build' }] } })).map((i) => i.key)).toEqual(['1'])
     expect(eventItems(JSON.stringify({ issues: [{ id: 'OAB-65', uuid: '8ab2d95b-c681-4106-8728-d2487ec5d958', title: 'Artigo no toque' }], hasNextPage: true })).map((i) => i.title)).toEqual(['OAB-65 · Artigo no toque']) // Linear's MCP
     expect(eventItems('3 issues abertas')).toEqual([expect.objectContaining({ whole: true, title: 'a resposta mudou' })])
+  })
+})
+
+describe('trying a failed routine run again by hand', () => {
+  const failingOnce = (): void => {
+    let failing = true
+    const base = fakeEngine('claude', { delayMs: 1 })
+    const claude: Engine = {
+      id: 'claude',
+      async *run(t: Turn) {
+        turns.push(t)
+        if (failing) {
+          failing = false
+          yield { type: 'error', message: 'o provedor caiu' }
+        } else yield* base.run(t)
+      }
+    }
+    runner = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')) })
+  }
+  const failedReply = () => db.messages().find((m) => m.author.kind === 'agent')!
+
+  it('keeps the event, and forgets it once the reply is done', async () => {
+    failingOnce()
+    const r = create({ kind: 'webhook', token: '' })
+    routines.webhook((db.routine(r.id)!.trigger as { token: string }).token, 'Build falhou: DADO-DO-EVENTO')
+    await settle()
+    const failed = failedReply()
+    expect(failed.run!.status).toBe('failed')
+    turns = []
+    runner.retry(failed.id)
+    await settle()
+    expect(turns[0]!.prompt).toContain('DADO-DO-EVENTO')
+    expect(db.message(failed.id)!.run).toMatchObject({ status: 'done' })
+    expect(db.message(failed.id)!.run!.task).toBeUndefined()
+  })
+
+  it('a paused run goes on with its event too', async () => {
+    const r = create({ kind: 'webhook', token: '' })
+    routines.webhook((db.routine(r.id)!.trigger as { token: string }).token, 'Build falhou: DADO-DO-EVENTO')
+    await settle()
+    const reply = failedReply()
+    db.saveMessage({ ...reply, run: { ...reply.run!, status: 'paused', task: 'tarefa com DADO-DO-EVENTO' } })
+    turns = []
+    await runner.continue(reply.id)
+    await settle()
+    expect(turns[0]!.prompt).toContain('DADO-DO-EVENTO')
+  })
+
+  it('keeps a scheduled routine’s instructions too', async () => {
+    failingOnce()
+    const r = routines.save({ name: 'Bom dia', agentId: 'a1', conversationId: 'c1', prompt: 'Resuma o dia.', schedule: { days: [0, 1, 2, 3, 4, 5, 6], time: '09:00' }, enabled: true })
+    routines.runNow(r.id)
+    await settle()
+    turns = []
+    runner.retry(failedReply().id)
+    await settle()
+    expect(turns[0]!.prompt).toContain('Esta é a rotina "Bom dia"')
   })
 })

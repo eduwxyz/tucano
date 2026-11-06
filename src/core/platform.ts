@@ -2,7 +2,7 @@
 // code asks "open a terminal with this", "where is Chrome?", "how do I spawn this
 // CLI?", and never checks the platform itself. Most answers are a plain function
 // of the system, so they're tested for every system on any machine.
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 import { homedir, userInfo } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
@@ -89,6 +89,13 @@ export function chromeCandidates(os: Os = osOf(), env: NodeJS.ProcessEnv = proce
 
 export const findChrome = (os: Os = osOf(), exists: (p: string) => boolean = existsSync): string | undefined => chromeCandidates(os).find(exists)
 
+// On Linux, Chrome keeps the key to its cookies in the desktop's keyring (the D-Bus Secret Service)
+// and waits for it before the first page loads. A server on a desktop PC (Ubuntu with GNOME) has that
+// keyring locked, with nobody to open it, so every navigation hangs for good: the page's address is
+// set, the tab stays blank and nothing says why. The profile is the app's own, so on a server Chrome
+// uses its built-in store instead. A desktop keeps the keyring: its profiles' cookies are in it already.
+export const chromeKeyringFlags = (os: Os = osOf(), env: NodeJS.ProcessEnv = process.env): string[] => (os === 'linux' && env['TUCANO_SERVER'] === '1' ? ['--password-store=basic'] : [])
+
 // What a headless Chrome tells sites about the machine, matching the real one.
 export const userAgentPlatform = (os: Os = osOf(), arch: string = process.arch): { platform: string; platformVersion: string; architecture: string } => ({
   platform: systemName(os),
@@ -120,7 +127,9 @@ export const pathDirs = (): string[] => (process.env['PATH'] ?? process.env['Pat
 // the folder to PATH (Claude Code's native installer on Windows says so and moves
 // on). Each one that exists and isn't on the PATH yet is appended to it.
 export function withInstallDirs(path: string, os: Os = osOf(), home = homedir(), env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = existsSync): string {
-  const dirs = [join(home, '.local', 'bin'), ...(os === 'windows' ? [env['APPDATA'] && join(env['APPDATA'], 'npm')] : [])].filter((d): d is string => !!d)
+  // Windows: npm's global folder, and Cursor's installer (%LOCALAPPDATA%\cursor-agent).
+  // Grok's installer puts `grok` in ~/.grok/bin and may not add it to PATH.
+  const dirs = [join(home, '.local', 'bin'), join(home, '.grok', 'bin'), ...(os === 'windows' ? [env['APPDATA'] && join(env['APPDATA'], 'npm'), env['LOCALAPPDATA'] && join(env['LOCALAPPDATA'], 'cursor-agent')] : [])].filter((d): d is string => !!d)
   const have = path.split(delimiter).filter(Boolean)
   const same = (a: string, b: string): boolean => (os === 'windows' ? a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase() : a.replace(/\/+$/, '') === b.replace(/\/+$/, ''))
   const missing = dirs.filter((d) => exists(d) && !have.some((h) => same(h, d)))
@@ -252,3 +261,20 @@ export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.e
   }
   return { file: process.env['ComSpec'] || 'cmd.exe', args: ['/d', '/s', '/c', `"${command}"`], verbatim: true, kind: 'cmd', env }
 }
+
+// A new console window on Windows that runs a .cmd script and stays open (its output and
+// errors stay the person's). cmd reads a script in the console's code page, not UTF-8, so a
+// user folder like C:\Users\Glaúcia broke paths written into it: the script stays ASCII and
+// the paths go in environment variables, which Windows hands over intact.
+export function openWindowsConsole(script: string, lines: string[], env: Record<string, string> = {}): void {
+  writeFileSync(script, `@echo off\r\n${lines.join('\r\n')}\r\n`)
+  spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'cmd.exe', '/k', `"${script}"`], {
+    detached: true,
+    stdio: 'ignore',
+    windowsVerbatimArguments: true,
+    env: { ...process.env, ...env }
+  })
+    .on('error', () => {})
+    .unref()
+}
+

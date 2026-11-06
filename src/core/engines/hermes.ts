@@ -212,6 +212,7 @@ export function hermesEnv(appDir: string, home: string, base: NodeJS.ProcessEnv 
 export function hermesEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
   return {
     id: 'hermes',
+    keepsMcp: true,
     async *run(turn) {
       const path = bin()
       if (!path) {

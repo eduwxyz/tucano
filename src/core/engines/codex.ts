@@ -82,6 +82,17 @@ export const CODEX_DISABLED_FEATURES = [
 // read-only sandbox in an empty directory as a last line of defense. The prompt comes from stdin ("-"). The app's gateway,
 // when given, is the only MCP server, with its tools approved up front: the
 // gateway decides what runs.
+// Codex tells the model its sandbox is read-only, which it is on purpose (an empty folder), and a model
+// took that for the agent's computer: it answered "this session has read-only filesystem access"
+// without trying write_file, or tried Codex's own apply_patch and gave up. Said plainly, it writes
+// (GPT-6-Astra: 0 of 6 without it, 6 of 6 with it); hedged ("if you have a computer"), 1 of 3.
+// So only an agent whose instructions give it write_file gets it.
+const sandboxNote = (): string =>
+  L(
+    'O sandbox do próprio Codex aqui é só leitura e vazio de propósito: não é o seu computador, e o apply_patch e o shell dele não chegam lá. Os seus arquivos estão no seu computador: crie e mude com write_file e edit_file, que funcionam.',
+    "Codex's own sandbox here is read-only and empty on purpose: it isn't your computer, and its apply_patch and shell don't reach it. Your files are on your computer: create and change them with write_file and edit_file, which do work."
+  )
+
 export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl' | 'web' | 'images'>, provider: string[] = []): string[] {
   const gateway = turn.mcpUrl
     ? [
@@ -103,7 +114,7 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
     '-C', turn.cwd,
     '-m', turn.model,
     '-c', `model_reasoning_effort=${JSON.stringify(turn.effort)}`,
-    '-c', `developer_instructions=${JSON.stringify(turn.system)}`,
+    '-c', `developer_instructions=${JSON.stringify(turn.mcpUrl && turn.system.includes('write_file') ? `${turn.system}\n\n${sandboxNote()}` : turn.system)}`,
     '-c', 'skills.include_instructions=false',
     '-c', 'skills.bundled.enabled=false',
     '-c', `web_search=${turn.web ? '"live"' : '"disabled"'}`,
@@ -182,7 +193,7 @@ export function codexEngine(
       const p = await provider()
       const shell = await shellEnv() // read once per launch
       const keys = Object.fromEntries(p.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
-      yield* runCli({ bin: path, args: codexArgs(turn, p.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: { ...codexEnv(home), ...keys, ...p.env } })
+      yield* runCli({ bin: path, args: codexArgs(turn, p.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: { ...codexEnv(turn.account ?? home), ...keys, ...p.env } })
     }
   }
 }

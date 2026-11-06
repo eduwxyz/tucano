@@ -36,7 +36,9 @@ describe.skipIf(!enabled)('the Hermes engine end to end', () => {
     const gateway = new Gateway()
     await gateway.start()
     const called: string[] = []
-    gateway.agentTurn('iris', { tools: [TOOL], call: async (name) => (called.push(name), textResult('2 tasks: coffee and bread')) })
+    // The URL the CLI's own daemon is given stays the same from turn to turn (agentToken), the
+    // way runs.ts does it for an engine that holds its connection — parked between turns.
+    const turn = gateway.open({ tools: [TOOL], call: async (name) => (called.push(name), textResult('2 tasks: coffee and bread')) }, gateway.agentToken('iris'))
 
     const previous = process.env['HERMES_HOME']
     process.env['HERMES_HOME'] = userHome
@@ -47,14 +49,14 @@ describe.skipIf(!enabled)('the Hermes engine end to end', () => {
       // Nothing warms this root first: a cold root used to die on the CLI's own
       // imports ("No module named 'ruamel'"), so the engine has to prepare it.
 
-      const home = hermesHome(root, { system: 'You are Iris, a Tucano agent.', mcpUrl: gateway.agentUrl('iris'), web: false, agentKey: 'iris' }, userHome)
+      const home = hermesHome(root, { system: 'You are Iris, a Tucano agent.', mcpUrl: turn.url, web: false, agentKey: 'iris' }, userHome)
       expect(home).toContain(join('profiles', 'iris'))
 
       const events = []
       for await (const ev of hermesEngine(() => bin, root).run({
         model: 'probe/probe-model', effort: 'low', system: 'You are Iris, a Tucano agent.',
         prompt: 'list my tasks', blocks: ['list my tasks'], images: [], cwd: userHome,
-        agentKey: 'iris', signal: new AbortController().signal, mcpUrl: gateway.agentUrl('iris'), web: false
+        agentKey: 'iris', signal: new AbortController().signal, mcpUrl: turn.url, web: false
       })) {
         events.push(ev)
       }

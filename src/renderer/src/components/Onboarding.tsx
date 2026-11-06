@@ -20,6 +20,7 @@ import {
   modelInfo,
   usable,
   navigate,
+  openDialog,
   newChannel,
   refreshEngines,
   newAgentDraft,
@@ -41,11 +42,11 @@ import {
   isTeam
 } from '../store'
 import { HarnessList, ModelPicker, usableEngines } from './Harness'
-import { JevKey, LanguagePicker, ModelSelect, Toggle } from './Pages'
+import { ColorPicker, JevKey, LanguagePicker, LookPicker, ModelSelect, Toggle } from './Pages'
 import { Splash } from './Splash'
 import { Composer, MessageList } from './Conversation'
 import { draftAgent, UseDraft } from './Tuca'
-import { AgentAvatar, Icon, MeAvatar, type IconName } from './ui'
+import { AgentAvatar, Icon, MeAvatar, TucaMark, type IconName } from './ui'
 
 type Computer = 'none' | 'linux' | 'mac'
 
@@ -146,8 +147,6 @@ const TEMPLATES = (): Template[] => [
 // The introduction draws again when the language changes: the opening plays only once.
 let opened = false
 
-const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
-
 const STEPS = ['welcome', 'engine', 'models', 'you', 'tools', 'skills', 'agent', 'powers', 'first'] as const
 type Step = (typeof STEPS)[number]
 // The builder screen (the Tuca, from the sidebar) is the introduction's last three steps.
@@ -165,7 +164,7 @@ const readyModels = (engines: State['settings']['engines']): typeof MODELS => MO
 // A template fills in who the agent is; the model stays if it still works.
 function fromTemplate(a: Agent, t: Template, models: typeof MODELS): Agent {
   const model = MODELS.some((m) => m.id === a.modelId) ? (models.find((m) => m.id === a.modelId) ?? models[0]) : modelInfo(a.modelId) ? { id: a.modelId } : models[0]
-  return { ...a, name: t.name, role: t.role, color: t.color, instructions: t.instructions, modelId: model?.id ?? a.modelId, web: true }
+  return { ...a, name: t.name, role: t.role, color: t.color, customColor: undefined, instructions: t.instructions, modelId: model?.id ?? a.modelId, web: true }
 }
 
 export function Onboarding({ build = false, from }: { build?: boolean; from?: View } = {}): ReactNode {
@@ -184,9 +183,11 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   const [computer, setComputer] = useState<Computer>('none')
   const [task, setTask] = useState(() => TEMPLATES()[0]!.tasks[0]!)
   const [busy, setBusy] = useState(false)
-  // A new install picks both models; seeing the introduction again starts from what's set.
-  const [routerModel, setRouterModel] = useState(hasAgents ? settings.routerModel : '')
-  const [memoryModel, setMemoryModel] = useState(hasAgents ? settings.memoryModel : '')
+  // A new install picks both models; seeing the introduction again, or a workspace that brought
+  // another's settings, starts from what's set.
+  const keep = hasAgents || !!settings.onboarding?.carried
+  const [routerModel, setRouterModel] = useState(keep ? settings.routerModel : '')
+  const [memoryModel, setMemoryModel] = useState(keep ? settings.memoryModel : '')
   const [skills, setSkills] = useState<string[]>([])
   const [grants, setGrants] = useState<Record<string, GrantLevel>>({})
   // The first agent comes from the Tuca's card, or from the form for who prefers it.
@@ -200,7 +201,13 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   const models = readyModels(settings.engines)
   const ready = usableEngines(settings)
   const at = steps.indexOf(step)
-  const go = (s: Step): void => setStep(s)
+  // Which way the next step slides in: forward from the right, back from the left.
+  const [dir, setDir] = useState<'next' | 'back'>('next')
+  const [cheer, setCheer] = useState(false)
+  const go = (s: Step): void => {
+    setDir(steps.indexOf(s) < at ? 'back' : 'next')
+    setStep(s)
+  }
   const next = (): void => go(steps[at + 1]!)
   const back = (): void => go(steps[at - 1]!)
   const patch = (p: Partial<Agent>): void => setAgent((a) => ({ ...a, ...p }))
@@ -221,7 +228,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   }, [step])
 
   // The first harness that works sets the model; a template keeps it. Off a plan
-  // (a gateway, OpenCode, Pi, Hermes) the person picks from what the harness lists.
+  // (a gateway, OpenCode, Pi) the person picks from what the harness lists.
   useEffect(() => {
     const m = modelInfo(agent.modelId)
     if (m && ready.includes(m.engine)) return
@@ -271,6 +278,11 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
       await saveAgent(a, [channelId])
       if (fromTuca) settleDraft(fromTuca.messageId, a.id) // his card shows it was created
       await Promise.all(skills.map((source) => linkSkill(source).catch(() => undefined))) // for every agent; who uses each changes in Skills
+      // A beat for the Tuca to cheer before the channel opens (none with reduced motion).
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        setCheer(true)
+        await new Promise((done) => setTimeout(done, 650))
+      }
       updateSettings({ workspaceName: name.trim() || settings.workspaceName, context: context.trim(), routerModel, memoryModel, onboarding: { done: true } })
       navigate({ kind: 'conversation', id: channelId })
       sendMessage(channelId, `@${a.handle} ${task.trim()}`)
@@ -297,7 +309,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
 
       <div className="onb__scroll">
         <BuildMode.Provider value={build}>
-        <div className="onb__stage" key={step}>
+        <div className="onb__stage" key={step} data-dir={dir}>
           {step === 'welcome' && <Welcome name={name} setName={setName} onNext={next} />}
           {step === 'engine' && <Harnesses ready={ready.length > 0} onBack={back} onNext={next} />}
           {step === 'models' && <Models ready={ready} router={routerModel} setRouter={setRouterModel} memory={memoryModel} setMemory={setMemoryModel} onBack={back} onNext={next} />}
@@ -315,6 +327,11 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
         </div>
         </BuildMode.Provider>
       </div>
+      {cheer && (
+        <div className="onb-cheer" aria-hidden>
+          <TucaMark size={96} happy />
+        </div>
+      )}
     </div>
   )
 }
@@ -347,14 +364,14 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
         <h1>{L('Um time de agentes de IA, trabalhando no seu computador.', 'A team of AI agents, working on your computer.')}</h1>
         <p className="onb__lead">{L('Você conversa com eles em canais, como num chat do trabalho. Eles pesquisam, escrevem, programam e usam as suas ferramentas, e você decide até onde cada um vai.', 'You talk to them in channels, like a work chat. They research, write, code and use your tools, and you decide how far each one goes.')}</p>
         <ul className="onb__points">
-          <Point icon="zap" title={L('No harness que você já usa', 'On the harness you already use')}>
-            {L('Claude Code, Codex, OpenCode, Pi ou Hermes, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, OpenCode, Pi or Hermes, the way you set them up: on your plan, your company’s gateway or your providers.')}
+          <Point icon="zap" title={L('Nos programas que você já usa', 'In the tools you already use')}>
+            {L('Claude Code, Codex, OpenCode ou Pi, como você configurou: no seu plano, no gateway da empresa ou nos seus provedores.', 'Claude Code, Codex, OpenCode or Pi, the way you set them up: on your plan, your company’s gateway or your providers.')}
           </Point>
           <Point icon="shield" title={L('Você no controle', 'You’re in control')}>
             {L('Cada agente só usa o que você liberar. Comprar, publicar, enviar e apagar sempre esperam o seu ok.', 'Each agent only uses what you allow. Buying, publishing, sending and deleting always wait for your OK.')}
           </Point>
           <Point icon="lock" title={L('Tudo fica aqui', 'Everything stays here')}>
-            {L('Conversas, memória e logins ficam no seu computador. Nada passa por servidor nosso.', 'Conversations, memory and logins stay on your computer. Nothing goes through a server of ours.')}
+            {L('Conversas, memória e logins ficam no seu computador. Nada passa por um servidor do Tucano.', 'Conversations, memory and logins stay on your computer. Nothing goes through a Tucano server.')}
           </Point>
         </ul>
         <label className="onb__field">
@@ -439,13 +456,13 @@ function Harnesses({ ready, onBack, onNext }: { ready: boolean; onBack: () => vo
   return (
     <div className="onb__split">
       <section className="onb__main">
-        <span className="onb__kicker">{L('Passo 1 · Os harnesses', 'Step 1 · The harnesses')}</span>
-        <h1>{L('Quais harnesses seus agentes vão usar?', 'Which harnesses will your agents use?')}</h1>
-        <p className="onb__lead">{L('Os agentes rodam nos programas que já estão no seu computador, do jeito que você configurou cada um. O Tucano só lê essa configuração: nunca vê nem guarda as suas senhas e chaves.', 'The agents run on the programs already on your computer, the way you set up each one. Tucano only reads that setup: it never sees or stores your passwords and keys.')}</p>
+        <span className="onb__kicker">{L('Passo 1 · Onde rodam', 'Step 1 · Where they run')}</span>
+        <h1>{L('Onde seus agentes vão rodar?', 'Where will your agents run?')}</h1>
+        <p className="onb__lead">{L('No Claude Code, no Codex ou em outro que você já usa, do jeito que configurou cada um. O Tucano só lê essa configuração: nunca vê nem guarda as suas senhas e chaves.', 'In Claude Code, Codex or another one you already use, the way you set up each. Tucano only reads that setup: it never sees or stores your passwords and keys.')}</p>
         <HarnessList />
         {!ready && (
           <p className="onb__wait">
-            <span className="pulse" /> {L('Esperando um deles ficar pronto…', 'Waiting for one of them to be ready…')}
+            <span className="pulse" /> {L('Entre em um deles (no terminal que abriu) e eu sigo sozinho.', 'Sign in to one of them (in the terminal that opened) and I’ll move on.')}
           </p>
         )}
         <Nav onBack={onBack} onNext={onNext} disabled={!ready} />
@@ -455,17 +472,17 @@ function Harnesses({ ready, onBack, onNext }: { ready: boolean; onBack: () => vo
           <Icon name="zap" size={16} />
           <div>
             <p>
-              <strong>{L('O que eu leio de cada um', 'What I read from each one')}</strong>
+              <strong>{L('O que o Tucano lê de cada um', 'What Tucano reads from each one')}</strong>
             </p>
             <ul className="harness__guide">
               <li>
                 <b>{L('Plano:', 'Plan:')}</b> {L('o login do Claude ou do ChatGPT. Sem chave e sem cobrança por uso.', 'your Claude or ChatGPT login. No key and no pay-per-use.')}
               </li>
               <li>
-                <b>Gateway:</b> {L('o proxy da empresa (ou um provedor) que está no settings.json do Claude Code, no config.toml do Codex ou no config.yaml do Hermes. Os agentes usam o mesmo, e a telemetria fica desligada.', 'your company’s proxy (or a provider) in Claude Code’s settings.json, Codex’s config.toml, or Hermes’s config.yaml. The agents use the same one, and telemetry stays off.')}
+                <b>Gateway:</b> {L('o proxy da empresa (ou um provedor) que está no settings.json do Claude Code ou no config.toml do Codex. Os agentes usam o mesmo, e a telemetria fica desligada.', 'your company’s proxy (or a provider) in Claude Code’s settings.json or Codex’s config.toml. The agents use the same one, and telemetry stays off.')}
               </li>
               <li>
-                <b>{L('Provedores:', 'Providers:')}</b> {L('os logins do OpenCode, do Pi e do Hermes, com os modelos de cada um.', 'your OpenCode, Pi and Hermes logins, with each one’s models.')}
+                <b>{L('Provedores:', 'Providers:')}</b> {L('os logins do OpenCode e do Pi, com os modelos de cada um.', 'your OpenCode and Pi logins, with each one’s models.')}
               </li>
             </ul>
           </div>
@@ -486,7 +503,7 @@ function Models(p: { ready: EngineId[]; router: string; setRouter: (v: string) =
       <h1>{L('Quem decide e quem lembra.', 'Who decides and who remembers.')}</h1>
       <p className="onb__lead">{L('Dois trabalhos pequenos rodam o tempo todo, fora dos agentes. Escolha um modelo rápido pra cada um; dá pra trocar depois em Configurações.', 'Two small jobs run all the time, outside the agents. Pick a fast model for each; you can change them later in Settings.')}</p>
       <p className="onb-note">
-        <Icon name="zap" size={14} /> {L('Primeiro o harness, depois o modelo da lista dele. Se o seu não aparece, escolha', 'First the harness, then a model from its list. If yours isn’t there, pick')} <b>{L('Outro modelo…', 'Other model…')}</b> {L('e digite o nome.', 'and type its name.')}
+        <Icon name="zap" size={14} /> {L('Primeiro o programa (Claude Code, Codex…), depois o modelo da lista dele. Se o seu não aparece, escolha', 'First the tool (Claude Code, Codex…), then a model from its list. If yours isn’t there, pick')} <b>{L('Outro modelo…', 'Other model…')}</b> {L('e digite o nome.', 'and type its name.')}
       </p>
       <div className="onb-pair">
         <div className="onb-pick">
@@ -526,7 +543,7 @@ const STATUS = (): Record<string, { label: string; tone: string }> => ({
   connected: { label: L('conectado', 'connected'), tone: 'tag--ok' },
   connecting: { label: L('conectando…', 'connecting…'), tone: '' },
   needs_auth: { label: L('precisa autorizar', 'needs authorization'), tone: 'tag--warn' },
-  error: { label: L('erro', 'error'), tone: 'tag--danger' },
+  error: { label: L('não conectou', 'didn’t connect'), tone: 'tag--danger' },
   disconnected: { label: L('desconectado', 'disconnected'), tone: 'tag--warn' }
 })
 
@@ -656,13 +673,13 @@ function SkillsStep({ picked, setPicked, onBack, onNext }: { picked: string[]; s
 
 // ---------- 3. you ----------
 
-const ABOUT_EXAMPLES = (): string[] => (lang() === 'en' ? ['I’m a developer working on…', 'I run an online store that sells…', 'I’m studying for…', 'I prefer short, direct answers.'] : ['Sou dev e trabalho com…', 'Tenho uma loja online de…', 'Estudo para…', 'Prefiro respostas curtas e diretas.'])
+const ABOUT_EXAMPLES = (): string[] => (lang() === 'en' ? ['I’m a developer working on…', 'I run an online store that sells…', 'I’m studying for…', 'I prefer short, direct answers.'] : ['Sou dev e trabalho com…', 'Tenho uma loja online de…', 'Estudo pra…', 'Prefiro respostas curtas e diretas.'])
 
 function You({ name, context, setContext, onBack, onNext }: { name: string; context: string; setContext: (v: string) => void; onBack: () => void; onNext: () => void }): ReactNode {
   return (
     <section className="onb__main">
       <span className="onb__kicker">{L('Passo 3 · Você', 'Step 3 · You')}</span>
-      <h1>{name.trim() ? L(`${name.trim().split(' ')[0]}, conta um pouco sobre você.`, `${name.trim().split(' ')[0]}, tell us a bit about yourself.`) : L('Conta um pouco sobre você.', 'Tell us a bit about yourself.')}</h1>
+      <h1>{name.trim() ? L(`${name.trim().split(' ')[0]}, conta um pouco sobre você.`, `${name.trim().split(' ')[0]}, tell me a bit about yourself.`) : L('Conta um pouco sobre você.', 'Tell me a bit about yourself.')}</h1>
       <p className="onb__lead">{L('Todo agente lê isso antes de cada resposta, então ninguém precisa te perguntar de novo. Seu trabalho, seus projetos, como você gosta das respostas.', 'Every agent reads this before each reply, so nobody has to ask you again. Your work, your projects, how you like your answers.')}</p>
       <textarea
         className="onb__textarea"
@@ -745,8 +762,8 @@ function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: str
         <h1>{L('Conte pro Tuca o que você quer delegar', 'Tell Tuca what you want to delegate')}</h1>
         <p className="onb__lead">
           {build
-            ? L('Ele faz duas ou três perguntas e propõe um agente. Nada é criado sem você.', 'It asks two or three questions and proposes an agent. Nothing is created without you.')
-            : L('O Tuca monta os agentes do seu time. Ele faz duas ou três perguntas e propõe um; nada é criado sem você. Depois ele fica na barra lateral pra montar os próximos.', 'Tuca builds your team’s agents. It asks two or three questions and proposes one; nothing is created without you. Then it stays in the sidebar to build the next ones.')}
+            ? L('Ele faz duas ou três perguntas e propõe um agente. Nada é criado sem você.', 'He asks two or three questions and proposes an agent. Nothing is created without you.')
+            : L('O Tuca monta os agentes do seu time. Ele faz duas ou três perguntas e propõe um; nada é criado sem você. Depois ele fica na barra lateral pra montar os próximos.', 'Tuca builds your team’s agents. He asks two or three questions and proposes one; nothing is created without you. Then he stays in the sidebar to build the next ones.')}
         </p>
         <div className="onb__field onb__field--tuca-model">
           <span>{L('Modelo do Tuca', 'Tuca’s model')}</span>
@@ -791,7 +808,7 @@ function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: str
             {tuca && <AgentAvatar agent={tuca} size={64} />}
             <h2>Tuca</h2>
             <span className="muted">{L('Monta agentes', 'Builds agents')}</span>
-            <p className="muted small">{L('A proposta dele aparece aqui: nome, o que faz, modelo e o que pode acessar.', 'Its proposal shows up here: name, what it does, model and what it can access.')}</p>
+            <p className="muted small">{L('A proposta dele aparece aqui: nome, o que faz, modelo e o que pode acessar.', 'His proposal shows up here: name, what it does, model and what it can access.')}</p>
           </div>
         )}
       </aside>
@@ -815,7 +832,7 @@ function MakeAgent(p: {
       <section className="onb__main">
         <span className="onb__kicker">{useContext(BuildMode) ? L('Novo agente', 'New agent') : L('Passo 6 · Seu primeiro agente', 'Step 6 · Your first agent')}</span>
         <h1>{L('Quem vai trabalhar com você?', 'Who’s going to work with you?')}</h1>
-        <p className="onb__lead">{L('Comece por um modelo e ajuste o que quiser. Depois você monta o resto do time.', 'Start from a template and adjust anything. You build the rest of the team later.')}</p>
+        <p className="onb__lead">{L('Comece por um dos exemplos e ajuste o que quiser. Depois você monta o resto do time.', 'Start from one of the examples and adjust anything. You build the rest of the team later.')}</p>
         <div className="onb-templates">
           {TEMPLATES().map((t) => (
             <button key={t.id} className={`onb-template ${p.template.id === t.id ? 'is-active' : ''}`} onClick={() => p.pick(t)}>
@@ -833,17 +850,17 @@ function MakeAgent(p: {
             <input value={agent.name} placeholder={L('Ex.: Iris', 'E.g. Iris')} onChange={(e) => patch({ name: e.target.value })} />
           </label>
           <label className="onb__field">
-            <span>{L('Função', 'Role')}</span>
+            <span>{L('Papel', 'Role')}</span>
             <input value={agent.role} placeholder={L('Ex.: Pesquisa', 'E.g. Research')} onChange={(e) => patch({ role: e.target.value })} />
           </label>
         </div>
         <div className="onb__field">
           <span>{L('Cor', 'Color')}</span>
-          <div className="swatches">
-            {COLORS.map((c) => (
-              <button key={c} className={`swatch c-${c} ${agent.color === c ? 'is-active' : ''}`} onClick={() => patch({ color: c })} aria-label={c} />
-            ))}
-          </div>
+          <ColorPicker agent={agent} patch={patch} />
+        </div>
+        <div className="onb__field">
+          <span>{L('Aparência', 'Look')}</span>
+          <LookPicker agent={agent} patch={patch} />
         </div>
         <div className="onb__field">
           <span>{L('Modelo', 'Model')}</span>
@@ -868,7 +885,7 @@ function AgentCard({ agent, handle, computer }: { agent: Agent; handle: string; 
   const first = agent.instructions.trim().split(/(?<=\.)\s/)[0]
   return (
     <div className="onb-card">
-      <AgentAvatar agent={{ name, color: agent.color }} size={64} />
+      <AgentAvatar agent={{ ...agent, name }} size={64} />
       <h2>{name}</h2>
       <span className="muted">
         @{handle}
@@ -885,7 +902,7 @@ function AgentCard({ agent, handle, computer }: { agent: Agent; handle: string; 
         <Power on={!!agent.browser} icon="pointer" label={L('Navegador', 'Browser')} />
       </div>
       <div className="onb-card__bubble">
-        <AgentAvatar agent={{ name, color: agent.color }} size={22} />
+        <AgentAvatar agent={{ ...agent, name }} size={22} />
         <p>
           {L(`Oi! Eu sou ${agent.name.trim() ? `${agent.name.trim()}` : 'o seu agente'}.`, `Hi! I’m ${agent.name.trim() ? `${agent.name.trim()}` : 'your agent'}.`)}{first ? ` ${first}` : L(' Me diz o que eu faço e eu começo.', ' Tell me what I do and I’ll get started.')}
         </p>
@@ -918,6 +935,7 @@ function Powers(p: {
   const { agent, patch, computer } = p
   const name = agent.name.trim() || L('Ele', 'It')
   const connectors = useStore((s) => s.connectors)
+  const isolated = useStore((s) => s.isolatedComputers)
   return (
     <div className="onb__split">
       <section className="onb__main">
@@ -959,7 +977,9 @@ function Powers(p: {
                     ['linux', L('Linux isolado', 'Isolated Linux')],
                     ['mac', L('Este computador', 'This computer')]
                   ] as const
-                ).map(([k, label]) => (
+                )
+                  .filter(([k]) => k !== 'linux' || isolated)
+                  .map(([k, label]) => (
                   <button key={k} className={computer === k ? 'is-active' : ''} onClick={() => p.setComputer(k)}>
                     {label}
                   </button>
@@ -969,7 +989,7 @@ function Powers(p: {
               {computer === 'linux' && <p className="hint">{L('Um computador só dele, separado do seu. Instala e roda o que precisar sem pedir. Precisa do Docker rodando.', 'A computer of its own, apart from yours. It installs and runs what it needs without asking. Needs Docker running.')}</p>}
               {computer === 'mac' && (
                 <p className="hint hint--warn">
-                  <Icon name="lock" size={13} /> {L(`${agent.name.trim() || 'O agente'} roda comandos no seu computador como se fosse você, com tudo o que você tem instalado. Escolha só se confia nessa função.`, `${agent.name.trim() || 'The agent'} runs commands on your computer as if it were you, with everything you have installed. Only choose this if you trust that role.`)}
+                  <Icon name="lock" size={13} /> {L(`${agent.name.trim() || 'O agente'} roda comandos no seu computador como se fosse você, com tudo o que você tem instalado. Escolha só se confia nesse papel.`, `${agent.name.trim() || 'The agent'} runs commands on your computer as if it were you, with everything you have installed. Only choose this if you trust that role.`)}
                 </p>
               )}
             </div>
@@ -1088,7 +1108,8 @@ interface Item {
   title: string
   how: string
   done: (s: State) => boolean
-  go: (s: State) => View
+  go?: (s: State) => View
+  open?: () => void
   action: string
 }
 
@@ -1098,7 +1119,7 @@ const firstChannel = (s: State): View => {
 }
 
 const ITEMS = (): Item[] => [
-  { id: 'agent', title: L('Criar seu primeiro agente', 'Create your first agent'), how: L('Feito na introdução.', 'Done in the introduction.'), done: (s) => s.agents.some(isTeam), go: () => ({ kind: 'tuca' }), action: L('Criar', 'Create') },
+  { id: 'agent', title: L('Criar seu primeiro agente', 'Create your first agent'), how: L('Converse com o Tuca e ele monta um pra você.', 'Chat with Tuca and he builds one for you.'), done: (s) => s.agents.some(isTeam), go: () => ({ kind: 'tuca' }), action: L('Criar', 'Create') },
   {
     id: 'reply',
     title: L('Ver um agente trabalhando', 'Watch an agent work'),
@@ -1154,11 +1175,19 @@ const ITEMS = (): Item[] => [
     done: (s) => !!s.settings.telegram?.chat,
     go: () => ({ kind: 'settings' }),
     action: L('Configurações', 'Settings')
+  },
+  {
+    id: 'workspaces',
+    title: L('Conhecer os workspaces', 'Explore workspaces'),
+    how: L('Separe seus contextos. Crie, duplique e gerencie seus workspaces.', 'Keep your contexts separate. Create, duplicate and manage your workspaces.'),
+    done: (s) => !!s.settings.onboarding?.workspaceManagerSeen,
+    open: () => openDialog({ kind: 'workspaces' }),
+    action: L('Workspaces', 'Workspaces')
   }
 ]
 
 export function GettingStarted(): ReactNode {
-  const items = ITEMS()
+  const items = ITEMS().filter((item) => item.id !== 'workspaces' || !!window.tucano.workspaces)
   const done = useStore((s) => items.map((i) => i.done(s)))
   const onboarding = useStore((s) => s.settings.onboarding)
   const [open, setOpen] = useState(false)
@@ -1193,7 +1222,8 @@ export function GettingStarted(): ReactNode {
                   <button
                     className={`btn btn--sm ${i === nextIndex ? 'btn--primary' : ''}`}
                     onClick={() => {
-                      navigate(item.go(getState()))
+                      if (item.open) item.open()
+                      else if (item.go) navigate(item.go(getState()))
                       setOpen(false)
                     }}
                   >
@@ -1219,7 +1249,7 @@ export function GettingStarted(): ReactNode {
           </span>
         </span>
         <span className="getting__track">
-          <span style={{ width: `${(count / items.length) * 100}%` }} />
+          <span style={{ transform: `scaleX(${count / items.length})` }} />
         </span>
       </button>
     </div>
