@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { CATALOG, catalogInput, CATEGORIES, entryOf, GOOGLE_APIS, googleScopes, sameServer, searchCatalog } from '../src/shared/connector-catalog'
+import { CATALOG, catalogInput, CATEGORIES, entryOf, GOOGLE_APIS, ownAppOf, sameServer, searchCatalog, SLACK_SCOPES, slackAppLink } from '../src/shared/connector-catalog'
 import { LOGOS } from '../src/renderer/src/connector-logos'
 
 describe('the connector catalog', () => {
   it('lists each service once, at an https address, in a category that exists', () => {
-    expect(CATALOG.length).toBe(45)
+    expect(CATALOG.length).toBe(46)
     expect(new Set(CATALOG.map((c) => c.id)).size).toBe(CATALOG.length)
     const remote = CATALOG.filter((c) => !c.local)
     expect(new Set(remote.map((c) => c.url)).size).toBe(remote.length)
@@ -74,23 +74,35 @@ describe('the connector catalog', () => {
   })
 
   it("signs in to Google's five with the person's app, asking only what their tools need", () => {
-    const google = CATALOG.filter((c) => c.google)
+    const google = CATALOG.filter((c) => c.app?.provider === 'google')
     expect(google.map((c) => c.id)).toEqual(['gmail', 'google-calendar', 'google-drive', 'google-docs', 'google-sheets'])
     for (const c of google) {
       expect(c.category, c.name).toBe('google')
       expect(c.url, c.name).toMatch(/^https:\/\/\w+mcp\.googleapis\.com\/mcp\/v1$/)
       expect(LOGOS[c.id], c.name).toBeDefined()
-      for (const s of c.google!) expect(s, c.name).toMatch(/^https:\/\/www\.googleapis\.com\/auth\/[\w.]+$/)
+      for (const s of c.app!.scopes) expect(s, c.name).toMatch(/^https:\/\/www\.googleapis\.com\/auth\/[\w.]+$/)
     }
     // Nothing that sends email or deletes it for good, nor Drive's full access.
-    const all = google.flatMap((c) => c.google!)
+    const all = google.flatMap((c) => c.app!.scopes)
     expect(all).not.toContain('https://mail.google.com/')
     expect(all).not.toContain('https://www.googleapis.com/auth/gmail.send')
     expect(all).not.toContain('https://www.googleapis.com/auth/drive')
-    expect(googleScopes('https://gmailmcp.googleapis.com/mcp/v1/')).toEqual(['https://www.googleapis.com/auth/gmail.modify'])
-    expect(googleScopes('https://mcp.linear.app/mcp')).toBeUndefined()
+    expect(ownAppOf('https://gmailmcp.googleapis.com/mcp/v1/')).toEqual({ provider: 'google', scopes: ['https://www.googleapis.com/auth/gmail.modify'] })
+    expect(ownAppOf('https://mcp.linear.app/mcp')).toBeUndefined()
     // Each service's API and its MCP one, turned on in one page.
     expect(GOOGLE_APIS).toEqual(expect.arrayContaining(['calendar-json.googleapis.com', 'calendarmcp.googleapis.com', 'gmail.googleapis.com', 'gmailmcp.googleapis.com']))
     expect(GOOGLE_APIS).toHaveLength(10)
+  })
+
+  it("makes Slack's app from a link, with MCP on and the address the sign-in comes back to", () => {
+    expect(ownAppOf('https://mcp.slack.com/mcp')).toEqual({ provider: 'slack', scopes: SLACK_SCOPES })
+    const link = new URL(slackAppLink('http://localhost:47717/oauth/callback'))
+    expect(`${link.origin}${link.pathname}`).toBe('https://api.slack.com/apps')
+    expect(link.searchParams.get('new_app')).toBe('1')
+    const manifest = JSON.parse(link.searchParams.get('manifest_json')!)
+    expect(manifest.settings.is_mcp_enabled).toBe(true)
+    expect(manifest.oauth_config.redirect_urls).toEqual(['http://localhost:47717/oauth/callback'])
+    expect(manifest.oauth_config.scopes.user).toEqual(SLACK_SCOPES)
+    expect(manifest.oauth_config.scopes.bot).toBeUndefined() // the agents act as the person, with a user token
   })
 })

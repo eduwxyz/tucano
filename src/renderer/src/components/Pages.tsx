@@ -68,7 +68,8 @@ import { voiceRefusal } from '../../../shared/voice'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
-import { ConnectorGrid } from './ConnectorStore'
+import { ConnectorGrid, OwnAppSetup } from './ConnectorStore'
+import { entryOf } from '../../../shared/connector-catalog'
 import { ApprovalCard, toolWords } from './Conversation'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
@@ -1142,6 +1143,8 @@ export function ConnectorsPage(): ReactNode {
 // A connector's state, who uses it and its tools, in a window over the page.
 function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void }): ReactNode {
   const users = useStore((s) => s.agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none'))
+  const own = entryOf(c)?.app // signs in with the person's own app: it can be changed here
+  const [changing, setChanging] = useState(false)
   return (
     <Modal title={c.name} onClose={onClose} className="connector-modal">
       <div className="connector-modal__body">
@@ -1179,6 +1182,11 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
           {c.status !== 'connecting' && (
             <button className="btn btn--sm" onClick={() => reconnectConnector(c.id)}>
               {c.status === 'connected' ? L('Atualizar ferramentas', 'Refresh tools') : L('Conectar de novo', 'Reconnect')}
+            </button>
+          )}
+          {own && (
+            <button className="btn btn--ghost btn--sm" onClick={() => setChanging(true)}>
+              {own.provider === 'google' ? L('Seu app do Google', 'Your Google app') : L('Seu app do Slack', 'Your Slack app')}
             </button>
           )}
           <span className="grow" />
@@ -1227,6 +1235,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
         ))}
         <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
       </div>
+      {changing && own && <OwnAppSetup provider={own.provider} onClose={() => setChanging(false)} />}
     </Modal>
   )
 }

@@ -147,7 +147,13 @@ describe("Google's connectors", () => {
       emit: () => {},
       openUrl: () => {},
       oauthCallbackUrl: () => 'http://127.0.0.1:1/oauth/callback',
-      googleScopes: (url) => (url?.startsWith(gBase) ? ['https://www.googleapis.com/auth/gmail.modify'] : undefined)
+      fixedCallbackUrl: () => 'http://localhost:47717/oauth/callback',
+      ownAppOf: (url) =>
+        url === `${gBase}/mcp/v1/slack`
+          ? { provider: 'slack', scopes: ['chat:write', 'search:read.public'] }
+          : url?.startsWith(gBase)
+            ? { provider: 'google', scopes: ['https://www.googleapis.com/auth/gmail.modify'] }
+            : undefined
     })
   })
 
@@ -165,14 +171,14 @@ describe("Google's connectors", () => {
   })
 
   it("takes only a Google client ID, and never shows the secret back", async () => {
-    await expect(gConnectors.setGoogleApp({ clientId: 'abc', clientSecret: 's' })).rejects.toThrow(/googleusercontent/)
-    await expect(gConnectors.setGoogleApp({ clientId: '1-a.apps.googleusercontent.com', clientSecret: ' ' })).rejects.toThrow(/chave secreta/)
-    await gConnectors.setGoogleApp({ clientId: ' 1-a.apps.googleusercontent.com ', clientSecret: 'GOCSPX-s' })
-    expect(await gConnectors.googleApp()).toEqual({ clientId: '1-a.apps.googleusercontent.com' })
+    await expect(gConnectors.setOwnApp('google', { clientId: 'abc', clientSecret: 's' })).rejects.toThrow(/googleusercontent/)
+    await expect(gConnectors.setOwnApp('google', { clientId: '1-a.apps.googleusercontent.com', clientSecret: ' ' })).rejects.toThrow(/chave secreta/)
+    await gConnectors.setOwnApp('google', { clientId: ' 1-a.apps.googleusercontent.com ', clientSecret: 'GOCSPX-s' })
+    expect(await gConnectors.ownApp('google')).toEqual({ clientId: '1-a.apps.googleusercontent.com', redirectUrl: 'http://127.0.0.1:1/oauth/callback' })
   })
 
   it('signs in with that app, asking for its scopes and a refresh token, and renews with its secret', async () => {
-    await gConnectors.setGoogleApp({ clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-s' })
+    await gConnectors.setOwnApp('google', { clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-s' })
     const id = await gConnectors.add({ name: 'Gmail', kind: 'remote', url: `${gBase}/mcp/v1`, auth: 'oauth' })
     await gConnectors.connect(id)
     const page = new URL((await gConnectors.authorize(id))!)
@@ -195,16 +201,36 @@ describe("Google's connectors", () => {
   })
 
   it('signs the Google connectors out when the app changes, and keeps them with the same one', async () => {
-    await gConnectors.setGoogleApp({ clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-s' })
+    await gConnectors.setOwnApp('google', { clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-s' })
     const gmail = await gConnectors.add({ name: 'Gmail', kind: 'remote', url: `${gBase}/mcp/v1`, auth: 'oauth' })
     const other = await gConnectors.add({ name: 'Linear', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
     await secrets.setJson(`connector:${gmail}:oauth_tokens`, { access_token: 'a', token_type: 'Bearer' })
     await secrets.setJson(`connector:${other}:oauth_tokens`, { access_token: 'b', token_type: 'Bearer' })
-    await gConnectors.setGoogleApp({ clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-new' })
+    await gConnectors.setOwnApp('google', { clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-new' })
     expect(await secrets.getJson(`connector:${gmail}:oauth_tokens`)).toBeDefined()
-    await gConnectors.setGoogleApp({ clientId: '2-b.apps.googleusercontent.com', clientSecret: 'GOCSPX-b' })
+    await gConnectors.setOwnApp('google', { clientId: '2-b.apps.googleusercontent.com', clientSecret: 'GOCSPX-b' })
     expect(await secrets.getJson(`connector:${gmail}:oauth_tokens`)).toBeUndefined()
     expect(await secrets.getJson(`connector:${other}:oauth_tokens`)).toBeDefined()
+  })
+
+  it("signs Slack in with the person's app, back to the fixed address its app registered", async () => {
+    await expect(gConnectors.setOwnApp('slack', { clientId: '1-a.apps.googleusercontent.com', clientSecret: 's' })).rejects.toThrow(/Slack/)
+    const id = await gConnectors.add({ name: 'Slack', kind: 'remote', url: `${gBase}/mcp/v1/slack`, auth: 'oauth' })
+    await gConnectors.authorize(id)
+    expect(gConnectors.get(id)!.error).toMatch(/app do Slack/)
+
+    await gConnectors.setOwnApp('slack', { clientId: '123.456', clientSecret: 'shh' })
+    expect(await gConnectors.ownApp('slack')).toEqual({ clientId: '123.456', redirectUrl: 'http://localhost:47717/oauth/callback' })
+    expect(await gConnectors.ownApp('google')).toEqual({ redirectUrl: 'http://127.0.0.1:1/oauth/callback' }) // apart from Google's
+    await gConnectors.settled() // saving the app tried the connector again, on its own
+    expect(gConnectors.get(id)!.status).toBe('needs_auth')
+    const page = new URL((await gConnectors.authorize(id))!)
+    expect(page.searchParams.get('client_id')).toBe('123.456')
+    expect(page.searchParams.get('redirect_uri')).toBe('http://localhost:47717/oauth/callback')
+    expect(page.searchParams.get('scope')).toBe('chat:write search:read.public')
+    expect(page.searchParams.has('access_type')).toBe(false) // Google's alone
+    await gConnectors.finishOAuthFromUrl(`http://localhost:47717/oauth/callback?code=s1&state=${page.searchParams.get('state')}`).catch(() => {})
+    expect(new URLSearchParams(tokenBodies[0]).get('redirect_uri')).toBe('http://localhost:47717/oauth/callback')
   })
 })
 

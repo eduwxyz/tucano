@@ -1,11 +1,11 @@
 // The connectors the app offers ready to add: official remote MCP servers that an app it has never
 // met (Tucano) can sign in to by itself, through the browser (OAuth with dynamic registration and
 // PKCE), or that need no sign-in at all. Each was probed on 2026-11-05; a server that only takes an
-// app registered ahead of time (HubSpot, Box, Asana's current one; Slack, Outlook and Teams) isn't
-// here: it's added by hand. Some ask a few things first (the address of your own instance, a token)
-// or run the service's official server on this computer. Google's sign-in takes no app it hasn't met
-// either, so the person registers one in their own Google Cloud project, once, and all of Google's
-// connectors sign in with it.
+// app registered ahead of time (HubSpot, Box, Asana's current one; Outlook and Teams) isn't here:
+// it's added by hand. Some ask a few things first (the address of your own instance, a token) or run
+// the service's official server on this computer. Google's and Slack's sign-in take no app they haven't
+// met either, so the person makes one, once (in Google Cloud, in their Slack workspace), and signs in
+// with it.
 import { L } from './lang'
 import type { ConnectorInput } from './types'
 
@@ -31,8 +31,11 @@ export interface CatalogEntry {
   about: () => string // a few words: what the agents get
   local?: { command: string; args: string[]; env?: Record<string, string> } // runs on this computer
   fields?: CatalogField[]
-  google?: string[] // one of Google's: signs in with the person's Google app, asking for these scopes
+  app?: { provider: AppProvider; scopes: string[] } // signs in with the person's own app, asking for these scopes
 }
+
+// Whose sign-in needs an app the person makes: Google's (one for its five servers) and Slack's.
+export type AppProvider = 'google' | 'slack'
 
 export const CATEGORIES = (): { id: CatalogCategory; name: string }[] => [
   { id: 'google', name: 'Google' },
@@ -75,10 +78,21 @@ const tokenField = (placeholder: string, hint: () => string, label = (): string 
 // Google's own MCP servers. The scopes are what their tools need, short of the full ones: Gmail
 // drafts but never sends nor deletes for good, Drive reads all and writes only what it made or opened.
 const DRIVE = ['drive.readonly', 'drive.file']
-const g = (id: string, name: string, host: string, pt: string, en: string, scopes: string[]): CatalogEntry => ({
-  ...e(id, name, `https://${host}.googleapis.com/mcp/v1`, 'google', pt, en),
-  google: scopes.map((s) => `https://www.googleapis.com/auth/${s}`)
+const g = (id: string, name: string, host: string, pt: string, en: string, scopes: string[]): CatalogEntry =>
+  e(id, name, `https://${host}.googleapis.com/mcp/v1`, 'google', pt, en, 'oauth', { app: { provider: 'google', scopes: scopes.map((s) => `https://www.googleapis.com/auth/${s}`) } })
+
+// What Slack's server offers, all of it: the app is the person's, made for this, and each tool still
+// goes through the classes and approvals here.
+export const SLACK_SCOPES = 'canvases:read canvases:write channels:history channels:read channels:write chat:write emoji:read files:read files:write groups:history groups:read groups:write im:history im:read im:write lists:read lists:write mpim:history mpim:read mpim:write reactions:read reactions:write search:read.files search:read.im search:read.mpim search:read.private search:read.public search:read.users users:read users:read.email'.split(' ')
+
+// The Slack app the person makes from a link, filled in: its user scopes, MCP turned on, and the
+// address the sign-in comes back to, which Slack takes only as registered, port and all.
+export const slackManifest = (redirectUrl: string): Record<string, unknown> => ({
+  display_information: { name: 'Tucano', description: L('Os agentes do Tucano no seu Slack, pelo servidor MCP do Slack.', "Tucano's agents in your Slack, through Slack's MCP server.") },
+  oauth_config: { redirect_urls: [redirectUrl], scopes: { user: SLACK_SCOPES } },
+  settings: { is_mcp_enabled: true, org_deploy_enabled: false, socket_mode_enabled: false, token_rotation_enabled: false }
 })
+export const slackAppLink = (redirectUrl: string): string => `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(JSON.stringify(slackManifest(redirectUrl)))}`
 
 export const CATALOG: CatalogEntry[] = [
   g('gmail', 'Gmail', 'gmailmcp', 'E-mails, rascunhos e marcadores', 'Email, drafts and labels', ['gmail.modify']),
@@ -140,6 +154,7 @@ export const CATALOG: CatalogEntry[] = [
     ]
   }),
 
+  e('slack', 'Slack', 'https://mcp.slack.com/mcp', 'work', 'Mensagens, canais, canvases e listas', 'Messages, channels, canvases and lists', 'oauth', { app: { provider: 'slack', scopes: SLACK_SCOPES } }),
   e('notion', 'Notion', 'https://mcp.notion.com/mcp', 'work', 'Páginas, bancos e documentos', 'Pages, databases and docs'),
   e('atlassian', 'Jira e Confluence', 'https://mcp.atlassian.com/v2/mcp', 'work', 'Issues do Jira e páginas do Confluence', 'Jira issues and Confluence pages'),
   e('trello', 'Trello', 'https://mcp.trello.com/v1', 'work', 'Quadros, listas e cartões', 'Boards, lists and cards'),
@@ -250,8 +265,8 @@ export function searchCatalog(query: string, entries: CatalogEntry[] = CATALOG):
   return entries.filter((c) => words.every((w) => text(c).includes(w)))
 }
 
-// The scopes a Google connector asks for, by its address; undefined for any other server.
-export const googleScopes = (url: string | undefined): string[] | undefined => CATALOG.find((c) => c.google && sameServer(url, c.url))?.google
+// Whose app a connector signs in with, and what it asks for, by its address; undefined for any other server.
+export const ownAppOf = (url: string | undefined): CatalogEntry['app'] => CATALOG.find((c) => c.app && sameServer(url, c.url))?.app
 
 // What the person turns on in their Google Cloud project, in one page: each service's API and its MCP API.
 export const GOOGLE_APIS = ['gmail', 'calendar-json', 'drive', 'docs', 'sheets'].flatMap((a) => [`${a}.googleapis.com`, `${a === 'calendar-json' ? 'calendar' : a}mcp.googleapis.com`])
