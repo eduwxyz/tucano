@@ -124,6 +124,32 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Ninguém precisa responder')
   })
 
+  it('a plan of two layers: the next one waits for the one before and reads what it wrote', async () => {
+    db.saveAgent(agent('a2', 'theo')) // both on the same engine, so every turn is seen here
+    const r = runner(
+      fakeEngine('claude', {
+        delayMs: 1,
+        route: () => ({ plano: [['lia'], ['theo']], reason: 'um acha, o outro escreve' }),
+        reply: (t) => (t.prompt.includes('primeiro passo pronto') ? 'segundo passo, com o que a Lia achou' : 'primeiro passo pronto')
+      })
+    )
+    await r.send('c1', 'acha o erro e escreve o texto')
+    await r.idle()
+    expect(db.messages().find((m) => m.author.kind === 'system')!.text).toContain('Chamei **lia**; depois **theo** · um acha, o outro escreve')
+    const replies = agentMessages()
+    expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a1', 'a2'])
+    expect(replies[1]!.text).toBe('segundo passo, com o que a Lia achou')
+    expect(claude.turns).toHaveLength(3) // the router, then one turn per layer
+  })
+
+  it('a layer of two agents answers at once', async () => {
+    const r = runner(fakeEngine('claude', { delayMs: 1, route: () => ({ plano: [['lia', 'theo']], reason: 'dois assuntos' }) }))
+    await r.send('c1', 'duas coisas ao mesmo tempo')
+    await r.idle()
+    expect(db.messages().find((m) => m.author.kind === 'system')!.text).toContain('Chamei **lia** e **theo** · dois assuntos')
+    expect(agentMessages()).toHaveLength(2)
+  })
+
   it('says so when a channel has nobody in it, instead of ignoring the message', async () => {
     db.createConversation({ id: 'c2', kind: 'channel', name: 'vazio', members: [] })
     const r = runner()

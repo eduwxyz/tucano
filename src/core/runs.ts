@@ -24,7 +24,7 @@ import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey, type Followup } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
-import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
+import { ROUTER_HISTORY, route, routerTurn, screenHandoff, type TurnPlan } from './router'
 import { allowed, approvalHash, canonical } from './policy'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
@@ -152,6 +152,7 @@ export class Runner {
   private queue: (() => Promise<unknown>)[] = []
   private active = 0
   private routing = 0
+  private plans = 0 // a plan with a layer still to be queued: idle waits for it too
   private controllers = new Map<string, Control>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
@@ -200,6 +201,7 @@ export class Runner {
   stopAll(): void {
     this.paused = true
     this.queue.length = 0
+    this.plans = 0 // the layers nobody will queue any more: idle must not wait for them
     this.followups = new Followups() // the places the dropped queue held, and what was noted for later
     for (const c of this.controllers.values()) {
       c.reason = 'stopped'
@@ -456,7 +458,7 @@ export class Runner {
   }
 
   private isIdle(): boolean {
-    return this.active === 0 && this.queue.length === 0 && this.routing === 0
+    return this.active === 0 && this.queue.length === 0 && this.routing === 0 && this.plans === 0
   }
 
   private checkIdle(): void {
@@ -513,7 +515,7 @@ export class Runner {
       if (settings.routerModel === JEV_MODEL) {
         const key = await this.deps.jev?.key()
         const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
+        if (!('error' in j)) return this.routed(conv, note, j.plan, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
         fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
       }
 
@@ -526,7 +528,7 @@ export class Runner {
       const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       if ('error' in r) return fail(r.error)
-      this.routed(conv, note, r.agents, `${r.reason}${fellBack}`)
+      this.routed(conv, note, r.plan, `${r.reason}${fellBack}`)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
@@ -535,16 +537,42 @@ export class Runner {
     }
   }
 
-  private routed(conv: Conversation, note: Message, agents: Agent[], reason: string): void {
+  // The plan's layers, in order: everyone in a layer answers at once, and the next layer is
+  // queued when the whole layer is done, so it reads what they wrote. Each agent takes its own
+  // place in the queue, like any other reply.
+  private routed(conv: Conversation, note: Message, plan: TurnPlan, reason: string): void {
     const why = reason ? ` · ${reason}` : ''
-    if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
-    this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
-    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: note.threadId }))
+    const layers = plan.filter((l) => l.length > 0)
+    if (layers.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
+    const and = L(' e ', ' and ')
+    const called = layers.map((l) => l.map((a) => `**${a.name}**`).join(and)).join(L('; depois ', '; then '))
+    this.update(note, { text: `${L('Chamei', 'Called')} ${called}${why}`, run: undefined })
+    const run = (i: number): void => {
+      const done = layers[i]!.map((a) => this.enqueue(() => this.execute(a, conv, { depth: 1, threadId: note.threadId })))
+      if (layers[i + 1]) void Promise.all(done).then(() => run(i + 1))
+      else {
+        // The last layer is queued: idle waits for it, not for the layers still to come.
+        this.plans--
+        this.checkIdle()
+      }
+    }
+    this.plans++
+    run(0)
   }
 
-  private enqueue(job: () => Promise<unknown>): void {
-    this.queue.push(job)
+  private enqueue(job: () => Promise<unknown>): Promise<void> {
+    let done!: () => void
+    // Settles when the job ends, well or badly; a job dropped from the queue (stopAll) never settles.
+    const settled = new Promise<void>((resolve) => (done = resolve))
+    this.queue.push(async () => {
+      try {
+        await job()
+      } finally {
+        done()
+      }
+    })
     this.pump()
+    return settled
   }
 
   private pump(): void {
