@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- build.mjs publishes this page twice: as is at /alternativa-grok-bot/, and with the data-en texts at /en/grok-bot-alternative/ -->
+<title data-en="Grok Bot alternative: Tucano, free and open source, on your computer">Alternativa ao Grok Bot: Tucano, grátis e open source, no seu computador</title>
+<meta name="description" content="O Tucano é uma alternativa grátis e open source ao Grok Bot: um time de agentes de IA no seu computador, com a assinatura que você já tem. Comparamos com Grok Bot, MausBot, OpenBot e Rerun." data-en="Tucano is a free, open-source Grok Bot alternative: a team of AI agents on your computer, on the subscription you already have. Compared with Grok Bot, MausBot, OpenBot and Rerun.">
+<meta property="og:title" content="Alternativa ao Grok Bot: Tucano, grátis e open source, no seu computador" data-en="Grok Bot alternative: Tucano, free and open source, on your computer">
+<meta property="og:description" content="Um time de agentes de IA no seu computador, com a assinatura que você já tem. Comparado com Grok Bot, MausBot, OpenBot e Rerun." data-en="A team of AI agents on your computer, on the subscription you already have. Compared with Grok Bot, MausBot, OpenBot and Rerun.">
+<meta property="og:image" content="https://tucano.sh/assets/brand/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://tucano.sh/assets/brand/og.png">
+<meta name="twitter:site" content="@tucanosh">
+<meta name="theme-color" content="#F3EFE6">
+<link rel="icon" type="image/png" href="/assets/brand/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/brand/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/compare.css?v=1">
+</head>
+<body>
+<script>
+// A visitor who picked the other language on tucano.sh goes to this page in that language.
+;(() => {
+  let l
+  try { l = localStorage.getItem('tucano-lang') } catch {}
+  const other = (l === 'en' || l === 'pt-BR') && l !== document.documentElement.lang && document.querySelector(`link[rel="alternate"][hreflang="${l}"]`)
+  if (other) location.replace(other.href)
+})()
+</script>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <clipPath id="mark-clip"><rect width="100" height="100" rx="28"/></clipPath>
+    <symbol id="mark" viewBox="0 0 100 100">
+      <g clip-path="url(#mark-clip)">
+        <rect width="100" height="100" fill="#F1ECE2"/>
+        <circle cx="27" cy="73" r="48" fill="#121212"/>
+        <circle cx="38" cy="47" r="14" fill="#fff"/>
+        <circle cx="43" cy="47" r="5.5" fill="#121212"/>
+        <path d="M53 24 Q84 25 93 44 L96 57 L53 57 Z" fill="#FF8C24"/>
+        <path d="M53 57 L95 57 Q86 70 53 71 Z" fill="#E5531F"/>
+        <path d="M83 57 A9 12 0 0 1 97 47 L97 57 Z" fill="#121212"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+<header>
+  <a class="brand" href="/" data-en-href="/en/"><svg><use href="#mark"/></svg><span>tucano</span></a>
+  <div class="lang" role="group" aria-label="Idioma / Language"><a href="/alternativa-grok-bot/" hreflang="pt-BR" data-lang>PT</a><a href="/en/grok-bot-alternative/" hreflang="en" data-lang>EN</a></div>
+  <a class="btn btn--beak" href="/#instalar" data-en-href="/en/#instalar"><span lang="pt-BR">Baixar o Tucano</span><span lang="en">Get Tucano</span></a>
+</header>
+
+<main>
+<div class="hero">
+  <div class="eyebrow"><span lang="pt-BR">Comparação · atualizada em 6 de novembro de 2026</span><span lang="en">Comparison · updated November 6, 2026</span></div>
+  <h1><span lang="pt-BR">Uma alternativa ao Grok Bot que roda <em>no seu computador.</em></span><span lang="en">A Grok Bot alternative that runs <em>on your computer.</em></span></h1>
+  <p class="answer"><span lang="pt-BR">O <b>Tucano</b> é uma alternativa <b>grátis e open source</b> (Apache-2.0) ao Grok Bot. Em vez de um computador na nuvem, ele roda no seu Mac, Windows ou Linux, com a <b>assinatura que você já tem</b> (Claude, ChatGPT, Grok, Cursor…), e você decide o que cada agente pode ler, escrever e o que espera o seu sim.</span><span lang="en"><b>Tucano</b> is a <b>free, open-source</b> (Apache-2.0) alternative to Grok Bot. Instead of a computer in the cloud, it runs on your Mac, Windows or Linux PC, on the <b>subscription you already have</b> (Claude, ChatGPT, Grok, Cursor…), and you decide what each agent can read, write, and what waits for your yes.</span></p>
+  <div class="ctas">
+    <a class="btn btn--beak" href="/#instalar" data-en-href="/en/#instalar"><span lang="pt-BR">Baixar grátis</span><span lang="en">Download free</span></a>
+    <a class="btn btn--ghost" href="https://github.com/eduwxyz/tucano"><span lang="pt-BR">Ver o código no GitHub</span><span lang="en">See the code on GitHub</span></a>
+  </div>
+</div>
+
+<section>
+  <h2><span lang="pt-BR">Tucano e as alternativas, <em>lado a lado.</em></span><span lang="en">Tucano and the alternatives, <em>side by side.</em></span></h2>
+  <p class="sub"><span lang="pt-BR">O que cada um diz no próprio site, na documentação ou no README, com as fontes no fim da página. O OpenBot aqui é o do openbot.run.</span><span lang="en">What each one says on its own site, docs or README, with the sources at the end of the page. OpenBot here is the one at openbot.run.</span></p>
+  <div class="table">
+    <table>
+      <thead><tr><th></th><th class="us">Tucano</th><th>Grok Bot</th><th>MausBot <small>(OpenMausBot)</small></th><th>OpenBot</th><th>Rerun</th></tr></thead>
+      <tbody>
+        <tr><th><span lang="pt-BR">Preço</span><span lang="en">Price</span></th>
+          <td class="us"><span lang="pt-BR">Grátis, sem plano pago</span><span lang="en">Free, no paid plan</span></td>
+          <td><span lang="pt-BR">Incluído em planos pagos do X (Premium ou acima) e do Cursor</span><span lang="en">Included in paid X (Premium and up) and Cursor plans</span></td>
+          <td><span lang="pt-BR">App grátis; nuvem de US$ 15 a 99 por mês</span><span lang="en">Free app; cloud from $15 to $99 a month</span></td>
+          <td><span lang="pt-BR">Grátis pra uso não comercial; uso comercial é pago</span><span lang="en">Free for noncommercial use; commercial use is paid</span></td>
+          <td><span lang="pt-BR">US$ 29 por mês, com 5 dias de teste</span><span lang="en">$29 a month, with a 5-day trial</span></td></tr>
+        <tr><th><span lang="pt-BR">Onde roda</span><span lang="en">Where it runs</span></th>
+          <td class="us"><span lang="pt-BR">No seu computador; num servidor seu, em fase experimental</span><span lang="en">On your computer; on your own server, experimental</span></td>
+          <td><span lang="pt-BR">Num computador na nuvem</span><span lang="en">On a computer in the cloud</span></td>
+          <td><span lang="pt-BR">No seu computador; na nuvem nos planos pagos</span><span lang="en">On your computer; in the cloud on paid plans</span></td>
+          <td><span lang="pt-BR">No seu computador; servidor sempre ligado opcional</span><span lang="en">On your computer; optional always-on server</span></td>
+          <td><span lang="pt-BR">Na nuvem (Europa) ou num servidor seu</span><span lang="en">In the cloud (Europe) or self-hosted</span></td></tr>
+        <tr><th><span lang="pt-BR">Com o computador desligado</span><span lang="en">With your computer off</span></th>
+          <td class="us"><span lang="pt-BR">Só no modo servidor (experimental)</span><span lang="en">Only in server mode (experimental)</span></td>
+          <td><span lang="pt-BR">Sim</span><span lang="en">Yes</span></td>
+          <td><span lang="pt-BR">Nos planos de nuvem</span><span lang="en">On cloud plans</span></td>
+          <td><span lang="pt-BR">Com o modo servidor</span><span lang="en">With server mode</span></td>
+          <td><span lang="pt-BR">Sim</span><span lang="en">Yes</span></td></tr>
+        <tr><th><span lang="pt-BR">Usa a assinatura que você já tem</span><span lang="en">Uses the subscription you already have</span></th>
+          <td class="us"><span lang="pt-BR">Sim: Claude Code, Codex, Cursor, Grok, OpenCode, Pi</span><span lang="en">Yes: Claude Code, Codex, Cursor, Grok, OpenCode, Pi</span></td>
+          <td><span lang="pt-BR">Não: o modelo é escolhido por eles</span><span lang="en">No: they pick the model</span></td>
+          <td><span lang="pt-BR">Sim: Claude, Codex, Grok e outros</span><span lang="en">Yes: Claude, Codex, Grok and others</span></td>
+          <td><span lang="pt-BR">Sim: Claude Code, Codex, Grok e outros</span><span lang="en">Yes: Claude Code, Codex, Grok and others</span></td>
+          <td><span lang="pt-BR">Sim: Claude ou ChatGPT, ou modelos locais</span><span lang="en">Yes: Claude or ChatGPT, or local models</span></td></tr>
+        <tr><th><span lang="pt-BR">Código aberto</span><span lang="en">Open source</span></th>
+          <td class="us"><span lang="pt-BR">Sim, Apache-2.0</span><span lang="en">Yes, Apache-2.0</span></td>
+          <td><span lang="pt-BR">Não</span><span lang="en">No</span></td>
+          <td><span lang="pt-BR">Sim, Apache-2.0 (menos a parte enterprise)</span><span lang="en">Yes, Apache-2.0 (except the enterprise part)</span></td>
+          <td><span lang="pt-BR">Código aberto pra ler, com licença não comercial (PolyForm)</span><span lang="en">Source-available, with a noncommercial license (PolyForm)</span></td>
+          <td><span lang="pt-BR">Sim, AGPL-3.0</span><span lang="en">Yes, AGPL-3.0</span></td></tr>
+        <tr><th><span lang="pt-BR">Pede o seu sim antes de ações sensíveis</span><span lang="en">Asks before sensitive actions</span></th>
+          <td class="us"><span lang="pt-BR">Sim, amarrado à chamada exata, também pelo Telegram</span><span lang="en">Yes, tied to the exact call, also on Telegram</span></td>
+          <td><span lang="pt-BR">Sim: não envia nada sem você</span><span lang="en">Yes: never sends without you</span></td>
+          <td><span lang="pt-BR">Sim: cartões de permitir ou negar</span><span lang="en">Yes: allow or deny cards</span></td>
+          <td><span lang="pt-BR">Não por ação: o README avisa que os agentes rodam com acesso total</span><span lang="en">Not per action: its README warns agents run with full access</span></td>
+          <td><span lang="pt-BR">Sim: antes de enviar, pagar ou apagar</span><span lang="en">Yes: before sending, paying or deleting</span></td></tr>
+        <tr><th><span lang="pt-BR">No celular</span><span lang="en">On your phone</span></th>
+          <td class="us"><span lang="pt-BR">Aprovações pelo Telegram; o app inteiro no navegador, no modo servidor</span><span lang="en">Approvals on Telegram; the whole app in a browser, in server mode</span></td>
+          <td><span lang="pt-BR">Apps de iOS e Android, Slack e X</span><span lang="en">iOS and Android apps, Slack and X</span></td>
+          <td><span lang="pt-BR">Apps de iOS e Android</span><span lang="en">iOS and Android apps</span></td>
+          <td><span lang="pt-BR">App de iPhone e versão web</span><span lang="en">iPhone app and a web version</span></td>
+          <td><span lang="pt-BR">App web no celular</span><span lang="en">Web app on the phone</span></td></tr>
+        <tr><th><span lang="pt-BR">Várias pessoas nos mesmos agentes</span><span lang="en">Several people, same agents</span></th>
+          <td class="us"><span lang="pt-BR">Ainda não</span><span lang="en">Not yet</span></td>
+          <td><span lang="pt-BR">Sim, com Team Bots (beta)</span><span lang="en">Yes, with Team Bots (beta)</span></td>
+          <td><span lang="pt-BR">Nos planos Team e Business</span><span lang="en">On Team and Business plans</span></td>
+          <td><span lang="pt-BR">Sim</span><span lang="en">Yes</span></td>
+          <td><span lang="pt-BR">Sim</span><span lang="en">Yes</span></td></tr>
+        <tr><th><span lang="pt-BR">Em português</span><span lang="en">In Portuguese</span></th>
+          <td class="us"><span lang="pt-BR">Sim: o app e o site</span><span lang="en">Yes: the app and the site</span></td>
+          <td><span lang="pt-BR">Não informado</span><span lang="en">Not stated</span></td>
+          <td><span lang="pt-BR">Sim</span><span lang="en">Yes</span></td>
+          <td><span lang="pt-BR">Sim</span><span lang="en">Yes</span></td>
+          <td><span lang="pt-BR">Não encontramos</span><span lang="en">Not found</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><span lang="pt-BR">Onde cada um <em>se sai melhor.</em></span><span lang="en">Where each one <em>does better.</em></span></h2>
+  <div class="cols">
+    <div class="card">
+      <h3><span lang="pt-BR">Onde o Tucano se sai melhor</span><span lang="en">Where Tucano does better</span></h3>
+      <ul>
+        <li><span lang="pt-BR"><b>Controle por agente e por ferramenta.</b> Cada agente recebe, pra cada ferramenta, sem acesso, ler, ou ler e escrever. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação com a chamada exata na sua frente.</span><span lang="en"><b>Control per agent and per tool.</b> Each agent gets, for each tool, no access, read, or read and write. Merges, purchases, posts, emails and deletes become an approval with the exact call in front of you.</span></li>
+        <li><span lang="pt-BR"><b>Agentes que trabalham juntos.</b> Eles conversam em canais e passam o trabalho com @menções: um acha o bug, outro corrige, um terceiro revisa.</span><span lang="en"><b>Agents that work together.</b> They talk in channels and hand work over with @mentions: one finds the bug, another fixes it, a third reviews it.</span></li>
+        <li><span lang="pt-BR"><b>Grátis de verdade.</b> Sem plano pago, sem recurso trancado, sem cobrança por token. Você paga só a assinatura de IA que já tem.</span><span lang="en"><b>Actually free.</b> No paid plan, no locked features, no per-token bill. You only pay the AI subscription you already have.</span></li>
+        <li><span lang="pt-BR"><b>Seus dados ficam com você.</b> Conversas, memória, arquivos e logins ficam no seu computador. Não existe servidor do Tucano.</span><span lang="en"><b>Your data stays with you.</b> Conversations, memory, files and logins live on your computer. There is no Tucano server.</span></li>
+        <li><span lang="pt-BR"><b>Misture modelos no mesmo time.</b> Um agente no Claude, outro no Codex, outro no Grok.</span><span lang="en"><b>Mix models in one team.</b> One agent on Claude, another on Codex, another on Grok.</span></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span lang="pt-BR">Onde os outros se saem melhor hoje</span><span lang="en">Where the others do better today</span></h3>
+      <ul>
+        <li><span lang="pt-BR"><b>Rodar 24 horas sem montar servidor:</b> o Grok Bot, o Rerun e a nuvem do MausBot já vêm assim. No Tucano, isso é o modo servidor, ainda experimental.</span><span lang="en"><b>Running around the clock without setting up a server:</b> Grok Bot, Rerun and MausBot's cloud come that way. In Tucano, that's server mode, still experimental.</span></li>
+        <li><span lang="pt-BR"><b>App de celular:</b> Grok Bot, MausBot e OpenBot têm. O Tucano manda as aprovações pelo Telegram.</span><span lang="en"><b>A phone app:</b> Grok Bot, MausBot and OpenBot have one. Tucano sends approvals through Telegram.</span></li>
+        <li><span lang="pt-BR"><b>Várias pessoas com os mesmos agentes:</b> OpenBot, Rerun, Grok Bot (Team Bots) e os planos de time do MausBot.</span><span lang="en"><b>Several people sharing agents:</b> OpenBot, Rerun, Grok Bot (Team Bots) and MausBot's team plans.</span></li>
+        <li><span lang="pt-BR"><b>Milhares de apps prontos:</b> Rerun e MausBot trazem catálogos via Composio. O Tucano conecta pelo MCP: os conectores da loja, ou o endereço de qualquer servidor MCP.</span><span lang="en"><b>Thousands of ready-made apps:</b> Rerun and MausBot ship catalogs through Composio. Tucano connects over MCP: the connectors in its store, or any MCP server's address.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span lang="pt-BR">Qual escolher</span><span lang="en">Which one to pick</span></h2>
+  <ul class="pick">
+    <li><span lang="pt-BR"><b>Você já paga o X ou o Cursor e quer tudo pronto na nuvem:</b> o Grok Bot.</span><span lang="en"><b>You already pay for X or Cursor and want it all ready in the cloud:</b> Grok Bot.</span></li>
+    <li><span lang="pt-BR"><b>Seu time não é técnico e quer agentes 24 horas sem instalar nada:</b> o Rerun.</span><span lang="en"><b>Your team isn't technical and wants agents around the clock without installing anything:</b> Rerun.</span></li>
+    <li><span lang="pt-BR"><b>Você quer um time de agentes no seu computador, com a assinatura que já tem, decidindo o que cada um pode fazer:</b> o Tucano.</span><span lang="en"><b>You want a team of agents on your computer, on the subscription you already have, deciding what each one can do:</b> Tucano.</span></li>
+  </ul>
+</section>
+
+<section>
+  <h2><span lang="pt-BR">Perguntas</span><span lang="en">Questions</span></h2>
+  <div class="qa" data-faq>
+    <details open><summary><span lang="pt-BR">O Tucano é uma alternativa ao Grok Bot?</span><span lang="en">Is Tucano a Grok Bot alternative?</span></summary><p><span lang="pt-BR">Sim. Os dois dão a você um time de agentes de IA com memória, rotinas, ferramentas e aprovação antes de ações sensíveis. A diferença é que o Tucano roda no seu computador, é grátis e open source, e usa a assinatura de IA que você já tem.</span><span lang="en">Yes. Both give you a team of AI agents with memory, routines, tools and approval before sensitive actions. The difference is that Tucano runs on your computer, is free and open source, and uses the AI subscription you already have.</span></p></details>
+    <details><summary><span lang="pt-BR">Dá pra usar o Grok no Tucano?</span><span lang="en">Can I use Grok in Tucano?</span></summary><p><span lang="pt-BR">Sim. O Tucano roda o Grok CLI com o seu login do grok.com, sem chave de API. Cada agente escolhe o seu motor, então dá pra ter um no Grok e outro no Claude Code ou no Codex.</span><span lang="en">Yes. Tucano runs the Grok CLI with your grok.com sign-in, no API key needed. Each agent picks its engine, so one can run on Grok and another on Claude Code or Codex.</span></p></details>
+    <details><summary><span lang="pt-BR">Preciso deixar o computador ligado?</span><span lang="en">Do I need to keep my computer on?</span></summary><p><span lang="pt-BR">Pras rotinas agendadas, sim: o Tucano fica perto do relógio e trabalha enquanto o computador está ligado. Pra rodar com ele desligado, existe o modo servidor, num VPS seu, ainda experimental.</span><span lang="en">For scheduled routines, yes: Tucano sits by the clock and works while your computer is on. To run with it off, there's server mode, on a VPS of your own, still experimental.</span></p></details>
+    <details><summary><span lang="pt-BR">Quanto custa o Tucano?</span><span lang="en">How much does Tucano cost?</span></summary><p><span lang="pt-BR">Nada. Não existe plano pago. Você usa o plano do Claude, do ChatGPT, do Grok ou do Cursor que já paga, ou o gateway de IA da sua empresa.</span><span lang="en">Nothing. There is no paid plan. You use the Claude, ChatGPT, Grok or Cursor plan you already pay for, or your company's AI gateway.</span></p></details>
+  </div>
+</section>
+
+<section class="sources">
+  <p><span lang="pt-BR">Fontes, consultadas em 6 de novembro de 2026. Viu algo desatualizado? <a href="https://github.com/eduwxyz/tucano/issues">Abra uma issue</a> que a gente corrige.</span><span lang="en">Sources, checked on November 6, 2026. Spotted something out of date? <a href="https://github.com/eduwxyz/tucano/issues">Open an issue</a> and we'll fix it.</span></p>
+  <ul>
+    <li><a href="https://docs.x.ai/grok-bot/overview">Grok Bot: docs.x.ai</a></li>
+    <li><a href="https://cursor.com/help/grok-bot/plans">Grok Bot: cursor.com/help</a></li>
+    <li><a href="https://github.com/milind-soni/OpenMausBot">MausBot: GitHub</a></li>
+    <li><a href="https://mausbot.com/pricing">MausBot: mausbot.com/pricing</a></li>
+    <li><a href="https://github.com/nightly-labs/openbot">OpenBot: GitHub</a></li>
+    <li><a href="https://www.producthunt.com/p/openbot-3/openbot-4">OpenBot: Product Hunt</a></li>
+    <li><a href="https://rerun.build/pricing">Rerun: rerun.build/pricing</a></li>
+    <li><a href="https://github.com/rerun-build/rerun">Rerun: GitHub</a></li>
+    <li><a href="https://github.com/eduwxyz/tucano">Tucano: GitHub</a></li>
+  </ul>
+</section>
+</main>
+
+<footer>
+  <span><span lang="pt-BR">Feito no Brasil.</span><span lang="en">Made in Brazil.</span></span>
+  <nav><a href="/" data-en-href="/en/">tucano.sh</a><a href="/alternativa-openclaw/" data-en-href="/en/openclaw-alternative/"><span lang="pt-BR">Alternativa ao OpenClaw</span><span lang="en">OpenClaw alternative</span></a><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://github.com/eduwxyz/tucano/blob/HEAD/LICENSE">Apache-2.0</a></nav>
+</footer>
+</div>
+<script>
+// PT | EN remembers the choice, as on the home page.
+document.querySelectorAll('.lang a').forEach((a) => a.addEventListener('click', () => { try { localStorage.setItem('tucano-lang', a.hreflang) } catch {} }))
+</script>
+</body>
+</html>
