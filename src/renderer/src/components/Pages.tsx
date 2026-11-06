@@ -75,6 +75,7 @@ import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
+import { hasServers, ServersCard } from './Servers'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
@@ -1401,7 +1402,8 @@ const SETTINGS_TABS = (): TabList => [
   ['geral', L('Geral', 'General')],
   ['modelos', L('Modelos', 'Models')],
   ['agentes', L('Agentes', 'Agents')],
-  ['integracoes', L('Celular e GitHub', 'Phone and GitHub')]
+  ['integracoes', L('Celular e GitHub', 'Phone and GitHub')],
+  ...(hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : [])
 ]
 const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
@@ -2092,6 +2094,7 @@ export function SettingsPage(): ReactNode {
         {pane('integracoes') && <GithubCard info={settings.github} />}
 
         {pane('geral') && <TeamCard />}
+        {pane('servidores') && <ServersCard />}
 
         {pane('agentes') && (
           <Card title={L('Limites', 'Limits')}>

@@ -149,6 +149,14 @@
           "!VERSION"
         ]
       }
+    ],
+    "protocols": [
+      {
+        "name": "Tucano",
+        "schemes": [
+          "tucano"
+        ]
+      }
     ]
   }
 }

@@ -8282,3 +8282,10 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .catalog__card .btn {
   flex: none;
 }
+
+/* Over a server's page (Servers.tsx): the window's top 40 px stay the app's. */
+.server-bar { position: fixed; inset: 0 0 auto 0; height: 40px; z-index: 1000; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); -webkit-app-region: drag; font-size: 13px; }
+.server-bar button { -webkit-app-region: no-drag; }
+[data-os='mac'] .server-bar { padding-left: 84px; }
+.server-bar__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workspace-picker__head--servers { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 8px; }
