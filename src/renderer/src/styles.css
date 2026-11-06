@@ -693,6 +693,14 @@ h3 {
 .c-green .avatar__eyes i { animation-duration: 4.9s; animation-delay: 3.2s; }
 .c-teal .avatar__eyes i { animation-duration: 6.8s; animation-delay: 1.7s; }
 .c-graphite .avatar__eyes i { animation-duration: 5.3s; animation-delay: 2.8s; }
+/* A long conversation has hundreds of faces: only the latest messages' still blink (before the
+   happy squint below, which wins over this). */
+.messages .avatar__eyes i {
+  animation-name: none;
+}
+.messages > :nth-last-child(-n + 3) .avatar__eyes i {
+  animation-name: blink;
+}
 /* At work: the eyes read, left to right, and come back. */
 .avatar.is-busy .avatar__eyes {
   animation: read 1.8s var(--ease-out) infinite;
@@ -1650,6 +1658,7 @@ h3 {
   padding: 13px 16px 4px;
   background: transparent;
   max-height: 220px;
+  field-sizing: content; /* grows with its text, without measuring on each key (Composer) */
 }
 .composer textarea:focus {
   box-shadow: none;

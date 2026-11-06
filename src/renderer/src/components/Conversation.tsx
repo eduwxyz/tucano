@@ -1463,6 +1463,8 @@ function RecordingClock({ since }: { since: number }): ReactNode {
   )
 }
 
+// The field sizes itself to its text where CSS can (styles.css: field-sizing).
+const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')
 const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'word-spacing', 'tab-size', 'text-transform', 'text-indent', 'padding']
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
@@ -1579,23 +1581,28 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     }
   }, [inThread])
 
-  // The field grows with its text, up to a point; on a narrower window the same text takes more lines.
+  // The field grows with its text, up to a point. With CSS field-sizing (Electron has it) that takes no
+  // measuring on each key; elsewhere (a browser, on a server) the height is set from the text.
   const fit = (): void => {
     const el = ref.current
-    if (!el) return
+    if (!el || FIELD_SIZING) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
-    followField()
   }
   useLayoutEffect(fit, [text])
+  // The copy follows the field's size as it changes (a new line, a narrower window), and takes its
+  // type again only when the width changes (a phone's breakpoint): not on every key.
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    let width = el.clientWidth
+    let width = -1
     const watch = new ResizeObserver(() => {
-      if (el.clientWidth === width) return // only a new width changes the lines; fit's own height doesn't
-      width = el.clientWidth
-      fit()
+      if (el.clientWidth !== width) {
+        width = el.clientWidth
+        fit()
+        copyType()
+      }
+      followField()
     })
     watch.observe(el)
     return () => watch.disconnect()
@@ -1605,12 +1612,17 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // on top keeps the caret and the selection. The copy takes the field's type as computed (a phone
   // gets 16 px, and a field doesn't inherit letter spacing), its width (a scrollbar takes some) and
   // its size and its scroll, so both break the lines in the same places and scroll as far.
-  const followField = (): void => {
+  const copyType = (): void => {
     const el = ref.current
     const m = mirror.current
     if (!el || !m) return
     const field = getComputedStyle(el)
     for (const p of TYPE) m.style.setProperty(p, field.getPropertyValue(p))
+  }
+  const followField = (): void => {
+    const el = ref.current
+    const m = mirror.current
+    if (!el || !m) return
     m.style.width = `${el.clientWidth}px`
     m.style.height = `${el.clientHeight}px`
     m.scrollTop = el.scrollTop
