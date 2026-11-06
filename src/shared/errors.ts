@@ -93,8 +93,14 @@ export function friendly(e: unknown, ctx: FriendlyContext = {}): Friendly {
   const missing = MISSING.exec(raw)?.[1];
   if (missing) {
     const node = /^(npx|npm|node)(\.cmd|\.exe)?$/i.test(missing);
+    const uv = /^uvx?(\.exe)?$/i.test(missing);
     return mapped(
-      node
+      uv
+        ? L(
+            `O comando \`${missing}\` não foi encontrado. Instale o uv (docs.astral.sh/uv) e tente de novo.`,
+            `The \`${missing}\` command wasn't found. Install uv (docs.astral.sh/uv) and try again.`
+          )
+        : node
         ? L(
             `O comando \`${missing}\` não foi encontrado. Instale o Node.js (nodejs.org) e tente de novo.`,
             `The \`${missing}\` command wasn't found. Install Node.js (nodejs.org) and try again.`

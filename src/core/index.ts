@@ -534,16 +534,19 @@ const connectors = new ConnectorManager({
   openUrl: (url) => serverMode || toMain({ type: 'open', url }),
   // On a server behind https (TUCANO_URL), the provider sends the person back to the server's own
   // address, which src/server hands over here; on a desktop, to the gateway on this computer.
-  oauthCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : gateway.url('/oauth/callback'))
+  oauthCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : gateway.url('/oauth/callback')),
+  // Slack's app registers its address once: the workspace's webhook port, which doesn't change.
+  fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`)
 })
-gateway.route('/oauth/callback', async (url) => {
+const oauthCallback = async (url: URL): Promise<string> => {
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state') ?? ''
   if (!code) return notAuthorized(url)
   return (await connectors.finishOAuth(state, code))
     ? L('Conector autorizado. Pode fechar esta aba e voltar pro Tucano.', 'Connector authorized. You can close this tab and go back to Tucano.')
     : L('Esse pedido de autorização expirou. Tente de novo pelo app.', 'This authorization request expired. Try again from the app.')
-})
+}
+gateway.route('/oauth/callback', oauthCallback)
 
 const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
 
@@ -656,6 +659,14 @@ if (defaultWorkspace) telegram = new Telegram({
 
 // Routines started by something on this Mac: POST http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>.
 const hooks = createServer((req, res) => {
+  // The sign-in of a connector whose app registers a fixed address (Slack's) comes back here.
+  if (req.method === 'GET' && req.url?.startsWith('/oauth/callback')) {
+    void oauthCallback(new URL(req.url, 'http://localhost')).then(
+      (text) => res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(text),
+      (e: unknown) => res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(e instanceof Error ? e.message : String(e))
+    )
+    return
+  }
   const m = /^\/gatilho\/([\w-]{10,})$/.exec(req.url ?? '')
   if (req.method !== 'POST' || !m) return void res.writeHead(404).end(L('Use POST /gatilho/<código>\n', 'Use POST /gatilho/<code>\n'))
   let body = ''
@@ -1164,6 +1175,8 @@ const api: Api = {
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
   setConnectorToken: ({ id, token }) => connectors.setToken(id, token),
+  ownApp: ({ provider }) => connectors.ownApp(provider),
+  setOwnApp: ({ provider, clientId, clientSecret }) => connectors.setOwnApp(provider, { clientId, clientSecret }),
   authorizeConnector: async ({ id }) => {
     const url = await connectors.authorize(id)
     return serverMode && url ? { url } : {}

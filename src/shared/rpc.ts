@@ -1,5 +1,6 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
+import type { AppProvider } from './connector-catalog'
 import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
@@ -69,6 +70,8 @@ export interface Api {
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
   setConnectorToken(p: { id: string; token: string }): Promise<void>
+  ownApp(p: { provider: AppProvider }): Promise<{ clientId?: string; redirectUrl: string }> // the person's app (Google's, Slack's) its connectors sign in with; its secret stays in the core
+  setOwnApp(p: { provider: AppProvider; clientId: string; clientSecret: string }): Promise<void>
   authorizeConnector(p: { id: string }): Promise<{ url?: string }> // url: on a server, the page to open in the person's browser
   finishConnectorAuth(p: { url: string }): Promise<boolean> // on a server: the address the authorization page ended on
   harnessMcps(): Promise<HarnessMcp[]> // the MCP servers set up in Claude Code, Codex and OpenCode

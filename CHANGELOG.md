@@ -4,6 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Six more connectors in the store, for services that ask a few things first:** GitHub (a personal access token), Dynatrace and Snowflake (your instance and a token), Metabase (your address, then the browser sign-in), and Azure DevOps and AWS CloudWatch, which run the service's official server on this computer (with npx and uv). The store asks for what each needs in a window and adds the connector as the custom form would.
+- **A connector's secrets can stay in 1Password.** In place of a token or a variable of a local connector's command, an `op://Vault/Item/field` reference: Tucano keeps only the reference and reads the value with the 1Password CLI on each connection, and says what to do when the CLI is missing, signed out or locked, or the item isn't there.
+- **Gmail, Google Calendar, Google Drive, Google Docs and Google Sheets in the connector store**, through Google's own MCP servers. Google signs in only apps registered with it, so the first one walks you through making yours in Google Cloud, once, in five steps with a link for each; the other four then sign in with one click. Each asks only for what its tools need: Gmail searches, reads, drafts and labels but never sends nor deletes for good, and Drive writes only the files it made or opened. The Tuca's guide explains the steps and what to check when Google turns a sign-in away.
+- **Slack in the connector store**, through Slack's own MCP server. Slack takes only directory apps or a workspace's internal apps, so the first Connect makes yours from a link that fills it all in (permissions, MCP on, the address to come back to): pick the workspace, create, paste its Client ID and Secret. Agents act as you, with a user token, through the same classes and approvals. The sign-in comes back through the workspace's fixed webhook port, since Slack takes only the address registered in the app. Google's or Slack's app can be changed from the connector's page.
+
 ## [0.2.13] - 2026-11-06
 
 > **Em português:**

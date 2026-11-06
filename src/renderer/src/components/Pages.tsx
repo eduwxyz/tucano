@@ -68,7 +68,8 @@ import { voiceRefusal } from '../../../shared/voice'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
-import { ConnectorGrid } from './ConnectorStore'
+import { ConnectorGrid, OwnAppSetup } from './ConnectorStore'
+import { entryOf } from '../../../shared/connector-catalog'
 import { ApprovalCard, toolWords } from './Conversation'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
@@ -1094,7 +1095,7 @@ function ConnectorToken({ id }: { id: string }): ReactNode {
   }
   return (
     <div className="row">
-      <input className="grow" type="password" value={token} placeholder={L('Token (substitui o atual)', 'Token (replaces the current one)')} onChange={(e) => setToken(e.target.value)} />
+      <input className="grow" type="password" value={token} placeholder={L('Token ou op://… (substitui o atual)', 'Token or op://… (replaces the current one)')} onChange={(e) => setToken(e.target.value)} />
       <button className="btn btn--sm" disabled={busy || !token.trim()} onClick={save}>
         {L('Salvar token', 'Save token')}
       </button>
@@ -1142,6 +1143,8 @@ export function ConnectorsPage(): ReactNode {
 // A connector's state, who uses it and its tools, in a window over the page.
 function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void }): ReactNode {
   const users = useStore((s) => s.agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none'))
+  const own = entryOf(c)?.app // signs in with the person's own app: it can be changed here
+  const [changing, setChanging] = useState(false)
   return (
     <Modal title={c.name} onClose={onClose} className="connector-modal">
       <div className="connector-modal__body">
@@ -1179,6 +1182,11 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
           {c.status !== 'connecting' && (
             <button className="btn btn--sm" onClick={() => reconnectConnector(c.id)}>
               {c.status === 'connected' ? L('Atualizar ferramentas', 'Refresh tools') : L('Conectar de novo', 'Reconnect')}
+            </button>
+          )}
+          {own && (
+            <button className="btn btn--ghost btn--sm" onClick={() => setChanging(true)}>
+              {own.provider === 'google' ? L('Seu app do Google', 'Your Google app') : L('Seu app do Slack', 'Your Slack app')}
             </button>
           )}
           <span className="grow" />
@@ -1227,6 +1235,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
         ))}
         <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
       </div>
+      {changing && own && <OwnAppSetup provider={own.provider} onClose={() => setChanging(false)} />}
     </Modal>
   )
 }
@@ -1295,7 +1304,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
             </select>
           </Field>
           {auth === 'token' && (
-            <Field label="Token">
+            <Field label="Token" hint={L('Ou uma referência do 1Password (op://Cofre/Item/campo), lida a cada conexão.', 'Or a 1Password reference (op://Vault/Item/field), read on each connection.')}>
               <input type="password" value={token} onChange={(e) => setToken(e.target.value)} />
             </Field>
           )}
@@ -1313,7 +1322,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
               <input value={args} placeholder="-y @modelcontextprotocol/server-postgres postgres://…" onChange={(e) => setArgs(e.target.value)} />
             </Field>
           </div>
-          <Field label={L('Variáveis de ambiente', 'Environment variables')} hint={L('Uma por linha, NOME=valor. Os valores ficam cifrados.', 'One per line, NAME=value. Values are encrypted.')}>
+          <Field label={L('Variáveis de ambiente', 'Environment variables')} hint={L('Uma por linha, NOME=valor. Os valores ficam cifrados; um valor op://Cofre/Item/campo vem do 1Password.', 'One per line, NAME=value. Values are encrypted; an op://Vault/Item/field value comes from 1Password.')}>
             <textarea rows={2} value={env} onChange={(e) => setEnv(e.target.value)} />
           </Field>
           {demo && (
