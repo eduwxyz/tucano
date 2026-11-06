@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { parse } from 'smol-toml'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
-import type { Engine, EngineEvent, Turn } from './types'
+import { CodexApp, Unsupported, type Launch } from './codex-app'
+import type { Engine, EngineEvent, Turn, TurnShape } from './types'
 import { L } from '../../shared/lang'
 
 // Codex reads AGENTS.md, skills, plugins and memories from the user's home no
@@ -93,6 +94,9 @@ const sandboxNote = (): string =>
     "Codex's own sandbox here is read-only and empty on purpose: it isn't your computer, and its apply_patch and shell don't reach it. Your files are on your computer: create and change them with write_file and edit_file, which do work."
   )
 
+// The agent's instructions, with the sandbox note when it has a computer.
+export const codexInstructions = (turn: Pick<Turn, 'system' | 'mcpUrl'>): string => (turn.mcpUrl && turn.system.includes('write_file') ? `${turn.system}\n\n${sandboxNote()}` : turn.system)
+
 export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl' | 'web' | 'images'>, provider: string[] = []): string[] {
   const gateway = turn.mcpUrl
     ? [
@@ -114,7 +118,7 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
     '-C', turn.cwd,
     '-m', turn.model,
     '-c', `model_reasoning_effort=${JSON.stringify(turn.effort)}`,
-    '-c', `developer_instructions=${JSON.stringify(turn.mcpUrl && turn.system.includes('write_file') ? `${turn.system}\n\n${sandboxNote()}` : turn.system)}`,
+    '-c', `developer_instructions=${JSON.stringify(codexInstructions(turn))}`,
     '-c', 'skills.include_instructions=false',
     '-c', 'skills.bundled.enabled=false',
     '-c', `web_search=${turn.web ? '"live"' : '"disabled"'}`,
@@ -175,25 +179,137 @@ export function codexParser(): Parser {
   }
 }
 
+// The same isolation as codexArgs, for `codex app-server`: what's the same for every thread goes in
+// the process's flags; the rest (model, effort, instructions, folder, web, the gateway) in each
+// thread's settings (web search on or off always said there), sent over stdin, so the gateway's
+// address and its token never show in the arguments. The app-server has no --ignore-user-config or --ignore-rules: see codexIsolated.
+// mcp_optional_startup_grace_ms=0: since Codex 0.147 a turn may start before an MCP server is up,
+// and then goes without its tools; this waits for the gateway (local, quick to answer).
+export function codexAppArgs(provider: string[] = []): string[] {
+  return [
+    'app-server',
+    ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
+    '-c', 'sandbox_mode="read-only"',
+    '-c', 'approval_policy="never"',
+    '-c', 'skills.include_instructions=false',
+    '-c', 'skills.bundled.enabled=false',
+    '-c', 'project_doc_max_bytes=0',
+    '-c', 'history.persistence="none"',
+    '-c', 'mcp_optional_startup_grace_ms=0',
+    ...provider
+  ]
+}
+
+export function codexThread(turn: TurnShape): Record<string, unknown> {
+  return {
+    model: turn.model,
+    cwd: turn.cwd,
+    sandbox: 'read-only',
+    approvalPolicy: 'never',
+    developerInstructions: codexInstructions(turn),
+    config: {
+      model_reasoning_effort: turn.effort,
+      web_search: turn.web ? 'live' : 'disabled',
+      ...(turn.mcpUrl ? { [`mcp_servers.${GATEWAY_NAME}`]: { url: turn.mcpUrl, default_tools_approval_mode: 'approve', tool_timeout_sec: 900 } } : {})
+    }
+  }
+}
+
+// What --ignore-user-config and --ignore-rules leave out, absent from the home: then the
+// app-server loads nothing exec wouldn't. With either there, Codex runs as exec.
+export const codexIsolated = (codexHome: string): boolean => !existsSync(join(codexHome, 'config.toml')) && !existsSync(join(codexHome, 'rules'))
+
+// Each turn as one `codex exec` (the CLI before the app-server, or a home that has its own
+// config): it gets the whole conversation every time.
+const EXEC_ONLY = 'TUCANO_CODEX_EXEC'
+
 export function codexEngine(
   bin: () => string | undefined,
   home: string,
   shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({}),
   provider: () => Promise<CodexProvider & { env?: Record<string, string> }> = async () => userCodexProvider()
 ): Engine {
+  const codexHome = (account?: string): string => join(account ?? home, '.codex')
+  const notIsolated = new Set<string>() // homes found with a config of their own
+  const isolated = (account?: string): boolean => {
+    const h = codexHome(account)
+    if (codexIsolated(h)) return true
+    notIsolated.add(h)
+    return false
+  }
+  // The gateway's key lives in the user's shell (.zshrc), which an app opened from Finder doesn't get.
+  const launch = async (t: Pick<TurnShape, 'account'>): Promise<{ env: NodeJS.ProcessEnv; config: string[]; launch: Launch }> => {
+    const p = await provider()
+    const shell = await shellEnv() // read once per launch
+    const keys = Object.fromEntries(p.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
+    const env = { ...codexEnv(t.account ?? home), ...keys, ...p.env }
+    return { env, config: p.config, launch: { key: JSON.stringify([t.account ?? home, p.config, keys, p.env ?? {}]), home: codexHome(t.account), args: codexAppArgs(p.config), env, cwd: t.account ?? home } }
+  }
+  const app = new CodexApp({ thread: codexThread })
+  const appLaunch = async (t: Pick<TurnShape, 'account'>): Promise<Launch> => (await launch(t)).launch
+  // Whether this turn can go to the app-server: one that resumes a session has to.
+  const usable = (path: string, account?: string): boolean => !process.env[EXEC_ONLY] && app.supports(path) && isolated(account)
+
+  const exec = (path: string, turn: Turn, l: { env: NodeJS.ProcessEnv; config: string[] }): AsyncIterable<EngineEvent> =>
+    runCli({ bin: path, args: codexArgs(turn, l.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: l.env })
+
   return {
     id: 'codex',
+    // Sessions only while every turn can go to the app-server; otherwise each gets the whole conversation.
+    get sessions() {
+      const path = bin()
+      return !!path && !notIsolated.size && usable(path)
+    },
     async *run(turn) {
       const path = bin()
       if (!path) {
         yield { type: 'error', message: L('O Codex não está instalado. Veja em Configurações.', "Codex isn't installed. See Settings.") }
         return
       }
-      // The gateway's key lives in the user's shell (.zshrc), which an app opened from Finder doesn't get.
-      const p = await provider()
-      const shell = await shellEnv() // read once per launch
-      const keys = Object.fromEntries(p.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
-      yield* runCli({ bin: path, args: codexArgs(turn, p.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: { ...codexEnv(turn.account ?? home), ...keys, ...p.env } })
-    }
+      const l = await launch(turn)
+      if (!usable(path, turn.account)) {
+        if (turn.session?.resume) {
+          yield { type: 'error', message: L('O Codex não tem mais essa conversa; ela recomeça na próxima resposta.', "Codex no longer has this conversation; it starts over on the next reply.") }
+          return
+        }
+        yield* exec(path, turn, l)
+        return
+      }
+      const session = turn.session
+      const events = session ? app.session(path, { ...turn, session }, l.launch) : app.oneShot(path, turn, l.launch)
+      let any = false
+      try {
+        for await (const ev of events) {
+          any = true
+          yield ev
+        }
+      } catch (e) {
+        if (!(e instanceof Unsupported) || any) throw e
+        // No app-server to take it (an old CLI): exec does, with everything, and from now on. A
+        // session's first turn only then: the next would come with only what's new.
+        if (session && app.supports(path)) {
+          yield { type: 'error', message: e.message }
+          return
+        }
+        yield* exec(path, turn, l)
+      }
+    },
+    warm(turn) {
+      const path = bin()
+      if (!path || !usable(path, turn.account)) return
+      void appLaunch(turn).then((l) => app.warm(path, turn, l), () => {})
+    },
+    rewarm(id) {
+      const path = bin()
+      if (path) app.rewarm(path, id, appLaunch)
+    },
+    release(id) {
+      app.release(bin(), id, appLaunch)
+    },
+    clean(workDir, accountDirs = []) {
+      app.clean(bin(), workDir, [home, ...accountDirs].map((h) => codexHome(h)), (h) => ({ key: JSON.stringify(['clean', h]), home: h, args: codexAppArgs(), env: codexEnv(join(h, '..')), cwd: join(h, '..') }))
+    },
+    settle: () => app.settle(),
+    dispose: () => app.dispose()
   }
 }
