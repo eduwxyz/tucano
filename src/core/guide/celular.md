@@ -4,7 +4,7 @@
 Com um bot do Telegram seu, você decide aprovações, responde às perguntas dos agentes (é só responder a mensagem) e recebe o fim das rotinas de qualquer lugar. É útil pra rotina que pede aprovação de madrugada. O app busca as mensagens no Telegram, então nada precisa chegar até o seu computador.
 
 ## Ligar
-1. Em **Configurações › Celular e GitHub** (Settings › Phone and GitHub), card **Celular (Telegram)**.
+1. Em **Configurações › Celular** (Settings › Phone), card **Celular (Telegram)**.
 2. No Telegram, abra o @BotFather, mande `/newbot` e escolha um nome. Ele devolve um token.
 3. Cole o token em **Token do bot** e **Salvar**.
 4. Abra o seu bot no Telegram e mande o código que o app mostra (`/start <código>`). Só quem mandar esse código fica com o bot.

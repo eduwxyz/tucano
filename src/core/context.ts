@@ -26,12 +26,11 @@ export function systemPrompt(opts: {
   apps?: AgentApp[] // the person's own apps it may use
   routines?: Routine[] // its own, when it can schedule
   skills?: Skill[] // the active ones it follows, when it has skill tools
-  publish?: string[] // the GitHub repositories it can push agent/* branches to
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
   connectors?: boolean // it has connector tools (Slack, Databricks…)
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, publish, builder, wiki, connectors } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, builder, wiki, connectors } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -71,15 +70,10 @@ export function systemPrompt(opts: {
               `Nelas, mude só o que ${me} pediu e confira com os testes ou o build do projeto. Antes de mexer, olhe o git status; não apague, não reescreva o que não entendeu e não descarte mudanças de ${me}. node_modules e .venv aqui são do Linux, separados dos do computador de ${me}: instale à vontade.`,
               `In them, change only what ${me} asked for and check it with the project's tests or build. Before touching anything, look at git status; don't delete, don't rewrite what you don't understand and don't discard ${me}'s changes. node_modules and .venv here are Linux's, separate from ${me}'s computer's: install freely.`
             )} ${
-              publish?.length
-                ? L(
-                    `Não há credenciais no seu computador, mas o app publica no GitHub (${publish.join(', ')}) por você: faça commit numa branch agent/<assunto> e \`git push origin agent/<assunto>\` (só branches agent/* passam; main e as outras são recusadas). Depois peça a PR com abrir_pr: ${me} aprova e o app abre. Deploy continua com ${me}.`,
-                    `There are no credentials on your computer, but the app publishes to GitHub (${publish.join(', ')}) for you: commit on an agent/<topic> branch and \`git push origin agent/<topic>\` (only agent/* branches go through; main and the others are refused). Then ask for the PR with abrir_pr: ${me} approves and the app opens it. Deploying stays with ${me}.`
-                  )
-                : L(
-                    `Não há credenciais no seu computador, então git push e deploy não funcionam: faça commit só se ${me} pedir e diga o que falta ${me} fazer.`,
-                    `There are no credentials on your computer, so git push and deploys don't work: commit only if ${me} asks and say what's left for ${me} to do.`
-                  )
+              L(
+                `Não há credenciais no seu computador, então git push e deploy não funcionam: faça commit só se ${me} pedir e diga o que falta ${me} fazer. Pra publicar no GitHub (uma branch, uma PR), use as ferramentas do conector do GitHub, se você tiver.`,
+                `There are no credentials on your computer, so git push and deploys don't work: commit only if ${me} asks and say what's left for ${me} to do. To publish to GitHub (a branch, a PR), use the GitHub connector's tools, if you have it.`
+              )
             }\``
           ].join('\n')
       ]

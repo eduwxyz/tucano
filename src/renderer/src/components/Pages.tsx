@@ -28,7 +28,6 @@ import {
   browserAction,
   setTelegramToken,
   unpairTelegram,
-  setGithubToken,
   exportTeam,
   importAgents,
   importTeam,
@@ -1402,7 +1401,7 @@ const SETTINGS_TABS = (): TabList => [
   ['geral', L('Geral', 'General')],
   ['modelos', L('Modelos', 'Models')],
   ['agentes', L('Agentes', 'Agents')],
-  ['integracoes', L('Celular e GitHub', 'Phone and GitHub')],
+  ['integracoes', L('Celular', 'Phone')],
   ...(hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : [])
 ]
 const AGENT_TABS = (): TabList => [
@@ -1525,58 +1524,6 @@ export function LanguagePicker({ className = '' }: { className?: string }): Reac
 }
 
 // Issue to PR (spec §22): the token the app pushes agent/* branches and opens PRs with.
-function GithubCard({ info }: { info?: { user?: string; error?: string } }): ReactNode {
-  const [token, setToken] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const save = (value: string | null): void => {
-    setBusy(true)
-    setError('')
-    setGithubToken(value)
-      .then(() => setToken(''))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
-      .finally(() => setBusy(false))
-  }
-  return (
-    <Card
-      title={L('GitHub (push e PR)', 'GitHub (push and PR)')}
-      lead={L(
-        'Pros agentes publicarem o que fazem nas pastas que você emprestou: o git do computador deles passa pelo app, que põe o token fora do computador e só aceita push em branches agent/*. Abrir PR é um pedido de aprovação.',
-        'So agents can publish what they do in the folders you lent: their computer’s git goes through the app, which keeps the token outside the computer and only accepts pushes to agent/* branches. Opening a PR is an approval request.'
-      )}
-    >
-      {info?.user ? (
-        <div className="row row--center">
-          <span className="tag tag--ok">{L('Conectado', 'Connected')}</span>
-          <span className="small grow">
-            {L('como', 'as')} <strong>{info.user}</strong>
-          </span>
-          <button className="btn btn--sm btn--ghost" onClick={() => save(null)}>
-            {L('Remover token', 'Remove token')}
-          </button>
-        </div>
-      ) : (
-        <>
-          <p className="small">
-            {L('Crie um token fine-grained em github.com → Settings → Developer settings →', 'Create a fine-grained token at github.com → Settings → Developer settings →')} <strong>Fine-grained tokens</strong>
-            {L(', só com os repositórios dessas pastas e as permissões', ', with only these folders’ repositories and the permissions')} <strong>Contents: read and write</strong> {L('e', 'and')} <strong>Pull requests: read and write</strong>.
-          </p>
-          <div className="row">
-            <input className="grow" type="password" value={token} placeholder="github_pat_…" onChange={(e) => setToken(e.target.value)} />
-            <button className="btn" disabled={busy || !token.trim()} onClick={() => save(token)}>
-              {busy ? L('Conferindo…', 'Checking…') : L('Salvar', 'Save')}
-            </button>
-          </div>
-        </>
-      )}
-      {(error || info?.error) && <p className="note note--error">{error || info?.error}</p>}
-      <p className="hint">
-        <Icon name="shield" size={13} /> {L('O token fica no cofre do sistema e nunca entra no computador dos agentes. main e as outras branches são recusadas no caminho.', 'The token stays in the system’s vault and never enters the agents’ computer. main and the other branches are refused on the way.')}
-      </p>
-    </Card>
-  )
-}
-
 // The team as a file, and backups of everything.
 const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
@@ -2091,7 +2038,6 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('integracoes') && <GithubCard info={settings.github} />}
 
         {pane('geral') && <TeamCard />}
         {pane('servidores') && <ServersCard />}
