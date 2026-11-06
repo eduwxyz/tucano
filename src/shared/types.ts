@@ -396,6 +396,7 @@ export interface Settings {
   wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
   wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
+  skillsDir?: string // an extra folder of skills (<category>/<name>/SKILL.md), like Hermes keeps them; TUCANO_SKILLS_DIR wins; empty when unset
   defaultLimit: number
   approvalTtlHours: number
   questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)

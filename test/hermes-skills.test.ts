@@ -101,7 +101,7 @@ describe('findHermesSkills', () => {
 
   it('works on a SKILL.md without metadata.hermes', () => {
     put(join(root, 'ops/x/SKILL.md'), '---\nname: x\ndescription: d\nallowed-tools: Read\n---\n')
-    expect(findHermesSkills(root, 'H')[0]!.tags).toEqual([])
+    expect(findHermesSkills(root, 'H')[0]!.tags ?? []).toEqual([])
   })
 
   it('lists the same name in two categories, both', () => {

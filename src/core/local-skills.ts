@@ -218,6 +218,23 @@ export function findLocalSkills(home = homedir()): LocalSkill[] {
   return [...inDirs(join(claude, 'skills'), 'Claude Code'), ...pluginSkills(claude), ...inDirs(join(codex, 'skills'), 'Codex')]
 }
 
+// Every skill on this Mac, plus the ones in an extra directory (TUCANO_SKILLS_DIR or Settings,
+// empty by default; <category>/<name>/SKILL.md or flat). A skill reached twice, say a link from
+// ~/.codex/skills into that directory, is listed once, by the real path of its SKILL.md.
+export function findSkills(home = homedir(), extraDir?: string): LocalSkill[] {
+  const extra = extraDir?.trim() ? findHermesSkills(extraDir.trim(), 'Hermes') : []
+  const seen = new Set<string>()
+  return [...findLocalSkills(home), ...extra].filter((s) => {
+    let key = s.source
+    try {
+      key = realpathSync(s.source)
+    } catch {
+      // keep the path as it is
+    }
+    return !seen.has(key) && !!seen.add(key)
+  })
+}
+
 // A linked skill's recipe, or one of its files; never a file outside its folder.
 export function readLinked(source: string, file?: string): string {
   const dir = realpathSync(dirname(source))
