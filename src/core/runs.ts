@@ -154,8 +154,8 @@ type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: stri
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 export class Runner {
-  private queue: { job: () => Promise<unknown>; agentId?: string }[] = []
-  private busy = new Set<string>() // agents with a reply running: their next one waits
+  private queue: { job: () => Promise<unknown>; place?: string }[] = []
+  private busy = new Set<string>() // an agent's places (replyKey) with a reply running: its next one there waits
   private dropped = new Set<string>() // queued replies stopped before they started
   private active = 0
   private routing = 0
@@ -335,7 +335,7 @@ export class Runner {
         // Stopped by the person, or everyone paused: the rest don't start.
         if (i + 1 < agents.length && !this.paused && m.run?.status !== 'stopped') next(i + 1)
         return m
-      }, agents[i]!.id)
+      }, replyKey(agents[i]!.id, conv.id, threadId))
     next(0)
   }
 
@@ -648,7 +648,7 @@ export class Runner {
       const then = typeof opts.then === 'function' ? opts.then(me) : opts.then
       const task = opts.task ?? (delegation ? briefFor(delegation, this.deps.db.agent(delegation.by), me, then) : then)
       return this.execute(agent, conv, { depth: 1, existing: msg, task, work: opts.work, delegation, round: opts.round, reportOf: opts.reportOf, root: opts.root })
-    }, agent.id)
+    }, replyKey(agent.id, conv.id, msg.threadId))
   }
 
   // Hands out the tasks a reply delegated, once that reply is over. Stopped, or with everyone paused, nothing goes.
@@ -748,23 +748,23 @@ export class Runner {
   // `agentId`: whose reply the job is. An agent does one thing at a time, like a person: while it's busy,
   // what else comes for it (a mention, a task, a question in a channel) waits, and goes in the order it came.
   // Other agents' work goes on meanwhile.
-  private enqueue(job: () => Promise<unknown>, agentId?: string): void {
-    this.queue.push({ job, agentId })
+  private enqueue(job: () => Promise<unknown>, place?: string): void {
+    this.queue.push({ job, place })
     this.pump()
   }
 
   private pump(): void {
     while (this.active < MAX_CONCURRENT) {
       if (this.paused) return // paused: nothing new starts, queued work waits
-      const i = this.queue.findIndex((q) => !q.agentId || !this.busy.has(q.agentId))
+      const i = this.queue.findIndex((q) => !q.place || !this.busy.has(q.place))
       if (i < 0) return
-      const [{ job, agentId }] = this.queue.splice(i, 1) as [{ job: () => Promise<unknown>; agentId?: string }]
-      if (agentId) this.busy.add(agentId)
+      const [{ job, place }] = this.queue.splice(i, 1) as [{ job: () => Promise<unknown>; place?: string }]
+      if (place) this.busy.add(place)
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
         .catch((e: unknown) => console.error('[runner]', e))
         .finally(() => {
-          if (agentId) this.busy.delete(agentId)
+          if (place) this.busy.delete(place)
           this.active--
           this.pump()
           if (this.active === 0) this.deps.onBusy?.(false)
@@ -773,17 +773,18 @@ export class Runner {
     }
   }
 
-  // A reply for an agent, in line behind what it's doing. When it's busy, the reply shows up at once as
-  // queued, so it's clear it's coming and in what order.
+  // A reply for an agent, in line behind what it's doing there: in other conversations and threads it runs at
+  // once. When it's busy here, the reply shows up at once as queued, so it's clear it's coming and in what order.
   private start(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): void {
-    if (this.busy.has(agent.id) && !opts.existing) {
+    const place = replyKey(agent.id, conv.id, opts.existing ? opts.existing.threadId : opts.threadId)
+    if (this.busy.has(place) && !opts.existing) {
       const msg: Message = { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
       this.update(msg, {
         run: { status: 'working', depth: opts.depth, steps: [{ id: randomUUID(), label: L('Na fila', 'Queued'), detail: L('termina o que está fazendo antes', 'finishing what it is doing first'), status: 'running' }], ...(opts.task ? { task: opts.task } : {}) }
       })
       opts = { ...opts, existing: msg }
     }
-    this.enqueue(() => this.execute(agent, conv, opts), agent.id)
+    this.enqueue(() => this.execute(agent, conv, opts), place)
   }
 
   // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
@@ -821,7 +822,7 @@ export class Runner {
     else if (opts.delegation) this.settle(opts.delegation.from)
     if (f && msg.run?.status === 'done' && !this.paused) {
       this.followups.reserve(key)
-      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }), agent.id)
+      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }), key)
     }
     return msg
   }
