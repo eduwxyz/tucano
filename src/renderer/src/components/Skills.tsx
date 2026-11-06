@@ -294,7 +294,7 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
     void localSkills().then(setFound, () => setFound([]))
   }, [])
   const needle = q.trim().toLowerCase()
-  const shown = (found ?? []).filter((l) => !needle || `${l.name} ${l.description} ${l.origin}`.toLowerCase().includes(needle))
+  const shown = (found ?? []).filter((l) => !needle || `${l.name} ${l.description} ${l.origin} ${l.category ?? ''} ${(l.tags ?? []).join(' ')}`.toLowerCase().includes(needle))
   const linked = (l: LocalSkill): boolean => skills.some((k) => k.source === l.source && k.state === 'active')
   useEffect(() => setAt(0), [q])
   useEffect(() => {
@@ -336,11 +336,12 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
                   <button key={l.source} className={`skill-add__item ${i === at ? 'is-at' : ''}`} disabled={on} onMouseEnter={() => setAt(i)} onClick={() => setPicked(l)}>
                     <span className="skill-add__head">
                       <strong>{l.name}</strong>
-                      <span>{l.origin}</span>
+                      <span>{l.origin}{l.category ? ` · ${l.category}` : ''}{l.version ? ` · v${l.version}` : ''}</span>
                       {l.scripts && <span className="warn-text">{L('precisa de computador', 'needs a computer')}</span>}
                       {on && <span className="tag tag--ok">{L('em uso', 'in use')}</span>}
                     </span>
                     <span className="skill-add__desc">{l.description}</span>
+                    {!!l.tags?.length && <span className="muted small">{l.tags.join(' · ')}</span>}
                     {l.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <span className="warn-text small" role="status">{skillLengthNote(l.bodyLength)}</span>}
                   </button>
                 )
@@ -354,6 +355,7 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
             </button>
             <h3>{picked.name}</h3>
             <p>{picked.description}</p>
+            {!!picked.tags?.length && <p className="muted small">{L('Etiquetas', 'Tags')}: {picked.tags.join(' · ')}</p>}
             {picked.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <p className="warn-text small" role="status">{skillLengthNote(picked.bodyLength)}</p>}
             {picked.scripts && <p className="warn-text small">{L('Tem scripts: só roda com um agente que tenha computador (Linux ou este computador).', 'It has scripts: it only runs with an agent that has a computer (Linux or this computer).')}</p>}
             <span className="skill-add__label">{L('Quem usa?', 'Who uses it?')}</span>
