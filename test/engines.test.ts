@@ -66,7 +66,9 @@ describe('Claude Code stream', () => {
 
   it('gets the gateway as its only MCP server, with its tools pre-allowed', () => {
     const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', mcpUrl: 'http://127.0.0.1:1/mcp/abc' })
-    expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: { tucano: { type: 'http', url: 'http://127.0.0.1:1/mcp/abc' } } })
+    // The address (and its token) comes from the environment: never in the arguments, which other programs can list.
+    expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: { tucano: { type: 'http', url: '${TUCANO_MCP_URL}' } } })
+    expect(args.join(' ')).not.toContain('/mcp/abc')
     expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__tucano')
     expect(args).toContain('--strict-mcp-config')
     expect(claudeArgs({ model: 'sonnet', effort: 'low', system: 'x' })).not.toContain('--mcp-config')

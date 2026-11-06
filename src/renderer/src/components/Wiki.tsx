@@ -7,6 +7,7 @@ import { L, locale } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
+import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import { call } from '../rpc'
 import { agentById, navigate, setTab, updateSettings, useStore, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
@@ -920,7 +921,7 @@ function WikiSearch({ pages, onClose }: { pages: WikiPageInfo[]; onClose: () => 
                 <b>{r.title}</b>
                 {r.snippet && (
                   <small>
-                    <Markdown allowedElements={['p', 'strong', 'em']} unwrapDisallowed>
+                    <Markdown urlTransform={safeUrl} allowedElements={['p', 'strong', 'em']} unwrapDisallowed>
                       {r.snippet}
                     </Markdown>
                   </small>
@@ -1077,7 +1078,7 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
 // One change, as the curator wrote it: what goes where.
 function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
   const md = (t?: string): ReactNode => (
-    <Markdown remarkPlugins={[remarkGfm]} components={mdLinks()}>
+    <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks()}>
       {wikiLinks(t ?? '')}
     </Markdown>
   )
@@ -1229,7 +1230,7 @@ function WikiReviewPane(): ReactNode {
   if (!r) return null
   const sorted = [...r.findings].sort((a, b) => FINDING_ORDER.indexOf(a.kind) - FINDING_ORDER.indexOf(b.kind))
   const md = (t: string): ReactNode => (
-    <Markdown components={{ ...mdLinks(), p: (p) => <span>{p.children}</span> }}>{wikiLinks(t)}</Markdown>
+    <Markdown urlTransform={safeUrl} components={{ ...mdLinks(), p: (p) => <span>{p.children}</span> }}>{wikiLinks(t)}</Markdown>
   )
   return (
     <div className="wk-pane">
@@ -1525,7 +1526,7 @@ function WikiSourceView({ id }: { id: string }): ReactNode {
       </div>
       {src.error && <p className="field__error">{src.error}</p>}
       <article className="wk-doc md wk-doc--source">
-        <Markdown remarkPlugins={[remarkGfm]}>{src.text.trimStart().replace(/^# .*\n+/, '')}</Markdown>
+        <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{src.text.trimStart().replace(/^# .*\n+/, '')}</Markdown>
       </article>
     </div>
   )
@@ -1654,7 +1655,7 @@ function WikiPageView({ title, data }: { title: string; data: WikiData | null })
       </div>
       <h1 className="wk-page__title">{page.title}</h1>
       <div className="wk-doc md">
-        <Markdown remarkPlugins={[remarkGfm]} components={mdLinks(missing)}>
+        <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks(missing)}>
           {wikiLinks(page.body)}
         </Markdown>
       </div>
@@ -1803,7 +1804,7 @@ function WikiEditor({ title }: { title?: string }): ReactNode {
           <textarea className="wiki-editor__text" value={body} onChange={(e) => setBody(e.target.value)} spellCheck placeholder={L('Comece com uma frase que diga o que é. Depois, seções com ##.', 'Start with one sentence that says what it is. Then sections with ##.')} />
           <div className="wiki-editor__preview wk-doc md">
             {body.trim() ? (
-              <Markdown remarkPlugins={[remarkGfm]} components={mdLinks()}>
+              <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks()}>
                 {wikiLinks(body)}
               </Markdown>
             ) : (

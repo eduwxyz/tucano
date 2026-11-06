@@ -1,7 +1,8 @@
 import { L, lang, locale } from '../../../shared/lang'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
-import Markdown, { defaultUrlTransform, type ExtraProps } from 'react-markdown'
-import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
+import Markdown, { type ExtraProps } from 'react-markdown'
+import { safeUrl } from '../links'
+import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
@@ -315,7 +316,6 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
 
 const AGENT_PLUGINS = [remarkGfm, remarkMentions, remarkLocalPaths]
 const PLAIN_PLUGINS = [remarkGfm, remarkMentions]
-const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
 
 // Parsing is by far the most expensive part of drawing a message, so it only runs when the text changes.
 const MessageMarkdown = memo(Markdown)
@@ -380,9 +380,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {message.text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
-              <MessageMarkdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={agentMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
             ) : (
-              <MessageMarkdown remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
             )}
           </div>
         ) : null}
@@ -480,7 +480,7 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
           </div>
         )}
         <div className="md">
-          <MessageMarkdown remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+          <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
         </div>
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
@@ -494,7 +494,7 @@ function SystemText({ text }: { text: string }): ReactNode {
   const [head = '', ...why] = text.split(' · ')
   return (
     <>
-      <Markdown>{head}</Markdown>
+      <Markdown urlTransform={safeUrl}>{head}</Markdown>
       {why.length > 0 && (
         <span className="system-line__why" title={why.join(' · ').replace(/\*\*/g, '')}>
           {why.join(' · ').replace(/\*\*/g, '')}

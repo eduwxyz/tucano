@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
-import { app, BrowserWindow, session, type MediaAccessPermissionRequest, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
+import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
@@ -131,10 +132,22 @@ type CoreRequest =
   | { type: 'icons'; id: string; paths: string[] }
   | { type: 'browser'; id: string; agentId: string; op: BrowserOp; args?: Record<string, unknown> }
 
+// The app's page: the dev server while developing, the built index.html otherwise.
+const APP_PAGE = process.env['ELECTRON_RENDERER_URL'] ?? pathToFileURL(join(import.meta.dirname, '../renderer/index.html')).toString()
+
+// Only the app's own page, in the app's window, talks to main: never a page that window
+// was somehow taken to, nor a frame inside it. Its bridge reaches the core.
+function fromApp(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame
+  const ok = !!frame && frame === event.sender.mainFrame && !!mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents && isAppPage(frame.url, APP_PAGE)
+  if (!ok) console.error('[main] ignored a message from', frame?.url ?? 'a closed frame')
+  return ok
+}
+
 // The conversation open in the window, so a notification about it can stay quiet.
 let viewing: string | null = null
-ipcMain.on('viewing', (_e, id: unknown) => {
-  if (_e.sender !== mainWindow?.webContents || _e.senderFrame !== _e.sender.mainFrame) return
+ipcMain.on('viewing', (e, id: unknown) => {
+  if (!fromApp(e)) return
   viewing = typeof id === 'string' ? id : null
   cores.get(registry.selected().id)?.child.postMessage({ type: 'viewing', conversationId: viewing })
 })
@@ -377,7 +390,7 @@ function serveArtifact(req: Request): Promise<Response> | Response {
 
 // Each page load asks for a port; one end goes to the core, the other to the page.
 ipcMain.on('core:connect', async (event) => {
-  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return
+  if (!fromApp(event)) return
   const workspace = registry.selected()
   const runtime = startCore(workspace)
   try { await runtime.ready } catch { return }
@@ -559,9 +572,10 @@ function showWindow(conversationId?: string, page?: 'skills', threadId?: string)
 const updates = new Updates((state) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update', state)
 })
-ipcMain.handle('update:state', () => updates.get())
-ipcMain.on('update:check', () => updates.check())
-ipcMain.on('update:install', () => {
+ipcMain.handle('update:state', (e) => (fromApp(e) ? updates.get() : null))
+ipcMain.on('update:check', (e) => fromApp(e) && updates.check())
+ipcMain.on('update:install', (e) => {
+  if (!fromApp(e)) return
   // A reply in progress would be cut off: the person decides.
   if (awakeBlocker !== null && mainWindow && !mainWindow.isDestroyed()) {
     const answer = dialog.showMessageBoxSync(mainWindow, {
@@ -579,6 +593,7 @@ ipcMain.on('update:install', () => {
 
 // The Mac's folder picker, for a folder lent to an agent's computer. The core checks the choice.
 ipcMain.handle('pick-folder', async (event) => {
+  if (!fromApp(event)) return null
   const win = BrowserWindow.fromWebContents(event.sender)
   const opts = { title: L('Escolher pasta', 'Choose a folder'), buttonLabel: L('Escolher', 'Choose'), properties: ['openDirectory' as const] }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
@@ -619,21 +634,24 @@ function createWindow(): BrowserWindow {
     stillOpen()
   })
 
-  // Links in messages open in the default browser, never inside the app.
+  // Links in messages open in the default browser or the mail app, never inside the app;
+  // any other scheme isn't handed to the system either.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (isOutsideLink(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
 
-  // react-markdown renders message links as plain <a href>, and a plain click
-  // navigates this whole window away (the app "disappears" behind the site).
-  // Same promise as above, for those: web links go to the real browser;
-  // a same-URL navigation (reload) is not a link and stays.
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!/^https?:\/\//.test(url) || url === win.webContents.getURL()) return
+  // react-markdown renders message links as plain <a href>, and a plain click navigates
+  // this whole window. The window only ever shows the app: a reload stays, web and mail
+  // links go to the system, and anything else (a local page, which would get the app's
+  // bridge to the core) goes nowhere.
+  const guard = (event: { preventDefault: () => void }, url: string): void => {
+    if (isAppPage(url, APP_PAGE)) return
     event.preventDefault()
-    void shell.openExternal(url)
-  })
+    if (isOutsideLink(url)) void shell.openExternal(url)
+  }
+  win.webContents.on('will-navigate', guard)
+  win.webContents.on('will-redirect', guard)
 
   if (process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])

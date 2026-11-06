@@ -6,7 +6,8 @@
 // protocol; the page scripts are the same as in the Electron fallback. The
 // screen streams to the app while it changes, so the panel is a live view.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs'
+import type { Readable, Writable } from 'node:stream'
+import { existsSync, mkdirSync, readlinkSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { L } from '../shared/lang'
 import { chromeKeyringFlags, findChrome, userAgentPlatform } from './platform'
@@ -61,9 +62,11 @@ type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Erro
 // A new frame of the screen; says whether the app wants frames at full speed now.
 export type OnFrame = (agentId: string, jpeg: string) => boolean
 
-// One Chrome process and its DevTools connection, following one tab.
+// One Chrome process and its DevTools connection, following one tab. The connection is a
+// pipe to that process (--remote-debugging-pipe): no port another program on the computer
+// (a command an agent runs) could find and drive this profile through.
 class Tab {
-  private ws!: WebSocket
+  private closed = false
   private n = 0
   private pending = new Map<number, Pending>()
   session = '' // the tab we drive
@@ -79,18 +82,28 @@ class Tab {
     private onFrame?: (jpeg: string) => boolean
   ) {}
 
-  async connect(port: string): Promise<void> {
-    const { webSocketDebuggerUrl } = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()) as { webSocketDebuggerUrl: string }
-    this.ws = new WebSocket(webSocketDebuggerUrl)
-    await new Promise<void>((resolve, reject) => {
-      this.ws.addEventListener('open', () => resolve(), { once: true })
-      this.ws.addEventListener('error', () => reject(new Error(L('o Chrome não aceitou a conexão', "Chrome didn't accept the connection"))), { once: true })
+  // Chrome reads commands on its fd 3 and writes on fd 4, each message ending in a NUL.
+  private get input(): Writable {
+    return this.proc.stdio[3] as Writable
+  }
+
+  async connect(): Promise<void> {
+    const output = this.proc.stdio[4] as Readable
+    let buffered = ''
+    output.setEncoding('utf8')
+    output.on('data', (chunk: string) => {
+      const parts = (buffered + chunk).split('\0')
+      buffered = parts.pop() ?? ''
+      for (const m of parts) if (m) this.onMessage(JSON.parse(m) as Record<string, unknown>)
     })
-    this.ws.addEventListener('message', (e) => this.onMessage(JSON.parse(String(e.data)) as Record<string, unknown>))
-    this.ws.addEventListener('close', () => {
+    const gone = (): void => {
+      this.closed = true
       for (const p of this.pending.values()) p.reject(new Error(L('o Chrome fechou', 'Chrome closed')))
       this.pending.clear()
-    })
+    }
+    output.on('close', gone)
+    output.on('error', gone)
+    this.input.on('error', gone)
     await this.send('Target.setDiscoverTargets', { discover: true })
     const { targetInfos } = (await this.send('Target.getTargets')) as { targetInfos: { targetId: string; type: string; url: string }[] }
     const page = targetInfos.find((t) => t.type === 'page')
@@ -100,8 +113,9 @@ class Tab {
   send(method: string, params: Record<string, unknown> = {}, session = ''): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const id = ++this.n
+      if (this.closed) return reject(new Error(L('o Chrome fechou', 'Chrome closed')))
       this.pending.set(id, { resolve, reject })
-      this.ws.send(JSON.stringify({ id, method, params, ...(session ? { sessionId: session } : {}) }))
+      this.input.write(JSON.stringify({ id, method, params, ...(session ? { sessionId: session } : {}) }) + '\0')
       setTimeout(() => this.pending.get(id) && (this.pending.delete(id), reject(new Error(L(`o Chrome não respondeu (${method})`, `Chrome didn't answer (${method})`)))), 30_000).unref()
     })
   }
@@ -191,8 +205,9 @@ class Tab {
   }
 
   close(): void {
+    this.closed = true
     try {
-      this.ws.close()
+      this.input.end()
     } catch {}
   }
 }
@@ -234,10 +249,9 @@ export class ChromeBrowsers {
         for (let i = 0; i < 50 && alive(pid); i++) await wait(200)
       }
     } catch {}
-    rmSync(join(profile, 'DevToolsActivePort'), { force: true })
     const args = [
       `--user-data-dir=${profile}`,
-      '--remote-debugging-port=0',
+      '--remote-debugging-pipe',
       '--disable-blink-features=AutomationControlled', // navigator.webdriver stays false, as in any Chrome
       '--no-first-run',
       '--no-default-browser-check',
@@ -248,22 +262,22 @@ export class ChromeBrowsers {
       ...(headed ? ['--new-window'] : ['--headless=new', '--mute-audio']),
       url && /^https?:/.test(url) ? url : 'about:blank'
     ]
-    const proc = spawn(this.bin, args, { stdio: 'ignore' })
-    let port = ''
-    for (let i = 0; i < 75 && !port; i++) {
-      await wait(200)
-      if (proc.exitCode !== null) throw new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))
-      try {
-        port = readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0] ?? ''
-      } catch {}
-    }
-    if (!port) {
-      proc.kill()
-      throw new Error(L('o Chrome não abriu em 15 s', "Chrome didn't open in 15 s"))
-    }
+    const proc = spawn(this.bin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
     const onFrame = this.onFrame
     const tab = new Tab(proc, headed, onFrame && ((jpeg) => onFrame(agentId, jpeg)))
-    await tab.connect(port)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const failed = new Promise<never>((_, reject) => {
+      proc.once('exit', () => reject(new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))))
+      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 15 s', "Chrome didn't open in 15 s"))), 15_000)
+    })
+    try {
+      await Promise.race([tab.connect(), failed])
+    } catch (e) {
+      proc.kill()
+      throw e
+    } finally {
+      clearTimeout(timer)
+    }
     proc.once('exit', () => {
       if (this.tabs.get(agentId) !== tab) return
       this.tabs.delete(agentId)
