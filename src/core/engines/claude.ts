@@ -7,6 +7,7 @@ import { L } from '../../shared/lang'
 
 export const GATEWAY_NAME = 'tucano'
 const WEB_TOOLS = ['WebSearch', 'WebFetch'] // run on Anthropic's side, on the subscription
+const TOOL_SEARCH = 'ToolSearch' // loads a deferred MCP tool by name; touches nothing on the computer
 
 // How the user's own Claude Code reaches the model, from their settings.json:
 // the `env` block (a company gateway: ANTHROPIC_BASE_URL and its token, or
@@ -34,11 +35,16 @@ export function userProvider(dir = process.env['CLAUDE_CONFIG_DIR'] || join(home
 // --bare: it turns off the subscription login. The app's gateway, when given,
 // is the only MCP server, and its tools are pre-allowed: the gateway decides.
 // With web, the only built-in tools are web search and page reading.
+// With the gateway, also ToolSearch: without it the CLI turns tool search off and puts every
+// connector tool in every model call (measured: 198 tools, 239k tokens a call, up to 7.8 s to the
+// first token; with it, 11k). The CLI then lists the connector tools by name and the model loads
+// the ones it needs; the app's own tools stay in the prompt (ALWAYS_LOAD in the gateway).
 export const GATEWAY_ENV = 'TUCANO_MCP_URL'
 
 export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl' | 'web' | 'blocks' | 'images' | 'session'>, apiKeyHelper?: string): string[] {
   const web = turn.web ? WEB_TOOLS : []
-  const allowed = [...(turn.mcpUrl ? [`mcp__${GATEWAY_NAME}`] : []), ...web]
+  const search = turn.mcpUrl ? [TOOL_SEARCH] : []
+  const allowed = [...(turn.mcpUrl ? [`mcp__${GATEWAY_NAME}`] : []), ...search, ...web]
   // The address carries the gateway's token: the CLI fills it in from the environment, so it
   // never shows in the arguments, which any program on the computer can list.
   const gateway = turn.mcpUrl ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: `\${${GATEWAY_ENV}}` } } })] : []
@@ -51,7 +57,7 @@ export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcp
     '--model', turn.model,
     '--effort', turn.effort,
     '--system-prompt', turn.system,
-    '--tools', web.join(','),
+    '--tools', [...search, ...web].join(','),
     '--strict-mcp-config',
     '--setting-sources', '',
     ...(turn.session ? [turn.session.resume ? '--resume' : '--session-id', turn.session.id] : ['--no-session-persistence']),

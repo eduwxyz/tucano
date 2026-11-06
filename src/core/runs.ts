@@ -21,7 +21,7 @@ import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
-import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey, type Followup } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
@@ -814,7 +814,8 @@ export class Runner {
             }
           }
         : undefined
-    const toolDefs: ToolDef[] = [
+    // The app's own tools stay in the prompt; the connectors' wait behind tool search (ALWAYS_LOAD).
+    const ownTools: ToolDef[] = [
       ASK_USER,
       ...(accessTool ? [accessTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
@@ -827,7 +828,10 @@ export class Runner {
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
-      ...(wiki ? WIKI_TOOLS : []),
+      ...(wiki ? WIKI_TOOLS : [])
+    ]
+    const toolDefs: ToolDef[] = [
+      ...ownTools.map((t) => ({ ...t, _meta: { ...t._meta, ...ALWAYS_LOAD } })),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
