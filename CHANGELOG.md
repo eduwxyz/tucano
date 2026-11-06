@@ -4,8 +4,20 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-11-06
+
+> **Em português:**
+> - **Google e Slack nos conectores.** Gmail, Calendar, Drive, Docs e Sheets, pelos servidores oficiais do Google, e o Slack, pelo dele. Os dois só aceitam apps cadastrados neles, então o primeiro Conectar mostra como criar o seu, uma vez: 5 passos no Google, 2 no Slack (o link já traz tudo preenchido). Depois, é um clique.
+> - **Mais seis conectores, e segredos no 1Password.** GitHub, Dynatrace, Snowflake, Metabase, Azure DevOps e AWS CloudWatch: a loja pede o endereço ou o token numa janela. No lugar de um token, dá pra pôr uma referência do 1Password (op://…), lida a cada conexão.
+> - **O Tucano num servidor, pronto pra outras pessoas.** Entrar por link, as páginas que os agentes servem abrindo pelo servidor, arquivos que sobem e descem, o login dos conectores terminando sozinho e as notificações no navegador.
+> - **O app abre os seus Tucanos em servidores.** Um link tucano://connect pareia o app com um Tucano num servidor, que aparece na mesma janela, com uma barra pra voltar; ficam em Configurações › Servidores.
+>
+> **Correção:** um agente no Codex volta a salvar arquivos no computador dele, em vez de dizer que a sessão é só leitura. Acontecia quando um agente caía no modelo reserva do Codex.
+
 ### Added
 
+- **Tucano as a server, ready for other people to use.** Sign in by a link (`server.js link` prints it; `TUCANO_URL` behind a proxy), and twenty wrong tokens from one address lock it out for ten minutes. Pages agents serve open at `https://<port>-<address>`, through the server, with a sign-in of their own, WebSockets included. A file sent with a message goes up to the server, a cited one comes down, an Obsidian vault comes in as a .zip, and folders are picked on the server. OAuth connectors finish on the server's own address, with nothing to paste; notifications reach the browser, and a connection that goes quiet comes back with the drafts kept. An idle agent's Chrome closes after ten minutes and reopens on the same page.
+- **The desktop app opens your Tucanos on servers.** A `tucano://connect` link (`server.js link` prints it, next to the browser's) pairs the app with a Tucano on a server: its page shows over the app in the same window, in a view with no bridge to this computer, under a bar to go back, signed in with a token the system's keychain keeps. **Settings › Servers** lists them, pairs a pasted link and forgets one; the workspace list, the Window menu and the tray open them, and the server on screen when the app quit comes back at launch.
 - **Six more connectors in the store, for services that ask a few things first:** GitHub (a personal access token), Dynatrace and Snowflake (your instance and a token), Metabase (your address, then the browser sign-in), and Azure DevOps and AWS CloudWatch, which run the service's official server on this computer (with npx and uv). The store asks for what each needs in a window and adds the connector as the custom form would.
 - **A connector's secrets can stay in 1Password.** In place of a token or a variable of a local connector's command, an `op://Vault/Item/field` reference: Tucano keeps only the reference and reads the value with the 1Password CLI on each connection, and says what to do when the CLI is missing, signed out or locked, or the item isn't there.
 - **Gmail, Google Calendar, Google Drive, Google Docs and Google Sheets in the connector store**, through Google's own MCP servers. Google signs in only apps registered with it, so the first one walks you through making yours in Google Cloud, once, in five steps with a link for each; the other four then sign in with one click. Each asks only for what its tools need: Gmail searches, reads, drafts and labels but never sends nor deletes for good, and Drive writes only the files it made or opened. The Tuca's guide explains the steps and what to check when Google turns a sign-in away.
@@ -339,6 +351,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.14]: https://github.com/eduwxyz/tucano/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/eduwxyz/tucano/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/eduwxyz/tucano/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/eduwxyz/tucano/compare/v0.2.10...v0.2.11
