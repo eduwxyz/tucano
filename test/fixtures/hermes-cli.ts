@@ -3,26 +3,46 @@
 // daemon helpers. Both tests are opt-in (TUCANO_HERMES_E2E=1) — a Hermes install
 // is not a CI given, and a 0.21 install cannot run them (no gateway daemon).
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, parse } from 'node:path'
+import { findOnPath } from '../../src/core/platform'
 
 export type ToolOffer = { function?: { name?: string } }
 export type ChatMessage = { role?: string; content?: unknown }
 // The model's whole behaviour, in one function: what it reads, what it answers.
 export type ModelPlan = (req: { messages: ChatMessage[]; tools: ToolOffer[] }) => { message: Record<string, unknown>; finish: 'stop' | 'tool_calls' }
 
-export function onPath(cmd: string): string | undefined {
-  for (const dir of (process.env['PATH'] ?? '').split(':')) {
-    const p = join(dir, cmd)
-    if (dir && existsSync(p)) return p
-  }
-  return undefined
+// The CLI is looked for the way the app looks for it (platform.ts), which knows
+// where Windows keeps its executables (hermes.exe, hermes.cmd) and that PATH is
+// split on `;` there.
+export const hermesBin = (): string | undefined => process.env['TUCANO_HERMES_BIN'] || findOnPath('hermes')
+export const hermesE2e = (): boolean => process.env['TUCANO_HERMES_E2E'] === '1' && !!hermesBin()
+
+// Where a test's own root goes. Windows builds its `%TEMP%` path out of the
+// person's name (C:\Users\<name>\AppData\Local\Temp) and Hermes then adds its
+// own tree under it (installs/<id>/environments/<id>/workspace/…); past the
+// 260 characters a path without LongPathsEnabled fails a copy with [WinError 3],
+// which is what a run at the default temp dir hit. A root at the top of the
+// drive keeps every path under it short. Elsewhere the temp dir is short already.
+export function hermesTmpRoot(name: string): string {
+  const base = process.platform === 'win32' ? parse(tmpdir()).root : tmpdir()
+  mkdirSync(base, { recursive: true })
+  return mkdtempSync(join(base, `tucano-${name}-`))
 }
 
-export const hermesBin = (): string | undefined => process.env['TUCANO_HERMES_BIN'] || onPath('hermes')
-export const hermesE2e = (): boolean => process.env['TUCANO_HERMES_E2E'] === '1' && !!hermesBin()
+// Cleans up where the system allows it. A file still held (a daemon's log, a
+// helper an earlier run left alive) must not turn into a cleanup error that
+// hides what the test itself did, so a failed removal is let go.
+export function removeTree(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  } catch {
+    // the run's own outcome is what the test reports
+  }
+}
 
 // A tool message's content is a string or a list of parts, depending on provider.
 export function textOf(content: unknown): string {

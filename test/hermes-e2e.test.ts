@@ -5,13 +5,12 @@
 //
 // Opt-in and slow (spawns the CLI, warms a fresh root, boots its daemon):
 //   TUCANO_HERMES_E2E=1 npx vitest run test/hermes-e2e.test.ts
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { hermesEngine, hermesHome } from '../src/core/engines/hermes'
 import { Gateway, textResult, type ToolDef } from '../src/core/gateway'
-import { alive, daemonPid, fakeModel, hermesBin, hermesE2e, stopDaemon, textOf } from './fixtures/hermes-cli'
+import { alive, daemonPid, fakeModel, hermesBin, hermesE2e, hermesTmpRoot, removeTree, stopDaemon, textOf } from './fixtures/hermes-cli'
 
 const MCP_NAME = 'list_tasks'
 const TOOL: ToolDef = { name: MCP_NAME, description: 'Lists the tasks', inputSchema: { type: 'object', properties: {} } }
@@ -20,8 +19,8 @@ const enabled = hermesE2e()
 
 describe.skipIf(!enabled)('the Hermes engine end to end', () => {
   it('runs a tool the app gave it, through the CLI gateway and back', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'tucano-hermes-e2e-'))
-    const userHome = mkdtempSync(join(tmpdir(), 'tucano-hermes-user-'))
+    const root = hermesTmpRoot('e2e')
+    const userHome = hermesTmpRoot('e2e-user')
     // Hermes offers a server's tools to the model as `mcp__<server>__<tool>` (the
     // call back to the server uses the raw name), so the script asks for whatever
     // it was offered and answers from the result it got back.
@@ -88,8 +87,8 @@ describe.skipIf(!enabled)('the Hermes engine end to end', () => {
       await stopDaemon(bin!, root)
       await gateway.stop()
       model.close()
-      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
-      rmSync(userHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+      removeTree(root)
+      removeTree(userHome)
     }
   }, 600_000)
 })

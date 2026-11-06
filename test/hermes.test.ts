@@ -9,6 +9,7 @@ import { ENGINES } from '../src/shared/types'
 
 // Fixture is real CLI output (`hermes chat --format stream-json`, Hermes 2026-10-29), trimmed.
 const lines = readFileSync(join(import.meta.dirname, 'fixtures', 'hermes-stream.jsonl'), 'utf8').split('\n').filter((l) => l.trim())
+const win = process.platform === 'win32'
 
 describe('hermes', () => {
   it('turns its events into the engine events', () => {
@@ -81,8 +82,15 @@ describe('hermes setup', () => {
     const appDir = mkdtempSync(join(tmpdir(), 'hh-'))
     const home = hermesHome(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false, agentKey: 'iris' }, userHome)
     expect(home).toContain(join('profiles', 'iris')) // one profile home per Tucano agent
-    expect(lstatSync(join(home, 'auth.json')).isSymbolicLink()).toBe(true)
-    expect(lstatSync(join(home, '.env')).isSymbolicLink()).toBe(true)
+    // The logins stay the person's. Linked where the platform allows it, so a
+    // refreshed login is picked up; copied where it doesn't, since Windows
+    // without the right privileges fails symlinkSync (EPERM) — that fallback is
+    // what keeps the CLI logged in there, and either way it reads the person's
+    // own bytes, never the app's copy of them.
+    for (const f of ['auth.json', '.env']) {
+      expect(readFileSync(join(home, f), 'utf8')).toBe(readFileSync(join(userHome, f), 'utf8'))
+      expect(win || lstatSync(join(home, f)).isSymbolicLink()).toBe(true)
+    }
     const c = parseYaml(readFileSync(join(home, 'config.yaml'), 'utf8')) as Record<string, unknown>
     expect(c['approvals']).toEqual({ mode: 'off' })
     expect(c['platform_toolsets']).toEqual({ cli: [] }) // no built-in tools, no web
@@ -176,7 +184,11 @@ describe('hermes setup', () => {
     expect(parseHermesModels(join(dir, 'missing.json'))).toEqual([])
   })
 
-  it('builds the dependency environment once per root, and a run waits for it', async () => {
+  // The fake CLI of the two tests below is a shell script, which Windows can't
+  // run as a program (its execFile refuses a .cmd without a shell): the same
+  // reason the OpenCode V2 process tests are skipped there. The logic under test
+  // is the same on every system.
+  it.skipIf(win)('builds the dependency environment once per root, and a run waits for it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hw-'))
     const log = join(dir, 'calls.txt')
     const bin = join(dir, 'hermes')
@@ -198,7 +210,7 @@ describe('hermes setup', () => {
     expect(ENGINES.hermes.min).toBe('0.22.0')
   })
 
-  it('tries again when a repair fails', async () => {
+  it.skipIf(win)('tries again when a repair fails', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hf-'))
     const log = join(dir, 'calls.txt')
     const bin = join(dir, 'hermes')

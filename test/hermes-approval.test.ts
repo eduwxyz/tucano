@@ -6,8 +6,7 @@
 //
 // Opt-in and slow (spawns the CLI, warms a fresh root, boots its daemon):
 //   TUCANO_HERMES_E2E=1 npx vitest run test/hermes-approval.test.ts
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ConnectorManager } from '../src/core/connectors'
@@ -20,7 +19,7 @@ import { plainCipher, Secrets } from '../src/core/secrets'
 import { setLang } from '../src/shared/lang'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, Message, Settings } from '../src/shared/types'
-import { fakeModel, hermesBin, hermesE2e, stopDaemon, textOf } from './fixtures/hermes-cli'
+import { fakeModel, hermesBin, hermesE2e, hermesTmpRoot, removeTree, stopDaemon, textOf } from './fixtures/hermes-cli'
 
 const DEMO = join(import.meta.dirname, '..', 'scripts', 'demo-mcp-server.mjs')
 const ready = { installed: true, loggedIn: true }
@@ -31,7 +30,7 @@ describe.skipIf(!enabled)('a Hermes agent asking for a sensitive tool', () => {
   it('becomes a pending approval in the app instead of running', async () => {
     setLang('en') // the app's own messages, asserted in its English side
 
-    const dir = mkdtempSync(join(tmpdir(), 'tucano-hermes-appr-'))
+    const dir = hermesTmpRoot('appr')
     const root = join(dir, 'hermes') // the root the engine owns
     const userHome = join(dir, 'user') // the person's own Hermes config
     const tasksFile = join(dir, 'tasks.json')
@@ -111,7 +110,7 @@ describe.skipIf(!enabled)('a Hermes agent asking for a sensitive tool', () => {
       await connectors.closeAll()
       await gateway.stop()
       model.close()
-      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+      removeTree(dir)
     }
   }, 600_000)
 })
