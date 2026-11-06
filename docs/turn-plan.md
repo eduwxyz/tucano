@@ -18,10 +18,10 @@ Ceilings, in `src/core/router.ts`:
 | | |
 |---|---|
 | `MAX_ROUTED` | 2 handles per layer (as before) |
-| `MAX_LAYERS` | 2 layers |
+| `MAX_LAYERS` | 3 layers |
 | `MAX_PLANNED` | 3 agents in the whole plan |
 
-So a plan calls 1 agent, 2 at once (what the router already did), or 2 layers — at most one run more than before. Nobody answers twice: a handle repeated in another layer is dropped.
+A plan can call one agent, two in parallel, or up to three agents in sequential layers. A handle repeated in another layer is dropped, so nobody in the plan answers twice.
 
 ## How the Runner executes it
 
@@ -35,10 +35,10 @@ The plan counts as one step of depth: every layer runs at `depth: 1`, the same a
 
 Jev is a classifier, not a writer: it can't return a plan in one answer. So the adapter (`src/core/jev.ts`) asks once per layer — at most `MAX_LAYERS` questions, each under a second:
 
-1. `Qual agente do canal deve responder à última mensagem humana?` — options: the channel's handles, "todos", "ninguém". A second agent joins the same layer when it gets at least 30% (`SECOND_AT`), as before.
-2. The state of the second question names who is already answering; the options are the remaining handles plus `__encerrar` ("ninguém mais"). The answer either opens the second layer or ends the plan.
+1. `Qual agente do canal deve responder à última mensagem humana?` — options: the channel's handles, "todos", "ninguém". Another agent joins the same layer when it gets at least 30% (`SECOND_AT`), as before.
+2. Each later question names who is already answering; the options are the remaining handles plus `__encerrar` ("ninguém mais"). The answer either opens another layer or ends the plan. The 3-layer ceiling means at most three questions per message.
 
-The cost, honestly: one TypeSafe call per layer instead of one per message, and the recent messages go to TypeSafe once per call. A crossed dependency ("Lia depends on nobody, Theo depends on Lia") doesn't fit a typed choice: the second layer is a whole layer, so an agent that could have run in parallel waits. That's the expressiveness Jev gives up against the CLI router, which writes the plan in one answer.
+The cost, honestly: one TypeSafe call per layer instead of one per message, and the recent messages go to TypeSafe once per call. A crossed dependency ("Lia depends on nobody, Theo depends on Lia") doesn't fit a typed choice: each later layer is selected as a whole, so an agent that could have run in parallel may wait. That's the expressiveness Jev gives up against the CLI router, which writes the plan in one answer.
 
 ## What it doesn't do
 
@@ -47,5 +47,5 @@ There is no second pass of an LLM over a reply before it's posted: no reconcilia
 ## Tests
 
 - `test/router.test.ts`: the shape of a plan, the ceilings, nobody twice, the old `handles`.
-- `test/runner.test.ts`: two layers (the second only starts when the first is done, and its turn sees the first reply), and a layer of two answering at once.
-- `test/jev.test.ts`: the second question (criteria, state, the plan it builds) and the one-layer cases.
+- `test/runner.test.ts`: sequential layers (each later layer only starts after the previous one is done, and can see earlier replies), and a layer of two answering at once.
+- `test/jev.test.ts`: the later layer questions (criteria, state, the plan they build) and the one-layer cases.

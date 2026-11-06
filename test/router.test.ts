@@ -50,12 +50,12 @@ describe('parseRoute', () => {
     expect(parseRoute('{"plan":[["nina"],["lia"]],"reason":""}', three)?.plan).toEqual([[nina], [lia]])
   })
 
-  it('caps a plan at two layers and three agents, and nobody answers twice', () => {
+  it('caps a plan at three layers and three agents, and nobody answers twice', () => {
     const theo = agent('a3', 'theo', 'Dados')
     const bia = agent('a4', 'bia', 'Produto')
     const four = [...team, theo, bia]
     expect(parseRoute('{"plano":[["lia","nina"],["theo","bia"]],"reason":""}', four)?.plan).toEqual([[lia, nina], [theo]])
-    expect(parseRoute('{"plano":[["lia"],["nina"],["theo"]],"reason":""}', four)?.plan).toEqual([[lia], [nina]])
+    expect(parseRoute('{"plano":[["lia"],["nina"],["theo"]],"reason":""}', four)?.plan).toEqual([[lia], [nina], [theo]])
     expect(parseRoute('{"plano":[["lia"],["lia"]],"reason":""}', four)?.plan).toEqual([[lia]])
   })
 
@@ -68,14 +68,14 @@ describe('parseRoute', () => {
 
 describe('planBrief', () => {
   it('tells every layer of a plan which one is theirs and who answers next', () => {
-    const plan = [[lia], [nina]]
+    const plan = [[lia], [agent('a3', 'theo', 'Dados')], [nina]]
     const first = planBrief(plan, lia, 'um acha, o outro escreve')
-    expect(first).toContain('O roteador dividiu esta mensagem em 2 camadas')
-    expect(first).toContain('- 1ª camada: Lia\n- 2ª camada: Nina')
+    expect(first).toContain('O roteador dividiu esta mensagem em 3 camadas')
+    expect(first).toContain('- 1ª camada: Lia\n- 2ª camada: Theo\n- 3ª camada: Nina')
     expect(first).toContain('Você é da 1ª camada')
     expect(first).toContain('A camada seguinte só começa quando a sua terminar')
     expect(first).toContain('Motivo do plano: um acha, o outro escreve')
-    expect(planBrief(plan, nina, '')).toContain('Você é da 2ª camada')
+    expect(planBrief(plan, nina, '')).toContain('Você é da 3ª camada')
   })
 
   it('names the agents of a layer of two, and says nothing without a reason', () => {
