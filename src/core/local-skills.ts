@@ -148,6 +148,27 @@ const inDirs = (root: string, origin: string): LocalSkill[] =>
     .map((d) => skill(join(d, 'SKILL.md'), origin))
     .filter((s): s is LocalSkill => !!s)
 
+const visible = (d: string): string[] => dirs(d).filter((p) => !basename(p).startsWith('.') && basename(p) !== 'node_modules')
+
+// A skills folder with category folders, like Hermes keeps it: <name>/SKILL.md or
+// <category>/<name>/SKILL.md. A folder with its own SKILL.md is a skill, so its scripts/ and
+// references/ never count as categories. Folders that start with a dot (.archive, .git) are skipped.
+export function findHermesSkills(root: string, origin: string): LocalSkill[] {
+  const found: LocalSkill[] = []
+  for (const d of visible(root)) {
+    const own = skill(join(d, 'SKILL.md'), origin)
+    if (own) {
+      found.push(own)
+      continue
+    }
+    for (const c of visible(d)) {
+      const s = skill(join(c, 'SKILL.md'), origin)
+      if (s) found.push({ ...s, category: s.category ?? basename(d) })
+    }
+  }
+  return found
+}
+
 // The newest version folder of each plugin the user turned on in Claude Code.
 function pluginSkills(claude: string): LocalSkill[] {
   let enabled: string[] = []
