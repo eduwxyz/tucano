@@ -1,0 +1,8 @@
+{"type":"text","data":"Vou consultar. "}
+{"type":"thought","data":"skip me"}
+{"type":"tool_call","toolCallId":"c1","toolName":"web_search","status":"in_progress","rawInput":{"query":"Node.js LTS"}}
+{"type":"tool_call_update","toolCallId":"c1","status":"completed"}
+{"type":"tool_call","toolCallId":"c2","toolName":"search_tool","status":"completed","rawInput":{"query":"hora"}}
+{"type":"usage","usage":{"input_tokens":10,"output_tokens":4}}
+{"type":"text","data":"São 21:58."}
+{"type":"end","stopReason":"end_turn","usage":{"input_tokens":100,"cache_read_input_tokens":50,"cache_creation_input_tokens":10,"output_tokens":20,"reasoning_tokens":5},"total_cost_usd":0.0123}

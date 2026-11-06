@@ -7,12 +7,14 @@ import { L, locale } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
+import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import { call } from '../rpc'
-import { agentById, navigate, updateSettings, useStore, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
+import { agentById, navigate, setTab, updateSettings, useStore, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
 import { Sheet, Toggle } from './Pages'
 import { confirmDialog } from './Dialogs'
 import { AgentAvatar, Icon, type IconName } from './ui'
+import { screenOf } from '../../../shared/screens'
 
 const DEFAULT_KINDS = (): string[] => [L('Pessoa', 'Person'), L('Projeto', 'Project'), L('Assunto', 'Topic'), L('Decisão', 'Decision')]
 const CODE = /```[\s\S]*?```|`[^`\n]*`/g
@@ -164,9 +166,30 @@ function Peek({ title, rect }: { title: string; rect: DOMRect }): ReactNode {
 }
 
 // A link inside rendered Markdown: a wiki page opens here; anything else stays a link.
+// A link to one of the app's screens (the Tuca's "[Abrir Conectores](#abrir/conectores)"): a button that goes there.
+function ScreenLink({ target, children }: { target: NonNullable<ReturnType<typeof screenOf>>; children?: ReactNode }): ReactNode {
+  const agent = useStore((s) => (target.agentHandle ? s.agents.find((a) => a.handle === target.agentHandle) : undefined))
+  if (target.agentHandle && !agent) return <>{children}</>
+  const go = (): void => {
+    if (agent) return navigate({ kind: 'agent', id: agent.id })
+    const { screen } = target
+    if (!screen) return
+    if (screen.tab) setTab(screen.view, screen.tab)
+    navigate({ kind: screen.view } as View)
+  }
+  return (
+    <button type="button" className="screen-link" onClick={go}>
+      {children}
+      <Icon name="chevron" size={11} />
+    </button>
+  )
+}
+
 export function WikiLink({ href, children, missing }: { href?: string; children?: ReactNode; missing?: Set<string> }): ReactNode {
   const [hover, setHover] = useState<DOMRect | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const screen = screenOf(href)
+  if (screen) return <ScreenLink target={screen}>{children}</ScreenLink>
   if (href?.startsWith('#att/'))
     return (
       <span className="wiki-link wiki-link--source wiki-link--file" title={decodeURIComponent(href.slice(5))}>
@@ -575,6 +598,23 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
   const close = (): void => navigate({ kind: 'wiki' })
   const [imported, setImported] = useState<WikiImport | { error: string } | 'busy' | null>(null)
   const startImport = (): void => {
+    const failed = (e: Error): void => setImported({ error: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+    // On a server the vault is on the person's computer, not there: it goes up as a .zip.
+    const upload = window.tucano.upload
+    if (upload) {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.zip,application/zip'
+      input.onchange = () => {
+        const file = input.files?.[0]
+        if (!file) return
+        setSettings(false)
+        setImported('busy')
+        void upload(file).then((path) => call('wikiImportZip', { path })).then(setImported, failed)
+      }
+      input.click()
+      return
+    }
     const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> }).pickFolder
     void pick?.().then((dir) => {
       if (!dir) return
@@ -898,7 +938,7 @@ function WikiSearch({ pages, onClose }: { pages: WikiPageInfo[]; onClose: () => 
                 <b>{r.title}</b>
                 {r.snippet && (
                   <small>
-                    <Markdown allowedElements={['p', 'strong', 'em']} unwrapDisallowed>
+                    <Markdown urlTransform={safeUrl} allowedElements={['p', 'strong', 'em']} unwrapDisallowed>
                       {r.snippet}
                     </Markdown>
                   </small>
@@ -1025,7 +1065,11 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
           <div className="wk-setting">
             <span>
               <b>{L('Importar um cofre do Obsidian', 'Import an Obsidian vault')}</b>
-              <small>{L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', 'The notes come in as they are, with their folders, links and attachments. The original vault stays as it was.')}</small>
+              <small>
+                {window.tucano.upload
+                  ? L('Compacte a pasta do cofre num .zip e envie: as notas entram como estão, com as pastas, os links e os anexos.', 'Zip the vault’s folder and send it: the notes come in as they are, with their folders, links and attachments.')
+                  : L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', 'The notes come in as they are, with their folders, links and attachments. The original vault stays as it was.')}
+              </small>
             </span>
             <button className="btn btn--sm" onClick={onImport}>
               {L('Importar…', 'Import…')}
@@ -1055,7 +1099,7 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
 // One change, as the curator wrote it: what goes where.
 function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
   const md = (t?: string): ReactNode => (
-    <Markdown remarkPlugins={[remarkGfm]} components={mdLinks()}>
+    <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks()}>
       {wikiLinks(t ?? '')}
     </Markdown>
   )
@@ -1207,7 +1251,7 @@ function WikiReviewPane(): ReactNode {
   if (!r) return null
   const sorted = [...r.findings].sort((a, b) => FINDING_ORDER.indexOf(a.kind) - FINDING_ORDER.indexOf(b.kind))
   const md = (t: string): ReactNode => (
-    <Markdown components={{ ...mdLinks(), p: (p) => <span>{p.children}</span> }}>{wikiLinks(t)}</Markdown>
+    <Markdown urlTransform={safeUrl} components={{ ...mdLinks(), p: (p) => <span>{p.children}</span> }}>{wikiLinks(t)}</Markdown>
   )
   return (
     <div className="wk-pane">
@@ -1503,7 +1547,7 @@ function WikiSourceView({ id }: { id: string }): ReactNode {
       </div>
       {src.error && <p className="field__error">{src.error}</p>}
       <article className="wk-doc md wk-doc--source">
-        <Markdown remarkPlugins={[remarkGfm]}>{src.text.trimStart().replace(/^# .*\n+/, '')}</Markdown>
+        <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{src.text.trimStart().replace(/^# .*\n+/, '')}</Markdown>
       </article>
     </div>
   )
@@ -1632,7 +1676,7 @@ function WikiPageView({ title, data }: { title: string; data: WikiData | null })
       </div>
       <h1 className="wk-page__title">{page.title}</h1>
       <div className="wk-doc md">
-        <Markdown remarkPlugins={[remarkGfm]} components={mdLinks(missing)}>
+        <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks(missing)}>
           {wikiLinks(page.body)}
         </Markdown>
       </div>
@@ -1781,7 +1825,7 @@ function WikiEditor({ title }: { title?: string }): ReactNode {
           <textarea className="wiki-editor__text" value={body} onChange={(e) => setBody(e.target.value)} spellCheck placeholder={L('Comece com uma frase que diga o que é. Depois, seções com ##.', 'Start with one sentence that says what it is. Then sections with ##.')} />
           <div className="wiki-editor__preview wk-doc md">
             {body.trim() ? (
-              <Markdown remarkPlugins={[remarkGfm]} components={mdLinks()}>
+              <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks()}>
                 {wikiLinks(body)}
               </Markdown>
             ) : (

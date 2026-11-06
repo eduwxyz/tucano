@@ -122,3 +122,23 @@ describe('which failed calls go again on a new connection', () => {
     expect(staleSession(new StreamableHTTPError(500, 'Internal error'))).toBe(false)
   })
 })
+
+describe('settled()', () => {
+  it('waits for a stdio connector that is still connecting, and is immediate when none is', async () => {
+    await connectors.settled() // nothing connecting
+    const script = join(mkdtempSync(join(tmpdir(), 'tucano-stdio-')), 'server.mjs')
+    writeFileSync(
+      script,
+      `const { Server } = await import('${sdk}/server/index.js')
+const { StdioServerTransport } = await import('${sdk}/server/stdio.js')
+const { ListToolsRequestSchema } = await import('${sdk}/types.js')
+const s = new Server({ name: 't', version: '1' }, { capabilities: { tools: {} } })
+s.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: ${JSON.stringify(tools)} }))
+await s.connect(new StdioServerTransport())`
+    )
+    const id = await connectors.add({ name: 'Local', kind: 'stdio', command: process.execPath, args: [script] }, false)
+    connectors.connectAll() // as the app does at startup
+    await connectors.settled()
+    expect(status(id)).toBe('connected')
+  }, 20_000)
+})

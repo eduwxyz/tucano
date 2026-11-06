@@ -87,7 +87,7 @@ describe("errors in people’s words", () => {
       detail: "spawn npx ENOENT",
     });
     expect(friendly(sys("spawn uvx ENOENT", "ENOENT")).text).toBe(
-      "O comando `uvx` não foi encontrado. Confira se ele está instalado."
+      "O comando `uvx` não foi encontrado. Instale o uv (docs.astral.sh/uv) e tente de novo."
     );
     expect(friendly(sys("database is locked", "SQLITE_BUSY")).text).toBe(
       "O Tucano está ocupado salvando. Tente de novo em instantes."
