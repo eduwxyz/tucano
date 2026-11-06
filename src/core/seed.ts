@@ -3,6 +3,16 @@ import { L } from '../shared/lang'
 import type { Agent } from '../shared/types'
 import type { Db } from './db'
 
+export function initializeWorkspace(db: Db, env: NodeJS.ProcessEnv = process.env): void {
+  if (!db.created) return
+  // Demo seeding belongs to the original test install, never a workspace made
+  // from the switcher. Even in fake mode those follow the normal introduction.
+  const demo = env['TUCANO_DEFAULT_WORKSPACE'] !== '0' &&
+    (env['TUCANO_SEED'] === '1' || (env['TUCANO_FAKE_ENGINES'] === '1' && env['TUCANO_SEED'] !== '0'))
+  if (demo) seed(db)
+  else db.setSettings({ onboarding: { done: false } })
+}
+
 // First run: a small team and three channels, so there is someone to talk to.
 export function seed(db: Db): void {
   const agent = (a: Omit<Agent, 'id' | 'used' | 'grants' | 'memory' | 'computer' | 'archived'>): Agent => ({ ...a, id: randomUUID(), used: 0, grants: {}, memory: 'auto', computer: false, archived: false })

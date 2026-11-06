@@ -3,6 +3,7 @@
 import { useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
+import type { AppProvider } from '../../shared/connector-catalog'
 import {
   type Account,
   type AccountEngine,
@@ -62,6 +63,8 @@ export type View =
   | { kind: 'settings' }
 
 export interface State {
+  webhookPort: number
+  defaultWorkspace: boolean
   ready: boolean
   threadSeen: Record<string, number> // thread root id → when I last had it open (what came after is new)
   navOpen: boolean // on a phone, the sidebar slid in over the view
@@ -85,6 +88,7 @@ export interface State {
   voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
   platform: Os
   packaged: boolean
+  isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
@@ -99,7 +103,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string }
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -123,6 +127,8 @@ const loadSeen = (): Record<string, number> => {
 }
 
 let state: State = {
+  webhookPort: 47717,
+  defaultWorkspace: true,
   ready: false,
   threadSeen: loadSeen(),
   wikiRev: 0,
@@ -157,6 +163,7 @@ let state: State = {
   skills: [],
   platform: 'mac',
   packaged: false,
+  isolatedComputers: true,
   panel: null,
   dialog: null,
   tabs: {},
@@ -220,26 +227,10 @@ function apply(e: CoreEvent): void {
   set((s) => {
     switch (e.type) {
       case 'message': {
-        const known = s.messages.some((m) => m.id === e.message.id)
-        const viewing = s.view?.kind === 'conversation' && s.view.id === e.message.conversationId
-        const fromAgent = e.message.author.kind === 'agent' || e.message.author.kind === 'routine'
-        // A reply that lands while you're elsewhere is new content too: the end of
-        // the run, or it stopping for your turn (a question, an approval — the
-        // states the core notifies). Counted once: if the badge already counts
-        // this conversation, the run's start is already in it.
-        const finished =
-          known && fromAgent && !viewing && e.message.run !== undefined
-          && ['done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(e.message.run.status)
-          && s.messages.find((m) => m.id === e.message.id)?.run?.status !== e.message.run.status
-          && (s.conversations.find((c) => c.id === e.message.conversationId)?.unread ?? 0) === 0
-        const conversations =
-          fromAgent && !viewing && (!known || finished)
-            ? s.conversations.map((c) => (c.id === e.message.conversationId ? { ...c, unread: (c.unread ?? 0) + 1 } : c))
-            : s.conversations
         // Out of the queue: it reaches the agent now, so it goes after what came in meanwhile.
         const delivered = s.messages.find((m) => m.id === e.message.id)?.queued && !e.message.queued
         const messages = delivered ? [...s.messages.filter((m) => m.id !== e.message.id), e.message] : upsert(s.messages, e.message)
-        return { ...s, conversations, messages }
+        return { ...s, messages }
       }
       case 'message_removed':
         return { ...s, messages: s.messages.filter((m) => m.id !== e.id) }
@@ -248,8 +239,7 @@ function apply(e: CoreEvent): void {
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
       case 'conversation': {
-        const prev = s.conversations.find((c) => c.id === e.conversation.id)
-        return { ...s, conversations: upsert(s.conversations, { ...e.conversation, unread: prev?.unread }) }
+        return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
       case 'settings':
         return withSettings(s, e.settings)
@@ -314,7 +304,10 @@ export async function start(): Promise<void> {
   let viewing: string | null = null
   subscribe(() => {
     const id = state.view?.kind === 'conversation' ? state.view.id : null
-    if (id !== viewing) window.tucano.viewing((viewing = id))
+    if (id !== viewing) {
+      window.tucano.viewing((viewing = id))
+      if (id && state.ready) void call('markRead', { conversationId: id })
+    }
   })
   await connect(apply)
   const snap = await call('snapshot')
@@ -324,6 +317,8 @@ export async function start(): Promise<void> {
     return {
       ...withSettings(s, snap.settings),
       ready: true,
+      webhookPort: snap.webhookPort ?? 47717,
+      defaultWorkspace: snap.defaultWorkspace ?? true,
       view,
       agents: snap.agents,
       conversations: snap.conversations,
@@ -338,6 +333,7 @@ export async function start(): Promise<void> {
       skills: snap.skills,
       platform: snap.platform,
       packaged: snap.packaged,
+      isolatedComputers: snap.isolatedComputers,
       demoServer: snap.demoServer
     }
   })
@@ -481,6 +477,8 @@ export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: 
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.
 export const openTuca = (): void => navigate({ kind: 'tuca', from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
+export const applyProposal = (messageId: string): Promise<{ id: string }> => call('applyProposal', { messageId })
+export const dismissProposal = (messageId: string): void => void call('dismissProposal', { messageId }).catch(() => {})
 export const settleDraft = (messageId: string, agentId?: string): void => void fire(L('Não consegui salvar o cartão.', "I couldn't save the card."), 'settleDraft', { messageId, agentId })
 
 export async function openDm(agentId: string): Promise<void> {
@@ -500,6 +498,8 @@ export const addConnector = (input: ConnectorInput): Promise<string> => call('ad
 export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
 export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
 export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
+export const ownApp = (provider: AppProvider): Promise<{ clientId?: string; redirectUrl: string }> => call('ownApp', { provider })
+export const setOwnApp = (provider: AppProvider, clientId: string, clientSecret: string): Promise<void> => call('setOwnApp', { provider, clientId, clientSecret })
 // On a server the authorization page comes back to be opened here, then pasted back.
 export const authorizeConnector = (id: string): void =>
   void call('authorizeConnector', { id }).then(
@@ -517,7 +517,7 @@ export const setTopic = (id: string, topic: string): Promise<void> => call('setT
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
-export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
+export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
 // `threadId`: a reply in the thread that message started.
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
@@ -592,7 +592,14 @@ export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'
 export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
 // A page an agent serves, as this browser reaches it: on a server, at the server's
 // address (it passes running services through on a private network).
-export const reachable = (url: string): string => (windowless() ? url.replace(/^http:\/\/127\.0\.0\.1:/, `http://${location.hostname}:`) : url)
+// A page an agent serves on the server's loopback, from here. Behind https it has an address of its
+// own, reached through this server (src/server/preview.ts); on a private address, the same port there.
+export const reachable = (url: string): string => {
+  if (!windowless()) return url
+  const m = /^http:\/\/127\.0\.0\.1:(\d+)(.*)$/.exec(url)
+  if (!m) return url
+  return location.protocol === 'https:' ? `${location.origin}/preview/${m[1]}${m[2] || '/'}` : `http://${location.hostname}:${m[1]}${m[2]}`
+}
 export const browserInput = (agentId: string, input: BrowserInput): void => void call('browserInput', { agentId, input }).catch(() => {})
 // In a browser (Tucano as a server) the page opens it itself: the server has no screen.
 export const openExternal = (url: string): void =>
@@ -615,7 +622,6 @@ export const skillVersions = (skillId: string): Promise<SkillVersion[]> => call(
 export const checkTrigger = (trigger: Trigger): Promise<string> => call('checkTrigger', { trigger })
 export const setTelegramToken = (token: string | null): Promise<void> => call('setTelegramToken', { token })
 export const unpairTelegram = (): void => void fire(L('Não consegui desconectar o Telegram.', "I couldn't disconnect Telegram."), 'unpairTelegram')
-export const setGithubToken = (token: string | null): Promise<void> => call('setGithubToken', { token })
 export const exportTeam = (): Promise<string> => call('exportTeam')
 export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
 export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)

@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, ROUTING, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, ROUTING, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, mentioned, snip, systemPrompt, transcript, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -13,20 +13,27 @@ import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser 
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
-import { ABRIR_PR, GITHUB, type GitHub } from './github'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderSection, draftFrom, PROPOR_AGENTE } from './tuca'
+import { availableModels, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
+import { LER_GUIA, readGuide } from './guide'
+import { proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { Followups, replyKey, type Followup } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
+
+// An old approval of the push-from-the-computer PRs (they left Tucano): still decided, never run.
+const GITHUB = 'github'
+const ABRIR_PR = 'abrir_pr'
 
 const MAX_CONCURRENT = 4
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
@@ -83,11 +90,11 @@ export interface RunnerDeps {
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
-  github?: Pick<GitHub, 'pushable' | 'openPr'> // without it, agents can't open PRs
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
+  timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
 
 // What the runner needs from the connector manager.
@@ -117,9 +124,13 @@ export function resultText(r: CallToolResult): string {
   if (bytes.length <= MAX_RESULT_BYTES) return text
   // Cut on a whole character: a split one decodes as U+FFFD at the end.
   const kept = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8').replace(/�+$/, '')
+  // How much was left out, so the agent narrows the question instead of paging through the rest.
+  const kb = (n: number): string => `${Math.round(n / 1000).toLocaleString(locale())} KB`
+  const lines = (s: string): number => s.split('\n').length
+  const shown = Math.max(1, Math.round((MAX_RESULT_BYTES / bytes.length) * 100))
   return `${kept}\n${L(
-    `[… resultado cortado em ${MAX_RESULT_BYTES / 1000} KB: o resto não chegou. Se precisar dele, chame de novo pedindo menos de uma vez (paginação, filtro, menos campos).]`,
-    `[… result cut at ${MAX_RESULT_BYTES / 1000} KB: the rest didn't come through. If you need it, call again asking for less at once (pagination, a filter, fewer fields).]`
+    `[… resultado cortado: chegaram ${kb(MAX_RESULT_BYTES)} de ${kb(bytes.length)} (${shown}%, ${lines(kept)} de ${lines(text)} linhas). Se precisar de mais, pergunte de um jeito mais estreito (uma janela de tempo menor, um filtro, menos campos, uma agregação); leia o resto em partes só se precisar mesmo de tudo.]`,
+    `[… result cut: ${kb(MAX_RESULT_BYTES)} of ${kb(bytes.length)} came through (${shown}%, ${lines(kept)} of ${lines(text)} lines). If you need more, ask more narrowly (a shorter time window, a filter, fewer fields, an aggregate); read the rest in parts only if you really need all of it.]`
   )}`
 }
 
@@ -138,7 +149,8 @@ export interface RoutineEvent {
 }
 
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'steered' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'steered' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 // An agent answering in a conversation: replies running there, their thread, and my messages waiting for them.
 // `mine`: it answers my message (not another agent's or a routine's), so my next one may wait for it.
 type Line = { n: number; threadId?: string; waiting: string[]; steered?: boolean; mine?: boolean }
@@ -156,6 +168,7 @@ export class Runner {
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
   private sessions: Sessions
+  private followups = new Followups()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -172,15 +185,40 @@ export class Runner {
       }
     })
     // Left by an earlier run of the app, under the usual login and each account's.
-    const accounts = deps.dataDir ? join(deps.dataDir, 'accounts') : undefined
+    this.cleanTranscripts()
+    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
+
+  // What the engines keep outside the app's folder (Claude Code's transcripts, in ~/.claude) for
+  // agents here, but not of a session still kept.
+  cleanTranscripts(): void {
+    const accounts = this.deps.dataDir ? join(this.deps.dataDir, 'accounts') : undefined
     let accountDirs: string[] = []
     try {
       if (accounts) accountDirs = readdirSync(accounts).map((d) => join(accounts, d))
     } catch {
       // no accounts
     }
-    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir, accountDirs)
-    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+    for (const e of Object.values(this.deps.engines)) e.clean?.(this.deps.workDir, accountDirs)
+  }
+
+  // The sessions let go are gone from disk: their processes exited and their files went after.
+  async settled(): Promise<void> {
+    await Promise.all(Object.values(this.deps.engines).map((e) => e.settle?.()))
+  }
+
+  // For good (the workspace is being deleted): what's queued is dropped, what's running stops,
+  // and the kept sessions go, with their transcripts.
+  stopAll(): void {
+    this.paused = true
+    this.queue.length = 0
+    this.followups = new Followups() // the places the dropped queue held, and what was noted for later
+    for (const c of this.controllers.values()) {
+      c.reason = 'stopped'
+      c.ctl.abort()
+    }
+    this.sessions.dropWhere(() => true)
+    this.checkIdle()
   }
 
   // An archived agent's sessions, or a deleted conversation's, go now: their process and the
@@ -194,6 +232,7 @@ export class Runner {
 
   setPaused(paused: boolean): void {
     this.paused = paused
+    if (!paused) this.pump() // resumed: any queued work that was blocked can go on
   }
 
   // The person is writing here. What will answer gets its Claude Code started now, so the reply
@@ -213,7 +252,7 @@ export class Runner {
       // A message outside threads in a conversation that answers in them opens a new thread: nothing is kept there yet.
       if (!agent || (conv.threads && !threadId)) return
       const engine = modelInfo(agent.modelId)?.engine ?? 'claude'
-      const id = this.sessions.idOf(`${agent.id}:${conv.id}:${threadId ?? ''}`)
+      const id = this.sessions.idOf(replyKey(agent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
       return
     }
@@ -329,6 +368,7 @@ export class Runner {
   retry(messageId: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
+    if (this.paused) return // nobody starts working while paused
     if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status) || msg.run.steered) return
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
@@ -342,6 +382,7 @@ export class Runner {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (msg?.run?.status !== 'paused' || msg.author.kind !== 'agent') return
+    if (this.paused) return // nobody starts working while paused
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
@@ -369,6 +410,7 @@ export class Runner {
   // Resolves with the agent's reply once that run ends, or undefined when it can't run.
   async runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> {
     const { db, emit } = this.deps
+    if (this.paused) return undefined // routines don't run while paused
     const conv = db.conversation(r.conversationId)
     const agent = db.agent(r.agentId)
     if (!conv || !agent || agent.archived) return undefined
@@ -398,6 +440,7 @@ export class Runner {
 
   // A routine's reply that failed, run again in place with the same request.
   async retryRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined> {
+    if (this.paused) return undefined // routines don't run while paused
     const { db } = this.deps
     const msg = db.message(messageId)
     const conv = db.conversation(r.conversationId)
@@ -483,6 +526,7 @@ export class Runner {
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
   private async routeAndRun(conv: Conversation, members: Agent[], threadId?: string): Promise<void> {
     const { db, engines } = this.deps
+    if (this.paused) return // nobody starts working while paused
     this.routing++
     const place = `${conv.id}:${threadId ?? ''}`
     const hold: Line = { n: 0, waiting: [], threadId }
@@ -561,6 +605,7 @@ export class Runner {
 
   private pump(): void {
     while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
+      if (this.paused) return // paused: nothing new starts, queued work waits
       const job = this.queue.shift()!
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
@@ -586,6 +631,44 @@ export class Runner {
     const status = settings.engines[model.engine]
     if (!status?.installed || (account ? !account.loggedIn : !status.loggedIn)) return undefined
     return { model, account }
+  }
+
+  // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
+  // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
+  // `reserved`: this reply was queued by handOff, which already holds its place.
+  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+    const threadId = opts.existing ? opts.existing.threadId : opts.threadId
+    const key = replyKey(agent.id, conv.id, threadId)
+    const { reserved, ...rest } = opts
+    // My messages that come in while it runs wait in this line (see lineFor).
+    const lineKey = `${agent.id}:${conv.id}`
+    const w: Line = this.working.get(lineKey) ?? { n: 0, waiting: [] }
+    w.n++
+    w.threadId = threadId
+    w.mine = opts.depth === 1 && !opts.routine
+    this.working.set(lineKey, w)
+    this.followups.start(key, reserved)
+    let msg: Message | undefined
+    let f: Followup | undefined
+    try {
+      msg = await this.reply(agent, conv, rest)
+    } finally {
+      this.followups.end(key)
+      f = this.followups.take(key) // taken even when the reply threw: a stale follow-up must not wait for the next one
+      if (--w.n === 0) {
+        this.working.delete(lineKey)
+        // One reply for my messages that waited: it reads a hand-off noted meanwhile too.
+        if (w.waiting.length) {
+          f = undefined
+          void this.followUp(agent, conv, w, msg)
+        }
+      }
+    }
+    if (f && msg?.run?.status === 'done' && !this.paused) {
+      this.followups.reserve(key)
+      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }))
+    }
+    return msg!
   }
 
   // `threadId`: the reply goes in that thread (an existing reply keeps its own).
@@ -667,26 +750,6 @@ export class Runner {
     emit({ type: 'message_removed', id: messageId })
   }
 
-  // A reply, and what came in for it while it ran: my messages that waited go together in one follow-up.
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }): Promise<Message> {
-    const key = `${agent.id}:${conv.id}`
-    const w: Line = this.working.get(key) ?? { n: 0, waiting: [] }
-    w.n++
-    w.threadId = opts.existing ? opts.existing.threadId : opts.threadId
-    w.mine = opts.depth === 1 && !opts.routine
-    this.working.set(key, w)
-    let msg: Message | undefined
-    try {
-      msg = await this.turn(agent, conv, opts)
-      return msg
-    } finally {
-      if (--w.n === 0) {
-        this.working.delete(key)
-        if (w.waiting.length) void this.followUp(agent, conv, w, msg)
-      }
-    }
-  }
-
   // One reply for the messages that waited: they're read together, as what they nearly always are, more of
   // the same request. Steered, it knows it was cut short and what it had done.
   private async followUp(agent: Agent, conv: Conversation, w: Line, last: Message | undefined): Promise<void> {
@@ -724,10 +787,11 @@ export class Runner {
           `Enquanto você respondia, ${me} mandou ${more}, logo depois da sua resposta acima. Leia como continuação do mesmo pedido: responda o que elas acrescentam ou mudam, numa resposta só, sem repetir o que você já disse. Se mudam algo que você respondeu, corrija.`,
           `While you were answering, ${me} sent ${more}, right after your reply above. Read them as more of the same request: answer what they add or change, in one reply, without repeating what you already said. If they change something you answered, correct it.`
         )
-    this.enqueue(() => this.execute(current, conv, { depth: 1, task, work: last?.run?.work, threadId: w.threadId }))
+    this.followups.reserve(replyKey(current.id, conv.id, w.threadId))
+    this.enqueue(() => this.execute(current, conv, { depth: 1, task, work: last?.run?.work, threadId: w.threadId, reserved: true }))
   }
 
-  private async turn(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }): Promise<Message> {
+  private async reply(agent: Agent, conv: Conversation, opts: ReplyOpts): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -827,8 +891,10 @@ export class Runner {
     // threads, of the conversations this agent is in, are looked up.
     const canSeekThreads = !!this.deps.gateway && (!!msg.threadId || db.threadRoots(conv.id).size > 0)
     const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
-    // The Tuca proposes agents; nobody else does.
-    const builds = !!this.deps.gateway && agent.kind === 'tuca'
+    // Any agent may propose agents, teams, routines and channels (a card the person applies); only the
+    // Tuca helps with Tucano itself, with the guide and a look at the workspace.
+    const proposes = !!this.deps.gateway
+    const helps = proposes && agent.kind === 'tuca'
     let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
     // why, so it says so in a sentence instead of spending a call on each tool to find out.
@@ -881,6 +947,11 @@ export class Runner {
       seen.set(key, { result, n })
       return n
     }
+    // Calls per connector tool, whatever the arguments: paging a whole channel changes the cursor each
+    // time, so the repeat guard never sees it.
+    const callsOf = new Map<string, number>()
+    let sleeps = 0 // commands that started by sleeping
+    let refusedSleeps = 0
 
     let pending = ''
     let timer: NodeJS.Timeout | null = null
@@ -901,7 +972,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
       // (a refused token, a sign-in to finish) takes them away.
@@ -929,36 +1000,14 @@ export class Runner {
             }
           }
         : undefined
-    // abrir_pr: when a folder lent to this agent is a GitHub repository it can push to.
-    const repos = (this.deps.gateway && this.deps.github?.pushable(agent)) || []
-    const prTool: ToolDef | undefined = repos.length
-      ? {
-          name: ABRIR_PR,
-          description: L(
-            `Pede pra abrir uma pull request em ${repos.join(' ou ')} com uma branch agent/* que você já publicou com git push. Vira um pedido de aprovação; aprovada, o app abre a PR e você recebe o link.`,
-            `Asks to open a pull request on ${repos.join(' or ')} from an agent/* branch you already published with git push. It becomes an approval request; once approved, the app opens the PR and you get the link.`
-          ),
-          inputSchema: {
-            type: 'object',
-            properties: {
-              ...(repos.length > 1 ? { repositorio: { type: 'string', enum: repos } } : {}),
-              branch: { type: 'string', description: L('A branch publicada, ex.: agent/lembrete-duplicado.', 'The published branch, e.g. agent/duplicate-reminder.') },
-              titulo: { type: 'string' },
-              descricao: { type: 'string', description: L('Em Markdown: o que mudou, por quê, como foi testado, o que falta conferir (ex.: o build no Xcode).', "In Markdown: what changed, why, how it was tested, what's left to check (e.g. the Xcode build).") },
-              base: { type: 'string', description: L('A branch de destino. Default: main.', 'The target branch. Default: main.') }
-            },
-            required: [...(repos.length > 1 ? ['repositorio'] : []), 'branch', 'titulo', 'descricao']
-          }
-        }
-      : undefined
     const toolDefs: ToolDef[] = [
       ASK_USER,
       ...(accessTool ? [accessTool] : []),
-      ...(prTool ? [prTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
-      ...(builds ? [PROPOR_AGENTE] : []),
+      ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
+      ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -1005,7 +1054,55 @@ export class Runner {
           )
         }
 
-        if (name === PROPOR_AGENTE.name && builds) {
+        if (name === LER_GUIA.name && helps) {
+          const page = readGuide(args['pagina'])
+          if (!page.error) addSteps({ id: randomUUID(), label: L('Leu o guia', 'Read the guide'), detail: String(args['pagina']), status: 'done' })
+          return textResult(page.text, page.error)
+        }
+
+        if (name === VER_ESTADO.name && helps) {
+          addSteps({ id: randomUUID(), label: L('Olhou o workspace', 'Looked at the workspace'), detail: String(args['area'] ?? L('tudo', 'all')), status: 'done' })
+          const now = Date.now()
+          return textResult(
+            workspaceState(args['area'], {
+              settings: await this.deps.settings(),
+              connectors: this.deps.connectors?.list() ?? [],
+              agents: db.agents().filter((a) => a.kind !== 'tuca'),
+              conversations: db.conversations(),
+              routines: db.routines(),
+              approvals: db.approvals(),
+              failures: db.recentFailures(now - 7 * 24 * 3_600_000),
+              lastRun: (r) => {
+                const run = r.lastMessageId ? db.message(r.lastMessageId)?.run : undefined
+                return run && { status: run.status, ...(run.error ? { error: run.error } : {}) }
+              },
+              now
+            })
+          )
+        }
+
+        if ((name === PROPOR_TIME.name || PROPOSAL_TOOLS().some((t) => t.name === name)) && proposes) {
+          const now = await this.deps.settings()
+          const usable = (id: string): boolean => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn }
+          const r =
+            name === PROPOR_TIME.name
+              ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
+              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations(), connectors: this.deps.connectors?.list() ?? [], usable })
+          if (!r.proposal) return textResult(r.error!, true)
+          msg.run = { ...msg.run!, proposal: r.proposal }
+          const p = r.proposal
+          const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : p.kind === 'team' ? L('Propôs um time', 'Proposed a team') : L('Propôs um canal', 'Proposed a channel')
+          const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
+          addSteps({ id: randomUUID(), label: what, detail, status: 'done' })
+          return textResult(
+            L(
+              'A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar. Termine com uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
+              "The proposal is in the card, with Apply and Discard, and has NOT happened yet: it only happens when the person applies it. Finish with one short sentence saying they just need to apply it (or ask for a change), without repeating what the card shows. One proposal per reply: the next one replaces this one."
+            )
+          )
+        }
+
+        if (name === PROPOR_AGENTE.name && proposes) {
           const now = await this.deps.settings()
           const r = draftFrom(args, {
             usable: (id) => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn },
@@ -1113,6 +1210,21 @@ export class Runner {
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
+          // An agent with connectors sleeping with nothing checked after it is waiting for something outside
+          // (a query, a job): that holds the reply a minute at a time and makes nothing come sooner. The first
+          // runs; the next ones don't. A sleep before checking something here (a server, a build) always runs.
+          const slept = exposed.size && name === 'bash' && typeof args['command'] === 'string' ? idleSleepSeconds(args['command']) : 0
+          if (slept >= 20 && ++sleeps > SLEEPS_FREE) {
+            if (++refusedSleeps >= SLEEPS_STOP) halt('sleeping')
+            addSteps({ id: randomUUID(), label: L('Não esperou com sleep', "Didn't wait with sleep"), detail: snip(String(args['command']), 80), status: 'error' })
+            return textResult(
+              L(
+                `Não rodei: dormir sem conferir nada não faz nada chegar mais cedo e segura a resposta. Uma consulta de conector que volta ainda rodando (um SQL demorado) o app espera por você, por até ${PENDING_WAIT_MINUTES} minutos: rode-a uma vez só. Se precisar esperar algo no seu computador, durma e confira no mesmo comando (ex.: sleep 30 && curl …, ou um laço). Se não há o que esperar, siga com o que já tem ou encerre dizendo o que falta.`,
+                `Not run: sleeping without checking anything makes nothing come sooner and holds the reply. A connector query that comes back still running (a slow SQL) is awaited by the app for you, for up to ${PENDING_WAIT_MINUTES} minutes: run it only once. If you need to wait for something on your computer, sleep and check in the same command (e.g. sleep 30 && curl …, or a loop). If there's nothing to wait for, go on with what you have or end saying what's left.`
+              ),
+              true
+            )
+          }
           const t0 = Date.now()
           const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
           // A command shows whole (or the SQL it runs, pulled out), masked, from the moment it starts.
@@ -1266,44 +1378,6 @@ export class Runner {
           return clip(out.result)
         }
 
-        if (name === ABRIR_PR && prTool) {
-          const repo = repos.length > 1 ? repos.find((r) => r === args['repositorio']) : repos[0]
-          if (!repo) return textResult(L(`Diga o repositório: ${repos.join(' ou ')}.`, `Say the repository: ${repos.join(' or ')}.`), true)
-          const branch = typeof args['branch'] === 'string' ? args['branch'].trim().replace(/^refs\/heads\//, '') : ''
-          const title = typeof args['titulo'] === 'string' ? args['titulo'].trim() : ''
-          if (!/^agent\/[A-Za-z0-9._\/-]+$/.test(branch)) return textResult(L('A branch precisa ser agent/<assunto>, já publicada com git push.', 'The branch must be agent/<topic>, already published with git push.'), true)
-          if (!title) return textResult(L('Faltou o título.', 'Missing the title.'), true)
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
-          const prArgs = { repo, head: branch, base: typeof args['base'] === 'string' && args['base'].trim() ? args['base'].trim() : 'main', title, body: typeof args['descricao'] === 'string' ? args['descricao'] : '' }
-          approval = {
-            id: randomUUID(),
-            hash: approvalHash(GITHUB, ABRIR_PR, prArgs),
-            agentId: agent.id,
-            conversationId: conv.id,
-            messageId: msg.id,
-            connectorId: GITHUB,
-            connectorName: 'GitHub',
-            tool: ABRIR_PR,
-            args: prArgs,
-            why: title,
-            highRisk: false,
-            state: 'pending',
-            createdAt: Date.now(),
-            expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
-          }
-          db.createApproval(approval)
-          emit({ type: 'approval', approval })
-          msg.run = { ...msg.run!, approvalId: approval.id }
-          addSteps({ id: randomUUID(), label: L('Pediu pra abrir a PR', 'Asked to open the PR'), detail: `${branch} → ${prArgs.base}`, status: 'done' })
-          this.deps.notify?.(L(`${agent.name} quer abrir uma PR`, `${agent.name} wants to open a PR`), `${repo}: ${title}`, conv.id, 'approval', msg.threadId)
-          return textResult(
-            L(
-              `Pedido de PR criado. A PR ainda NÃO existe. Encerre sua resposta agora dizendo em uma frase o que vai na PR. Quando ${settings.workspaceName} aprovar, você recebe o link numa nova mensagem.`,
-              `PR request created. The PR does NOT exist yet. End your reply now saying in one sentence what goes in the PR. When ${settings.workspaceName} approves, you get the link in a new message.`
-            )
-          )
-        }
-
         if (name === ACCESS_REQUEST && accessTool) {
           const c = this.deps.connectors?.list().find((x) => x.name === args['conector'])
           const nivel = args['nivel'] === 'read_write' ? 'read_write' : 'read'
@@ -1399,10 +1473,43 @@ export class Runner {
           save()
         }
         try {
-          const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
-          if (r.isError) finish('error', errorReason(r))
-          else finish('done', undefined, resultSummary(resultText(r)))
-          return clip(r)
+          const { [REASON_PARAM]: _reason, ...toolArgs } = args
+          const first = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
+          // A query still running: the app waits for it here, with the connector's own status tool, instead
+          // of the agent sleeping and asking again. Not a status tool the agent called itself (asking whether a
+          // deploy finished wants the answer now), nor a write (starting a job doesn't mean waiting for it).
+          const pending = current.cls === 'read' && !isStatusTool(current.name) ? pendingOf(first) : undefined
+          const poller = pending && pollTool(db.tools(hit.connector.id), pending, (t) => allowed(t, db.agent(agent.id)?.grants[hit.connector.id]))
+          const done = (r: CallToolResult): void => (r.isError ? finish('error', errorReason(r)) : finish('done', undefined, resultSummary(resultText(r))))
+          if (!pending || !poller) {
+            done(first)
+            return clip(first)
+          }
+          const w = await awaitDone(first, async (p) => this.deps.connectors!.call(hit.connector.id, poller.tool.name, pollTool([poller.tool], p, () => true)?.args ?? poller.args), {
+            maxMs: PENDING_WAIT_MINUTES * 60_000,
+            wait: this.deps.timers?.wait,
+            now: this.deps.timers?.now,
+            signal: control.ctl.signal
+          })
+          const took = w.ms >= 60_000 ? `${Math.round(w.ms / 60_000)} min` : `${Math.max(1, Math.round(w.ms / 1000))} s`
+          msg.run = { ...msg.run!, steps: msg.run!.steps.map((s) => (s.id === step.id ? { ...s, detail: `${detail} · ${L(`esperou ${took}`, `waited ${took}`)}` } : s)) }
+          done(w.result)
+          if (!w.pending) return clip(w.result)
+          const ids = Object.entries(poller.args).map(([k, v]) => `${k}=${v}`).join(', ')
+          const r = clip(w.result)
+          return {
+            ...r,
+            content: [
+              ...r.content,
+              {
+                type: 'text',
+                text: L(
+                  `[Ainda ${w.pending.state} depois de ${took} esperando (${w.polls} consultas a ${poller.tool.name}). Não fique esperando nem durma: diga a ${settings.workspaceName} que ainda está rodando (${ids}) e siga com o que já dá pra fazer, ou chame ${poller.tool.name} uma vez mais no fim.]`,
+                  `[Still ${w.pending.state} after waiting ${took} (${w.polls} checks with ${poller.tool.name}). Don't keep waiting or sleep: tell ${settings.workspaceName} it's still running (${ids}) and go on with what you can do, or call ${poller.tool.name} once more at the end.]`
+                )
+              }
+            ]
+          }
         } catch (e) {
           const why = callError(e)
           finish('error', why)
@@ -1423,6 +1530,19 @@ export class Runner {
             true
           )
         }
+        // Only reads: paging a history is reading, and many writes in a row (filing 80 issues) are the work.
+        const count = exposed.get(name)?.tool.cls === 'read' ? (callsOf.get(name) ?? 0) + 1 : 0
+        if (count) callsOf.set(name, count)
+        if (count > SAME_TOOL_STOP) {
+          if (++failing >= ERRORS_STOP) halt('errors')
+          return textResult(
+            L(
+              `Recusada: você já chamou ${name} ${SAME_TOOL_STOP} vezes nesta resposta. Trabalhe com o que já tem: escreva o que achou e o que falta. Se precisar de mais, use um recorte estreito (uma busca, um filtro de tempo) com outra ferramenta, ou peça a ${settings.workspaceName} pra continuar.`,
+              `Refused: you've already called ${name} ${SAME_TOOL_STOP} times in this reply. Work with what you have: write what you found and what's left. If you need more, use a narrow cut (a search, a time filter) with another tool, or ask ${settings.workspaceName} to go on.`
+            ),
+            true
+          )
+        }
         inFlight++
         acted = true
         sign()
@@ -1438,6 +1558,13 @@ export class Runner {
             const warning = L(
               `Atenção: esta chamada deu exatamente o mesmo resultado ${n} vezes nesta resposta. Repetir não vai mudar nada: mude de abordagem, ou encerre dizendo onde travou.`,
               `Careful: this call gave exactly the same result ${n} times in this reply. Repeating won't change anything: change your approach, or end saying where you got stuck.`
+            )
+            return { ...r, content: [...r.content, { type: 'text', text: warning }] }
+          } else if (count === SAME_TOOL_WARN) {
+            addSteps({ id: randomUUID(), label: L('Chamou a mesma ferramenta muitas vezes', 'Called the same tool many times'), detail: `${name} · ${count}×`, status: 'error' })
+            const warning = L(
+              `Atenção: você já chamou ${name} ${count} vezes nesta resposta. Se está paginando um histórico inteiro (um canal, logs, uma tabela), pare: peça só a janela que a tarefa precisa, com o filtro de tempo da ferramenta (ex.: oldest/latest em segundos Unix), uma busca ou um limite. Depois de ${SAME_TOOL_STOP} chamadas, ela é recusada nesta resposta.`,
+              `Careful: you've called ${name} ${count} times in this reply. If you're paging through a whole history (a channel, logs, a table), stop: ask only for the window the task needs, with the tool's time filter (e.g. oldest/latest in Unix seconds), a search or a limit. Past ${SAME_TOOL_STOP} calls, it's refused for this reply.`
             )
             return { ...r, content: [...r.content, { type: 'text', text: warning }] }
           }
@@ -1460,7 +1587,7 @@ export class Runner {
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
     const thread = msg.threadId ? db.message(msg.threadId) : undefined
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread, searchable: canSeekThreads })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0 })
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -1481,14 +1608,16 @@ export class Runner {
       routines: routines?.forAgent(agent.id),
       skills: skills && mySkills,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
-      publish: repos,
-      builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
+      connectors: exposed.size > 0,
+      builder: proposes
+        ? [builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId, tuca: helps, me: settings.workspaceName }), helps && helperSection()].filter(Boolean).join('\n\n')
+        : undefined
     })
 
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
     // thread) with only what's new since. Not while another agent is still writing a message this
     // reply would see half of: that one goes the usual way, and the session takes it all next time.
-    const sessionKey = `${agent.id}:${conv.id}:${msg.threadId ?? ''}`
+    const sessionKey = replyKey(agent.id, conv.id, msg.threadId)
     const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs, gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
@@ -1611,15 +1740,16 @@ export class Runner {
       )
     }
 
-    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
+    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal }
     if (control.reason === 'steered') {
       // Not a failure: the reply right after picks up with the new direction.
       save({ run: { ...base, ...again, status: 'stopped', steered: true, steps: closeThinking('done', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
-    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
+    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
       const why = {
         loop: L(`repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`, `I repeated the same thing, with the same result, ${REPEAT_STOP} times. It looked like a loop`),
+        sleeping: L('fiquei tentando esperar com sleep por algo que não chegava', 'I kept trying to wait with sleep for something that wasn’t coming'),
         errors: L(`${ERRORS_STOP} ferramentas falharam seguidas`, `${ERRORS_STOP} tools failed in a row`),
         stall: L(`fiquei ${Math.round(stallMs / 60_000)} minutos sem nenhum sinal, travado`, `I went ${Math.round(stallMs / 60_000)} minutes without any sign of life, stuck`)
       }[control.reason]
@@ -1708,33 +1838,13 @@ export class Runner {
     let ok = false // whether the approved thing went through
     let task: string
     if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
-      if (decision === 'approved') {
-        try {
-          const work = db.message(ap.messageId)?.run?.work
-          const cost = work ? db.costByWork(0).find((w) => w.work === work) : undefined
-          const footer = L(
-            `\n\n---\nFeita por ${agent?.name ?? 'um agente'} no Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens em ${cost.replies} resposta${cost.replies > 1 ? 's' : ''} até aqui` : ''}.`,
-            `\n\n---\nMade by ${agent?.name ?? 'an agent'} in Tucano${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens in ${cost.replies} repl${cost.replies > 1 ? 'ies' : 'y'} so far` : ''}.`
-          )
-          const pr = await this.deps.github!.openPr({ ...ap.args, body: `${String(ap.args['body'] ?? '')}${footer}` })
-          ok = true
-          outcome = L(`Abriu a PR #${pr.number}.`, `Opened PR #${pr.number}.`)
-          task = L(`${me} aprovou, e o app abriu a PR #${pr.number}: ${pr.url}\n\nAvise ${me} com o link em uma frase.`, `${me} approved, and the app opened PR #${pr.number}: ${pr.url}\n\nTell ${me} with the link in one sentence.`)
-        } catch (e) {
-          const err = e instanceof Error ? e.message : String(e)
-          outcome = L(`Falhou: ${err}`, `Failed: ${err}`)
-          task = L(
-            `${me} aprovou a PR, mas ela não abriu: ${err}. Conte a ${me} e diga o que fazer (a branch foi publicada? já existe uma PR dela?).`,
-            `${me} approved the PR, but it didn't open: ${err}. Tell ${me} and say what to do (was the branch published? is there already a PR for it?).`
-          )
-        }
-      } else {
-        outcome = decision === 'refused' ? L('Nada foi aberto.', 'Nothing was opened.') : expired
-        task = L(
-          `${me} ${decision === 'refused' ? `recusou a PR${reason ? `: "${reason}"` : ''}` : 'não respondeu ao pedido de PR'}. Nada foi aberto. Responda considerando isso.`,
-          `${me} ${decision === 'refused' ? `turned down the PR${reason ? `: "${reason}"` : ''}` : "didn't answer the PR request"}. Nothing was opened. Reply with that in mind.`
-        )
-      }
+      // A PR asked for before pushing from the agent's computer left Tucano: nothing is opened.
+      // The GitHub connector does it now, with the person's approval like any of its tools.
+      outcome = decision === 'expired' ? expired : L('Nada foi aberto: abrir PR assim saiu do Tucano.', 'Nothing was opened: opening a PR this way left Tucano.')
+      task = L(
+        `${me} ${decision === 'approved' ? 'aprovou' : decision === 'refused' ? 'recusou' : 'não respondeu a'} um pedido de PR antigo, mas abrir PR pelo computador saiu do Tucano e nada foi aberto. Se você tem o conector do GitHub, abra a PR por ele; senão, diga a ${me} que ele precisa dar a você o conector do GitHub.`,
+        `${me} ${decision === 'approved' ? 'approved' : decision === 'refused' ? 'turned down' : "didn't answer"} an old PR request, but opening a PR from the computer left Tucano and nothing was opened. If you have the GitHub connector, open the PR with it; otherwise, tell ${me} you need the GitHub connector.`
+      )
     } else if (ap.connectorId === APPS) {
       // A click or key in one of the person's apps: made on the same app, on the same element.
       const onde = typeof ap.args['onde'] === 'string' ? ap.args['onde'] : ''
@@ -1762,7 +1872,9 @@ export class Runner {
       }
     } else if (ap.connectorId === NAVEGADOR) {
       // A click in the agent's browser: made only on the same page, on the same button.
-      const what = L(`clicar em "${String(ap.args['alvo'] ?? '')}"`, `clicking "${String(ap.args['alvo'] ?? '')}"`)
+      const alvo = String(ap.args['alvo'] ?? '') || L('um elemento sem nome', 'an element with no name')
+      const key = typeof ap.args['tecla'] === 'string' ? (ap.args['tecla'] === 'enter' ? 'Enter' : L('Espaço', 'Space')) : undefined
+      const what = key ? L(`apertar ${key} em "${alvo}"`, `pressing ${key} on "${alvo}"`) : L(`clicar em "${alvo}"`, `clicking "${alvo}"`)
       if (decision === 'approved' && agent?.browser && this.deps.browser) {
         const r = await this.deps.browser.approved(agent, ap.args)
         ok = r.ok
@@ -1907,6 +2019,8 @@ export class Runner {
     const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
     this.routing++
     try {
+      const keyOf = (a: Agent): string => replyKey(a.id, conv.id, msg.threadId)
+      const isBusy = (a: Agent): boolean => this.followups.busy(keyOf(a))
       let called = next
       let step = { label: L('Chamou', 'Called'), detail: list(next), ms: 0 }
       const failed = (why: string): void => {
@@ -1923,7 +2037,7 @@ export class Runner {
           const cwd = join(this.deps.workDir, '_router')
           mkdirSync(cwd, { recursive: true })
           const { messages } = contextWindow(db, msg, ROUTER_HISTORY)
-          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
+          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
           if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
           step.ms = r.ms
           if ('error' in r) failed(r.error)
@@ -1938,7 +2052,10 @@ export class Runner {
       }
       // Paused while the router was thinking: call no one.
       if (this.paused) called = []
-      else {
+      // Nothing awaits from here to the enqueues, so who is busy now is who is busy when they're called.
+      const busy = called.filter(isBusy)
+      if (!this.paused) {
+        if (busy.length) step.detail = `${step.detail ? `${step.detail} · ` : ''}${busy.length === called.length ? '' : `${list(busy)}: `}${busy.length > 1 ? L('já estão respondendo aqui, veem isto na próxima resposta', 'already replying here, will see this next') : L('já está respondendo aqui, vê isto na próxima resposta', 'already replying here, will see this next')}`
         // Seconds have passed: other code may have saved this reply meanwhile (the wiki, a draft), so add to what's stored.
         const saved = db.message(msg.id) ?? msg
         if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
@@ -1948,7 +2065,14 @@ export class Runner {
         this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
         return finished()
       }
-      for (const a of called) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
+      // A noted follow-up counts as someone taking the turn: the agent will answer it, so no "done" yet.
+      for (const a of called) {
+        if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work })
+        else {
+          this.followups.reserve(keyOf(a))
+          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true }))
+        }
+      }
     } finally {
       this.routing--
       this.checkIdle()
