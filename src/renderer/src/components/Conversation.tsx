@@ -1503,12 +1503,14 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
   // With a thread open there are two fields: a drop on the thread goes to its own.
   const inThread = !!threadId
+  const hidden = useRef(false) // behind the decisions: an image dropped now would come back unasked when they close
+  hidden.current = !!deciding
   useEffect(() => {
     let depth = 0
     const files = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
     const mine = (e: DragEvent): boolean => !!(e.target instanceof Element && e.target.closest('.side-panel--thread')) === inThread
     const enter = (e: DragEvent): void => {
-      if (!files(e)) return
+      if (!files(e) || hidden.current) return
       depth++
       setDragging(true)
     }
@@ -1523,7 +1525,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       e.preventDefault()
       depth = 0
       setDragging(false)
-      if (mine(e)) void addFiles([...(e.dataTransfer?.files ?? [])])
+      if (mine(e) && !hidden.current) void addFiles([...(e.dataTransfer?.files ?? [])])
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)

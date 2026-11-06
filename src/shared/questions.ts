@@ -2,7 +2,7 @@
 // choice or a free text. The answers are kept on the asking message, one per decision, and
 // go to the agent as my next message, one line each.
 import { L } from './lang'
-import type { Run } from './types'
+import type { Message, Run } from './types'
 
 export type QuestionKind = 'single' | 'multiple' | 'text'
 export interface QuestionOption {
@@ -20,6 +20,12 @@ export interface Answer {
   text?: string // the answer to a text decision
   skipped?: true
 }
+// What's on a decision's card before it's confirmed.
+export interface AnswerDraft {
+  chosen: number[]
+  other: string
+  text: string
+}
 
 export const MAX_QUESTIONS = 4
 export const MIN_OPTIONS = 2
@@ -35,6 +41,11 @@ const KINDS: QuestionKind[] = ['single', 'multiple', 'text']
 export function questionsOf(run: Run | undefined): Question[] {
   if (run?.questions?.length) return run.questions
   return run?.question ? [{ question: run.question, kind: 'text' }] : []
+}
+
+// A question that was just asked. Answering part of it saves the message again, which asks nothing new.
+export function isNewQuestion(message: Message): boolean {
+  return message.run?.status === 'waiting_input' && !message.run.answers && questionsOf(message.run).length > 0
 }
 
 const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
@@ -87,6 +98,14 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Ques
 
 export function isAnswered(answer: Answer | null | undefined): boolean {
   return !!answer && (!!answer.chosen?.length || !!answer.other || !!answer.text || !!answer.skipped)
+}
+
+export function draftAnswer(question: Question, draft: AnswerDraft): Answer | null {
+  if (question.kind === 'text') return draft.text.trim() ? { text: draft.text.trim() } : null
+  const other = draft.other.trim()
+  if (question.kind === 'single') return other ? { other } : draft.chosen.length ? { chosen: draft.chosen } : null
+  if (!draft.chosen.length && !other) return null
+  return { ...(draft.chosen.length ? { chosen: [...draft.chosen].sort((a, b) => a - b) } : {}), ...(other ? { other } : {}) }
 }
 
 export function firstUnanswered(questions: Question[], answers: (Answer | null)[] | undefined): number {

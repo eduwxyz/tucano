@@ -2,21 +2,65 @@ import { describe, expect, it } from 'vitest'
 import {
   answerLabel,
   describeQuestions,
+  draftAnswer,
   firstUnanswered,
   formatAnswers,
   isAnswered,
+  isNewQuestion,
   parseQuestions,
   questionHeadline,
   questionsAsText,
   questionsOf,
+  type AnswerDraft,
   type Question
 } from '../src/shared/questions'
+import type { Message, Run } from '../src/shared/types'
 
 const pagination: Question = { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] }
 const parts: Question = { question: 'O que remover?', kind: 'multiple', options: [{ label: 'Nó tag' }, { label: 'getUsedTags' }, { label: 'declaredTagIds' }] }
 const deadline: Question = { question: 'Pra quando?', kind: 'text' }
 
 const refused = (args: Record<string, unknown>): boolean => 'error' in parseQuestions(args)
+
+describe('draftAnswer', () => {
+  const single: Question = { question: 'Qual?', kind: 'single', options: [{ label: 'A' }, { label: 'B' }] }
+  const multiple: Question = { ...single, kind: 'multiple' }
+  const text: Question = { question: 'Qual?', kind: 'text' }
+  const draft = (patch: Partial<AnswerDraft>): AnswerDraft => ({ chosen: [], other: '', text: '', ...patch })
+
+  it('is the text, trimmed, or nothing', () => {
+    expect(draftAnswer(text, draft({ text: ' sexta ' }))).toEqual({ text: 'sexta' })
+    expect(draftAnswer(text, draft({ text: '  ' }))).toBeNull()
+  })
+
+  it('keeps every option ticked, in order, and something else with them', () => {
+    expect(draftAnswer(multiple, draft({ chosen: [1, 0], other: ' C ' }))).toEqual({ chosen: [0, 1], other: 'C' })
+    expect(draftAnswer(multiple, draft({}))).toBeNull()
+  })
+
+  it('in a single choice, something else takes the place of the option', () => {
+    expect(draftAnswer(single, draft({ chosen: [1], other: 'C' }))).toEqual({ other: 'C' })
+    expect(draftAnswer(single, draft({ chosen: [1] }))).toEqual({ chosen: [1] })
+  })
+})
+
+describe('isNewQuestion', () => {
+  const asked = (run: Partial<Run>): Message => ({ id: 'm', conversationId: 'c', author: { kind: 'agent', id: 'a' }, text: '', at: 0, run: { status: 'waiting_input', steps: [], questions: [{ question: 'Qual?', kind: 'text' }], ...run } })
+
+  it('is a question waiting, before any answer', () => {
+    expect(isNewQuestion(asked({}))).toBe(true)
+    expect(isNewQuestion(asked({ questions: undefined, question: 'Qual?' }))).toBe(true)
+  })
+
+  it('is not a question saved again with an answer on it', () => {
+    expect(isNewQuestion(asked({ answers: [null] }))).toBe(false)
+  })
+
+  it('is not anything else', () => {
+    expect(isNewQuestion(asked({ status: 'done' }))).toBe(false)
+    expect(isNewQuestion(asked({ questions: undefined }))).toBe(false)
+  })
+})
 
 describe('questionsOf', () => {
   it('reads an old run with a question string as one text decision', () => {

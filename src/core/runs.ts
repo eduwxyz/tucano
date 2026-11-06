@@ -286,7 +286,7 @@ export class Runner {
   // only agent in the channel, and otherwise the router. The answers, and
   // everything else it sets off, go in its thread (`threadId`, or its own when
   // the conversation answers in threads) or else in the conversation.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): Promise<void> {
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, question?: Message): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const typed = text.trim()
@@ -298,7 +298,7 @@ export class Runner {
     const thread = root?.conversationId === conv.id ? (root.threadId ?? root.id) : undefined
     // A question an agent left waiting is answered by my next message in its thread. What I
     // write outside threads stays outside: it only answers a question that is outside too.
-    const asked = this.pendingQuestion(conv.id, thread)
+    const asked = question ?? this.pendingQuestion(conv.id, thread)
     // The decisions I answered on the card go first, whether I send them or write my own reply.
     const body = [asked ? formatAnswers(questionsOf(asked.run), asked.run?.answers) : '', typed].filter(Boolean).join('\n\n')
     if (!body && pictures.length === 0) return
@@ -501,10 +501,7 @@ export class Runner {
 
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
   private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
-    return this.deps.db
-      .recentMessages(conversationId, 50, threadId ?? null)
-      .reverse()
-      .find((m) => m.run?.status === 'waiting_input')
+    return this.deps.db.waitingQuestion(conversationId, threadId ?? null)
   }
 
   private post(conversationId: string, threadId: string | undefined, text: string, run?: Run): Message {
@@ -1856,7 +1853,7 @@ export class Runner {
   async submitAnswers(messageId: string): Promise<void> {
     const asked = this.deps.db.message(messageId)
     if (asked?.run?.status !== 'waiting_input') return
-    await this.send(asked.conversationId, '', [], asked.threadId)
+    await this.send(asked.conversationId, '', [], asked.threadId, asked)
   }
 
   // The user took over the agent's browser ("Assumir") and handed it back

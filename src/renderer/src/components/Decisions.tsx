@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type Question } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Question } from '../../../shared/questions'
 import { answerQuestion, dismissQuestion, reopenQuestion, submitAnswers, useStore, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
@@ -19,6 +19,14 @@ const Prose = ({ text, className }: { text: string; className: string }): ReactN
   </div>
 )
 
+// What's ticked or typed but not confirmed, by message and decision, so moving around or closing
+// the card keeps it (like the message box's drafts). In memory: closing the app drops them.
+const drafts = new Map<string, AnswerDraft>()
+const draftKey = (messageId: string, index: number): string => `${messageId}:${index}`
+
+// How long the keyboard stays quiet before a card that just showed up takes the focus.
+const QUIET_MS = 800
+
 const typing = (e: KeyboardEvent): boolean => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
 
 export function DecisionsCard({ message }: { message: Message }): ReactNode {
@@ -29,6 +37,8 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
   const allAnswered = (list: (Answer | null)[]): boolean => firstUnanswered(questions, list) === -1
   const [step, setStep] = useState<Step>(() => {
+    const unfinished = questions.findIndex((_, i) => drafts.has(draftKey(message.id, i))) // reopened: back where I was typing
+    if (unfinished !== -1) return unfinished
     const first = firstUnanswered(questions, saved)
     return first === -1 ? (questions.length > 1 ? 'review' : 0) : first
   })
@@ -39,11 +49,12 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
   const send = (): void => {
     if (sending) return
     setSending(true)
-    submitAnswers(message.id)
+    void submitAnswers(message.id).finally(() => setSending(false)) // it failed if the card is still here: it can go again
   }
 
   const commit = (index: number, answer: Answer | null): void => {
     setEngaged(true)
+    drafts.delete(draftKey(message.id, index))
     const next = answers.map((a, i) => (i === index ? answer : a))
     setAnswers(next)
     answerQuestion(message.id, index, answer)
@@ -53,8 +64,23 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
     setStep(after !== -1 ? after : allAnswered(next) ? 'review' : firstUnanswered(questions, next))
   }
 
+  // Leaving a decision with the arrows keeps what's on it, as its answer if it is one.
+  const settle = (): (Answer | null)[] => {
+    if (step === 'review') return answers
+    const key = draftKey(message.id, step)
+    const draft = drafts.get(key)
+    if (!draft) return answers
+    drafts.delete(key)
+    const answer = draftAnswer(questions[step]!, draft)
+    const next = answers.map((a, i) => (i === step ? answer : a))
+    setAnswers(next)
+    answerQuestion(message.id, step, answer)
+    return next
+  }
+
   const go = (to: Step): void => {
-    if (to === 'review' && !allAnswered(answers)) return
+    const settled = settle()
+    if (to === 'review' && !allAnswered(settled)) return
     setEngaged(true)
     setStep(to)
   }
@@ -88,36 +114,58 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
       {step === 'review' ? (
         <Review questions={questions} answers={answers} onEdit={setStep} onSend={send} sending={sending} />
       ) : (
-        <Decision key={step} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onDismiss={() => dismissQuestion(message.id)} />
+        <Decision key={step} draftId={draftKey(message.id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onDismiss={() => dismissQuestion(message.id)} />
       )}
     </div>
   )
 }
 
-function Decision({ question, answer, last, takeFocus, onAnswer, onDismiss }: { question: Question; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onDismiss: () => void }): ReactNode {
+function Decision({ draftId, question, answer, last, takeFocus, onAnswer, onDismiss }: { draftId: string; question: Question; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onDismiss: () => void }): ReactNode {
   const options = question.options ?? []
-  const [chosen, setChosen] = useState<number[]>(answer?.chosen ?? [])
-  const [other, setOther] = useState(answer?.other ?? '')
-  const [text, setText] = useState(answer?.text ?? '')
+  const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
+  const { chosen, other, text } = draft
+  const edit = (patch: Partial<AnswerDraft>): void => {
+    const next = { ...draft, ...patch }
+    drafts.set(draftId, next)
+    setDraft(next)
+  }
   const [focus, setFocus] = useState<number | null>(null)
   const otherField = useRef<HTMLInputElement>(null)
   const textField = useRef<HTMLTextAreaElement>(null)
   const body = useRef<HTMLDivElement>(null)
   // From the second decision on, keys work at once: the text field, or the options, takes the focus.
+  // The first one may replace the message box under my fingers, and a digit would answer it: it
+  // waits for a pause, and never takes the focus from a field I'm in.
   useEffect(() => {
-    if (takeFocus) (textField.current ?? body.current)?.focus()
+    const target = (): HTMLElement | null => textField.current ?? body.current
+    if (takeFocus) {
+      target()?.focus()
+      return
+    }
+    let timer: ReturnType<typeof setTimeout>
+    const wait = (): void => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        if (document.activeElement === document.body) target()?.focus({ preventScroll: true })
+      }, QUIET_MS)
+    }
+    wait()
+    window.addEventListener('keydown', wait, true)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('keydown', wait, true)
+    }
   }, [])
 
   const multiple = question.kind === 'multiple'
   const pick = (i: number): void => {
     if (!multiple) return onAnswer({ chosen: [i] })
-    setChosen((cur) => (cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i]))
+    edit({ chosen: chosen.includes(i) ? chosen.filter((x) => x !== i) : [...chosen, i] })
   }
-  const ready = question.kind === 'text' ? !!text.trim() : multiple ? chosen.length > 0 || !!other.trim() : !!other.trim()
+  const typed = draftAnswer(question, draft)
+  const ready = !!typed
   const confirm = (): void => {
-    if (!ready) return
-    if (question.kind === 'text') return onAnswer({ text: text.trim() })
-    onAnswer({ ...(chosen.length && multiple ? { chosen: [...chosen].sort((a, b) => a - b) } : {}), ...(other.trim() ? { other: other.trim() } : {}) })
+    if (typed) onAnswer(typed)
   }
   const skip = (): void => onAnswer({ skipped: true })
 
@@ -142,7 +190,7 @@ function Decision({ question, answer, last, takeFocus, onAnswer, onDismiss }: { 
     <div className="decisions__body" ref={body} tabIndex={-1} onKeyDown={keys}>
       {isLong(question) && <Prose className="decisions__prose" text={question.question} />}
       {question.kind === 'text' ? (
-        <textarea ref={textField} className="decisions__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onChange={(e) => setText(e.target.value)} />
+        <textarea ref={textField} className="decisions__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onChange={(e) => edit({ text: e.target.value })} />
       ) : (
         <div className="decisions__options" role={multiple ? 'group' : 'radiogroup'}>
           {options.map((o, i) => {
@@ -161,7 +209,7 @@ function Decision({ question, answer, last, takeFocus, onAnswer, onDismiss }: { 
             <span className="decisions__key">
               <Icon name="edit" size={12} />
             </span>
-            <input ref={otherField} value={other} placeholder={L('Outra coisa…', 'Something else…')} onChange={(e) => setOther(e.target.value)} />
+            <input ref={otherField} value={other} placeholder={L('Outra coisa…', 'Something else…')} onChange={(e) => edit({ other: e.target.value })} />
           </label>
         </div>
       )}

@@ -441,6 +441,27 @@ describe('ask_user through the gateway', () => {
   }
   const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'me')
 
+  it('sends the answers of a question older than the last 50 messages', async () => {
+    const { r, asked } = await askDecisions()
+    for (let i = 0; i < 60; i++) db.saveMessage({ id: `routine-${i}`, conversationId: asked.conversationId, author: { kind: 'system' }, text: `Rotina ${i}`, at: asked.at + 1000 + i, ...(asked.threadId ? { threadId: asked.threadId } : {}) })
+    r.answer(asked.id, 0, { chosen: [1] })
+    r.answer(asked.id, 1, { text: 'até sexta' })
+    await r.submitAnswers(asked.id)
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(mine().at(-1)?.text).toContain('Scroll infinito')
+  })
+
+  it('answers the question on the card, not a newer one waiting in the same place', async () => {
+    const { r, asked } = await askDecisions()
+    const newer: Message = { ...asked, id: 'newer', author: { kind: 'agent', id: 'a2' }, at: asked.at + 1000, run: { status: 'waiting_input', steps: [], questions: [{ question: 'Outra?', kind: 'text' }] } }
+    db.saveMessage(newer)
+    r.answer(asked.id, 0, { skipped: true })
+    r.answer(asked.id, 1, { text: 'até sexta' })
+    await r.submitAnswers(asked.id)
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(db.message('newer')?.run?.status).toBe('waiting_input')
+  })
+
   it('keeps partial answers on the question and sends them as my message', async () => {
     const { r, asked } = await askDecisions()
     r.answer(asked.id, 0, { chosen: [1] })

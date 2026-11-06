@@ -516,7 +516,7 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
 
 export const answerQuestion = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerQuestion', { messageId, index, answer })
-export const submitAnswers = (messageId: string): void => void fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitAnswers', { messageId })
+export const submitAnswers = (messageId: string): Promise<void> => fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitAnswers', { messageId })
 
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
 // nobody needs to hear if it didn't work.
