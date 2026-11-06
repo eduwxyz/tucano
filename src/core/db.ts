@@ -1,4 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
+import { readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { CACHE_READ_WEIGHT, routineCap, type Agent, type AgentApp, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ThreadSummary, type ToolClass, type Trigger } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
@@ -724,6 +726,20 @@ export class Db {
   setSecret(key: string, value: string | undefined): void {
     if (value === undefined) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(key)
     else this.db.prepare('INSERT INTO secrets (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)
+  }
+
+  // ---------- latest local backup ----------
+  latestBackup(dir: string): string | undefined {
+    try {
+      const files = readdirSync(dir)
+        .filter((f) => /^(tucano|agent-desk)-.*\.db$/.test(f))
+        .map((f) => join(dir, f))
+        .map((f) => ({ path: f, mtime: statSync(f).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime)
+      return files[0]?.path
+    } catch {
+      return undefined
+    }
   }
 
   // ---------- approvals ----------

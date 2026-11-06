@@ -44,6 +44,7 @@ import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
+import { DriveBackup } from './drive'
 import { applyForeignTeam, readForeignZip } from './agent-import'
 import { zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
@@ -428,7 +429,7 @@ const connectors = new ConnectorManager({
   secrets,
   emit,
   // On a server there's nothing to open it in: authorizeConnector hands it to the page.
-  openUrl: (url) => serverMode || toMain({ type: 'open', url }),
+  openUrl: async (url) => { void (serverMode || toMain({ type: 'open', url })) },
   oauthCallbackUrl: () => gateway.url('/oauth/callback')
 })
 gateway.route('/oauth/callback', async (url) => {
@@ -457,6 +458,20 @@ const github: GitHub = new GitHub({
 githubRef = github
 const computers = new Computers({ db, dataDir, emit, shoot, gitRemote: (agentId) => github.gitRemote(agentId) })
 const backups = join(dataDir, 'backups')
+
+// Google Drive backup: só ativo quando o usuário configurou client_id/secret via env.
+// Nenhuma credencial é gravada no repo; cada usuário cria seu próprio projeto no Google Cloud.
+const gdriveClientId = process.env['TUCANO_GDRIVE_CLIENT_ID']
+const gdriveClientSecret = process.env['TUCANO_GDRIVE_CLIENT_SECRET']
+let driveBackup: DriveBackup | undefined
+if (gdriveClientId && gdriveClientSecret) {
+  driveBackup = new DriveBackup(
+    secrets,
+    gdriveClientId,
+    gdriveClientSecret,
+    async (url) => { void (serverMode || toMain({ type: 'open', url })) },
+  )
+}
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
 const routines = new Routines({
@@ -587,11 +602,21 @@ void ready.then(async () => {
     void telegram?.start()
   }
   // A copy of the database once a day, the last 7 kept.
-  const daily = (): void => {
+  const daily = async (): Promise<void> => {
     try {
       backupIfDue(db, backups)
     } catch (e) {
       console.error('[backup]', e)
+    }
+    // Upload para o Drive é best-effort: nunca derruba o backup local.
+    if (driveBackup) {
+      const last = db.latestBackup(backups)
+      if (last) {
+        void driveBackup.upload(last).catch((e) => {
+          console.error('[backup:drive]', e)
+          void driveBackup?.setStatus({ lastError: String(e) })
+        })
+      }
     }
   }
   daily()
@@ -883,7 +908,16 @@ const api: Api = {
       zip.close()
     }
   },
-  backupNow: () => backup(db, backups),
+  backupNow: () => {
+    const file = backup(db, backups)
+    if (driveBackup) {
+      void driveBackup.upload(file).catch((e) => {
+        console.error('[backup:drive]', e)
+        void driveBackup?.setStatus({ lastError: String(e) })
+      })
+    }
+    return file
+  },
   openBackups: () => {
     mkdirSync(backups, { recursive: true })
     toMain({ type: 'open_path', path: backups })
