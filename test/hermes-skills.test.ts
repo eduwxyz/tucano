@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { findHermesSkills, findSkills, skillMeta } from '../src/core/local-skills'
+import { tagFacets } from '../src/shared/skill-tags'
 
 const put = (path: string, text: string): void => {
   mkdirSync(join(path, '..'), { recursive: true })
@@ -143,5 +144,40 @@ describe('findSkills (extra directory)', () => {
       return // no permission to link here: the case can't run
     }
     expect(findSkills(home, root).filter((s) => s.name === 'deploy')).toHaveLength(1)
+  })
+})
+
+describe('tagFacets', () => {
+  it('groups family:/env:/tool: tags by facet, in a fixed order, keeping the values', () => {
+    expect(tagFacets(['tool:git', 'family:ops', 'env:wsl', 'family:seo'])).toEqual([
+      { facet: 'family', values: ['ops', 'seo'] },
+      { facet: 'env', values: ['wsl'] },
+      { facet: 'tool', values: ['git'] }
+    ])
+  })
+
+  it('puts tags with no known facet in one group without a facet', () => {
+    expect(tagFacets(['family:ops', 'plain', 'unknown:x'])).toEqual([
+      { facet: 'family', values: ['ops'] },
+      { facet: undefined, values: ['plain', 'unknown:x'] }
+    ])
+  })
+
+  it('keeps colons inside the value and drops an empty value', () => {
+    expect(tagFacets(['risk:high:prod', 'role:'])).toEqual([
+      { facet: 'risk', values: ['high:prod'] },
+      { facet: undefined, values: ['role:'] }
+    ])
+  })
+
+  it('is empty for no tags', () => {
+    expect(tagFacets([])).toEqual([])
+  })
+})
+
+describe('allowedTools', () => {
+  it('reaches the skill found in the extra directory', () => {
+    put(join(root, 'ops', 'a', 'SKILL.md'), '---\nname: a\nallowed-tools: Read, Bash\n---\nx')
+    expect(findSkills(home, root).find((s) => s.name === 'a')?.allowedTools).toBe('Read, Bash')
   })
 })

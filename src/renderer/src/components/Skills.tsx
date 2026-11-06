@@ -32,6 +32,7 @@ import { AdminOnly } from './People'
 import { confirmDialog } from './Dialogs'
 import { ago, AgentAvatar, Icon, time } from './ui'
 import { Modal } from './Modal'
+import { tagFacets } from '../../../shared/skill-tags'
 
 type Place = { kind: 'list' } | { kind: 'skill'; id: string } | { kind: 'review' }
 
@@ -281,6 +282,18 @@ function Who({ ids }: { ids: string[] }): ReactNode {
 }
 
 // The skills of the user's Claude Code (and its plugins) and Codex: find one, say who uses it.
+// "família: ops, seo · ferramenta: git": a skill's tags grouped by facet.
+const FACET: Record<string, [string, string]> = { family: ['família', 'family'], env: ['ambiente', 'environment'], tool: ['ferramenta', 'tool'], artifact: ['entrega', 'artifact'], risk: ['risco', 'risk'], locale: ['idioma', 'locale'], role: ['papel', 'role'] }
+function TagLine({ tags }: { tags: string[] }): ReactNode {
+  return (
+    <span className="muted small">
+      {tagFacets(tags)
+        .map((g) => `${g.facet ? `${L(FACET[g.facet]![0], FACET[g.facet]![1])}: ` : ''}${g.values.join(', ')}`)
+        .join(' · ')}
+    </span>
+  )
+}
+
 function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
   const skills = useStore((s) => s.skills)
   const [found, setFound] = useState<LocalSkill[] | null>(null)
@@ -341,7 +354,7 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
                       {on && <span className="tag tag--ok">{L('em uso', 'in use')}</span>}
                     </span>
                     <span className="skill-add__desc">{l.description}</span>
-                    {!!l.tags?.length && <span className="muted small">{l.tags.join(' · ')}</span>}
+                    {!!l.tags?.length && <TagLine tags={l.tags} />}
                     {l.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <span className="warn-text small" role="status">{skillLengthNote(l.bodyLength)}</span>}
                   </button>
                 )
@@ -355,7 +368,8 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
             </button>
             <h3>{picked.name}</h3>
             <p>{picked.description}</p>
-            {!!picked.tags?.length && <p className="muted small">{L('Etiquetas', 'Tags')}: {picked.tags.join(' · ')}</p>}
+            {!!picked.tags?.length && <TagLine tags={picked.tags} />}
+            {picked.allowedTools && <p className="muted small">{L('Ferramentas permitidas', 'Allowed tools')}: {picked.allowedTools}</p>}
             {picked.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <p className="warn-text small" role="status">{skillLengthNote(picked.bodyLength)}</p>}
             {picked.scripts && <p className="warn-text small">{L('Tem scripts: só roda com um agente que tenha computador (Linux ou este computador).', 'It has scripts: it only runs with an agent that has a computer (Linux or this computer).')}</p>}
             <span className="skill-add__label">{L('Quem usa?', 'Who uses it?')}</span>
