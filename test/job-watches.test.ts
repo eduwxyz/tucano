@@ -573,6 +573,29 @@ describe('what the agent is told', () => {
   })
 })
 
+describe('Spark on the first reading', () => {
+  it('shows the numbers right away, not at the next check', async () => {
+    spark = { stageId: '14', tasksDone: 1, tasksTotal: 4, tasksActive: 3, shuffleBytes: 10, spillBytes: 0, at: 0 }
+    await follow()
+    expect(only().reading?.spark?.shuffleBytes).toBe(10)
+  })
+
+  it('keeps why they’re missing, and still follows the run', async () => {
+    sparkFails = new Error('403 sem permissão')
+    const out = await follow()
+    expect(out.watchId).toBeTruthy()
+    expect(only()).toMatchObject({ status: 'watching', sparkError: '403 sem permissão' })
+    expect(jobSummary(only().reading!, only())).toContain('403 sem permissão')
+  })
+
+  it('doesn’t ask for a run that has ended', async () => {
+    sparkFails = new Error('não deveria perguntar')
+    reading = running({ state: 'succeeded' })
+    await follow()
+    expect(only().sparkError).toBeUndefined()
+  })
+})
+
 describe('the analysis skill that comes with it', () => {
   let skills: Skills
   const deps = () => ({ skills: () => db.skills(), save: (s: Parameters<Skills['save']>[0]) => skills.save(s) })

@@ -164,7 +164,9 @@ export function JobWatchCard({ id }: { id: string }): ReactNode {
           )}
         </p>
       )}
-      {w.sparkError && live && <p className="muted small job-card__line">{L('Sem métricas do Spark agora: ', 'No Spark metrics right now: ')}{w.sparkError}</p>}
+      {w.sparkError && (live || !spark) && <p className="muted small job-card__line">{L('Sem métricas do Spark: ', 'No Spark metrics: ')}{w.sparkError}</p>}
+      {!w.sparkError && !spark && r && isFinal(r.state) && <p className="muted small job-card__line">{L('Shuffle, spill e memória só são lidos enquanto o run está rodando, e o cluster deste já encerrou. Acompanhe um run em andamento para vê-los.', 'Shuffle, spill and memory are only read while the run is going, and this one’s cluster has shut down. Follow a run in progress to see them.')}</p>}
+      {!w.sparkError && !spark && r?.state === 'running' && !r.clusterId && <p className="muted small job-card__line">{L('Este run não mostra um cluster clássico, então não há API do Spark para ler. Em serverless, essas métricas não existem.', 'This run shows no classic cluster, so there’s no Spark API to read. On serverless, these metrics don’t exist.')}</p>}
       {w.gap && <p className="muted small job-card__line">{L(`Sem leituras por ${duration(w.gap.to - w.gap.from)}: as métricas desse intervalo ficaram de fora.`, `No readings for ${duration(w.gap.to - w.gap.from)}: metrics from that time are missing.`)}</p>}
       {w.endReason === 'max_time' && <p className="muted small job-card__line">{L('Parou de acompanhar no tempo máximo. O job pode continuar rodando.', 'Stopped following at the time limit. The job may still be running.')}</p>}
       {stale && r?.state !== 'succeeded' && <p className="muted small job-card__line">{L('Métricas lidas antes de o cluster encerrar.', 'Metrics read before the cluster shut down.')}</p>}
@@ -293,7 +295,7 @@ export function JobWatchSettingsCard(): ReactNode {
       <Field label={L('Caminhos do api get', 'api get paths')} hint={L('Um por linha. Escrever pela API (api post e afins) nunca é permitido.', 'One per line. Writing through the API (api post and the like) is never allowed.')}>
         <textarea rows={2} value={paths} spellCheck={false} onChange={(e) => setPaths(e.target.value)} onBlur={() => set({ apiPaths: lines(paths) })} />
       </Field>
-      <Field label={L('Endereço da API do Spark', 'Spark API address')} hint={L('Vazio: sem shuffle, spill, memória e progresso da etapa. Use {cluster} no lugar do id do cluster. O caminho precisa estar na lista acima.', 'Empty: no shuffle, spill, memory or stage progress. Use {cluster} for the cluster’s id. The path must be on the list above.')}>
+      <Field label={L('Endereço da API do Spark', 'Spark API address')} hint={L('Vazio: o app descobre sozinho. Preencha só se ele não achar, com {cluster} no lugar do id do cluster. O caminho precisa estar na lista acima.', 'Empty: the app finds it on its own. Fill it in only if it can’t, with {cluster} for the cluster’s id. The path must be on the list above.')}>
         <input value={saved?.sparkApiBase ?? ''} placeholder="/driver-proxy-api/o/<org>/{cluster}/<port>/api/v1" spellCheck={false} onChange={(e) => set({ sparkApiBase: e.target.value })} />
       </Field>
 

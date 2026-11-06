@@ -93,7 +93,7 @@ export interface JobWatchSettings {
   profile?: string // unset: found on its own, from `databricks auth profiles`
   commands: string[] // "jobs list-runs --job-id --limit": a command and the flags it may take; the rest is refused
   apiPaths: string[] // where `api get` may go
-  sparkApiBase?: string // "/driver-proxy-api/o/0/{cluster}/40001/api/v1"; unset: no Spark numbers
+  sparkApiBase?: string // "/driver-proxy-api/o/0/{cluster}/40001/api/v1"; unset: found on its own
   actions: boolean // starting and canceling jobs, each with an approval
   intervalSeconds: number
   maxActive: number

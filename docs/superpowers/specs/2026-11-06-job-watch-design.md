@@ -41,7 +41,7 @@ Antes de construir as métricas do Spark, validar com a CLI do usuário, num clu
 3. As respostas trazem progresso por etapa, shuffle, spill e memória dos executores.
 4. Os nomes das flags da CLI e o formato de `jobs get-run` e `jobs list-runs` na versão instalada batem com esta spec.
 
-**Até essa validação, o Spark fica desligado:** o **Endereço da API do Spark** vem vazio, e o cartão mostra essas métricas como indisponíveis. Com o endereço validado, preenchê-lo nas Configurações liga as métricas, sem mudar o código.
+**Até essa validação, o endereço é uma tentativa:** com o campo vazio, o app testa `/driver-proxy-api/o/<org>/<cluster>/<porta>/api/v1`, com o número do workspace do link do run e depois `0`, nas portas 40001 e 4040. Guarda o que responder, e um cluster que não respondeu só é testado de novo após 5 minutos. O cartão mostra o motivo de cada ausência.
 
 **Se o item 2 ou 3 falhar:** o cartão fica com estado, duração, tasks e comparação com a média. Shuffle, spill, memória e progresso da etapa aparecem como indisponíveis. A detecção de travamento usa só "lentidão fora do normal". Nenhuma fonte alternativa entra nesta versão sem nova decisão do usuário.
 
@@ -216,7 +216,7 @@ O cartão diz "Possível travamento", nunca uma certeza. Se o progresso voltar, 
 | Configuração | Padrão | Mínimo |
 |---|---|---|
 | Caminho da CLI | Achado sozinho, no PATH e nas pastas comuns de instalação | Não se aplica |
-| Endereço da API do Spark | Vazio: sem métricas do Spark | Não se aplica |
+| Endereço da API do Spark | Vazio: descoberto sozinho | Não se aplica |
 | Perfil da CLI | Achado sozinho: o do ambiente, senão `DEFAULT`, senão o primeiro com login válido | Não se aplica |
 | Intervalo entre consultas | 30 s | 15 s |
 | Jobs ao mesmo tempo | 5 | 1 |

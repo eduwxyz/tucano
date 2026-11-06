@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseProfile, CliError, DatabricksCli, findCli, parseJson, parseProfiles, parseRun, parseSpark, stateOf, type CliExec } from '../src/core/databricks'
+import { chooseProfile, CliError, DatabricksCli, findCli, parseJson, parseProfiles, parseRun, parseSpark, sparkAddresses, stateOf, type CliExec } from '../src/core/databricks'
 import { jobWatchConfig } from '../src/shared/job-watch'
 
 describe('reading the state of a run', () => {
@@ -330,10 +330,73 @@ describe('calling the CLI', () => {
     expect(paths).toEqual(['/api/2.1/jobs/runs/list?job_id=1&limit=1', '/api/2.1/jobs/list?name=vendas_diarias&limit=5'])
   })
 
-  it('reads Spark only when an address is set', async () => {
-    const { calls, exec } = answers(() => ({ stdout: '[]' }))
-    expect(await cli(exec).spark('c-1', 1)).toBeUndefined()
-    expect(calls).toEqual([])
+  it('takes the workspace’s number from the run’s link', () => {
+    expect(sparkAddresses('c-1', 'https://x.cloud.databricks.com/?o=123#job/1/run/2')[0]).toBe('/driver-proxy-api/o/123/c-1/40001/api/v1')
+    expect(sparkAddresses('c-1', 'https://adb-456.7.azuredatabricks.net/jobs/1')[0]).toBe('/driver-proxy-api/o/456/c-1/40001/api/v1')
+    expect(sparkAddresses('c-1')).toEqual(['/driver-proxy-api/o/0/c-1/40001/api/v1', '/driver-proxy-api/o/0/c-1/4040/api/v1'])
+  })
+
+  describe('finding Spark on its own', () => {
+    const stages = JSON.stringify([{ status: 'ACTIVE', stageId: 3, attemptId: 0, numTasks: 4, numCompleteTasks: 1, numActiveTasks: 3, shuffleReadBytes: 9 }])
+    const answering = (works: (path: string) => boolean) => {
+      const tried: string[] = []
+      const { exec } = answers((args) => {
+        if (args[0] === 'auth') return { stdout: '{}' }
+        const path = args[2]!
+        if (path.endsWith('/applications')) tried.push(path)
+        const base = path.slice(0, path.indexOf('/api/v1') + 7)
+        if (!works(base)) return { stderr: 'Error: 404 page not found', code: 1 }
+        if (path.endsWith('/applications')) return { stdout: '[{"id":"app-1"}]' }
+        if (path.endsWith('/stages')) return { stdout: stages }
+        return { stdout: '[]' }
+      })
+      return { tried, exec }
+    }
+
+    it('uses the first address that answers, and remembers it', async () => {
+      const { tried, exec } = answering((b) => b.includes('/o/0/c-1/40001'))
+      const c = cli(exec)
+      expect(await c.spark('c-1', 1, undefined, 'https://x/?o=123')).toMatchObject({ stageId: '3', shuffleBytes: 9 })
+      expect(tried).toEqual(['/driver-proxy-api/o/123/c-1/40001/api/v1/applications', '/driver-proxy-api/o/123/c-1/4040/api/v1/applications', '/driver-proxy-api/o/0/c-1/40001/api/v1/applications'])
+      await c.spark('c-1', 2, undefined, 'https://x/?o=123')
+      expect(tried).toHaveLength(3)
+    })
+
+    it('says why when nothing answers, and doesn’t ask again for a while', async () => {
+      const { tried, exec } = answering(() => false)
+      const c = cli(exec)
+      await expect(c.spark('c-1', 1)).rejects.toThrow('404')
+      const asked = tried.length
+      expect(asked).toBeGreaterThan(0)
+      await expect(c.spark('c-1', 2)).rejects.toThrow('404')
+      expect(tried).toHaveLength(asked)
+      await expect(c.spark('c-1', 6 * 60_000)).rejects.toThrow('404')
+      expect(tried.length).toBeGreaterThan(asked)
+    })
+
+    it('finds it again when an address stops answering', async () => {
+      let up = true
+      const { tried, exec } = answering(() => up)
+      const c = cli(exec)
+      await c.spark('c-1', 1)
+      up = false
+      await expect(c.spark('c-1', 2)).rejects.toThrow()
+      up = true
+      expect(await c.spark('c-1', 3)).toMatchObject({ stageId: '3' })
+      expect(tried.length).toBeGreaterThan(1)
+    })
+
+    it('lets the address in Settings win', async () => {
+      const { tried, exec } = answering(() => true)
+      await cli(exec, { sparkApiBase: '/driver-proxy-api/o/9/{cluster}/1234/api/v1' }).spark('c-1', 1, undefined, 'https://x/?o=123')
+      expect(tried).toEqual(['/driver-proxy-api/o/9/c-1/1234/api/v1/applications'])
+    })
+
+    it('stays within the allowed paths', async () => {
+      const { tried, exec } = answering(() => true)
+      await expect(cli(exec, { apiPaths: ['/api/2.1/jobs/runs/list'] }).spark('c-1', 1)).rejects.toThrow()
+      expect(tried).toEqual([])
+    })
   })
 
   it('reads Spark through the allowed paths, with the cluster in the address', async () => {

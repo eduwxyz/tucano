@@ -2,7 +2,7 @@
 // agent is only woken for what deserves a look (a failure, the end, a possible stall).
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { isFinal, type JobEvent, type JobReading, type JobSkillState, type JobWatch, type JobWatchSettings } from '../shared/job-watch'
+import { isFinal, type JobEvent, type JobReading, type JobSkillState, type JobWatch, type JobWatchSettings, type SparkReading } from '../shared/job-watch'
 import type { CoreEvent } from '../shared/rpc'
 import type { Agent, Conversation, Message, Skill, SkillInput } from '../shared/types'
 import { checkCli } from './cli-policy'
@@ -99,7 +99,7 @@ const bytes = (n: number): string => {
 const mins = (ms: number): string => `${Math.max(1, Math.round(ms / 60_000))} min`
 
 // A run in a few lines, for the agent. Task names and messages come from the job: they're data.
-export function jobSummary(r: JobReading, w?: Pick<JobWatch, 'baselineMs' | 'baselineRuns'>, now = Date.now()): string {
+export function jobSummary(r: JobReading, w?: Pick<JobWatch, 'baselineMs' | 'baselineRuns' | 'sparkError'>, now = Date.now()): string {
   const took = r.startedAt ? (r.endedAt ?? now) - r.startedAt : undefined
   const lines = [
     `${r.name} · ${r.state}${took ? ` · ${mins(took)}` : ''}`,
@@ -116,7 +116,7 @@ export function jobSummary(r: JobReading, w?: Pick<JobWatch, 'baselineMs' | 'bas
       )
     )
   } else {
-    lines.push(L('Métricas do Spark indisponíveis.', 'Spark metrics unavailable.'))
+    lines.push(L(`Métricas do Spark indisponíveis${w?.sparkError ? `: ${w.sparkError}` : ''}. Diga isso, sem inventar números.`, `Spark metrics unavailable${w?.sparkError ? `: ${w.sparkError}` : ''}. Say so, without making up numbers.`))
   }
   return lines.join('\n')
 }
@@ -333,7 +333,7 @@ export class JobWatches {
     const previous = w.reading?.spark
     if (read.state === 'running' && read.clusterId) {
       try {
-        const spark = await this.deps.cli.spark(read.clusterId, now, previous)
+        const spark = await this.deps.cli.spark(read.clusterId, now, previous, read.url)
         reading = spark ? { ...read, spark } : previous ? { ...read, spark: previous } : read
         w = { ...w, sparkError: undefined }
       } catch (e) {
@@ -487,6 +487,16 @@ export class JobWatches {
       const now = this.now()
       const final = isFinal(reading.state)
       const job = jobId || reading.jobId
+      // Spark's numbers on the first reading, not half a minute later. Without them, the card says why.
+      let spark: SparkReading | undefined
+      let sparkError: string | undefined
+      if (reading.state === 'running' && reading.clusterId) {
+        try {
+          spark = await this.deps.cli.spark(reading.clusterId, now, undefined, reading.url)
+        } catch (e) {
+          sparkError = e instanceof Error ? e.message : String(e)
+        }
+      }
       const base = job ? await this.deps.cli.baseline(job).catch(() => ({ runs: 0 } as { ms?: number; runs: number })) : undefined
       const w = this.store({
         id: randomUUID(),
@@ -497,7 +507,8 @@ export class JobWatches {
         runId,
         status: final ? 'ended' : 'watching',
         ...(final ? { endReason: 'finished' as const, endedAt: now } : {}),
-        reading,
+        reading: spark ? { ...reading, spark } : reading,
+        ...(sparkError ? { sparkError } : {}),
         readAt: now,
         ...(base ? { baselineRuns: base.runs, ...(base.ms ? { baselineMs: base.ms } : {}) } : {}),
         firedAlerts: final ? ['run_failed', 'run_succeeded'] : [],

@@ -15,6 +15,8 @@ const MAX_MESSAGE = 400
 const MAX_OUTPUT = 8_000
 const BASELINE_RUNS = 10
 const FOUND_FOR_MS = 10 * 60_000 // what was found stands this long; a failed login looks again sooner
+const SPARK_RETRY_MS = 5 * 60_000 // a cluster that didn't answer isn't asked again before this
+const SPARK_PORTS = ['40001', '4040'] // Databricks' usual Spark UI port, then Spark's own default
 
 export type CliErrorKind = JobReadErrorKind | 'gone'
 
@@ -268,10 +270,19 @@ function failure(r: CliResult): CliError {
   return new CliError('transient', short || L('A CLI do Databricks falhou.', 'The Databricks CLI failed.'))
 }
 
+// The addresses to try for a cluster's Spark API. The workspace's number comes from the run's link; 0 stands
+// for the current workspace.
+export function sparkAddresses(clusterId: string, runUrl?: string): string[] {
+  const org = runUrl ? (/[?&]o=(\d+)/.exec(runUrl)?.[1] ?? /\badb-(\d+)\./.exec(runUrl)?.[1]) : undefined
+  return [...new Set([org, '0'].filter((o): o is string => !!o))].flatMap((o) => SPARK_PORTS.map((port) => `/driver-proxy-api/o/${o}/${clusterId}/${port}/api/v1`))
+}
+
 type Found = { cliPath: string; profile?: string; profiles: DatabricksProfile[] }
 
 export class DatabricksCli {
   private found: { key: string; at: number; value: Promise<Found> } | undefined
+  private sparkAddress = new Map<string, { base: string; app: string }>() // per cluster, what answered
+  private sparkFailed = new Map<string, { at: number; error: string }>()
 
   constructor(private deps: { config: () => JobWatchSettings; exec?: CliExec; find?: () => string | undefined; env?: NodeJS.ProcessEnv; now?: () => number }) {}
 
@@ -367,14 +378,44 @@ export class DatabricksCli {
     return { ...(ms ? { ms } : {}), runs: done.length }
   }
 
-  // Spark's numbers for a cluster. Undefined when no address is configured: they're off until then.
-  async spark(clusterId: string, now: number, previous?: SparkReading): Promise<SparkReading | undefined> {
-    const base = this.deps.config().sparkApiBase?.replace('{cluster}', clusterId).replace(/\/$/, '')
-    if (!base) return undefined
-    const apps = list(await this.json(['api', 'get', `${base}/applications`]))
-    const app = text(apps[0]?.['id'])
-    if (!app) throw new CliError('transient', L('O Spark não listou nenhuma aplicação.', "Spark didn't list any application."))
+  // Where this cluster's Spark API answers: the address set in Settings, or the first one that works.
+  private async sparkPlace(clusterId: string, now: number, runUrl?: string): Promise<{ base: string; app: string }> {
+    const set = this.deps.config().sparkApiBase?.replace('{cluster}', clusterId).replace(/\/$/, '')
+    const known = this.sparkAddress.get(clusterId)
+    if (known && (!set || known.base === set)) return known
+    const failed = this.sparkFailed.get(clusterId)
+    if (!set && failed && now - failed.at < SPARK_RETRY_MS) throw new CliError('transient', failed.error)
+    let error = L('O Spark não listou nenhuma aplicação.', "Spark didn't list any application.")
+    for (const base of set ? [set] : sparkAddresses(clusterId, runUrl)) {
+      try {
+        const app = text(list(await this.json(['api', 'get', `${base}/applications`]))[0]?.['id'])
+        if (app) {
+          const place = { base, app }
+          this.sparkAddress.set(clusterId, place)
+          this.sparkFailed.delete(clusterId)
+          return place
+        }
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e)
+      }
+    }
+    this.sparkFailed.set(clusterId, { at: now, error })
+    throw new CliError('transient', error)
+  }
+
+  // Spark's numbers for a cluster. An application can restart: an address that stops answering is looked for again.
+  async spark(clusterId: string, now: number, previous?: SparkReading, runUrl?: string): Promise<SparkReading | undefined> {
+    const { base, app } = await this.sparkPlace(clusterId, now, runUrl)
     const root = `${base}/applications/${app}`
+    try {
+      return await this.sparkAt(root, now, previous)
+    } catch (e) {
+      this.sparkAddress.delete(clusterId)
+      throw e
+    }
+  }
+
+  private async sparkAt(root: string, now: number, previous?: SparkReading): Promise<SparkReading | undefined> {
     const stages = await this.json(['api', 'get', `${root}/stages`])
     const executors = await this.json(['api', 'get', `${root}/executors`])
     const active = activeStage(list(stages))
