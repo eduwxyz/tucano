@@ -198,6 +198,17 @@ describe('Codex exec stream', () => {
     expect(args.at(-1)).toBe('-')
   })
 
+  it("tells an agent with a computer that Codex's read-only sandbox isn't it", () => {
+    const instructions = (system: string, mcpUrl?: string): string => {
+      const args = codexArgs({ model: 'gpt-6-astra', effort: 'low', system, cwd: '/tmp/x', ...(mcpUrl ? { mcpUrl } : {}) })
+      return args.find((a) => a.startsWith('developer_instructions='))!
+    }
+    const computer = 'Use bash, read_file, write_file and edit_file on /work.'
+    expect(instructions(computer, 'http://127.0.0.1:1/mcp/t')).toMatch(/apply_patch.*write_file e edit_file|apply_patch.*write_file and edit_file/)
+    expect(instructions('Você é Theo.', 'http://127.0.0.1:1/mcp/t')).not.toMatch(/apply_patch/) // no computer: nothing to point to
+    expect(instructions(computer)).not.toMatch(/apply_patch/) // no gateway, no tools
+  })
+
   it('turns off skills, web search, project docs and every built-in tool', () => {
     const args = codexArgs({ model: 'gpt-5.6-luna', effort: 'low', system: 'x', cwd: '/tmp/x' })
     expect(args).toEqual(expect.arrayContaining(['skills.include_instructions=false', 'skills.bundled.enabled=false', 'web_search="disabled"', 'project_doc_max_bytes=0']))
