@@ -4,9 +4,17 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-11-06
+
 > **Em português:**
+> - **Segurança: duas correções.** Um link na resposta de um agente não abre mais um arquivo local como se fosse o app ([GHSA-6pvc-g4mm-34rq](https://github.com/eduwxyz/tucano/security/advisories/GHSA-6pvc-g4mm-34rq)), e Enter, Espaço ou um clique num botão sem nome no navegador de um agente não passam mais sem a sua aprovação quando publicam, enviam ou apagam ([GHSA-4q39-94jc-xhq8](https://github.com/eduwxyz/tucano/security/advisories/GHSA-4q39-94jc-xhq8)). Atualize.
 > - **Qualquer agente cria por você.** Peça a um agente um agente novo, um time de agentes com um canal, uma rotina, um canal ou uma mudança num agente, e ele propõe num card com Aplicar e Descartar: nada muda até você aplicar.
 > - **O Tuca te ajuda com o Tucano.** Ele faz o que dá em vez de ensinar o passo a passo, explica o resto lendo um guia do app, e descobre por que algo não está dando certo olhando o workspace: motores, conectores, limites, rotinas e os erros das respostas, nunca o que foi dito nas conversas. Quando cita uma tela, manda um botão que leva até ela.
+
+### Security
+
+- **A link in an agent's reply can't open a local file as the app anymore.** The window only ever shows the app, only the app's own page talks to its main process, and message links keep only http, https and mailto ([GHSA-6pvc-g4mm-34rq](https://github.com/eduwxyz/tucano/security/advisories/GHSA-6pvc-g4mm-34rq)). Thanks to @rayanneblima.
+- **Enter, Space or a click on a nameless button in an agent's browser ask for your approval** when they publish, send or delete, as a click on a risky button did; clicks are judged by the page's own words, not the agent's ([GHSA-4q39-94jc-xhq8](https://github.com/eduwxyz/tucano/security/advisories/GHSA-4q39-94jc-xhq8)). Thanks to @marcossimo.
 
 ### Added
 
@@ -319,6 +327,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.13]: https://github.com/eduwxyz/tucano/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/eduwxyz/tucano/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/eduwxyz/tucano/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/eduwxyz/tucano/compare/v0.2.9...v0.2.10
