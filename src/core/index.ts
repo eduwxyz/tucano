@@ -1517,7 +1517,7 @@ const api: Handlers = {
   },
   localSkills: () => findSkills(undefined, skillsDir()),
   linkSkill: ({ source, agents }, ctx) => {
-    if (!findSkills(undefined, skillsDir()).some((k) => k.source === source)) throw new Error(L('Essa skill não está mais no seu Claude Code nem no Codex.', "That skill is no longer in your Claude Code or Codex."))
+    if (!findSkills(undefined, skillsDir()).some((k) => k.source === source)) throw new Error(L('Essa skill não está mais no seu Claude Code, no Codex nem na pasta extra de skills.', "That skill is no longer in your Claude Code, your Codex or the extra skills folder."))
     const linked = skills.link(source, agents)
     record(ctx, 'skill.created', linked.id, { name: linked.name, source })
     return linked
