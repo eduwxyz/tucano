@@ -24,4 +24,4 @@ O Tuca fica no topo da barra lateral. Ele monta agentes: você conta uma tarefa,
 - **Geral** (General): nome do workspace, como os agentes te chamam, idioma, **Contexto** (o que todo agente lê antes de cada resposta), ditado, notificações, atualizações, time e backup, área de perigo.
 - **Modelos** (Models): os harnesses e as contas, o **Roteador** (Router) e o modelo da **Memória**.
 - **Agentes** (Agents): navegador dos agentes, rotinas (abrir ao ligar, horário de silêncio) e limites.
-- **Celular e GitHub** (Phone and GitHub): o bot do Telegram e o token do GitHub.
+- **Celular** (Phone): o bot do Telegram.

@@ -35,7 +35,6 @@ import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
-import { GitHub } from './github'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
@@ -154,7 +153,7 @@ const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLog
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), github: githubInfo(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
 }
 
 // More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
@@ -182,8 +181,7 @@ function watchAccount(id: string): void {
   }, 4_000)
   watchingAccount.unref()
 }
-// github is made further down; settings can be asked for before.
-const githubInfo = (): Settings['github'] => githubRef?.info()
+
 
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
@@ -259,7 +257,6 @@ function emit(event: CoreEvent): void {
 
 // The phone gets each new approval and question as it happens (spec §19).
 let telegram: Telegram | undefined
-let githubRef: GitHub | undefined
 const sentToPhone = new Set<string>()
 function toPhone(e: CoreEvent): void {
   if (!telegram) return
@@ -347,7 +344,6 @@ process.parentPort.on('message', (e) => {
     routines.stop()
     telegram?.stop()
     hooks.close()
-    github.stop()
     runner.stopAll()
     void (async () => {
       await runner.idle()
@@ -550,20 +546,7 @@ gateway.route('/oauth/callback', oauthCallback)
 
 const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
 
-// Issue to PR: the GitHub proxy agents' computers push through (spec §22).
-const github: GitHub = new GitHub({
-  secrets,
-  db,
-  post: (conversationId, text) => {
-    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now() }
-    db.saveMessage(m)
-    emit({ type: 'message', message: m })
-  },
-  changed: () => emit({ type: 'settings', settings: settings() })
-})
-
-githubRef = github
-const computers = new Computers({ db, dataDir, emit, shoot, gitRemote: (agentId) => github.gitRemote(agentId) })
+const computers = new Computers({ db, dataDir, emit, shoot })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
@@ -636,7 +619,6 @@ const runner = new Runner({
   notify: (title, body, conversationId, kind, threadId) =>
     kind ? toMain({ type: 'notify', title, body, conversationId, threadId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId, undefined, { threadId }),
   jev: { key: () => secrets.get(JEV_SECRET) },
-  github,
   onBusy: (busy) => toMain({ type: 'busy', busy }),
   onQuota: (quota) => {
     db.setSettings({ quota })
@@ -703,14 +685,10 @@ void ready.then(async () => {
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   // A thread that went quiet gets its own summary, and the memories in it.
   setInterval(() => void memory.sweep().catch((e: unknown) => console.error('[memory]', e)), 60_000).unref()
-  // Nothing here waits on the keychain: the first use after an update can be a
-  // macOS prompt that stays open until someone answers it.
-  void github.start().catch((e: unknown) => console.error('[github]', e))
   if (!fake) {
     // A port taken (another Tucano open, say) is logged and the rest goes on: a call there reaches
     // a server that doesn't know its token, never this workspace's data.
     hooks.listen(runtimePorts.webhook, '127.0.0.1')
-    github.listen()
     void telegram?.start()
   }
   routines.start()
@@ -1062,7 +1040,6 @@ const api: Api = {
     if (!telegram) throw new Error(L('O Telegram fica no workspace padrão.', 'Telegram belongs to the default workspace.'))
     return telegram.setToken(token)
   },
-  setGithubToken: ({ token }) => github.setToken(token),
   exportTeam: () => exportTeam(db),
   importTeam: ({ text }) => {
     const r = importTeam(db, text, settings().defaultLimit)

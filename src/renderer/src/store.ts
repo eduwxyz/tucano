@@ -614,7 +614,6 @@ export const skillVersions = (skillId: string): Promise<SkillVersion[]> => call(
 export const checkTrigger = (trigger: Trigger): Promise<string> => call('checkTrigger', { trigger })
 export const setTelegramToken = (token: string | null): Promise<void> => call('setTelegramToken', { token })
 export const unpairTelegram = (): void => void fire(L('Não consegui desconectar o Telegram.', "I couldn't disconnect Telegram."), 'unpairTelegram')
-export const setGithubToken = (token: string | null): Promise<void> => call('setGithubToken', { token })
 export const exportTeam = (): Promise<string> => call('exportTeam')
 export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
 export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)
