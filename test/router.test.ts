@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { handoffPrompt, handoffSystem, parseRoute, routerPrompt } from '../src/core/router'
+import { handoffPrompt, handoffSystem, parseRoute, replyExcerpt, routerPrompt } from '../src/core/router'
 import type { Agent, Connector, Message } from '../src/shared/types'
 
 const agent = (id: string, handle: string, role: string, instructions = ''): Agent => ({
@@ -103,6 +103,37 @@ describe('handoffPrompt', () => {
 
   it('does not count waiting for someone as a request', () => {
     expect(handoffSystem()).toContain('Fico esperando o aviso do Léo')
+  })
+})
+
+describe('replyExcerpt', () => {
+  // A long plan, written line by line, with the ask at the very end.
+  const plan = Array.from({ length: 80 }, (_, i) => `Passo ${i + 1}: ajustar o módulo ${i + 1} e conferir o resultado.`).join('\n')
+  const ask = '@nina, preciso de duas decisões:\n1. aprova a ordem?\n2. aprova começar pelo levantamento?'
+
+  it('keeps a short reply whole', () => {
+    expect(replyExcerpt('  Valeu, @nina!  ', ['nina'])).toBe('Valeu, @nina!')
+  })
+
+  it('keeps the opening and the lines around a mention at the end of a long reply', () => {
+    const out = replyExcerpt(`${plan}\n\n${ask}`, ['nina'])
+    expect(out.startsWith('Passo 1:')).toBe(true)
+    expect(out).toContain(ask)
+    expect(out).toContain('\n[…]\n')
+    expect(out).not.toContain('Passo 30:')
+    expect(out.length).toBeLessThan(4000)
+  })
+
+  it('marks a cut at the end, and ignores handles inside code or not asked about', () => {
+    const out = replyExcerpt(`${plan}\n\`@nina\` @lia`, ['nina'])
+    expect(out.endsWith('\n[…]')).toBe(true)
+    expect(out).not.toContain('@lia')
+  })
+
+  it('goes into the hand-off prompt, which says it was cut', () => {
+    const p = handoffPrompt({ reply: `${plan}\n\n${ask}`, author: lia, candidates: [nina], messages: [], members: team, me: 'Edu' })
+    expect(p).toContain(ask)
+    expect(p).toContain('[…] marca o que ficou de fora')
   })
 })
 
