@@ -8,16 +8,25 @@ export interface Waiting {
   approval: string[]
 }
 
-export function waitingIn(messages: Message[], conversationId: string): Waiting {
-  const asked = new Set<string>()
-  const approval = new Set<string>()
+// Every row of the sidebar asks on every change, and a reply streaming changes the messages at each
+// word: they're read once per change, for all the conversations.
+let read: { messages: Message[]; waiting: Map<string, Waiting> } | undefined
+
+function waitingByConversation(messages: Message[]): Map<string, Waiting> {
+  if (read?.messages === messages) return read.waiting
+  const waiting = new Map<string, Waiting>()
   for (const m of messages) {
-    if (m.conversationId !== conversationId || m.author.kind !== 'agent') continue
-    if (m.run?.status === 'waiting_input') asked.add(m.author.id)
-    else if (m.run?.status === 'waiting_approval') approval.add(m.author.id)
+    if (m.author.kind !== 'agent' || (m.run?.status !== 'waiting_input' && m.run?.status !== 'waiting_approval')) continue
+    const here = waiting.get(m.conversationId) ?? { asked: [], approval: [] }
+    const who = m.run.status === 'waiting_input' ? here.asked : here.approval
+    if (!who.includes(m.author.id)) who.push(m.author.id)
+    waiting.set(m.conversationId, here)
   }
-  return { asked: [...asked], approval: [...approval] }
+  read = { messages, waiting }
+  return waiting
 }
+
+export const waitingIn = (messages: Message[], conversationId: string): Waiting => waitingByConversation(messages).get(conversationId) ?? { asked: [], approval: [] }
 
 export const isWaiting = (waiting: Waiting): boolean => waiting.asked.length > 0 || waiting.approval.length > 0
 

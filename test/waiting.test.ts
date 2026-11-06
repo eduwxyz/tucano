@@ -7,6 +7,13 @@ const names: Record<string, string> = { leo: 'Leo', bia: 'Bia', nina: 'Nina' }
 const nameOf = (id: string): string => names[id] ?? id
 
 describe('waitingIn', () => {
+  it('reads the messages it is given, not the ones it read before', () => {
+    const before = [msg('1', 'c1', 'leo', 'waiting_input')]
+    expect(waitingIn(before, 'c1').asked).toEqual(['leo'])
+    expect(waitingIn([msg('1', 'c1', 'leo', 'done')], 'c1').asked).toEqual([])
+    expect(waitingIn(before, 'c1').asked).toEqual(['leo'])
+  })
+
   it('lists who asked and who asks for approval in a conversation, each once', () => {
     const messages = [msg('1', 'c1', 'leo', 'waiting_input'), msg('2', 'c1', 'bia', 'waiting_approval'), msg('3', 'c1', 'leo', 'waiting_input'), msg('4', 'c2', 'nina', 'waiting_input'), msg('5', 'c1', 'nina', 'working')]
     expect(waitingIn(messages, 'c1')).toEqual({ asked: ['leo'], approval: ['bia'] })
