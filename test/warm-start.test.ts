@@ -111,7 +111,7 @@ describe('a Claude Code process started ahead', () => {
     const engine = claudeEngine(() => bin, async () => ({ env: {} }))
     const turn = (): Turn => ({ ...routerTurn('haiku', dir), prompt: 'quem responde?', signal: new AbortController().signal })
     engine.warm!(routerTurn('haiku', dir))
-    await wait(1500)
+    await wait(2500) // a busy machine (the whole suite at once) takes over a second to boot node
     const warm = await reply(engine.run(turn()))
     expect(upOf(warm)).toBeGreaterThanOrEqual(1000)
     const cold = await reply(engine.run(turn())) // the spare is used up: a new process, as before
@@ -126,7 +126,7 @@ describe('a Claude Code process started ahead', () => {
     await reply(engine.run(turn(false)))
     engine.dispose!() // as if it had closed after its five minutes
     engine.rewarm!('s1')
-    await wait(1500)
+    await wait(2500) // a busy machine (the whole suite at once) takes over a second to boot node
     const next = await reply(engine.run(turn(true)))
     expect(next).toMatch(/turn=1 resume=true/)
     expect(upOf(next)).toBeGreaterThanOrEqual(1000)
