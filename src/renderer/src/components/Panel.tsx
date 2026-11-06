@@ -3,6 +3,7 @@
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
+import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import { agentById, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
@@ -441,7 +442,7 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
     case 'pdf':
       return <iframe src={url} title={artifact.title} />
     case 'markdown':
-      return <div className="side-panel__doc md">{text !== null && <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>}</div>
+      return <div className="side-panel__doc md">{text !== null && <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{text}</Markdown>}</div>
     case 'csv':
       return <div className="side-panel__doc">{text !== null && <CsvTable text={text} tab={artifact.name.endsWith('.tsv')} />}</div>
     case 'text':

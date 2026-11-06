@@ -153,7 +153,7 @@ No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o
 
 - **Conectar uma ferramenta:** **Conectores → Adicionar**, cole o endereço do servidor MCP. Os com OAuth abrem o navegador; os outros pedem um token. Depois, na página de cada agente, escolha o acesso dele a cada conector.
 - **Agentes arquivados** saem da barra lateral e param de responder, mas o histórico e os recibos ficam. Eles aparecem em **Arquivados**, pra reativar.
-- **Aprovar pelo celular:** conecte o bot do Telegram em **Configurações → Celular e GitHub**; aprovações e perguntas chegam com os botões.
+- **Aprovar pelo celular:** conecte o bot do Telegram em **Configurações → Celular**; aprovações e perguntas chegam com os botões.
 - **Primeiros passos**, na barra lateral, leva você pelo resto: montar um time, conectar uma ferramenta, ensinar a memória, agendar uma rotina, emprestar um projeto.
 
 ## Como funciona

@@ -1,6 +1,7 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
+import type { AppProvider } from './connector-catalog'
 import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
@@ -20,6 +21,7 @@ export interface Snapshot {
   skills: Skill[]
   platform: Os
   packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
+  isolatedComputers: boolean // agents can have an isolated Linux computer: Docker is there (not inside a server's container)
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
 }
 
@@ -44,6 +46,8 @@ export interface Api {
   openDm(p: { agentId: string }): string
   ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with his conversation; fresh starts a new session
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
+  applyProposal(p: { messageId: string }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched
+  dismissProposal(p: { messageId: string }): void
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
@@ -69,6 +73,8 @@ export interface Api {
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
   setConnectorToken(p: { id: string; token: string }): Promise<void>
+  ownApp(p: { provider: AppProvider }): Promise<{ clientId?: string; redirectUrl: string }> // the person's app (Google's, Slack's) its connectors sign in with; its secret stays in the core
+  setOwnApp(p: { provider: AppProvider; clientId: string; clientSecret: string }): Promise<void>
   authorizeConnector(p: { id: string }): Promise<{ url?: string }> // url: on a server, the page to open in the person's browser
   finishConnectorAuth(p: { url: string }): Promise<boolean> // on a server: the address the authorization page ended on
   harnessMcps(): Promise<HarnessMcp[]> // the MCP servers set up in Claude Code, Codex and OpenCode
@@ -114,7 +120,6 @@ export interface Api {
   openBackups(): void
   report(p: { week?: number }): Report // the calendar week starting at `week` (a Monday); this one by default
   usage(): UsageReport
-  setGithubToken(p: { token: string | null }): Promise<void> // checked with GitHub; throws why it's refused
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
   // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.
@@ -147,6 +152,7 @@ export interface Api {
   wikiRunReview(): void // reviews now, in the background; a 'wiki' event when done
   wikiDismissFinding(p: { id: string }): void // and refuses its fix
   wikiImport(p: { dir: string }): WikiImport // an Obsidian vault copied in, as it is
+  wikiImportZip(p: { path: string }): WikiImport // the same, from a .zip sent to a server (src/server's /upload)
   setWikiCapture(p: { conversationId: string; on: boolean }): void
   setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now

@@ -3,6 +3,7 @@
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
+import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import {
   agentById,
@@ -231,7 +232,7 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
         <h2>{L('Receita', 'Recipe')}</h2>
         {k.body.trim() ? (
           <article className="recipe">
-            <Markdown remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
+            <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
           </article>
         ) : (
           <p className="read-empty">{L(`A receita é lida de ${k.source} a cada uso.`, `The recipe is read from ${k.source} on every use.`)}</p>
@@ -441,7 +442,7 @@ function Proposal({ proposal: p }: { proposal: Skill }): ReactNode {
             <span>{L('Quando usar:', 'When to use:')}</span> {p.description}
           </p>
           <article className="recipe recipe--box">
-            <Markdown remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
+            <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
           </article>
           <p className="proposal__who">
             {L('Vale pra', 'For')} <Who ids={p.agents} />. {L('Depois de aprovar, dá pra liberar pra outros agentes.', 'After approving, you can open it to other agents.')}

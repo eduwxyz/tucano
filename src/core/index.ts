@@ -5,10 +5,10 @@ import { voiceRefusal } from '../shared/voice'
 import { ModelDownload, Transcriber, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
-import { basename, join } from 'node:path'
+import { basename, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
@@ -35,7 +35,6 @@ import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
-import { GitHub } from './github'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
@@ -45,7 +44,7 @@ import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { applyForeignTeam, readForeignZip } from './agent-import'
-import { zipFromBuffer, zipFromFile } from './zip'
+import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
@@ -57,7 +56,7 @@ import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
-import { agentFromDraft, availableModels, tucaAgent, tucaHello } from './tuca'
+import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
@@ -67,6 +66,7 @@ const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
 // Run by the server (src/server): no window, and the screens are in a browser elsewhere.
 const serverMode = process.env['TUCANO_SERVER'] === '1'
+const publicUrl = process.env['TUCANO_URL']?.replace(/\/+$/, '')
 const runtimePorts = workspacePorts()
 const defaultWorkspace = process.env['TUCANO_DEFAULT_WORKSPACE'] !== '0'
 mkdirSync(dataDir, { recursive: true })
@@ -154,7 +154,7 @@ const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLog
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), github: githubInfo(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
 }
 
 // More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
@@ -182,8 +182,7 @@ function watchAccount(id: string): void {
   }, 4_000)
   watchingAccount.unref()
 }
-// github is made further down; settings can be asked for before.
-const githubInfo = (): Settings['github'] => githubRef?.info()
+
 
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
@@ -259,7 +258,6 @@ function emit(event: CoreEvent): void {
 
 // The phone gets each new approval and question as it happens (spec §19).
 let telegram: Telegram | undefined
-let githubRef: GitHub | undefined
 const sentToPhone = new Set<string>()
 function toPhone(e: CoreEvent): void {
   if (!telegram) return
@@ -347,7 +345,6 @@ process.parentPort.on('message', (e) => {
     routines.stop()
     telegram?.stop()
     hooks.close()
-    github.stop()
     runner.stopAll()
     void (async () => {
       await runner.idle()
@@ -368,6 +365,17 @@ process.parentPort.on('message', (e) => {
     return
   }
   if (r?.type === 'power') return routines.setAwake(r.awake === true)
+  // A server's /oauth/callback: the code the provider sent back, checked against the state only this core made.
+  if (r?.type === 'oauth-callback') {
+    const { state = '', code = '', error = '' } = (r.data ?? {}) as { state?: string; code?: string; error?: string }
+    const reply = (ok: boolean, why?: string): void => process.parentPort.postMessage({ type: 'oauth-result', id: r.id, data: { ok, why } })
+    if (!code) return reply(false, error === 'access_denied' ? L('Você recusou o acesso na página do serviço.', 'You declined access on the service’s page.') : L('A autorização não voltou com o código.', 'The authorization came back without a code.'))
+    void connectors.finishOAuth(state, code).then(
+      (ok) => reply(ok, ok ? undefined : L('Esse pedido de autorização venceu. Tente de novo pelo app.', 'That authorization request expired. Try again from the app.')),
+      (e: unknown) => reply(false, e instanceof Error ? e.message : String(e))
+    )
+    return
+  }
   if (r?.type === 'browser-shown') return browser.setShown(r.agentId ?? '', r.shown === true)
   if (r?.type === 'browser-result') {
     const p = pages.get(r.id)
@@ -469,7 +477,8 @@ const chrome =
         (agentId, shown) => browser.setShown(agentId, shown),
         undefined,
         (agentId, jpeg) => browser.frame(agentId, jpeg),
-        serverMode
+        serverMode,
+        serverMode ? 10 * 60_000 : undefined // on a server, an idle agent's Chrome gives its memory back
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -491,7 +500,8 @@ delete process.env['TUCANO_LOCAL_KEY']
 // computer, and not on Windows yet, where paths don't look like this.
 function localReach(messageId: string): LocalReach | undefined {
   const message = db.message(messageId)
-  if (serverMode || isWin || message?.author.kind !== 'agent') return undefined
+  // On a server a cited file is saved down instead of shown in Finder (src/server's /local/), so it counts there too.
+  if (isWin || message?.author.kind !== 'agent') return undefined
   const agent = db.agent(message.author.id)
   if (!agent) return undefined
   return { agentId: agent.id, own: computers.folder(agent.id), dataRoot: dataDir, limited: isLimited(agent) }
@@ -519,33 +529,25 @@ const connectors = new ConnectorManager({
   emit,
   // On a server there's nothing to open it in: authorizeConnector hands it to the page.
   openUrl: (url) => serverMode || toMain({ type: 'open', url }),
-  oauthCallbackUrl: () => gateway.url('/oauth/callback')
+  // On a server behind https (TUCANO_URL), the provider sends the person back to the server's own
+  // address, which src/server hands over here; on a desktop, to the gateway on this computer.
+  oauthCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : gateway.url('/oauth/callback')),
+  // Slack's app registers its address once: the workspace's webhook port, which doesn't change.
+  fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`)
 })
-gateway.route('/oauth/callback', async (url) => {
+const oauthCallback = async (url: URL): Promise<string> => {
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state') ?? ''
   if (!code) return notAuthorized(url)
   return (await connectors.finishOAuth(state, code))
     ? L('Conector autorizado. Pode fechar esta aba e voltar pro Tucano.', 'Connector authorized. You can close this tab and go back to Tucano.')
     : L('Esse pedido de autorização expirou. Tente de novo pelo app.', 'This authorization request expired. Try again from the app.')
-})
+}
+gateway.route('/oauth/callback', oauthCallback)
 
 const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
 
-// Issue to PR: the GitHub proxy agents' computers push through (spec §22).
-const github: GitHub = new GitHub({
-  secrets,
-  db,
-  post: (conversationId, text) => {
-    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now() }
-    db.saveMessage(m)
-    emit({ type: 'message', message: m })
-  },
-  changed: () => emit({ type: 'settings', settings: settings() })
-})
-
-githubRef = github
-const computers = new Computers({ db, dataDir, emit, shoot, gitRemote: (agentId) => github.gitRemote(agentId) })
+const computers = new Computers({ db, dataDir, emit, shoot })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
@@ -618,7 +620,6 @@ const runner = new Runner({
   notify: (title, body, conversationId, kind, threadId) =>
     kind ? toMain({ type: 'notify', title, body, conversationId, threadId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId, undefined, { threadId }),
   jev: { key: () => secrets.get(JEV_SECRET) },
-  github,
   onBusy: (busy) => toMain({ type: 'busy', busy }),
   onQuota: (quota) => {
     db.setSettings({ quota })
@@ -641,6 +642,14 @@ if (defaultWorkspace) telegram = new Telegram({
 
 // Routines started by something on this Mac: POST http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>.
 const hooks = createServer((req, res) => {
+  // The sign-in of a connector whose app registers a fixed address (Slack's) comes back here.
+  if (req.method === 'GET' && req.url?.startsWith('/oauth/callback')) {
+    void oauthCallback(new URL(req.url, 'http://localhost')).then(
+      (text) => res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(text),
+      (e: unknown) => res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(e instanceof Error ? e.message : String(e))
+    )
+    return
+  }
   const m = /^\/gatilho\/([\w-]{10,})$/.exec(req.url ?? '')
   if (req.method !== 'POST' || !m) return void res.writeHead(404).end(L('Use POST /gatilho/<código>\n', 'Use POST /gatilho/<code>\n'))
   let body = ''
@@ -677,14 +686,10 @@ void ready.then(async () => {
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   // A thread that went quiet gets its own summary, and the memories in it.
   setInterval(() => void memory.sweep().catch((e: unknown) => console.error('[memory]', e)), 60_000).unref()
-  // Nothing here waits on the keychain: the first use after an update can be a
-  // macOS prompt that stays open until someone answers it.
-  void github.start().catch((e: unknown) => console.error('[github]', e))
   if (!fake) {
     // A port taken (another Tucano open, say) is logged and the rest goes on: a call there reaches
     // a server that doesn't know its token, never this workspace's data.
     hooks.listen(runtimePorts.webhook, '127.0.0.1')
-    github.listen()
     void telegram?.start()
   }
   routines.start()
@@ -748,6 +753,13 @@ function ensureTuca(modelId?: string, fresh = false): { agentId: string; convers
   const s = settings()
   const works = worksWith(s)
   let tuca = db.agents().find((a) => a.kind === 'tuca')
+  // Made before he helped with the app: what he does and says, as it is now.
+  const current = tuca && tucaUpToDate(tuca)
+  if (current) {
+    tuca = current
+    db.saveAgent(tuca)
+    emit({ type: 'agent', agent: tuca })
+  }
   // A harness turned off since: the model given now, if it works.
   if (tuca && !works(tuca.modelId) && modelId && works(modelId)) {
     tuca = { ...tuca, modelId }
@@ -776,6 +788,15 @@ function ensureTuca(modelId?: string, fresh = false): { agentId: string; convers
     emit({ type: 'message', message: hello })
   }
   return { agentId: tuca.id, conversationId: dm.id }
+}
+
+// A Tuca's proposal is settled once: applied (with what it made or changed) or dismissed.
+function settleProposal(messageId: string, appliedId?: string): void {
+  const m = db.message(messageId)
+  if (!m?.run?.proposal || m.run.proposal.state) return
+  const updated: Message = { ...m, run: { ...m.run, proposal: { ...m.run.proposal, state: appliedId ? 'applied' : 'dismissed', ...(appliedId ? { appliedId } : {}) } } }
+  db.saveMessage(updated)
+  emit({ type: 'message', message: updated })
 }
 
 // A Tuca's card is settled once: created (with the agent) or dismissed.
@@ -822,6 +843,9 @@ const api: Api = {
     skills: db.skills(),
     platform: osOf(),
     packaged: process.env['TUCANO_PACKAGED'] === '1',
+    // On a desktop it's always offered (the page says when Docker is missing); a server without Docker,
+    // inside a container, can't have one, so it isn't.
+    isolatedComputers: !serverMode || onPath('docker'),
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
 
@@ -907,7 +931,11 @@ const api: Api = {
     const reach = localReach(messageId)
     const found = reach && resolveLocal(path, reach)
     if (!found) return null
-    return { kind: found.kind, ...((found.kind === 'image' || found.kind === 'video') && localKey ? { url: localUrl(localKey, found.path) } : {}) }
+    const base = serverMode ? '/local' : undefined
+    const seen = (found.kind === 'image' || found.kind === 'video') && localKey ? { url: localUrl(localKey, found.path, base) } : {}
+    // On a server the file isn't on the person's computer: showing it in Finder means nothing, saving it does.
+    const saved = serverMode && localKey && found.kind !== 'folder' ? { download: `${localUrl(localKey, found.path, base)}?download=1` } : {}
+    return { kind: found.kind, ...seen, ...saved }
   },
   openLocal: ({ messageId, path, how }) => {
     const reach = localReach(messageId)
@@ -950,6 +978,46 @@ const api: Api = {
     return { agentId: agent.id, conversationId }
   },
   settleDraft: ({ messageId, agentId }) => settleDraft(messageId, agentId),
+  // What a Tuca's card proposed, done the way the screens do it (and checked the same way).
+  applyProposal: ({ messageId }) => {
+    const p = db.message(messageId)?.run?.proposal
+    if (!p) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
+    if (p.state) throw new Error(p.state === 'applied' ? L('Essa proposta já foi aplicada.', 'That proposal was already applied.') : L('Essa proposta foi descartada.', 'That proposal was discarded.'))
+    let id: string
+    if (p.kind === 'agent') {
+      const agent = db.agent(p.agentId)
+      if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+      const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
+      api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds })
+      id = agent.id
+    } else if (p.kind === 'routine') {
+      const conversationId = p.routine.conversationId || api.openDm({ agentId: p.routine.agentId })
+      id = routines.save({ ...p.routine, conversationId }).id
+    } else if (p.kind === 'channel') {
+      id = api.createChannel({ name: p.name, ...(p.threads ? { threads: true } : {}) })
+      api.setChannelMembers({ id, agentIds: p.members })
+      if (p.topic) api.setTopic({ id, topic: p.topic })
+    } else {
+      // A team: its agents, each with a DM, and the channel they share when there is one.
+      if (p.channel && db.conversations().some((c) => c.kind === 'channel' && c.name === p.channel!.name)) throw new Error(L(`Já existe o canal #${p.channel.name}.`, `There's already a #${p.channel.name} channel.`))
+      const made: string[] = []
+      for (const d of p.agents) {
+        const agent = agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit)
+        db.saveAgent(agent)
+        emit({ type: 'agent', agent })
+        api.openDm({ agentId: agent.id })
+        made.push(agent.id)
+      }
+      if (p.channel) {
+        id = api.createChannel({ name: p.channel.name, ...(p.channel.threads ? { threads: true } : {}) })
+        api.setChannelMembers({ id, agentIds: made })
+        if (p.channel.topic) api.setTopic({ id, topic: p.channel.topic })
+      } else id = made[0]!
+    }
+    settleProposal(messageId, id)
+    return { id }
+  },
+  dismissProposal: ({ messageId }) => settleProposal(messageId),
   openDm: ({ agentId }) => {
     const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId)
     if (existing) return existing.id
@@ -977,7 +1045,6 @@ const api: Api = {
     if (!telegram) throw new Error(L('O Telegram fica no workspace padrão.', 'Telegram belongs to the default workspace.'))
     return telegram.setToken(token)
   },
-  setGithubToken: ({ token }) => github.setToken(token),
   exportTeam: () => exportTeam(db),
   importTeam: ({ text }) => {
     const r = importTeam(db, text, settings().defaultLimit)
@@ -1090,6 +1157,8 @@ const api: Api = {
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
   setConnectorToken: ({ id, token }) => connectors.setToken(id, token),
+  ownApp: ({ provider }) => connectors.ownApp(provider),
+  setOwnApp: ({ provider, clientId, clientSecret }) => connectors.setOwnApp(provider, { clientId, clientSecret }),
   authorizeConnector: async ({ id }) => {
     const url = await connectors.authorize(id)
     return serverMode && url ? { url } : {}
@@ -1210,6 +1279,21 @@ const api: Api = {
   },
   wikiDismissFinding: ({ id }) => wiki.dismissFinding(id),
   wikiImport: ({ dir }) => wiki.importVault(dir, settings().workspaceName || L('Você', 'You')),
+  // On a server: a vault zipped on the person's computer and sent up. Only from the uploads folder
+  // the server writes to; unpacked apart, copied in as any vault, then both go.
+  wikiImportZip: ({ path }) => {
+    const uploads = join(dataDir, 'uploads')
+    if (!serverMode || typeof path !== 'string' || !resolve(path).startsWith(uploads + sep) || !path.toLowerCase().endsWith('.zip')) throw new Error(L('Envie o vault como um arquivo .zip.', 'Send the vault as a .zip file.'))
+    const unpacked = mkdtempSync(join(uploads, 'vault-'))
+    const zip = zipFromFile(path)
+    try {
+      return wiki.importVault(extractZip(zip, unpacked), settings().workspaceName || L('Você', 'You'))
+    } finally {
+      zip.close()
+      rmSync(unpacked, { recursive: true, force: true })
+      rmSync(path, { force: true })
+    }
+  },
   setWikiCapture: ({ conversationId, on }) => {
     db.setWikiCapture(conversationId, on)
     const c = db.conversation(conversationId)

@@ -935,6 +935,7 @@ function Powers(p: {
   const { agent, patch, computer } = p
   const name = agent.name.trim() || L('Ele', 'It')
   const connectors = useStore((s) => s.connectors)
+  const isolated = useStore((s) => s.isolatedComputers)
   return (
     <div className="onb__split">
       <section className="onb__main">
@@ -976,7 +977,9 @@ function Powers(p: {
                     ['linux', L('Linux isolado', 'Isolated Linux')],
                     ['mac', L('Este computador', 'This computer')]
                   ] as const
-                ).map(([k, label]) => (
+                )
+                  .filter(([k]) => k !== 'linux' || isolated)
+                  .map(([k, label]) => (
                   <button key={k} className={computer === k ? 'is-active' : ''} onClick={() => p.setComputer(k)}>
                     {label}
                   </button>

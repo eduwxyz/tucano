@@ -921,6 +921,18 @@ export class Db {
     }
   }
 
+  // The latest replies that ended badly, newest first: what went wrong, never what was said.
+  recentFailures(since: number, limit = 10): { agentId: string; conversationId: string; at: number; status: string; error?: string }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT author_id, conversation_id, at, json_extract(run, '$.status') AS status, json_extract(run, '$.error') AS error FROM messages
+         WHERE author_kind = 'agent' AND at >= ? AND json_extract(run, '$.status') IN ('failed', 'limit_reached', 'interrupted')
+         ORDER BY at DESC LIMIT ?`
+      )
+      .all(since, limit) as Row[]
+    return rows.map((r) => ({ agentId: str(r['author_id']), conversationId: str(r['conversation_id']), at: Number(r['at']), status: str(r['status']), ...(r['error'] ? { error: str(r['error']) } : {}) }))
+  }
+
   approvals(): Approval[] {
     return (this.db.prepare('SELECT * FROM approvals ORDER BY created_at').all() as Row[]).map((r) => this.toApproval(r))
   }

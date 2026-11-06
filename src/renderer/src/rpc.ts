@@ -18,6 +18,7 @@ declare global {
       connect: () => void
       pickFolder: () => Promise<string | null>
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
+      upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)
       onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void
       onNavigatePage?: (cb: (page: 'skills') => void) => void // desktop only
       onCoreDown?: (cb: () => void) => void // desktop only: a browser reloads on its own
@@ -26,6 +27,15 @@ declare global {
       onUpdate: (cb: (state: UpdateState) => void) => void
       checkUpdates: () => void
       installUpdate: () => void
+      servers?: {
+        // desktop only: Tucanos on servers, shown in this window over the app; open: the one on screen
+        list: () => Promise<{ id: string; name: string; origin: string; open: boolean }[]>
+        pair: (link: string) => Promise<'paired' | 'cancelled' | 'invalid' | 'unsafe'>
+        open: (id: string) => void
+        local: () => void // back to this computer's Tucano
+        forget: (id: string) => Promise<boolean>
+        onChanged: (cb: () => void) => void
+      }
     }
   }
 }

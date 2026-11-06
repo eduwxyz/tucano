@@ -1,13 +1,15 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
-import { app, BrowserWindow, session, type MediaAccessPermissionRequest, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
+import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
+import { Servers } from './servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -131,10 +133,22 @@ type CoreRequest =
   | { type: 'icons'; id: string; paths: string[] }
   | { type: 'browser'; id: string; agentId: string; op: BrowserOp; args?: Record<string, unknown> }
 
+// The app's page: the dev server while developing, the built index.html otherwise.
+const APP_PAGE = process.env['ELECTRON_RENDERER_URL'] ?? pathToFileURL(join(import.meta.dirname, '../renderer/index.html')).toString()
+
+// Only the app's own page, in the app's window, talks to main: never a page that window
+// was somehow taken to, nor a frame inside it. Its bridge reaches the core.
+function fromApp(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame
+  const ok = !!frame && frame === event.sender.mainFrame && !!mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents && isAppPage(frame.url, APP_PAGE)
+  if (!ok) console.error('[main] ignored a message from', frame?.url ?? 'a closed frame')
+  return ok
+}
+
 // The conversation open in the window, so a notification about it can stay quiet.
 let viewing: string | null = null
-ipcMain.on('viewing', (_e, id: unknown) => {
-  if (_e.sender !== mainWindow?.webContents || _e.senderFrame !== _e.sender.mainFrame) return
+ipcMain.on('viewing', (e, id: unknown) => {
+  if (!fromApp(e)) return
   viewing = typeof id === 'string' ? id : null
   cores.get(registry.selected().id)?.child.postMessage({ type: 'viewing', conversationId: viewing })
 })
@@ -205,6 +219,7 @@ function setTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: L(`Abrir o ${NAME}`, `Open ${NAME}`), click: () => showWindow() },
+      ...(servers.list().length ? [{ type: 'separator' as const }, ...servers.windowsMenu()] : []),
       { type: 'separator' },
       { label: L(`Encerrar o ${NAME}`, `Quit ${NAME}`), click: () => app.quit() }
     ])
@@ -377,7 +392,7 @@ function serveArtifact(req: Request): Promise<Response> | Response {
 
 // Each page load asks for a port; one end goes to the core, the other to the page.
 ipcMain.on('core:connect', async (event) => {
-  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return
+  if (!fromApp(event)) return
   const workspace = registry.selected()
   const runtime = startCore(workspace)
   try { await runtime.ready } catch { return }
@@ -550,6 +565,7 @@ function showWindow(conversationId?: string, page?: 'skills', threadId?: string)
   win.show()
   win.focus()
   if (!conversationId && !page) return
+  servers.showLocal() // a conversation of this computer's: its Tucano on screen
   const go = (): void => (page ? win.webContents.send('navigate-page', page) : win.webContents.send('navigate', conversationId, threadId))
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go)
   else go()
@@ -559,9 +575,10 @@ function showWindow(conversationId?: string, page?: 'skills', threadId?: string)
 const updates = new Updates((state) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update', state)
 })
-ipcMain.handle('update:state', () => updates.get())
-ipcMain.on('update:check', () => updates.check())
-ipcMain.on('update:install', () => {
+ipcMain.handle('update:state', (e) => (fromApp(e) ? updates.get() : null))
+ipcMain.on('update:check', (e) => fromApp(e) && updates.check())
+ipcMain.on('update:install', (e) => {
+  if (!fromApp(e)) return
   // A reply in progress would be cut off: the person decides.
   if (awakeBlocker !== null && mainWindow && !mainWindow.isDestroyed()) {
     const answer = dialog.showMessageBoxSync(mainWindow, {
@@ -579,6 +596,7 @@ ipcMain.on('update:install', () => {
 
 // The Mac's folder picker, for a folder lent to an agent's computer. The core checks the choice.
 ipcMain.handle('pick-folder', async (event) => {
+  if (!fromApp(event)) return null
   const win = BrowserWindow.fromWebContents(event.sender)
   const opts = { title: L('Escolher pasta', 'Choose a folder'), buttonLabel: L('Escolher', 'Choose'), properties: ['openDirectory' as const] }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
@@ -610,6 +628,9 @@ function createWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
   mainWindow = win
+  // A server on screen keeps the window's size (servers.ts), and comes back in a window made again.
+  win.on('resize', () => servers.place())
+  win.webContents.once('did-finish-load', () => servers.place())
   win.on('closed', () => {
     if (mainWindow === win) {
       cores.get(registry.selected().id)?.child.postMessage({ type: 'viewing', conversationId: null })
@@ -619,21 +640,24 @@ function createWindow(): BrowserWindow {
     stillOpen()
   })
 
-  // Links in messages open in the default browser, never inside the app.
+  // Links in messages open in the default browser or the mail app, never inside the app;
+  // any other scheme isn't handed to the system either.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (isOutsideLink(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
 
-  // react-markdown renders message links as plain <a href>, and a plain click
-  // navigates this whole window away (the app "disappears" behind the site).
-  // Same promise as above, for those: web links go to the real browser;
-  // a same-URL navigation (reload) is not a link and stays.
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!/^https?:\/\//.test(url) || url === win.webContents.getURL()) return
+  // react-markdown renders message links as plain <a href>, and a plain click navigates
+  // this whole window. The window only ever shows the app: a reload stays, web and mail
+  // links go to the system, and anything else (a local page, which would get the app's
+  // bridge to the core) goes nowhere.
+  const guard = (event: { preventDefault: () => void }, url: string): void => {
+    if (isAppPage(url, APP_PAGE)) return
     event.preventDefault()
-    void shell.openExternal(url)
-  })
+    if (isOutsideLink(url)) void shell.openExternal(url)
+  }
+  win.webContents.on('will-navigate', guard)
+  win.webContents.on('will-redirect', guard)
 
   if (process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -652,7 +676,50 @@ if (process.env['TUCANO_DATA']) app.setPath('userData', process.env['TUCANO_DATA
 const quitOnly = process.argv.includes('--quit')
 const primary = app.requestSingleInstanceLock() && !quitOnly
 if (!primary) app.quit()
-app.on('second-instance', (_e, argv) => (argv.includes('--quit') ? app.quit() : showWindow()))
+// Tucanos on servers, shown in the app's window (servers.ts). The keychain keeps their access, as it
+// keeps the core's secrets; where it can't, nothing is saved.
+const servers = new Servers({
+  dataDir,
+  seal: (text) => (safeStorage.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== 'basic_text' ? safeStorage.encryptString(text).toString('base64') : null),
+  unseal: (sealed) => {
+    try {
+      return safeStorage.decryptString(Buffer.from(sealed, 'base64'))
+    } catch {
+      return null
+    }
+  },
+  changed: () => {
+    setMenu()
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('servers')
+  },
+  window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+  showLocal: () => showWindow()
+})
+// Settings › Servers, on the app's own page only (fromApp): the list without tokens, pairing with a
+// pasted link, opening and forgetting.
+ipcMain.handle('servers:list', (e) => (fromApp(e) ? servers.summary() : []))
+ipcMain.handle('servers:pair', (e, link: unknown) => (fromApp(e) && typeof link === 'string' && link.length < 4096 ? servers.pair(link, false) : 'invalid'))
+ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.show(id))
+ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
+ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
+// A tucano://connect link: on a Mac the system hands it over by open-url; on Windows and Linux it
+// comes as an argument, to this instance or (the app already open) to second-instance.
+const linkIn = (argv: string[]): string | undefined => argv.find((a) => a.startsWith('tucano://'))
+let pendingLink = linkIn(process.argv)
+const openLink = (link: string): void => {
+  if (app.isReady()) void servers.pairFromOutside(link)
+  else pendingLink = link
+}
+app.on('open-url', (e, url) => {
+  e.preventDefault()
+  openLink(url)
+})
+app.on('second-instance', (_e, argv) => {
+  if (argv.includes('--quit')) return app.quit()
+  const link = linkIn(argv)
+  if (link) openLink(link)
+  else showWindow()
+})
 
 // The app's own menu, in the app's language (Electron's would be in English).
 function setMenu(): void {
@@ -677,6 +744,7 @@ function setMenu(): void {
       },
       { role: 'editMenu', label: L('Editar', 'Edit') },
       { role: 'viewMenu', label: L('Visualizar', 'View') },
+      { label: L('Servidores', 'Servers'), submenu: servers.menu(() => clipboard.readText()) },
       { role: 'windowMenu', label: L('Janela', 'Window') }
     ])
   )
@@ -716,6 +784,11 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   createWindow()
   setTray()
   updates.start()
+  // Only the installed app takes tucano:// links: a development run would take them from it.
+  if (app.isPackaged) app.setAsDefaultProtocolClient('tucano')
+  servers.restore()
+  if (pendingLink) void servers.pairFromOutside(pendingLink)
+  pendingLink = undefined
   app.on('activate', () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow()
   })
@@ -728,6 +801,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true
+  servers.quit()
   for (const r of cores.values()) r.browsers.quit()
 })
 

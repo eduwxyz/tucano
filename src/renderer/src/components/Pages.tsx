@@ -28,7 +28,6 @@ import {
   browserAction,
   setTelegramToken,
   unpairTelegram,
-  setGithubToken,
   exportTeam,
   importAgents,
   importTeam,
@@ -68,12 +67,14 @@ import { voiceRefusal } from '../../../shared/voice'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
-import { ConnectorGrid } from './ConnectorStore'
+import { ConnectorGrid, OwnAppSetup } from './ConnectorStore'
+import { entryOf } from '../../../shared/connector-catalog'
 import { ApprovalCard, toolWords } from './Conversation'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
+import { hasServers, ServersCard } from './Servers'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
@@ -769,6 +770,7 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
   const on = kind === 'linux'
   const state = on ? (info && info.state !== 'off' ? info.state : 'stopped') : 'off'
   const st = COMPUTER_STATE()[state]!
+  const isolated = useStore((s) => s.isolatedComputers)
 
   return (
     <Card
@@ -779,22 +781,24 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
       )}
     >
       <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Computador', 'Computer')}>
-        {COMPUTER_CHOICES().map((c) => (
-          <button
-            key={c.value}
-            role="radio"
-            aria-checked={kind === c.value}
-            className={kind === c.value ? 'is-active' : ''}
-            onClick={() => {
-              if (kind === c.value) return
-              if (c.value === 'mac') return setConfirmMac(true)
-              setConfirmMac(false)
-              onChange(c.value)
-            }}
-          >
-            {c.label}
-          </button>
-        ))}
+        {COMPUTER_CHOICES()
+          .filter((c) => c.value !== 'linux' || isolated || kind === 'linux') // on a server without Docker there's none to have
+          .map((c) => (
+            <button
+              key={c.value}
+              role="radio"
+              aria-checked={kind === c.value}
+              className={kind === c.value ? 'is-active' : ''}
+              onClick={() => {
+                if (kind === c.value) return
+                if (c.value === 'mac') return setConfirmMac(true)
+                setConfirmMac(false)
+                onChange(c.value)
+              }}
+            >
+              {c.label}
+            </button>
+          ))}
       </div>
       {confirmMac && kind !== 'mac' && (
         <div className="mac-confirm">
@@ -1091,7 +1095,7 @@ function ConnectorToken({ id }: { id: string }): ReactNode {
   }
   return (
     <div className="row">
-      <input className="grow" type="password" value={token} placeholder={L('Token (substitui o atual)', 'Token (replaces the current one)')} onChange={(e) => setToken(e.target.value)} />
+      <input className="grow" type="password" value={token} placeholder={L('Token ou op://… (substitui o atual)', 'Token or op://… (replaces the current one)')} onChange={(e) => setToken(e.target.value)} />
       <button className="btn btn--sm" disabled={busy || !token.trim()} onClick={save}>
         {L('Salvar token', 'Save token')}
       </button>
@@ -1139,6 +1143,8 @@ export function ConnectorsPage(): ReactNode {
 // A connector's state, who uses it and its tools, in a window over the page.
 function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void }): ReactNode {
   const users = useStore((s) => s.agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none'))
+  const own = entryOf(c)?.app // signs in with the person's own app: it can be changed here
+  const [changing, setChanging] = useState(false)
   return (
     <Modal title={c.name} onClose={onClose} className="connector-modal">
       <div className="connector-modal__body">
@@ -1176,6 +1182,11 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
           {c.status !== 'connecting' && (
             <button className="btn btn--sm" onClick={() => reconnectConnector(c.id)}>
               {c.status === 'connected' ? L('Atualizar ferramentas', 'Refresh tools') : L('Conectar de novo', 'Reconnect')}
+            </button>
+          )}
+          {own && (
+            <button className="btn btn--ghost btn--sm" onClick={() => setChanging(true)}>
+              {own.provider === 'google' ? L('Seu app do Google', 'Your Google app') : L('Seu app do Slack', 'Your Slack app')}
             </button>
           )}
           <span className="grow" />
@@ -1224,6 +1235,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
         ))}
         <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
       </div>
+      {changing && own && <OwnAppSetup provider={own.provider} onClose={() => setChanging(false)} />}
     </Modal>
   )
 }
@@ -1292,7 +1304,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
             </select>
           </Field>
           {auth === 'token' && (
-            <Field label="Token">
+            <Field label="Token" hint={L('Ou uma referência do 1Password (op://Cofre/Item/campo), lida a cada conexão.', 'Or a 1Password reference (op://Vault/Item/field), read on each connection.')}>
               <input type="password" value={token} onChange={(e) => setToken(e.target.value)} />
             </Field>
           )}
@@ -1310,7 +1322,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
               <input value={args} placeholder="-y @modelcontextprotocol/server-postgres postgres://…" onChange={(e) => setArgs(e.target.value)} />
             </Field>
           </div>
-          <Field label={L('Variáveis de ambiente', 'Environment variables')} hint={L('Uma por linha, NOME=valor. Os valores ficam cifrados.', 'One per line, NAME=value. Values are encrypted.')}>
+          <Field label={L('Variáveis de ambiente', 'Environment variables')} hint={L('Uma por linha, NOME=valor. Os valores ficam cifrados; um valor op://Cofre/Item/campo vem do 1Password.', 'One per line, NAME=value. Values are encrypted; an op://Vault/Item/field value comes from 1Password.')}>
             <textarea rows={2} value={env} onChange={(e) => setEnv(e.target.value)} />
           </Field>
           {demo && (
@@ -1389,7 +1401,8 @@ const SETTINGS_TABS = (): TabList => [
   ['geral', L('Geral', 'General')],
   ['modelos', L('Modelos', 'Models')],
   ['agentes', L('Agentes', 'Agents')],
-  ['integracoes', L('Celular e GitHub', 'Phone and GitHub')]
+  ['integracoes', L('Celular', 'Phone')],
+  ...(hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : [])
 ]
 const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
@@ -1511,58 +1524,6 @@ export function LanguagePicker({ className = '' }: { className?: string }): Reac
 }
 
 // Issue to PR (spec §22): the token the app pushes agent/* branches and opens PRs with.
-function GithubCard({ info }: { info?: { user?: string; error?: string } }): ReactNode {
-  const [token, setToken] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const save = (value: string | null): void => {
-    setBusy(true)
-    setError('')
-    setGithubToken(value)
-      .then(() => setToken(''))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
-      .finally(() => setBusy(false))
-  }
-  return (
-    <Card
-      title={L('GitHub (push e PR)', 'GitHub (push and PR)')}
-      lead={L(
-        'Pros agentes publicarem o que fazem nas pastas que você emprestou: o git do computador deles passa pelo app, que põe o token fora do computador e só aceita push em branches agent/*. Abrir PR é um pedido de aprovação.',
-        'So agents can publish what they do in the folders you lent: their computer’s git goes through the app, which keeps the token outside the computer and only accepts pushes to agent/* branches. Opening a PR is an approval request.'
-      )}
-    >
-      {info?.user ? (
-        <div className="row row--center">
-          <span className="tag tag--ok">{L('Conectado', 'Connected')}</span>
-          <span className="small grow">
-            {L('como', 'as')} <strong>{info.user}</strong>
-          </span>
-          <button className="btn btn--sm btn--ghost" onClick={() => save(null)}>
-            {L('Remover token', 'Remove token')}
-          </button>
-        </div>
-      ) : (
-        <>
-          <p className="small">
-            {L('Crie um token fine-grained em github.com → Settings → Developer settings →', 'Create a fine-grained token at github.com → Settings → Developer settings →')} <strong>Fine-grained tokens</strong>
-            {L(', só com os repositórios dessas pastas e as permissões', ', with only these folders’ repositories and the permissions')} <strong>Contents: read and write</strong> {L('e', 'and')} <strong>Pull requests: read and write</strong>.
-          </p>
-          <div className="row">
-            <input className="grow" type="password" value={token} placeholder="github_pat_…" onChange={(e) => setToken(e.target.value)} />
-            <button className="btn" disabled={busy || !token.trim()} onClick={() => save(token)}>
-              {busy ? L('Conferindo…', 'Checking…') : L('Salvar', 'Save')}
-            </button>
-          </div>
-        </>
-      )}
-      {(error || info?.error) && <p className="note note--error">{error || info?.error}</p>}
-      <p className="hint">
-        <Icon name="shield" size={13} /> {L('O token fica no cofre do sistema e nunca entra no computador dos agentes. main e as outras branches são recusadas no caminho.', 'The token stays in the system’s vault and never enters the agents’ computer. main and the other branches are refused on the way.')}
-      </p>
-    </Card>
-  )
-}
-
 // The team as a file, and backups of everything.
 const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
@@ -2077,9 +2038,9 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('integracoes') && <GithubCard info={settings.github} />}
 
         {pane('geral') && <TeamCard />}
+        {pane('servidores') && <ServersCard />}
 
         {pane('agentes') && (
           <Card title={L('Limites', 'Limits')}>
