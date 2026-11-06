@@ -598,6 +598,23 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
   const close = (): void => navigate({ kind: 'wiki' })
   const [imported, setImported] = useState<WikiImport | { error: string } | 'busy' | null>(null)
   const startImport = (): void => {
+    const failed = (e: Error): void => setImported({ error: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+    // On a server the vault is on the person's computer, not there: it goes up as a .zip.
+    const upload = window.tucano.upload
+    if (upload) {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.zip,application/zip'
+      input.onchange = () => {
+        const file = input.files?.[0]
+        if (!file) return
+        setSettings(false)
+        setImported('busy')
+        void upload(file).then((path) => call('wikiImportZip', { path })).then(setImported, failed)
+      }
+      input.click()
+      return
+    }
     const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> }).pickFolder
     void pick?.().then((dir) => {
       if (!dir) return
@@ -1048,7 +1065,11 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
           <div className="wk-setting">
             <span>
               <b>{L('Importar um cofre do Obsidian', 'Import an Obsidian vault')}</b>
-              <small>{L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', 'The notes come in as they are, with their folders, links and attachments. The original vault stays as it was.')}</small>
+              <small>
+                {window.tucano.upload
+                  ? L('Compacte a pasta do cofre num .zip e envie: as notas entram como estão, com as pastas, os links e os anexos.', 'Zip the vault’s folder and send it: the notes come in as they are, with their folders, links and attachments.')
+                  : L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', 'The notes come in as they are, with their folders, links and attachments. The original vault stays as it was.')}
+              </small>
             </span>
             <button className="btn btn--sm" onClick={onImport}>
               {L('Importar…', 'Import…')}

@@ -19,6 +19,7 @@ export interface Snapshot {
   skills: Skill[]
   platform: Os
   packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
+  isolatedComputers: boolean // agents can have an isolated Linux computer: Docker is there (not inside a server's container)
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
 }
 
@@ -146,6 +147,7 @@ export interface Api {
   wikiRunReview(): void // reviews now, in the background; a 'wiki' event when done
   wikiDismissFinding(p: { id: string }): void // and refuses its fix
   wikiImport(p: { dir: string }): WikiImport // an Obsidian vault copied in, as it is
+  wikiImportZip(p: { path: string }): WikiImport // the same, from a .zip sent to a server (src/server's /upload)
   setWikiCapture(p: { conversationId: string; on: boolean }): void
   setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now

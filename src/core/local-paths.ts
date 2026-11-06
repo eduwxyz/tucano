@@ -65,7 +65,8 @@ export function resolveLocal(raw: string, reach: LocalReach, home = homedir()): 
 // has checked, and a page in the window can't ask for anything else.
 const sign = (key: string, path: string): string => createHmac('sha256', key).update(path).digest('base64url')
 
-export const localUrl = (key: string, path: string): string => `tucano://local/${sign(key, path)}/${Buffer.from(path).toString('base64url')}`
+// On a desktop the app's tucano: protocol serves it; on a server, its own /local/ path (src/server).
+export const localUrl = (key: string, path: string, base = 'tucano://local'): string => `${base}/${sign(key, path)}/${Buffer.from(path).toString('base64url')}`
 
 export function verifyLocalUrl(key: string, url: URL): string | null {
   const [signature = '', encoded = ''] = url.pathname.slice(1).split('/')

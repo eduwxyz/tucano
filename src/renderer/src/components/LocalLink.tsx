@@ -29,6 +29,13 @@ function LocalLink({ messageId, path, children }: { messageId: string; path: str
   }, [messageId, path])
   if (!info) return <>{children}</>
   const title = path.split('/').filter(Boolean).pop() ?? path
+  // On a server the file is there, not here: it comes down to this computer instead of showing in Finder.
+  const save = (): void => {
+    const a = document.createElement('a')
+    a.href = info.download!
+    a.download = title
+    a.click()
+  }
   const open = (e: MouseEvent<HTMLButtonElement>): void => {
     if (info.url) {
       // The others cited in this message, so the arrows go through them.
@@ -36,14 +43,16 @@ function LocalLink({ messageId, path, children }: { messageId: string; path: str
       const items = here.map((el) => ({ url: el.dataset['mediaUrl']!, title: el.dataset['mediaTitle']!, video: el.dataset['mediaVideo'] === '1' }))
       const unique = items.filter((x, i) => items.findIndex((y) => y.url === x.url) === i)
       openLightbox(unique, Math.max(0, unique.findIndex((x) => x.url === info.url)))
-    } else openLocal(messageId, path, info.kind === 'folder' || info.kind === 'pdf' ? 'open' : 'reveal')
+    } else if (info.download) save()
+    else openLocal(messageId, path, info.kind === 'folder' || info.kind === 'pdf' ? 'open' : 'reveal')
   }
   return (
     <button
       type="button"
       className="local-link"
       title={
-        info.url ? L(`Abrir aqui (botão direito: mostrar ${onMac ? 'no Finder' : 'na pasta'})`, `Open here (right click: show ${onMac ? 'in Finder' : 'in its folder'})`)
+        info.download ? (info.url ? L('Abrir aqui (botão direito: baixar)', 'Open here (right click: download)') : L('Baixar', 'Download'))
+        : info.url ? L(`Abrir aqui (botão direito: mostrar ${onMac ? 'no Finder' : 'na pasta'})`, `Open here (right click: show ${onMac ? 'in Finder' : 'in its folder'})`)
         : info.kind === 'file' ? L(`Mostrar ${onMac ? 'no Finder' : 'na pasta'}`, `Show ${onMac ? 'in Finder' : 'in its folder'}`)
         : L('Abrir (botão direito: mostrar onde está)', 'Open (right click: show where it is)')
       }
@@ -53,7 +62,8 @@ function LocalLink({ messageId, path, children }: { messageId: string; path: str
       onClick={open}
       onContextMenu={(e) => {
         e.preventDefault()
-        openLocal(messageId, path, 'reveal')
+        if (info.download) save()
+        else openLocal(messageId, path, 'reveal')
       }}
     >
       {children}
