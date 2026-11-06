@@ -922,6 +922,28 @@ const api: Api = {
     mkdirSync(backups, { recursive: true })
     toMain({ type: 'open_path', path: backups })
   },
+  // Google Drive backup
+  driveBackupStatus: () => driveBackup?.status() ?? Promise.resolve({ connected: false }),
+  driveBackupConnect: async ({ clientId, clientSecret }) => {
+    if (!clientId || !clientSecret) throw new Error('clientId e clientSecret são obrigatórios')
+    driveBackup = new DriveBackup(
+      secrets,
+      clientId,
+      clientSecret,
+      async (url) => { void (serverMode || toMain({ type: 'open', url })) }
+    )
+    await driveBackup.connect()
+  },
+  driveBackupDisconnect: async () => {
+    await driveBackup?.disconnect()
+    driveBackup = undefined
+  },
+  driveBackupUploadNow: async () => {
+    if (!driveBackup) throw new Error('Google Drive não conectado')
+    const last = db.latestBackup(backups)
+    if (!last) throw new Error('Nenhum backup local encontrado')
+    return driveBackup.upload(last)
+  },
   report: ({ week }) => report(db, Date.now(), week),
   usage: () => usage(db),
   unpairTelegram: () => void telegram?.unpair(),

@@ -20,6 +20,13 @@ export interface Snapshot {
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
 }
 
+export interface DriveBackupStatus {
+  connected: boolean
+  lastUpload?: string // ISO
+  lastError?: string
+  folderId?: string
+}
+
 export interface Api {
   snapshot(): Snapshot
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
@@ -106,6 +113,11 @@ export interface Api {
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
   backupNow(): string // where the copy went
   openBackups(): void
+  // Google Drive backup (opcional, só com TUCANO_GDRIVE_CLIENT_ID/SECRET definidos)
+  driveBackupStatus(): Promise<DriveBackupStatus>
+  driveBackupConnect(p: { clientId: string; clientSecret: string }): Promise<void>
+  driveBackupDisconnect(): Promise<void>
+  driveBackupUploadNow(): Promise<string>
   report(p: { week?: number }): Report // the calendar week starting at `week` (a Monday); this one by default
   usage(): UsageReport
   setGithubToken(p: { token: string | null }): Promise<void> // checked with GitHub; throws why it's refused

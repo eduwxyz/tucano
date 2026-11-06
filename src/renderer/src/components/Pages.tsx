@@ -1,5 +1,6 @@
 import { L, locale, type Lang } from '../../../shared/lang'
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import type { DriveBackupStatus } from '../../../shared/rpc'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
   navigate,
@@ -34,6 +35,10 @@ import {
   importTeam,
   backupNow,
   openBackups,
+  driveBackupStatus,
+  driveBackupConnect,
+  driveBackupDisconnect,
+  driveBackupUploadNow,
   type TelegramInfo,
   useStore,
   EFFORTS,
@@ -1386,7 +1391,8 @@ const SETTINGS_TABS = (): TabList => [
   ['geral', L('Geral', 'General')],
   ['modelos', L('Modelos', 'Models')],
   ['agentes', L('Agentes', 'Agents')],
-  ['integracoes', L('Celular e GitHub', 'Phone and GitHub')]
+  ['integracoes', L('Celular e GitHub', 'Phone and GitHub')],
+  ['backup', L('Backup', 'Backup')]
 ]
 const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
@@ -1847,6 +1853,57 @@ export function SettingsPage(): ReactNode {
   const tabs = SETTINGS_TABS()
   const tab = useTab('settings', tabs)
   const pane = (t: string): boolean => tab === t
+
+  // Google Drive backup state
+  const [driveStatus, setDriveStatus] = useState<DriveBackupStatus>({ connected: false })
+  const [note, setNote] = useState<string | undefined>()
+  const clientIdRef = useRef<HTMLInputElement>(null)
+  const clientSecretRef = useRef<HTMLInputElement>(null)
+
+  const loadDriveStatus = async () => {
+    try {
+      setDriveStatus(await driveBackupStatus())
+    } catch {
+      setDriveStatus({ connected: false })
+    }
+  }
+  useEffect(() => {
+    loadDriveStatus()
+  }, [])
+
+  const connect = async () => {
+    const id = clientIdRef.current?.value.trim()
+    const secret = clientSecretRef.current?.value.trim()
+    if (!id || !secret) return
+    try {
+      await driveBackupConnect({ clientId: id, clientSecret: secret })
+      await loadDriveStatus()
+      clientIdRef.current!.value = ''
+      clientSecretRef.current!.value = ''
+    } catch (e: unknown) {
+      setNote((e as Error).message)
+    }
+  }
+
+  const disconnect = async () => {
+    try {
+      await driveBackupDisconnect()
+      await loadDriveStatus()
+    } catch (e: unknown) {
+      setNote((e as Error).message)
+    }
+  }
+
+  const uploadNow = async () => {
+    try {
+      const f = await driveBackupUploadNow()
+      setNote(L(`Enviado para o Drive: ${f}`, `Uploaded to Drive: ${f}`))
+      await loadDriveStatus()
+    } catch (e: unknown) {
+      setNote((e as Error).message)
+    }
+  }
+
   return (
     <Page title={L('Configurações', 'Settings')}>
       <Tabs page="settings" tabs={tabs} />
@@ -2010,6 +2067,54 @@ export function SettingsPage(): ReactNode {
 
         {pane('integracoes') && <GithubCard info={settings.github} />}
 
+        {pane('backup') && (
+          <Card title={L('Backup no Google Drive', 'Google Drive backup')} lead={L('Copia automaticamente o banco do Tucano para o Google Drive, mantendo os 7 últimos. Cada usuário cria seu próprio projeto no Google Cloud Console.', 'Automatically copies the Tucano database to Google Drive, keeping the last 7. Each user creates their own Google Cloud Console project.')}>
+            <div className="key-row">
+              <Icon name="plug" />
+              <div className="grow">
+                <strong>{L('Conectar ao Google Drive', 'Connect to Google Drive')}</strong>
+                <p className="muted small">{L('Opcional: só ativo quando você define TUCANO_GDRIVE_CLIENT_ID e TUCANO_GDRIVE_CLIENT_SECRET (variáveis de ambiente) ou preenche abaixo.', 'Optional: only active when you set TUCANO_GDRIVE_CLIENT_ID and TUCANO_GDRIVE_CLIENT_SECRET (env vars) or fill in below.')}</p>
+              </div>
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              {driveStatus.connected ? (
+                <>
+                  <span className="badge badge--ok">{L('Conectado', 'Connected')}</span>
+                  {driveStatus.lastUpload && (
+                    <span className="badge">{L(`Último upload: ${new Date(driveStatus.lastUpload).toLocaleString()}`, `Last upload: ${new Date(driveStatus.lastUpload).toLocaleString()}`)}</span>
+                  )}
+                  {driveStatus.lastError && (
+                    <span className="badge badge--error">{L(`Erro: ${driveStatus.lastError}`, `Error: ${driveStatus.lastError}`)}</span>
+                  )}
+                  <button className="btn btn--sm" onClick={uploadNow}>{L('Fazer upload agora', 'Upload now')}</button>
+                  <button className="btn btn--sm btn--ghost" onClick={disconnect}>{L('Desconectar', 'Disconnect')}</button>
+                </>
+              ) : (
+                <>
+                  <label className="btn btn--sm">
+                    {L('Conectar…', 'Connect…')}
+                    <input type="text" placeholder="Client ID" ref={clientIdRef} style={{ marginRight: 4, width: 220 }} />
+                  </label>
+                  <label className="btn btn--sm">
+                    {L('Client Secret', 'Client Secret')}
+                    <input type="text" placeholder="Client Secret" ref={clientSecretRef} style={{ marginRight: 4, width: 260 }} />
+                  </label>
+                  <button className="btn btn--sm" onClick={connect}>{L('Conectar', 'Connect')}</button>
+                </>
+              )}
+            </div>
+            <p className="small muted">
+              {L('Variáveis de ambiente: TUCANO_GDRIVE_CLIENT_ID, TUCANO_GDRIVE_CLIENT_SECRET.', 'Env vars: TUCANO_GDRIVE_CLIENT_ID, TUCANO_GDRIVE_CLIENT_SECRET.')}
+            </p>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn btn--sm" onClick={() => void backupNow().then((f) => setNote(L(`Backup feito: ${f.split('/').pop()}`, `Backup done: ${f.split('/').pop()}`)))}>
+                {L('Fazer backup agora (local)', 'Back up now (local)')}
+              </button>
+              <button className="btn btn--sm btn--ghost" onClick={openBackups}>{L('Abrir pasta', 'Open folder')}</button>
+            </div>
+            {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
+          </Card>
+        )}
         {pane('geral') && <TeamCard />}
 
         {pane('agentes') && (
