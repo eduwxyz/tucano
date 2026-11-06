@@ -41,6 +41,8 @@ export interface Api {
   openDm(p: { agentId: string }): string
   ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with his conversation; fresh starts a new session
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
+  applyProposal(p: { messageId: string }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched
+  dismissProposal(p: { messageId: string }): void
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void

@@ -4,6 +4,15 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Qualquer agente cria por você.** Peça a um agente um agente novo, um time de agentes com um canal, uma rotina, um canal ou uma mudança num agente, e ele propõe num card com Aplicar e Descartar: nada muda até você aplicar.
+> - **O Tuca te ajuda com o Tucano.** Ele faz o que dá em vez de ensinar o passo a passo, explica o resto lendo um guia do app, e descobre por que algo não está dando certo olhando o workspace: motores, conectores, limites, rotinas e os erros das respostas, nunca o que foi dito nas conversas. Quando cita uma tela, manda um botão que leva até ela.
+
+### Added
+
+- **Any agent makes things for you, as cards you apply.** Ask an agent for a new agent, a team, a routine, a channel or a change to an agent, and it proposes it: a new agent as before; a team of 2 to 8 agents with a channel for them, created at once with **Create team**; a scheduled routine for any agent (an agent's own still go through scheduling it itself); a channel with its agents; or a change to an agent that exists, shown as before and after. Each is a card with **Apply** and **Discard**, applied the way the screens do it, and nothing changes until you apply it. Agents are told to propose when you ask or when it clearly solves what you asked, not in the middle of other work.
+- **The Tuca helps you with Tucano.** He does what he can instead of explaining how, asking only for what's missing, even when you ask "how do I…?". The rest he explains from a guide of the app (17 pages, from agents and connectors to workspaces and troubleshooting) he reads before answering, so he doesn't make up screens; other agents send those questions to him. Asked why something isn't working, he looks at the workspace first: harnesses and sign-ins, connectors and their errors, each agent's model, access and limit, routines and how their last run ended, and the replies that failed in the last week with their error, never what was said in conversations. When he mentions a screen, the message shows a button that opens it. A Tuca made before is brought up to date when the app starts, unless his instructions were rewritten by hand.
+
 ## [0.2.12] - 2026-11-05
 
 > **Em português:**

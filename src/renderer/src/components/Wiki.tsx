@@ -9,10 +9,11 @@ import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { call } from '../rpc'
-import { agentById, navigate, updateSettings, useStore, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
+import { agentById, navigate, setTab, updateSettings, useStore, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
 import { Sheet, Toggle } from './Pages'
 import { confirmDialog } from './Dialogs'
 import { AgentAvatar, Icon, type IconName } from './ui'
+import { screenOf } from '../../../shared/screens'
 
 const DEFAULT_KINDS = (): string[] => [L('Pessoa', 'Person'), L('Projeto', 'Project'), L('Assunto', 'Topic'), L('Decisão', 'Decision')]
 const CODE = /```[\s\S]*?```|`[^`\n]*`/g
@@ -164,9 +165,30 @@ function Peek({ title, rect }: { title: string; rect: DOMRect }): ReactNode {
 }
 
 // A link inside rendered Markdown: a wiki page opens here; anything else stays a link.
+// A link to one of the app's screens (the Tuca's "[Abrir Conectores](#abrir/conectores)"): a button that goes there.
+function ScreenLink({ target, children }: { target: NonNullable<ReturnType<typeof screenOf>>; children?: ReactNode }): ReactNode {
+  const agent = useStore((s) => (target.agentHandle ? s.agents.find((a) => a.handle === target.agentHandle) : undefined))
+  if (target.agentHandle && !agent) return <>{children}</>
+  const go = (): void => {
+    if (agent) return navigate({ kind: 'agent', id: agent.id })
+    const { screen } = target
+    if (!screen) return
+    if (screen.tab) setTab(screen.view, screen.tab)
+    navigate({ kind: screen.view } as View)
+  }
+  return (
+    <button type="button" className="screen-link" onClick={go}>
+      {children}
+      <Icon name="chevron" size={11} />
+    </button>
+  )
+}
+
 export function WikiLink({ href, children, missing }: { href?: string; children?: ReactNode; missing?: Set<string> }): ReactNode {
   const [hover, setHover] = useState<DOMRect | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const screen = screenOf(href)
+  if (screen) return <ScreenLink target={screen}>{children}</ScreenLink>
   if (href?.startsWith('#att/'))
     return (
       <span className="wiki-link wiki-link--source wiki-link--file" title={decodeURIComponent(href.slice(5))}>

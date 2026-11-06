@@ -468,6 +468,8 @@ export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: 
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.
 export const openTuca = (): void => navigate({ kind: 'tuca', from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
+export const applyProposal = (messageId: string): Promise<{ id: string }> => call('applyProposal', { messageId })
+export const dismissProposal = (messageId: string): void => void call('dismissProposal', { messageId }).catch(() => {})
 export const settleDraft = (messageId: string, agentId?: string): void => void fire(L('Não consegui salvar o cartão.', "I couldn't save the card."), 'settleDraft', { messageId, agentId })
 
 export async function openDm(agentId: string): Promise<void> {

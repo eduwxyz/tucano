@@ -57,7 +57,7 @@ import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
-import { AgentProposal } from './Tuca'
+import { AgentProposal, ProposalCard } from './Tuca'
 import { FoldToggle } from './Fold'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
@@ -396,6 +396,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.agentDraft && <AgentProposal message={message} />}
+        {message.run?.proposal && <ProposalCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
