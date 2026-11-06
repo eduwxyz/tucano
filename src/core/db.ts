@@ -309,7 +309,7 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN job_watch INTEGER NOT NULL DEFAULT 0;
-  CREATE TABLE job_watches (
+  CREATE TABLE IF NOT EXISTS job_watches (
     id TEXT PRIMARY KEY,
     data TEXT NOT NULL,
     created_at INTEGER NOT NULL
