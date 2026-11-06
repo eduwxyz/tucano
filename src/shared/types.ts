@@ -245,7 +245,8 @@ export interface LocalInfo {
 }
 
 export interface Settings {
-  workspaceName: string
+  workspaceName: string // the person's name: what the agents call them
+  workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
@@ -274,7 +275,7 @@ export interface Settings {
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
-  onboarding?: { done: boolean; checklistHidden?: boolean }
+  onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean; carried?: boolean } // carried: the general settings came from another workspace
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
@@ -383,6 +384,11 @@ export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: st
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops
 export const ERRORS_STOP = 8 // tool calls failing in a row
+export const SAME_TOOL_WARN = 15 // one connector tool called this many times in a reply (paging a whole history): told to narrow it
+export const SAME_TOOL_STOP = 60 // ...and past it, that tool is refused for the rest of the reply
+export const SLEEPS_FREE = 1 // commands that start by sleeping 20 s or more: the first runs, the next ones are refused
+export const SLEEPS_STOP = 4 // refused sleeps in a reply before it stops
+export const PENDING_WAIT_MINUTES = 5 // a connector result still running (a SQL statement) is awaited by the app this long
 
 // What a reply counts against limits: a token read from the cache costs about a
 // tenth of a new one, so it counts a tenth.

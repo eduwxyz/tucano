@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, mentioned, snip, systemPrompt, transcript, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -21,11 +21,13 @@ import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { Followups, replyKey, type Followup } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsOf, type Answer, type Question } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, canonical } from './policy'
+import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
 
@@ -117,6 +119,7 @@ export interface RunnerDeps {
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
+  timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
 
 // What the runner needs from the connector manager.
@@ -146,9 +149,13 @@ export function resultText(r: CallToolResult): string {
   if (bytes.length <= MAX_RESULT_BYTES) return text
   // Cut on a whole character: a split one decodes as U+FFFD at the end.
   const kept = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8').replace(/�+$/, '')
+  // How much was left out, so the agent narrows the question instead of paging through the rest.
+  const kb = (n: number): string => `${Math.round(n / 1000).toLocaleString(locale())} KB`
+  const lines = (s: string): number => s.split('\n').length
+  const shown = Math.max(1, Math.round((MAX_RESULT_BYTES / bytes.length) * 100))
   return `${kept}\n${L(
-    `[… resultado cortado em ${MAX_RESULT_BYTES / 1000} KB: o resto não chegou. Se precisar dele, chame de novo pedindo menos de uma vez (paginação, filtro, menos campos).]`,
-    `[… result cut at ${MAX_RESULT_BYTES / 1000} KB: the rest didn't come through. If you need it, call again asking for less at once (pagination, a filter, fewer fields).]`
+    `[… resultado cortado: chegaram ${kb(MAX_RESULT_BYTES)} de ${kb(bytes.length)} (${shown}%, ${lines(kept)} de ${lines(text)} linhas). Se precisar de mais, pergunte de um jeito mais estreito (uma janela de tempo menor, um filtro, menos campos, uma agregação); leia o resto em partes só se precisar mesmo de tudo.]`,
+    `[… result cut: ${kb(MAX_RESULT_BYTES)} of ${kb(bytes.length)} came through (${shown}%, ${lines(kept)} of ${lines(text)} lines). If you need more, ask more narrowly (a shorter time window, a filter, fewer fields, an aggregate); read the rest in parts only if you really need all of it.]`
   )}`
 }
 
@@ -167,7 +174,8 @@ export interface RoutineEvent {
 }
 
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' }
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -177,6 +185,7 @@ export class Runner {
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
   private sessions: Sessions
+  private followups = new Followups()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -193,15 +202,40 @@ export class Runner {
       }
     })
     // Left by an earlier run of the app, under the usual login and each account's.
-    const accounts = deps.dataDir ? join(deps.dataDir, 'accounts') : undefined
+    this.cleanTranscripts()
+    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+  }
+
+  // What the engines keep outside the app's folder (Claude Code's transcripts, in ~/.claude) for
+  // agents here, but not of a session still kept.
+  cleanTranscripts(): void {
+    const accounts = this.deps.dataDir ? join(this.deps.dataDir, 'accounts') : undefined
     let accountDirs: string[] = []
     try {
       if (accounts) accountDirs = readdirSync(accounts).map((d) => join(accounts, d))
     } catch {
       // no accounts
     }
-    for (const e of Object.values(deps.engines)) e.clean?.(deps.workDir, accountDirs)
-    setInterval(() => this.sessions.sweep(), 10 * 60_000).unref()
+    for (const e of Object.values(this.deps.engines)) e.clean?.(this.deps.workDir, accountDirs)
+  }
+
+  // The sessions let go are gone from disk: their processes exited and their files went after.
+  async settled(): Promise<void> {
+    await Promise.all(Object.values(this.deps.engines).map((e) => e.settle?.()))
+  }
+
+  // For good (the workspace is being deleted): what's queued is dropped, what's running stops,
+  // and the kept sessions go, with their transcripts.
+  stopAll(): void {
+    this.paused = true
+    this.queue.length = 0
+    this.followups = new Followups() // the places the dropped queue held, and what was noted for later
+    for (const c of this.controllers.values()) {
+      c.reason = 'stopped'
+      c.ctl.abort()
+    }
+    this.sessions.dropWhere(() => true)
+    this.checkIdle()
   }
 
   // An archived agent's sessions, or a deleted conversation's, go now: their process and the
@@ -215,6 +249,7 @@ export class Runner {
 
   setPaused(paused: boolean): void {
     this.paused = paused
+    if (!paused) this.pump() // resumed: any queued work that was blocked can go on
   }
 
   // The person is writing here. What will answer gets its Claude Code started now, so the reply
@@ -234,7 +269,7 @@ export class Runner {
       // A message outside threads in a conversation that answers in them opens a new thread: nothing is kept there yet.
       if (!agent || (conv.threads && !threadId)) return
       const engine = modelInfo(agent.modelId)?.engine ?? 'claude'
-      const id = this.sessions.idOf(`${agent.id}:${conv.id}:${threadId ?? ''}`)
+      const id = this.sessions.idOf(replyKey(agent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
       return
     }
@@ -330,6 +365,7 @@ export class Runner {
   retry(messageId: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
+    if (this.paused) return // nobody starts working while paused
     if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status)) return
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
@@ -343,6 +379,7 @@ export class Runner {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (msg?.run?.status !== 'paused' || msg.author.kind !== 'agent') return
+    if (this.paused) return // nobody starts working while paused
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
@@ -370,6 +407,7 @@ export class Runner {
   // Resolves with the agent's reply once that run ends, or undefined when it can't run.
   async runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> {
     const { db, emit } = this.deps
+    if (this.paused) return undefined // routines don't run while paused
     const conv = db.conversation(r.conversationId)
     const agent = db.agent(r.agentId)
     if (!conv || !agent || agent.archived) return undefined
@@ -399,6 +437,7 @@ export class Runner {
 
   // A routine's reply that failed, run again in place with the same request.
   async retryRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined> {
+    if (this.paused) return undefined // routines don't run while paused
     const { db } = this.deps
     const msg = db.message(messageId)
     const conv = db.conversation(r.conversationId)
@@ -484,6 +523,7 @@ export class Runner {
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
   private async routeAndRun(conv: Conversation, members: Agent[], threadId?: string): Promise<void> {
     const { db, engines } = this.deps
+    if (this.paused) return // nobody starts working while paused
     this.routing++
     const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
@@ -541,6 +581,7 @@ export class Runner {
 
   private pump(): void {
     while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
+      if (this.paused) return // paused: nothing new starts, queued work waits
       const job = this.queue.shift()!
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
@@ -568,8 +609,31 @@ export class Runner {
     return { model, account }
   }
 
+  // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
+  // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
+  // `reserved`: this reply was queued by handOff, which already holds its place.
+  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+    const threadId = opts.existing ? opts.existing.threadId : opts.threadId
+    const key = replyKey(agent.id, conv.id, threadId)
+    const { reserved, ...rest } = opts
+    this.followups.start(key, reserved)
+    let msg: Message
+    let f: Followup | undefined
+    try {
+      msg = await this.reply(agent, conv, rest)
+    } finally {
+      this.followups.end(key)
+      f = this.followups.take(key) // taken even when the reply threw: a stale follow-up must not wait for the next one
+    }
+    if (f && msg.run?.status === 'done' && !this.paused) {
+      this.followups.reserve(key)
+      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }))
+    }
+    return msg
+  }
+
   // `threadId`: the reply goes in that thread (an existing reply keeps its own).
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }): Promise<Message> {
+  private async reply(agent: Agent, conv: Conversation, opts: ReplyOpts): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -723,6 +787,11 @@ export class Runner {
       seen.set(key, { result, n })
       return n
     }
+    // Calls per connector tool, whatever the arguments: paging a whole channel changes the cursor each
+    // time, so the repeat guard never sees it.
+    const callsOf = new Map<string, number>()
+    let sleeps = 0 // commands that started by sleeping
+    let refusedSleeps = 0
 
     let pending = ''
     let timer: NodeJS.Timeout | null = null
@@ -955,6 +1024,21 @@ export class Runner {
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
+          // An agent with connectors sleeping with nothing checked after it is waiting for something outside
+          // (a query, a job): that holds the reply a minute at a time and makes nothing come sooner. The first
+          // runs; the next ones don't. A sleep before checking something here (a server, a build) always runs.
+          const slept = exposed.size && name === 'bash' && typeof args['command'] === 'string' ? idleSleepSeconds(args['command']) : 0
+          if (slept >= 20 && ++sleeps > SLEEPS_FREE) {
+            if (++refusedSleeps >= SLEEPS_STOP) halt('sleeping')
+            addSteps({ id: randomUUID(), label: L('Não esperou com sleep', "Didn't wait with sleep"), detail: snip(String(args['command']), 80), status: 'error' })
+            return textResult(
+              L(
+                `Não rodei: dormir sem conferir nada não faz nada chegar mais cedo e segura a resposta. Uma consulta de conector que volta ainda rodando (um SQL demorado) o app espera por você, por até ${PENDING_WAIT_MINUTES} minutos: rode-a uma vez só. Se precisar esperar algo no seu computador, durma e confira no mesmo comando (ex.: sleep 30 && curl …, ou um laço). Se não há o que esperar, siga com o que já tem ou encerre dizendo o que falta.`,
+                `Not run: sleeping without checking anything makes nothing come sooner and holds the reply. A connector query that comes back still running (a slow SQL) is awaited by the app for you, for up to ${PENDING_WAIT_MINUTES} minutes: run it only once. If you need to wait for something on your computer, sleep and check in the same command (e.g. sleep 30 && curl …, or a loop). If there's nothing to wait for, go on with what you have or end saying what's left.`
+              ),
+              true
+            )
+          }
           const t0 = Date.now()
           const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
           // A command shows whole (or the SQL it runs, pulled out), masked, from the moment it starts.
@@ -1241,10 +1325,43 @@ export class Runner {
           save()
         }
         try {
-          const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
-          if (r.isError) finish('error', errorReason(r))
-          else finish('done', undefined, resultSummary(resultText(r)))
-          return clip(r)
+          const { [REASON_PARAM]: _reason, ...toolArgs } = args
+          const first = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
+          // A query still running: the app waits for it here, with the connector's own status tool, instead
+          // of the agent sleeping and asking again. Not a status tool the agent called itself (asking whether a
+          // deploy finished wants the answer now), nor a write (starting a job doesn't mean waiting for it).
+          const pending = current.cls === 'read' && !isStatusTool(current.name) ? pendingOf(first) : undefined
+          const poller = pending && pollTool(db.tools(hit.connector.id), pending, (t) => allowed(t, db.agent(agent.id)?.grants[hit.connector.id]))
+          const done = (r: CallToolResult): void => (r.isError ? finish('error', errorReason(r)) : finish('done', undefined, resultSummary(resultText(r))))
+          if (!pending || !poller) {
+            done(first)
+            return clip(first)
+          }
+          const w = await awaitDone(first, async (p) => this.deps.connectors!.call(hit.connector.id, poller.tool.name, pollTool([poller.tool], p, () => true)?.args ?? poller.args), {
+            maxMs: PENDING_WAIT_MINUTES * 60_000,
+            wait: this.deps.timers?.wait,
+            now: this.deps.timers?.now,
+            signal: control.ctl.signal
+          })
+          const took = w.ms >= 60_000 ? `${Math.round(w.ms / 60_000)} min` : `${Math.max(1, Math.round(w.ms / 1000))} s`
+          msg.run = { ...msg.run!, steps: msg.run!.steps.map((s) => (s.id === step.id ? { ...s, detail: `${detail} · ${L(`esperou ${took}`, `waited ${took}`)}` } : s)) }
+          done(w.result)
+          if (!w.pending) return clip(w.result)
+          const ids = Object.entries(poller.args).map(([k, v]) => `${k}=${v}`).join(', ')
+          const r = clip(w.result)
+          return {
+            ...r,
+            content: [
+              ...r.content,
+              {
+                type: 'text',
+                text: L(
+                  `[Ainda ${w.pending.state} depois de ${took} esperando (${w.polls} consultas a ${poller.tool.name}). Não fique esperando nem durma: diga a ${settings.workspaceName} que ainda está rodando (${ids}) e siga com o que já dá pra fazer, ou chame ${poller.tool.name} uma vez mais no fim.]`,
+                  `[Still ${w.pending.state} after waiting ${took} (${w.polls} checks with ${poller.tool.name}). Don't keep waiting or sleep: tell ${settings.workspaceName} it's still running (${ids}) and go on with what you can do, or call ${poller.tool.name} once more at the end.]`
+                )
+              }
+            ]
+          }
         } catch (e) {
           const why = callError(e)
           finish('error', why)
@@ -1265,6 +1382,19 @@ export class Runner {
             true
           )
         }
+        // Only reads: paging a history is reading, and many writes in a row (filing 80 issues) are the work.
+        const count = exposed.get(name)?.tool.cls === 'read' ? (callsOf.get(name) ?? 0) + 1 : 0
+        if (count) callsOf.set(name, count)
+        if (count > SAME_TOOL_STOP) {
+          if (++failing >= ERRORS_STOP) halt('errors')
+          return textResult(
+            L(
+              `Recusada: você já chamou ${name} ${SAME_TOOL_STOP} vezes nesta resposta. Trabalhe com o que já tem: escreva o que achou e o que falta. Se precisar de mais, use um recorte estreito (uma busca, um filtro de tempo) com outra ferramenta, ou peça a ${settings.workspaceName} pra continuar.`,
+              `Refused: you've already called ${name} ${SAME_TOOL_STOP} times in this reply. Work with what you have: write what you found and what's left. If you need more, use a narrow cut (a search, a time filter) with another tool, or ask ${settings.workspaceName} to go on.`
+            ),
+            true
+          )
+        }
         inFlight++
         acted = true
         sign()
@@ -1280,6 +1410,13 @@ export class Runner {
             const warning = L(
               `Atenção: esta chamada deu exatamente o mesmo resultado ${n} vezes nesta resposta. Repetir não vai mudar nada: mude de abordagem, ou encerre dizendo onde travou.`,
               `Careful: this call gave exactly the same result ${n} times in this reply. Repeating won't change anything: change your approach, or end saying where you got stuck.`
+            )
+            return { ...r, content: [...r.content, { type: 'text', text: warning }] }
+          } else if (count === SAME_TOOL_WARN) {
+            addSteps({ id: randomUUID(), label: L('Chamou a mesma ferramenta muitas vezes', 'Called the same tool many times'), detail: `${name} · ${count}×`, status: 'error' })
+            const warning = L(
+              `Atenção: você já chamou ${name} ${count} vezes nesta resposta. Se está paginando um histórico inteiro (um canal, logs, uma tabela), pare: peça só a janela que a tarefa precisa, com o filtro de tempo da ferramenta (ex.: oldest/latest em segundos Unix), uma busca ou um limite. Depois de ${SAME_TOOL_STOP} chamadas, ela é recusada nesta resposta.`,
+              `Careful: you've called ${name} ${count} times in this reply. If you're paging through a whole history (a channel, logs, a table), stop: ask only for the window the task needs, with the tool's time filter (e.g. oldest/latest in Unix seconds), a search or a limit. Past ${SAME_TOOL_STOP} calls, it's refused for this reply.`
             )
             return { ...r, content: [...r.content, { type: 'text', text: warning }] }
           }
@@ -1302,7 +1439,7 @@ export class Runner {
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
     const thread = msg.threadId ? db.message(msg.threadId) : undefined
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread, searchable: canSeekThreads })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0 })
     const images: TurnImage[] = attached
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -1324,13 +1461,14 @@ export class Runner {
       skills: skills && mySkills,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
       publish: repos,
+      connectors: exposed.size > 0,
       builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
     })
 
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
     // thread) with only what's new since. Not while another agent is still writing a message this
     // reply would see half of: that one goes the usual way, and the session takes it all next time.
-    const sessionKey = `${agent.id}:${conv.id}:${msg.threadId ?? ''}`
+    const sessionKey = replyKey(agent.id, conv.id, msg.threadId)
     const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs, gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
@@ -1456,9 +1594,10 @@ export class Runner {
     const base = { depth: opts.depth, work, receipt, questions, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
-    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
+    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
       const why = {
         loop: L(`repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`, `I repeated the same thing, with the same result, ${REPEAT_STOP} times. It looked like a loop`),
+        sleeping: L('fiquei tentando esperar com sleep por algo que não chegava', 'I kept trying to wait with sleep for something that wasn’t coming'),
         errors: L(`${ERRORS_STOP} ferramentas falharam seguidas`, `${ERRORS_STOP} tools failed in a row`),
         stall: L(`fiquei ${Math.round(stallMs / 60_000)} minutos sem nenhum sinal, travado`, `I went ${Math.round(stallMs / 60_000)} minutes without any sign of life, stuck`)
       }[control.reason]
@@ -1766,6 +1905,8 @@ export class Runner {
     const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
     this.routing++
     try {
+      const keyOf = (a: Agent): string => replyKey(a.id, conv.id, msg.threadId)
+      const isBusy = (a: Agent): boolean => this.followups.busy(keyOf(a))
       let called = next
       let step = { label: L('Chamou', 'Called'), detail: list(next), ms: 0 }
       const failed = (why: string): void => {
@@ -1782,7 +1923,7 @@ export class Runner {
           const cwd = join(this.deps.workDir, '_router')
           mkdirSync(cwd, { recursive: true })
           const { messages } = contextWindow(db, msg, ROUTER_HISTORY)
-          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
+          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: this.members(conv), me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
           if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
           step.ms = r.ms
           if ('error' in r) failed(r.error)
@@ -1797,7 +1938,10 @@ export class Runner {
       }
       // Paused while the router was thinking: call no one.
       if (this.paused) called = []
-      else {
+      // Nothing awaits from here to the enqueues, so who is busy now is who is busy when they're called.
+      const busy = called.filter(isBusy)
+      if (!this.paused) {
+        if (busy.length) step.detail = `${step.detail ? `${step.detail} · ` : ''}${busy.length === called.length ? '' : `${list(busy)}: `}${busy.length > 1 ? L('já estão respondendo aqui, veem isto na próxima resposta', 'already replying here, will see this next') : L('já está respondendo aqui, vê isto na próxima resposta', 'already replying here, will see this next')}`
         // Seconds have passed: other code may have saved this reply meanwhile (the wiki, a draft), so add to what's stored.
         const saved = db.message(msg.id) ?? msg
         if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
@@ -1807,7 +1951,14 @@ export class Runner {
         this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
         return finished()
       }
-      for (const a of called) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId }))
+      // A noted follow-up counts as someone taking the turn: the agent will answer it, so no "done" yet.
+      for (const a of called) {
+        if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work })
+        else {
+          this.followups.reserve(keyOf(a))
+          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true }))
+        }
+      }
     } finally {
       this.routing--
       this.checkIdle()

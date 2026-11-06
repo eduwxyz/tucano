@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { handoffPrompt, parseRoute, routerPrompt } from '../src/core/router'
+import { handoffPrompt, handoffSystem, parseRoute, routerPrompt } from '../src/core/router'
 import type { Agent, Connector, Message } from '../src/shared/types'
 
 const agent = (id: string, handle: string, role: string, instructions = ''): Agent => ({
@@ -92,6 +92,17 @@ describe('handoffPrompt', () => {
   it('includes the recent messages and skips system notes', () => {
     expect(p).toContain('[Edu] revisa o build')
     expect(p).not.toContain('Chamei')
+  })
+
+  it('says who is already replying, only when someone is', () => {
+    expect(p).not.toContain('Já estão respondendo')
+    const busy = handoffPrompt({ reply: 'Valeu, @nina!', author: lia, candidates: [nina], busy: [nina], messages, members: team, me: 'Edu' })
+    expect(busy).toContain('Já estão respondendo aqui: Nina.')
+    expect(busy).toContain('algo novo')
+  })
+
+  it('does not count waiting for someone as a request', () => {
+    expect(handoffSystem()).toContain('Fico esperando o aviso do Léo')
   })
 })
 

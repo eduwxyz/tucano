@@ -279,6 +279,71 @@ describe('Runner', () => {
   })
 })
 
+describe('one reply at a time per agent and thread', () => {
+  const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((res) => { const t = setTimeout(res, ms); signal.addEventListener('abort', () => (clearTimeout(t), res()), { once: true }) })
+  // Lia and Bia ask Theo for something; Theo takes `ms` and records how many of his turns overlap.
+  const slowTheo = (ms: number): { engine: Engine; active: () => number; max: () => number } => {
+    let active = 0
+    let max = 0
+    const base = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, revisa o PR?' : t.system.startsWith('Você é bia') ? '@theo, e o deploy?' : 'feito') })
+    const engine: Engine = {
+      id: 'claude',
+      run: (t) =>
+        t.system.startsWith('Você é theo')
+          ? (async function* () {
+              max = Math.max(max, ++active)
+              try {
+                await sleep(ms, t.signal)
+                yield* base.run(t)
+              } finally {
+                active--
+              }
+            })()
+          : base.run(t)
+    }
+    return { engine, active: () => active, max: () => max }
+  }
+  const by = (id: string): Message[] => agentMessages().filter((m) => (m.author as { id: string }).id === id)
+
+  beforeEach(() => {
+    db.saveAgent(agent('a2', 'theo')) // on Claude, like the others
+    db.saveAgent(agent('a3', 'bia'))
+    db.createConversation({ id: 'c3', kind: 'channel', name: 'time', members: ['a1', 'a2', 'a3'] })
+    db.createConversation({ id: 'c4', kind: 'channel', name: 'outro', members: ['a1', 'a2'] })
+  })
+
+  it('answers hand-offs that arrive while the agent replies once more, after, never at the same time', async () => {
+    const t = slowTheo(800)
+    const r = runner(t.engine)
+    await r.send('c3', '@lia @bia começam')
+    await r.idle()
+    expect(by('a2').map((m) => [m.run?.status, m.run?.depth])).toEqual([['done', 2], ['done', 2]])
+    expect(t.max()).toBe(1)
+    // Whoever reached Theo while he was replying says so on their reply.
+    const notes = [...by('a1'), ...by('a3')].flatMap((m) => m.run!.steps.map((x) => x.detail ?? ''))
+    expect(notes.some((x) => x.includes('já está respondendo'))).toBe(true)
+  })
+
+  it('keeps conversations parallel: the same agent replies in two at once', async () => {
+    const t = slowTheo(300)
+    const r = runner(t.engine)
+    await Promise.all([r.send('c1', '@lia começa'), r.send('c4', '@lia começa')])
+    await r.idle()
+    expect(by('a2')).toHaveLength(2)
+    expect(t.max()).toBe(2)
+  })
+
+  it('drops the follow-up when the reply it waited for was stopped', async () => {
+    const t = slowTheo(2000)
+    const r = runner(t.engine)
+    await r.send('c3', '@lia @bia começam')
+    for (let i = 0; i < 100 && !(by('a2')[0]?.run?.status === 'working' && by('a1')[0]?.run?.steps.some((x) => x.label === 'Chamou') && by('a3')[0]?.run?.steps.some((x) => x.label === 'Chamou')); i++) await new Promise((res) => setTimeout(res, 10))
+    r.stop(by('a2')[0]!.id)
+    await r.idle()
+    expect(by('a2').map((m) => m.run?.status)).toEqual(['stopped'])
+  })
+})
+
 describe('Db', () => {
   it('marks runs left working as interrupted on startup', () => {
     db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'meio', at: 1, run: { status: 'working', steps: [{ id: 's', label: 'Pensando', status: 'running' }] } })

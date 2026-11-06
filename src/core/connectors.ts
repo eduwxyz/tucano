@@ -103,6 +103,24 @@ export const staleSession = (e: unknown): boolean =>
 
 const key = (id: string, what: string): string => `connector:${id}:${what}`
 
+// The gateway's callback port changes on every launch, and RFC 8252 §7.3 has an
+// authorization server treat a loopback redirect as port-agnostic. Comparing the
+// redirect without the port keeps the registration — and the refresh token, which
+// belongs to the client that got it — across restarts, instead of signing in again.
+// Only an http loopback address loses its port; anything else must match whole.
+export const sameLoopbackRedirect = (a: string, b: string): boolean => {
+  const shape = (u: string): string => {
+    try {
+      const { protocol, hostname, pathname, search } = new URL(u)
+      const loopback = protocol === 'http:' && (hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]')
+      return loopback ? `${protocol}//${hostname}${pathname}${search}` : u
+    } catch {
+      return u
+    }
+  }
+  return shape(a) === shape(b)
+}
+
 export class ConnectorManager {
   private live = new Map<string, Live>()
   private oauthStates = new Map<string, { connectorId: string; transport: StreamableHTTPClientTransport }>()
@@ -187,6 +205,13 @@ export class ConnectorManager {
 
   connectAll(): void {
     for (const c of this.deps.db.connectors()) void this.connect(c.id)
+  }
+
+  // Settles when every connection attempt under way has finished, whether it worked or not;
+  // undefined when none is, so whoever waits on it can go on at once.
+  settled(): Promise<void> | undefined {
+    const pending = [...this.live.values()].flatMap((l) => (l.connecting ? [l.connecting] : []))
+    return pending.length ? Promise.allSettled(pending).then(() => {}) : undefined
   }
 
   async closeAll(): Promise<void> {
@@ -436,11 +461,14 @@ export class ConnectorManager {
         state = randomBytes(16).toString('hex')
         return state
       },
-      // The callback port changes between launches; a registration for another
-      // redirect URL is useless, so register again.
+      // The callback port changes between launches; the registration is still good,
+      // so the refresh token that goes with it survives the restart (a refresh sends no
+      // redirect). Signing in again, it must be the exact address: a server that
+      // doesn't take any port on loopback would turn the new one away, so it registers again.
       clientInformation: async () => {
         const info = await secrets.getJson<OAuthClientInformationMixed & { redirect_uris?: string[] }>(key(id, 'oauth_client'))
-        return info && (!info.redirect_uris || info.redirect_uris.includes(redirectUrl)) ? info : undefined
+        const fits = (u: string): boolean => (interactive ? u === redirectUrl : sameLoopbackRedirect(u, redirectUrl))
+        return info && (!info.redirect_uris || info.redirect_uris.some(fits)) ? info : undefined
       },
       saveClientInformation: (info) => secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] }),
       tokens: () => secrets.getJson<OAuthTokens>(key(id, 'oauth_tokens')),

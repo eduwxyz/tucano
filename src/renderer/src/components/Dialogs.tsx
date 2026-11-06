@@ -5,6 +5,8 @@ import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as KeyEvent, type ReactNode } from 'react'
 import { agentById, archiveAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
+import { WorkspaceManager } from './WorkspaceManager'
+import { Modal } from './Modal'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
 
@@ -73,6 +75,7 @@ function DialogBody(): ReactNode {
   const dialog = useStore((s) => s.dialog)
   const conv = useStore((s) => (s.dialog && 'id' in s.dialog ? s.conversations.find((c) => c.id === (s.dialog as { id: string }).id) : undefined))
   const close = (): void => openDialog(null)
+  if (dialog?.kind === 'workspaces') return <WorkspaceManager onClose={close} create={dialog.create} />
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
@@ -160,58 +163,6 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
         </button>
       </footer>
     </Modal>
-  )
-}
-
-// Open windows, newest last: Esc and Tab belong to the one on top only.
-const openModals: object[] = []
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-
-// `className`: a card of another size (the news after an update).
-export function Modal({ title, onClose, children, className }: { title: string; onClose: () => void; children: ReactNode; className?: string }): ReactNode {
-  const card = useRef<HTMLDivElement>(null)
-  const close = useRef(onClose)
-  close.current = onClose
-  useEffect(() => {
-    const me = {}
-    openModals.push(me)
-    const before = document.activeElement as HTMLElement | null
-    if (!card.current?.contains(document.activeElement)) card.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus()
-    // Captured before the page's own keys, so an Esc here doesn't also close what's behind.
-    const keys = (e: KeyboardEvent): void => {
-      if (openModals[openModals.length - 1] !== me) return
-      if (e.key === 'Escape') {
-        e.stopImmediatePropagation()
-        e.preventDefault()
-        close.current()
-      } else if (e.key === 'Tab' && card.current) {
-        const all = [...card.current.querySelectorAll<HTMLElement>(FOCUSABLE)]
-        if (!all.length) return
-        const [first, last] = [all[0]!, all[all.length - 1]!]
-        const inside = card.current.contains(document.activeElement)
-        if (e.shiftKey && (document.activeElement === first || !inside)) (e.preventDefault(), last.focus())
-        else if (!e.shiftKey && (document.activeElement === last || !inside)) (e.preventDefault(), first.focus())
-      }
-    }
-    window.addEventListener('keydown', keys, true)
-    return () => {
-      window.removeEventListener('keydown', keys, true)
-      openModals.splice(openModals.indexOf(me), 1)
-      if (before?.isConnected) before.focus()
-    }
-  }, [])
-  return (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal__card ${className ?? ''}`} role="dialog" aria-modal="true" aria-label={title} ref={card}>
-        <header className="modal__head">
-          <strong>{title}</strong>
-          <button className="icon-btn icon-btn--sm" title={L('Fechar', 'Close')} onClick={onClose}>
-            <Icon name="x" size={14} />
-          </button>
-        </header>
-        {children}
-      </div>
-    </div>
   )
 }
 

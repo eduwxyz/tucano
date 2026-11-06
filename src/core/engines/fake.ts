@@ -187,7 +187,7 @@ function fakeHandoff(prompt: string): { handles: string[]; reason: string } {
   const [head = '', rest = ''] = prompt.split('<reply>\n')
   const reply = rest.slice(0, rest.lastIndexOf('\n</reply>'))
   const body = reply.replace(/^(?:@[\w-]+|[\s,.!:;-])+/, '')
-  if (!body.includes('?') && /^(valeu|obrigad|combinado|ok\b|beleza|👍|thanks|got it)/i.test(body)) return { handles: [], reason: 'agradecimento, ninguém precisa responder' }
+  if (!body.includes('?') && /^(valeu|obrigad|combinado|ok\b|beleza|👍|thanks|got it|fico esperando|aguardo)/i.test(body)) return { handles: [], reason: 'agradecimento, ninguém precisa responder' }
   return { handles: [...head.matchAll(/^- ([a-z0-9_-]+): /gim)].map((m) => m[1]!), reason: 'pedido' }
 }
 

@@ -349,6 +349,12 @@ describe('Claude Code with a session', () => {
   it('keeps its file under the config folder, by working folder', () => {
     expect(claudeProjectDir('/cfg', 'E:\\tucano-tmp\\probe-agent')).toBe(join('/cfg', 'projects', 'E--tucano-tmp-probe-agent'))
   })
+
+  it('names a long working folder as Claude Code does: cut at 200, then a hash of the whole path', () => {
+    // A real folder Claude Code made, for an agent of a second workspace under a long data folder.
+    const cwd = '/private/tmp/claude-501/-Users-eduardo-dev-agent-desk/a8f0d917-0489-4ee3-b90e-3ab79f9c8560/scratchpad/ws-leak-ySAaAW/workspaces/01a1ade8-40cc-79b7-bd30-8b0854d380d3/agents/9f3ef99c-7f51-4ea2-a06d-8cfbc28ee75c'
+    expect(claudeProjectDir('/cfg', cwd)).toBe(join('/cfg', 'projects', '-private-tmp-claude-501--Users-eduardo-dev-agent-desk-a8f0d917-0489-4ee3-b90e-3ab79f9c8560-scratchpad-ws-leak-ySAaAW-workspaces-01a1ade8-40cc-79b7-bd30-8b0854d380d3-agents-9f3ef99c-7f51-4ea2-a06d-8cfb-nrss68'))
+  })
 })
 
 // ---------- a process kept open between turns (a stand-in for Claude Code) ----------
@@ -418,7 +424,7 @@ describe('a Claude Code process kept open', () => {
     writeFileSync(file, '{}\n')
     mkdirSync(join(claudeProjectDir(cfg, dir), 's1', 'tool-results'), { recursive: true })
     engine.release!('s1')
-    for (let i = 0; i < 50 && existsSync(file); i++) await new Promise((r) => setTimeout(r, 100)) // once its process is gone
+    await engine.settle!() // once its process is gone
     expect(existsSync(file)).toBe(false)
     expect(existsSync(join(claudeProjectDir(cfg, dir), 's1'))).toBe(false)
     engine.dispose!()
