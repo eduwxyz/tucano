@@ -12,6 +12,17 @@ export const SNAPSHOT = `(() => {
   // "Tudo Tudo": a visible label and a hidden copy for screen readers.
   const once = (s) => { const w = s.split(' '); const h = w.length / 2; return w.length % 2 === 0 && w.slice(0, h).join(' ') === w.slice(h).join(' ') ? w.slice(0, h).join(' ') : s }
   const ROLES = { button: 'botão', tab: 'aba', menuitem: 'item de menu', menuitemcheckbox: 'item de menu', option: 'opção', combobox: 'campo', textbox: 'campo', searchbox: 'campo', switch: 'chave', slider: 'controle' }
+  // The element that has the focus, inside shadow roots too.
+  let active = document.activeElement
+  while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement
+  // What a field's form sends with: its submit button's label (Enter in the field presses it).
+  const sender = (f) => {
+    const form = f.form || (f.closest && f.closest('form'))
+    if (!form) return undefined
+    const b = form.querySelector('button:not([type]),button[type=submit],input[type=submit],input[type=image]')
+    if (!b) return ''
+    return clean(b.getAttribute('aria-label')) || clean(b.innerText) || clean(b.value) || clean(b.getAttribute('title')) || clean(b.getAttribute('alt'))
+  }
   const byIds = (ids) => clean((ids || '').split(/\\s+/).map((id) => { const n = id && (el.getRootNode().getElementById ? el.getRootNode() : document).getElementById(id); return n ? n.innerText || n.textContent : '' }).join(' '))
   let el
   for (el of found) {
@@ -31,7 +42,8 @@ export const SNAPSHOT = `(() => {
     else if (el.isContentEditable) value = clean(el.innerText).slice(0, 80)
     const c = el.checked !== undefined && (type === 'checkbox' || type === 'radio') ? el.checked : el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-selected') === 'true' ? true : undefined
     refs.push(new WeakRef(el))
-    out.push({ ref: refs.length, role, label: once(label).slice(0, 100), value: value || undefined, checked: c, disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true' || undefined, inView: r.bottom > 0 && r.right > 0 && r.top < H && r.left < W })
+    const submits = field && tag === 'input' ? sender(el) : undefined
+    out.push({ ref: refs.length, role, label: once(label).slice(0, 100), value: value || undefined, checked: c, disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true' || undefined, inView: r.bottom > 0 && r.right > 0 && r.top < H && r.left < W, focused: el === active || undefined, multiline: (field && (tag === 'textarea' || el.isContentEditable)) || undefined, submits: submits === undefined ? undefined : submits.slice(0, 100) })
   }
   window.__adRefs = refs
   return { url: location.href, title: document.title, w: W, h: H, scrollY: Math.round(scrollY), scrollH: document.documentElement.scrollHeight, elements: out }

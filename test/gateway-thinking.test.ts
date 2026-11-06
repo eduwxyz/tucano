@@ -21,9 +21,9 @@ describe('thinking on a model behind a gateway that isn’t Anthropic’s', () =
   })
 
   it('goes in the environment Claude Code runs with, under the gateway’s own settings', () => {
-    expect(claudeEnv({ env: {} }, undefined, true)['CLAUDE_CODE_DISABLE_THINKING']).toBe('1')
-    expect(claudeEnv({ env: {} }, undefined, false)['CLAUDE_CODE_DISABLE_THINKING']).toBe(process.env['CLAUDE_CODE_DISABLE_THINKING'])
-    expect(claudeEnv({ env: { CLAUDE_CODE_DISABLE_THINKING: '0' } }, undefined, true)['CLAUDE_CODE_DISABLE_THINKING']).toBe('0')
+    expect(claudeEnv({ env: {} }, undefined, undefined, true)['CLAUDE_CODE_DISABLE_THINKING']).toBe('1')
+    expect(claudeEnv({ env: {} }, undefined, undefined, false)['CLAUDE_CODE_DISABLE_THINKING']).toBe(process.env['CLAUDE_CODE_DISABLE_THINKING'])
+    expect(claudeEnv({ env: { CLAUDE_CODE_DISABLE_THINKING: '0' } }, undefined, undefined, true)['CLAUDE_CODE_DISABLE_THINKING']).toBe('0')
   })
 
   it.skipIf(process.platform === 'win32')('the CLI gets CLAUDE_CODE_DISABLE_THINKING only then, and the person’s own setting wins', async () => {

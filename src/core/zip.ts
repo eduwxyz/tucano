@@ -1,7 +1,8 @@
 // Reads a .zip without a library: the central directory for the list, then only the entries asked for,
-// stored or deflated. Nothing is written to disk. Each entry has a cap, checked before inflating, so a
+// stored or deflated. Nothing is written to disk (extractZip, below, is the one that does). Each entry has a cap, checked before inflating, so a
 // small file that claims to unpack into gigabytes is refused. No ZIP64 (files over 4 GB), no encryption.
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
+import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 import { L } from '../shared/lang'
 
@@ -106,4 +107,27 @@ export function zipFromFile(path: string): Zip {
     closeSync(fd)
     throw e
   }
+}
+
+// A whole .zip into a folder (a vault sent from another computer): only plain relative paths
+// (never absolute, never "..", never macOS's __MACOSX copies), each file and the total capped.
+// A single folder at the top, as zipping a folder makes, becomes the root. Returns that root.
+export function extractZip(zip: Zip, to: string, caps = { file: 50 * 1024 * 1024, total: 1024 * 1024 * 1024 }): string {
+  let total = 0
+  const tops = new Set<string>()
+  for (const e of zip.entries.values()) {
+    const name = e.name.replace(/\\/g, '/')
+    if (name.endsWith('/') || name.startsWith('__MACOSX/') || /(^|\/)\.DS_Store$/.test(name)) continue
+    const parts = name.split('/')
+    if (isAbsolute(name) || /^[A-Za-z]:/.test(name) || parts.some((p) => p === '..' || p === '')) throw new Error(L(`O .zip tem um caminho que não pode: ${name}`, `The .zip has a path it can't: ${name}`))
+    total += e.size
+    if (total > caps.total) throw new Error(L('O .zip é grande demais (mais de 1 GB descompactado).', 'The .zip is too big (over 1 GB unpacked).'))
+    const data = zip.read(e.name, caps.file)
+    if (!data) continue
+    const file = join(to, ...parts)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, data)
+    tops.add(parts.length > 1 ? parts[0]! : '')
+  }
+  return tops.size === 1 && !tops.has('') ? join(to, [...tops][0]!) : to
 }
