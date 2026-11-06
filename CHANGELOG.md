@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **Models behind a company gateway answer fast at low and medium effort.** Claude Code asks every call to think, which puts a model that isn't Anthropic's (DeepSeek through a gateway, say) in its slow reasoning mode, so each step took 10 seconds to a minute and the reasoning could even pass the output cap on a plain "oi". Now, on such models, Low and Medium effort turn that off and High and Max keep it; the agent's page says so under the effort. Anthropic's models are unchanged, and your own `CLAUDE_CODE_DISABLE_THINKING` in Claude Code's settings still wins.
+
 ## [0.2.14] - 2026-11-06
 
 > **Em português:**
@@ -87,7 +91,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **The server's page opens over plain HTTP on a private address,** such as Tailscale or a home network. It stayed blank: a browser outside a secure context has no `crypto.randomUUID`, which the app calls as it starts. The page now brings a small replacement for it, and one for the copy buttons. Thanks [@daniellcar](https://github.com/daniellcar)! ([#142](https://github.com/eduwxyz/tucano/pull/142))
 - **The toucan shows in the Linux dock and app menu.** The .deb showed a generic gear: the icon was a single 1024 px image, under a size the icon theme doesn't list, so the dock found nothing. It now installs the toucan at every size from 16 to 1024 px. Thanks [@cleitoncsalvagni](https://github.com/cleitoncsalvagni)! ([#140](https://github.com/eduwxyz/tucano/pull/140))
 - **The app opens unpacked even when its version isn't one the updater accepts.** The updater was made as the app started, and making it checks the version, so an unpacked build reporting one like `0.0` stopped before its window opened. It's now made only when updates are on. Thanks [@b7s](https://github.com/b7s)! ([#123](https://github.com/eduwxyz/tucano/pull/123))
-- **Models behind a company gateway answer fast at low and medium effort.** Claude Code asks every call to think, which puts a model that isn't Anthropic's (DeepSeek through a gateway, say) in its slow reasoning mode, so each step took 10 seconds to a minute and the reasoning could even pass the output cap on a plain "oi". Now, on such models, Low and Medium effort turn that off and High and Max keep it; the agent's page says so under the effort. Anthropic's models are unchanged, and your own `CLAUDE_CODE_DISABLE_THINKING` in Claude Code's settings still wins.
 
 ## [0.2.11] - 2026-11-05
 
