@@ -305,6 +305,13 @@ const MIGRATIONS = [
   INSERT OR IGNORE INTO message_notifications (message_id, phase)
     SELECT id, COALESCE(json_extract(run, '$.status'), 'message') FROM messages;
   CREATE INDEX IF NOT EXISTS message_notifications_unread ON message_notifications (message_id) WHERE unread = 1;
+  `,
+  `
+  -- gemini to antigravity harness rename
+  UPDATE settings SET value = REPLACE(value, '"gemini"', '"antigravity"') WHERE key = 'harnesses';
+  UPDATE agents SET model = REPLACE(model, 'gemini:', 'antigravity:') WHERE model LIKE 'gemini:%';
+  UPDATE agents SET fallback_model = REPLACE(fallback_model, 'gemini:', 'antigravity:') WHERE fallback_model LIKE 'gemini:%';
+  UPDATE receipts SET engine = 'antigravity' WHERE engine = 'gemini';
   `
 ]
 

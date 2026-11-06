@@ -22,7 +22,7 @@ import { claudeEngine, userProvider } from './engines/claude'
 import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
-import { geminiAppDir, geminiEngine } from './engines/gemini'
+import { antigravityAppDir, antigravityEngine } from './engines/antigravity'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
@@ -99,7 +99,7 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
 }
 
 const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
-let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine, cursor: unknownEngine, grok: unknownEngine }
+let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, antigravity: unknownEngine, cursor: unknownEngine, grok: unknownEngine }
 // The models OpenCode and Pi list (what the person has logins for), from the last check.
 let listed: Partial<Record<EngineId, string[]>> = {}
 // Codex's own catalog for this login (names and what each model is for), from the last check.
@@ -108,7 +108,7 @@ let codexCatalog: CodexModel[] = []
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 async function detect(): Promise<void> {
   if (fake) {
-    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } }
+    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } }
     listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
   } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
   await checkAccounts()
@@ -185,13 +185,13 @@ function watchAccount(id: string): void {
 const githubInfo = (): Settings['github'] => githubRef?.info()
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   : {
       claude: claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())),
       codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())),
       opencode: opencodeEngine(() => engines.opencode.path, join(dataDir, 'opencode-home'), loginEnv, () => engines.opencode.version),
       pi: piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv),
-      gemini: geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv),
+      antigravity: antigravityEngine(() => engines.antigravity.path, antigravityAppDir(dataDir), loginEnv),
       cursor: cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv),
       grok: grokEngine(() => engines.grok.path, loginEnv)
     }

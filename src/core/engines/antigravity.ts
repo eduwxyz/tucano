@@ -22,7 +22,7 @@ import { L } from '../../shared/lang'
 // output_tokens, …}} — the terminal event.
 const GEMINI_WEB = 'google_web_search' // Gemini's own, kept only when the agent has the web
 
-export function geminiParser(): Parser {
+export function antigravityParser(): Parser {
   let text = ''
   let usage: { inputTokens: number; cacheReadTokens: number; outputTokens: number } | undefined
   let failed = false
@@ -47,7 +47,7 @@ export function geminiParser(): Parser {
         const err = ev['error'] as { message?: unknown } | undefined
         if (ev['status'] === 'error' || err) {
           failed = true
-          error = (typeof err?.message === 'string' && err.message) || error || L('O Gemini terminou com erro.', 'Gemini ended with an error.')
+          error = (typeof err?.message === 'string' && err.message) || error || L('O Antigravity terminou com erro.', 'Antigravity ended with an error.')
         } else {
           const s = (ev['stats'] ?? {}) as Record<string, unknown>
           usage = { inputTokens: num(s['input_tokens']), cacheReadTokens: num(s['cached']), outputTokens: num(s['output_tokens']) }
@@ -59,7 +59,7 @@ export function geminiParser(): Parser {
       if (failed) return [{ type: 'error', message: error }]
       if (usage) return [{ type: 'done', text, usage }]
       const detail = lastLines(stderr)
-      return [{ type: 'error', message: L(`O Gemini saiu sem resposta (código ${code ?? '?'}).`, `Gemini exited without a reply (code ${code ?? '?'}).`) + (detail ? `\n${detail}` : '') }]
+      return [{ type: 'error', message: L(`O Antigravity saiu sem resposta (código ${code ?? '?'}).`, `Antigravity exited without a reply (code ${code ?? '?'}).`) + (detail ? `\n${detail}` : '') }]
     }
   }
 }
@@ -69,7 +69,7 @@ export function geminiParser(): Parser {
 // terminal prompt — the gateway is the only tool source and it decides what
 // runs, so auto-approving at the CLI is right. The system prompt and the MCP
 // server come from the home (geminiHome).
-export function geminiArgs(turn: Pick<Turn, 'model'>): string[] {
+export function antigravityArgs(turn: Pick<Turn, 'model'>): string[] {
   return ['-p', '', '--output-format', 'stream-json', '--approval-mode', 'yolo', '-m', turn.model]
 }
 
@@ -77,7 +77,7 @@ export function geminiArgs(turn: Pick<Turn, 'model'>): string[] {
 const userHomeOf = (): string => join(process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
 
 // Where the app keeps the Gemini homes, in its data folder.
-export const geminiAppDir = (dataDir: string): string => join(dataDir, 'gemini')
+export const antigravityAppDir = (dataDir: string): string => join(dataDir, 'antigravity')
 
 // A link where one is possible (the login must stay the person's), a plain copy
 // where the platform refuses links (Windows without privileges).
@@ -100,7 +100,7 @@ function linkOrCopy(target: string, at: string): void {
 // as the only MCP server and turns the built-in tools off; the person's login
 // (OAuth credentials, or an env-based key/gateway) is brought in; the agent's
 // instructions go to a file the CLI reads as the system prompt.
-export function geminiHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, userHome = userHomeOf()): string {
+export function antigravityHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, userHome = userHomeOf()): string {
   mkdirSync(appDir, { recursive: true })
   const home = join(appDir, randomBytes(8).toString('hex'))
   const dot = join(home, '.gemini')
@@ -148,28 +148,28 @@ export function geminiHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
 // any folder). That only holds for the keys we set: built-in tools, MCP servers,
 // skills, subagents, tool discovery, hooks and telemetry. A key a newer CLI adds
 // is the folder's until it's set here too.
-export function geminiEnv(home: string, base: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+export function antigravityEnv(home: string, base: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return { ...base, GEMINI_CLI_HOME: home, GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, '.gemini', 'settings.json'), GEMINI_SYSTEM_MD: join(home, 'system.md') }
 }
 
 // The model is "<provider>/<model>" as the picker lists it; the CLI wants the
 // model id alone. The home carries the gateway and the system prompt.
-export function geminiEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
+export function antigravityEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
   return {
-    id: 'gemini',
+    id: 'antigravity',
     async *run(turn) {
       const path = bin()
       if (!path) {
-        yield { type: 'error', message: L('O Gemini não está instalado. Veja em Configurações.', "Gemini isn't installed. See Settings.") }
+        yield { type: 'error', message: L('O Antigravity não está instalado. Veja em Configurações.', "Antigravity isn't installed. See Settings.") }
         return
       }
       const model = turn.model.includes('/') ? turn.model.slice(turn.model.indexOf('/') + 1) : turn.model
-      const home = geminiHome(appDir, turn)
+      const home = antigravityHome(appDir, turn)
       // Provider keys may live in the person's shell (an SSO helper prints the
       // token), which an app opened from Finder doesn't get.
-      const env = geminiEnv(home, { ...process.env, ...(await shellEnv()) })
+      const env = antigravityEnv(home, { ...process.env, ...(await shellEnv()) })
       try {
-        yield* runCli({ bin: path, args: geminiArgs({ model }), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: geminiParser(), env })
+        yield* runCli({ bin: path, args: antigravityArgs({ model }), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: antigravityParser(), env })
       } finally {
         // The turn's throwaway home goes; the login is a link, so only this
         // turn's settings, system prompt and session are dropped.
@@ -185,18 +185,24 @@ export function geminiEngine(bin: () => string | undefined, appDir: string, shel
 
 // Dynamically extracts model definitions from the installed @google/gemini-cli
 // bundle when available, matching what the CLI exposes in `/model`.
-export function detectGeminiCliModels(binPath?: string): string[] {
+export function detectAntigravityCliModels(binPath?: string): string[] {
   if (!binPath) return []
   try {
     const real = realpathSync(binPath)
-    const marker = join('@google', 'gemini-cli')
-    const idx = real.indexOf(marker)
-    const pkgDir =
-      idx !== -1
-        ? real.slice(0, idx + marker.length)
-        : existsSync(join(dirname(real), 'node_modules', '@google', 'gemini-cli'))
-          ? join(dirname(real), 'node_modules', '@google', 'gemini-cli')
-          : undefined
+    const markers = [join('@google', 'antigravity-cli'), join('@google', 'gemini-cli')]
+    let pkgDir: string | undefined
+    for (const marker of markers) {
+      const idx = real.indexOf(marker)
+      if (idx !== -1) {
+        pkgDir = real.slice(0, idx + marker.length)
+        break
+      }
+      const alt = join(dirname(real), 'node_modules', marker)
+      if (existsSync(alt)) {
+        pkgDir = alt
+        break
+      }
+    }
     if (!pkgDir) return []
     const bundleDir = join(pkgDir, 'bundle')
     if (!existsSync(bundleDir)) return []
@@ -210,7 +216,7 @@ export function detectGeminiCliModels(binPath?: string): string[] {
       while ((match = regex.exec(content)) !== null) {
         if (match[1]) found.push(match[1])
       }
-      if (found.length > 0) return [...new Set(found)].map((m) => `gemini/${m}`)
+      if (found.length > 0) return [...new Set(found)].map((m) => `antigravity/${m}`)
     }
   } catch {
     // not resolvable or readable: use default models
@@ -220,18 +226,18 @@ export function detectGeminiCliModels(binPath?: string): string[] {
 
 // The model ids Gemini can run. Dynamically discovered from the installed
 // @google/gemini-cli package when present, falling back to known models.
-export function geminiModels(binPath?: string): string[] {
-  const dynamic = detectGeminiCliModels(binPath)
+export function antigravityModels(binPath?: string): string[] {
+  const dynamic = detectAntigravityCliModels(binPath)
   if (dynamic.length > 0) return dynamic
   return [
-    'gemini/gemini-3.1-pro-preview',
-    'gemini/gemini-3-flash-preview',
-    'gemini/gemini-3.8-flash',
-    'gemini/gemini-3.5-flash-lite',
-    'gemini/gemini-2.5-pro',
-    'gemini/gemini-2.5-flash',
-    'gemini/gemini-2.5-flash-lite',
-    'gemini/gemma-4-31b-it',
-    'gemini/gemma-4-26b-a4b-it'
+    'antigravity/gemini-3.1-pro-preview',
+    'antigravity/gemini-3-flash-preview',
+    'antigravity/gemini-3.8-flash',
+    'antigravity/gemini-3.5-flash-lite',
+    'antigravity/gemini-2.5-pro',
+    'antigravity/gemini-2.5-flash',
+    'antigravity/gemini-2.5-flash-lite',
+    'antigravity/gemma-4-31b-it',
+    'antigravity/gemma-4-26b-a4b-it'
   ]
 }
