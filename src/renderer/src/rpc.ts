@@ -27,6 +27,14 @@ declare global {
       onUpdate: (cb: (state: UpdateState) => void) => void
       checkUpdates: () => void
       installUpdate: () => void
+      servers?: {
+        // desktop only: Tucanos on servers, each in its own window
+        list: () => Promise<{ id: string; name: string; origin: string; open: boolean }[]>
+        pair: (link: string) => Promise<'paired' | 'cancelled' | 'invalid' | 'unsafe'>
+        open: (id: string) => void
+        forget: (id: string) => Promise<boolean>
+        onChanged: (cb: () => void) => void
+      }
     }
   }
 }

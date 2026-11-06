@@ -20,6 +20,7 @@ import { ARTIFACT_CSP, BASE_HEADERS, clientIp, decodedPath, Limiter, PAGE_HEADER
 import { Preview } from './preview'
 import { vault } from './vault'
 import { verifyLocalUrl } from '../core/local-paths'
+import { pairingLink } from '../shared/servers'
 import { INSECURE_CONTEXT_SHIM } from './web-shim'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
@@ -41,8 +42,10 @@ const publicUrl = (process.env['TUCANO_URL'] || `http://${host === '0.0.0.0' || 
 
 // `server.js link`: the one place the token is printed. The log never has it, since logs
 // get kept, shipped and pasted into issues.
+// The second line pairs the desktop app or the phone (Settings › Servers, or a QR code of it).
 if (process.argv[2] === 'link') {
   console.log(`${publicUrl}/?token=${token}`)
+  console.log(pairingLink({ origin: publicUrl, token }))
   process.exit(0)
 }
 // The secrets (Telegram, GitHub, connector keys) are sealed with this key; on a
