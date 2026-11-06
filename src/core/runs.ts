@@ -667,15 +667,15 @@ export class Runner {
     const placed = go.filter((t) => !t.askedIn).map((t) => {
       const target = db.agent(t.agentId)!
       const where = conv.kind === 'channel' ? conv : this.pair(manager, target)
-      // In the DM between the two, the request opens a thread of its own: the manager's message starts it.
-      return { t: { ...t, conversationId: where.id, ...(where.id !== conv.id ? { threadId: randomUUID() } : {}) }, target, where }
+      // In a DM between the two set to threads, the request opens one of its own: the manager's message starts it.
+      return { t: { ...t, conversationId: where.id, ...(where.id !== conv.id && where.threads ? { threadId: randomUUID() } : {}) }, target, where }
     })
     this.update(msg, { run: { ...msg.run!, delegated: placed.length || asks.length ? [...placed.map((p) => p.t), ...asks] : undefined } })
     const above = msg.run?.delegation
     for (const { t, target, where } of placed) {
       if (where.id !== conv.id) {
         // A millisecond earlier than the reply it gets, so it always reads first.
-        const ask: Message = { id: t.threadId!, conversationId: where.id, author: { kind: 'agent', id: manager.id }, text: [t.task, t.doneWhen && `${L('Pronto quando', 'Done when')}: ${t.doneWhen}`].filter(Boolean).join('\n\n'), at: Date.now() - 1 }
+        const ask: Message = { id: t.threadId ?? randomUUID(), conversationId: where.id, author: { kind: 'agent', id: manager.id }, text: [t.task, t.doneWhen && `${L('Pronto quando', 'Done when')}: ${t.doneWhen}`].filter(Boolean).join('\n\n'), at: Date.now() - 1 }
         db.saveMessage(ask)
         this.deps.emit({ type: 'message', message: ask })
       }
@@ -687,9 +687,10 @@ export class Runner {
   }
 
   // The DM between two agents: one per pair, made the first time one asks the other for something, and used
-  // again every time after. Each request is a thread in it, and the agent working on one sees only that
-  // thread (see turn), so it reads no other request's history. (A DM made for a single request, from
-  // before, stays as it was and isn't used again.)
+  // again every time after. Requests go in it like any message, one after the other, and the agent working on
+  // one reads the DM's recent history. Set to threads, each request is a thread in it, and the agent working on
+  // one sees only that thread (see turn), so it reads no other request's history. (A DM made for a single
+  // request, from before, stays as it was and isn't used again.)
   private pair(a: Agent, b: Agent): Conversation {
     const { db, emit } = this.deps
     const found = db.conversations().find((c) => c.kind === 'agents' && !c.request && c.members.length === 2 && c.members.includes(a.id) && c.members.includes(b.id))
@@ -925,7 +926,7 @@ export class Runner {
     // A delegate working in its manager's channel sees what it was sent and the channel from then on, not what
     // came before. In the DM between the two, it's their own conversation: it sees it as it is.
     const inline = !!opts.delegation && db.message(opts.delegation.from)?.conversationId === conv.id
-    // (In the DM between two agents, each request is its own thread, and a reply in a thread sees that thread alone.)
+    // (Set to threads, each request there is its own thread, and a reply in a thread sees that thread alone.)
     const summary = inline ? undefined : window.summary
     const history = inline ? window.messages.filter((m) => m.id === opts.delegation!.from || m.at > opts.delegation!.since) : window.messages
     // What this reply counts toward: given (a chain, a routine's issue), or an issue named in the message it answers.

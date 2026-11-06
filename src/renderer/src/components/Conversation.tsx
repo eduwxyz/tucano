@@ -189,6 +189,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
                 {L('Ver perfil', 'See profile')}
               </button>
             )}
+            {pair && (
+              <button className="icon-btn" title={L('Configurações da conversa', 'Conversation settings')} aria-label={L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+                <Icon name="gear" size={16} />
+              </button>
+            )}
           </div>
         </header>
 

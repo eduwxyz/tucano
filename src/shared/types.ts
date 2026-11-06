@@ -220,7 +220,7 @@ export interface Delegated {
   doneWhen?: string
   // Asked in a channel, of whoever can help (pedir_ajuda): the channel. agentId is '' until the router picks.
   askedIn?: string
-  threadId?: string // the thread the question opened there
+  threadId?: string // the thread it opened there: the question's, or the request's in a DM between agents set to threads
   nobody?: boolean // no one there could help
   reported?: boolean // `nobody` already went back to the one who asked
 }

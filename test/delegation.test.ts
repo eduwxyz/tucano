@@ -108,7 +108,7 @@ describe('delegation', () => {
     expect(notes.filter((n) => n.kind === 'done').map((n) => n.title)).toEqual(['chefe terminou', 'chefe terminou'])
   })
 
-  it('keeps one DM per pair of agents: each request a thread in it, and the work on one sees only its thread', async () => {
+  it('keeps one DM per pair of agents: the requests come in the conversation, and the work on one reads the earlier ones', async () => {
     const r = runner()
     await r.send('dm', 'delegue a @dev: escrever o post')
     await r.idle()
@@ -119,6 +119,35 @@ describe('delegation', () => {
     const pairs = db.conversations().filter((c) => c.kind === 'agents')
     expect(pairs).toHaveLength(1)
     const dm = pairs[0]!.id
+    expect(said(dm).map((m) => m.text)).toEqual(['escrever o post', 'Feito: escrever o post', 'corrigir o bug', 'Feito: corrigir o bug'])
+    expect(said(dm).every((m) => m.threadId === undefined)).toBe(true)
+
+    // It's their conversation: the second task sees the first.
+    expect(turnsOf('dev')[1]!.prompt).toContain('corrigir o bug')
+    expect(turnsOf('dev')[1]!.prompt).toContain('escrever o post')
+
+    // The manager's tasks point at the DM, with no thread to open.
+    const heads = said('dm').filter((m) => m.run?.delegated?.length)
+    expect(heads.map((m) => m.run!.delegated![0])).toEqual([expect.objectContaining({ conversationId: dm }), expect.objectContaining({ conversationId: dm })])
+    expect(heads.every((m) => m.run!.delegated![0]!.threadId === undefined)).toBe(true)
+
+    // Both requests are over: the DM can go, and the lead's reports stay in the person's DM.
+    expect(requestRunning(db.conversation(dm)!, db.messages())).toBe(false)
+    db.deleteConversation(dm)
+    expect(db.conversation(dm)).toBeUndefined()
+    expect(said('dm').filter((m) => m.run?.reportOf)).toHaveLength(2)
+  })
+
+  it('a DM between agents set to threads: each request a thread in it, and the work on one sees only its thread', async () => {
+    db.createConversation({ id: 'p', kind: 'agents', name: 'chefe-dev', members: ['chefe', 'dev'], threads: true })
+    const r = runner()
+    await r.send('dm', 'delegue a @dev: escrever o post')
+    await r.idle()
+    await r.send('dm', 'delegue a @dev: corrigir o bug')
+    await r.idle()
+
+    expect(db.conversations().filter((c) => c.kind === 'agents')).toHaveLength(1)
+    const dm = 'p'
     const [post, bug] = said(dm).filter((m) => by(m) === 'chefe')
     expect(post!.text).toBe('escrever o post')
     expect(bug!.text).toBe('corrigir o bug')
@@ -253,14 +282,31 @@ describe('delegation', () => {
     expect(said('dm').map(by)).toEqual(['chefe'])
     expect(notes.at(-1)).toMatchObject({ title: 'dev te perguntou', kind: 'question' })
 
-    // Answered in the request's thread, where the question is.
-    await r.send(withDev, 'até sexta', [], said(withDev)[0]!.id)
+    // Answered in the conversation, where the question is.
+    await r.send(withDev, 'até sexta')
     await r.idle()
     expect(said(withDev).map(by)).toEqual(['chefe', 'dev', 'dev'])
     const answered = turnsOf('dev').at(-1)!
     expect(answered.prompt).toContain('<tarefa>\npergunte o prazo\n</tarefa>')
     expect(answered.prompt).toContain('até sexta')
     expect(said('dm').map(by)).toEqual(['chefe', 'chefe'])
+    expect(said('dm')[1]!.run?.round).toBe(1)
+  })
+
+  it('set to threads, the question is answered in the request’s thread', async () => {
+    db.createConversation({ id: 'p', kind: 'agents', name: 'chefe-dev', members: ['chefe', 'dev'], threads: true })
+    const r = runner()
+    await r.send('dm', 'delegue a @dev: pergunte o prazo')
+    await r.idle()
+    const [ask, question] = said('p')
+    expect(question!.threadId).toBe(ask!.id)
+    expect(question!.run?.status).toBe('waiting_input')
+
+    await r.send('p', 'até sexta', [], ask!.id)
+    await r.idle()
+    expect(said('p').map(by)).toEqual(['chefe', 'dev', 'dev'])
+    expect(said('p')[2]!.threadId).toBe(ask!.id)
+    expect(turnsOf('dev').at(-1)!.prompt).toContain('até sexta')
     expect(said('dm')[1]!.run?.round).toBe(1)
   })
 

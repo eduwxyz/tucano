@@ -213,7 +213,9 @@ export function Sidebar(): ReactNode {
   ]
   // A DM between agents holds one request's work: once that's over, it can go.
   const pairMenu = (c: Conversation): MenuItem[] => [
-    ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }, 'separator' as const] : []),
+    ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
+    { label: L('Configurações da conversa…', 'Conversation settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id: c.id }) },
+    'separator',
     {
       label: L('Apagar a conversa…', 'Delete the conversation…'),
       icon: 'trash',

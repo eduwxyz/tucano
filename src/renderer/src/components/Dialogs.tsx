@@ -3,7 +3,7 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as KeyEvent, type ReactNode } from 'react'
-import { agentById, archiveAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
+import { agentById, archiveAgent, conversationTitle, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
@@ -88,7 +88,8 @@ function DialogBody(): ReactNode {
 // A channel's name, topic and where its agents answer; a DM's, only where. Without `conv`, a new channel.
 function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () => void }): ReactNode {
   const dmName = useStore((s) => (conv?.kind === 'dm' && conv.members[0] ? agentById(s, conv.members[0])?.name : undefined))
-  const channel = conv?.kind !== 'dm'
+  const pairName = useStore((s) => (conv?.kind === 'agents' ? conversationTitle(s, conv) : undefined))
+  const channel = !conv || conv.kind === 'channel'
   const [name, setName] = useState(conv?.name ?? '')
   const [topic, setTopicText] = useState(conv?.topic ?? '')
   const [threads, setThreadsOn] = useState(!!conv?.threads)
@@ -108,11 +109,16 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
     done.then(onClose, (e: unknown) => setError(message(e)))
   }
   const enter = (e: KeyEvent): void => void (e.key === 'Enter' && save())
-  const choices = [
-    { on: false, label: L('Na conversa, como um chat', 'In the conversation, like a chat'), about: L('As respostas vêm logo abaixo da mensagem.', 'Answers come right below the message.') },
-    { on: true, label: L('Em threads, uma por mensagem', 'In threads, one per message'), about: L('Cada mensagem abre uma thread na lateral, com as respostas dela.', 'Each message opens a thread on the side, with its answers.') }
-  ]
-  const title = !conv ? L('Novo canal', 'New channel') : channel ? L(`Configurações de #${conv.name}`, `#${conv.name} settings`) : L(`Conversa com ${dmName ?? 'o agente'}`, `Conversation with ${dmName ?? 'the agent'}`)
+  const choices = pairName
+    ? [
+        { on: false, label: L('Na conversa, como um chat', 'In the conversation, like a chat'), about: L('Os pedidos vêm um abaixo do outro, e quem trabalha num pedido lê os anteriores.', 'Requests come one below the other, and whoever works on one reads the earlier ones.') },
+        { on: true, label: L('Em threads, uma por pedido', 'In threads, one per request'), about: L('Cada pedido abre uma thread na lateral, e quem trabalha nele lê só aquela thread.', 'Each request opens a thread on the side, and whoever works on it reads only that thread.') }
+      ]
+    : [
+        { on: false, label: L('Na conversa, como um chat', 'In the conversation, like a chat'), about: L('As respostas vêm logo abaixo da mensagem.', 'Answers come right below the message.') },
+        { on: true, label: L('Em threads, uma por mensagem', 'In threads, one per message'), about: L('Cada mensagem abre uma thread na lateral, com as respostas dela.', 'Each message opens a thread on the side, with its answers.') }
+      ]
+  const title = !conv ? L('Novo canal', 'New channel') : channel ? L(`Configurações de #${conv.name}`, `#${conv.name} settings`) : (pairName ?? L(`Conversa com ${dmName ?? 'o agente'}`, `Conversation with ${dmName ?? 'the agent'}`))
   return (
     <Modal title={title} onClose={onClose}>
       {channel && (
