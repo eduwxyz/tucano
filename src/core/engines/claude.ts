@@ -34,10 +34,14 @@ export function userProvider(dir = process.env['CLAUDE_CONFIG_DIR'] || join(home
 // --bare: it turns off the subscription login. The app's gateway, when given,
 // is the only MCP server, and its tools are pre-allowed: the gateway decides.
 // With web, the only built-in tools are web search and page reading.
+export const GATEWAY_ENV = 'TUCANO_MCP_URL'
+
 export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl' | 'web' | 'blocks' | 'images' | 'session'>, apiKeyHelper?: string): string[] {
   const web = turn.web ? WEB_TOOLS : []
   const allowed = [...(turn.mcpUrl ? [`mcp__${GATEWAY_NAME}`] : []), ...web]
-  const gateway = turn.mcpUrl ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: turn.mcpUrl } } })] : []
+  // The address carries the gateway's token: the CLI fills it in from the environment, so it
+  // never shows in the arguments, which any program on the computer can list.
+  const gateway = turn.mcpUrl ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: `\${${GATEWAY_ENV}}` } } })] : []
   return [
     '-p',
     ...(turn.session || turn.blocks?.some((b) => b.trim()) || turn.images?.length ? ['--input-format', 'stream-json'] : []),
@@ -174,13 +178,21 @@ export function claudeParser(): Parser {
 // Without CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC the CLI makes one more model call after the
 // reply (its post-turn summary) and only then sends `result`: about 2.5 s on every reply, at
 // times over 10 s. Nobody reads that summary here.
-export function claudeEnv(p: Provider, account?: string): NodeJS.ProcessEnv {
-  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), MCP_TOOL_TIMEOUT: '900000' }
+// The gateway's address goes in the environment, not the arguments (see claudeArgs).
+export function claudeEnv(p: Provider, account?: string, mcpUrl?: string): NodeJS.ProcessEnv {
+  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), ...(mcpUrl ? { [GATEWAY_ENV]: mcpUrl } : {}), MCP_TOOL_TIMEOUT: '900000' }
 }
 
 // Where Claude Code keeps a session: its config folder, then the working folder with every
 // character other than a letter or digit turned into "-".
-export const claudeProjectDir = (configDir: string, cwd: string): string => join(configDir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
+// As Claude Code names it: past 200 characters, cut there and followed by a hash of the whole path.
+export const claudeProjectDir = (configDir: string, cwd: string): string => {
+  const name = cwd.replace(/[^a-zA-Z0-9]/g, '-')
+  if (name.length <= 200) return join(configDir, 'projects', name)
+  let hash = 0
+  for (let i = 0; i < cwd.length; i++) hash = ((hash << 5) - hash + cwd.charCodeAt(i)) | 0
+  return join(configDir, 'projects', `${name.slice(0, 200)}-${Math.abs(hash).toString(36)}`)
+}
 const configDirOf = (account?: string): string => account || process.env['CLAUDE_CONFIG_DIR'] || join(homedir(), '.claude')
 
 // A process kept open after a reply waits this long for the next one, and only this many wait at
@@ -211,6 +223,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
   const shapes = new Map<string, TurnShape>() // session id → the settings of its last turn, to start it again
   const spares = new Map<string, { cli: LiveCli; timer: NodeJS.Timeout; at: number }>() // by flags and provider
 
+  const removing = new Set<Promise<void>>() // session files waiting for their process to exit
   const close = (id: string): void => {
     const k = kept.get(id)
     if (!k) return
@@ -232,7 +245,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
     trim()
   }
   // The same flags and provider as an open process: then it can take this turn.
-  const keyOf = (path: string, t: TurnShape, args: string[], p: Provider): string => JSON.stringify([path, t.cwd, args, p.env, t.account ?? ''])
+  const keyOf = (path: string, t: TurnShape, args: string[], p: Provider): string => JSON.stringify([path, t.cwd, args, p.env, t.account ?? '', t.mcpUrl ?? ''])
   const keptKey = (path: string, t: TurnShape, id: string, p: Provider): string => keyOf(path, t, claudeArgs({ ...t, session: { id, resume: true } }, p.apiKeyHelper), p)
   const dropSpare = (key: string): void => {
     const s = spares.get(key)
@@ -253,7 +266,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       }
       // The gateway's token goes in the environment, never in the arguments (other processes can read those).
       const p = await provider()
-      const env = claudeEnv(p, turn.account)
+      const env = claudeEnv(p, turn.account, turn.mcpUrl)
       const session = turn.session
       if (!session) {
         // A process started for it ahead of time takes the turn, then goes.
@@ -317,7 +330,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
           return
         }
         if (had) dropSpare(key)
-        const cli = new LiveCli({ bin: path, args, cwd: turn.cwd, env: claudeEnv(p, turn.account) })
+        const cli = new LiveCli({ bin: path, args, cwd: turn.cwd, env: claudeEnv(p, turn.account, turn.mcpUrl) })
         const spare = { cli, at: Date.now(), timer: setTimeout(() => spares.get(key)?.cli === cli && dropSpare(key), SPARE_MS) }
         spare.timer.unref()
         spares.set(key, spare)
@@ -336,7 +349,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       if (!path || !shape) return
       void provider().then((p) => {
         if (kept.has(id) || !shapes.has(id)) return // a turn or a release got there first
-        const k: Kept = { cli: new LiveCli({ bin: path, args: claudeArgs({ ...shape, session: { id, resume: true } }, p.apiKeyHelper), cwd: shape.cwd, env: claudeEnv(p, shape.account) }), key: keptKey(path, shape, id, p), usedAt: Date.now() }
+        const k: Kept = { cli: new LiveCli({ bin: path, args: claudeArgs({ ...shape, session: { id, resume: true } }, p.apiKeyHelper), cwd: shape.cwd, env: claudeEnv(p, shape.account, shape.mcpUrl) }), key: keptKey(path, shape, id, p), usedAt: Date.now() }
         kept.set(id, k)
         park(id, k)
       })
@@ -364,8 +377,13 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
           /* not empty */
         }
       }
-      if (open?.alive) void open.exited().then(remove)
-      else remove()
+      if (!open?.alive) return remove()
+      const gone = open.exited().then(remove)
+      removing.add(gone)
+      void gone.finally(() => removing.delete(gone))
+    },
+    async settle() {
+      await Promise.all([...removing])
     },
     // Only the exact folders of the agents under workDir, in the usual config folder and in each
     // account's: Claude Code's folder names are lossy, so a prefix could take someone else's.

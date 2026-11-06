@@ -20,6 +20,7 @@ import {
   modelInfo,
   usable,
   navigate,
+  openDialog,
   newChannel,
   refreshEngines,
   newAgentDraft,
@@ -182,9 +183,11 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   const [computer, setComputer] = useState<Computer>('none')
   const [task, setTask] = useState(() => TEMPLATES()[0]!.tasks[0]!)
   const [busy, setBusy] = useState(false)
-  // A new install picks both models; seeing the introduction again starts from what's set.
-  const [routerModel, setRouterModel] = useState(hasAgents ? settings.routerModel : '')
-  const [memoryModel, setMemoryModel] = useState(hasAgents ? settings.memoryModel : '')
+  // A new install picks both models; seeing the introduction again, or a workspace that brought
+  // another's settings, starts from what's set.
+  const keep = hasAgents || !!settings.onboarding?.carried
+  const [routerModel, setRouterModel] = useState(keep ? settings.routerModel : '')
+  const [memoryModel, setMemoryModel] = useState(keep ? settings.memoryModel : '')
   const [skills, setSkills] = useState<string[]>([])
   const [grants, setGrants] = useState<Record<string, GrantLevel>>({})
   // The first agent comes from the Tuca's card, or from the form for who prefers it.
@@ -932,6 +935,7 @@ function Powers(p: {
   const { agent, patch, computer } = p
   const name = agent.name.trim() || L('Ele', 'It')
   const connectors = useStore((s) => s.connectors)
+  const isolated = useStore((s) => s.isolatedComputers)
   return (
     <div className="onb__split">
       <section className="onb__main">
@@ -973,7 +977,9 @@ function Powers(p: {
                     ['linux', L('Linux isolado', 'Isolated Linux')],
                     ['mac', L('Este computador', 'This computer')]
                   ] as const
-                ).map(([k, label]) => (
+                )
+                  .filter(([k]) => k !== 'linux' || isolated)
+                  .map(([k, label]) => (
                   <button key={k} className={computer === k ? 'is-active' : ''} onClick={() => p.setComputer(k)}>
                     {label}
                   </button>
@@ -1102,7 +1108,8 @@ interface Item {
   title: string
   how: string
   done: (s: State) => boolean
-  go: (s: State) => View
+  go?: (s: State) => View
+  open?: () => void
   action: string
 }
 
@@ -1168,11 +1175,19 @@ const ITEMS = (): Item[] => [
     done: (s) => !!s.settings.telegram?.chat,
     go: () => ({ kind: 'settings' }),
     action: L('Configurações', 'Settings')
+  },
+  {
+    id: 'workspaces',
+    title: L('Conhecer os workspaces', 'Explore workspaces'),
+    how: L('Separe seus contextos. Crie, duplique e gerencie seus workspaces.', 'Keep your contexts separate. Create, duplicate and manage your workspaces.'),
+    done: (s) => !!s.settings.onboarding?.workspaceManagerSeen,
+    open: () => openDialog({ kind: 'workspaces' }),
+    action: L('Workspaces', 'Workspaces')
   }
 ]
 
 export function GettingStarted(): ReactNode {
-  const items = ITEMS()
+  const items = ITEMS().filter((item) => item.id !== 'workspaces' || !!window.tucano.workspaces)
   const done = useStore((s) => items.map((i) => i.done(s)))
   const onboarding = useStore((s) => s.settings.onboarding)
   const [open, setOpen] = useState(false)
@@ -1207,7 +1222,8 @@ export function GettingStarted(): ReactNode {
                   <button
                     className={`btn btn--sm ${i === nextIndex ? 'btn--primary' : ''}`}
                     onClick={() => {
-                      navigate(item.go(getState()))
+                      if (item.open) item.open()
+                      else if (item.go) navigate(item.go(getState()))
                       setOpen(false)
                     }}
                   >

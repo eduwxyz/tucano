@@ -1,8 +1,9 @@
 import { L, lang, locale } from '../../../shared/lang'
 import { actionLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
-import Markdown, { defaultUrlTransform, type ExtraProps } from 'react-markdown'
-import { LOCAL_LINK, remarkLocalPaths } from '../../../shared/path-text'
+import Markdown, { type ExtraProps } from 'react-markdown'
+import { safeUrl } from '../links'
+import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
@@ -58,7 +59,7 @@ import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
-import { AgentProposal } from './Tuca'
+import { AgentProposal, ProposalCard } from './Tuca'
 import { FoldToggle } from './Fold'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
@@ -316,7 +317,6 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
 
 const AGENT_PLUGINS = [remarkGfm, remarkMentions, remarkLocalPaths]
 const PLAIN_PLUGINS = [remarkGfm, remarkMentions]
-const keepLocalLinks = (url: string): string => (url.startsWith(LOCAL_LINK) ? url : defaultUrlTransform(url))
 
 // Parsing is by far the most expensive part of drawing a message, so it only runs when the text changes.
 const MessageMarkdown = memo(Markdown)
@@ -381,9 +381,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {message.text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
-              <MessageMarkdown remarkPlugins={AGENT_PLUGINS} urlTransform={keepLocalLinks} components={agentMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={agentMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
             ) : (
-              <MessageMarkdown remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
             )}
           </div>
         ) : null}
@@ -397,6 +397,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.agentDraft && <AgentProposal message={message} />}
+        {message.run?.proposal && <ProposalCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
@@ -480,7 +481,7 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
           </div>
         )}
         <div className="md">
-          <MessageMarkdown remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+          <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
         </div>
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
@@ -494,7 +495,7 @@ function SystemText({ text }: { text: string }): ReactNode {
   const [head = '', ...why] = text.split(' · ')
   return (
     <>
-      <Markdown>{head}</Markdown>
+      <Markdown urlTransform={safeUrl}>{head}</Markdown>
       {why.length > 0 && (
         <span className="system-line__why" title={why.join(' · ').replace(/\*\*/g, '')}>
           {why.join(' · ').replace(/\*\*/g, '')}
@@ -1229,6 +1230,22 @@ async function prepareImage(file: File): Promise<Attached | string> {
 // One draft per conversation (and per thread), kept while the app runs: leaving a
 // channel doesn't lose the message you were typing.
 const drafts = new Map<string, { text: string; images: Attached[] }>()
+// On a server the page reloads to reconnect (src/server's bridge): the texts are kept in this
+// tab for that moment, and come back once. Images aren't: attach them again.
+const RELOAD_KEY = 'tucano-drafts'
+try {
+  const kept = JSON.parse(sessionStorage.getItem(RELOAD_KEY) ?? '{}') as Record<string, string>
+  for (const [k, text] of Object.entries(kept)) if (typeof text === 'string' && text.trim()) drafts.set(k, { text, images: [] })
+  sessionStorage.removeItem(RELOAD_KEY)
+} catch {}
+const keepForReload = (current?: { key: string; text: string }): void => {
+  const texts: Record<string, string> = {}
+  for (const [k, d] of drafts) if (d.text.trim()) texts[k] = d.text
+  if (current?.text.trim()) texts[current.key] = current.text
+  try {
+    sessionStorage.setItem(RELOAD_KEY, JSON.stringify(texts))
+  } catch {}
+}
 
 type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing'
 type DictationControls = { press: () => void; release: () => void; stop: () => void; cancel: () => void; startedAt: () => number }
@@ -1495,6 +1512,11 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const live = useRef({ text, images })
   live.current = { text, images }
   useEffect(() => {
+    const save = (): void => keepForReload({ key, text: live.current.text })
+    window.addEventListener('tucano:reloading', save)
+    return () => window.removeEventListener('tucano:reloading', save)
+  }, [key])
+  useEffect(() => {
     const draft = drafts.get(key)
     setText(draft?.text ?? '')
     setImages(draft?.images ?? [])
@@ -1507,7 +1529,22 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     }
   }, [key])
 
-  const addFiles = async (files: File[]): Promise<void> => {
+  const addFiles = async (all: File[]): Promise<void> => {
+    if (!all.length) return
+    // On a server, a file that isn't an image goes up to it (~/Enviados) and the message says where:
+    // an agent on that computer opens it there, and the link brings it back down.
+    const upload = window.tucano.upload
+    const files = upload ? all.filter((f) => IMAGE_MIMES.includes(f.type)) : all
+    const others = upload ? all.filter((f) => !IMAGE_MIMES.includes(f.type)) : []
+    if (others.length && upload) {
+      setNote(L(`Enviando ${others.length === 1 ? others[0]!.name : `${others.length} arquivos`}…`, `Sending ${others.length === 1 ? others[0]!.name : `${others.length} files`}…`))
+      const sent = await Promise.allSettled(others.map((f) => upload(f, 'message')))
+      const paths = sent.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+      if (paths.length) setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${paths.map((p) => L(`Arquivo enviado: \`${p}\``, `File sent: \`${p}\``)).join('\n')}`)
+      const failed = sent.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+      setNote(failed ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason) : '')
+      if (!files.length) return void ref.current?.focus()
+    }
     if (!files.length) return
     const done = await Promise.all(files.map(prepareImage))
     const ok = done.filter((d): d is Attached => typeof d !== 'string')
@@ -1728,7 +1765,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               if (e.target.value.trim()) typing(conversationId, threadId)
             }}
             onPaste={(e) => {
-              const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
+              const files = [...e.clipboardData.files].filter((f) => window.tucano.upload || f.type.startsWith('image/'))
               if (!files.length) return
               e.preventDefault()
               void addFiles(files)
@@ -1755,13 +1792,13 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
         </div>
         <div className="composer__bar">
           <VoiceButton controls={voiceControls} state={voice} />
-          <button className="icon-btn" title={L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
+          <button className="icon-btn" title={window.tucano.upload ? L('Anexar arquivo (ou arraste e solte, ou cole)', 'Attach a file (or drag and drop, or paste)') : L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
             <Icon name="image" size={15} />
           </button>
           <input
             ref={picker}
             type="file"
-            accept="image/*"
+            accept={window.tucano.upload ? undefined : 'image/*'}
             multiple
             hidden
             onChange={(e) => {
