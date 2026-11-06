@@ -87,12 +87,15 @@ export function antigravityParser(): Parser {
   }
 }
 
-// Headless, one shot: `-p=-` reads the prompt from stdin (Antigravity CLI 1.5+),
-// stream-json out, the model named, and --dangerously-skip-permissions so a tool
-// call never waits on a terminal prompt — the gateway is the only tool source
-// and it decides what runs. Flags before `-p=-` so the CLI does not swallow them.
+// Headless: Antigravity 1.5+ print mode takes the user turn on stdin as one
+// stream-json line (`event: user`). Piping plain text with `-p=-` does not attach
+// it to the conversation — the model only sees the default greeting.
 export function antigravityArgs(turn: Pick<Turn, 'model'>): string[] {
-  return ['--output-format', 'stream-json', '--dangerously-skip-permissions', '--model', turn.model, '-p=-']
+  return ['--output-format', 'stream-json', '--input-format', 'stream-json', '--dangerously-skip-permissions', '--model', turn.model]
+}
+
+export function antigravityInput(prompt: string): string {
+  return `${JSON.stringify({ event: 'user', message: { role: 'user', content: prompt } })}\n`
 }
 
 // Person login lives under ~/.gemini or %LOCALAPPDATA%\agy (Antigravity install).
@@ -201,7 +204,7 @@ export function antigravityEngine(bin: () => string | undefined, appDir: string,
       // token), which an app opened from Finder doesn't get.
       const env = antigravityEnv(home, { ...process.env, ...(await shellEnv()) })
       try {
-        yield* runCli({ bin: path, args: antigravityArgs({ model }), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: antigravityParser(), env })
+        yield* runCli({ bin: path, args: antigravityArgs({ model }), stdin: antigravityInput(turn.prompt), cwd: turn.cwd, signal: turn.signal, parser: antigravityParser(), env })
       } finally {
         // The turn's throwaway home goes; the login is a link, so only this
         // turn's settings, system prompt and session are dropped.

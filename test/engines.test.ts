@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { detectAntigravityCliModels, antigravityArgs, antigravityEnv, antigravityHome, antigravityModels, antigravityParser } from '../src/core/engines/antigravity'
+import { detectAntigravityCliModels, antigravityArgs, antigravityEnv, antigravityHome, antigravityInput, antigravityModels, antigravityParser } from '../src/core/engines/antigravity'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { grokArgs, grokCleanup, grokConfig, grokEngine, grokLogin, grokParser, grokPrompt, grokTurnDirs, grokTurnEnv, parseGrokModels, userGrokHome } from '../src/core/engines/grok'
 import { customModel, modelInfo, usable } from '../src/shared/types'
@@ -271,7 +271,8 @@ describe('Gemini stream', () => {
 describe('Gemini config', () => {
   it('runs headless with stream-json, auto-approving tools (the gateway decides), the model alone', () => {
     const args = antigravityArgs({ model: 'gemini-2.5-pro' })
-    expect(args).toEqual(['--output-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'gemini-2.5-pro', '-p=-'])
+    expect(args).toEqual(['--output-format', 'stream-json', '--input-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'gemini-2.5-pro'])
+    expect(antigravityInput('oi')).toBe('{"event":"user","message":{"role":"user","content":"oi"}}\n')
   })
 
   it('gives each turn a fresh home with the gateway as its only MCP server and no built-in tools', () => {
