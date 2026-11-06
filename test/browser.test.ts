@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, BrowserElement, BrowserReply, Settings } from '../src/shared/types'
-import { bareTarget, Browser, browserStep, describePage, findByText, risky, type BrowserHost } from '../src/core/browser'
+import { bareTarget, enterSends, keyActs, Browser, browserStep, describePage, findByText, risky, type BrowserHost } from '../src/core/browser'
 import { systemPrompt } from '../src/core/context'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
@@ -35,14 +35,14 @@ const el = (ref: number, role: string, label: string, extra: Partial<BrowserElem
 const ELEMENTS = [el(1, 'campo', 'Destino', { value: '' }), el(2, 'botão', 'Buscar'), el(3, 'botão', 'Publicar'), el(4, 'link', 'Ajuda', { inView: false }), el(5, 'botão', ''), el(6, 'link', 'Buscar ajuda', { inView: false })]
 
 // A page in memory: what the main process would do in Chromium, recorded.
-function fakeHost(): { host: BrowserHost; calls: { op: string; args?: Record<string, unknown> }[]; page: { url: string; title: string; shown: boolean } } {
-  const page = { url: '', title: '', shown: false }
+function fakeHost(): { host: BrowserHost; calls: { op: string; args?: Record<string, unknown> }[]; page: { url: string; title: string; shown: boolean; elements: BrowserElement[] } } {
+  const page = { url: '', title: '', shown: false, elements: ELEMENTS }
   const calls: { op: string; args?: Record<string, unknown> }[] = []
   const host: BrowserHost = async (_agentId, op, args) => {
     calls.push({ op, args })
     const here: BrowserReply = { url: page.url, title: page.title, frame: Buffer.from('jpeg').toString('base64'), w: 1280, h: 800, shown: page.shown }
     if (op === 'open') Object.assign(page, { url: String(args?.['url']), title: 'Studio' })
-    if (op === 'snapshot') return { ...here, frame: undefined, elements: ELEMENTS }
+    if (op === 'snapshot') return { ...here, frame: undefined, elements: page.elements }
     if (op === 'text') return { ...here, text: 'Retenção média 42%' }
     return { ...here, url: page.url, title: page.title }
   }
@@ -67,6 +67,24 @@ describe('finding what the agent names', () => {
   it('knows what buys, publishes, sends or deletes, by the words on it', () => {
     for (const w of ['Publicar', 'Comprar agora', 'Finalizar compra', 'Enviar', 'Agendar', 'Salvar', 'Excluir vídeo', 'Post', 'Submit', 'Reservar']) expect(risky(w), w).toBe(true)
     for (const w of ['Buscar', 'Análises', 'Próximo', 'Posts', 'Facebook', 'Cancelar', 'Fechar']) expect(risky(w), w).toBe(false)
+    // Public actions on the person's account too (GHSA-4q39)
+    for (const w of ['Repost', 'Repostar', 'Curtir', 'Like', 'Retweet', 'Tweet', 'Compartilhar', 'Share']) expect(risky(w), w).toBe(true)
+  })
+
+  it('knows when Enter or Space would send something (GHSA-4q39)', () => {
+    expect(enterSends({ label: 'Destino' })).toBe(false) // no form: a search or a filter
+    expect(enterSends({ label: 'Comentar', multiline: true })).toBe(true) // a comment box: Enter sends
+    expect(enterSends({ label: 'Mensagem', submits: 'Enviar' })).toBe(true)
+    expect(enterSends({ label: 'Pesquisar', submits: 'Buscar' })).toBe(false)
+    expect(enterSends({ label: 'Pesquisar', submits: '' })).toBe(false) // a search with a magnifier button
+    expect(enterSends({ label: 'Nome', submits: '' })).toBe(true) // a nameless button that isn't a search
+    expect(keyActs('enter', el(3, 'botão', 'Publicar'))).toBe(true)
+    expect(keyActs('space', el(5, 'botão', ''))).toBe(true) // no name: can't be told safe
+    expect(keyActs('enter', el(2, 'botão', 'Buscar'))).toBe(false)
+    expect(keyActs('space', el(7, 'checkbox', 'Lembrar'))).toBe(false)
+    expect(keyActs('space', el(8, 'campo', 'Comentar', { multiline: true }))).toBe(false) // a space in the text
+    expect(keyActs('tab', el(3, 'botão', 'Publicar'))).toBe(false)
+    expect(keyActs('enter', undefined)).toBe(false)
   })
 
   it('describes the page with what is on screen, numbered', () => {
@@ -169,6 +187,45 @@ describe("an agent's browser", () => {
     expect(fake.calls.filter((c) => c.op === 'click')).toHaveLength(1)
   })
 
+  it('Enter where it sends waits for me, after the text goes in; approved, it presses it in that field (GHSA-4q39)', async () => {
+    fake.page.elements = [el(1, 'campo', 'Adicione um comentário', { multiline: true, value: '' }), el(2, 'botão', 'Responder')]
+    await browser.call(lia(), 'navegador_abrir', { url: 'https://x.com/post/1' }, ctx)
+    const r = await browser.call(lia(), 'navegador_digitar', { alvo: '#1', texto: 'Ótimo post!', enter: true }, ctx)
+    expect(r.approval).toMatchObject({ args: { url: 'https://x.com/post/1', tecla: 'enter', alvo: 'Adicione um comentário', ref: 1 }, detail: 'Apertar Enter em "Adicione um comentário"' })
+    expect(r.artifact?.kind).toBe('image')
+    expect(fake.calls.filter((c) => c.op === 'type').map((c) => c.args)).toEqual([{ ref: 1, text: 'Ótimo post!', enter: false }])
+    expect(fake.calls.some((c) => c.op === 'key')).toBe(false)
+    expect(await browser.approved(lia(), r.approval!.args)).toMatchObject({ ok: true })
+    expect(fake.calls.filter((c) => c.op === 'click' || c.op === 'key').map((c) => [c.op, c.args])).toEqual([['click', { ref: 1 }], ['key', { key: 'enter' }]])
+  })
+
+  it('Enter or Space on a focused button that publishes, or has no name, waits for me (GHSA-4q39)', async () => {
+    await browser.call(lia(), 'navegador_abrir', { url: 'https://x.com/compose' }, ctx)
+    fake.page.elements = [el(1, 'campo', 'Texto'), el(2, 'botão', 'Postar', { focused: true })]
+    const r = await browser.call(lia(), 'navegador_tecla', { tecla: 'enter' }, ctx)
+    expect(r.approval).toMatchObject({ args: { tecla: 'enter', alvo: 'Postar', ref: 2 }, detail: 'Apertar Enter em "Postar"' })
+    fake.page.elements = [el(1, 'botão', '', { focused: true })]
+    expect((await browser.call(lia(), 'navegador_tecla', { tecla: 'space' }, ctx)).approval?.detail).toBe('Apertar Espaço em "um elemento sem nome"')
+    expect(fake.calls.some((c) => c.op === 'key')).toBe(false)
+    // Approved: the same button, clicked (Enter on a button is its click).
+    fake.page.elements = [el(1, 'campo', 'Texto'), el(2, 'botão', 'Postar', { focused: true })]
+    expect(await browser.approved(lia(), r.approval!.args)).toMatchObject({ ok: true })
+    expect(fake.calls.filter((c) => c.op === 'click').map((c) => c.args)).toEqual([{ ref: 2 }])
+    // Tab and a focus on something harmless go on as before.
+    fake.page.elements = [el(1, 'botão', 'Buscar', { focused: true })]
+    expect((await browser.call(lia(), 'navegador_tecla', { tecla: 'enter' }, ctx)).approval).toBeUndefined()
+    expect((await browser.call(lia(), 'navegador_tecla', { tecla: 'tab' }, ctx)).approval).toBeUndefined()
+  })
+
+  it('a click on something with no name on the page waits for me, whatever the agent calls it (GHSA-4q39)', async () => {
+    await browser.call(lia(), 'navegador_abrir', { url: 'https://x.com/compose' }, ctx)
+    const r = await browser.call(lia(), 'navegador_clicar', { alvo: '#5' }, ctx)
+    expect(r.approval).toMatchObject({ args: { url: 'https://x.com/compose', alvo: '', ref: 5 } })
+    expect(fake.calls.some((c) => c.op === 'click')).toBe(false)
+    expect(await browser.approved(lia(), r.approval!.args)).toMatchObject({ ok: true })
+    expect(fake.calls.filter((c) => c.op === 'click').map((c) => c.args)).toEqual([{ ref: 5 }])
+  })
+
   it('reads the whole page as information, not instructions', async () => {
     await browser.call(lia(), 'navegador_abrir', { url: 'https://studio.youtube.com' }, ctx)
     const r = await browser.call(lia(), 'navegador_ler', {}, ctx)
@@ -194,7 +251,7 @@ describe("an agent's browser", () => {
     expect(browser.view('lia-0001')?.log.at(-1)?.label).toBe('Edu devolveu')
   })
 
-  it('with Jev on, what the text does not find goes to Jev: first the elements, then the screen', async () => {
+  it('with Jev on, what the text does not find goes to Jev: first the elements, then the screen; with no name to judge by, it waits for me', async () => {
     const asked: Record<string, unknown>[] = []
     let answer: unknown = { answers: { alvo: { choice: 'e5', probabilities: { e5: 0.9 } } } }
     const f = (async (_url: string, init?: RequestInit) => {
@@ -204,9 +261,13 @@ describe("an agent's browser", () => {
     const withJev = new Browser({ host: fake.host, db, dataDir, emit: () => {}, me: () => 'Edu', jev: { key: async () => 'ts-key', on: () => true, fetch: f } })
     await withJev.call(lia(), 'navegador_abrir', { url: 'https://airbnb.com' }, ctx)
 
-    await withJev.call(lia(), 'navegador_clicar', { alvo: 'o ícone de menu no canto' }, ctx)
+    const menu = await withJev.call(lia(), 'navegador_clicar', { alvo: 'o ícone de menu no canto' }, ctx)
     expect(asked[0]).toMatchObject({ model: 'jev-latest', state: { pedido: 'o ícone de menu no canto' }, questions: { alvo: { type: 'choice' } } })
     expect((asked[0]!['questions'] as { alvo: { criteria: Record<string, string> } }).alvo.criteria).toMatchObject({ e2: 'botão "Buscar"', e5: 'botão sem nome', e4: 'link "Ajuda" (fora da tela)' })
+    // The element Jev found has no name on the page: what the agent called it doesn't make it safe.
+    expect(menu.approval).toMatchObject({ args: { alvo: '', ref: 5 } })
+    expect(fake.calls.some((c) => c.op === 'click')).toBe(false)
+    expect(await withJev.approved(lia(), menu.approval!.args)).toMatchObject({ ok: true })
     expect(fake.calls.filter((c) => c.op === 'click').at(-1)?.args).toEqual({ ref: 5 })
 
     // Not among the elements: the box on the screenshot, clicked at its center.
@@ -218,8 +279,13 @@ describe("an agent's browser", () => {
       return Response.json(n++ === 0 ? { answers: { alvo: { choice: '__nenhum' } } } : { answers: { alvo: { box: { left: 0.5, right: 0.6, top: 0.1, bottom: 0.2 }, confidence: 0.8 } } })
     }) as unknown as typeof fetch
     const onScreen = new Browser({ host: fake.host, db, dataDir, emit: () => {}, me: () => 'Edu', jev: { key: async () => 'ts-key', on: () => true, fetch: f2 } })
-    await onScreen.call(lia(), 'navegador_clicar', { alvo: 'o pin do mapa perto do lago' }, ctx)
+    const pin = await onScreen.call(lia(), 'navegador_clicar', { alvo: 'o pin do mapa perto do lago' }, ctx)
     expect(asked.at(-1)).toMatchObject({ model: 'jev-preview', questions: { alvo: { type: 'box' } } })
+    // A spot found only on the screen waits for me too; approved, it's clicked there.
+    expect(pin.approval?.args).toMatchObject({ alvo: '' })
+    expect(pin.approval!.args['x'] as number).toBeCloseTo(0.55)
+    expect(pin.approval!.args['y'] as number).toBeCloseTo(0.15)
+    expect(await onScreen.approved(lia(), pin.approval!.args)).toMatchObject({ ok: true })
     const click = fake.calls.filter((c) => c.op === 'click').at(-1)!.args as { x: number; y: number }
     expect(click.x).toBeCloseTo(0.55 * 1280)
     expect(click.y).toBeCloseTo(0.15 * 800)

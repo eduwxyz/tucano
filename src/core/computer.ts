@@ -376,13 +376,12 @@ export interface ComputerDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
-  gitRemote?: (agentId: string) => string | undefined // the app's GitHub proxy for this agent (spec §22)
   setup?: () => string | undefined // what every new computer comes with (Settings): a bash script
 }
 
 export class Computers {
   private infos = new Map<string, ComputerInfo>()
-  private gitSet = new Set<string>() // computers whose git already goes through the proxy, this session
+  private gitSet = new Set<string>() // computers whose git was taken off the old GitHub proxy, this session
   private ports = new Map<string, Record<number, number>>()
   private starting = new Map<string, Promise<void>>()
   private bases = new Map<string, Promise<string>>() // base images being made, by tag
@@ -501,7 +500,7 @@ export class Computers {
     }
     if (state.code === 0 && running === 'true') {
       if (!this.ports.has(agentId)) await this.readPorts(agentId)
-      await this.pointGit(agentId)
+      await this.unpointGit(agentId)
       if (this.infos.get(agentId)?.state !== 'running') this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
       return
     }
@@ -562,7 +561,7 @@ export class Computers {
       await docker(['exec', name, 'bash', '-c', clean], { timeoutMs: 15_000 })
     }
     await this.readPorts(agentId)
-    await this.pointGit(agentId)
+    await this.unpointGit(agentId)
     this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
   }
 
@@ -604,15 +603,13 @@ export class Computers {
     return tag
   }
 
-  // GitHub, by any of its URL forms, goes through the app's proxy, which adds the
-  // token outside the computer and lets through only what its lent folders allow.
-  private async pointGit(agentId: string): Promise<void> {
-    const via = this.deps.gitRemote?.(agentId)
-    if (!via || this.gitSet.has(agentId)) return
+  // A computer made when GitHub went through the app's proxy (push and PR from the agent's computer,
+  // since removed) still sends git there: those rewrites go, so git reaches GitHub as it would.
+  private async unpointGit(agentId: string): Promise<void> {
+    if (this.gitSet.has(agentId)) return
     const name = this.name(agentId)
-    for (const [from, match] of [['https://github.com/', '^https://github'], ['git@github.com:', '^git@github'], ['ssh://git@github.com/', '^ssh://']] as const) {
-      await docker(['exec', name, 'git', 'config', '--global', '--replace-all', `url.${via}.insteadOf`, from, match], { timeoutMs: 15_000 })
-    }
+    const drop = "for k in $(git config --global --name-only --get-regexp '^url\\..*/git/.*\\.insteadof$' 2>/dev/null | sed 's/\\.insteadof$//' | sort -u); do git config --global --remove-section \"$k\" 2>/dev/null; done; true"
+    await docker(['exec', name, 'bash', '-c', drop], { timeoutMs: 15_000 }).catch(() => {})
     this.gitSet.add(agentId)
   }
 
