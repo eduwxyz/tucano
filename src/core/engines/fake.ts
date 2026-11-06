@@ -73,6 +73,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /(?:acompanhe o run|follow run) (\d+)/i.test(last)) {
+        // Following a Databricks run: the card, then the app takes it from here.
+        await callTool(turn.mcpUrl, 'acompanhar_job', { run_id: /(?:acompanhe o run|follow run) (\d+)/i.exec(last)![1]! })
+        reply = 'Acompanhando.'
       } else if (turn.mcpUrl && /(?:consulte|run the sql) `([^`]+)`/i.test(last)) {
         // A SQL connector's tool (Databricks' execute_sql_read_only), to see its steps and errors.
         const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!

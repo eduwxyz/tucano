@@ -1,6 +1,7 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ChannelLayout } from './channel-layout'
+import type { JobWatchSettings } from './job-watch'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -81,6 +82,7 @@ export interface Agent {
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
+  jobWatch?: boolean // follows Databricks runs through the app's own tools; off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
@@ -170,6 +172,7 @@ export interface Run {
   artifactIds?: string[] // files and screenshots shown in this reply
   services?: string[] // services started in this reply, by name, on the author's computer
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
+  jobWatchIds?: string[] // runs it started following in this reply: each shows a live card
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
@@ -290,6 +293,7 @@ export interface Settings {
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+  jobWatch?: Partial<JobWatchSettings> // following Databricks runs: the CLI, what it may run, the limits
 }
 
 // Which chirp a notification plays: a knock when an agent needs me, two notes when the work

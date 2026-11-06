@@ -1,6 +1,7 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider } from './connector-catalog'
+import type { JobWatch } from './job-watch'
 import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
@@ -17,6 +18,7 @@ export interface Snapshot {
   computers: ComputerInfo[]
   browsers: BrowserView[]
   routines: Routine[]
+  jobWatches: JobWatch[]
   skills: Skill[]
   platform: Os
   packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
@@ -119,6 +121,9 @@ export interface Api {
   usage(): UsageReport
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
+  stopJobWatch(p: { id: string }): void // stops following; the job keeps running
+  cancelJobRun(p: { id: string }): Promise<void> // the run itself, when job actions are on
+  checkDatabricks(): Promise<{ ok: boolean; text: string }> // is the CLI there, and does the login work
   // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.
   wiki(): { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number } // pending: the curator's changes; the review's are in findings
   wikiPage(p: { title: string }): WikiPage | null
@@ -176,6 +181,7 @@ export type CoreEvent =
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'routine'; routine: Routine }
   | { type: 'routine_removed'; id: string }
+  | { type: 'job_watch'; watch: JobWatch }
   | { type: 'conversation_removed'; id: string }
   | { type: 'skill'; skill: Skill }
   | { type: 'skill_removed'; id: string }

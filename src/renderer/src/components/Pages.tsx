@@ -1,4 +1,5 @@
 import { L, locale, type Lang } from '../../../shared/lang'
+import { JobWatchSettingsCard } from './JobWatch'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
@@ -555,6 +556,27 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   </button>
                 </div>
               )}
+            </Card>
+          )}
+
+          {pane('ferramentas') && (
+            <Card
+              title={L('Acompanhar jobs', 'Follow jobs')}
+              lead={`${L('Acompanha runs do Databricks pela CLI, com um cartão ao vivo na conversa. Só usa os comandos permitidos em Configurações › Agentes. Essas regras não valem pra um agente em Este computador, que roda comandos como você: use um perfil só de leitura, ou deixe ele em Linux isolado ou sem computador.', 'Follows Databricks runs through the CLI, with a live card in the conversation. It only uses the commands allowed in Settings › Agents. Those rules don’t bind an agent on This computer, which runs commands as you: use a read-only profile, or keep it on isolated Linux or with no computer.')}${isNew ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
+            >
+              <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Acompanhar jobs', 'Follow jobs')}>
+                {[false, true].map((v) => (
+                  <button
+                    key={String(v)}
+                    role="radio"
+                    aria-checked={!!draft.jobWatch === v}
+                    className={!!draft.jobWatch === v ? 'is-active' : ''}
+                    onClick={() => (isNew ? patch({ jobWatch: v }) : (setDraft((d) => ({ ...d, jobWatch: v })), patchAgent(draft.id, { jobWatch: v })))}
+                  >
+                    {v ? L('Ligado', 'On') : L('Desligado', 'Off')}
+                  </button>
+                ))}
+              </div>
             </Card>
           )}
 
@@ -2078,6 +2100,7 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
+        {pane('agentes') && <JobWatchSettingsCard />}
         {pane('geral') && <WorkspaceDangerArea />}
       </div>
     </Page>

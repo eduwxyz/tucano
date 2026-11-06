@@ -32,10 +32,12 @@ Permitir que um agente acompanhe um job do Databricks a partir de um `job_id` ou
 
 Antes de construir as métricas do Spark, validar com a CLI do usuário, num cluster em execução:
 
-1. A CLI está instalada onde o Tucano roda, e o perfil autentica.
+1. A CLI está instalada onde o Tucano roda, e o perfil autentica. O botão **Testar a CLI** confere isso.
 2. `databricks api get` alcança a API de monitoramento do Spark pelo proxy do driver. Não há documentação oficial confirmando esse caminho. A validação também define o formato exato do caminho e como obter a organização, o cluster e a porta.
 3. As respostas trazem progresso por etapa, shuffle, spill e memória dos executores.
 4. Os nomes das flags da CLI e o formato de `jobs get-run` e `jobs list-runs` na versão instalada batem com esta spec.
+
+**Até essa validação, o Spark fica desligado:** o **Endereço da API do Spark** vem vazio, e o cartão mostra essas métricas como indisponíveis. Com o endereço validado, preenchê-lo nas Configurações liga as métricas, sem mudar o código.
 
 **Se o item 2 ou 3 falhar:** o cartão fica com estado, duração, tasks e comparação com a média. Shuffle, spill, memória e progresso da etapa aparecem como indisponíveis. A detecção de travamento usa só "lentidão fora do normal". Nenhuma fonte alternativa entra nesta versão sem nova decisão do usuário.
 
@@ -133,7 +135,10 @@ Liberados por padrão:
 - `jobs get-run-output`
 - `jobs list-runs`
 - `clusters get`
-- `api get`, só nos caminhos da lista, que começa com o caminho do Spark definido na etapa 0
+- `current-user me`, para o botão **Testar a CLI**
+- `api get`, só nos caminhos da lista: `/api/2.1/jobs/runs/list` e `/driver-proxy-api/`
+
+Cada entrada da lista traz as flags aceitas, como `jobs list-runs --job-id --limit`. Para achar runs, o app usa `api get`, porque ele traz uma página só, e a listagem da CLI pode percorrer todo o histórico.
 
 Sempre recusados, salvo pela opção de ações:
 
@@ -141,9 +146,9 @@ Sempre recusados, salvo pela opção de ações:
 - `api post`, `api put`, `api patch` e `api delete`.
 - Caminhos com `..`, `%2e` ou fora da lista, e flags fora da lista de cada comando.
 
-**Edição da lista:** o usuário pode adicionar comandos. Um comando fora do padrão de leitura exige confirmação no momento em que é adicionado.
+**Edição da lista:** o usuário pode adicionar comandos. Um comando fora do padrão de leitura exige confirmação no momento em que é adicionado, e cada uso por um agente passa pelo fluxo de aprovação. `jobs run-now`, `jobs cancel-run` e escrita pela API nunca entram pela lista.
 
-**Ações:** vêm desligadas. Ligadas, adicionam as ferramentas `iniciar_job` e `cancelar_job`, e o botão **Cancelar run** no cartão. Cada uso passa pelo fluxo de aprovação existente, sem opção de "sempre permitir".
+**Ações:** vêm desligadas. Ligadas, adicionam as ferramentas `iniciar_job` e `cancelar_job`, que passam pelo fluxo de aprovação existente, sem opção de "sempre permitir", e o botão **Cancelar run** no cartão, em que a pessoa confirma num diálogo.
 
 **Limite conhecido:** as regras valem para o monitor e para as ferramentas. Elas não seguram um agente com shell em **Este computador**, que roda comandos como o usuário. A proteção recomendada é um perfil só de leitura no Databricks e o agente em **Linux isolado** ou sem computador. A tela de Configurações deixa isso explícito.
 
@@ -156,6 +161,7 @@ Só aparecem para agentes com **Acompanhar jobs** ligado na aba **Ferramentas**,
 | `acompanhar_job` | `job_id` ou `run_id` | Cria o acompanhamento e responde na hora, com o cartão. Se já existir para o run, devolve o existente |
 | `ver_job` | `run_id`, `task` opcional | Última leitura, ou a saída de uma task. Consultar a saída usa `jobs get-run-output` |
 | `parar_acompanhamento` | `run_id` | Encerra o acompanhamento, sem mexer no job |
+| `consultar_databricks` | `comando`, `motivo` opcional | Roda um comando da lista de permitidos. É o que torna a edição da lista útil. Comando que não seja de leitura vira pedido de aprovação. O perfil e o formato são sempre definidos pelo app |
 
 A saída de jobs é tratada como dado, nunca como instrução. Ela é limitada em tamanho e passa pela remoção de segredos de `step-text.ts`.
 
@@ -202,6 +208,7 @@ O cartão diz "Possível travamento", nunca uma certeza. Se o progresso voltar, 
 | Configuração | Padrão | Mínimo |
 |---|---|---|
 | Caminho da CLI | Procurar no PATH | Não se aplica |
+| Endereço da API do Spark | Vazio: sem métricas do Spark | Não se aplica |
 | Perfil da CLI | Escolhido pelo usuário | Não se aplica |
 | Intervalo entre consultas | 30 s | 15 s |
 | Jobs ao mesmo tempo | 5 | 1 |
