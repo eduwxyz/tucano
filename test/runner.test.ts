@@ -149,6 +149,20 @@ describe('Runner', () => {
     expect(second).toContain('Você é da 2ª camada')
   })
 
+  it('does not hand off to a planned agent, but still hands off to an unplanned one', async () => {
+    db.saveAgent(agent('a3', 'ivy'))
+    db.createConversation({ id: 'c2', kind: 'channel', name: 'engenharia', members: ['a1', 'a2', 'a3'] })
+    const r = runner(fakeEngine('claude', {
+      delayMs: 1,
+      route: () => ({ plano: [['lia'], ['theo']], reason: 'um prepara, o outro finaliza' }),
+      reply: (turn) => (turn.system.startsWith('Você é lia') ? '@theo, finalize com o material acima. @ivy, confira a fonte.' : 'Resumo final.')
+    }))
+    await r.send('c2', 'prepare o material e finalize o resumo')
+    await r.idle()
+
+    expect(agentMessages().map((m) => (m.author as { id: string }).id).sort()).toEqual(['a1', 'a2', 'a3'])
+  })
+
   it('a plan of one layer tells the agents nothing about an order', async () => {
     db.saveAgent(agent('a2', 'theo')) // both on the same engine, so every turn is seen here
     const r = runner(fakeEngine('claude', { delayMs: 1, route: () => ({ plano: [['lia', 'theo']], reason: 'dois assuntos' }) }))

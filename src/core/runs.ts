@@ -149,7 +149,7 @@ export interface RoutineEvent {
 }
 
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
-type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; plannedLater?: string[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 export class Runner {
@@ -554,7 +554,7 @@ export class Runner {
     const called = layers.map((l) => l.map((a) => `**${a.name}**`).join(and)).join(L('; depois ', '; then '))
     this.update(note, { text: `${L('Chamei', 'Called')} ${called}${why}`, run: undefined })
     const run = (i: number): void => {
-      const done = layers[i]!.map((a) => this.enqueue(() => this.execute(a, conv, { depth: 1, threadId: note.threadId, task: planBrief(layers, a, reason) || undefined })))
+      const done = layers[i]!.map((a) => this.enqueue(() => this.execute(a, conv, { depth: 1, threadId: note.threadId, task: planBrief(layers, a, reason) || undefined, plannedLater: layers.slice(i + 1).flat().map((next) => next.id) })))
       if (layers[i + 1]) void Promise.all(done).then(() => run(i + 1))
       else {
         // The last layer is queued: idle waits for it, not for the layers still to come.
@@ -1634,7 +1634,7 @@ export class Runner {
         const finished = (): void => {
           if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId)
         }
-        const next = this.mentions(agent, conv, msg)
+        const next = this.mentions(agent, conv, msg).filter((a) => !opts.plannedLater?.includes(a.id))
         if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, finished)
         else finished()
       }
