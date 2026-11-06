@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
-import { appStep, appTools, DesktopApps, grantOf, itemize, keyFor, parseLsappinfo, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
+import { appStep, appTools, DesktopApps, grantOf, isTucano, itemize, keyFor, parseLsappinfo, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
 import type { Agent } from '../src/shared/types'
 
 // A Notes window as agent-desktop describes it.
@@ -139,6 +139,15 @@ describe('what an agent may do with an app', () => {
     expect(calls.filter((c) => c[0] === 'click')).toHaveLength(0)
     expect((await apps.call(nina, 'app_tecla', { app: 'Notas', tecla: 'return' })).approval).toBeDefined()
     expect(riskyKey('cmd+shift+d')).toBe(true)
+    expect(riskyKey('shift+cmd+d')).toBe(true)
+    expect(riskyKey('Shift + Command + D')).toBe(true)
+    expect(riskyKey('return')).toBe(true)
+    expect(riskyKey('shift+return')).toBe(false)
+    expect(riskyKey('shift+ctrl+enter')).toBe(true)
+    expect(riskyKey('option+delete')).toBe(true)
+    expect(riskyKey('cmd+d')).toBe(false)
+    expect(riskyClick('')).toBe(true)
+    expect(riskyClick('  ')).toBe(true)
     expect(riskyKey('cmd+n')).toBe(false)
     expect(riskyKey('cmd+backspace')).toBe(true)
     expect(riskyKey('alt + delete')).toBe(true)
@@ -155,16 +164,26 @@ describe('what an agent may do with an app', () => {
     const again = await apps.call(nina, 'app_clicar', { app: 'Notas', alvo: 'Apagar' })
     expect(again.approval).toBeUndefined()
     expect(calls.filter((c) => c[0] === 'click').at(-1)?.[1]).toMatch(/^@s\d+:e2$/)
-    // The same action under a longer name counts too, once.
-    apps.approved(nina, { app: 'Notas', alvo: 'Apagar Nota' })
-    await apps.call(nina, 'app_ver', { app: 'Notas' })
-    expect((await apps.call(nina, 'app_clicar', { app: 'Notas', alvo: 'Apagar' })).approval).toBeUndefined()
     // Once: the next one asks again.
+    await apps.call(nina, 'app_ver', { app: 'Notas' })
+    expect((await apps.call(nina, 'app_clicar', { app: 'Notas', alvo: 'Apagar' })).approval).toBeDefined()
+    // Only the exact element: a longer or shorter name ("Apagar Nota", "Apagar Tudo") asks again.
+    apps.approved(nina, { app: 'Notas', alvo: 'Apagar Nota' })
     await apps.call(nina, 'app_ver', { app: 'Notas' })
     expect((await apps.call(nina, 'app_clicar', { app: 'Notas', alvo: 'Apagar' })).approval).toBeDefined()
     expect(apps.approved(agent([{ name: 'Notas', level: 'read' }]), del.approval!.args).ok).toBe(false)
   })
 
+})
+
+describe('Tucano itself', () => {
+  it('is never an app an agent drives, which could click its own approval', () => {
+    expect(isTucano({ name: 'Tucano' })).toBe(true)
+    expect(isTucano({ name: 'Tucano.exe' })).toBe(true)
+    expect(isTucano({ name: 'Electron' })).toBe(true)
+    expect(isTucano({ name: 'Algo', bundleId: 'dev.tucano.app' })).toBe(true)
+    expect(isTucano({ name: 'Notas', bundleId: 'com.apple.Notes' })).toBe(false)
+  })
 })
 
 describe('the open apps on a Mac', () => {

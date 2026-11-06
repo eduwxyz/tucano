@@ -96,3 +96,34 @@ export function newsSince(changelog: string, current: string, seen?: string): Re
     .filter((r) => compareVersions(r.version, current) <= 0 && (seen ? compareVersions(r.version, seen) > 0 : compareVersions(r.version, current) === 0))
     .slice(0, 3)
 }
+
+// A page of the what's-new window: a few topics of one version, so a big release reads in steps
+// instead of a wall to scroll. In Portuguese, the summary's topics (the text before them on the
+// version's first page, after them on its last); otherwise each section's items, by section.
+export interface NewsPage {
+  release: ReleaseNotes
+  intro?: string
+  outro?: string
+  groups: { kind?: string; items: string[] }[]
+}
+
+export const NEWS_PER_PAGE = 4
+
+export function newsPages(news: ReleaseNotes[], pt: boolean, per = NEWS_PER_PAGE): NewsPage[] {
+  const pages: NewsPage[] = []
+  for (const r of news) {
+    const summary = pt ? r.pt : undefined
+    const items: { kind?: string; md: string }[] = summary ? summary.points.map((md) => ({ md })) : r.sections.flatMap((s) => s.items.map((md) => ({ kind: s.kind, md })))
+    const count = Math.max(1, Math.ceil(items.length / per))
+    for (let i = 0; i < count; i++) {
+      const groups: NewsPage['groups'] = []
+      for (const item of items.slice(i * per, (i + 1) * per)) {
+        const last = groups.at(-1)
+        if (last && last.kind === item.kind) last.items.push(item.md)
+        else groups.push({ ...(item.kind ? { kind: item.kind } : {}), items: [item.md] })
+      }
+      pages.push({ release: r, groups, ...(summary?.intro && i === 0 ? { intro: summary.intro } : {}), ...(summary?.outro && i === count - 1 ? { outro: summary.outro } : {}) })
+    }
+  }
+  return pages
+}

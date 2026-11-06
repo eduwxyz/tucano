@@ -27,15 +27,15 @@ export function systemPrompt(opts: {
   apps?: AgentApp[] // the person's own apps it may use
   routines?: Routine[] // its own, when it can schedule
   skills?: Skill[] // the active ones it follows, when it has skill tools
-  publish?: string[] // the GitHub repositories it can push agent/* branches to
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   team?: { team: Agent[]; others: Agent[] } // who it can hand work to with delegar: the ones it coordinates, and the rest
   delegatedBy?: Agent // the agent whose task this reply works on
   askedIn?: string // that task is a question it asked in this channel, and this agent was picked to answer
   together?: { before: Agent[]; after: Agent[] } // called with others at once: who answered before it, who answers after
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
+  connectors?: boolean // it has connector tools (Slack, Databricks…)
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, publish, builder, team, delegatedBy, askedIn, together, wiki } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, builder, team, delegatedBy, askedIn, together, wiki, connectors } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const other = conversation.kind === 'agents' ? peers[0] : undefined
   const where = delegatedBy
@@ -82,15 +82,10 @@ export function systemPrompt(opts: {
               `Nelas, mude só o que ${me} pediu e confira com os testes ou o build do projeto. Antes de mexer, olhe o git status; não apague, não reescreva o que não entendeu e não descarte mudanças de ${me}. node_modules e .venv aqui são do Linux, separados dos do computador de ${me}: instale à vontade.`,
               `In them, change only what ${me} asked for and check it with the project's tests or build. Before touching anything, look at git status; don't delete, don't rewrite what you don't understand and don't discard ${me}'s changes. node_modules and .venv here are Linux's, separate from ${me}'s computer's: install freely.`
             )} ${
-              publish?.length
-                ? L(
-                    `Não há credenciais no seu computador, mas o app publica no GitHub (${publish.join(', ')}) por você: faça commit numa branch agent/<assunto> e \`git push origin agent/<assunto>\` (só branches agent/* passam; main e as outras são recusadas). Depois peça a PR com abrir_pr: ${me} aprova e o app abre. Deploy continua com ${me}.`,
-                    `There are no credentials on your computer, but the app publishes to GitHub (${publish.join(', ')}) for you: commit on an agent/<topic> branch and \`git push origin agent/<topic>\` (only agent/* branches go through; main and the others are refused). Then ask for the PR with abrir_pr: ${me} approves and the app opens it. Deploying stays with ${me}.`
-                  )
-                : L(
-                    `Não há credenciais no seu computador, então git push e deploy não funcionam: faça commit só se ${me} pedir e diga o que falta ${me} fazer.`,
-                    `There are no credentials on your computer, so git push and deploys don't work: commit only if ${me} asks and say what's left for ${me} to do.`
-                  )
+              L(
+                `Não há credenciais no seu computador, então git push e deploy não funcionam: faça commit só se ${me} pedir e diga o que falta ${me} fazer. Pra publicar no GitHub (uma branch, uma PR), use as ferramentas do conector do GitHub, se você tiver.`,
+                `There are no credentials on your computer, so git push and deploys don't work: commit only if ${me} asks and say what's left for ${me} to do. To publish to GitHub (a branch, a PR), use the GitHub connector's tools, if you have it.`
+              )
             }\``
           ].join('\n')
       ]
@@ -161,6 +156,7 @@ export function systemPrompt(opts: {
         `- Suas outras ferramentas são as que ${me} liberou pra você. Ações sensíveis não rodam na hora: viram um pedido de aprovação, e você recebe o resultado depois da decisão.`,
         `- Your other tools are the ones ${me} granted you. Sensitive actions don't run right away: they become an approval request, and you get the result after the decision.`
       ),
+      connectors && readingData(me),
       offline?.length &&
         L(
           `- Você tem acesso a ${offline.join(', ')}, mas ${offline.length > 1 ? 'eles estão desconectados' : 'ele está desconectado'} agora, então as ferramentas não aparecem pra você. Se precisar, peça a ${me} pra reconectar em Conectores (não é falta de permissão).`,
@@ -178,6 +174,21 @@ export function systemPrompt(opts: {
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+// Reading a channel, a history, logs or a table: only the window the task needs, and no waiting by hand.
+// Without it an agent asked about "the alarm" pages through the whole channel and sleeps on slow queries.
+export function readingData(me: string): string {
+  return [
+    L(
+      `- Pra ler um canal, um histórico, logs ou uma tabela, peça só a janela que a tarefa precisa, com o filtro de tempo da ferramenta, uma busca ou um limite, em vez de paginar tudo. Cada mensagem traz a hora, com os segundos Unix; a última é de agora. Ex.: "o alarme da última hora" é oldest = (unix da última mensagem − 3600). Se o pedido é sobre algo de agora (um alarme, um erro) e ${me} não disser a janela, comece pela última hora e só amplie se faltar. Se um resultado vier cortado, estreite a pergunta (janela menor, filtro, menos campos, uma agregação) em vez de chamar de novo pro resto.`,
+      `- To read a channel, a history, logs or a table, ask only for the window the task needs, with the tool's time filter, a search or a limit, instead of paging through everything. Each message carries its time, with the Unix seconds; the last one is from now. E.g. "the alarm from the last hour" is oldest = (the last message's unix − 3600). If it's about something happening now (an alarm, an error) and ${me} doesn't say the window, start with the last hour and widen it only if something's missing. If a result comes back cut, narrow the question (a shorter window, a filter, fewer fields, an aggregate) instead of calling again for the rest.`
+    ),
+    L(
+      '- Uma consulta que volta ainda rodando (um SQL demorado) o app espera por você, com a ferramenta de status do próprio conector: ela só te devolve quando terminar. Não espere com sleep nem rode a mesma consulta de novo.',
+      "- A query that comes back still running (a slow SQL) is awaited by the app for you, with the connector's own status tool: it only comes back once it's done. Don't wait with sleep or run the same query again."
+    )
+  ].join('\n')
 }
 
 // The language of the app is the one agents answer in, unless the person writes in another.
@@ -277,7 +288,15 @@ function memorySection(me: string, m: { aboutMe: Memory[]; own: Memory[]; search
     .join('\n\n')
 }
 
-const now = (): string => new Date().toLocaleString(locale(), { weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+// "UTC-03:00": message times are local, and the tools that filter by time often want UTC or Unix seconds.
+const utcOffset = (d: Date): string => {
+  const m = -d.getTimezoneOffset()
+  const a = Math.abs(m)
+  return `UTC${m < 0 ? '-' : '+'}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`
+}
+const zone = (at: number): string => `${utcOffset(new Date(at))}, unix ${Math.floor(at / 1000)}`
+
+const now = (): string => `${new Date().toLocaleString(locale(), { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} (${zone(Date.now())})`
 
 // "sáb 18/10 14:02": with the weekday, so "toda segunda" and "amanhã" can be worked out.
 export const clock = (at: number): string => {
@@ -285,6 +304,10 @@ export const clock = (at: number): string => {
   const day = d.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')
   return `${day} ${d.toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', '')}`
 }
+
+// A message's time in the transcript: the clock with the year, the offset and the Unix seconds, so
+// "the last hour" goes straight into a tool's time filter. It never changes, so the cache still holds.
+export const stamp = (at: number): string => `${clock(at).replace(/^(\S+ \d{2}\/\d{2})/, `$1/${new Date(at).getFullYear()}`)} (${zone(at)})`
 
 // The conversation as blocks, one per message, oldest first. Nothing in them
 // changes between turns (no "now", no closing line), so a kept session can tell
@@ -304,6 +327,7 @@ type TranscriptOpts = {
   images?: Map<string, string[]>
   thread?: Message
   searchable?: boolean
+  unix?: boolean // message times with the year, the offset and the Unix seconds: for an agent whose tools filter by time
 }
 
 export function transcript(opts: TranscriptOpts): string[] {
@@ -318,7 +342,7 @@ export const snip = (text: string, max: number): string => {
 
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
-  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable } = opts
+  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable, unix } = opts
   const name = (m: Message): string | null => {
     if (m.author.kind === 'me') return me
     if (m.author.kind === 'system') return null
@@ -378,7 +402,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       : `${summary?.trim() ? L('Mensagens desde o resumo', 'Messages since the summary') : L(`Conversa em ${where}`, `Conversation in ${where}`)}, ${L('das mais antigas pras mais novas', 'oldest to newest')}:`
   ].filter((b): b is string => !!b)
   const blockOf = new Map(shown.map((m, i) => [m.id, head.length + i]))
-  const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${clock(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
+  const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${unix ? stamp(m.at) : clock(m.at)}]\n${body(m)}`), ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
   return { blocks, blockOf }
 }
 

@@ -26,6 +26,7 @@ import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dia
 import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
+import { WorkspaceSelector } from './Workspaces'
 import { AgentAvatar, Icon, TucaMark, useJustEnded, type IconName } from './ui'
 
 // The wiki stays lit on any of its pages.
@@ -52,7 +53,7 @@ function TucaItem(): ReactNode {
     <button className="nav-item" onClick={openTuca} title={L('Monte um agente conversando com o Tuca', 'Build an agent by chatting with Tuca')}>
       <TucaMark size={18} />
       <span className="nav-item__label">Tuca</span>
-      <span className="nav-item__meta">{L('monta agentes', 'builds agents')}</span>
+      <span className="nav-item__meta">{L('te ajuda', 'helps you')}</span>
     </button>
   )
 }
@@ -258,11 +259,10 @@ export function Sidebar(): ReactNode {
     <aside className="sidebar">
       <div className="sidebar__drag" />
       <div className="workspace">
-        <span className="workspace__logo">{s.settings.workspaceName.slice(0, 1)}</span>
-        <span className="workspace__name">{s.settings.workspaceName}</span>
+        <WorkspaceSelector />
         <button
           className={`icon-btn ${s.settings.paused ? 'is-paused' : ''}`}
-          title={s.settings.paused ? L('Retomar os agentes', 'Resume the agents') : L('Pausar tudo: nenhum agente começa a trabalhar e nenhuma rotina roda', 'Pause everything: no agent starts working and no routine runs')}
+          title={s.settings.paused ? L('Retomar os agentes deste workspace', 'Resume agents in this workspace') : L('Pausar este workspace: nenhum agente começa a trabalhar e nenhuma rotina roda', 'Pause this workspace: no agent starts working and no routine runs')}
           onClick={() => updateSettings({ paused: !s.settings.paused })}
         >
           <Icon name={s.settings.paused ? 'play' : 'pause'} />

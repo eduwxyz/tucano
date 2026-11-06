@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -53,6 +53,16 @@ describe('the team as a file', () => {
     const file = backup(a, mkdtempSync(join(tmpdir(), 'bk-')))
     expect(existsSync(file)).toBe(true)
     expect(new Db(file).agents()[0]!.handle).toBe('staff')
+  })
+
+  it("keeps a backup named after the workspace, beside a week of older ones", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bk-'))
+    for (let d = 1; d <= 7; d++) writeFileSync(join(dir, `tucano-2026-10-0${d}-09-00.db`), '')
+    const file = backup(fresh(), dir, 'Empresa São Paulo')
+    expect(file.endsWith('-Empresa-Sao-Paulo.db')).toBe(true)
+    expect(existsSync(file)).toBe(true)
+    expect(readdirSync(dir)).toHaveLength(7)
+    expect(existsSync(join(dir, 'tucano-2026-10-01-09-00.db'))).toBe(false) // the oldest went
   })
 })
 

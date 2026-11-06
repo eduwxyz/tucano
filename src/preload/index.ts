@@ -8,6 +8,19 @@ ipcRenderer.on('core:port', (event) => {
 })
 
 contextBridge.exposeInMainWorld('tucano', {
+  workspaces: {
+    list: () => ipcRenderer.invoke('workspaces:list'),
+    create: (name?: string) => ipcRenderer.invoke('workspaces:create', name),
+    delete: (id?: string) => ipcRenderer.invoke('workspaces:delete', id),
+    duplicate: (id: string, name?: string, parts?: object) => ipcRenderer.invoke('workspaces:duplicate', id, name, parts),
+    setPaused: (paused: boolean, id?: string) => ipcRenderer.invoke('workspaces:pause', paused, id),
+    switch: (id: string) => ipcRenderer.invoke('workspaces:switch', id),
+    subscribe: (cb: (list: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, list: unknown): void => cb(list)
+      ipcRenderer.on('workspaces', listener)
+      return () => ipcRenderer.removeListener('workspaces', listener)
+    }
+  },
   connect: (): void => ipcRenderer.send('core:connect'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
@@ -32,5 +45,16 @@ contextBridge.exposeInMainWorld('tucano', {
     ipcRenderer.on('update', (_e, state: unknown) => cb(state))
   },
   checkUpdates: (): void => ipcRenderer.send('update:check'),
-  installUpdate: (): void => ipcRenderer.send('update:install')
+  installUpdate: (): void => ipcRenderer.send('update:install'),
+  // Tucanos on servers, shown in this window over the app (Settings › Servers, the workspace list).
+  servers: {
+    list: (): Promise<unknown> => ipcRenderer.invoke('servers:list'),
+    pair: (link: string): Promise<unknown> => ipcRenderer.invoke('servers:pair', link),
+    open: (id: string): void => ipcRenderer.send('servers:open', id),
+    local: (): void => ipcRenderer.send('servers:local'),
+    forget: (id: string): Promise<unknown> => ipcRenderer.invoke('servers:forget', id),
+    onChanged: (cb: () => void): void => {
+      ipcRenderer.on('servers', () => cb())
+    }
+  }
 })

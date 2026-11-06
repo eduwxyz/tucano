@@ -32,4 +32,21 @@ describe.skipIf(!hasChrome())('closing an agent’s Chrome', () => {
     await chrome.run('ada', 'close')
     expect((await chrome.run('ada', 'open', { url })).title).toBe('signed in')
   }, 60_000)
+
+  it('closes a Chrome left idle, and reopens it on the same page, still signed in', async () => {
+    const idle = new ChromeBrowsers(mkdtempSync(join(tmpdir(), 'tucano-chrome-')), () => {}, undefined, undefined, false, 600)
+    try {
+      await idle.run('bia', 'open', { url: `${url}login` })
+      await idle.run('bia', 'open', { url: `${url}page` })
+      expect(idle.running('bia')).toBe(true)
+      for (let i = 0; i < 150 && idle.running('bia'); i++) await new Promise((r) => setTimeout(r, 200))
+      expect(idle.running('bia')).toBe(false)
+      // The next ask opens it again where it was: no url given, the page it left.
+      const back = await idle.run('bia', 'snapshot')
+      expect(back.url).toBe(`${url}page`)
+      expect(back.title).toBe('signed in')
+    } finally {
+      idle.quit()
+    }
+  }, 60_000)
 })
