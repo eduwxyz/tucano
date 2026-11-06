@@ -9,7 +9,7 @@ import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '..
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
-import { geminiModels } from './gemini'
+import { antigravityModels } from './antigravity'
 import { cursorSignedIn, parseCursorModels } from './cursor'
 import { grokLogin, parseGrokModels } from './grok'
 
@@ -226,23 +226,37 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
   return { status: listedStatus(path, v.stdout, models, 'pi (e /login)'), models }
 }
 
-// Gemini CLI. Its model list isn't offered by an offline command, so the known
+// Antigravity CLI (replaces Gemini CLI). Its model list isn't offered by an offline command, so the known
 // current models are used; "signed in" is whether a login is in place — the
 // OAuth credentials in the home, or an API key / Vertex in the environment.
-export async function detectGemini(): Promise<{ status: EngineStatus; models: string[] }> {
-  const path = await which('gemini')
+function antigravityLoginDir(): string {
+  const candidates = [
+    join(process.env['ANTIGRAVITY_CLI_HOME'] || process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
+  ]
+  if (process.env['LOCALAPPDATA']) {
+    candidates.push(join(process.env['LOCALAPPDATA'], 'agy', '.gemini'))
+    candidates.push(join(process.env['LOCALAPPDATA'], 'agy'))
+  }
+  for (const c of candidates) {
+    if (existsSync(join(c, 'oauth_creds.json'))) return c
+  }
+  return candidates[0]!
+}
+
+export async function detectAntigravity(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('agy')
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
   const v = await run(path, ['--version'])
-  const home = join(process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
-  const signedIn = existsSync(join(home, 'oauth_creds.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
-  const models = geminiModels(path)
+  const home = antigravityLoginDir()
+  const signedIn = existsSync(join(home, 'oauth_creds.json')) || existsSync(join(home, 'google_accounts.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
+  const models = antigravityModels(path)
   return {
     status: {
       installed: true,
       path,
       version: version(v.stdout),
       loggedIn: signedIn,
-      ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com gemini', 'Not signed in: sign in with gemini') })
+      ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com agy', 'Not signed in: sign in with agy') })
     },
     models: signedIn ? models : []
   }
@@ -302,12 +316,12 @@ export async function detectEngines(codexHome: string): Promise<{ engines: Recor
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
   // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
   const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
-  const [claude, codex, opencode, pi, gemini, cursor, grok] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini(), detectCursor(), detectGrok()])
+  const [claude, codex, opencode, pi, antigravity, cursor, grok] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectAntigravity(), detectCursor(), detectGrok()])
   // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
   const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
   return {
-    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status, cursor: cursor.status, grok: grok.status },
-    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, cursor: cursor.models, grok: grok.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, antigravity: antigravity.status, cursor: cursor.status, grok: grok.status },
+    listed: { opencode: opencode.models, pi: pi.models, antigravity: antigravity.models, cursor: cursor.models, grok: grok.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
     codexCatalog
   }
 }

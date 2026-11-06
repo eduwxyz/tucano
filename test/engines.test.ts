@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { detectGeminiCliModels, geminiArgs, geminiEnv, geminiHome, geminiModels, geminiParser } from '../src/core/engines/gemini'
+import { detectAntigravityCliModels, antigravityArgs, antigravityEnv, antigravityHome, antigravityInput, antigravityModels, antigravityParser } from '../src/core/engines/antigravity'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { grokArgs, grokCleanup, grokConfig, grokEngine, grokLogin, grokParser, grokPrompt, grokTurnDirs, grokTurnEnv, parseGrokModels, userGrokHome } from '../src/core/engines/grok'
 import { customModel, modelInfo, usable } from '../src/shared/types'
@@ -236,26 +236,26 @@ describe('Codex exec stream', () => {
 
 describe('Gemini stream', () => {
   it('streams the assistant deltas as the answer and reports the usage from the result', () => {
-    const events = feed(geminiParser(), fixture('gemini-stream.jsonl'))
+    const events = feed(antigravityParser(), fixture('gemini-stream.jsonl'))
     expect(text(events)).toBe('Deixa eu buscar. O dólar está R$ 5,10.')
     const done = events.find((e) => e.type === 'done')
     expect(done).toMatchObject({ type: 'done', text: 'Deixa eu buscar. O dólar está R$ 5,10.', usage: { inputTokens: 1000, cacheReadTokens: 34, outputTokens: 200 } })
   })
 
   it("reports the model's web search, and only that built-in", () => {
-    const web = feed(geminiParser(), fixture('gemini-stream.jsonl')).filter((e) => e.type === 'web')
+    const web = feed(antigravityParser(), fixture('gemini-stream.jsonl')).filter((e) => e.type === 'web')
     expect(web).toEqual([{ type: 'web', action: 'search', detail: 'preço do dólar hoje' }])
   })
 
   it('turns an error result into an error event, and a warning is not fatal', () => {
     const warn = '{"type":"error","severity":"warning","message":"a slow tool"}'
     const bad = '{"type":"result","status":"error","error":{"type":"AuthError","message":"not signed in"}}'
-    const events = feed(geminiParser(), [warn, bad])
+    const events = feed(antigravityParser(), [warn, bad])
     expect(events).toEqual([{ type: 'error', message: 'not signed in' }])
   })
 
   it('reports an error when the process exits without a result', () => {
-    const events = feed(geminiParser(), ['{"type":"init","session_id":"s","model":"gemini-2.5-pro"}'], 1, 'boom\nquota exceeded')
+    const events = feed(antigravityParser(), ['{"type":"init","session_id":"s","model":"gemini-2.5-pro"}'], 1, 'boom\nquota exceeded')
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({ type: 'error' })
     expect((events[0] as { message: string }).message).toContain('quota exceeded')
@@ -264,21 +264,22 @@ describe('Gemini stream', () => {
   it('ignores the user echo and unknown lines', () => {
     const echo = '{"type":"message","role":"user","content":"oi"}'
     const unknown = '{"type":"something_new"}'
-    expect(feed(geminiParser(), [echo, unknown, 'not json'], 0)).toHaveLength(1) // only the "no result" error
+    expect(feed(antigravityParser(), [echo, unknown, 'not json'], 0)).toHaveLength(1) // only the "no result" error
   })
 })
 
 describe('Gemini config', () => {
   it('runs headless with stream-json, auto-approving tools (the gateway decides), the model alone', () => {
-    const args = geminiArgs({ model: 'gemini-2.5-pro' })
-    expect(args).toEqual(['-p', '', '--output-format', 'stream-json', '--approval-mode', 'yolo', '-m', 'gemini-2.5-pro'])
+    const args = antigravityArgs({ model: 'gemini-2.5-pro' })
+    expect(args).toEqual(['--output-format', 'stream-json', '--input-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'gemini-2.5-pro'])
+    expect(antigravityInput('oi')).toBe('{"event":"user","message":{"role":"user","content":"oi"}}\n')
   })
 
   it('gives each turn a fresh home with the gateway as its only MCP server and no built-in tools', () => {
     const userHome = mkdtempSync(join(tmpdir(), 'gu-'))
     writeFileSync(join(userHome, 'oauth_creds.json'), '{}')
     const appDir = mkdtempSync(join(tmpdir(), 'gh-'))
-    const home = geminiHome(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }, userHome)
+    const home = antigravityHome(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }, userHome)
     expect(home.startsWith(appDir)).toBe(true)
     // the CLI reads $GEMINI_CLI_HOME/.gemini/, so nothing goes at the root
     const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
@@ -299,11 +300,11 @@ describe('Gemini config', () => {
     // the agent's instructions are the system prompt, and the login is brought in
     expect(readFileSync(join(home, 'system.md'), 'utf8')).toBe('You are Iris.')
     // the turn's settings are also the system settings, applied over the working folder's
-    expect(geminiEnv(home, { PATH: '/x' })).toEqual({ PATH: '/x', GEMINI_CLI_HOME: home, GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, '.gemini', 'settings.json'), GEMINI_SYSTEM_MD: join(home, 'system.md') })
+    expect(antigravityEnv(home, { PATH: '/x' })).toEqual({ PATH: '/x', GEMINI_CLI_HOME: home, GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, '.gemini', 'settings.json'), GEMINI_SYSTEM_MD: join(home, 'system.md') })
   })
 
   it('turns on only the web search when the agent has the web', () => {
-    const home = geminiHome(mkdtempSync(join(tmpdir(), 'gh2-')), { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'gu2-')))
+    const home = antigravityHome(mkdtempSync(join(tmpdir(), 'gh2-')), { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'gu2-')))
     const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
     expect(s['tools']).toEqual({ core: ['google_web_search'], discoveryCommand: '', callCommand: '' })
     expect(s['mcpServers']).toBeUndefined()
@@ -312,15 +313,15 @@ describe('Gemini config', () => {
   it('gives a different home each turn', () => {
     const appDir = mkdtempSync(join(tmpdir(), 'gh3-'))
     const userHome = mkdtempSync(join(tmpdir(), 'gu3-'))
-    const a = geminiHome(appDir, { system: 'a', mcpUrl: undefined, web: false }, userHome)
-    const b = geminiHome(appDir, { system: 'b', mcpUrl: undefined, web: false }, userHome)
+    const a = antigravityHome(appDir, { system: 'a', mcpUrl: undefined, web: false }, userHome)
+    const b = antigravityHome(appDir, { system: 'b', mcpUrl: undefined, web: false }, userHome)
     expect(a).not.toBe(b)
   })
 
   it('lists default models when no bin path is provided', () => {
-    const list = geminiModels()
-    expect(list).toContain('gemini/gemini-3.8-flash')
-    expect(list).toContain('gemini/gemini-3.1-pro-preview')
+    const list = antigravityModels()
+    expect(list).toContain('antigravity/gemini-3.8-flash-medium')
+    expect(list).toContain('antigravity/gemini-4-argon-medium')
   })
 
   it('dynamically extracts models from an installed @google/gemini-cli package', () => {
@@ -333,8 +334,8 @@ describe('Gemini config', () => {
     )
     const bin = join(root, 'gemini.cmd')
     writeFileSync(bin, '@ECHO off')
-    expect(detectGeminiCliModels(bin)).toEqual(['gemini/gemini-3.9-flash', 'gemini/gemini-4-pro'])
-    expect(geminiModels(bin)).toEqual(['gemini/gemini-3.9-flash', 'gemini/gemini-4-pro'])
+    expect(detectAntigravityCliModels(bin)).toEqual(['antigravity/gemini-3.9-flash', 'antigravity/gemini-4-pro'])
+    expect(antigravityModels(bin)).toEqual(['antigravity/gemini-3.9-flash', 'antigravity/gemini-4-pro'])
   })
 })
 
