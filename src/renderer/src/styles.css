@@ -1002,6 +1002,29 @@ h3 {
   flex: 1;
   overflow-y: auto;
   padding: 24px 0 12px;
+  contain: content; /* what changes in the list lays out only the list */
+}
+/* Rows off screen skip layout and paint until the scroll gets near; each keeps its last real height. */
+.messages > .msg,
+.messages > .system-line {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 96px;
+}
+.messages > .system-line {
+  contain-intrinsic-block-size: auto 30px;
+}
+/* The latest always draw: the list opens at its end, and they're what changes. */
+.messages > :nth-last-child(-n + 12) {
+  content-visibility: visible;
+}
+/* Older messages on their way, over the top of the list (it takes no room, so nothing jumps). */
+.messages__older {
+  position: sticky;
+  top: 0;
+  height: 0;
+  overflow: visible;
+  text-align: center;
+  z-index: 1;
 }
 /* "Go to the end": rides the bottom of the list while you read further up. */
 .messages__jump {

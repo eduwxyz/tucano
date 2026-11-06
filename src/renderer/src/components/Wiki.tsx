@@ -78,8 +78,8 @@ const when = (t: number): string => new Date(t).toLocaleString(locale(), { dateS
 // Who changed something: you, an agent, the curator, the review, or another app (Obsidian).
 function useWho(): (by: string) => string {
   const me = useStore((s) => s.me.name)
-  const state = useStore((s) => s)
-  return (by) => (by === 'me' ? me : by === 'outside' ? L('fora do Tucano', 'outside Tucano') : by === 'auto' ? L('o curador', 'the curator') : by === 'review' ? L('a revisão', 'the review') : by === 'import' ? L('veio do Obsidian', 'came from Obsidian') : (agentById(state, by)?.name ?? by))
+  const agents = useStore((s) => s.agents)
+  return (by) => (by === 'me' ? me : by === 'outside' ? L('fora do Tucano', 'outside Tucano') : by === 'auto' ? L('o curador', 'the curator') : by === 'review' ? L('a revisão', 'the review') : by === 'import' ? L('veio do Obsidian', 'came from Obsidian') : (agents.find((a) => a.id === by)?.name ?? by))
 }
 function Who({ by, size = 22 }: { by: string; size?: number }): ReactNode {
   const me = useStore((s) => s.me)

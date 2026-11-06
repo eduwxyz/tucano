@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
-import { agentById, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { agentById, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 
@@ -114,7 +114,7 @@ const clock = (at: number): string => new Date(at).toLocaleTimeString(locale(), 
 
 // Live while the agent is answering with it, or while I drive it.
 function useLive(agentId: string): boolean {
-  const working = useStore((s) => s.messages.some((m) => m.author.kind === 'agent' && m.author.id === agentId && m.run?.status === 'working'))
+  const working = useStore((s) => workingAgents(s).has(agentId))
   const view = useStore((s) => browserOf(s, agentId))
   return working || !!view?.doing || !!view?.shown
 }

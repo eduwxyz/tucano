@@ -808,6 +808,8 @@ function settleDraft(messageId: string, agentId?: string): void {
 }
 
 
+const PAGE = 100 // messages outside threads per conversation, per page sent to the window
+
 const api: Api = {
   markRead: ({ conversationId }) => {
     db.markRead(conversationId)
@@ -831,7 +833,7 @@ const api: Api = {
     settings: settings(),
     agents: db.agents(),
     conversations: db.conversations(),
-    messages: db.messages(),
+    ...db.openingMessages(PAGE), // each conversation's latest: the rest come as the scroll gets there
     connectors: connectors.list(),
     approvals: db.approvals(),
     memories: db.memories(),
@@ -847,6 +849,17 @@ const api: Api = {
     isolatedComputers: !serverMode || onPath('docker'),
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
+
+  olderMessages: ({ conversationId, before, through }) => {
+    // Back to a message to show (a reply: from its thread's first message), or one more page.
+    const target = through ? db.message(through) : undefined
+    const start = target?.threadId ? db.message(target.threadId) : target
+    return db.messagesBefore(conversationId, before, PAGE, start?.conversationId === conversationId ? start.at : undefined)
+  },
+  threadMessages: ({ rootId }) => {
+    const root = db.message(rootId)
+    return root ? [root, ...db.recentMessages(root.conversationId, 100_000, rootId)] : []
+  },
 
   sendMessage: ({ conversationId, text, images, threadId }) => {
     void runner.send(conversationId, text, images, threadId)

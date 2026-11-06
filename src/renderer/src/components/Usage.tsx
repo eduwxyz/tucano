@@ -2,7 +2,7 @@
 // Claude subscription's windows, and where each agent will end the month.
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { agentById, countedTokens, ENGINES, isTeam, loadUsage, modelInfo, navigate, useStore, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
+import { agentById, countedTokens, ENGINES, isTeam, loadUsage, messageById, modelInfo, navigate, receipts, useStore, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
 import { Sheet } from './Pages'
 import { AgentAvatar, duration, Icon, tokens, usd } from './ui'
 
@@ -52,8 +52,8 @@ function useBilling(u: UsageReport | null): { id: EngineId; label: string; statu
 export function UsagePage(): ReactNode {
   const [u, setU] = useState<UsageReport | null>(null)
   // Recomputed whenever a reply lands with its receipt.
-  const receipts = useStore((s) => s.messages.reduce((n, m) => n + (m.run?.receipt ? 1 : 0), 0))
-  useEffect(() => void loadUsage().then(setU), [receipts])
+  const count = useStore((s) => receipts(s).length)
+  useEffect(() => void loadUsage().then(setU), [count])
   const billing = useBilling(u)
   const allPlan = billing.length > 0 && billing.every((b) => b.status.route === 'plan')
 
@@ -412,7 +412,7 @@ function Backstage({ u }: { u: UsageReport }): ReactNode {
 
 function Receipts(): ReactNode {
   const [shown, setShown] = useState(10)
-  const all = useStore((s) => s.messages.filter((m) => m.run?.receipt))
+  const all = useStore(receipts)
   const recent = [...all].sort((a, b) => b.at - a.at)
   if (recent.length === 0) return null
   return (
@@ -444,7 +444,7 @@ function Receipts(): ReactNode {
 }
 
 function ReceiptRow({ id }: { id: string }): ReactNode {
-  const m = useStore((s) => s.messages.find((x) => x.id === id)!)
+  const m = useStore((s) => messageById(s, id)!)
   const agent = useStore((s) => (m.author.kind === 'agent' ? agentById(s, m.author.id) : undefined))
   const conv = useStore((s) => s.conversations.find((c) => c.id === m.conversationId))
   const r = m.run!.receipt!

@@ -1,8 +1,9 @@
 import { L } from '../../../shared/lang'
-import { useCallback, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { memo, useCallback, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
   archiveAgent,
+  isWorking,
   openTuca,
   isTeam,
   deleteConversation,
@@ -98,12 +99,17 @@ function GroupFold({ id, label, unread, head, naming, children }: { id: string; 
 const unreadIn = (conversations: { unread?: number }[]): number => conversations.reduce((sum, c) => sum + (c.unread ?? 0), 0)
 
 export function Sidebar(): ReactNode {
-  const s = useStore((s) => s)
-  const channels = s.conversations.filter((c) => c.kind === 'channel')
-  const dms = s.conversations.filter((c) => c.kind === 'dm' && agentById(s, c.name)?.kind !== 'tuca')
-  const pending = pendingApprovals(s).length
-  const suggestions = pendingMemories(s).length
-  const proposals = s.skills.filter((k) => k.state === 'pending').length
+  // Only what it draws: the whole state changes with every step an agent takes.
+  const conversations = useStore((s) => s.conversations)
+  const agents = useStore((s) => s.agents)
+  const settings = useStore((s) => s.settings)
+  const platform = useStore((s) => s.platform)
+  const pending = useStore((s) => pendingApprovals(s).length)
+  const suggestions = useStore((s) => pendingMemories(s).length)
+  const proposals = useStore((s) => s.skills.filter((k) => k.state === 'pending').length)
+  const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
+  const channels = conversations.filter((c) => c.kind === 'channel')
+  const dms = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')
   const [menu, setMenu] = useState<MenuState>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
   const open = (e: React.MouseEvent, items: MenuItem[]): void => {
@@ -111,7 +117,7 @@ export function Sidebar(): ReactNode {
     setMenu({ x: e.clientX, y: e.clientY, items })
   }
   // The order and groups are the person's: the core only keeps them.
-  const layout = s.settings.channelLayout
+  const layout = settings.channelLayout
   const arranged = arrange(channels, layout)
   const whole: ChannelLayout = { loose: arranged.loose.map((c) => c.id), groups: arranged.groups.map((g) => ({ ...g, channels: g.channels.map((c) => c.id) })) }
   const saveLayout = (next: ChannelLayout): void => updateSettings({ channelLayout: next })
@@ -190,7 +196,7 @@ export function Sidebar(): ReactNode {
     { label: L(`Ver ${agentName}`, `See ${agentName}`), icon: 'eye', onClick: () => navigate({ kind: 'agent', id: agentId }) },
     { label: L('Marcar como lido', 'Mark as read'), icon: 'check', onClick: () => markRead(id) },
     { label: L('Configurações da conversa…', 'Conversation settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id }) },
-    wikiItem(id, s.conversations.find((x) => x.id === id)?.wikiCapture !== false),
+    wikiItem(id, conversations.find((x) => x.id === id)?.wikiCapture !== false),
     'separator',
     {
       label: L('Apagar a conversa…', 'Delete the conversation…'),
@@ -226,7 +232,7 @@ export function Sidebar(): ReactNode {
   ]
 
   const isDark =
-    s.settings.theme === 'dark' || (s.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+    settings.theme === 'dark' || (settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
 
   return (
     <aside className="sidebar">
@@ -234,11 +240,11 @@ export function Sidebar(): ReactNode {
       <div className="workspace">
         <WorkspaceSelector />
         <button
-          className={`icon-btn ${s.settings.paused ? 'is-paused' : ''}`}
-          title={s.settings.paused ? L('Retomar os agentes deste workspace', 'Resume agents in this workspace') : L('Pausar este workspace: nenhum agente começa a trabalhar e nenhuma rotina roda', 'Pause this workspace: no agent starts working and no routine runs')}
-          onClick={() => updateSettings({ paused: !s.settings.paused })}
+          className={`icon-btn ${settings.paused ? 'is-paused' : ''}`}
+          title={settings.paused ? L('Retomar os agentes deste workspace', 'Resume agents in this workspace') : L('Pausar este workspace: nenhum agente começa a trabalhar e nenhuma rotina roda', 'Pause this workspace: no agent starts working and no routine runs')}
+          onClick={() => updateSettings({ paused: !settings.paused })}
         >
-          <Icon name={s.settings.paused ? 'play' : 'pause'} />
+          <Icon name={settings.paused ? 'play' : 'pause'} />
         </button>
         <button
           className="icon-btn"
@@ -249,7 +255,7 @@ export function Sidebar(): ReactNode {
         </button>
       </div>
 
-      {s.settings.paused && (
+      {settings.paused && (
         <button className="paused-banner" onClick={() => updateSettings({ paused: false })}>
           <Icon name="pause" size={13} /> {L('Agentes pausados', 'Agents paused')} · <u>{L('retomar', 'resume')}</u>
         </button>
@@ -268,7 +274,7 @@ export function Sidebar(): ReactNode {
           label={L('Canais', 'Channels')}
           unread={unreadIn(channels)}
           action={
-            <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(s.platform, 'N')})`, `New channel (${shortcut(s.platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
+            <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(platform, 'N')})`, `New channel (${shortcut(platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
               <Icon name="plus" size={14} />
             </button>
           }
@@ -318,7 +324,7 @@ export function Sidebar(): ReactNode {
         {dms.length > 0 && (
         <Section id="dms" label={L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)}>
           {dms.map((c) => {
-            const agent = agentById(s, c.name)
+            const agent = agentOf(c.name)
             if (!agent) return null
             return (
               <div key={c.id} onContextMenu={(e) => open(e, dmMenu(c.id, agent.id, agent.name))}>
@@ -338,24 +344,24 @@ export function Sidebar(): ReactNode {
             </button>
           }
         >
-          {s.agents
+          {agents
             .filter(isTeam)
             .map((a) => (
               <div key={a.id} onContextMenu={(e) => open(e, agentMenu(a.id, a.name))}>
                 <AgentItem id={a.id} />
               </div>
             ))}
-          {s.agents.some((a) => a.archived) && (
+          {agents.some((a) => a.archived) && (
             <button className="nav-item nav-item--quiet" onClick={() => openDialog({ kind: 'archived' })}>
               <Icon name="layers" />
               <span className="nav-item__label">{L('Arquivados', 'Archived')}</span>
-              <span className="nav-item__meta">{s.agents.filter((a) => a.archived).length}</span>
+              <span className="nav-item__meta">{agents.filter((a) => a.archived).length}</span>
             </button>
           )}
         </Section>
       </nav>
 
-      {s.settings.onboarding?.done && !s.settings.onboarding.checklistHidden && <GettingStarted />}
+      {settings.onboarding?.done && !settings.onboarding.checklistHidden && <GettingStarted />}
       <ContextMenu menu={menu} onClose={closeMenu} />
       <div className="sidebar__foot">
         <UpdateNote />
@@ -367,9 +373,9 @@ export function Sidebar(): ReactNode {
   )
 }
 
-function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: number }): ReactNode {
+const ChannelItem = memo(function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: number }): ReactNode {
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
-  const working = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'working'))
+  const working = useStore((s) => isWorking(s, id))
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
@@ -378,7 +384,7 @@ function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: 
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )
-}
+})
 
 // Working: the dot pulses. Just finished: it turns green for a moment and fades out, instead of vanishing.
 function LiveDot({ working }: { working: boolean }): ReactNode {
@@ -387,10 +393,10 @@ function LiveDot({ working }: { working: boolean }): ReactNode {
   return <span className={`pulse ${done ? 'is-done' : ''}`} title={working ? L('Trabalhando', 'Working') : undefined} />
 }
 
-function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: number }): ReactNode {
+const DmItem = memo(function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: number }): ReactNode {
   const name = agent.name
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
-  const working = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'working'))
+  const working = useStore((s) => isWorking(s, id))
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
@@ -399,9 +405,9 @@ function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: numb
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )
-}
+})
 
-function AgentItem({ id }: { id: string }): ReactNode {
+const AgentItem = memo(function AgentItem({ id }: { id: string }): ReactNode {
   const agent = useStore((s) => agentById(s, id))
   const active = useStore((s) => s.view?.kind === 'agent' && s.view.id === id)
   // The agent list is configuration: working shows on the thread (DM, channel),
@@ -421,4 +427,4 @@ function AgentItem({ id }: { id: string }): ReactNode {
       {pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title={pct >= 1 ? L('Bateu o limite do mês', 'Hit the monthly limit') : L('Já usou mais de 80% do limite', 'Over 80% of the limit used')} />}
     </button>
   )
-}
+})

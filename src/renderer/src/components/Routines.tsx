@@ -16,6 +16,7 @@ import {
   useStore,
   type Message,
   type Routine,
+  type State,
   type RoutineInput,
   type RunStatus,
   type Trigger,
@@ -89,7 +90,7 @@ type Draft = RoutineInput & { conversationId: string } // '' while the agent's D
 export function RoutinesPage(): ReactNode {
   const routines = useStore((s) => s.routines)
   const agents = useStore((s) => s.agents.filter(isTeam))
-  const messages = useStore((s) => s.messages)
+  const runs = useStore(allRuns)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [week, setWeek] = useState(() => startOfWeek(Date.now()))
   const [open, setOpen] = useState<{ occ: Occ; rect: DOMRect } | null>(null)
@@ -131,7 +132,7 @@ export function RoutinesPage(): ReactNode {
 
   const days = Array.from({ length: 7 }, (_, i) => dayAt(week, i))
   const end = dayAt(week, 7)
-  const occs = [...runsOf(messages, routines), ...planned(routines, week, now)].filter((o) => o.at >= week && o.at < end)
+  const occs = [...runs, ...planned(routines, week, now)].filter((o) => o.at >= week && o.at < end)
   const watching = routines.filter((r) => r.enabled && r.trigger)
   const finished = (r: Routine): boolean => !r.enabled && !!r.schedule.once && !!r.lastAt && !r.trigger
   const off = routines.filter((r) => !r.enabled && !finished(r))
@@ -289,14 +290,31 @@ const dayAt = (week: number, i: number): number => {
 }
 const hm = (t: number): string => new Date(t).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
 
-// What actually ran: each request a routine posted, with the agent's reply after it.
+// What actually ran: each request a routine posted, with the agent's reply after it. Worked out per
+// conversation, once per change of it, so a reply elsewhere doesn't redo the calendar.
+const runsCache = new WeakMap<Message[], { routines: Routine[]; occs: Occ[] }>()
+function allRuns(s: State): Occ[] {
+  return Object.values(s.messages).flatMap((list) => {
+    const had = runsCache.get(list)
+    if (had?.routines === s.routines) return had.occs
+    const occs = runsOf(list, s.routines)
+    runsCache.set(list, { routines: s.routines, occs })
+    return occs
+  })
+}
+
+// In one conversation's messages, oldest first.
 function runsOf(messages: Message[], routines: Routine[]): Occ[] {
   const out: Occ[] = []
   messages.forEach((ask, i) => {
     if (ask.author.kind !== 'routine') return
     const id = ask.author.id
     const r = routines.find((x) => x.id === id)
-    const reply = messages.slice(i + 1).find((m) => m.conversationId === ask.conversationId && m.author.kind === 'agent' && (!r || m.author.id === r.agentId))
+    let reply: Message | undefined
+    for (let j = i + 1; j < messages.length && !reply; j++) {
+      const m = messages[j]!
+      if (m.author.kind === 'agent' && (!r || m.author.id === r.agentId)) reply = m
+    }
     const agentId = r?.agentId ?? (reply?.author.kind === 'agent' ? reply.author.id : undefined)
     if (!agentId) return
     out.push({ key: ask.id, routine: r, name: r?.name ?? ask.routine?.name ?? L('Rotina', 'Routine'), agentId, at: ask.at, conversationId: ask.conversationId, status: reply?.run?.status, replyId: reply?.id })
@@ -525,7 +543,7 @@ function Popover({ occ, rect, now, onClose, onEdit }: { occ: Occ; rect: DOMRect;
   const r = useStore((s) => (occ.routine ? s.routines.find((x) => x.id === occ.routine!.id) : undefined))
   const agent = useStore((s) => agentById(s, occ.agentId))
   const conv = useStore((s) => s.conversations.find((c) => c.id === (r?.conversationId ?? occ.conversationId)))
-  const history = useStore((s) => (r ? runsOf(s.messages, [r]).filter((o) => o.routine) : []))
+  const history = useStore((s) => (r ? allRuns(s).filter((o) => o.routine?.id === r.id) : []))
   const connector = useStore((s) => (r?.trigger?.kind === 'poll' ? s.connectors.find((c) => c.id === (r.trigger as { connectorId: string }).connectorId) : undefined))
   const [confirm, setConfirm] = useState(false)
   const ref = useRef<HTMLDivElement>(null)

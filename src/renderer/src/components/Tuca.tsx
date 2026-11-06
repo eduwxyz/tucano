@@ -15,6 +15,7 @@ import {
   sendMessage,
   settleDraft,
   slug,
+  messagesIn,
   useStore,
   type Agent,
   type AgentDraft,
@@ -40,7 +41,7 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
   const created = useStore((s) => (d.agentId ? s.agents.find((a) => a.id === d.agentId) : undefined))
   const by = useStore((s) => (message.author.kind === 'agent' && s.agents.find((a) => a.id === (message.author as { id: string }).id)?.name) || 'Tuca')
   // A newer proposal in the same conversation replaces this one.
-  const replaced = useStore((s) => s.messages.some((m) => m.conversationId === message.conversationId && m.at > message.at && !!m.run?.agentDraft))
+  const replaced = useStore((s) => messagesIn(s, message.conversationId).some((m) => m.at > message.at && !!m.run?.agentDraft))
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -139,7 +140,7 @@ export function ProposalCard({ message }: { message: Message }): ReactNode {
   const connectors = useStore((s) => s.connectors)
   const conversations = useStore((s) => s.conversations)
   // A newer proposal in the same conversation replaces this one.
-  const replaced = useStore((s) => s.messages.some((m) => m.conversationId === message.conversationId && m.at > message.at && !!m.run?.proposal))
+  const replaced = useStore((s) => messagesIn(s, message.conversationId).some((m) => m.at > message.at && !!m.run?.proposal))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [open, setOpen] = useState(false)
