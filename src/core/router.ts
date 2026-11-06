@@ -1,35 +1,70 @@
-// The router picks who answers a channel message nobody was mentioned in. It
-// only chooses speakers: it grants nothing and never sees tools, just which
-// connectors each agent may use, so a question about Linear goes to whoever
-// can read Linear. It also screens an agent's reply that mentions others, so a
-// "thanks, @bia" doesn't wake her up.
+// The router picks who answers a channel message nobody was mentioned in, and
+// in what order: a plan is the layers of who answers, everyone in a layer at
+// once and the next layer only after the one before, so it reads what they
+// wrote. It only chooses speakers: it grants nothing and never sees tools, just
+// which connectors each agent may use, so a question about Linear goes to
+// whoever can read Linear. It also screens an agent's reply that mentions
+// others, so a "thanks, @bia" doesn't wake her up.
 import { L } from '../shared/lang'
 import type { Agent, Connector, Message } from '../shared/types'
 import type { Engine, TurnShape, Usage } from './engines/types'
 import type { ThreadDigest } from './memory'
 
 export const ROUTER_HISTORY = 10
-export const MAX_ROUTED = 2
+export const MAX_ROUTED = 2 // agents in one layer, answering at once
+export const MAX_LAYERS = 3 // sequential layers in one plan
+export const MAX_PLANNED = 3 // agents in one plan, counting every layer
+
+// The router's answer: the layers of who answers, in order. One layer is the
+// old "who answers" (all at once); a second layer waits for the first, so it
+// reads what it wrote. An empty plan is nobody.
+export type TurnPlan = Agent[][]
+export const planAgents = (plan: TurnPlan): Agent[] => plan.flat()
+
+// What an agent of a plan is told about it: the layers, which one is theirs, and that the next
+// one waits for them. A layer that knows another answers after it hands over what it found
+// instead of the finished work, which is what happened twice over in the same thread. A plan of
+// one layer has no order to keep, so nobody is told anything and the reply reads as it always
+// did. Empty string: nothing to say to this agent.
+export function planBrief(plan: TurnPlan, agent: Agent, reason: string): string {
+  const layers = plan.filter((l) => l.length > 0)
+  const mine = layers.findIndex((l) => l.some((a) => a.id === agent.id))
+  if (layers.length < 2 || mine < 0) return ''
+  const names = (l: Agent[]): string => l.map((a) => a.name).join(L(' e ', ' and '))
+  const layer = (i: number): string => L(`${i + 1}ª camada`, `layer ${i + 1}`)
+  return [
+    L(`O roteador dividiu esta mensagem em ${layers.length} camadas, uma depois da outra:`, `The router split this message into ${layers.length} layers, one after the other:`),
+    ...layers.map((l, i) => `- ${layer(i)}: ${names(l)}`),
+    mine === 0
+      ? L('Você é da 1ª camada, e responde agora. A camada seguinte só começa quando a sua terminar, e aí lê o que ficou escrito aqui.', 'You are in the 1st layer, answering now. The next layer only starts when yours is done, and then reads what was written here.')
+      : L(`Você é da ${layer(mine)}, e responde agora, depois da camada anterior, que já escreveu acima.`, `You are in ${layer(mine)}, answering now, after the layer before, which already wrote above.`),
+    reason ? L(`Motivo do plano: ${reason}`, `Plan reason: ${reason}`) : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
 
 export const routerSystem = (): string =>
   L(
     [
-      'Você decide quais agentes de um chat de trabalho devem responder à última mensagem humana.',
-      'Responda SOMENTE com JSON, sem texto em volta, no formato {"handles": ["..."], "todos": false, "reason": "..."}:',
-      `- "handles": de 0 a ${MAX_ROUTED} handles, só da lista de agentes; prefira 1.`,
-      '- "todos": true quando a mensagem é pro grupo todo (um cumprimento, "pessoal", uma pergunta pra todos, uma apresentação): aí todos os agentes respondem.',
+      'Você decide quais agentes de um chat de trabalho devem responder à última mensagem humana, e em que ordem.',
+      'Responda SOMENTE com JSON, sem texto em volta, no formato {"plano": [["..."], ["..."]], "todos": false, "reason": "..."}:',
+      `- "plano": de 0 a ${MAX_LAYERS} camadas, cada uma com 0 a ${MAX_ROUTED} handles (no máximo ${MAX_PLANNED} handles no plano todo), só da lista de agentes. Todos os agentes de uma camada respondem ao mesmo tempo; a camada seguinte só começa quando a anterior terminar, e aí já lê o que ela escreveu.`,
+      '- Prefira 1 agente. Use 2 handles na mesma camada quando as respostas não dependem uma da outra (dois assuntos, dois sistemas diferentes). Use camadas sequenciais quando uma resposta depende da anterior: uma encontra a informação, outra escreve, e uma terceira pode medir ou revisar o resultado.',
+      '- "todos": true quando a mensagem é pro grupo todo (um cumprimento, "pessoal", uma pergunta pra todos, uma apresentação): aí todos os agentes respondem, numa camada só.',
       '- "reason": um motivo de até 12 palavras, em português.',
       'Se a mensagem depende de um sistema externo (ex.: Linear, GitHub), prefira quem tem acesso a ele; se ninguém tem, escolha pelo papel.',
-      'Um cumprimento nunca fica sem resposta. Lista vazia (e "todos" falso) só quando ninguém precisa responder: agradecimento, recado, conversa já encerrada.'
+      'Um cumprimento nunca fica sem resposta. Plano vazio (e "todos" falso) só quando ninguém precisa responder: agradecimento, recado, conversa já encerrada.'
     ].join('\n'),
     [
-      'You decide which agents in a work chat should answer the last human message.',
-      'Reply ONLY with JSON, no text around it, in the format {"handles": ["..."], "everyone": false, "reason": "..."}:',
-      `- "handles": 0 to ${MAX_ROUTED} handles, only from the list of agents; prefer 1.`,
-      '- "everyone": true when the message is for the whole group (a greeting, "everyone", a question for all, an introduction): then every agent answers.',
+      'You decide which agents in a work chat should answer the last human message, and in what order.',
+      'Reply ONLY with JSON, no text around it, in the format {"plano": [["..."], ["..."], ["..."]], "everyone": false, "reason": "..."}:',
+      `- "plano": 0 to ${MAX_LAYERS} layers, each with 0 to ${MAX_ROUTED} handles (at most ${MAX_PLANNED} handles in the whole plan), only from the list of agents. Every agent in a layer answers at once; the next layer only starts when the one before is done, and then it reads what it wrote.`,
+      '- Prefer 1 agent. Use 2 handles in the same layer when the replies do not depend on each other (two subjects, two different systems). Use sequential layers when a reply depends on the previous one: one finds the information, another writes, and a third can measure or review the result.',
+      '- "everyone": true when the message is for the whole group (a greeting, "everyone", a question for all, an introduction): then every agent answers, in a single layer.',
       '- "reason": a reason of up to 12 words, in English.',
       'If the message depends on an external system (e.g. Linear, GitHub), prefer whoever has access to it; if no one does, choose by role.',
-      "A greeting never goes unanswered. An empty list (and \"everyone\" false) only when no one needs to answer: a thank-you, a note, a conversation that's already over."
+      "A greeting never goes unanswered. An empty plan (and \"everyone\" false) only when no one needs to answer: a thank-you, a note, a conversation that's already over."
     ].join('\n')
   )
 
@@ -139,7 +174,8 @@ export function handoffPrompt(opts: { reply: string; author: Agent; candidates: 
 }
 
 // Lenient: models sometimes wrap JSON in a code fence or add a line around it.
-export function parseRoute(text: string, agents: Agent[], max = MAX_ROUTED): { agents: Agent[]; reason: string } | null {
+// `max` caps the handles in one layer (a hand-off passes how many were mentioned).
+export function parseRoute(text: string, agents: Agent[], max = MAX_ROUTED): { plan: TurnPlan; reason: string } | null {
   const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
   if (!json) return null
   let data: unknown
@@ -149,18 +185,32 @@ export function parseRoute(text: string, agents: Agent[], max = MAX_ROUTED): { a
     return null
   }
   if (!data || typeof data !== 'object') return null
-  const { handles, reason, todos, everyone } = data as { handles?: unknown; reason?: unknown; todos?: unknown; everyone?: unknown }
+  const { plano, plan: layers, handles, reason, todos, everyone } = data as { plano?: unknown; plan?: unknown; handles?: unknown; reason?: unknown; todos?: unknown; everyone?: unknown }
   const why = typeof reason === 'string' ? reason.trim() : ''
-  // A message for the whole group: every agent in the channel answers.
-  if (todos === true || everyone === true) return { agents: [...agents], reason: why }
-  if (!Array.isArray(handles)) return null
-  const picked: Agent[] = []
-  for (const h of handles) {
-    if (typeof h !== 'string') continue
-    const a = agents.find((x) => x.handle.toLowerCase() === h.replace(/^@/, '').toLowerCase())
-    if (a && !picked.includes(a)) picked.push(a)
+  // A message for the whole group: every agent in the channel answers, in one layer.
+  if (todos === true || everyone === true) return { plan: [agents.slice()], reason: why }
+  // "plano" is the layers; "handles" is what the older prompt asked for: everyone at once.
+  const raw = Array.isArray(plano) ? plano : Array.isArray(layers) ? layers : Array.isArray(handles) ? [handles] : null
+  if (!raw) return null
+  const plan: TurnPlan = []
+  const taken = new Set<string>()
+  let total = 0
+  for (const layer of raw) {
+    if (plan.length >= MAX_LAYERS || total >= MAX_PLANNED) break
+    if (!Array.isArray(layer)) continue
+    const picked: Agent[] = []
+    for (const h of layer) {
+      if (typeof h !== 'string') continue
+      const a = agents.find((x) => x.handle.toLowerCase() === h.replace(/^@/, '').toLowerCase())
+      if (a && !taken.has(a.id) && !picked.includes(a)) picked.push(a)
+    }
+    if (!picked.length) continue
+    const kept = picked.slice(0, Math.min(max, MAX_PLANNED - total))
+    for (const a of kept) taken.add(a.id)
+    plan.push(kept)
+    total += kept.length
   }
-  return { agents: picked.slice(0, max), reason: why }
+  return { plan, reason: why }
 }
 
 // The router's turn without its prompt: the same for every message, so its process can start ahead.
@@ -176,7 +226,7 @@ export async function route(opts: {
   thread?: Message
   threads?: ThreadDigest[]
   cwd: string
-}): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
+}): Promise<{ plan: TurnPlan; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()
   let text = ''
   let usage: Usage | undefined
@@ -228,7 +278,7 @@ export async function screenHandoff(opts: {
   }
   const ms = Date.now() - started
   if (error) return { error, usage, ms }
-  // A reply may mention up to three agents, and each one asked needs the turn.
+  // A reply may mention up to three agents, and each one asked needs the turn: they all answer at once.
   const parsed = parseRoute(text, opts.candidates, opts.candidates.length)
-  return parsed ? { ...parsed, usage, ms } : { error: L('resposta do router fora do formato', "the router's answer wasn't in the format"), usage, ms }
+  return parsed ? { agents: planAgents(parsed.plan), reason: parsed.reason, usage, ms } : { error: L('resposta do router fora do formato', "the router's answer wasn't in the format"), usage, ms }
 }

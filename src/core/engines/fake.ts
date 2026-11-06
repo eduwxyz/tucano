@@ -11,7 +11,8 @@ import type { Engine, EngineEvent, Turn } from './types'
 // router prompt, and calls ask_user through the gateway when asked to ask.
 // `sessions`: it takes kept sessions like Claude Code does, and `released` gets the ones let go;
 // `warmed` gets what was started ahead ("warm <model>", "rewarm <session id>").
-export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (turn: Turn) => string; sessions?: boolean; released?: string[]; warmed?: string[] } = {}): Engine {
+// `route`: what the router answers, for a test that needs a plan of its own.
+export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (turn: Turn) => string; sessions?: boolean; released?: string[]; warmed?: string[]; route?: (prompt: string) => { plano: string[][]; reason: string } } = {}): Engine {
   const delay = opts.delayMs ?? 25
   return {
     id,
@@ -34,7 +35,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       let reply: string
       let spend = 0 // "gaste N tokens": a reply that costs that much, to see the budget pause
       if (turn.system === routerSystem()) {
-        reply = JSON.stringify(fakeRoute(turn.prompt))
+        reply = JSON.stringify((opts.route ?? fakeRoute)(turn.prompt))
       } else if (turn.system === handoffSystem()) {
         reply = JSON.stringify(fakeHandoff(turn.prompt))
       } else if (turn.system === memorySystem()) {
@@ -162,13 +163,13 @@ const ROLE_WORDS: [RegExp, RegExp][] = [
   [/conteúdo/i, /post|texto|anúncio|linkedin|escrev/i]
 ]
 
-function fakeRoute(prompt: string): { handles: string[]; reason: string } {
+function fakeRoute(prompt: string): { plano: string[][]; reason: string } {
   const last = lastMessage(prompt)
-  if (/^(bom dia|boa tarde|boa noite|obrigad|valeu|ok)\b/i.test(last.trim())) return { handles: [], reason: 'cumprimento, ninguém precisa responder' }
+  if (/^(bom dia|boa tarde|boa noite|obrigad|valeu|ok)\b/i.test(last.trim())) return { plano: [], reason: 'cumprimento, ninguém precisa responder' }
   const roster = [...prompt.matchAll(/^- ([a-z0-9_-]+): ([^·\n]*)/gim)].map((m) => ({ handle: m[1]!, about: m[2]! }))
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
-  return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
+  return pick ? { plano: [[pick.handle]], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { plano: [], reason: 'sem agentes' }
 }
 
 // Courtesy replies don't hand the turn; anything else does, to every mentioned agent.

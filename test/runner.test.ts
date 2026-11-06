@@ -124,6 +124,70 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Ninguém precisa responder')
   })
 
+  it('runs three sequential layers in order, and each reads the earlier replies', async () => {
+    db.saveAgent(agent('a2', 'theo', { modelId: 'sonnet' }))
+    db.saveAgent(agent('a3', 'may'))
+    db.createConversation({ id: 'c3', kind: 'channel', name: 'engenharia', members: ['a1', 'a2', 'a3'] })
+    const r = runner(
+      fakeEngine('claude', {
+        delayMs: 1,
+        route: () => ({ plano: [['lia'], ['theo'], ['may']], reason: 'find, write, measure' }),
+        reply: (t) => t.system.startsWith('Você é lia')
+          ? 'primeiro passo pronto'
+          : t.system.startsWith('Você é may')
+            ? 'terceiro passo, usando as duas respostas anteriores'
+            : 'segundo passo pronto, com o que a Lia achou'
+      })
+    )
+    await r.send('c3', 'acha o erro, escreve o texto e mede o resultado')
+    await r.idle()
+    const replies = agentMessages()
+    expect(db.messages().find((m) => m.author.kind === 'system')!.text).toContain('Chamei **lia**; depois **theo**; depois **may** · find, write, measure')
+    expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a1', 'a2', 'a3'])
+    expect(replies[2]!.text).toBe('terceiro passo, usando as duas respostas anteriores')
+    expect(claude.turns).toHaveLength(4) // the router, then one turn per layer
+    const [first, second, third] = claude.turns.slice(1).map((turn) => turn.prompt)
+    expect(first).toContain('O roteador dividiu esta mensagem em 3 camadas')
+    expect(first).toContain('- 1ª camada: lia\n- 2ª camada: theo\n- 3ª camada: may')
+    expect(first).toContain('Você é da 1ª camada')
+    expect(first).toContain('Motivo do plano: find, write, measure')
+    expect(second).toContain('Você é da 2ª camada')
+    expect(third).toContain('Você é da 3ª camada')
+    expect(third).toContain('primeiro passo pronto')
+    expect(third).toContain('segundo passo pronto, com o que a Lia achou')
+  })
+
+  it('does not hand off to a planned agent, but still hands off to an unplanned one', async () => {
+    db.saveAgent(agent('a3', 'ivy'))
+    db.createConversation({ id: 'c2', kind: 'channel', name: 'engenharia', members: ['a1', 'a2', 'a3'] })
+    const r = runner(fakeEngine('claude', {
+      delayMs: 1,
+      route: () => ({ plano: [['lia'], ['theo']], reason: 'um prepara, o outro finaliza' }),
+      reply: (turn) => (turn.system.startsWith('Você é lia') ? '@theo, finalize com o material acima. @ivy, confira a fonte.' : 'Resumo final.')
+    }))
+    await r.send('c2', 'prepare o material e finalize o resumo')
+    await r.idle()
+
+    expect(agentMessages().map((m) => (m.author as { id: string }).id).sort()).toEqual(['a1', 'a2', 'a3'])
+  })
+
+  it('a plan of one layer tells the agents nothing about an order', async () => {
+    db.saveAgent(agent('a2', 'theo')) // both on the same engine, so every turn is seen here
+    const r = runner(fakeEngine('claude', { delayMs: 1, route: () => ({ plano: [['lia', 'theo']], reason: 'dois assuntos' }) }))
+    await r.send('c1', 'duas coisas ao mesmo tempo')
+    await r.idle()
+    expect(claude.turns).toHaveLength(3) // the router, then the two agents
+    expect(claude.turns.slice(1).every((t) => !t.prompt.includes('O roteador dividiu'))).toBe(true)
+  })
+
+  it('a layer of two agents answers at once', async () => {
+    const r = runner(fakeEngine('claude', { delayMs: 1, route: () => ({ plano: [['lia', 'theo']], reason: 'dois assuntos' }) }))
+    await r.send('c1', 'duas coisas ao mesmo tempo')
+    await r.idle()
+    expect(db.messages().find((m) => m.author.kind === 'system')!.text).toContain('Chamei **lia** e **theo** · dois assuntos')
+    expect(agentMessages()).toHaveLength(2)
+  })
+
   it('says so when a channel has nobody in it, instead of ignoring the message', async () => {
     db.createConversation({ id: 'c2', kind: 'channel', name: 'vazio', members: [] })
     const r = runner()

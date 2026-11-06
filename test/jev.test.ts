@@ -18,14 +18,18 @@ const theo = agent('a3', 'theo', 'Dados')
 const messages = [{ id: 'm1', conversationId: 'c1', author: { kind: 'me' as const }, text: 'o build quebrou', at: 1 }]
 
 // A stand-in for TypeSafe's API: records requests, answers with the given probabilities.
-function typesafe(probabilities: Record<string, number> | number) {
+// `after` and `later` answer subsequent layer questions; by default, the plan ends.
+function typesafe(probabilities: Record<string, number> | number, after?: Record<string, number>, later?: Record<string, number>) {
   const requests: { url: string; init: RequestInit }[] = []
+  let asks = 0
   const f = (async (url: string, init: RequestInit) => {
     requests.push({ url, init })
     if (typeof probabilities === 'number') return new Response('{}', { status: probabilities })
     if (url.endsWith('/models')) return Response.json({ models: ['jev-latest'] })
-    const choice = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]![0]
-    return Response.json({ model: 'jev-1.13', answers: { who: { type: 'choice', choice, probabilities, confidence: 0.6 } }, usage: { input_tokens: 400, output_tokens: 3 } })
+    const p = asks === 0 ? probabilities : asks === 1 ? (after ?? { __encerrar: 0.9 }) : (later ?? { __encerrar: 0.9 })
+    asks++
+    const choice = Object.entries(p).sort((a, b) => b[1] - a[1])[0]![0]
+    return Response.json({ model: 'jev-1.13', answers: { who: { type: 'choice', choice, probabilities: p, confidence: 0.6 } }, usage: { input_tokens: 400, output_tokens: 3 } })
   }) as unknown as typeof fetch
   return { f, requests, body: (i = 0) => JSON.parse(requests[i]!.init.body as string) as { model: string; state: string; questions: { who: { type: string; criteria: Record<string, string> } } } }
 }
@@ -34,7 +38,7 @@ describe('Jev router', () => {
   it('asks a typed choice among the channel agents, with the key, and calls the one it picks', async () => {
     const api = typesafe({ lia: 0.84, nina: 0.1, __ninguem: 0.06 })
     const r = await routeJev({ key: 'ts-key', messages, agents: [lia, nina], me: 'Edu', fetch: api.f })
-    expect(r).toMatchObject({ agents: [lia], reason: 'Jev, 84%' })
+    expect(r).toMatchObject({ plan: [[lia]], reason: 'Jev, 84%' })
     expect(api.requests[0]!.url).toBe('https://api.typesafe.ai/v1/systemone')
     expect(api.requests[0]!.init.headers).toMatchObject({ Authorization: 'Bearer ts-key' })
     const body = api.body()
@@ -44,13 +48,29 @@ describe('Jev router', () => {
     expect(body.state).toContain('[Edu] o build quebrou')
   })
 
+  it('asks for a later layer, naming who is already answering', async () => {
+    const api = typesafe({ lia: 0.6, nina: 0.1 }, { theo: 0.7, __encerrar: 0.2 })
+    const r = await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: api.f })
+    expect(r).toMatchObject({ plan: [[lia], [theo]], reason: 'Jev, 60% · depois 70%' })
+    expect(Object.keys(api.body(1).questions.who.criteria)).toEqual(['nina', 'theo', '__encerrar'])
+    expect(api.body(1).state).toContain('Vão responder agora: Lia.')
+  })
+
+  it('plans three sequential layers when each next agent needs the previous answer', async () => {
+    const api = typesafe({ lia: 0.8, nina: 0.1, theo: 0.1 }, { nina: 0.8, theo: 0.1, __encerrar: 0.1 }, { theo: 0.8, __encerrar: 0.2 })
+    const r = await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: api.f })
+    expect(r).toMatchObject({ plan: [[lia], [nina], [theo]] })
+    expect(api.requests).toHaveLength(3)
+    expect(api.body(2).state).toContain('Vão responder agora: Lia e Nina.')
+  })
+
   it('calls a second agent only when it is close, and nobody when that wins', async () => {
-    expect(await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: typesafe({ lia: 0.5, theo: 0.35, nina: 0.15 }).f })).toMatchObject({ agents: [lia, theo] })
-    expect(await routeJev({ key: 'k', messages, agents: [lia, nina], me: 'Edu', fetch: typesafe({ lia: 0.2, nina: 0.1, __ninguem: 0.7 }).f })).toMatchObject({ agents: [], reason: 'Jev, 70%' })
+    expect(await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: typesafe({ lia: 0.5, theo: 0.35, nina: 0.15 }).f })).toMatchObject({ plan: [[lia, theo]] })
+    expect(await routeJev({ key: 'k', messages, agents: [lia, nina], me: 'Edu', fetch: typesafe({ lia: 0.2, nina: 0.1, __ninguem: 0.7 }).f })).toMatchObject({ plan: [], reason: 'Jev, 70%' })
   })
 
   it('calls every agent when the message is for the whole group, like a greeting', async () => {
-    expect(await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: typesafe({ lia: 0.1, nina: 0.1, theo: 0.05, __todos: 0.75 }).f })).toMatchObject({ agents: [lia, nina, theo], reason: 'Jev, 75%' })
+    expect(await routeJev({ key: 'k', messages, agents: [lia, nina, theo], me: 'Edu', fetch: typesafe({ lia: 0.1, nina: 0.1, theo: 0.05, __todos: 0.75 }).f })).toMatchObject({ plan: [[lia, nina, theo]], reason: 'Jev, 75%' })
   })
 
   it('says what went wrong instead of guessing', async () => {
