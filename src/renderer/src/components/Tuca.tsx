@@ -38,6 +38,7 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
   const use = useContext(UseDraft)
   const connectors = useStore((s) => s.connectors)
   const created = useStore((s) => (d.agentId ? s.agents.find((a) => a.id === d.agentId) : undefined))
+  const by = useStore((s) => (message.author.kind === 'agent' && s.agents.find((a) => a.id === (message.author as { id: string }).id)?.name) || 'Tuca')
   // A newer proposal in the same conversation replaces this one.
   const replaced = useStore((s) => s.messages.some((m) => m.conversationId === message.conversationId && m.at > message.at && !!m.run?.agentDraft))
   const [open, setOpen] = useState(false)
@@ -68,7 +69,7 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
           <strong>{d.name}</strong>
           <span className="muted small">{d.role || L('Agente', 'Agent')}</span>
         </div>
-        <span className="tag">{L('proposta do Tuca', 'proposed by Tuca')}</span>
+        <span className="tag">{L(`proposta de ${by}`, `proposed by ${by}`)}</span>
       </div>
       <p className={`draft-card__instructions ${open ? 'is-open' : ''}`} onClick={() => setOpen(!open)} title={open ? undefined : L('Ver tudo', 'Show all')}>
         {d.instructions}
@@ -143,6 +144,7 @@ export function ProposalCard({ message }: { message: Message }): ReactNode {
   const [error, setError] = useState('')
   const [open, setOpen] = useState(false)
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
+  const by = (message.author.kind === 'agent' && agentOf(message.author.id)?.name) || 'Tuca'
   const grantList = (g: Record<string, string>): string =>
     Object.entries(g).map(([id, level]) => `${connectors.find((c) => c.id === id)?.name ?? L('conector', 'connector')} (${level === 'read_write' ? L('leitura e escrita', 'read and write') : L('leitura', 'read')})`).join(', ') || L('nenhum', 'none')
   const modelName = (id: string): string => {
@@ -252,6 +254,41 @@ export function ProposalCard({ message }: { message: Message }): ReactNode {
         {L('Ver em Rotinas', 'See in Routines')}
       </button>
     )
+  } else if (p.kind === 'team') {
+    const channel = p.appliedId ? conversations.find((c) => c.id === p.appliedId) : undefined
+    head = (
+      <>
+        <span className="proposal-icon">
+          <Icon name="users" size={18} />
+        </span>
+        <div className="grow">
+          <strong>{p.channel ? `#${p.channel.name}` : L(`Um time de ${p.agents.length}`, `A team of ${p.agents.length}`)}</strong>
+          <span className="muted small">{p.channel?.topic || L(`Time de ${p.agents.length} agentes`, `Team of ${p.agents.length} agents`)}</span>
+        </div>
+      </>
+    )
+    body = (
+      <div className="team-card">
+        {p.agents.map((d) => {
+          const m = modelInfo(d.modelId)
+          return (
+            <div key={d.name} className="team-card__agent">
+              <AgentAvatar agent={{ name: d.name, color: d.color }} size={28} />
+              <div className="grow">
+                <strong>{d.name}</strong> <span className="muted small">{d.role}</span>
+                <p className="muted small">{d.instructions.split('\n')[0]}</p>
+              </div>
+              <span className="muted small">{m ? m.label : d.modelId}</span>
+            </div>
+          )
+        })}
+      </div>
+    )
+    done = channel ? (
+      <button className="btn btn--primary btn--sm" onClick={() => navigate({ kind: 'conversation', id: channel.id })}>
+        {L('Abrir canal', 'Open channel')}
+      </button>
+    ) : undefined
   } else {
     const members = p.members.map(agentOf).filter((a): a is Agent => !!a)
     head = (
@@ -280,7 +317,7 @@ export function ProposalCard({ message }: { message: Message }): ReactNode {
     <div className={`draft-card ${p.state || replaced ? 'is-settled' : ''}`}>
       <div className="draft-card__head">
         {head}
-        <span className="tag">{L('proposta do Tuca', 'proposed by Tuca')}</span>
+        <span className="tag">{L(`proposta de ${by}`, `proposed by ${by}`)}</span>
       </div>
       {body}
       {p.reason && <p className="hint">{p.reason}</p>}
@@ -298,7 +335,7 @@ export function ProposalCard({ message }: { message: Message }): ReactNode {
         ) : (
           <>
             <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => void apply()}>
-              {L('Aplicar', 'Apply')}
+              {p.kind === 'team' ? L('Criar time', 'Create team') : L('Aplicar', 'Apply')}
             </button>
             <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => dismissProposal(message.id)}>
               {L('Descartar', 'Discard')}

@@ -5318,6 +5318,22 @@ kbd {
   grid-template-columns: 120px 1fr;
   gap: 8px;
 }
+.team-card {
+  display: grid;
+  gap: 8px;
+}
+.team-card__agent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.team-card__agent p {
+  margin: 2px 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .proposal-icon {
   display: grid;
   place-items: center;

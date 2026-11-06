@@ -11,7 +11,7 @@ import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { GUIDE, guideIndex, readGuide, type GuidePage } from '../src/core/guide'
 import { Runner } from '../src/core/runs'
-import { tucaAgent, tucaInstructions, tucaUpToDate } from '../src/core/tuca'
+import { teamFrom, tucaAgent, tucaInstructions, tucaUpToDate } from '../src/core/tuca'
 import { proposalFrom, workspaceState } from '../src/core/tuca-help'
 import { screenOf } from '../src/shared/screens'
 
@@ -57,6 +57,26 @@ describe("the Tuca's proposals for what exists", () => {
     expect(proposalFrom('propor_canal', { nome: 'Suporte VIP', agentes: ['lia', '@theo', 'lia'], tema: 'Clientes grandes' }, ctx).proposal).toEqual({ kind: 'channel', name: 'suporte-vip', members: ['a1', 'a2'], topic: 'Clientes grandes' })
     expect(proposalFrom('propor_canal', { nome: 'Engenharia', agentes: ['lia'] }, ctx).error).toContain('Já existe')
     expect(proposalFrom('propor_canal', { nome: 'novo', agentes: [] }, ctx).error).toContain('quais agentes')
+  })
+})
+
+describe('a team, proposed at once', () => {
+  const each = (nome: string, extra: Record<string, unknown> = {}) => ({ nome, funcao: 'Pesquisa', instrucoes: `Você é ${nome}.`, ...extra })
+  const tctx = { usable: (id: string) => id === 'sonnet', fallbackModel: 'sonnet', connectors: [linear], channels: ['geral'] }
+
+  it('makes each agent like propor_agente, and the channel they share', () => {
+    const r = teamFrom({ agentes: [each('Rafa', { conectores: [{ conector: 'Linear' }] }), each('Bia', { modelo: 'opus' })], canal: { nome: 'Lançamento', tema: 'O lançamento do app' }, motivo: 'Dividir o trabalho' }, tctx)
+    expect(r.proposal).toMatchObject({ kind: 'team', channel: { name: 'lancamento', topic: 'O lançamento do app' }, reason: 'Dividir o trabalho' })
+    const team = r.proposal as Extract<typeof r.proposal, { kind: 'team' }>
+    expect(team.agents.map((a) => [a.name, a.modelId, a.grants])).toEqual([['Rafa', 'sonnet', { 'c-lin': 'read' }], ['Bia', 'sonnet', {}]])
+  })
+
+  it('says what to fix', () => {
+    expect(teamFrom({ agentes: [each('Rafa')] }, tctx).error).toContain('de 2 a 8')
+    expect(teamFrom({ agentes: [each('Rafa'), each('rafa')] }, tctx).error).toContain('Dois agentes')
+    expect(teamFrom({ agentes: [each('Rafa'), { nome: 'Bia' }] }, tctx).error).toContain('Agente 2')
+    expect(teamFrom({ agentes: [each('Rafa'), each('Bia')], canal: { nome: 'Geral' } }, tctx).error).toContain('#geral')
+    expect(teamFrom({ agentes: [each('Rafa'), each('Bia')] }, tctx).proposal).not.toHaveProperty('channel') // a team without a channel
   })
 })
 
@@ -199,12 +219,18 @@ describe('the Tuca helping, in a conversation', () => {
     expect(db.agent('a1')?.modelId).toBe('sonnet')
   })
 
-  it('is the only one with these tools', async () => {
+  it('lets any agent propose, but only the Tuca reads the guide and the workspace', async () => {
     db.createConversation({ id: 'd2', kind: 'dm', name: 'a1', members: ['a1'] })
-    calls = [{ tool: 'ver_estado', args: {} }]
-    await runner.send('d2', 'oi')
+    calls = [
+      { tool: 'ver_estado', args: {} },
+      { tool: 'ler_guia', args: { pagina: 'rotinas' } },
+      { tool: 'propor_canal', args: { nome: 'suporte', agentes: ['lia'] } }
+    ]
+    await runner.send('d2', 'cria um canal de suporte comigo')
     await runner.idle()
     expect(turns[0]!.system).not.toContain('## O guia do Tucano')
-    expect((results[0] as { isError?: boolean }).isError).toBe(true)
+    expect(results.slice(0, 2).map((r) => (r as { isError?: boolean }).isError)).toEqual([true, true])
+    const reply = db.messages().find((m) => m.author.kind === 'agent' && m.text === 'pronto')!
+    expect(reply.run?.proposal).toMatchObject({ kind: 'channel', name: 'suporte', members: ['a1'] })
   })
 })

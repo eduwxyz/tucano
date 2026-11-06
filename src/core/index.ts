@@ -976,10 +976,26 @@ const api: Api = {
     } else if (p.kind === 'routine') {
       const conversationId = p.routine.conversationId || api.openDm({ agentId: p.routine.agentId })
       id = routines.save({ ...p.routine, conversationId }).id
-    } else {
+    } else if (p.kind === 'channel') {
       id = api.createChannel({ name: p.name, ...(p.threads ? { threads: true } : {}) })
       api.setChannelMembers({ id, agentIds: p.members })
       if (p.topic) api.setTopic({ id, topic: p.topic })
+    } else {
+      // A team: its agents, each with a DM, and the channel they share when there is one.
+      if (p.channel && db.conversations().some((c) => c.kind === 'channel' && c.name === p.channel!.name)) throw new Error(L(`Já existe o canal #${p.channel.name}.`, `There's already a #${p.channel.name} channel.`))
+      const made: string[] = []
+      for (const d of p.agents) {
+        const agent = agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit)
+        db.saveAgent(agent)
+        emit({ type: 'agent', agent })
+        api.openDm({ agentId: agent.id })
+        made.push(agent.id)
+      }
+      if (p.channel) {
+        id = api.createChannel({ name: p.channel.name, ...(p.channel.threads ? { threads: true } : {}) })
+        api.setChannelMembers({ id, agentIds: made })
+        if (p.channel.topic) api.setTopic({ id, topic: p.channel.topic })
+      } else id = made[0]!
     }
     settleProposal(messageId, id)
     return { id }

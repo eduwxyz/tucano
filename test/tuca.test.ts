@@ -71,12 +71,14 @@ describe('the Tuca in a conversation', () => {
     expect(db.agents().map((a) => a.name)).toEqual(['Tuca'])
   })
 
-  it('is the only one who can propose', async () => {
+  it("any other agent can propose too, told when to, but isn't the one who explains Tucano", async () => {
     db.saveAgent({ ...tucaAgent('sonnet', [], 1000), id: 'a2', name: 'Lia', handle: 'lia', kind: undefined })
     db.createConversation({ id: 'd2', kind: 'dm', name: 'a2', members: ['a2'] })
-    await runner.send('d2', 'quero alguém pra responder tickets de suporte')
+    await runner.send('d2', 'oi')
     await runner.idle()
     expect(systems[0]).not.toContain('## Pra montar agentes')
-    expect(db.messages().find((m) => m.author.kind === 'agent')!.run?.agentDraft).toBeUndefined()
+    expect(systems[0]).toContain('## Pra propor agentes, times, rotinas e canais')
+    expect(systems[0]).toContain('Proponha quando Edu pedir')
+    expect(systems[0]).not.toContain('## O guia do Tucano')
   })
 })

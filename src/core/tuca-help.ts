@@ -3,7 +3,7 @@
 // card with Aplicar and Descartar, like his new agents: nothing changes until the person applies it.
 // He sees settings, statuses and error messages, never what was said in a conversation.
 import { L } from '../shared/lang'
-import { channelName, ENGINES, modelInfo, validTime, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type TucaProposal } from '../shared/types'
+import { channelName, ENGINES, modelInfo, validTime, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal } from '../shared/types'
 import type { ToolDef } from './gateway'
 
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh']
@@ -210,7 +210,7 @@ function grantsFrom(raw: unknown, connectors: Connector[]): { grants?: Record<st
   return { grants }
 }
 
-export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: TucaProposal; error?: string } {
+export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: Proposal; error?: string } {
   const reason = text(args, 'motivo', 300) || undefined
   if (tool === PROPOR_AJUSTE.name) {
     const agent = findAgent(ctx, args['agente'])

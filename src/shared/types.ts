@@ -175,7 +175,7 @@ export interface Run {
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
-  proposal?: TucaProposal // a change the Tuca proposed (an agent's, a routine, a channel), shown as a card
+  proposal?: Proposal // what an agent proposed (a change to an agent, a routine, a channel, a team), shown as a card
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
@@ -198,13 +198,14 @@ export interface AgentDraft {
 // What the Tuca may propose to change in an agent that exists.
 export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
 
-// A change the Tuca proposes to what exists, or a new routine or channel: a card under his message
+// A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,
 // routine or channel it made or changed; `error`: why applying it didn't work.
-export type TucaProposal = (
+export type Proposal = (
   | { kind: 'agent'; agentId: string; changes: AgentChanges; before?: AgentChanges } // before: those fields as they were
   | { kind: 'routine'; routine: RoutineInput }
   | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
+  | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean } } // several agents at once, and a channel with them
 ) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string }
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }

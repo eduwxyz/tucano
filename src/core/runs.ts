@@ -15,7 +15,7 @@ import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './c
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { ABRIR_PR, GITHUB, type GitHub } from './github'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderSection, draftFrom, helperSection, PROPOR_AGENTE } from './tuca'
+import { availableModels, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { LER_GUIA, readGuide } from './guide'
 import { proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
@@ -703,8 +703,10 @@ export class Runner {
     // threads, of the conversations this agent is in, are looked up.
     const canSeekThreads = !!this.deps.gateway && (!!msg.threadId || db.threadRoots(conv.id).size > 0)
     const myConversations = (): Conversation[] => db.conversations().filter((c) => c.members.includes(agent.id))
-    // The Tuca proposes agents; nobody else does.
-    const builds = !!this.deps.gateway && agent.kind === 'tuca'
+    // Any agent may propose agents, teams, routines and channels (a card the person applies); only the
+    // Tuca helps with Tucano itself, with the guide and a look at the workspace.
+    const proposes = !!this.deps.gateway
+    const helps = proposes && agent.kind === 'tuca'
     let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
     // why, so it says so in a sentence instead of spending a call on each tool to find out.
@@ -839,7 +841,8 @@ export class Runner {
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
-      ...(builds ? [PROPOR_AGENTE, LER_GUIA, VER_ESTADO, ...PROPOSAL_TOOLS()] : []),
+      ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
+      ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -886,13 +889,13 @@ export class Runner {
           )
         }
 
-        if (name === LER_GUIA.name && builds) {
+        if (name === LER_GUIA.name && helps) {
           const page = readGuide(args['pagina'])
           if (!page.error) addSteps({ id: randomUUID(), label: L('Leu o guia', 'Read the guide'), detail: String(args['pagina']), status: 'done' })
           return textResult(page.text, page.error)
         }
 
-        if (name === VER_ESTADO.name && builds) {
+        if (name === VER_ESTADO.name && helps) {
           addSteps({ id: randomUUID(), label: L('Olhou o workspace', 'Looked at the workspace'), detail: String(args['area'] ?? L('tudo', 'all')), status: 'done' })
           const now = Date.now()
           return textResult(
@@ -913,19 +916,19 @@ export class Runner {
           )
         }
 
-        if (PROPOSAL_TOOLS().some((t) => t.name === name) && builds) {
+        if ((name === PROPOR_TIME.name || PROPOSAL_TOOLS().some((t) => t.name === name)) && proposes) {
           const now = await this.deps.settings()
-          const r = proposalFrom(name, args, {
-            agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'),
-            conversations: db.conversations(),
-            connectors: this.deps.connectors?.list() ?? [],
-            usable: (id) => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn }
-          })
+          const usable = (id: string): boolean => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn }
+          const r =
+            name === PROPOR_TIME.name
+              ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
+              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations(), connectors: this.deps.connectors?.list() ?? [], usable })
           if (!r.proposal) return textResult(r.error!, true)
           msg.run = { ...msg.run!, proposal: r.proposal }
           const p = r.proposal
-          const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : L('Propôs um canal', 'Proposed a channel')
-          addSteps({ id: randomUUID(), label: what, detail: p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : Object.keys(p.changes).join(', '), status: 'done' })
+          const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : p.kind === 'team' ? L('Propôs um time', 'Proposed a team') : L('Propôs um canal', 'Proposed a channel')
+          const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
+          addSteps({ id: randomUUID(), label: what, detail, status: 'done' })
           return textResult(
             L(
               'A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar. Termine com uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
@@ -934,7 +937,7 @@ export class Runner {
           )
         }
 
-        if (name === PROPOR_AGENTE.name && builds) {
+        if (name === PROPOR_AGENTE.name && proposes) {
           const now = await this.deps.settings()
           const r = draftFrom(args, {
             usable: (id) => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn },
@@ -1480,7 +1483,9 @@ export class Runner {
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
       publish: repos,
       connectors: exposed.size > 0,
-      builder: builds ? `${builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })}\n\n${helperSection()}` : undefined
+      builder: proposes
+        ? [builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId, tuca: helps, me: settings.workspaceName }), helps && helperSection()].filter(Boolean).join('\n\n')
+        : undefined
     })
 
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
