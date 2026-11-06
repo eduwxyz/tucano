@@ -2,6 +2,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Gateway, textResult, type ToolDef } from '../src/core/gateway'
+import { setLang } from '../src/shared/lang'
+
+// The app speaks both; assert the English side of its messages.
+setLang('en')
 
 const tool = (name: string): ToolDef => ({ name, description: name, inputSchema: { type: 'object', properties: {} } })
 
@@ -34,7 +38,7 @@ describe('Gateway', () => {
     const s = gateway.open({ tools: [tool('list_issues')], call: async (name) => (calls.push(name), textResult(`ran ${name}`)) })
     const client = await connect(s.url)
     expect(await client.callTool({ name: 'list_issues', arguments: {} })).toMatchObject({ content: [{ text: 'ran list_issues' }] })
-    expect(await client.callTool({ name: 'merge_pull_request', arguments: {} })).toMatchObject({ isError: true, content: [{ text: 'Ferramenta não permitida: merge_pull_request' }] })
+    expect(await client.callTool({ name: 'merge_pull_request', arguments: {} })).toMatchObject({ isError: true, content: [{ text: 'Tool not allowed: merge_pull_request' }] })
     expect(calls).toEqual(['list_issues'])
     await client.close()
   })
@@ -45,5 +49,25 @@ describe('Gateway', () => {
     expect((await fetch(`${base}${'0'.repeat(48)}`, { method: 'POST' })).status).toBe(404)
     s.close()
     await expect(connect(s.url)).rejects.toThrow()
+  })
+
+  // Hermes: the CLI's own daemon keeps the MCP connection from one turn to the next, so the
+  // agent's URL is the same every turn — parked between them, its tools listed and nothing running.
+  it('keeps one URL per agent for an engine that holds its connection', async () => {
+    const token = gateway.agentToken('iris')
+    const first = gateway.open({ tools: [tool('ask_user')], call: async () => textResult('ok') }, token)
+    const client = await connect(first.url)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['ask_user'])
+    first.close()
+    // The next turn swaps the tools under the same URL, which the daemon still points at.
+    const second = gateway.open({ tools: [tool('bash')], call: async (name) => textResult(`ran ${name}`) }, gateway.agentToken('iris'))
+    expect(second.url).toBe(first.url)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['bash'])
+    expect(await client.callTool({ name: 'bash', arguments: {} })).toMatchObject({ content: [{ text: 'ran bash' }] })
+    await client.close()
+    // The agent is gone: its URL stops answering, and a new agent gets its own.
+    expect(gateway.agentToken('rafa')).not.toBe(token)
+    gateway.agentForget('iris')
+    await expect(connect(first.url)).rejects.toThrow()
   })
 })

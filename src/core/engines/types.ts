@@ -8,6 +8,7 @@ export interface Turn {
   blocks?: string[] // the same prompt in pieces (one per message), so an engine that caches by block reuses the conversation
   images?: TurnImage[] // images attached to messages of the conversation, the newest ones
   cwd: string // an empty per-agent directory; the CLI gets no project files
+  agentKey?: string // stable per-agent identity (the agent's own directory name), so an engine that keeps per-agent state can
   signal: AbortSignal
   mcpUrl?: string // the app's gateway for this turn: the only tools the CLI gets, besides the web ones
   web?: boolean // the CLI's own web search and page reading
@@ -51,6 +52,9 @@ export interface Engine {
   id: EngineId
   run(turn: Turn): AsyncIterable<EngineEvent>
   sessions?: boolean // takes `turn.session`; without it, every turn gets the whole conversation
+  // Its own daemon keeps the MCP connection from one turn to the next, so the URL it gets must
+  // outlive the turn: the runner hands it a token that stays the same (Hermes' gateway daemon).
+  keepsMcp?: boolean
   release?(sessionId: string): void // a session that won't be resumed: its process and its file go
   clean?(workDir: string, accountDirs?: string[]): void // sessions left from an earlier run of the app, by agents under workDir
   dispose?(): void // the app is quitting: processes kept open close

@@ -287,6 +287,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
           {/* npm.cmd: PowerShell blocks npm's .ps1 on a fresh Windows (scripts disabled). */}
           <span className="hint">{windows ? L('Ou cole no PowerShell:', 'Or paste in PowerShell:') : L('Ou cole no terminal:', 'Or paste in a terminal:')}</span>
           <code className="harness__cmd">{windows ? (ENGINES[engine].windows ?? ENGINES[engine].install).replace(/^npm /, 'npm.cmd ') : ENGINES[engine].install}</code>
+          {ENGINES[engine].min && <span className="hint">{L(`Precisa da ${ENGINES[engine].min} ou mais nova.`, `Needs ${ENGINES[engine].min} or newer.`)}</span>}
         </div>
       )}
       {st.warning && <p className="hint hint--warn harness__body">{st.warning}</p>}

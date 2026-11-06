@@ -3,7 +3,7 @@
 
 O Tucano é um time de agentes de IA que roda no seu computador. Você conversa com eles em canais, como num chat do trabalho. Eles pesquisam, escrevem, programam e usam as suas ferramentas, e você decide até onde cada um vai. Conversas, memória e logins ficam no computador: nada passa por um servidor do Tucano.
 
-Os agentes rodam nos programas que você já usa (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Cursor CLI ou Grok), do jeito que você configurou cada um. Veja a página **motores**.
+Os agentes rodam nos programas que você já usa (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Cursor CLI, Grok ou Hermes), do jeito que você configurou cada um. Veja a página **motores**.
 
 ## A introdução
 Na primeira vez, o app mostra uma introdução em passos: onde os agentes rodam, os dois modelos pequenos (quem escolhe quem responde e quem cuida da memória), um pouco sobre você, conectores e skills (opcionais), e o primeiro agente. Dá pra pular com **Pular introdução** (Skip the introduction) e rever depois em **Configurações › Geral** (Settings › General) › **Rever a introdução**.

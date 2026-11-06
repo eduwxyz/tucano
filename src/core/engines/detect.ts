@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
-import type { AccountEngine, EngineId, EngineStatus } from '../../shared/types'
+import { ENGINES, type AccountEngine, type EngineId, type EngineStatus } from '../../shared/types'
 import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
@@ -12,6 +12,7 @@ import { opencodeMajor } from './opencode-v2'
 import { geminiModels } from './gemini'
 import { cursorSignedIn, parseCursorModels } from './cursor'
 import { grokLogin, parseGrokModels } from './grok'
+import { hermesAppDir, userHermesProviders, warmHermes } from './hermes'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -54,6 +55,18 @@ async function which(cmd: string): Promise<string | undefined> {
 }
 
 const version = (out: string): string | undefined => out.match(/\d+\.\d+\.\d+/)?.[0]
+
+// "0.22.5" is at least "0.22.0": compare part by part, missing parts as zero.
+export const olderThan = (found: string, min: string): boolean => {
+  const a = found.split('.').map((n) => parseInt(n, 10) || 0)
+  const b = min.split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0
+    const y = b[i] ?? 0
+    if (x !== y) return x < y
+  }
+  return false
+}
 
 export async function detectClaude(): Promise<EngineStatus> {
   const path = await which('claude')
@@ -297,17 +310,87 @@ export async function detectCursor(): Promise<{ status: EngineStatus; models: st
   }
 }
 
+// Hermes, the CLI the app itself runs on. Its model list comes from its own
+// provider cache: one entry per credential (a provider slug, or
+// `custom:<url>#<fingerprint>` for an endpoint in the person's config), each
+// with the models its catalog lists. A custom endpoint is labelled with the
+// config key it belongs to, not the host: that is the name its --provider takes.
+export function parseHermesModels(
+  file = join(process.env['HERMES_HOME'] || join(homedir(), '.hermes'), 'provider_models_cache.json'),
+  providers: Record<string, string> = {}
+): string[] {
+  let cache: Record<string, unknown>
+  try {
+    cache = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+  } catch {
+    return []
+  }
+  const out: string[] = []
+  for (const [key, entry] of Object.entries(cache)) {
+    const models = ((entry ?? {}) as Record<string, unknown>)['models']
+    if (!Array.isArray(models)) continue
+    const provider = key.startsWith('custom:') ? (providers[normalizeUrl(endpointUrl(key))] ?? hostOf(endpointUrl(key)) ?? key) : key
+    for (const m of models) if (typeof m === 'string' && m) out.push(`${provider}/${m}`)
+  }
+  return out
+}
+
+const endpointUrl = (key: string): string => key.slice(7).split('#')[0]! // "custom:<url>#<fingerprint>" → url
+const normalizeUrl = (url: string): string => url.trim().replace(/\/+$/, '').toLowerCase()
+
+// The endpoints of the person's own providers, by config key: a URL with
+// trailing slashes and case differences is still the same endpoint.
+export const hermesEndpointProviders = (providers: Record<string, unknown> | undefined): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(providers ?? {})) {
+    const e = (entry ?? {}) as Record<string, unknown>
+    const url = e['base_url'] ?? e['url'] ?? e['api']
+    if (typeof url === 'string' && url) out[normalizeUrl(url)] = key
+  }
+  return out
+}
+
+const hostOf = (url: string): string | undefined => {
+  try {
+    return new URL(url).host
+  } catch {
+    return undefined
+  }
+}
+
+export async function detectHermes(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('hermes')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  void warmHermes(path, hermesAppDir()) // started early; every run waits for it
+  const models = parseHermesModels(undefined, hermesEndpointProviders(userHermesProviders()['providers'] as Record<string, unknown> | undefined))
+  // What the cache lists is what the person can use; the status is the list.
+  const status = listedStatus(path, v.stdout, models, 'hermes setup')
+  // The options the app runs it with (--format stream-json, --query-file) are
+  // 0.22's; the package on PyPI is older and would fail every single turn, so
+  // the row says it instead of the person finding out mid-conversation.
+  const found = version(v.stdout)
+  const min = ENGINES.hermes.min
+  if (found && min && olderThan(found, min)) {
+    status.warning = L(
+      `O seu Hermes é ${found}: o Tucano roda com a ${min} ou mais nova (o pacote do PyPI é mais antigo e não tem as opções que o app usa). Atualize pelo instalador oficial.`,
+      `Your Hermes is ${found}: Tucano runs with ${min} or newer (the package on PyPI is older and lacks the options the app uses). Update through the official installer.`
+    )
+  }
+  return { status, models }
+}
+
 export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
   // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
   const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
-  const [claude, codex, opencode, pi, gemini, cursor, grok] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini(), detectCursor(), detectGrok()])
+  const [claude, codex, opencode, pi, gemini, cursor, grok, hermes] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini(), detectCursor(), detectGrok(), detectHermes()])
   // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
   const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
   return {
-    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status, cursor: cursor.status, grok: grok.status },
-    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, cursor: cursor.models, grok: grok.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status, cursor: cursor.status, grok: grok.status, hermes: hermes.status },
+    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, cursor: cursor.models, grok: grok.models, hermes: hermes.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
     codexCatalog
   }
 }

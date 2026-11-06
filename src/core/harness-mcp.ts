@@ -1,12 +1,14 @@
 // The MCP servers the person already set up in their harnesses: Claude Code
-// (~/.claude.json, user scope), Codex (config.toml) and OpenCode
-// (opencode.json). The app never runs them through the harness: adding one
-// makes it a connector of the app, reached through the gateway like any other.
-// Secrets (tokens, env values) stay in the core; the screen gets names only.
+// (~/.claude.json, user scope), Codex (config.toml), OpenCode
+// (opencode.json) and Hermes (config.yaml). The app never runs them through the
+// harness: adding one makes it a connector of the app, reached through the
+// gateway like any other. Secrets (tokens, env values) stay in the core; the
+// screen gets names only.
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parse } from 'smol-toml'
+import { parse as parseYaml } from 'yaml'
 import type { ConnectorInput, EngineId, HarnessMcp } from '../shared/types'
 import { stripJsonComments } from './engines/opencode'
 
@@ -18,6 +20,7 @@ export interface McpDirs {
   claude?: string // ~/.claude.json
   codex?: string // the dir with config.toml
   opencode?: string // the dir with opencode.json(c)
+  hermes?: string // the dir with config.yaml
 }
 
 type Obj = Record<string, unknown>
@@ -118,13 +121,32 @@ export function opencodeMcps(dir = join(process.env['XDG_CONFIG_HOME'] || join(h
   })
 }
 
+// Hermes: mcp_servers in ~/.hermes/config.yaml — { command, args, env } or
+// { url, headers? }. Off ones stay out.
+export function hermesMcps(dir = process.env['HERMES_HOME'] || join(homedir(), '.hermes')): Omit<FoundMcp, 'harnesses'>[] {
+  let c: Obj
+  try {
+    c = parseYaml(readFileSync(join(dir, 'config.yaml'), 'utf8')) as Obj
+  } catch {
+    return []
+  }
+  const servers = c?.['mcp_servers']
+  if (!isObj(servers)) return []
+  return Object.entries(servers).flatMap(([name, s]) => {
+    if (!isObj(s) || s['enabled'] === false) return []
+    const f = server(name, { url: typeof s['url'] === 'string' ? s['url'] : undefined, headers: strMap(s['headers']), command: typeof s['command'] === 'string' ? s['command'] : undefined, args: strs(s['args']), env: strMap(s['env']) })
+    return f ? [f] : []
+  })
+}
+
 // Every harness's servers, one entry per server (same address = same server), with the harnesses that have it.
 export function harnessMcps(dirs: McpDirs = {}, env: NodeJS.ProcessEnv = process.env): FoundMcp[] {
   const out = new Map<string, FoundMcp>()
   const sources: [EngineId, Omit<FoundMcp, 'harnesses'>[]][] = [
     ['claude', claudeMcps(dirs.claude)],
     ['codex', codexMcps(dirs.codex, env)],
-    ['opencode', opencodeMcps(dirs.opencode)]
+    ['opencode', opencodeMcps(dirs.opencode)],
+    ['hermes', hermesMcps(dirs.hermes)]
   ]
   for (const [engine, list] of sources)
     for (const f of list) {
