@@ -19,6 +19,8 @@ let readFails: Error | undefined
 let spark: SparkReading | undefined
 let sparkFails: Error | undefined
 let active: string[]
+let latest: string | undefined
+let named: string[]
 let baseline: { ms?: number; runs: number }
 let wakes: { event: JobEvent; watch: JobWatch }[]
 let wakeAnswer: Message | undefined | 'pending'
@@ -43,6 +45,8 @@ const make = (): JobWatches => {
         return reading
       },
       activeRuns: async () => active,
+      latestRun: async () => latest,
+      jobsNamed: async () => named,
       baseline: async () => baseline,
       spark: async (_c, now) => {
         if (sparkFails) throw sparkFails
@@ -79,6 +83,8 @@ beforeEach(() => {
   spark = undefined
   sparkFails = undefined
   active = ['8841']
+  latest = undefined
+  named = []
   baseline = { ms: 30 * MIN, runs: 5 }
   wakes = []
   wakeAnswer = replyDone()
@@ -120,13 +126,52 @@ describe('starting to follow', () => {
     expect(out.reply).toMatch(/mais recente|newest/)
   })
 
-  it('starts nothing when the job has no active run', async () => {
+  it('shows the last run when the job has no active one, starting nothing', async () => {
+    active = []
+    latest = '77'
+    reading = running({ state: 'succeeded', endedAt: clock })
+    const out = await follow({ job_id: '123' })
+    expect(out.watchId).toBeTruthy()
+    expect(only()).toMatchObject({ runId: '77', status: 'ended' })
+    expect(out.reply).toMatch(/último|last one/)
+    expect(out.reply).toMatch(/Nada foi iniciado|Nothing was started/)
+    expect(ran).toEqual([])
+    await step()
+    expect(wakes).toEqual([])
+  })
+
+  it('starts nothing, and says so, for a job with no runs', async () => {
     active = []
     const out = await follow({ job_id: '123' })
     expect(out.watchId).toBeUndefined()
     expect(db.jobWatches()).toEqual([])
-    expect(ran).toEqual([])
     expect(out.error).toBeUndefined()
+  })
+
+  it('takes a link, of a run or of a job', async () => {
+    await follow({ run_id: 'https://x.cloud.databricks.com/jobs/123/runs/8841?o=1' })
+    expect(only()).toMatchObject({ runId: '8841' })
+    jobs.stopWatch(only().id)
+    active = ['9']
+    await follow({ job_id: 'https://x.cloud.databricks.com/#job/123' })
+    expect(db.jobWatches().at(-1)).toMatchObject({ runId: '9', jobId: '123' })
+  })
+
+  it('takes a job by its exact name', async () => {
+    named = ['123']
+    await follow({ job_id: 'vendas_diarias' })
+    expect(only()).toMatchObject({ runId: '8841', jobId: '123' })
+  })
+
+  it('asks when the name isn’t found or isn’t one job', async () => {
+    expect((await follow({ job_id: 'nada' })).reply).toMatch(/exatamente|exactly/)
+    named = ['1', '2']
+    expect((await follow({ job_id: 'dois' })).reply).toMatch(/mais de um|more than one/)
+    expect(db.jobWatches()).toEqual([])
+  })
+
+  it('asks for the id on a name it can’t carry', async () => {
+    expect((await follow({ job_id: 'vendas diarias; rm -rf /' })).error).toBe(true)
   })
 
   it('refuses ids that aren’t ids', async () => {
@@ -174,7 +219,7 @@ describe('starting to follow', () => {
 describe('checking', () => {
   it('checks at the configured interval, not on every tick', async () => {
     const read = vi.fn(async () => reading)
-    const j = new JobWatches({ db, emit: () => {}, cli: { reading: read, activeRuns: async () => active, baseline: async () => baseline, spark: async () => undefined, output: async () => '', run: async () => '' }, config: () => jobWatchConfig({ intervalSeconds: 60 }), runner: { runJobEvent: async () => undefined }, now: () => clock })
+    const j = new JobWatches({ db, emit: () => {}, cli: { reading: read, latestRun: async () => latest, jobsNamed: async () => named, activeRuns: async () => active, baseline: async () => baseline, spark: async () => undefined, output: async () => '', run: async () => '' }, config: () => jobWatchConfig({ intervalSeconds: 60 }), runner: { runJobEvent: async () => undefined }, now: () => clock })
     await j.call(pm, conv, msg, 'acompanhar_job', { run_id: '8841' })
     read.mockClear()
     clock += 30_000
@@ -354,7 +399,7 @@ describe('when checks fail', () => {
     const read = vi.fn(async () => {
       throw new CliError('transient', 'x')
     })
-    const j = new JobWatches({ db, emit: () => {}, cli: { reading: read as never, activeRuns: async () => active, baseline: async () => baseline, spark: async () => undefined, output: async () => '', run: async () => '' }, config: () => jobWatchConfig(config), runner: { runJobEvent: async () => undefined }, now: () => clock })
+    const j = new JobWatches({ db, emit: () => {}, cli: { reading: read as never, latestRun: async () => latest, jobsNamed: async () => named, activeRuns: async () => active, baseline: async () => baseline, spark: async () => undefined, output: async () => '', run: async () => '' }, config: () => jobWatchConfig(config), runner: { runJobEvent: async () => undefined }, now: () => clock })
     db.saveJobWatch({ id: 'w', agentId: 'a1', conversationId: 'c1', messageId: 'm1', runId: '1', status: 'watching', firedAlerts: [], heldEvents: [], wakes: 0, createdAt: clock })
     await j.tick()
     expect(read).toHaveBeenCalledTimes(1)

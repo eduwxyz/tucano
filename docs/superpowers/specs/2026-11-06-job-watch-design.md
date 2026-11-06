@@ -16,7 +16,7 @@ Permitir que um agente acompanhe um job do Databricks a partir de um `job_id` ou
 | Estrutura | Módulo próprio no núcleo, separado das rotinas |
 | Cartão | Painel com métricas visíveis; num run concluído, encolhe para uma linha |
 | Comandos | Lista de permitidos configurável; o que não estiver nela é bloqueado |
-| Run inexistente | Com `job_id` e sem run ativo, o app avisa e não inicia o job |
+| Sem run ativo | Com um job e sem run ativo, o app mostra o último run e não inicia o job |
 
 ## Fora da primeira versão
 
@@ -169,13 +169,13 @@ Só aparecem para agentes com **Acompanhar jobs** ligado na aba **Ferramentas**,
 
 A saída de jobs é tratada como dado, nunca como instrução. Ela é limitada em tamanho e passa pela remoção de segredos de `step-text.ts`.
 
-**Prompt:** com a opção ligada, o agente é instruído a chamar `acompanhar_job` sempre que falarem de um job ou run específico, mesmo já terminado, porque é o que mostra o cartão. Com a opção desligada e o app já configurado, ele é instruído a dizer onde ligá-la.
+**Prompt:** com a opção ligada, a primeira ação do agente é chamar `acompanhar_job` sempre que falarem de um job ou run, mesmo já terminado, porque é o que mostra o cartão. `databricks jobs` no computador dele é recusado, com a indicação da ferramenta. Com a opção desligada e a CLI na máquina ou o app configurado, ele é instruído a dizer onde ligá-la antes de rodar qualquer comando.
 
 **Skill padrão:** ao ligar a opção num agente, ele recebe a skill `analisar-job-databricks`, criada na primeira vez. Depois ela é uma skill comum: o que a pessoa editar, tirar ou apagar fica assim. O cartão não depende dela.
 
 ## Ciclo de um acompanhamento
 
-1. Com `job_id`, procurar o run ativo com `jobs list-runs --job-id <id> --active-only`. Sem run ativo, responder ao agente e não criar acompanhamento.
+1. O agente pode passar id, nome exato ou link. Com um job, procurar o run ativo. Sem run ativo, mostrar o último run, já encerrado. Sem nenhum run, responder ao agente e não criar acompanhamento.
 2. Havendo mais de um run ativo, acompanhar o mais recente e dizer isso na resposta.
 3. Calcular `baselineMs` com até 10 runs bem-sucedidos do mesmo job, usando `--completed-only`.
 4. A cada intervalo, ler o run e, com um cluster ativo, as métricas do Spark. Salvar a leitura, emitir `job_watch` e rodar a detecção.

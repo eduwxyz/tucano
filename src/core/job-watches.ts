@@ -25,12 +25,12 @@ export const ACOMPANHAR_JOB: ToolDef = {
   name: 'acompanhar_job',
   get description() {
     return L(
-      'Mostra um run do Databricks num cartão ao vivo na conversa. Use sempre que falarem de um job ou run específico, para acompanhar, ver como está ou analisar, mesmo que já tenha terminado, antes de qualquer outra consulta. O app consulta sozinho, sem gastar tokens, e te acorda só em falha, conclusão ou possível travamento. Passe run_id, ou job_id para o run ativo do job. Nunca inicia um job. Se o run ainda estiver rodando, encerre a resposta depois de chamar: não fique esperando.',
-      'Shows a Databricks run in a live card in the conversation. Use it whenever a specific job or run comes up, to follow it, see how it’s doing or analyze it, even if it has ended, before any other query. The app checks on its own, spending no tokens, and wakes you only on a failure, the end or a possible stall. Pass run_id, or job_id for the job’s active run. It never starts a job. If the run is still going, end your reply after calling it: don’t wait.'
+      'Mostra um run do Databricks num cartão ao vivo na conversa. Use sempre que falarem de um job ou run específico, para acompanhar, ver como está ou analisar, mesmo que já tenha terminado, antes de qualquer outra consulta. O app consulta sozinho, sem gastar tokens, e te acorda só em falha, conclusão ou possível travamento. Passe run_id, ou job_id, que pode ser o id, o nome exato ou o link do job: mostra o run ativo ou, sem nenhum, o último. Nunca inicia um job. Se o run ainda estiver rodando, encerre a resposta depois de chamar: não fique esperando.',
+      'Shows a Databricks run in a live card in the conversation. Use it whenever a specific job or run comes up, to follow it, see how it’s doing or analyze it, even if it has ended, before any other query. The app checks on its own, spending no tokens, and wakes you only on a failure, the end or a possible stall. Pass run_id, or job_id, which can be the job’s id, exact name or link: it shows the active run or, with none, the last one. It never starts a job. If the run is still going, end your reply after calling it: don’t wait.'
     )
   },
   get inputSchema() {
-    return { type: 'object' as const, properties: { run_id: idProp(L('O id do run.', 'The run’s id.')), job_id: idProp(L('O id do job.', 'The job’s id.')) } }
+    return { type: 'object' as const, properties: { run_id: idProp(L('O id do run.', 'The run’s id.')), job_id: idProp(L('O id, o nome exato ou o link do job.', 'The job’s id, exact name or link.')) } }
   }
 }
 
@@ -196,7 +196,7 @@ export interface JobToolOutcome {
 export interface JobWatchDeps {
   db: Db
   emit: (e: CoreEvent) => void
-  cli: Pick<DatabricksCli, 'reading' | 'activeRuns' | 'baseline' | 'spark' | 'output' | 'run'>
+  cli: Pick<DatabricksCli, 'reading' | 'activeRuns' | 'latestRun' | 'jobsNamed' | 'baseline' | 'spark' | 'output' | 'run'>
   config: () => JobWatchSettings
   runner: { runJobEvent(w: JobWatch, e: JobEvent): Promise<Message | undefined> }
   blocked?: () => boolean // paused, or quiet hours: the checks go on and the agent waits
@@ -205,6 +205,13 @@ export interface JobWatchDeps {
 }
 
 const ID = /^\d{1,30}$/
+// A name the CLI's arguments can carry as it is. A name with spaces asks for the id instead.
+const NAME = /^[\w.:-]{1,200}$/
+// A link pasted from Databricks says which job and run it is: ".../jobs/123/runs/456", "#job/123/run/456".
+const fromLink = (s: string): { job?: string; run?: string } => ({
+  ...(/\bjobs?\/(\d+)/.exec(s) ? { job: /\bjobs?\/(\d+)/.exec(s)![1]! } : {}),
+  ...(/\bruns?\/(\d+)/.exec(s) ? { run: /\bruns?\/(\d+)/.exec(s)![1]! } : {})
+})
 const idOf = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '')
 
 export class JobWatches {
@@ -443,17 +450,33 @@ export class JobWatches {
     const label = L('Acompanhar job', 'Follow a job')
     const fail = (reply: string): JobToolOutcome => ({ reply, error: true, step: { label } })
     const config = this.deps.config()
-    let runId = idOf(args['run_id'])
-    const jobId = idOf(args['job_id'])
+    const given = [idOf(args['run_id']), idOf(args['job_id'])]
+    const link = fromLink(given.find((g) => g.includes('/')) ?? '')
+    let runId = given[0]!.includes('/') ? '' : given[0]!
+    let jobId = given[1]!.includes('/') ? '' : given[1]!
+    runId ||= link.run ?? ''
+    jobId ||= link.job ?? ''
     if (!runId && !jobId) return fail(L('Passe run_id ou job_id.', 'Pass run_id or job_id.'))
-    if ((runId && !ID.test(runId)) || (jobId && !ID.test(jobId))) return fail(L('Esse id não parece válido: use só os números.', 'That id doesn’t look valid: use only the digits.'))
+    if (runId && !ID.test(runId)) return fail(L('Esse run_id não parece válido: use só os números.', 'That run_id doesn’t look valid: use only the digits.'))
+    if (jobId && !ID.test(jobId) && !NAME.test(jobId)) return fail(L('Não consigo procurar esse nome: passe o id do job ou o link dele.', "I can't search for that name: pass the job's id or its link."))
     let others = 0
+    let lastOne = false
     try {
+      if (!runId && !ID.test(jobId)) {
+        const named = await this.deps.cli.jobsNamed(jobId)
+        if (!named.length) return fail(L(`Não achei um job chamado exatamente ${jobId}. Peça o id ou o link dele.`, `I couldn't find a job named exactly ${jobId}. Ask for its id or link.`))
+        if (named.length > 1) return fail(L(`Há mais de um job chamado ${jobId} (${named.join(', ')}). Pergunte qual.`, `There's more than one job named ${jobId} (${named.join(', ')}). Ask which.`))
+        jobId = named[0]!
+      }
       if (!runId) {
         const active = await this.deps.cli.activeRuns(jobId)
-        if (!active.length) return { reply: L(`O job ${jobId} não tem nenhum run ativo agora. Nada foi iniciado: avise e encerre.`, `Job ${jobId} has no active run now. Nothing was started: say so and end.`), step: { label, detail: L(`job ${jobId}: sem run ativo`, `job ${jobId}: no active run`) } }
-        runId = active[0]!
-        others = active.length - 1
+        others = Math.max(0, active.length - 1)
+        runId = active[0] ?? ''
+        if (!runId) {
+          runId = (await this.deps.cli.latestRun(jobId)) ?? ''
+          lastOne = true
+        }
+        if (!runId) return { reply: L(`O job ${jobId} ainda não tem nenhum run. Nada foi iniciado: diga isso em uma frase.`, `Job ${jobId} has no runs yet. Nothing was started: say so in one sentence.`), step: { label, detail: L(`job ${jobId}: sem runs`, `job ${jobId}: no runs`) } }
       }
       const existing = this.deps.db.jobWatches().find((w) => w.runId === runId && w.status === 'watching')
       if (existing) return { reply: L(`O run ${runId} já está sendo acompanhado, com o cartão na conversa. Encerre.`, `Run ${runId} is already being followed, with its card in the conversation. End.`), step: { label, detail: `run ${runId}` } }
@@ -483,10 +506,11 @@ export class JobWatches {
         createdAt: now
       })
       this.nextAt.set(w.id, now + config.intervalSeconds * 1000)
+      const none = lastOne ? L(`O job não tem run ativo: este é o último. Nada foi iniciado. `, `The job has no active run: this is the last one. Nothing was started. `) : ''
       const more = others ? L(` Há mais ${others} run(s) ativo(s) desse job: você está acompanhando o mais recente, e deve dizer isso.`, ` There are ${others} more active run(s) of this job: you're following the newest, and should say so.`) : ''
       return {
         reply: final
-          ? L(`O run ${runId} já terminou (${reading.state}):\n${jobSummary(reading, w)}\nResponda com o que importa disso.`, `Run ${runId} has already ended (${reading.state}):\n${jobSummary(reading, w)}\nReply with what matters from it.`)
+          ? L(`${none}O run ${runId} já terminou (${reading.state}), e o cartão já está na conversa:\n${jobSummary(reading, w)}\nResponda agora com o que importa disso. Use ver_job só se precisar de um detalhe que falta.`, `${none}Run ${runId} has already ended (${reading.state}), and the card is in the conversation:\n${jobSummary(reading, w)}\nReply now with what matters from it. Use ver_job only if you need a missing detail.`)
           : L(`Acompanhando o run ${runId}. O cartão já está na conversa e o app consulta sozinho. Você será acordado se algo acontecer. Encerre sua resposta agora, em uma frase.${more}`, `Following run ${runId}. The card is in the conversation and the app checks on its own. You'll be woken if something happens. End your reply now, in one sentence.${more}`),
         step: { label, detail: `${reading.name} · run ${runId}` },
         watchId: w.id

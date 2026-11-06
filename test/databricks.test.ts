@@ -317,6 +317,19 @@ describe('calling the CLI', () => {
     expect(await c.baseline('1')).toEqual({ ms: 200, runs: 3 })
   })
 
+  it('finds a job’s last run and the jobs with a name, within the rules', async () => {
+    const paths: string[] = []
+    const { exec } = answers((args) => {
+      if (args[0] === 'auth') return { stdout: '{}' }
+      paths.push(args[2]!)
+      return { stdout: JSON.stringify(args[2]!.includes('jobs/list') ? { jobs: [{ job_id: 5 }] } : { runs: [{ run_id: 7 }] }) }
+    })
+    const c = cli(exec)
+    expect(await c.latestRun('1')).toBe('7')
+    expect(await c.jobsNamed('vendas_diarias')).toEqual(['5'])
+    expect(paths).toEqual(['/api/2.1/jobs/runs/list?job_id=1&limit=1', '/api/2.1/jobs/list?name=vendas_diarias&limit=5'])
+  })
+
   it('reads Spark only when an address is set', async () => {
     const { calls, exec } = answers(() => ({ stdout: '[]' }))
     expect(await cli(exec).spark('c-1', 1)).toBeUndefined()

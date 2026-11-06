@@ -129,7 +129,7 @@ export interface DatabricksStatus {
 
 export const JOB_WATCH_DEFAULTS: JobWatchSettings = {
   commands: ['jobs get', 'jobs get-run', 'jobs get-run-output', 'jobs list-runs --job-id --active-only --completed-only --limit --expand-tasks --page-token', 'clusters get', 'current-user me', 'api get'],
-  apiPaths: ['/api/2.1/jobs/runs/list', '/driver-proxy-api/'],
+  apiPaths: ['/api/2.1/jobs/runs/list', '/api/2.1/jobs/list', '/driver-proxy-api/'],
   actions: false,
   intervalSeconds: 30,
   maxActive: 5,

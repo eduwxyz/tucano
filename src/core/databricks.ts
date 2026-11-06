@@ -340,6 +340,18 @@ export class DatabricksCli {
     return list(r['runs']).flatMap((x) => text(x['run_id']) ?? [])
   }
 
+  // The job's last run, of any state: what there is to show when none is going.
+  async latestRun(jobId: string): Promise<string | undefined> {
+    const r = obj(await this.json(['api', 'get', `/api/2.1/jobs/runs/list?job_id=${jobId}&limit=1`]))
+    return text(list(r['runs'])[0]?.['run_id'])
+  }
+
+  // The ids of the jobs with exactly this name.
+  async jobsNamed(name: string): Promise<string[]> {
+    const r = obj(await this.json(['api', 'get', `/api/2.1/jobs/list?name=${name}&limit=5`]))
+    return list(r['jobs']).flatMap((j) => text(j['job_id']) ?? [])
+  }
+
   async baseline(jobId: string): Promise<{ ms?: number; runs: number }> {
     const r = obj(await this.json(['api', 'get', `/api/2.1/jobs/runs/list?job_id=${jobId}&completed_only=true&limit=25`]))
     const done = list(r['runs'])

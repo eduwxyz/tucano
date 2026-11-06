@@ -1105,6 +1105,10 @@ export class Runner {
         }
 
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
+          // Jobs go through the app, with the login and the rules there: the computer may not even have the CLI.
+          if (jobs && name === 'bash' && typeof args['command'] === 'string' && /\bdatabricks\s+jobs\b/.test(args['command'])) {
+            return textResult(L('Não rodei: jobs do Databricks passam pelo app. Use acompanhar_job para mostrar o run, com o id, o nome ou o link do job, e ver_job para detalhes.', "Not run: Databricks jobs go through the app. Use acompanhar_job to show the run, with the job's id, name or link, and ver_job for details."), true)
+          }
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
           // An agent with connectors sleeping with nothing checked after it is waiting for something outside

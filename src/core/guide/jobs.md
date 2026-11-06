@@ -10,7 +10,7 @@ O app consulta o run sozinho, sem gastar tokens, e mostra estado, tasks e métri
 O app acha a CLI e o perfil sozinho, e mostra o que achou em **Configurações › Agentes › Jobs do Databricks**. Lá dá para escolher outro perfil.
 
 ## Usar
-Peça em palavras: "Acompanha o job 123456789" ou "Acompanha o run 8841 e me avisa se travar". Com um job, o agente segue o run ativo mais recente. Sem run ativo, ele avisa e **não inicia nada**.
+Peça em palavras: "Me fala sobre o job 123456789" ou "Acompanha o run 8841 e me avisa se travar". Vale o id, o nome exato ou o link. Com um job, o agente mostra o run ativo mais recente ou, sem nenhum, o último. Ele **nunca inicia nada**.
 
 **Parar de acompanhar** só encerra o acompanhamento: o job continua rodando.
 

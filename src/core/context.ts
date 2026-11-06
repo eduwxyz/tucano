@@ -97,13 +97,13 @@ export function systemPrompt(opts: {
       )}\n${skills.map((k) => `- ${k.name}: ${k.description}`).join('\n')}`,
     jobs === 'on' &&
       L(
-        `## Jobs do Databricks\nQuando ${me} falar de um job ou run específico (acompanhar, ver como está, checar, analisar), chame acompanhar_job primeiro, mesmo que o run já tenha terminado: é isso que mostra o cartão na conversa. Não rode a CLI no seu computador nem fique consultando de novo. Para detalhes, use ver_job depois.`,
-        `## Databricks jobs\nWhen ${me} brings up a specific job or run (follow, see how it's doing, check, analyze), call acompanhar_job first, even if the run has ended: that's what shows the card in the conversation. Don't run the CLI on your computer or keep checking again. For details, use ver_job after.`
+        `## Jobs do Databricks\nQuando ${me} falar de um job ou run (acompanhar, dizer sobre ele, ver como está, checar, analisar), sua primeira ação é chamar acompanhar_job, com o id, o nome ou o link, mesmo que o run já tenha terminado: é isso que mostra o cartão na conversa e traz os dados na hora. Nunca rode a CLI do Databricks no seu computador para isso, nem instale nada. Para detalhes, use ver_job depois.`,
+        `## Databricks jobs\nWhen ${me} brings up a job or run (follow, tell about it, see how it's doing, check, analyze), your first action is calling acompanhar_job, with its id, name or link, even if the run has ended: that's what shows the card in the conversation and brings the data right away. Never run the Databricks CLI on your computer for this, or install anything. For details, use ver_job after.`
       ),
     jobs === 'off' &&
       L(
-        `## Jobs do Databricks\nSe ${me} pedir para acompanhar um job ou run do Databricks, diga que para isso é preciso ligar Acompanhar jobs na sua página, em Ferramentas.`,
-        `## Databricks jobs\nIf ${me} asks to follow a Databricks job or run, say that it takes turning on Follow jobs on your page, under Tools.`
+        `## Jobs do Databricks\nSe ${me} falar de um job ou run do Databricks, diga logo, em uma frase e antes de rodar qualquer comando, que você não tem acesso a isso e que é preciso ligar Acompanhar jobs na sua página, em Ferramentas. Não tente instalar nem rodar a CLI por conta própria.`,
+        `## Databricks jobs\nIf ${me} brings up a Databricks job or run, say right away, in one sentence and before running any command, that you don't have access to it and that it takes turning on Follow jobs on your page, under Tools. Don't try to install or run the CLI on your own.`
       ),
     routines &&
       routines.length > 0 &&

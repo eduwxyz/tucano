@@ -11,7 +11,7 @@ import { DatabricksCli, type CliExec } from '../src/core/databricks'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
-import { Gateway } from '../src/core/gateway'
+import { Gateway, textResult } from '../src/core/gateway'
 import { JobWatches } from '../src/core/job-watches'
 import { Runner } from '../src/core/runs'
 
@@ -29,6 +29,7 @@ let calls: string[][]
 let runState: object
 let script: ((url: string) => Promise<void>) | undefined
 let found: boolean
+let ranOnComputer: string[]
 
 const run = (): string => JSON.stringify({ run_id: 8841, job_id: 123, run_name: 'vendas_diarias', start_time: Date.now() - 60_000, ...runState, tasks: [] })
 
@@ -75,6 +76,7 @@ beforeEach(async () => {
   calls = []
   runState = { state: { life_cycle_state: 'RUNNING' } }
   found = false
+  ranOnComputer = []
   settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
   gateway = new Gateway()
   await gateway.start()
@@ -85,7 +87,7 @@ beforeEach(async () => {
   const engines = Object.fromEntries((['codex', 'opencode', 'pi', 'gemini', 'cursor', 'grok'] as EngineId[]).map((e) => [e, fakeEngine(e)])) as Record<EngineId, Engine>
   engines.claude = engine('claude')
   jobs = new JobWatches({ db, emit: () => {}, cli, config, runner: { runJobEvent: (w, e) => runner.runJobEvent(w, e) } })
-  runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'jw-w-')), gateway, jobs, jobsFound: () => found })
+  runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'jw-w-')), gateway, jobs, jobsFound: () => found, computers: { call: async (_a, _n, args) => (ranOnComputer.push(String(args['command'])), { result: textResult('ok') }) } })
 })
 afterEach(() => gateway.stop())
 
@@ -133,7 +135,7 @@ describe('what the agent is told about jobs', () => {
   it('with the option on, to show a run in the card first', async () => {
     await ask(async () => {})
     expect(system()).toContain('## Databricks jobs')
-    expect(system()).toContain('call acompanhar_job first')
+    expect(system()).toContain('your first action is calling acompanhar_job')
   })
 
   it('with it off and the app set up, where to turn it on', async () => {
@@ -166,6 +168,29 @@ describe('what the agent is told about jobs', () => {
     const m = await ask((url) => use(url, 'acompanhar_job', { run_id: '8841' }))
     expect(m.run?.jobWatchIds).toHaveLength(1)
     expect(db.jobWatches()[0]).toMatchObject({ status: 'ended' })
+  })
+})
+
+describe('an agent with a computer', () => {
+  beforeEach(() => {
+    db.saveAgent({ ...agent, computer: true, computerKind: 'mac' })
+  })
+
+  it('is sent to the card instead of running the jobs CLI', async () => {
+    await ask((url) => use(url, 'bash', { command: 'databricks jobs get-run 8841 --output json' }))
+    expect(toolAnswers.at(-1)).toContain('Databricks jobs go through the app')
+    expect(ranOnComputer).toEqual([])
+  })
+
+  it('still runs what isn’t about jobs', async () => {
+    await ask((url) => use(url, 'bash', { command: 'databricks sql execute --statement "select 1"' }))
+    expect(ranOnComputer).toHaveLength(1)
+  })
+
+  it('with the option off, is free to use its own commands', async () => {
+    db.saveAgent({ ...agent, computer: true, computerKind: 'mac', jobWatch: false })
+    await ask((url) => use(url, 'bash', { command: 'databricks jobs list' }))
+    expect(ranOnComputer).toHaveLength(1)
   })
 })
 
