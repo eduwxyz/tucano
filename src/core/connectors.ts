@@ -16,6 +16,7 @@ import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '
 import type { Db } from './db'
 import { classify } from './policy'
 import type { Secrets } from './secrets'
+import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
 const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
@@ -49,6 +50,7 @@ export interface ConnectorDeps {
   emit: (e: CoreEvent) => void
   openUrl: (url: string) => void
   oauthCallbackUrl: () => string
+  readOp?: (ref: string) => Promise<string> // a 1Password reference's value (the op CLI; tests fake it)
 }
 
 interface Live {
@@ -198,20 +200,26 @@ export class ConnectorManager {
       { listChanged: { tools: { onChanged: () => void this.refreshTools(id).catch(() => {}) } } }
     )
     let transport: Transport
-    if (c.kind === 'remote') {
-      const headers: Record<string, string> = {}
-      if (c.auth === 'token') {
-        const token = await this.deps.secrets.get(key(id, 'token'))
-        if (token) headers['Authorization'] = `Bearer ${token}`
+    try {
+      if (c.kind === 'remote') {
+        const headers: Record<string, string> = {}
+        if (c.auth === 'token') {
+          const token = await this.deps.secrets.get(key(id, 'token'))
+          if (token) headers['Authorization'] = `Bearer ${await resolveOp(token, this.deps.readOp)}`
+        }
+        const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
+          requestInit: { headers },
+          authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive) : undefined
+        })
+        transport = http
+      } else {
+        const env = await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp)
+        transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
       }
-      const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
-        requestInit: { headers },
-        authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive) : undefined
-      })
-      transport = http
-    } else {
-      const env = (await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}
-      transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
+    } catch (e) {
+      // A 1Password secret that wasn't read: it needs you (unlock, install the CLI), so no retries.
+      this.setStatus(id, 'error', e instanceof OpError ? e.message : connectError(e))
+      return
     }
 
     try {

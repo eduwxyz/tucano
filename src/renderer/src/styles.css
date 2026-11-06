@@ -8065,6 +8065,24 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .catalog__dot.tag--danger {
   background: var(--danger);
 }
+/* What a catalog service asks before connecting. */
+.modal__card.connector-setup {
+  width: min(520px, calc(100vw - 32px));
+}
+.connector-setup__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.connector-setup__head {
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.connector-setup__body .warn-box {
+  margin: 0 0 8px;
+}
 /* A connector's details, over the page: the tools scroll, the head stays. */
 .modal__card.connector-modal {
   width: min(680px, calc(100vw - 32px));

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ConnectorManager } from '../src/core/connectors'
 import { Db } from '../src/core/db'
+import { OpError } from '../src/core/onepassword'
 import { plainCipher, Secrets } from '../src/core/secrets'
 
 let server: Server
@@ -151,5 +152,50 @@ describe('a connector with a token', () => {
     await connectors.setToken(id, 'new')
     expect(seen.at(-1)).toBe('Bearer new')
     srv.close()
+  })
+})
+
+describe('a secret kept in 1Password', () => {
+  it('keeps only the reference, and reads the value on each connection', async () => {
+    const seen: (string | undefined)[] = []
+    const srv = createServer((req, res) => {
+      seen.push(req.headers.authorization)
+      res.writeHead(401).end()
+    })
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve))
+    const reads: string[] = []
+    const secrets = new Secrets(db, plainCipher)
+    const mine = new ConnectorManager({
+      db,
+      secrets,
+      emit: () => {},
+      openUrl: () => {},
+      oauthCallbackUrl: () => '',
+      readOp: async (ref) => (reads.push(ref), 'from-1password')
+    })
+    const id = await mine.add({ kind: 'remote', name: 'GitHub', url: `http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp`, auth: 'token', token: ' op://Dev/GitHub/token ' })
+    await mine.connect(id)
+    expect(seen.at(-1)).toBe('Bearer from-1password')
+    expect(reads).toEqual(['op://Dev/GitHub/token'])
+    expect(await secrets.get(`connector:${id}:token`)).toBe('op://Dev/GitHub/token') // never the value
+    await mine.closeAll()
+    srv.close()
+  })
+
+  it("says what to do when 1Password doesn't give it, and doesn't try again by itself", async () => {
+    const mine = new ConnectorManager({
+      db,
+      secrets: new Secrets(db, plainCipher),
+      emit: () => {},
+      openUrl: () => {},
+      oauthCallbackUrl: () => '',
+      readOp: async () => {
+        throw new OpError('O 1Password não foi desbloqueado a tempo.')
+      }
+    })
+    const id = await mine.add({ kind: 'stdio', name: 'AWS', command: 'node', args: ['-e', ''], env: { AWS_SECRET_ACCESS_KEY: 'op://Dev/AWS/secret', AWS_REGION: 'us-east-1' } })
+    await mine.connect(id)
+    expect(mine.get(id)).toMatchObject({ status: 'error', error: 'O 1Password não foi desbloqueado a tempo.' })
+    await mine.closeAll()
   })
 })

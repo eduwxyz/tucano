@@ -1,18 +1,34 @@
 // The connectors the app offers ready to add: official remote MCP servers that an app it has never
 // met (Tucano) can sign in to by itself, through the browser (OAuth with dynamic registration and
 // PKCE), or that need no sign-in at all. Each was probed on 2026-11-05; a server that only takes an
-// app registered ahead of time (HubSpot, Box, Asana's current one) isn't here: it's added by hand.
+// app registered ahead of time (HubSpot, Box, Asana's current one; Slack, Gmail, Drive, Outlook and
+// Teams) isn't here: it's added by hand. Some ask a few things first (the address of your own
+// instance, a token) or run the service's official server on this computer.
 import { L } from './lang'
+import type { ConnectorInput } from './types'
 
 export type CatalogCategory = 'dev' | 'work' | 'business' | 'design' | 'research' | 'finance'
+
+// Something asked before connecting. Its value fills {id} in the address, the arguments or the
+// variables; the field "token" is the token itself.
+export interface CatalogField {
+  id: string
+  label: () => string
+  placeholder: string
+  hint?: () => string
+  secret?: boolean
+  clean?: (v: string) => string // what was pasted, as it goes in (an account out of its full address)
+}
 
 export interface CatalogEntry {
   id: string // also the logo's key
   name: string
-  url: string
-  auth: 'oauth' | 'none'
+  url: string // with {field}s, filled in before connecting; empty for a local one
+  auth: 'oauth' | 'none' | 'token'
   category: CatalogCategory
   about: () => string // a few words: what the agents get
+  local?: { command: string; args: string[]; env?: Record<string, string> } // runs on this computer
+  fields?: CatalogField[]
 }
 
 export const CATEGORIES = (): { id: CatalogCategory; name: string }[] => [
@@ -24,13 +40,32 @@ export const CATEGORIES = (): { id: CatalogCategory; name: string }[] => [
   { id: 'finance', name: L('Finanças', 'Finance') }
 ]
 
-const e = (id: string, name: string, url: string, category: CatalogCategory, pt: string, en: string, auth: CatalogEntry['auth'] = 'oauth'): CatalogEntry => ({
+const e = (id: string, name: string, url: string, category: CatalogCategory, pt: string, en: string, auth: CatalogEntry['auth'] = 'oauth', more: Partial<CatalogEntry> = {}): CatalogEntry => ({
   id,
   name,
   url,
   auth,
   category,
-  about: () => L(pt, en)
+  about: () => L(pt, en),
+  ...more
+})
+
+// "https://abc.apps.dynatrace.com/…" -> "abc": the first part of a host, however much of the address was pasted.
+const firstLabel = (v: string): string => v.trim().replace(/^https?:\/\//i, '').split(/[./]/)[0]!.toLowerCase()
+const site = (v: string): string => {
+  const t = v.trim().replace(/\/+$/, '')
+  return /^https?:\/\//i.test(t) ? t : `https://${t}`
+}
+const plain = (v: string): string => v.trim()
+
+const opHint = (): string => L('Ou uma referência do 1Password, como op://Cofre/Item/campo: o segredo fica lá e é lido a cada conexão.', 'Or a 1Password reference, like op://Vault/Item/field: the secret stays there and is read on each connection.')
+const tokenField = (placeholder: string, hint: () => string, label = (): string => L('Token', 'Token')): CatalogField => ({
+  id: 'token',
+  label,
+  placeholder,
+  secret: true,
+  clean: plain,
+  hint: () => `${hint()} ${opHint()}`
 })
 
 export const CATALOG: CatalogEntry[] = [
@@ -43,6 +78,49 @@ export const CATALOG: CatalogEntry[] = [
   e('netlify', 'Netlify', 'https://netlify-mcp.netlify.app/mcp', 'dev', 'Sites, deploys e logs', 'Sites, deploys and logs'),
   e('railway', 'Railway', 'https://mcp.railway.com', 'dev', 'Serviços, deploys e logs', 'Services, deploys and logs'),
   e('jam', 'Jam', 'https://mcp.jam.dev/mcp', 'dev', 'Relatos de bug com vídeo e logs', 'Bug reports with video and logs'),
+  e('github', 'GitHub', 'https://api.githubcopilot.com/mcp/', 'dev', 'Repositórios, issues e pull requests', 'Repositories, issues and pull requests', 'token', {
+    fields: [
+      tokenField(
+        'github_pat_…',
+        () => L('Um token de acesso pessoal, de github.com/settings/personal-access-tokens, com os repositórios que os agentes podem ver.', 'A personal access token, from github.com/settings/personal-access-tokens, with the repositories the agents may see.'),
+        () => L('Token de acesso pessoal', 'Personal access token')
+      )
+    ]
+  }),
+  e('azure-devops', 'Azure DevOps', '', 'dev', 'Work items, repositórios, PRs e pipelines', 'Work items, repositories, PRs and pipelines', 'none', {
+    local: { command: 'npx', args: ['-y', '@azure-devops/mcp', '{organization}'] },
+    fields: [
+      {
+        id: 'organization',
+        label: () => L('Organização', 'Organization'),
+        placeholder: 'contoso',
+        hint: () => L('O nome em dev.azure.com/organização. Na primeira vez que um agente usar, abre o login da Microsoft no navegador.', 'The name in dev.azure.com/organization. The first time an agent uses it, the Microsoft sign-in opens in the browser.'),
+        clean: (v) => {
+          const t = v.trim().replace(/^https?:\/\//i, '')
+          return (/^dev\.azure\.com\//i.test(t) ? t.split('/')[1]! : t.split(/[./]/)[0]!).trim()
+        }
+      }
+    ]
+  }),
+  e('cloudwatch', 'AWS CloudWatch', '', 'dev', 'Métricas, alarmes e logs da AWS', 'AWS metrics, alarms and logs', 'none', {
+    local: { command: 'uvx', args: ['awslabs.cloudwatch-mcp-server@latest'], env: { AWS_PROFILE: '{profile}', AWS_REGION: '{region}' } },
+    fields: [
+      {
+        id: 'profile',
+        label: () => L('Perfil da AWS', 'AWS profile'),
+        placeholder: 'default',
+        hint: () => L('Um perfil do ~/.aws/config, de aws configure ou aws sso login. Precisa do uv instalado (docs.astral.sh/uv).', 'A profile in ~/.aws/config, from aws configure or aws sso login. Needs uv installed (docs.astral.sh/uv).'),
+        clean: plain
+      },
+      { id: 'region', label: () => L('Região', 'Region'), placeholder: 'us-east-1', clean: (v) => v.trim().toLowerCase() }
+    ]
+  }),
+  e('dynatrace', 'Dynatrace', 'https://{environment}.apps.dynatrace.com/platform-reserved/mcp-gateway/v0.1/servers/dynatrace-mcp/mcp', 'dev', 'Problemas, logs e métricas em produção', 'Problems, logs and metrics in production', 'token', {
+    fields: [
+      { id: 'environment', label: () => L('Ambiente', 'Environment'), placeholder: 'abc12345', hint: () => L('O começo do endereço: abc12345.apps.dynatrace.com.', 'The start of its address: abc12345.apps.dynatrace.com.'), clean: firstLabel },
+      tokenField('dt0s16.…', () => L('Um platform token, com os escopos mcp-gateway:servers:invoke e mcp-gateway:servers:read.', 'A platform token, with the scopes mcp-gateway:servers:invoke and mcp-gateway:servers:read.'), () => 'Platform token')
+    ]
+  }),
 
   e('notion', 'Notion', 'https://mcp.notion.com/mcp', 'work', 'Páginas, bancos e documentos', 'Pages, databases and docs'),
   e('atlassian', 'Jira e Confluence', 'https://mcp.atlassian.com/v2/mcp', 'work', 'Issues do Jira e páginas do Confluence', 'Jira issues and Confluence pages'),
@@ -60,6 +138,26 @@ export const CATALOG: CatalogEntry[] = [
   e('square', 'Square', 'https://mcp.squareup.com/mcp', 'business', 'Vendas, pagamentos e estoque', 'Sales, payments and inventory'),
   e('intercom', 'Intercom', 'https://mcp.intercom.com/mcp', 'business', 'Conversas de suporte e clientes', 'Support conversations and customers'),
   e('airtable', 'Airtable', 'https://mcp.airtable.com/mcp', 'business', 'Bases e tabelas', 'Bases and tables'),
+  e('snowflake', 'Snowflake', 'https://{account}.snowflakecomputing.com/api/v2/databases/{database}/schemas/{schema}/mcp-servers/{server}', 'business', 'Consultas e agentes do Cortex', 'Queries and Cortex agents', 'token', {
+    fields: [
+      { id: 'account', label: () => L('Conta', 'Account'), placeholder: L('minhaorg-minhaconta', 'myorg-myaccount'), hint: () => L('O começo do endereço: minhaorg-minhaconta.snowflakecomputing.com.', 'The start of its address: myorg-myaccount.snowflakecomputing.com.'), clean: firstLabel },
+      { id: 'database', label: () => L('Banco', 'Database'), placeholder: 'ANALYTICS', clean: plain },
+      { id: 'schema', label: () => 'Schema', placeholder: 'PUBLIC', clean: plain },
+      { id: 'server', label: () => L('Servidor MCP', 'MCP server'), placeholder: 'AGENTS', hint: () => L('O nome dado em CREATE MCP SERVER.', 'The name given in CREATE MCP SERVER.'), clean: plain },
+      tokenField('…', () => L('Um programmatic access token do seu usuário (ALTER USER … ADD PROGRAMMATIC ACCESS TOKEN).', 'A programmatic access token of your user (ALTER USER … ADD PROGRAMMATIC ACCESS TOKEN).'), () => 'Programmatic access token')
+    ]
+  }),
+  e('metabase', 'Metabase', '{site}/api/metabase-mcp', 'business', 'Perguntas, dashboards e consultas', 'Questions, dashboards and queries', 'oauth', {
+    fields: [
+      {
+        id: 'site',
+        label: () => L('Endereço do seu Metabase', 'Your Metabase address'),
+        placeholder: L('https://metabase.suaempresa.com', 'https://metabase.yourcompany.com'),
+        hint: () => L('Com os recursos de IA ligados, em Admin → IA. O login abre no navegador.', 'With the AI features on, in Admin → AI. The sign-in opens in the browser.'),
+        clean: site
+      }
+    ]
+  }),
   e('zapier', 'Zapier', 'https://mcp.zapier.com/api/mcp/mcp', 'business', 'Ações em milhares de apps', 'Actions across thousands of apps'),
 
   e('canva', 'Canva', 'https://mcp.canva.com/mcp', 'design', 'Designs, modelos e exportações', 'Designs, templates and exports'),
@@ -74,6 +172,38 @@ export const CATALOG: CatalogEntry[] = [
   e('robinhood', 'Robinhood', 'https://agent.robinhood.com/mcp/trading', 'finance', 'Ações e investimentos', 'Stocks and investments'),
   e('aave', 'Aave', 'https://mcp.aave.com/mcp', 'finance', 'Dados do protocolo Aave', 'Aave protocol data', 'none')
 ]
+
+// What a catalog entry adds once its fields are filled in. Throws on one left empty.
+export function catalogInput(entry: CatalogEntry, values: Record<string, string> = {}): ConnectorInput {
+  const filled: Record<string, string> = {}
+  for (const f of entry.fields ?? []) {
+    const v = (f.clean ?? plain)(values[f.id] ?? '')
+    if (!v || v === 'https://') throw new Error(L(`Preencha: ${f.label()}.`, `Fill in: ${f.label()}.`))
+    filled[f.id] = v
+  }
+  // In an address a value goes in as one piece: a "/" or "?" in it can't reach another path or server.
+  const fill = (t: string, inUrl: boolean): string => t.replace(/\{(\w+)\}/g, (_, k: string) => (inUrl && k !== 'site' ? encodeURIComponent(filled[k] ?? '') : (filled[k] ?? '')))
+  if (entry.local) {
+    const env = Object.fromEntries(Object.entries(entry.local.env ?? {}).map(([k, v]) => [k, fill(v, false)]))
+    return { name: entry.name, kind: 'stdio', command: entry.local.command, args: entry.local.args.map((a) => fill(a, false)), env }
+  }
+  return { name: entry.name, kind: 'remote', url: fill(entry.url, true), auth: entry.auth, ...(entry.auth === 'token' ? { token: filled['token'] } : {}) }
+}
+
+// The catalog entry a connector came from: by its address (with any {field} in it), or by the package
+// its command runs.
+export function entryOf(c: { kind: 'remote' | 'stdio'; url?: string; command?: string; args?: string[] }, entries: CatalogEntry[] = CATALOG): CatalogEntry | undefined {
+  if (c.kind === 'stdio') return entries.find((e) => e.local && e.local.command === c.command && e.local.args.filter((a) => !a.includes('{')).every((a) => c.args?.includes(a)))
+  return entries.find((e) => {
+    if (e.local || !e.url) return false
+    if (!e.url.includes('{')) return sameServer(c.url, e.url)
+    const pattern = e.url
+      .split(/\{\w+\}/)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('[^?#]+?')
+    return new RegExp(`^${pattern}/?$`, 'i').test((c.url ?? '').trim())
+  })
+}
 
 // The same server, however its address was typed: case, a trailing slash.
 export const sameServer = (a: string | undefined, b: string): boolean => {

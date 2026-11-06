@@ -1088,7 +1088,7 @@ function ConnectorToken({ id }: { id: string }): ReactNode {
   }
   return (
     <div className="row">
-      <input className="grow" type="password" value={token} placeholder={L('Token (substitui o atual)', 'Token (replaces the current one)')} onChange={(e) => setToken(e.target.value)} />
+      <input className="grow" type="password" value={token} placeholder={L('Token ou op://… (substitui o atual)', 'Token or op://… (replaces the current one)')} onChange={(e) => setToken(e.target.value)} />
       <button className="btn btn--sm" disabled={busy || !token.trim()} onClick={save}>
         {L('Salvar token', 'Save token')}
       </button>
@@ -1289,7 +1289,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
             </select>
           </Field>
           {auth === 'token' && (
-            <Field label="Token">
+            <Field label="Token" hint={L('Ou uma referência do 1Password (op://Cofre/Item/campo), lida a cada conexão.', 'Or a 1Password reference (op://Vault/Item/field), read on each connection.')}>
               <input type="password" value={token} onChange={(e) => setToken(e.target.value)} />
             </Field>
           )}
@@ -1307,7 +1307,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
               <input value={args} placeholder="-y @modelcontextprotocol/server-postgres postgres://…" onChange={(e) => setArgs(e.target.value)} />
             </Field>
           </div>
-          <Field label={L('Variáveis de ambiente', 'Environment variables')} hint={L('Uma por linha, NOME=valor. Os valores ficam cifrados.', 'One per line, NAME=value. Values are encrypted.')}>
+          <Field label={L('Variáveis de ambiente', 'Environment variables')} hint={L('Uma por linha, NOME=valor. Os valores ficam cifrados; um valor op://Cofre/Item/campo vem do 1Password.', 'One per line, NAME=value. Values are encrypted; an op://Vault/Item/field value comes from 1Password.')}>
             <textarea rows={2} value={env} onChange={(e) => setEnv(e.target.value)} />
           </Field>
           {demo && (
