@@ -181,3 +181,18 @@ describe('allowedTools', () => {
     expect(findSkills(home, root).find((s) => s.name === 'a')?.allowedTools).toBe('Read, Bash')
   })
 })
+
+describe('allowed-tools forms', () => {
+  it('reads a block list, as 73 real Hermes skills write it, skipping comments', () => {
+    const m = skillMeta('---\nname: a\nallowed-tools:\n  # group\n  - WebFetch\n  - "Bash"\nuser-invocable: true\n---\nx')
+    expect(m.allowedTools).toBe('WebFetch, Bash')
+  })
+
+  it('reads a flow list', () => {
+    expect(skillMeta('---\nname: a\nallowed-tools: [Read, Bash]\n---\nx').allowedTools).toBe('Read, Bash')
+  })
+
+  it('has none for an empty block', () => {
+    expect(skillMeta('---\nname: a\nallowed-tools:\nversion: 1\n---\nx').allowedTools).toBeUndefined()
+  })
+})

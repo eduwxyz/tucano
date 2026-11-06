@@ -78,6 +78,13 @@ export function skillMeta(text: string): { category?: string; version?: string; 
   if (!m) return { tags: [] }
   const lines = m[1]!.split(/\r?\n/)
   const scalar = (s: { inline: string } | undefined): string | undefined => (s && unquote(s.inline) ? unquote(s.inline) : undefined)
+  // "[a, b]", or the "- a" lines under the key (73 Hermes skills write allowed-tools that way), or one value.
+  const list = (s: { inline: string; body: string[] } | undefined): string[] | undefined => {
+    if (!s) return undefined
+    const flow = /^\[(.*)\]$/.exec(s.inline)
+    const items = flow ? flow[1]!.split(',') : s.inline ? [s.inline] : s.body.map((l) => /^\s*-\s+(.*)$/.exec(l)?.[1] ?? '')
+    return items.map(unquote).filter(Boolean)
+  }
   const meta = section(lines, 'metadata')
   const hermes = meta && meta.body.length ? section(meta.body, 'hermes') : undefined
   const tagsAt = hermes && hermes.body.length ? section(hermes.body, 'tags') : undefined
@@ -90,7 +97,7 @@ export function skillMeta(text: string): { category?: string; version?: string; 
   return {
     category: scalar(section(lines, 'category')),
     version: scalar(section(lines, 'version')) ?? scalar(meta && meta.body.length ? section(meta.body, 'version') : undefined),
-    allowedTools: scalar(section(lines, 'allowed-tools')),
+    allowedTools: list(section(lines, 'allowed-tools'))?.join(', ') || undefined,
     tags
   }
 }
