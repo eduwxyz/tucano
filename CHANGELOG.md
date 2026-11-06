@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-11-05
+
 > **Em português:**
 > - **Workspaces.** Empresa e emprego, por exemplo, separados: cada workspace tem seus agentes, conversas, conectores, memórias e rotinas, e um não vê o outro. Você troca pelo nome no topo da barra lateral, e as rotinas de todos continuam rodando. Ao criar um, você escolhe o que levar do atual.
 > - **Agentes no Grok.** Um agente pode rodar no Grok CLI, com a assinatura do grok.com, como roda no Cursor CLI. Cada resposta usa uma pasta própria: os seus plugins, skills e hooks não carregam, e só as ferramentas do Tucano ficam à mão.
@@ -13,14 +15,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Um agente só acorda outro quando precisa.** Quando um agente menciona outro na resposta, o router lê e chama só quem tem algo a fazer: um agradecimento ou um “combinado” não acordam ninguém. Na dúvida, chama.
 > - **Uma triagem de alarmes leva minutos, não meia hora.** Uma consulta de conector que volta ainda rodando (um SQL demorado) o app espera sozinho, com a ferramenta de status do conector, em vez de o agente dormir e perguntar de novo; um agente com conectores lê só a janela que precisa, e é avisado quando pagina um histórico inteiro.
 > - **Um agente responde uma vez de cada vez na mesma conversa.** Quando outro agente passa a vez pra quem já está respondendo ali, não abre uma segunda resposta ao lado: fica anotado, e quando a resposta acaba vem uma só, que lê tudo o que chegou no meio. Em outras conversas e threads ele segue em paralelo.
-> - **Uma rotina que roda ao abrir o app já encontra os conectores.** As perdidas enquanto o app estava fechado rodavam antes de os conectores terminarem de conectar, e o agente achava que eles estavam fora do ar. Agora a rotina espera até 1 minuto por eles.
-> - **Um conector com login OAuth não pede pra entrar de novo a cada vez que o app abre.** O app se registrava de novo no servidor a cada abertura e perdia o token que renova o acesso; agora guarda o registro e renova sozinho.
 > - **Um conector que falha diz por quê.** O passo da resposta mostra o motivo em vermelho, e o agente recebe o mesmo motivo pra explicar, em vez de um ✗ sem nada.
-> - **Conversas longas não pesam mais enquanto um agente responde.** Cada palavra recebida redesenhava todas as mensagens; agora só a que mudou.
-> - **O navegador dos agentes abre páginas num servidor Linux que é um PC.** O Chrome esperava o chaveiro bloqueado da área de trabalho e nenhuma página carregava; no servidor ele agora usa o próprio armazenamento.
-> - **A página do servidor abre por HTTP num endereço privado,** como o Tailscale ou a rede de casa. Ela ficava em branco.
-> - **O app abre fora do instalador mesmo com uma versão estranha.** O atualizador, que nem é usado ali, conferia a versão ao abrir e derrubava o app.
-> - **O tucano aparece na dock e no menu de apps do Linux.** O .deb mostrava uma engrenagem genérica; agora instala o ícone em todos os tamanhos que o tema procura.
+> - **As novidades vêm em páginas,** como esta: quatro tópicos por vez, com setas pra passar.
+> - **Correções.** Uma rotina que roda ao abrir o app espera os conectores, um conector com login OAuth não pede pra entrar de novo a cada abertura, conversas longas não pesam enquanto um agente responde, o navegador dos agentes abre páginas num servidor Linux, a página do servidor abre por HTTP num endereço privado, o app abre fora do instalador, e o tucano aparece na dock do Linux.
+>
+> Obrigado ao Bruno, ao Dias, ao Alan, ao Matheus, ao Gian, ao João Vitor, ao Daniel, ao Cleiton e ao Luan!
 
 ### Added
 
@@ -42,9 +41,9 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **A routine that runs as the app opens finds its connectors.** Routines missed while the app was closed, and any due right as it opens, ran on the first check, before the connectors had finished connecting: the agent was told its tools were offline and ran without them. A routine now waits for the connectors still connecting, up to a minute, then runs anyway (with a line in the log); with none connecting it starts at once, as before. Thanks [@jvitorcarvalho](https://github.com/jvitorcarvalho)! ([#152](https://github.com/eduwxyz/tucano/pull/152))
 - **An agent replies once at a time in the same conversation or thread.** When another agent handed the turn to one already replying there, a second reply of it started next to the first, each working from the conversation as it was when it began. The hand-off is now noted instead, and the caller's step says so ("already replying here, will see this next"); when the current reply ends well, one follow-up reply reads everything that came in meanwhile, in the same Claude Code session. A reply that stopped, failed, hit a limit or waits on you gets no follow-up, since you act there anyway. The same agent elsewhere still runs in parallel, and the hand-off router is told who is already replying, and that waiting for someone's update isn't a request. Thanks [@eialanjones](https://github.com/eialanjones)! ([#151](https://github.com/eduwxyz/tucano/pull/151))
 - **A connector tool that fails says why.** The reply's step showed a bare ✗ next to the tool's name, and for some failures the agent got an empty result too. The step now shows the reason under its label (a few lines, all of it on a click), and the agent gets it: a reason only in the structured content or an embedded resource, an MCP error's code and data, a timeout in seconds, a result that doesn't match the tool's schema, or a session that couldn't reconnect. An approved call and a routine's poll say it the same way. Thanks [@rjgdias](https://github.com/rjgdias)! ([#133](https://github.com/eduwxyz/tucano/pull/133))
-- **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again.
-- **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring.
-- **The server's page opens over plain HTTP on a private address,** such as Tailscale or a home network. It stayed blank: a browser outside a secure context has no `crypto.randomUUID`, which the app calls as it starts. The page now brings a small replacement for it, and one for the copy buttons.
+- **Long conversations stay light while an agent replies.** Each streamed word redrew and re-parsed every message in the list, keeping the window busy on long conversations. Now only the message that changed is drawn again. Thanks [@Luan1Schons](https://github.com/Luan1Schons)! ([#132](https://github.com/eduwxyz/tucano/pull/132))
+- **An agent's browser loads pages on a Linux server that is a desktop PC.** Chrome waited for the desktop's locked keyring before its first page and never got it, so every page hung. On a server it now uses its own cookie store; a desktop keeps the keyring. Thanks [@daniellcar](https://github.com/daniellcar)! ([#143](https://github.com/eduwxyz/tucano/pull/143))
+- **The server's page opens over plain HTTP on a private address,** such as Tailscale or a home network. It stayed blank: a browser outside a secure context has no `crypto.randomUUID`, which the app calls as it starts. The page now brings a small replacement for it, and one for the copy buttons. Thanks [@daniellcar](https://github.com/daniellcar)! ([#142](https://github.com/eduwxyz/tucano/pull/142))
 - **The toucan shows in the Linux dock and app menu.** The .deb showed a generic gear: the icon was a single 1024 px image, under a size the icon theme doesn't list, so the dock found nothing. It now installs the toucan at every size from 16 to 1024 px. Thanks [@cleitoncsalvagni](https://github.com/cleitoncsalvagni)! ([#140](https://github.com/eduwxyz/tucano/pull/140))
 - **The app opens unpacked even when its version isn't one the updater accepts.** The updater was made as the app started, and making it checks the version, so an unpacked build reporting one like `0.0` stopped before its window opened. It's now made only when updates are on. Thanks [@b7s](https://github.com/b7s)! ([#123](https://github.com/eduwxyz/tucano/pull/123))
 
@@ -311,6 +310,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.12]: https://github.com/eduwxyz/tucano/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/eduwxyz/tucano/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/eduwxyz/tucano/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/eduwxyz/tucano/compare/v0.2.8...v0.2.9
