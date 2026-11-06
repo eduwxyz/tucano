@@ -177,7 +177,7 @@ A saída de jobs é tratada como dado, nunca como instrução. Ela é limitada e
 | `possible_stall` | Um dos sinais abaixo | Acorda uma vez por sinal e etapa |
 | `run_canceled` | Estado final `canceled` | Só cartão |
 | Nova tentativa | Task em `waiting_retry` | Só cartão |
-| Spill alto | Spill de pelo menos 10 GB, sem outro sinal | Só aviso no cartão |
+| `high_spill` | Spill igual ou acima do limite configurado (padrão: 10 GB) | Conforme a configuração: só aviso no cartão (padrão) ou acorda uma vez por etapa |
 
 ### Sinais de possível travamento
 
@@ -210,6 +210,10 @@ O cartão diz "Possível travamento", nunca uma certeza. Se o progresso voltar, 
 | Sem avanço | 15 min | 1 min |
 | Múltiplo da task atrasada | 5 | 2 |
 | Múltiplo da lentidão | 2 | 1,5 |
+| Limite de spill | 10 GB | 1 GB |
+| Ao passar do limite de spill | Só aviso no cartão | Não se aplica |
+
+**Ao passar do limite de spill** tem duas opções: **Só aviso no cartão** e **Acordar o agente**. Acordar o agente conta como alerta no limite de vezes por run, então nunca consome a vez reservada ao evento final.
 
 Acima do limite de jobs simultâneos, `acompanhar_job` recusa e explica. O acompanhamento não entra numa fila.
 
@@ -256,7 +260,7 @@ Ao iniciar ou acordar, o app retoma os acompanhamentos com `status: 'watching'` 
 ## Testes
 
 - `test/cli-policy.test.ts`: tabela de permitidos e recusados, incluindo `api post`, caminhos fora da lista, travessia e flags extras.
-- `test/job-detect.test.ts`: sequências de leituras para cada evento e sinal, duplicidade e recuperação.
+- `test/job-detect.test.ts`: sequências de leituras para cada evento e sinal, duplicidade, recuperação e as duas opções de spill, com limites diferentes do padrão.
 - `test/databricks.test.ts`: respostas de exemplo da CLI, IDs grandes, campos ausentes e os dois formatos de estado.
 - `test/job-watches.test.ts`: CLI e relógio simulados, cobrindo evento final reservado, horário de silêncio, retomada, limite simultâneo e recusas de acesso.
 - Conferência no app: cartão com dados simulados, nos estados acima, em tema claro e escuro.
