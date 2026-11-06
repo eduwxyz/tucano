@@ -142,6 +142,7 @@ describe('Runner', () => {
     await r.send('c3', 'acha o erro, escreve o texto e mede o resultado')
     await r.idle()
     const replies = agentMessages()
+    expect(db.messages().find((m) => m.author.kind === 'system')!.text).toContain('Chamei **lia**; depois **theo**; depois **may** · find, write, measure')
     expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a1', 'a2', 'a3'])
     expect(replies[2]!.text).toBe('terceiro passo, usando as duas respostas anteriores')
     expect(claude.turns).toHaveLength(4) // the router, then one turn per layer
