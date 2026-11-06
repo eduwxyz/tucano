@@ -15,7 +15,7 @@ Peça em palavras: "Me fala sobre o job 123456789" ou "Acompanha o run 8841 e me
 **Parar de acompanhar** só encerra o acompanhamento: o job continua rodando.
 
 ## Métricas
-Estado, duração e tasks vêm da API de Jobs. Shuffle, spill, memória e progresso da etapa vêm da API do Spark, com o endereço descoberto pelo app, e só existem com o run rodando num cluster clássico. Num run já encerrado ou em serverless, ficam indisponíveis, e o cartão diz o motivo. Sem eles, o travamento só é percebido pela lentidão fora do normal.
+Estado, duração e tasks vêm da API de Jobs. Shuffle, spill, memória e progresso da etapa vêm da API do Spark, com o endereço descoberto pelo app, e só existem com o run rodando num cluster clássico. Num run já encerrado ou em serverless, ficam indisponíveis, e o cartão diz o motivo. **Memória (pico)** é o pico do executor mais cheio; **Memória (cache)** aparece quando o Spark só informa o cache e não indica falta de memória. Sem eles, o travamento só é percebido pela lentidão fora do normal.
 
 ## Possível travamento
 - **Sem avanço:** as tasks concluídas da etapa não mudam há um tempo.

@@ -162,6 +162,12 @@ describe('spill', () => {
   })
 })
 
+describe('a spill Spark didn’t report', () => {
+  it('isn’t high', () => {
+    expect(detect(input({ reading: run({ spark: spark({ spillBytes: undefined }) }) })).spillHigh).toBe(false)
+  })
+})
+
 describe('the limit on wakes', () => {
   const alert = (key: string): JobEvent => ({ kind: 'possible_stall', key, title: key, at: NOW })
   const final: JobEvent = { kind: 'run_failed', key: 'run_failed', title: 'x', at: NOW }

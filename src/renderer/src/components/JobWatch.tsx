@@ -121,10 +121,10 @@ export function JobWatchCard({ id }: { id: string }): ReactNode {
             </div>
             <div className={w.spillHigh ? 'is-warn' : ''}>
               <small>Spill</small>
-              <b className={spark ? '' : 'is-none'}>{spark ? bytes(spark.spillBytes) : unavailable}</b>
+              <b className={spark?.spillBytes !== undefined ? '' : 'is-none'}>{spark?.spillBytes !== undefined ? bytes(spark.spillBytes) : unavailable}</b>
             </div>
-            <div>
-              <small>{L('Memória', 'Memory')}</small>
+            <div title={spark?.memoryKind === 'peak' ? L('Pico de uso da memória do Spark no executor mais cheio', 'Peak use of Spark’s memory on the fullest executor') : spark?.memoryKind === 'storage' ? L('Este Spark só informa a memória de cache: não mostra se o job está sem memória', 'This Spark only reports cache memory: it doesn’t show whether the job is short of memory') : undefined}>
+              <small>{spark?.memoryKind === 'storage' ? L('Memória (cache)', 'Memory (cache)') : spark?.memoryKind === 'peak' ? L('Memória (pico)', 'Memory (peak)') : L('Memória', 'Memory')}</small>
               <b className={spark?.memoryPercent !== undefined ? '' : 'is-none'}>{spark?.memoryPercent !== undefined ? `${spark.memoryPercent}%` : unavailable}</b>
             </div>
           </div>

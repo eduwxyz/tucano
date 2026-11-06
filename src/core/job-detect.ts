@@ -80,7 +80,7 @@ export function detect(i: DetectInput): DetectOutput {
   const progressAt = moved ? now : i.progressAt
 
   const signals = stallSignals(i, progressAt)
-  const spillHigh = !!r.spark && r.spark.spillBytes >= c.spillLimitGb * GB
+  const spillHigh = (r.spark?.spillBytes ?? 0) >= c.spillLimitGb * GB
 
   if (isFinal(r.state)) {
     // The last word: what led to it goes with it, and a canceled run is the person's own doing.

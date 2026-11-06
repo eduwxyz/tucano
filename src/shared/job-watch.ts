@@ -25,8 +25,9 @@ export interface SparkReading {
   medianTaskMs?: number
   longestActiveTaskMs?: number
   shuffleBytes: number
-  spillBytes: number
-  memoryPercent?: number
+  spillBytes?: number // unset: Spark didn't say, which isn't the same as no spill
+  memoryPercent?: number // the fullest executor
+  memoryKind?: 'peak' | 'storage' // its peak use of Spark's memory, or only what's cached, on a Spark that reports no peak
   at: number // when this was read: the cluster may be gone by the time the run ends
 }
 

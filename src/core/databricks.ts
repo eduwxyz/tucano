@@ -220,15 +220,34 @@ export function activeStage(stages: Record<string, unknown>[]): Record<string, u
   return active.sort((a, b) => (num(b['numActiveTasks']) ?? 0) - (num(a['numActiveTasks']) ?? 0))[0]
 }
 
+// The fullest executor, since the average hides the one running out. Its peak use of Spark's memory when reported;
+// `memoryUsed` alone only counts what's cached, and stays near zero on a job that's short of memory.
+export function executorMemory(all: Record<string, unknown>[]): { memoryPercent?: number; memoryKind?: 'peak' | 'storage' } {
+  const workers = all.filter((e) => e['id'] !== 'driver')
+  const execs = (workers.length ? workers : all).filter((e) => (num(e['maxMemory']) ?? 0) > 0)
+  const peaks = execs.flatMap((e) => {
+    const m = obj(e['peakMemoryMetrics'])
+    const parts = ['OnHeapExecutionMemory', 'OnHeapStorageMemory', 'OffHeapExecutionMemory', 'OffHeapStorageMemory'].map((k) => num(m[k])).filter((n): n is number => n !== undefined)
+    return parts.length ? [parts.reduce((a, b) => a + b, 0) / num(e['maxMemory'])!] : []
+  })
+  const percent = (r: number): number => Math.min(100, Math.round(r * 100))
+  if (peaks.length) return { memoryPercent: percent(Math.max(...peaks)), memoryKind: 'peak' }
+  const stored = execs.map((e) => (num(e['memoryUsed']) ?? 0) / num(e['maxMemory'])!)
+  return stored.length ? { memoryPercent: percent(Math.max(...stored)), memoryKind: 'storage' } : {}
+}
+
 // Spark's monitoring API, as its documentation describes it.
 export function parseSpark(input: { stages: unknown; executors?: unknown; median?: unknown; running?: unknown; now: number; previous?: SparkReading }): SparkReading | undefined {
   const stages = list(input.stages)
   const stage = activeStage(stages)
   const sum = (key: string): number => stages.reduce((n, s) => n + (num(s[key]) ?? 0), 0)
   if (!stage && !input.previous) return undefined
-  const execs = list(input.executors)
-  const used = execs.reduce((n, e) => n + (num(e['memoryUsed']) ?? 0), 0)
-  const max = execs.reduce((n, e) => n + (num(e['maxMemory']) ?? 0), 0)
+  const memory = executorMemory(list(input.executors))
+  // The same spilled data measured twice, in memory and on disk: the larger, never the sum.
+  const spilled = stages.flatMap((s) => {
+    const sizes = [num(s['diskBytesSpilled']), num(s['memoryBytesSpilled'])].filter((n): n is number => n !== undefined)
+    return sizes.length ? [Math.max(...sizes)] : []
+  })
   const median = Array.isArray(obj(input.median)['executorRunTime']) ? num((obj(input.median)['executorRunTime'] as unknown[])[0]) : undefined
   const longest = list(input.running).reduce<number | undefined>((best, t) => {
     const launched = text(t['launchTime'])
@@ -247,8 +266,8 @@ export function parseSpark(input: { stages: unknown; executors?: unknown; median
     ...(median !== undefined ? { medianTaskMs: median } : {}),
     ...(longest !== undefined ? { longestActiveTaskMs: longest } : {}),
     shuffleBytes: sum('shuffleReadBytes') + sum('shuffleWriteBytes'),
-    spillBytes: sum('diskBytesSpilled'),
-    ...(max > 0 ? { memoryPercent: Math.round((used / max) * 100) } : {}),
+    ...(spilled.length ? { spillBytes: spilled.reduce((a, b) => a + b, 0) } : {}),
+    ...memory,
     at: input.now
   }
 }

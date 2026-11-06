@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseProfile, CliError, DatabricksCli, findCli, parseJson, parseProfiles, parseRun, parseSpark, sparkAddresses, stateOf, type CliExec } from '../src/core/databricks'
+import { chooseProfile, CliError, DatabricksCli, executorMemory, findCli, parseJson, parseProfiles, parseRun, parseSpark, sparkAddresses, stateOf, type CliExec } from '../src/core/databricks'
 import { jobWatchConfig } from '../src/shared/job-watch'
 
 describe('reading the state of a run', () => {
@@ -87,7 +87,7 @@ describe('Spark’s numbers', () => {
 
   it('reads the busiest active stage, and totals across the application', () => {
     const s = parseSpark({ stages, now: 5, executors: [{ memoryUsed: 50, maxMemory: 100 }, { memoryUsed: 25, maxMemory: 100 }] })
-    expect(s).toMatchObject({ stageId: '14', stageName: 'join', tasksDone: 312, tasksTotal: 400, tasksActive: 88, shuffleBytes: 1150, spillBytes: 25, memoryPercent: 38, at: 5 })
+    expect(s).toMatchObject({ stageId: '14', stageName: 'join', tasksDone: 312, tasksTotal: 400, tasksActive: 88, shuffleBytes: 1150, spillBytes: 25, memoryPercent: 50, memoryKind: 'storage', at: 5 })
   })
 
   it('reads the median and the longest running task', () => {
@@ -104,6 +104,37 @@ describe('Spark’s numbers', () => {
 
   it('has nothing to say with no stage yet', () => {
     expect(parseSpark({ stages: [], now: 1 })).toBeUndefined()
+  })
+
+  it('tells no spill from a Spark that doesn’t report it', () => {
+    expect(parseSpark({ stages: [{ status: 'ACTIVE', stageId: 1, diskBytesSpilled: 0, memoryBytesSpilled: 0 }], now: 1 })!.spillBytes).toBe(0)
+    expect(parseSpark({ stages: [{ status: 'ACTIVE', stageId: 1 }], now: 1 })!.spillBytes).toBeUndefined()
+  })
+
+  it('counts spilled data once, whichever way it was measured', () => {
+    expect(parseSpark({ stages: [{ status: 'ACTIVE', stageId: 1, diskBytesSpilled: 40, memoryBytesSpilled: 100 }, { status: 'COMPLETE', stageId: 0, diskBytesSpilled: 7 }], now: 1 })!.spillBytes).toBe(107)
+  })
+
+  it('measures memory by the fullest executor’s peak', () => {
+    const peak = (exec: number, storage: number) => ({ OnHeapExecutionMemory: exec, OnHeapStorageMemory: storage, OffHeapExecutionMemory: 0, OffHeapStorageMemory: 0, JVMHeapMemory: 999 })
+    expect(executorMemory([
+      { id: 'driver', maxMemory: 100, memoryUsed: 99, peakMemoryMetrics: peak(99, 0) },
+      { id: '1', maxMemory: 100, memoryUsed: 0, peakMemoryMetrics: peak(30, 10) },
+      { id: '2', maxMemory: 100, memoryUsed: 1, peakMemoryMetrics: peak(85, 5) }
+    ])).toEqual({ memoryPercent: 90, memoryKind: 'peak' })
+  })
+
+  it('says it’s only the cache on a Spark with no peak', () => {
+    expect(executorMemory([{ id: '1', maxMemory: 200, memoryUsed: 2 }])).toEqual({ memoryPercent: 1, memoryKind: 'storage' })
+  })
+
+  it('reads the driver when there’s nothing else, and caps at 100', () => {
+    expect(executorMemory([{ id: 'driver', maxMemory: 100, peakMemoryMetrics: { OnHeapExecutionMemory: 150 } }])).toEqual({ memoryPercent: 100, memoryKind: 'peak' })
+  })
+
+  it('has no number with no memory reported', () => {
+    expect(executorMemory([{ id: '1' }])).toEqual({})
+    expect(executorMemory([])).toEqual({})
   })
 
   it('doesn’t make up a memory number', () => {

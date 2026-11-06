@@ -111,8 +111,8 @@ export function jobSummary(r: JobReading, w?: Pick<JobWatch, 'baselineMs' | 'bas
     const s = r.spark
     lines.push(
       L(
-        `Etapa ${s.stageId}: ${s.tasksDone} de ${s.tasksTotal} tasks, ${s.tasksActive} ativas. Shuffle ${bytes(s.shuffleBytes)}, spill ${bytes(s.spillBytes)}${s.memoryPercent !== undefined ? `, memória ${s.memoryPercent}%` : ''}.`,
-        `Stage ${s.stageId}: ${s.tasksDone} of ${s.tasksTotal} tasks, ${s.tasksActive} active. Shuffle ${bytes(s.shuffleBytes)}, spill ${bytes(s.spillBytes)}${s.memoryPercent !== undefined ? `, memory ${s.memoryPercent}%` : ''}.`
+        `Etapa ${s.stageId}: ${s.tasksDone} de ${s.tasksTotal} tasks, ${s.tasksActive} ativas. Shuffle ${bytes(s.shuffleBytes)}, spill ${s.spillBytes !== undefined ? bytes(s.spillBytes) : 'não informado'}${s.memoryPercent !== undefined ? `, memória ${s.memoryPercent}% ${s.memoryKind === 'peak' ? '(pico do executor mais cheio)' : '(só cache)'}` : ''}.`,
+        `Stage ${s.stageId}: ${s.tasksDone} of ${s.tasksTotal} tasks, ${s.tasksActive} active. Shuffle ${bytes(s.shuffleBytes)}, spill ${s.spillBytes !== undefined ? bytes(s.spillBytes) : 'not reported'}${s.memoryPercent !== undefined ? `, memory ${s.memoryPercent}% ${s.memoryKind === 'peak' ? '(peak of the fullest executor)' : '(cache only)'}` : ''}.`
       )
     )
   } else {
