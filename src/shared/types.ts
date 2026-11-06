@@ -953,6 +953,10 @@ export interface LocalSkill {
   origin: string // "Claude Code", "Plugin <name>", "Codex"
   files: string[] // its other text files, relative to its folder
   scripts: boolean // it has scripts: an agent needs a computer to run them
+  category?: string // the frontmatter's, or the folder it sits in (<category>/<name>/SKILL.md)
+  version?: string // top-level "version", or metadata.version
+  tags?: string[] // metadata.hermes.tags, e.g. "family:ops"
+  allowedTools?: string // the frontmatter's allowed-tools
 }
 
 export interface SkillVersion {

@@ -55,6 +55,46 @@ export function frontmatter(text: string): { name?: string; description?: string
   return { name: field('name'), description: field('description'), body: text.slice(m[0].length) }
 }
 
+const unquote = (v: string): string => v.trim().replace(/^(["'])(.*)\1$/, '$2')
+
+// The lines under "key:" (deeper than it), and what follows the colon on its own line.
+function section(lines: string[], key: string): { inline: string; body: string[] } | undefined {
+  const indent = (l: string): number => /^\s*/.exec(l)![0].length
+  const base = Math.min(...lines.filter((l) => l.trim() && !l.trim().startsWith('#')).map(indent))
+  const i = lines.findIndex((l) => indent(l) === base && l.slice(base).startsWith(`${key}:`))
+  if (i < 0) return undefined
+  const body: string[] = []
+  for (const l of lines.slice(i + 1)) {
+    if (l.trim() && indent(l) <= base) break
+    body.push(l)
+  }
+  return { inline: lines[i]!.slice(base + key.length + 1).trim(), body }
+}
+
+// category, version, tags and allowed-tools from the frontmatter. Hermes keeps them nested:
+// "metadata: { version, hermes: { tags } }"; a plain name/description frontmatter has none.
+export function skillMeta(text: string): { category?: string; version?: string; allowedTools?: string; tags: string[] } {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
+  if (!m) return { tags: [] }
+  const lines = m[1]!.split(/\r?\n/)
+  const scalar = (s: { inline: string } | undefined): string | undefined => (s && unquote(s.inline) ? unquote(s.inline) : undefined)
+  const meta = section(lines, 'metadata')
+  const hermes = meta && meta.body.length ? section(meta.body, 'hermes') : undefined
+  const tagsAt = hermes && hermes.body.length ? section(hermes.body, 'tags') : undefined
+  let tags: string[] = []
+  if (tagsAt) {
+    const flow = /^\[(.*)\]$/.exec(tagsAt.inline)
+    tags = flow ? flow[1]!.split(',') : tagsAt.body.map((l) => /^\s*-\s+(.*)$/.exec(l)?.[1] ?? '')
+    tags = tags.map(unquote).filter(Boolean)
+  }
+  return {
+    category: scalar(section(lines, 'category')),
+    version: scalar(section(lines, 'version')) ?? scalar(meta && meta.body.length ? section(meta.body, 'version') : undefined),
+    allowedTools: scalar(section(lines, 'allowed-tools')),
+    tags
+  }
+}
+
 // The other files of a skill: text ones it may point to, and whether it has scripts.
 function contents(dir: string): { files: string[]; scripts: boolean } {
   const files: string[] = []
@@ -82,9 +122,22 @@ function contents(dir: string): { files: string[]; scripts: boolean } {
 
 function skill(file: string, origin: string): LocalSkill | undefined {
   try {
-    const fm = frontmatter(readFileSync(file, 'utf8'))
+    const text = readFileSync(file, 'utf8')
+    const fm = frontmatter(text)
     const dir = dirname(file)
-    return { source: file, name: fm.name || basename(dir), description: fm.description || '', bodyLength: fm.body.trim().length, origin, ...contents(dir) }
+    const meta = skillMeta(text)
+    return {
+      source: file,
+      name: fm.name || basename(dir),
+      description: fm.description || '',
+      bodyLength: fm.body.trim().length,
+      origin,
+      ...contents(dir),
+      ...(meta.category ? { category: meta.category } : {}),
+      ...(meta.version ? { version: meta.version } : {}),
+      ...(meta.tags.length ? { tags: meta.tags } : {}),
+      ...(meta.allowedTools ? { allowedTools: meta.allowedTools } : {})
+    }
   } catch {
     return undefined
   }
