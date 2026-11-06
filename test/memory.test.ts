@@ -24,9 +24,9 @@ let turns: Turn[]
 let memory: Memories
 let runner: Runner
 
-function setup(): void {
-  const base = fakeEngine('claude', { delayMs: 1 })
-  const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }
+function setup(sessions = false): void {
+  const base = fakeEngine('claude', { delayMs: 1, sessions })
+  const claude: Engine = { ...base, run: (t) => (turns.push(t), base.run(t)) }
   const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   const emit = (_: CoreEvent): void => {}
   const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
@@ -196,9 +196,32 @@ describe('lembrar (long term)', () => {
 
     await runner.send('c1', '@theo oi')
     await settle()
-    const system = agentTurns('theo')[0]!.system
+    const system = agentTurns('theo')[0]!.prompt
     expect(system).toContain('Sobre Edu (todos os agentes veem):')
     expect(system).toContain('eu prefiro PR pequeno')
+  })
+
+  it('a new memory goes on the kept session with only the new context, instead of starting over', async () => {
+    setup(true)
+    await runner.send('c1', '@theo oi')
+    await settle()
+    const before = agentTurns('theo')
+    expect(before[0]!.session).toMatchObject({ resume: false })
+    expect(before[0]!.prompt).not.toContain('PR pequeno')
+
+    db.saveMemory({ id: 'mem1', scope: 'me', text: 'eu prefiro PR pequeno', state: 'active', origin: 'me', messageIds: [], createdAt: clock, confirmedAt: clock })
+    await runner.send('c1', '@theo e agora?')
+    await settle()
+    const [first, second] = agentTurns('theo')
+    expect(second!.system).toBe(first!.system) // the system prompt holds: the session and its cache go on
+    expect(second!.session).toEqual({ id: first!.session!.id, resume: true, keep: true })
+    expect(second!.blocks![0]).toMatch(/^# Contexto de agora/)
+    expect(second!.blocks![0]).toContain('eu prefiro PR pequeno')
+    expect(second!.blocks!.at(-1)).toContain('e agora?')
+
+    await runner.send('c1', '@theo e mais?')
+    await settle()
+    expect(agentTurns('theo')[2]!.blocks!.some((b) => b.includes('# Contexto de agora'))).toBe(false) // unchanged: not again
   })
 
   it('with "pede aprovação" nothing reaches a prompt until I accept it', async () => {
@@ -210,12 +233,12 @@ describe('lembrar (long term)', () => {
 
     await runner.send('c1', '@theo oi')
     await settle()
-    expect(agentTurns('theo')[0]!.system).not.toContain('PR pequeno')
+    expect(agentTurns('theo')[0]!.prompt).not.toContain('PR pequeno')
 
     memory.decide(pending!.id, true)
     await runner.send('c1', '@theo e agora?')
     await settle()
-    expect(agentTurns('theo')[1]!.system).toContain('PR pequeno')
+    expect(agentTurns('theo')[1]!.prompt).toContain('PR pequeno')
   })
 
   it('an agent set to "só lê" does not get the tool', async () => {
@@ -284,6 +307,6 @@ describe('extraction', () => {
     memory.forget(db.memories()[0]!.id)
     await runner.send('c1', '@theo oi')
     await settle()
-    expect(agentTurns('theo')[0]!.system).not.toContain('PR pequeno')
+    expect(agentTurns('theo')[0]!.prompt).not.toContain('PR pequeno')
   })
 })

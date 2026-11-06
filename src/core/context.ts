@@ -1,7 +1,9 @@
-// Builds what a turn sends to the engine: a system prompt (stable per agent)
-// and a prompt with the conversation transcript. Everything the agent knows
-// comes from here; a kept session (sessions.ts) gets it once, then only the
-// blocks of what's new.
+// Builds what a turn sends to the engine: a system prompt (stable per agent),
+// the live context (what changes on its own: memories, the wiki, skills,
+// routines, connectors down, the Tuca's view of the team) and a prompt with
+// the conversation transcript. Everything the agent knows comes from here; a
+// kept session (sessions.ts) gets it once, then only the blocks of what's new,
+// and the live context again only when it changed.
 import { L, lang, locale } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Routine, type Settings, type Skill } from '../shared/types'
@@ -10,7 +12,7 @@ import { osOf, shellCommand, systemName } from './platform'
 
 export const HISTORY_LIMIT = 30
 
-export function systemPrompt(opts: {
+export type PromptOpts = {
   agent: Agent
   settings: Pick<Settings, 'workspaceName' | 'context'>
   conversation: Conversation
@@ -29,8 +31,13 @@ export function systemPrompt(opts: {
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
   connectors?: boolean // it has connector tools (Slack, Databricks…)
-}): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, builder, wiki, connectors } = opts
+}
+
+// What doesn't change between replies unless the agent's setup does. A change here starts a new
+// session (Claude Code keeps the first system prompt on resume), so whatever changes on its own
+// goes in liveContext instead.
+export function systemPrompt(opts: PromptOpts): string {
+  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, macFolder, web, browser, apps, routines, skills, connectors } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -81,25 +88,6 @@ export function systemPrompt(opts: {
         .join('\n'),
     browser && browserSection(me),
     apps?.length && appsSection(me, apps),
-    builder,
-    memories && (memories.aboutMe.length > 0 || memories.own.length > 0 || !!memories.searchable) && memorySection(me, memories),
-    wiki &&
-      L(
-        `## A wiki\n${me} tem uma wiki com ${wiki.pages === 1 ? '1 página' : `${wiki.pages} páginas`} (${wiki.kinds.join(', ')}): o que ${me} e o time sabem, escrito. Quando a pergunta puder estar lá (uma pessoa, um cliente, um projeto, uma decisão, um assunto), consulte antes de responder ou de perguntar: wiki_indice pra ver o que existe, wiki_buscar pra achar, wiki_ler pra abrir. Ao usar uma página, cite com [[Título]]. Se a wiki não disser, diga que não está lá; não invente. Você só lê a wiki: o curador a atualiza sozinho depois da conversa, com o que ficar decidido; não diga que ela vai ficar desatualizada nem peça pra alguém editar.`,
-        `## The wiki\n${me} has a wiki with ${wiki.pages === 1 ? '1 page' : `${wiki.pages} pages`} (${wiki.kinds.join(', ')}): what ${me} and the team know, written down. When the answer could be there (a person, a client, a project, a decision, a topic), look before replying or asking: wiki_indice to see what exists, wiki_buscar to find, wiki_ler to open. When you use a page, cite it as [[Title]]. If the wiki doesn't say, say it isn't there; don't make it up. You only read the wiki: the curator updates it on its own after the conversation, with what was settled; don't say it will be out of date or ask anyone to edit it.`
-      ),
-    skills &&
-      skills.length > 0 &&
-      `${L(
-        `## Suas skills\nReceitas que ${me} aprovou pra tipos de tarefa. Quando a tarefa bater com o "quando usar", leia a receita com ler_skill antes de começar e siga.`,
-        `## Your skills\nRecipes ${me} approved for kinds of task. When the task matches the "when to use", read the recipe with ler_skill before starting and follow it.`
-      )}\n${skills.map((k) => `- ${k.name}: ${k.description}`).join('\n')}`,
-    routines &&
-      routines.length > 0 &&
-      `${L(
-        '## Suas rotinas\nPedidos agendados que você roda sozinho. Pra mudar ou apagar, use agendar_rotina com substitui, ou cancelar_rotina.',
-        '## Your routines\nScheduled requests you run on your own. To change or delete one, use agendar_rotina with substitui, or cancelar_rotina.'
-      )}\n${routines.map((r) => `- [${r.id}] ${r.name}: ${describeSchedule(r.schedule).toLowerCase()} · ${r.prompt.replace(/\s+/g, ' ').slice(0, 160)}`).join('\n')}`,
     [
       L('## Como responder', '## How to reply'),
       `- ${where} ${L(
@@ -143,11 +131,6 @@ export function systemPrompt(opts: {
         `- Your other tools are the ones ${me} granted you. Sensitive actions don't run right away: they become an approval request, and you get the result after the decision.`
       ),
       connectors && readingData(me),
-      offline?.length &&
-        L(
-          `- Você tem acesso a ${offline.join(', ')}, mas ${offline.length > 1 ? 'eles estão desconectados' : 'ele está desconectado'} agora, então as ferramentas não aparecem pra você. Se precisar, peça a ${me} pra reconectar em Conectores (não é falta de permissão).`,
-          `- You have access to ${offline.join(', ')}, but ${offline.length > 1 ? "they're disconnected" : "it's disconnected"} right now, so the tools don't show up for you. If you need them, ask ${me} to reconnect in Connectors (it's not a lack of permission).`
-        ),
       hasComputer
         ? L('- Não diga que fez algo que nenhuma ferramenta sua fez.', "- Don't say you did something none of your tools did.")
         : L(
@@ -161,6 +144,55 @@ export function systemPrompt(opts: {
     .filter(Boolean)
     .join('\n\n')
 }
+
+// What changes on its own between replies: it goes at the top of the transcript, and a kept session
+// gets it again (whole, after what it already has) only when it changed, so a new memory or a page
+// in the wiki doesn't end every agent's session. '' when there's nothing.
+export function liveContext(opts: Pick<PromptOpts, 'settings' | 'memories' | 'offline' | 'routines' | 'skills' | 'builder' | 'wiki'>): string {
+  const { settings, memories, offline, routines, skills, builder, wiki } = opts
+  const me = settings.workspaceName || L('o usuário', 'the user')
+  const parts = [
+    builder,
+    memories && (memories.aboutMe.length > 0 || memories.own.length > 0 || !!memories.searchable) && memorySection(me, memories),
+    wiki &&
+      L(
+        `## A wiki\n${me} tem uma wiki com ${wiki.pages === 1 ? '1 página' : `${wiki.pages} páginas`} (${wiki.kinds.join(', ')}): o que ${me} e o time sabem, escrito. Quando a pergunta puder estar lá (uma pessoa, um cliente, um projeto, uma decisão, um assunto), consulte antes de responder ou de perguntar: wiki_indice pra ver o que existe, wiki_buscar pra achar, wiki_ler pra abrir. Ao usar uma página, cite com [[Título]]. Se a wiki não disser, diga que não está lá; não invente. Você só lê a wiki: o curador a atualiza sozinho depois da conversa, com o que ficar decidido; não diga que ela vai ficar desatualizada nem peça pra alguém editar.`,
+        `## The wiki\n${me} has a wiki with ${wiki.pages === 1 ? '1 page' : `${wiki.pages} pages`} (${wiki.kinds.join(', ')}): what ${me} and the team know, written down. When the answer could be there (a person, a client, a project, a decision, a topic), look before replying or asking: wiki_indice to see what exists, wiki_buscar to find, wiki_ler to open. When you use a page, cite it as [[Title]]. If the wiki doesn't say, say it isn't there; don't make it up. You only read the wiki: the curator updates it on its own after the conversation, with what was settled; don't say it will be out of date or ask anyone to edit it.`
+      ),
+    skills &&
+      skills.length > 0 &&
+      `${L(
+        `## Suas skills\nReceitas que ${me} aprovou pra tipos de tarefa. Quando a tarefa bater com o "quando usar", leia a receita com ler_skill antes de começar e siga.`,
+        `## Your skills\nRecipes ${me} approved for kinds of task. When the task matches the "when to use", read the recipe with ler_skill before starting and follow it.`
+      )}\n${skills.map((k) => `- ${k.name}: ${k.description}`).join('\n')}`,
+    routines &&
+      routines.length > 0 &&
+      `${L(
+        '## Suas rotinas\nPedidos agendados que você roda sozinho. Pra mudar ou apagar, use agendar_rotina com substitui, ou cancelar_rotina.',
+        '## Your routines\nScheduled requests you run on your own. To change or delete one, use agendar_rotina with substitui, or cancelar_rotina.'
+      )}\n${routines.map((r) => `- [${r.id}] ${r.name}: ${describeSchedule(r.schedule).toLowerCase()} · ${r.prompt.replace(/\s+/g, ' ').slice(0, 160)}`).join('\n')}`,
+    offline?.length &&
+      L(
+        `## Conectores desconectados\nVocê tem acesso a ${offline.join(', ')}, mas ${offline.length > 1 ? 'eles estão desconectados' : 'ele está desconectado'} agora, então as ferramentas não aparecem pra você. Se precisar, peça a ${me} pra reconectar em Conectores (não é falta de permissão).`,
+        `## Disconnected connectors\nYou have access to ${offline.join(', ')}, but ${offline.length > 1 ? "they're disconnected" : "it's disconnected"} right now, so the tools don't show up for you. If you need them, ask ${me} to reconnect in Connectors (it's not a lack of permission).`
+      )
+  ].filter(Boolean)
+  if (!parts.length) return ''
+  return [LIVE_HEAD(), ...parts].join('\n\n')
+}
+
+const LIVE_HEAD = (): string =>
+  L(
+    '# Contexto de agora\nIsto vem do app, não de uma mensagem. Se aparecer de novo mais adiante na conversa, vale a versão mais nova.',
+    "# Context right now\nThis comes from the app, not from a message. If it shows up again later in the conversation, the newest version wins."
+  )
+
+// A kept session saw a live context that is now empty: what tells it the old one is gone.
+export const NO_LIVE = (): string =>
+  L(
+    '# Contexto de agora\nO contexto de antes não vale mais: agora não há memórias, wiki, skills, rotinas nem conectores desconectados.',
+    '# Context right now\nThe earlier context no longer holds: there are no memories, wiki, skills, routines or disconnected connectors now.'
+  )
 
 // Reading a channel, a history, logs or a table: only the window the task needs, and no waiting by hand.
 // Without it an agent asked about "the alarm" pages through the whole channel and sleeps on slow queries.
@@ -314,6 +346,7 @@ type TranscriptOpts = {
   thread?: Message
   searchable?: boolean
   unix?: boolean // message times with the year, the offset and the Unix seconds: for an agent whose tools filter by time
+  live?: string // liveContext: the first block
 }
 
 export function transcript(opts: TranscriptOpts): string[] {
@@ -328,7 +361,7 @@ export const snip = (text: string, max: number): string => {
 
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
-  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable, unix } = opts
+  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable, unix, live } = opts
   const name = (m: Message): string | null => {
     if (m.author.kind === 'me') return me
     if (m.author.kind === 'system') return null
@@ -374,6 +407,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       : ` ${L('As threads ficam à parte: daqui você só vê a mensagem que abriu cada uma.', 'Threads are kept apart: from here you only see the message that started each one.')} ${lookUp}`
     : ''
   const head = [
+    live?.trim(),
     summary?.trim() &&
       (thread
         ? `${L('Resumo do começo desta thread (as mensagens mais antigas dela não vão inteiras)', "Summary of this thread's beginning (its oldest messages don't go in full)")}:\n${summary.trim()}`

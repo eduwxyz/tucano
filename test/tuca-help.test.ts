@@ -200,9 +200,9 @@ describe('the Tuca helping, in a conversation', () => {
     ]
     await runner.send('d1', 'por que a Lia não responde?')
     await runner.idle()
-    expect(turns[0]!.system).toContain('## O guia do Tucano')
-    expect(turns[0]!.system).toContain('(#abrir/conectores)')
-    expect(turns[0]!.system).toContain('Lia (@lia)')
+    expect(turns[0]!.prompt).toContain('## O guia do Tucano')
+    expect(turns[0]!.prompt).toContain('(#abrir/conectores)')
+    expect(turns[0]!.prompt).toContain('Lia (@lia)')
     const texts = results.map((r) => (r as { content: { text: string }[] }).content[0]!.text)
     if (GUIDE.length) expect(texts[0]).toContain(`# ${GUIDE[0]!.title}`)
     expect(texts[1]).toContain('Linear: pede login')
@@ -228,7 +228,7 @@ describe('the Tuca helping, in a conversation', () => {
     ]
     await runner.send('d2', 'cria um canal de suporte comigo')
     await runner.idle()
-    expect(turns[0]!.system).not.toContain('## O guia do Tucano')
+    expect(turns[0]!.prompt).not.toContain('## O guia do Tucano')
     expect(results.slice(0, 2).map((r) => (r as { isError?: boolean }).isError)).toEqual([true, true])
     const reply = db.messages().find((m) => m.author.kind === 'agent' && m.text === 'pronto')!
     expect(reply.run?.proposal).toMatchObject({ kind: 'channel', name: 'suporte', members: ['a1'] })
