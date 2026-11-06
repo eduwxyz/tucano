@@ -184,9 +184,19 @@ await win.click('.cal__empty button:has-text("Fechamento da semana")')
 await win.locator('.routine-form select').nth(1).selectOption({ label: '#engenharia' })
 await shot('25-rotina-nova')
 await win.click('button:has-text("Criar rotina")')
-await win.click('.cal__ev:has-text("Fechamento da semana")') // the routine is a block on the calendar
+await win.locator('.routine-form').waitFor({ state: 'detached' })
+// The routine is a block on the calendar. The calendar shows only what's still to come, so past
+// Friday 17:00 this week's block is gone: find it next week, and come back to this one for the run.
+const routine = win.locator('.cal__ev:has-text("Fechamento da semana")')
+const later = (await routine.count()) === 0
+if (later) await win.keyboard.press('ArrowRight')
+await routine.first().click()
 await win.click('.cal-pop button:has-text("Rodar agora")')
-await win.waitForSelector('.cal__ev:has-text("Fechamento da semana") .cal__ev-ok', { timeout: 120_000 })
+if (later) await win.keyboard.press('t')
+const ran = win.locator('.cal__ev:has-text("Fechamento da semana"):has(.cal__ev-ok)')
+await ran.waitFor({ timeout: 120_000 })
+await win.keyboard.press('Escape') // the popover can cover the run's block
+await ran.first().click()
 await shot('26-rotinas')
 await win.click('.cal-pop button:has-text("Ver a")')
 await settle()
