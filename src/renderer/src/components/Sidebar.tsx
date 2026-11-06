@@ -51,7 +51,7 @@ function TucaItem(): ReactNode {
     <button className="nav-item" onClick={openTuca} title={L('Monte um agente conversando com o Tuca', 'Build an agent by chatting with Tuca')}>
       <TucaMark size={18} />
       <span className="nav-item__label">Tuca</span>
-      <span className="nav-item__meta">{L('monta agentes', 'builds agents')}</span>
+      <span className="nav-item__meta">{L('te ajuda', 'helps you')}</span>
     </button>
   )
 }

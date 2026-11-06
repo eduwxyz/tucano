@@ -15,7 +15,9 @@ import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './c
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { ABRIR_PR, GITHUB, type GitHub } from './github'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderSection, draftFrom, PROPOR_AGENTE } from './tuca'
+import { availableModels, builderSection, draftFrom, helperSection, PROPOR_AGENTE } from './tuca'
+import { LER_GUIA, readGuide } from './guide'
+import { proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
@@ -837,7 +839,7 @@ export class Runner {
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
-      ...(builds ? [PROPOR_AGENTE] : []),
+      ...(builds ? [PROPOR_AGENTE, LER_GUIA, VER_ESTADO, ...PROPOSAL_TOOLS()] : []),
       ...(computers ? computerTools(agent) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -880,6 +882,54 @@ export class Runner {
             L(
               `Pergunta enviada a ${settings.workspaceName}. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. A resposta chega na próxima mensagem.`,
               `Question sent to ${settings.workspaceName}. End your reply now with one sentence at most, without repeating the question. The answer comes in the next message.`
+            )
+          )
+        }
+
+        if (name === LER_GUIA.name && builds) {
+          const page = readGuide(args['pagina'])
+          if (!page.error) addSteps({ id: randomUUID(), label: L('Leu o guia', 'Read the guide'), detail: String(args['pagina']), status: 'done' })
+          return textResult(page.text, page.error)
+        }
+
+        if (name === VER_ESTADO.name && builds) {
+          addSteps({ id: randomUUID(), label: L('Olhou o workspace', 'Looked at the workspace'), detail: String(args['area'] ?? L('tudo', 'all')), status: 'done' })
+          const now = Date.now()
+          return textResult(
+            workspaceState(args['area'], {
+              settings: await this.deps.settings(),
+              connectors: this.deps.connectors?.list() ?? [],
+              agents: db.agents().filter((a) => a.kind !== 'tuca'),
+              conversations: db.conversations(),
+              routines: db.routines(),
+              approvals: db.approvals(),
+              failures: db.recentFailures(now - 7 * 24 * 3_600_000),
+              lastRun: (r) => {
+                const run = r.lastMessageId ? db.message(r.lastMessageId)?.run : undefined
+                return run && { status: run.status, ...(run.error ? { error: run.error } : {}) }
+              },
+              now
+            })
+          )
+        }
+
+        if (PROPOSAL_TOOLS().some((t) => t.name === name) && builds) {
+          const now = await this.deps.settings()
+          const r = proposalFrom(name, args, {
+            agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'),
+            conversations: db.conversations(),
+            connectors: this.deps.connectors?.list() ?? [],
+            usable: (id) => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn }
+          })
+          if (!r.proposal) return textResult(r.error!, true)
+          msg.run = { ...msg.run!, proposal: r.proposal }
+          const p = r.proposal
+          const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : L('Propôs um canal', 'Proposed a channel')
+          addSteps({ id: randomUUID(), label: what, detail: p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : Object.keys(p.changes).join(', '), status: 'done' })
+          return textResult(
+            L(
+              'A proposta está no card, com Aplicar e Descartar. Termine com uma frase curta, sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
+              'The proposal is in the card, with Apply and Discard. Finish with one short sentence, without repeating what the card shows. One proposal per reply: the next one replaces this one.'
             )
           )
         }
@@ -1430,7 +1480,7 @@ export class Runner {
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
       publish: repos,
       connectors: exposed.size > 0,
-      builder: builds ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId }) : undefined
+      builder: builds ? `${builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })}\n\n${helperSection()}` : undefined
     })
 
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
@@ -1559,7 +1609,7 @@ export class Runner {
       )
     }
 
-    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft }
+    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {

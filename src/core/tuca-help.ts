@@ -1,0 +1,283 @@
+// What the Tuca has besides building agents: a look at how the workspace is doing (ver_estado),
+// and proposals for what already exists (an agent's change, a routine, a channel). A proposal is a
+// card with Aplicar and Descartar, like his new agents: nothing changes until the person applies it.
+// He sees settings, statuses and error messages, never what was said in a conversation.
+import { L } from '../shared/lang'
+import { channelName, ENGINES, modelInfo, validTime, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type TucaProposal } from '../shared/types'
+import type { ToolDef } from './gateway'
+
+const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh']
+const DAY = 24 * 3_600_000
+
+// ---------- ver_estado ----------
+
+const AREAS = ['tudo', 'motores', 'conectores', 'agentes', 'rotinas', 'falhas'] as const
+type Area = (typeof AREAS)[number]
+
+export const VER_ESTADO: ToolDef = {
+  name: 'ver_estado',
+  get description() {
+    return L(
+      'Mostra como este workspace está: motores e logins, conectores e seus erros, agentes (modelo, limite, acessos), rotinas (próxima, última, erro) e as respostas que falharam nos últimos 7 dias, com a mensagem de erro. Use antes de dizer por que algo não funciona. Não mostra o conteúdo das conversas.',
+      "Shows how this workspace is doing: harnesses and sign-ins, connectors and their errors, agents (model, limit, access), routines (next, last, error) and the replies that failed in the last 7 days, with the error. Use it before saying why something doesn't work. It doesn't show what was said in conversations."
+    )
+  },
+  get inputSchema() {
+    return { type: 'object' as const, properties: { area: { type: 'string', enum: [...AREAS] } } }
+  }
+}
+
+export interface StateInput {
+  settings: Settings
+  connectors: Connector[]
+  agents: Agent[] // the team, archived ones too (said so)
+  conversations: Conversation[]
+  routines: Routine[]
+  approvals: Approval[]
+  failures: { agentId: string; conversationId: string; at: number; status: string; error?: string }[]
+  lastRun: (r: Routine) => { status?: string; error?: string } | undefined // the routine's last reply, how it ended
+  now: number
+}
+
+const when = (at: number | undefined, now: number): string => {
+  if (!at) return L('nunca', 'never')
+  const d = new Date(at)
+  const ago = now - at
+  const rel = ago >= 0 ? (ago < 3_600_000 ? L(`há ${Math.max(1, Math.round(ago / 60_000))} min`, `${Math.max(1, Math.round(ago / 60_000))} min ago`) : ago < DAY ? L(`há ${Math.round(ago / 3_600_000)} h`, `${Math.round(ago / 3_600_000)} h ago`) : L(`há ${Math.round(ago / DAY)} dias`, `${Math.round(ago / DAY)} days ago`)) : ''
+  return `${d.toISOString().slice(0, 16).replace('T', ' ')}${rel ? ` (${rel})` : ''}`
+}
+
+export function workspaceState(area: unknown, x: StateInput): string {
+  const want = (AREAS as readonly string[]).includes(String(area)) ? (area as Area) : 'tudo'
+  const show = (a: Area): boolean => want === 'tudo' || want === a
+  const s = x.settings
+  const agentName = (id: string): string => x.agents.find((a) => a.id === id)?.name ?? (id === 'router' ? 'router' : L('agente removido', 'removed agent'))
+  const where = (id: string): string => {
+    const c = x.conversations.find((c) => c.id === id)
+    return !c ? L('conversa removida', 'removed conversation') : c.kind === 'dm' ? L(`DM com ${agentName(c.name)}`, `DM with ${agentName(c.name)}`) : `#${c.name}`
+  }
+  const out: string[] = [
+    `${L('Workspace', 'Workspace')}: ${s.workspaceLabel || s.workspaceName}${s.paused ? L(' · PAUSADO: nenhum agente começa a trabalhar e nenhuma rotina roda', ' · PAUSED: no agent starts working and no routine runs') : ''}${s.quietHours ? L(` · horário de silêncio ${s.quietHours.from}–${s.quietHours.to}`, ` · quiet hours ${s.quietHours.from}–${s.quietHours.to}`) : ''}`
+  ]
+  if (show('motores')) {
+    const lines = (Object.keys(s.engines) as (keyof typeof ENGINES)[]).map((e) => {
+      const st = s.engines[e]
+      const state = st.off ? L('desligado na introdução', 'turned off in the introduction') : !st.installed ? L('não instalado', 'not installed') : st.loggedIn ? L(`pronto${st.account ? ` (${st.account})` : ''}`, `ready${st.account ? ` (${st.account})` : ''}`) : L('instalado, sem login', 'installed, not signed in')
+      return `- ${ENGINES[e].label}: ${state}${st.version ? ` · v${st.version}` : ''}${st.route === 'gateway' ? L(` · pelo gateway ${st.gateway ?? ''}`, ` · through gateway ${st.gateway ?? ''}`) : ''}${st.warning ? ` · ${st.warning}` : ''}`
+    })
+    const accounts = (s.accounts ?? []).map((a) => `- ${a.name} (${ENGINES[a.engine].label}): ${a.loggedIn ? L('com login', 'signed in') : L('sem login', 'not signed in')}`)
+    out.push(`## ${L('Motores', 'Harnesses')}\n${lines.join('\n')}${accounts.length ? `\n${L('Contas extras', 'Extra accounts')}:\n${accounts.join('\n')}` : ''}\n${L('Roteador', 'Router')}: ${s.routerModel} · ${L('memória', 'memory')}: ${s.memoryModel} (${s.memoryLearning})`)
+  }
+  if (show('conectores')) {
+    const status: Record<Connector['status'], string> = { connected: L('conectado', 'connected'), connecting: L('conectando', 'connecting'), needs_auth: L('pede login', 'needs sign-in'), error: L('com erro', 'error'), disconnected: L('desconectado', 'disconnected') }
+    const lines = x.connectors.map((c) => `- ${c.name}: ${status[c.status]}${c.error ? ` · ${c.error}` : ''}`)
+    out.push(`## ${L('Conectores', 'Connectors')}\n${lines.join('\n') || L('nenhum adicionado', 'none added')}`)
+  }
+  if (show('agentes')) {
+    const lines = x.agents.map((a) => {
+      const m = modelInfo(a.modelId)
+      const grants = Object.entries(a.grants).map(([id, g]) => `${x.connectors.find((c) => c.id === id)?.name ?? id} (${g === 'read_write' ? L('escrita', 'write') : g === 'read' ? L('leitura', 'read') : g})`)
+      const pct = a.limit ? Math.round((a.used / a.limit) * 100) : 0
+      const pending = x.approvals.filter((p) => p.agentId === a.id && p.state === 'pending').length
+      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
+    })
+    out.push(`## ${L('Agentes', 'Agents')}\n${lines.join('\n') || L('nenhum ainda', 'none yet')}`)
+  }
+  if (show('rotinas')) {
+    const lines = x.routines.map((r) => {
+      const last = x.lastRun(r)
+      const t = r.trigger
+      const kind = t?.kind === 'webhook' ? L('chamada local (webhook)', 'local call (webhook)') : t?.kind === 'poll' ? L(`quando aparece algo em ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, a cada ${t.everyMinutes} min`, `when something new shows in ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, every ${t.everyMinutes} min`) : `${r.schedule.days.join(',')} ${r.schedule.time}${r.schedule.once ? L(' (uma vez)', ' (once)') : ''}`
+      return `- ${r.name} (${agentName(r.agentId)}, ${where(r.conversationId)}): ${r.enabled ? L('ligada', 'on') : L('desligada', 'off')} · ${kind} · ${L('próxima', 'next')} ${r.enabled && r.nextAt ? when(r.nextAt, x.now) : '—'} · ${L('última', 'last')} ${when(r.lastAt, x.now)}${last?.status ? ` (${last.status}${last.error ? `: ${last.error}` : ''})` : ''}${t?.kind === 'poll' && t.error ? L(` · erro ao checar: ${t.error}`, ` · check error: ${t.error}`) : ''}`
+    })
+    out.push(`## ${L('Rotinas', 'Routines')}\n${lines.join('\n') || L('nenhuma', 'none')}`)
+  }
+  if (show('falhas')) {
+    const lines = x.failures.map((f) => `- ${when(f.at, x.now)} · ${agentName(f.agentId)} · ${where(f.conversationId)} · ${f.status}${f.error ? `: ${f.error}` : ''}`)
+    out.push(`## ${L('Respostas que falharam (7 dias)', 'Replies that failed (7 days)')}\n${lines.join('\n') || L('nenhuma', 'none')}`)
+  }
+  return out.join('\n\n')
+}
+
+// ---------- proposals ----------
+
+const reasonProp = () => ({ motivo: { type: 'string', description: L('Por que, em uma frase. Aparece no card.', 'Why, in one sentence. It shows on the card.') } })
+const agentProp = () => ({ agente: { type: 'string', description: L('O @handle do agente.', "The agent's @handle.") } })
+
+export const PROPOR_AJUSTE: ToolDef = {
+  name: 'propor_ajuste',
+  get description() {
+    return L(
+      'Propõe mudar um agente que já existe. Vira um card com o antes e o depois, Aplicar e Descartar: nada muda até a pessoa aplicar. Mande só o que muda; instruções vão inteiras.',
+      'Proposes changing an agent that exists. It becomes a card with before and after, Apply and Discard: nothing changes until the person applies it. Send only what changes; instructions go whole.'
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        ...agentProp(),
+        nome: { type: 'string' },
+        funcao: { type: 'string' },
+        instrucoes: { type: 'string', description: L('As instruções novas, inteiras.', 'The new instructions, whole.') },
+        modelo: { type: 'string', description: L('O id de um modelo da lista "Modelos que dá pra usar".', 'The id of a model from the "Models you can use" list.') },
+        esforco: { type: 'string', enum: EFFORTS },
+        web: { type: 'boolean' },
+        conectores: {
+          type: 'array',
+          description: L('A lista inteira de conectores que ele passa a ter (os de fora saem). Leitura por padrão.', 'The whole list of connectors it gets (the ones left out go). Read-only by default.'),
+          items: { type: 'object', properties: { conector: { type: 'string' }, nivel: { type: 'string', enum: ['leitura', 'escrita'] } }, required: ['conector'] }
+        },
+        limite: { type: 'number', description: L('O limite do mês, em tokens.', "The month's limit, in tokens.") },
+        ...reasonProp()
+      },
+      required: ['agente']
+    }
+  }
+}
+
+export const PROPOR_ROTINA: ToolDef = {
+  name: 'propor_rotina',
+  get description() {
+    return L(
+      'Propõe uma rotina num horário pra um agente: um pedido que ele faz sozinho nos dias e na hora escolhidos. Vira um card com Aplicar e Descartar. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
+      'Proposes a scheduled routine for an agent: a request it does on its own on the chosen days and time. It becomes a card with Apply and Discard. Triggers (webhook, connector) the person sets in Routines.'
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        ...agentProp(),
+        nome: { type: 'string', description: L('Curto (ex.: "Resumo do dia").', 'Short (e.g. "Daily summary").') },
+        pedido: { type: 'string', description: L('O que o agente faz a cada vez, como um pedido a ele.', 'What the agent does each time, as a request to it.') },
+        onde: { type: 'string', description: L('"dm" (a DM com o agente, o padrão) ou o nome de um canal de que ele participa.', '"dm" (the DM with the agent, the default) or the name of a channel it is in.') },
+        dias: { type: 'array', items: { type: 'number' }, description: L('0 = domingo … 6 = sábado.', '0 = Sunday … 6 = Saturday.') },
+        hora: { type: 'string', description: L('"HH:MM", hora deste computador.', '"HH:MM", this computer\'s time.') },
+        uma_vez: { type: 'boolean', description: L('Roda na próxima vez e desliga.', 'Runs next time, then turns off.') },
+        ...reasonProp()
+      },
+      required: ['agente', 'nome', 'pedido', 'dias', 'hora']
+    }
+  }
+}
+
+export const PROPOR_CANAL: ToolDef = {
+  name: 'propor_canal',
+  get description() {
+    return L('Propõe um canal novo, com os agentes que ficam nele. Vira um card com Aplicar e Descartar.', 'Proposes a new channel, with the agents in it. It becomes a card with Apply and Discard.')
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        nome: { type: 'string' },
+        tema: { type: 'string', description: L('Uma linha dizendo pra que ele serve.', 'One line saying what it is for.') },
+        agentes: { type: 'array', items: { type: 'string' }, description: L('Os @handles dos agentes.', "The agents' @handles.") },
+        threads: { type: 'boolean', description: L('Se cada mensagem abre uma thread (o padrão é responder na conversa).', 'Whether each message opens a thread (by default they answer in the conversation).') },
+        ...reasonProp()
+      },
+      required: ['nome', 'agentes']
+    }
+  }
+}
+
+export interface ProposalCtx {
+  agents: Agent[] // the team, not archived
+  conversations: Conversation[]
+  connectors: Connector[]
+  usable: (modelId: string) => boolean
+}
+
+const text = (args: Record<string, unknown>, k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
+const findAgent = (ctx: ProposalCtx, raw: unknown): Agent | undefined => {
+  const h = String(raw ?? '').trim().replace(/^@/, '').toLowerCase()
+  return ctx.agents.find((a) => a.handle.toLowerCase() === h) ?? ctx.agents.find((a) => a.name.toLowerCase() === h)
+}
+const unknownAgent = (raw: unknown): string => L(`Não existe o agente "${String(raw ?? '')}". Use um @handle da lista do time.`, `There's no agent "${String(raw ?? '')}". Use a @handle from the team list.`)
+
+function grantsFrom(raw: unknown, connectors: Connector[]): { grants?: Record<string, GrantLevel>; error?: string } {
+  const grants: Record<string, GrantLevel> = {}
+  const unknown: string[] = []
+  for (const c of Array.isArray(raw) ? (raw as unknown[]) : []) {
+    const r = (c ?? {}) as Record<string, unknown>
+    const wanted = String(r['conector'] ?? '').trim()
+    const found = connectors.find((x) => x.name.toLowerCase() === wanted.toLowerCase())
+    if (!found) unknown.push(wanted)
+    else grants[found.id] = r['nivel'] === 'escrita' ? 'read_write' : 'read'
+  }
+  if (unknown.length) return { error: L(`Não existe conector ${unknown.map((u) => `"${u}"`).join(', ')}. Use só os da lista.`, `There's no connector ${unknown.map((u) => `"${u}"`).join(', ')}. Use only the ones in the list.`) }
+  return { grants }
+}
+
+export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: TucaProposal; error?: string } {
+  const reason = text(args, 'motivo', 300) || undefined
+  if (tool === PROPOR_AJUSTE.name) {
+    const agent = findAgent(ctx, args['agente'])
+    if (!agent) return { error: unknownAgent(args['agente']) }
+    const changes: AgentChanges = {}
+    const name = text(args, 'nome', 40)
+    if (name && name !== agent.name) changes.name = name
+    const role = text(args, 'funcao', 40)
+    if (role && role !== agent.role) changes.role = role
+    const instructions = text(args, 'instrucoes', 8000)
+    if (instructions && instructions !== agent.instructions) changes.instructions = instructions
+    const model = text(args, 'modelo', 200)
+    if (model && model !== agent.modelId) {
+      if (!modelInfo(model) || !ctx.usable(model)) return { error: L(`O modelo "${model}" não dá pra usar agora. Use um da lista.`, `The model "${model}" can't be used now. Use one from the list.`) }
+      changes.modelId = model
+    }
+    if (EFFORTS.includes(args['esforco'] as Effort) && args['esforco'] !== agent.effort) changes.effort = args['esforco'] as Effort
+    if (typeof args['web'] === 'boolean' && args['web'] !== (agent.web !== false)) changes.web = args['web']
+    if (args['conectores'] !== undefined) {
+      const g = grantsFrom(args['conectores'], ctx.connectors)
+      if (g.error) return { error: g.error }
+      if (JSON.stringify(g.grants) !== JSON.stringify(agent.grants)) changes.grants = g.grants!
+    }
+    if (args['limite'] !== undefined) {
+      const n = Math.round(Number(args['limite']))
+      if (!Number.isFinite(n) || n < 1_000) return { error: L('O limite é em tokens, e no mínimo 1000.', 'The limit is in tokens, at least 1000.') }
+      if (n !== agent.limit) changes.limit = n
+    }
+    if (!Object.keys(changes).length) return { error: L('Nada mudaria: mande só o que é diferente do que ele tem hoje.', 'Nothing would change: send only what differs from what it has now.') }
+    const before = Object.fromEntries(Object.keys(changes).map((k) => [k, agent[k as keyof AgentChanges]])) as AgentChanges
+    return { proposal: { kind: 'agent', agentId: agent.id, changes, before, ...(reason ? { reason } : {}) } }
+  }
+  if (tool === PROPOR_ROTINA.name) {
+    const agent = findAgent(ctx, args['agente'])
+    if (!agent) return { error: unknownAgent(args['agente']) }
+    const name = text(args, 'nome', 80)
+    const prompt = text(args, 'pedido', 4000)
+    if (!name || !prompt) return { error: L('Faltou nome ou pedido.', 'Missing nome or pedido.') }
+    const days = [...new Set(Array.isArray(args['dias']) ? (args['dias'] as unknown[]).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [])].sort()
+    if (!days.length) return { error: L('Escolha pelo menos um dia (0 = domingo … 6 = sábado).', 'Pick at least one day (0 = Sunday … 6 = Saturday).') }
+    const time = text(args, 'hora', 5)
+    if (!validTime(time)) return { error: L('A hora vai como "HH:MM".', 'The time goes as "HH:MM".') }
+    const where = text(args, 'onde', 80).replace(/^#/, '')
+    let conversationId = '' // the agent's DM: opened when the routine is applied, if it isn't yet
+    if (where && where.toLowerCase() !== 'dm') {
+      const c = ctx.conversations.find((c) => c.kind === 'channel' && c.name === channelName(where))
+      if (!c) return { error: L(`Não existe o canal #${where}.`, `There's no #${where} channel.`) }
+      if (!c.members.includes(agent.id)) return { error: L(`${agent.name} não está em #${c.name}. Use a DM, ou um canal de que ele participa.`, `${agent.name} isn't in #${c.name}. Use the DM, or a channel it's in.`) }
+      conversationId = c.id
+    } else conversationId = ctx.conversations.find((c) => c.kind === 'dm' && c.name === agent.id)?.id ?? ''
+    return { proposal: { kind: 'routine', routine: { name, agentId: agent.id, conversationId, prompt, schedule: { days, time, ...(args['uma_vez'] === true ? { once: true } : {}) }, enabled: true }, ...(reason ? { reason } : {}) } }
+  }
+  if (tool === PROPOR_CANAL.name) {
+    const name = channelName(text(args, 'nome', 80))
+    if (!name) return { error: L('Dê um nome ao canal.', 'Give the channel a name.') }
+    if (ctx.conversations.some((c) => c.kind === 'channel' && c.name === name)) return { error: L(`Já existe o canal #${name}.`, `There's already a #${name} channel.`) }
+    const members: string[] = []
+    for (const raw of Array.isArray(args['agentes']) ? (args['agentes'] as unknown[]) : []) {
+      const a = findAgent(ctx, raw)
+      if (!a) return { error: unknownAgent(raw) }
+      if (!members.includes(a.id)) members.push(a.id)
+    }
+    if (!members.length) return { error: L('Diga quais agentes ficam no canal.', 'Say which agents are in the channel.') }
+    const topic = text(args, 'tema', 200)
+    return { proposal: { kind: 'channel', name, members, ...(topic ? { topic } : {}), ...(args['threads'] === true ? { threads: true } : {}), ...(reason ? { reason } : {}) } }
+  }
+  return { error: 'unknown proposal' }
+}
+
+export const PROPOSAL_TOOLS = (): ToolDef[] => [PROPOR_AJUSTE, PROPOR_ROTINA, PROPOR_CANAL]

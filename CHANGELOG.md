@@ -4,6 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **O Tuca te ajuda com o Tucano.** Além de montar agentes, ele explica como as coisas funcionam, lendo um guia do app antes de responder, e descobre por que algo não está dando certo olhando o workspace: motores, conectores, limites, rotinas e os erros das respostas, nunca o que foi dito nas conversas. Ele propõe ajustar um agente, uma rotina ou um canal novo num card com Aplicar e Descartar, e manda botões que levam à tela certa.
+
+### Added
+
+- **The Tuca helps you with Tucano.** Besides building agents, he explains how things work, reading the page of a guide of the app (17 pages, from agents and connectors to workspaces and troubleshooting) before answering, so he doesn't make up screens. Asked why something isn't working, he looks at the workspace first: harnesses and sign-ins, connectors and their errors, each agent's model, access and limit, routines and how their last run ended, and the replies that failed in the last week with their error, never what was said in conversations. He can propose changing an agent that exists, a scheduled routine or a new channel, each as a card with before and after, **Apply** and **Discard**; nothing changes until you apply it. When he mentions a screen, the message shows a button that opens it. A Tuca made before is brought up to date when the app starts, unless his instructions were rewritten by hand.
+
 ## [0.2.12] - 2026-11-05
 
 > **Em português:**

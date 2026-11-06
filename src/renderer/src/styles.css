@@ -5308,6 +5308,27 @@ kbd {
   align-items: center;
   gap: 8px;
 }
+/* a change the Tuca proposes: each field, before → after */
+.proposal-rows {
+  display: grid;
+  gap: 4px;
+}
+.proposal-rows > div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px;
+}
+.proposal-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 18px;
+}
 .onb-tuca {
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -7665,6 +7686,9 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 /* links in the text, and what they point to */
 .wiki-link { display: inline; padding: 0 2px; margin: 0; border-radius: 4px; background: transparent; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; border: 0; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 3px; text-decoration-thickness: 1.5px; transition: background-color var(--dur-fast) var(--ease-out), text-decoration-color var(--dur-fast) var(--ease-out); }
 .wiki-link:hover { background: var(--accent-soft); text-decoration-color: var(--accent); }
+/* a link to one of the app's screens, in a message: a small button that goes there */
+.screen-link { display: inline-flex; align-items: center; gap: 3px; padding: 1px 8px; margin: 0 1px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--panel); color: var(--text); font: inherit; font-size: 0.92em; font-weight: 600; cursor: pointer; vertical-align: 1px; transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
+.screen-link:hover { background: var(--accent-soft); border-color: var(--accent); }
 .wiki-link.is-missing { color: var(--text-2); text-decoration-style: dashed; text-decoration-color: var(--text-3); }
 .wiki-link--source { display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; text-decoration: none; color: var(--text-3); font-weight: 500; font-size: 0.78em; vertical-align: 1px; border-radius: 6px; background: var(--hover); }
 .wiki-link--source:hover { color: var(--text); background: var(--active); }

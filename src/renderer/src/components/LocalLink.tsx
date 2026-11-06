@@ -76,6 +76,6 @@ export const localLinkFor = (messageId: string) =>
     const path = href?.startsWith(LOCAL_LINK) ? decoded(href.slice(LOCAL_LINK.length)) : undefined
     if (path) return <LocalLink messageId={messageId} path={path}>{children}</LocalLink>
     if (href?.startsWith(LOCAL_LINK)) return <>{children}</>
-    if (href?.startsWith('#wiki/')) return <WikiLink href={href}>{children}</WikiLink> // a [[page]] of the wiki
+    if (href?.startsWith('#wiki/') || href?.startsWith('#abrir/')) return <WikiLink href={href}>{children}</WikiLink> // a [[page]] of the wiki, or one of the app's screens
     return <a href={href} {...rest}>{children}</a>
   }
