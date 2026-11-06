@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Agents' computers come set up.** **Settings › Agents › Agents' computer** takes a bash script every new Linux computer is set up with, so agents stop spending turns installing (and getting wrong) the same tools on each one. It runs once into a base image that every computer made after it starts from, in seconds; the agent is told what's already there. Ready-made, tested lines add the basics (jq, unzip, ssh, psql), GitHub CLI, GitLab CLI (glab), the Databricks CLI and the AWS CLI. A setup that fails says why, with its last lines, and the computer doesn't start half-done.
+
 ## [0.2.14] - 2026-11-06
 
 > **Em português:**
@@ -66,7 +70,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **Workspaces.** Keep a company and a day job, say, apart: each workspace has its own agents, conversations, connectors and credentials, memories, routines, engine folders and browser sessions, and none sees another's. Switch from the name at the top of the sidebar, which shows the others' unread and pending approvals (and nothing else of them); every workspace's routines and triggers keep running while another is on screen, each on its own webhook and git proxy ports. Creating one asks what to bring from the workspace you're in, each ticked on its own: the general settings (your name, language, router and memory models, limits, quiet hours), the context, the wiki (the same one, not a copy: what one keeps the other reads), agents, channels, skills, connectors with their credentials, routines. What depends on something left behind comes without it (agents without connectors have no grants), and with nothing ticked it starts empty with the introduction. Duplicating ticks everything; never messages, memories or usage. Settings › General names the workspace apart from what the agents call you, and its Danger area deletes a workspace with all its data, Claude Code's transcripts of its agents included. The folder you had is the default workspace, unchanged, and keeps Telegram and opening at login. It's a separation of data, not an OS sandbox: an agent on your computer still reaches the same disk. Thanks [@b7s](https://github.com/b7s)! ([#63](https://github.com/eduwxyz/tucano/pull/63))
 - **Agents on Grok.** An agent can run on the [Grok CLI](https://x.ai/cli) with a grok.com subscription, the way it runs on Cursor CLI: sign in with `grok login` and pick a Grok model. Each reply runs in a folder and a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load, Grok's own shell and files stay off, and Tucano's tools are the only ones it has. An `XAI_API_KEY` in the environment is set aside when grok.com is signed in, so the subscription isn't billed per token. The official installer is macOS and Linux. Thanks [@matheus-apolonio](https://github.com/matheus-apolonio)! ([#87](https://github.com/eduwxyz/tucano/pull/87))
-- **Agents' computers come set up.** **Settings › Agents › Agents' computer** takes a bash script every new Linux computer is set up with, so agents stop spending turns installing (and getting wrong) the same tools on each one. It runs once into a base image that every computer made after it starts from, in seconds; the agent is told what's already there. Ready-made, tested lines add the basics (jq, unzip, ssh, psql), GitHub CLI, GitLab CLI (glab), the Databricks CLI and the AWS CLI. A setup that fails says why, with its last lines, and the computer doesn't start half-done.
 
 ### Changed
 
