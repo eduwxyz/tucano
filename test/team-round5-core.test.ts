@@ -49,7 +49,7 @@ beforeAll(async () => {
 afterAll(() => {
   process.off('unhandledRejection', onCrash)
   process.off('uncaughtException', onCrash)
-  rmSync(core.dataDir, { recursive: true, force: true })
+  try { rmSync(core.dataDir, { recursive: true, force: true }) } catch {} // Windows: still open
   expect(crashes).toEqual([])
 })
 

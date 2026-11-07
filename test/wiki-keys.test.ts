@@ -7,7 +7,8 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { pageKey, Wiki } from '../src/core/wiki'
 
 const roots: string[] = []
-afterAll(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })))
+// Best effort: on Windows a database still open keeps its folder busy.
+afterAll(() => roots.forEach((r) => { try { rmSync(r, { recursive: true, force: true }) } catch {} }))
 const fresh = (): Wiki => {
   const root = mkdtempSync(join(tmpdir(), 'tucano-wikikeys-'))
   roots.push(root)

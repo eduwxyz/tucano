@@ -1,6 +1,7 @@
 // Tucano Team v1, fourth round: what the real core answers each person over its API (fake engines).
 // One core for the whole file: the describes run in order and build on each other.
 import { rmSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ActivityEntry, ComputerInfo, Conversation, Message, Person, Settings, WikiPage, WikiVersion } from '../src/shared/types'
 import { bootCore, type Client, type TestCore } from './helpers/core'
@@ -46,7 +47,7 @@ beforeAll(async () => {
 afterAll(() => {
   process.off('unhandledRejection', onCrash)
   process.off('uncaughtException', onCrash)
-  rmSync(core.dataDir, { recursive: true, force: true })
+  try { rmSync(core.dataDir, { recursive: true, force: true }) } catch {} // Windows: still open
   expect(crashes).toEqual([])
 })
 
@@ -126,7 +127,7 @@ describe('B. settings take only what they are', () => {
 
 describe('C. machine paths', () => {
   it("a computer's folder reaches the owner only", async () => {
-    expect((await ana.call<Snap>('snapshot')).computers.some((c) => c.folder.startsWith('/'))).toBe(true)
+    expect((await ana.call<Snap>('snapshot')).computers.some((c) => isAbsolute(c.folder))).toBe(true)
     expect((await bia.call<Snap>('snapshot')).computers.every((c) => c.folder === '')).toBe(true)
   })
 })

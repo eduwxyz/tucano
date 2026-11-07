@@ -19,7 +19,8 @@ import type { CoreEvent } from '../src/shared/rpc'
 import type { Connector, EngineId, Message, Person, Settings } from '../src/shared/types'
 
 const roots: string[] = []
-afterAll(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })))
+// Best effort: on Windows a database still open keeps its folder busy.
+afterAll(() => roots.forEach((r) => { try { rmSync(r, { recursive: true, force: true }) } catch {} }))
 const tmp = (): string => {
   const d = mkdtempSync(join(tmpdir(), 'tucano-r5-'))
   roots.push(d)

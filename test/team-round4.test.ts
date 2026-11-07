@@ -14,7 +14,8 @@ import { personScope, type ComputerInfo, type EngineId, type Message, type Perso
 import type { Engine } from '../src/core/engines/types'
 
 const roots: string[] = []
-afterAll(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })))
+// Best effort: on Windows a database still open keeps its folder busy.
+afterAll(() => roots.forEach((r) => { try { rmSync(r, { recursive: true, force: true }) } catch {} }))
 const tmp = (): string => {
   const d = mkdtempSync(join(tmpdir(), 'tucano-r4-'))
   roots.push(d)
