@@ -785,6 +785,18 @@ export class Db {
     return { messages: rows.map((r) => this.toMessage(r)), since }
   }
 
+  // The connector tools an agent called in its replies since `since`, most used first, as each step
+  // names them ("Linear · list_issues"), with how many times.
+  toolsUsedBy(agentId: string, since: number, replies = 200): { detail: string; count: number }[] {
+    const rows = this.db.prepare("SELECT run FROM messages WHERE author_kind = 'agent' AND author_id = ? AND at > ? AND run IS NOT NULL ORDER BY at DESC LIMIT ?").all(agentId, since, replies) as Row[]
+    const counts = new Map<string, number>()
+    for (const r of rows) {
+      const steps = (JSON.parse(str(r['run'])) as { steps?: { detail?: unknown }[] }).steps ?? []
+      for (const s of steps) if (typeof s.detail === 'string' && s.detail.includes(' · ')) counts.set(s.detail, (counts.get(s.detail) ?? 0) + 1)
+    }
+    return [...counts].map(([detail, count]) => ({ detail, count })).sort((a, b) => b.count - a.count)
+  }
+
   // Where the agent wrote last: while it works, the conversation of its reply.
   lastConversationOf(agentId: string): string | undefined {
     const r = this.db.prepare("SELECT conversation_id FROM messages WHERE author_kind = 'agent' AND author_id = ? ORDER BY at DESC LIMIT 1").get(agentId) as Row | undefined

@@ -36,6 +36,10 @@ const GITHUB = 'github'
 const ABRIR_PR = 'abrir_pr'
 
 const MAX_CONCURRENT = 4
+// Connector tools wait behind tool search, and loading one costs a model call (1.5–2 s). The ones an
+// agent called lately are listed loaded, so its usual lookups don't pay that: at most this many.
+export const PRELOAD_TOOLS = 12
+export const PRELOAD_DAYS = 14
 // Replies to something the person just did (a message, an approval, a retry) go ahead of routines,
 // hand-offs and follow-ups, and may run past MAX_CONCURRENT up to this: four routines running
 // mustn't keep a reply to the person waiting for minutes.
@@ -851,6 +855,14 @@ export class Runner {
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...(wiki ? WIKI_TOOLS : [])
     ]
+    // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
+    const byStep = new Map([...exposed].map(([name, { connector, tool }]) => [`${connector.name} · ${tool.name}`, name]))
+    const preload = new Set(
+      db
+        .toolsUsedBy(agent.id, Date.now() - PRELOAD_DAYS * 86_400_000)
+        .flatMap((u) => (byStep.has(u.detail) ? [byStep.get(u.detail)!] : []))
+        .slice(0, PRELOAD_TOOLS)
+    )
     const toolDefs: ToolDef[] = [
       ...ownTools.map((t) => ({ ...t, _meta: { ...t._meta, ...ALWAYS_LOAD } })),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
@@ -869,6 +881,7 @@ export class Runner {
           }
         }
       })
+        .map((t) => (preload.has(t.name) ? { ...t, _meta: { ...ALWAYS_LOAD } } : t))
     ]
 
     const addSteps = (...steps: Step[]): void => {
@@ -1459,7 +1472,8 @@ export class Runner {
     // thread) with only what's new since. Not while another agent is still writing a message this
     // reply would see half of: that one goes the usual way, and the session takes it all next time.
     const sessionKey = replyKey(agent.id, conv.id, msg.threadId)
-    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs, gateway: !!this.deps.gateway })
+    // Which tools come loaded (_meta) stays out: a tool used for the first time in this reply mustn't end the session.
+    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs.map(({ _meta: _m, ...t }) => t), gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
     let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined

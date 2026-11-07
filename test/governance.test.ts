@@ -142,6 +142,18 @@ describe('connectors', () => {
 })
 
 describe('grants', () => {
+  it('lists the connector tools the agent called lately as loaded, the others behind tool search', async () => {
+    db.saveAgent(agent('read'))
+    let first = true
+    const r = runner((_, tools) => (first ? ((first = false), { tool: tools.find((t) => t.endsWith('__list_tasks'))!, args: {} }) : null))
+    await r.send('d1', 'quais tarefas?')
+    await r.idle()
+    expect(seen.alwaysLoad[0]).not.toContain('tarefas__list_tasks') // never called yet
+    await r.send('d1', 'e agora?')
+    await r.idle()
+    expect(seen.alwaysLoad[1]).toContain('tarefas__list_tasks')
+  })
+
   it('read: the agent sees only read tools, and a forced call to another is refused without running', async () => {
     db.saveAgent(agent('read'))
     const r = runner((_, tools) => ({ tool: tools.find((t) => t.endsWith('__create_task')) ?? 'tarefas__create_task', args: { title: 'invasora' } }))
