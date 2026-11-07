@@ -67,3 +67,19 @@ footer a { text-decoration: none; }
   tbody th { width: 118px; min-width: 118px; padding-right: 10px; }
   table { min-width: 760px; }
 }
+
+/* The plain pages (privacidade.html, suporte.html): long text in readable lines. */
+.prose { max-width: 760px; }
+.prose h2 { margin-top: 8px; }
+.prose h3 { margin-top: 26px; font: 700 21px/1.2 var(--display); letter-spacing: -.02em; }
+.prose p, .prose ul { margin-top: 14px; color: var(--ink-2); }
+.prose ul { padding-left: 22px; }
+.prose li + li { margin-top: 8px; }
+.prose b { color: var(--ink); }
+.prose a { color: var(--beak-2); }
+.cols--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card p { margin-top: 12px; color: var(--ink-2); font-size: 15.5px; }
+.card p b { color: var(--ink); }
+.contact { margin-top: 24px; padding: 22px 26px; border-radius: 20px; background: #FFF4E6; box-shadow: 0 0 0 1px var(--line); }
+.contact a { color: var(--beak-2); font-weight: 600; }
+@media (max-width: 960px) { .cols--3 { grid-template-columns: minmax(0, 1fr); } }
