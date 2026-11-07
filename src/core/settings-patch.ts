@@ -27,6 +27,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   openAtLogin: { kind: 'boolean', max: 10, nullable: true },
   runBudgetPct: { kind: 'number', max: 30, nullable: true },
   runStallMinutes: { kind: 'number', max: 30, nullable: true },
+  chainDepth: { kind: 'number', max: 30, nullable: true },
   paused: { kind: 'boolean', max: 10, nullable: true },
   quietHours: { kind: 'object', max: 200, nullable: true },
   harnesses: { kind: 'array', max: 1_000, nullable: true },

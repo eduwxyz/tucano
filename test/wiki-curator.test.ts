@@ -1,8 +1,12 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import type { Agent, Message, Settings } from '../src/shared/types'
+import { describe, expect, it, vi } from 'vitest'
+import { saidAt, type Agent, type EngineId, type Message, type Settings } from '../src/shared/types'
+import { Db } from '../src/core/db'
+import { fakeEngine } from '../src/core/engines/fake'
+import type { Engine, EngineEvent, Turn } from '../src/core/engines/types'
+import { Runner } from '../src/core/runs'
 import { applyOp, Wiki } from '../src/core/wiki'
 import { curatorSystem, parseCuration, WikiCurator } from '../src/core/wiki-curator'
 
@@ -70,6 +74,7 @@ describe('the curator', () => {
       db: {
         conversation: (id) => ({ id, kind: 'dm', name: 'lia', ...(off.has(id) ? { wikiCapture: false } : {}) }),
         messagesAfter: (_c, at) => messages.filter((m) => m.at > at),
+        messagesSaidAfter: (_c, at) => messages.filter((m) => saidAt(m) > at),
         message: (id) => messages.find((m) => m.id === id),
         saveMessage: (m) => messages.splice(messages.findIndex((x) => x.id === m.id), 1, m),
         agents: () => agents
@@ -236,6 +241,131 @@ describe('the curator', () => {
     const redone = await curator.redo(swap.id)
     expect(redone).toHaveLength(1)
     expect(redone[0]!.ops[0]!.text).toContain('refeito.')
+  })
+})
+
+describe('the curator and replies that overlap', () => {
+  const ready = { installed: true, loggedIn: true }
+  const LIA = `LIA-${'x'.repeat(200)}` // one word each, so the fake engine says it at once
+  const THEO = `THEO-${'y'.repeat(200)}`
+  const agent = (id: string): Agent => ({ id, name: id, handle: id, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
+  const settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
+
+  // Real Db, Wiki and Runner. Lia works until `end()`; Theo is done at once.
+  function world(theoSays = THEO) {
+    const db = new Db(join(mkdtempSync(join(tmpdir(), 'tucano-wiki-')), 'test.db'))
+    db.saveAgent(agent('lia'))
+    db.saveAgent(agent('theo'))
+    db.createConversation({ id: 'c', kind: 'channel', name: 'geral', members: ['lia', 'theo'] })
+    const w = fresh()
+    const calls: string[] = []
+    const curator = new WikiCurator({ wiki: w, db, settings: () => settings, emitMessage: () => {}, llm: async (_s, prompt) => (calls.push(prompt), JSON.stringify({ guardar: false, mudancas: [] })) })
+    let release = (): void => {}
+    const held = new Promise<void>((r) => (release = r))
+    const isLia = (t: Turn): boolean => t.system.startsWith('Você é lia')
+    const quick = fakeEngine('claude', { delayMs: 1, reply: (t) => (isLia(t) ? LIA : theoSays) })
+    const claude: Engine = {
+      ...quick,
+      async *run(t: Turn): AsyncIterable<EngineEvent> {
+        if (isLia(t)) await held
+        yield* quick.run(t)
+      }
+    }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+    const runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'tucano-wiki-')) })
+    const by = (who: string): Message | undefined => db.messages().find((m) => m.author.kind === 'agent' && m.author.id === who)
+    // Lia is asked first and is at work when Theo is asked and answers: two messages, since agents called in one may take turns.
+    const overlap = async (): Promise<void> => {
+      await runner.send('c', '@lia bom dia')
+      await vi.waitFor(() => expect(by('lia')?.run?.status).toBe('working'))
+      await runner.send('c', '@theo bom dia')
+      await vi.waitFor(() => expect(by('theo')?.run?.status).toBe('done'))
+    }
+    const end = async (): Promise<void> => {
+      release()
+      await runner.idle()
+    }
+    return { db, w, curator, calls, by, overlap, end }
+  }
+  const message = (id: string, at: number, run?: Message['run']): Message => ({ id, conversationId: 'c', author: run ? { kind: 'agent', id: 'lia' } : { kind: 'person', id: 'p1' }, text: `${id} ${'z'.repeat(200)}`, at, ...(run ? { run } : {}) })
+
+  it('reads a reply that started first and ended last, once it ends, and nothing twice', async () => {
+    const { db, w, curator, calls, by, overlap, end } = world()
+    await overlap()
+
+    await curator.read('c') // the conversation goes quiet while she works
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain('THEO-')
+    expect(calls[0]).not.toContain('LIA-')
+
+    await end()
+    expect(by('lia')!.at).toBeLessThan(by('theo')!.at) // she did start first
+    await curator.read('c')
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toContain('LIA-')
+    expect(calls[1]).not.toContain('THEO-')
+    expect(w.mark('c')).toBe(saidAt(by('lia')!))
+
+    await curator.read('c')
+    expect(calls).toHaveLength(2)
+    db.close()
+  })
+
+  it("isn't thrown off by a reply too short to read", async () => {
+    const { db, curator, calls, overlap, end } = world('ok')
+    await overlap()
+    await curator.read('c')
+    expect(calls).toHaveLength(0)
+
+    await end()
+    await curator.read('c')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain('LIA-')
+    db.close()
+  })
+
+  it('reads in the order things were said', async () => {
+    const { db, curator, calls, overlap, end } = world()
+    await overlap()
+    await end()
+    await curator.read('c')
+    expect(calls[0]!.indexOf('THEO-')).toBeGreaterThan(-1)
+    expect(calls[0]!.indexOf('LIA-')).toBeGreaterThan(calls[0]!.indexOf('THEO-'))
+    db.close()
+  })
+
+  it("doesn't let what came while a reply worked push it out of the stretch", async () => {
+    const { db, curator, calls } = world()
+    db.saveMessage(message('longa', 1, { status: 'done', steps: [], endedAt: 100 }))
+    for (let k = 2; k <= 21; k++) db.saveMessage(message(`m${k}`, k))
+    await curator.read('c')
+    expect(calls[0]).toContain('longa')
+    db.close()
+  })
+
+  it('reads again a reply tried again, which ends anew', async () => {
+    const { db, w, curator, calls } = world()
+    db.saveMessage(message('falhou', 1, { status: 'failed', steps: [], endedAt: 5 }))
+    await curator.read('c')
+    expect(w.mark('c')).toBe(5)
+    db.saveMessage({ ...message('falhou', 1, { status: 'done', steps: [], endedAt: 9 }), text: `de novo ${'z'.repeat(200)}` })
+    await curator.read('c')
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toContain('de novo')
+    db.close()
+  })
+
+  it('finds what was said after a point: a reply by when it ended, one with no end by when it started', () => {
+    const { db } = world()
+    db.saveMessage(message('antes', 1))
+    db.saveMessage(message('antiga', 2, { status: 'done', steps: [] })) // from before replies kept their end
+    db.saveMessage(message('longa', 3, { status: 'done', steps: [], endedAt: 50 }))
+    db.saveMessage(message('rapida', 10, { status: 'done', steps: [], endedAt: 11 }))
+    db.saveMessage(message('ja-lida', 4, { status: 'done', steps: [], endedAt: 9 }))
+    db.saveMessage(message('depois', 20))
+    db.saveMessage(message('trabalhando', 21, { status: 'working', steps: [] }))
+    expect(db.messagesSaidAfter('c', 10).map((m) => m.id)).toEqual(['longa', 'rapida', 'depois', 'trabalhando'])
+    db.close()
   })
 })
 

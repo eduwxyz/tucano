@@ -38,6 +38,8 @@ import {
   EFFORTS,
   ENGINES,
   MAX_AGENT_ROUTINES,
+  MAX_CHAIN_DEPTH,
+  chainDepthCap,
   RUN_BUDGET_PCT,
   routineCap,
   RUN_STALL_MINUTES,
@@ -2307,6 +2309,14 @@ export function SettingsPage(): ReactNode {
                   min={5}
                   value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
                   onChange={(n) => updateSettings({ runStallMinutes: Math.max(5, Math.round(n)) })}
+                />
+              </Field>
+              <Field label={L('Respostas seguidas entre agentes', 'Agent replies in a row')} hint={L('Quantas respostas os agentes podem dar em sequência, passando a vez entre si, antes de parar e esperar você. De 1 a 10.', 'How many replies agents can give in a row, passing the turn between them, before they stop and wait for you. From 1 to 10.')}>
+                <NumberInput
+                  min={1}
+                  max={MAX_CHAIN_DEPTH}
+                  value={chainDepthCap(settings.chainDepth)}
+                  onChange={(n) => updateSettings({ chainDepth: chainDepthCap(n) })}
                 />
               </Field>
               <Field label={L('Expiração de aprovações', 'Approvals expire after')}>
