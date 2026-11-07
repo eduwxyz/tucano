@@ -263,6 +263,17 @@ describe('importing agents from Grok Bot, through our skill', () => {
     'agents/ledger/skills/reconcile/template.txt': 'x'
   })
 
+  it('imports long skills whole and reports how far they exceed the recommendation', () => {
+    const source = files()
+    const body = 'x'.repeat(32_345)
+    source['agents/ledger/skills/reconcile/SKILL.md'] = `---\nname: reconcile\ndescription: When reconciling\n---\n${body}`
+    const db = fresh()
+    const team = readForeignZip(zipFromBuffer(zip(source)))
+    const r = applyForeignTeam(db, team, opts)
+    expect(db.skills()[0]?.body).toHaveLength(32_345)
+    expect(r.summary).toContain('22.345 acima do recomendado de 10.000')
+  })
+
   it('brings agents, skills, routines off, memories to confirm and group chats as channels', () => {
     const db = fresh()
     db.createConversation({ id: 'g', kind: 'channel', name: 'geral', members: [] })
