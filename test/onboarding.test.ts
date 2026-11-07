@@ -3,7 +3,8 @@
 // tour's marks, and someone invited getting their own welcome.
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
-import { agentModel, aiState, backgroundModel, freshParts, GOAL_IDS, goalById, goalForText, goalFromText, GOALS, MISSIONS, missionsDone, needsSignIn, partShows, shortSidebar, tourCount, tourOn, type MissionFacts } from '../src/shared/onboarding'
+import { agentModel, aiState, AUTONOMY_CHOICES, autonomyChoiceHint, autonomyChosen, backgroundModel, FIRST_AUTONOMY, freshParts, GOAL_IDS, goalById, goalForText, goalFromText, GOALS, MISSIONS, missionsDone, needsSignIn, partShows, shortSidebar, storedAutonomy, tourCount, tourOn, type MissionFacts } from '../src/shared/onboarding'
+import { actionMode, levelOf, policyOf, verdict } from '../src/shared/actions'
 import { ENGINE_IDS, type EngineId, type EngineStatus, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { initializeWorkspace } from '../src/core/seed'
@@ -201,3 +202,51 @@ describe('someone invited', () => {
 })
 
 const defaultsFor = (): Omit<Settings, 'engines'> => ({ workspaceName: 'Eduardo', context: '', routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1, approvalTtlHours: 1, theme: 'system', language: 'pt' }) as Omit<Settings, 'engines'>
+
+describe('how far the first agent goes on its own', () => {
+  it('offers three answers, each one level, in order, with Normal recommended', () => {
+    expect(AUTONOMY_CHOICES().map((c) => [c.title, c.level])).toEqual([
+      ['Me pergunta antes de mudar qualquer coisa', 'careful'],
+      ['Faz o dia a dia por conta própria e pergunta antes do que importa', 'normal'],
+      ['Faz tudo por conta própria, até enviar e pagar', 'free']
+    ])
+    expect(AUTONOMY_CHOICES().filter((c) => c.recommended).map((c) => c.level)).toEqual(['normal'])
+    setLang('en')
+    expect(AUTONOMY_CHOICES().map((c) => c.title)).toEqual(['Asks me before changing anything', 'Handles the day to day and asks before what matters', 'Does everything on its own, even sending and paying'])
+  })
+
+  it('starts on Normal, kept as the agent\'s "Padrão" so it follows Settings later', () => {
+    expect(FIRST_AUTONOMY).toBe('normal')
+    expect(storedAutonomy(FIRST_AUTONOMY, undefined)).toBeUndefined()
+    expect(storedAutonomy('normal', 'normal')).toBeUndefined()
+    expect(autonomyChosen(undefined, undefined)).toBe('normal')
+    // A later change in Settings reaches an agent left on "Padrão".
+    expect(levelOf(policyOf({ autonomy: storedAutonomy('normal', undefined) }, { autonomy: 'careful' }))).toBe('careful')
+  })
+
+  it('keeps Careful and No guardrails as the agent\'s own, and Normal too when Settings say otherwise', () => {
+    expect(storedAutonomy('careful', undefined)).toBe('careful')
+    expect(storedAutonomy('free', 'normal')).toBe('free')
+    expect(storedAutonomy('normal', 'careful')).toBe('normal')
+    expect(autonomyChosen(storedAutonomy('normal', 'careful'), 'careful')).toBe('normal')
+    expect(autonomyChosen('free', 'careful')).toBe('free')
+    expect(levelOf(policyOf({ autonomy: 'careful' }, { autonomy: 'free' }))).toBe('careful')
+  })
+
+  it('says plainly what still asks, true to the rules', () => {
+    const p = (a: 'careful' | 'normal' | 'free') => policyOf({ autonomy: storedAutonomy(a, undefined) }, {})
+    // Careful: any change asks. Normal: what's sensitive asks. No guardrails: high risk still asks, and the guard is on.
+    expect(verdict({ cls: 'write', kinds: [], p: p('careful') }).run).toBe(false)
+    expect(autonomyChoiceHint('careful')).toContain('Pede antes de escrever num app')
+    expect(verdict({ cls: 'write', kinds: [], p: p('normal') }).run).toBe(true)
+    expect(verdict({ cls: 'sensitive', kinds: ['send'], p: p('normal') }).run).toBe(false)
+    expect(autonomyChoiceHint('normal')).toContain('Pede antes de enviar, apagar, publicar, pagar')
+    expect(actionMode('send', p('free'))).toBe('auto')
+    expect(verdict({ cls: 'sensitive', kinds: ['send'], p: p('free') }).run).toBe(true)
+    expect(verdict({ cls: 'sensitive', kinds: ['send'], p: p('free'), highRisk: true }).run).toBe(false)
+    expect(verdict({ cls: 'sensitive', kinds: ['send'], p: p('free'), outside: true }).why).toBe('guard')
+    expect(autonomyChoiceHint('free')).toContain('alto risco')
+    expect(autonomyChoiceHint('free')).toContain('depois de ler algo de fora')
+    expect(autonomyChoiceHint('free', false)).not.toContain('de fora')
+  })
+})

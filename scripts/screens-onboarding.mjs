@@ -1,8 +1,9 @@
 // Screenshots of the first run, screen by screen, on a new install with the fake engines: nothing
 // set up (TUCANO_FAKE_NO_AI: ChatGPT "set up" from the screen), then the Tuca's question, the agent,
 // the first message with its balloon, an agent's request with its balloon, the Tuca's and the
-// missions' balloons, and the missions. Then the same app found ready (three clicks), the advanced
-// and from-scratch paths, English and dark. Only the window is captured.
+// missions' balloons, and the missions. Then the same app found ready (three clicks), how far the
+// agent goes on its own (each answer, No guardrails' confirmation, the balloon on that level), the
+// advanced and from-scratch paths, English and dark. Only the window is captured.
 //   node scripts/screens-onboarding.mjs <out dir>
 import { _electron as electron } from 'playwright'
 import { mkdirSync, mkdtempSync } from 'node:fs'
@@ -219,6 +220,40 @@ const skipSplash = async (win) => {
   await app.close()
 }
 
+// ---------- how far the agent goes on its own: each answer, the confirmation, the balloon ----------
+{
+  const { app, win } = await open({})
+  const shot = (name) => win.screenshot({ path: `${out}/${name}.png` })
+  const row = (text) => win.locator(`.autonomy-pick__row:has-text("${text}")`)
+  await skipSplash(win)
+  await win.fill('.intro-input', 'Carol')
+  await win.click('button:has-text("Começar")')
+  await win.waitForSelector('button:has-text("Continuar"):not([disabled])')
+  await untick(win)
+  await win.click('button:has-text("Continuar")')
+  await win.click('.intro-tile:has-text("Organizar minha semana")')
+  await settle(win, 800)
+  await shot('15-autonomia-normal')
+  await row('Me pergunta antes').click()
+  await settle(win)
+  await shot('15b-autonomia-cuidadoso')
+  await row('Faz tudo por conta própria').click()
+  await win.waitForSelector('.modal')
+  await settle(win)
+  await shot('15c-autonomia-confirmacao')
+  await win.click('.modal button:has-text("Sem travas")')
+  await settle(win)
+  await shot('15d-autonomia-sem-travas')
+  await win.click('button:has-text("Chamar Lia pro time")')
+  await win.waitForSelector('.coach__card--first', { timeout: 20_000 })
+  await win.fill('.main .composer textarea', '@lia me ajuda a decidir como organizar a semana')
+  await win.keyboard.press('Enter')
+  await win.waitForSelector('.coach__card--ask', { timeout: 30_000 })
+  await settle(win, 800)
+  await shot('15e-tour-sem-travas')
+  await app.close()
+}
+
 // ---------- the other ways: advanced, from scratch ----------
 {
   const { app, win } = await open({ TUCANO_FAKE_NO_AI: '1' })
@@ -244,6 +279,8 @@ const skipSplash = async (win) => {
   await settle(win, 800)
   await shot('13-do-zero')
   await win.click('.onb .btn--primary:has-text("Continuar")')
+  await settle(win)
+  await shot('13a-do-zero-poderes')
   await win.click('.onb .btn--primary:has-text("Continuar")')
   await settle(win)
   await shot('13b-do-zero-primeira-tarefa')

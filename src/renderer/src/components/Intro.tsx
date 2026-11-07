@@ -6,7 +6,7 @@
 // invited to a team gets their own short welcome instead (GuestWelcome).
 import { L } from '../../../shared/lang'
 import { entryOf } from '../../../shared/connector-catalog'
-import { agentModel, aiState, backgroundModel, GOALS, goalForText, needsSignIn, type Goal } from '../../../shared/onboarding'
+import { agentModel, aiState, autonomyChosen, backgroundModel, FIRST_AUTONOMY, GOALS, goalForText, needsSignIn, storedAutonomy, type Goal } from '../../../shared/onboarding'
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   ENGINES,
@@ -57,6 +57,7 @@ import { draftAgent, UseDraft } from './Tuca'
 import { Onboarding } from './Onboarding'
 import { ConnectorGrid } from './ConnectorStore'
 import { Modal } from './Modal'
+import { AutonomyPick } from './AutonomyPick'
 import { AgentAvatar, Icon, MeAvatar, TucaMark } from './ui'
 
 // The opening plays once per run of the app, not again when the language changes.
@@ -84,7 +85,8 @@ export function Intro(): ReactNode {
   const [name, setName] = useState(settings.workspaceName)
   const [models, setModels] = useState<{ router: string; memory: string } | null>(null)
   const [goal, setGoal] = useState<Goal | null>(null)
-  const [agent, setAgent] = useState<Agent>(newAgentDraft)
+  // How far it goes on its own starts on Normal, the recommended answer (kept as "Padrão" while Settings say Normal).
+  const [agent, setAgent] = useState<Agent>(() => ({ ...newAgentDraft(), autonomy: storedAutonomy(FIRST_AUTONOMY, settings.autonomy) }))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [cheer, setCheer] = useState(false)
@@ -154,7 +156,8 @@ export function Intro(): ReactNode {
             agent={agent}
             goal={goal}
             onUse={(d) => {
-              setAgent((a) => ({ ...draftAgent(d), id: a.id, limit: a.limit }))
+              // The Tuca's version keeps the answer to how far it goes on its own.
+              setAgent((a) => ({ ...draftAgent(d), id: a.id, limit: a.limit, autonomy: a.autonomy }))
               if (d.task) setGoal({ ...goal, task: d.task })
               go('agent')
             }}
@@ -980,6 +983,8 @@ function Born(p: { agent: Agent; goal: Goal; patch: (a: Partial<Agent>) => void;
   const [connecting, setConnecting] = useState(false)
   const connected = useStore((s) => !!goal.connector && s.connectors.some((c) => entryOf(c)?.id === goal.connector!.id))
   const name = agent.name.trim() || L('seu agente', 'your agent')
+  const settingsLevel = useStore((s) => s.settings.autonomy)
+  const guard = useStore((s) => s.settings.outsideGuard ?? true)
   return (
     <div className="intro__split">
       <div className="intro-art intro-art--lilac">
@@ -1032,16 +1037,8 @@ function Born(p: { agent: Agent; goal: Goal; patch: (a: Partial<Agent>) => void;
                 {d}
               </li>
             ))}
-            <li className="intro-row">
-              <span className="intro-tick intro-tick--lock" aria-hidden>
-                <Icon name="lock" size={16} />
-              </span>
-              <span>
-                {L('Antes de enviar, apagar ou pagar algo, ', 'Before sending, deleting or paying for anything, ')}
-                <b>{L('pede o seu ok', 'it asks for your ok')}</b>
-              </span>
-            </li>
           </ul>
+          <AutonomyPick name={name} value={autonomyChosen(agent.autonomy, settingsLevel)} guard={guard} onPick={(level) => p.patch({ autonomy: storedAutonomy(level, settingsLevel) })} />
           {goal.connector && (
             <div className="intro-offer">
               <Icon name="plug" size={22} />

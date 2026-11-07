@@ -1,10 +1,12 @@
 // The tour, done instead of read: a balloon over the real screen at the moment it matters, once
 // each. The first message waiting in #geral; the first time an agent asks for something (only when
-// one really does: nothing is staged); then the Tuca, for help; then the missions. The screen
+// one really does: nothing is staged, and its words follow how far that agent goes on its own); then
+// the Tuca, for help; then the missions. The screen
 // stays usable under it (the shade lets clicks through), each one closes on its own or with
 // "Entendi", and "Pular tour" ends them all.
 import { L } from '../../../shared/lang'
 import { tourCount, tourOn, type TourMark } from '../../../shared/onboarding'
+import { levelOf, policyOf, type Autonomy } from '../../../shared/actions'
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { agentById, amOwner, getState, messagesIn, navigate, teamMode, updateSettings, useStore } from '../store'
 import { missionFacts } from './Missions'
@@ -86,6 +88,18 @@ export function CoachLayer(): ReactNode {
   return <Balloon mark={found.mark} box={found.box} missions={missions} />
 }
 
+// The first request's balloon, true at every level: it shows only when something really asks, and says
+// what asks at the level the agent is on (src/shared/actions.ts), never that everything does.
+export const askTitle = (name: string | undefined): string => (name ? L(`Quando ${name} precisar de você, pede aqui.`, `When ${name} needs you, it asks here.`) : L('Quando um agente precisar de você, pede aqui.', 'When an agent needs you, it asks here.'))
+export const askBody = (level: Autonomy, guard = true): string =>
+  ({
+    careful: L('Antes de mudar qualquer coisa, pede o seu ok: aprove, recuse ou responda.', 'Before changing anything, it asks for your ok: approve, refuse or answer.'),
+    normal: L('Antes de enviar, apagar, publicar ou pagar, pede o seu ok: aprove, recuse ou responda.', 'Before sending, deleting, publishing or paying, it asks for your ok: approve, refuse or answer.'),
+    free: guard
+      ? L('Sem travas, só pede o que é de alto risco ou o que vai pra fora depois de ler algo de fora. Perguntas também chegam aqui.', 'With no guardrails, it asks only for what’s high risk or what goes out after reading something from outside. Questions land here too.')
+      : L('Sem travas, só pede o que é de alto risco. Perguntas também chegam aqui.', 'With no guardrails, it asks only for what’s high risk. Questions land here too.')
+  })[level]
+
 const WIDTH: Record<TourMark, number> = { first: 440, ask: 370, tuca: 360, missions: 360 }
 
 // Where the balloon goes: above the message field, else beside its target (right first), kept on screen.
@@ -115,7 +129,7 @@ function Balloon({ mark, box, missions }: { mark: TourMark; box: Box; missions: 
   const agent = useStore((s) => {
     const c = s.conversations.find((x) => x.id === s.settings.onboarding?.channel)
     const a = c?.members.map((id) => agentById(s, id)).find(Boolean)
-    return a ? { name: a.name, handle: a.handle } : null
+    return a ? { name: a.name, handle: a.handle, level: levelOf(policyOf(a, s.settings)), guard: policyOf(a, s.settings).guard !== false } : null
   })
   useEffect(() => {
     if (card.current) setHeight(card.current.offsetHeight)
@@ -152,10 +166,10 @@ function Balloon({ mark, box, missions }: { mark: TourMark; box: Box; missions: 
       )
     },
     ask: {
-      title: L('Nada acontece sem você.', 'Nothing happens without you.'),
+      title: askTitle(agent?.name),
       body: (
         <>
-          {L('Quando um agente quer fazer algo por conta própria, ele pede aqui. O que esperar por você também aparece em ', 'When an agent wants to do something on its own, it asks here. Whatever waits for you also shows up in ')}
+          {askBody(agent?.level ?? 'normal', agent?.guard ?? true)} {L('O que esperar por você também aparece em ', 'Whatever waits for you also shows up in ')}
           <b>{forYou}</b>.
         </>
       ),

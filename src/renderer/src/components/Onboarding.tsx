@@ -31,6 +31,8 @@ import { ModelPicker, usableEngines } from './Harness'
 import { ColorPicker, LookPicker, Toggle } from './Pages'
 import { Composer, MessageList } from './Conversation'
 import { draftAgent, UseDraft } from './Tuca'
+import { AutonomyPick } from './AutonomyPick'
+import { autonomyChosen, FIRST_AUTONOMY, storedAutonomy } from '../../../shared/onboarding'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
 type Computer = 'none' | 'linux' | 'mac'
@@ -160,7 +162,8 @@ export function Onboarding({ build = false, from, manual }: { build?: boolean; f
   const steps = STEPS
   const [step, setStep] = useState<Step>('agent')
   const [template, setTemplate] = useState<Template>(() => TEMPLATES()[0]!)
-  const [agent, setAgent] = useState<Agent>(() => fromTemplate(newAgentDraft(), TEMPLATES()[0]!, readyModels(settings.engines)))
+  // From the introduction it starts on Normal, as the introduction's own agent does; the builder follows Settings.
+  const [agent, setAgent] = useState<Agent>(() => ({ ...fromTemplate(newAgentDraft(), TEMPLATES()[0]!, readyModels(settings.engines)), ...(manual ? { autonomy: storedAutonomy(FIRST_AUTONOMY, settings.autonomy) } : {}) }))
   const [computer, setComputer] = useState<Computer>('none')
   const [task, setTask] = useState(() => TEMPLATES()[0]!.tasks[0]!)
   const [busy, setBusy] = useState(false)
@@ -217,7 +220,7 @@ export function Onboarding({ build = false, from, manual }: { build?: boolean; f
 
   // A Tuca card: its agent becomes the new one (same id), with its access; powers and first task follow.
   const useDraft = (d: AgentDraft, messageId: string): void => {
-    setAgent((a) => ({ ...draftAgent(d), id: a.id, limit: a.limit }))
+    setAgent((a) => ({ ...draftAgent(d), id: a.id, limit: a.limit, autonomy: a.autonomy }))
     setGrants(Object.fromEntries(connectors.map((c) => [c.id, d.grants[c.id] ?? 'none'])))
     setFromTuca({ messageId, task: d.task })
     if (d.task) setTask(d.task)
@@ -523,6 +526,8 @@ function Powers(p: {
   const name = agent.name.trim() || L('Ele', 'It')
   const connectors = useStore((s) => s.connectors)
   const isolated = useStore((s) => s.isolatedComputers)
+  const settingsLevel = useStore((s) => s.settings.autonomy)
+  const guard = useStore((s) => s.settings.outsideGuard ?? true)
   return (
     <div className="onb__split">
       <section className="onb__main">
@@ -613,12 +618,7 @@ function Powers(p: {
             })}
           </div>
         )}
-        <div className="onb-guard">
-          <Icon name="shield" size={16} />
-          <p>
-            <strong>{L('Seja qual for a escolha,', 'Whatever you choose,')}</strong> {L('comprar, publicar, enviar e apagar viram um pedido de aprovação, com a ação exata. Nada disso acontece sem o seu ok.', 'buying, publishing, sending and deleting become an approval request, with the exact action. None of it happens without your OK.')}
-          </p>
-        </div>
+        <AutonomyPick compact name={agent.name.trim() || L('o agente', 'the agent')} value={autonomyChosen(agent.autonomy, settingsLevel)} guard={guard} onPick={(level) => patch({ autonomy: storedAutonomy(level, settingsLevel) })} />
         <Nav onBack={p.onBack} onNext={p.onNext} />
       </section>
       <aside className="onb__aside">

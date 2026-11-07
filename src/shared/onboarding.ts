@@ -3,6 +3,7 @@
 // the work behind the scenes, and the missions that make the sidebar grow on a new install.
 import { L } from './lang'
 import { codexValue, customModel, ENGINE_IDS, MODELS, type AgentColor, type EngineId, type EngineStatus, type Settings } from './types'
+import type { Autonomy } from './actions'
 
 // ---------- the goals ----------
 
@@ -18,7 +19,7 @@ export interface Goal {
   color: AgentColor
   web: boolean
   instructions: string
-  does: string[] // what it does, in plain words, one line each (the lock line is added apart)
+  does: string[] // what it does, in plain words, one line each (how far it goes alone is chosen apart)
   task: string // the first message, after its @
   connector?: { id: string; label: string } // a catalog entry worth offering, optional
 }
@@ -296,3 +297,39 @@ export const tourCount = (o: Settings['onboarding'], withMissions: boolean): { a
   const after = (o?.tour?.done ?? []).filter((m) => m !== 'first').length
   return { at: after + 1, of: withMissions ? 3 : 2 }
 }
+
+// ---------- how far the first agent goes on its own ----------
+// "Quanto {nome} faz por conta própria?": three plain answers, each one of the autonomy levels
+// (src/shared/actions.ts). Normal is the recommended one and comes picked.
+
+export const FIRST_AUTONOMY: Autonomy = 'normal'
+
+export interface AutonomyChoice {
+  level: Autonomy
+  title: string
+  recommended?: boolean
+}
+
+export const AUTONOMY_CHOICES = (): AutonomyChoice[] => [
+  { level: 'careful', title: L('Me pergunta antes de mudar qualquer coisa', 'Asks me before changing anything') },
+  { level: 'normal', title: L('Faz o dia a dia por conta própria e pergunta antes do que importa', 'Handles the day to day and asks before what matters'), recommended: true },
+  { level: 'free', title: L('Faz tudo por conta própria, até enviar e pagar', 'Does everything on its own, even sending and paying') }
+]
+
+// What still asks, in one line. True to verdict(): a high-risk action (or an app action that can't be
+// placed) asks at any level, and with the outside-content guard on (the default), what goes out after
+// reading something from outside asks too.
+export function autonomyChoiceHint(level: Autonomy, guard = true): string {
+  if (level === 'careful') return L('Pede antes de escrever num app, enviar, apagar ou clicar no que é arriscado. Ler e pesquisar nunca pede.', 'Asks before writing in an app, sending, deleting or a risky click. Reading and searching never ask.')
+  if (level === 'normal') return L('Lê, pesquisa e organiza sem pedir. Pede antes de enviar, apagar, publicar, pagar ou clicar no que é arriscado.', 'Reads, searches and organizes without asking. Asks before sending, deleting, publishing, paying or a risky click.')
+  return guard
+    ? L('Ainda pede o que é de alto risco e, depois de ler algo de fora (um e-mail, uma página), antes de enviar, publicar, pagar ou apagar.', 'Still asks for what’s high risk and, after reading something from outside (an email, a page), before sending, publishing, paying or deleting.')
+    : L('Ainda pede o que é de alto risco. O resto faz sem perguntar.', 'Still asks for what’s high risk. Everything else it does without asking.')
+}
+
+// What the agent keeps: Normal while Settings say Normal is left unset ("Padrão"), so the agent follows
+// later changes in Settings; any other answer (or Normal when Settings say otherwise) is its own.
+export const storedAutonomy = (choice: Autonomy, settingsLevel: Autonomy | undefined): Autonomy | undefined => (choice === 'normal' && (settingsLevel ?? 'normal') === 'normal' ? undefined : choice)
+
+// The answer shown for an agent: its own level, else Settings', else Normal.
+export const autonomyChosen = (agentLevel: Autonomy | undefined, settingsLevel: Autonomy | undefined): Autonomy => agentLevel ?? settingsLevel ?? 'normal'

@@ -1037,6 +1037,18 @@ function LentFolders({ agentId }: { agentId: string }): ReactNode {
   )
 }
 
+// Before an agent (or every agent) goes with no guardrails: here, in Settings and in the introduction.
+export const confirmNoGuardrails = (): Promise<boolean> =>
+  confirmDialog({
+    title: L('Deixar agir sem travas?', 'Let it act with no guardrails?'),
+    body: L(
+      'Envia, apaga, publica, paga e clica sem te perguntar. Continua pedindo o que você marcou como alto risco e, com a proteção ligada, o que vai pra fora depois de ler algo de fora. Tudo fica nos passos de cada resposta.',
+      'It sends, deletes, publishes, pays and clicks without asking you. It still asks for what you marked high risk and, with the guard on, for what goes out after reading something from outside. Everything stays in each reply’s steps.'
+    ),
+    confirm: L('Sem travas', 'No guardrails'),
+    danger: true
+  })
+
 // How far an agent goes on its own (in Settings, every agent): a level, the outside-content guard, and a rule
 // per kind of action for whoever wants it finer. On an agent's page, `inherited` is Settings and "Padrão"
 // follows them. `readOnly`: someone who only looks at the agent.
@@ -1048,16 +1060,7 @@ function AutonomyControls({ own, inherited, perAgent, readOnly, onChange }: { ow
   const guard = own.outsideGuard ?? inherited?.outsideGuard ?? true
   const pick = async (next: Autonomy | undefined): Promise<void> => {
     if ((next ?? inherited?.autonomy) === 'free' && effective !== 'free') {
-      const ok = await confirmDialog({
-        title: L('Deixar agir sem travas?', 'Let it act with no guardrails?'),
-        body: L(
-          'Envia, apaga, publica, paga e clica sem te perguntar. Continua pedindo o que você marcou como alto risco e, com a proteção ligada, o que vai pra fora depois de ler algo de fora. Tudo fica nos passos de cada resposta.',
-          'It sends, deletes, publishes, pays and clicks without asking you. It still asks for what you marked high risk and, with the guard on, for what goes out after reading something from outside. Everything stays in each reply’s steps.'
-        ),
-        confirm: L('Sem travas', 'No guardrails'),
-        danger: true
-      })
-      if (!ok) return
+      if (!(await confirmNoGuardrails())) return
     }
     onChange({ autonomy: next })
   }

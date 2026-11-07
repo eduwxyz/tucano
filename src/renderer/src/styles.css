@@ -4464,21 +4464,6 @@ table.csv th {
   border-radius: 8px;
   padding: 8px 10px;
 }
-.onb-guard {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.onb-guard p {
-  margin: 0;
-  color: var(--text);
-  font-size: 13px;
-}
-
 /* the first task */
 .onb-tasks {
   display: grid;
@@ -9128,6 +9113,7 @@ button.agent-card__now:hover {
 .intro-lang button:focus-visible,
 .coach button:focus-visible,
 .missions button:focus-visible,
+.autonomy-pick__row:focus-visible,
 .missions-card:focus-visible {
   outline: 2px solid var(--i-accent);
   outline-offset: 3px;
@@ -9860,13 +9846,6 @@ button.agent-card__now:hover {
 .intro-tick .icon {
   stroke-width: 3;
 }
-.intro-tick--lock {
-  background: var(--i-peach);
-  color: var(--i-link);
-}
-.intro-tick--lock .icon {
-  stroke-width: 2.4;
-}
 .intro-offer {
   display: flex;
   align-items: center;
@@ -9881,6 +9860,107 @@ button.agent-card__now:hover {
 .intro-offer > .icon {
   color: var(--i-ink-2);
   flex-shrink: 0;
+}
+/* How far the agent goes on its own: three rows, the picked one lilac like a goal tile. */
+.autonomy-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.autonomy-pick__q {
+  font-size: 17px;
+  font-weight: 800;
+}
+.autonomy-pick__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.autonomy-pick__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--i-card);
+  color: var(--i-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+  box-shadow: 0 1px 2px rgba(29, 26, 22, 0.05);
+  cursor: pointer;
+  transition: var(--transition-ui);
+  -webkit-app-region: no-drag;
+}
+.autonomy-pick__row:hover {
+  box-shadow: inset 0 0 0 2px var(--i-lilac-line);
+}
+.autonomy-pick__row.is-on {
+  background: var(--i-lilac);
+  box-shadow: inset 0 0 0 2px var(--i-lilac-line);
+}
+.autonomy-pick__dot {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--i-ink-3);
+}
+.autonomy-pick__row.is-on .autonomy-pick__dot {
+  box-shadow: inset 0 0 0 6px var(--i-lilac-tick);
+}
+.autonomy-pick__tag {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--i-lilac-ink);
+  background: var(--i-lilac);
+  padding: 4px 9px;
+  border-radius: 999px;
+}
+.autonomy-pick__row.is-on .autonomy-pick__tag {
+  background: var(--i-card);
+}
+.autonomy-pick__hint {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--i-ink-2);
+}
+/* In the detailed form, the app's own size. */
+.autonomy-pick--compact {
+  margin-top: 16px;
+  gap: 8px;
+}
+.autonomy-pick--compact .autonomy-pick__q {
+  font-size: 14px;
+}
+.autonomy-pick--compact .autonomy-pick__row {
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+.autonomy-pick--compact .autonomy-pick__row.is-on {
+  background: var(--i-lilac);
+  box-shadow: inset 0 0 0 2px var(--i-lilac-line);
+}
+.autonomy-pick--compact .autonomy-pick__dot {
+  width: 16px;
+  height: 16px;
+}
+.autonomy-pick--compact .autonomy-pick__row.is-on .autonomy-pick__dot {
+  box-shadow: inset 0 0 0 5px var(--i-lilac-tick);
+}
+.autonomy-pick--compact .autonomy-pick__hint {
+  font-size: 13px;
+  color: var(--text-2);
 }
 .intro-connect.modal__card,
 .intro-connect {

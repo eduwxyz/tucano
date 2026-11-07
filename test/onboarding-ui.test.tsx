@@ -54,6 +54,8 @@ const { createRoot } = await import('react-dom/client')
 const { Intro, GuestWelcome } = await import('../src/renderer/src/components/Intro')
 const { Sidebar } = await import('../src/renderer/src/components/Sidebar')
 const { MissionsPage } = await import('../src/renderer/src/components/Missions')
+const { Dialogs } = await import('../src/renderer/src/components/Dialogs')
+const { askBody, askTitle } = await import('../src/renderer/src/components/Coach')
 
 const off = (): EngineStatus => ({ installed: false, loggedIn: false })
 const engines = (p: Partial<Record<EngineId, EngineStatus>> = {}): Settings['engines'] => ({ claude: off(), codex: off(), opencode: off(), pi: off(), gemini: off(), cursor: off(), grok: off(), ...p })
@@ -139,7 +141,7 @@ describe('the first run', () => {
     expect(text()).toContain('Qual é a primeira coisa que você queria tirar das suas costas?')
     await click(/Organizar minha semana/)
     expect(text()).toContain('O que Lia faz por você')
-    expect(text()).toContain('pede o seu ok')
+    expect(text()).toContain('Quanto Lia faz por conta própria?')
     expect(text()).toContain('Ver a sua agenda do Google')
     await click(/Chamar Lia pro time/)
     await act(async () => new Promise((r) => setTimeout(r, 700)))
@@ -148,6 +150,8 @@ describe('the first run', () => {
     expect(channels).toEqual(['ch1'])
     // Safe by default: the web the goal needs, no computer, no browser of its own.
     expect(saved).toMatchObject({ name: 'Lia', handle: 'lia', web: true, computer: false, browser: false, modelId: 'sonnet' })
+    // Normal, the recommended answer, untouched: the agent follows Settings ("Padrão").
+    expect(saved.autonomy).toBeUndefined()
     // The models picked behind the scenes, the tour started in #geral, and nothing sent.
     expect(store.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ routerModel: 'haiku', memoryModel: 'haiku', onboarding: { fresh: true, done: true, channel: 'ch1', tour: { done: [] } } }))
     expect(store.navigate).toHaveBeenCalledWith({ kind: 'conversation', id: 'ch1' })
@@ -173,6 +177,99 @@ describe('the first run', () => {
     await click(/^Continuar$/)
     await click(/Prefiro configurar do zero/)
     expect(text()).toContain('Quem vai trabalhar com você?')
+  })
+})
+
+describe('how far the agent goes on its own', () => {
+  const ready = (): State => state({ settings: { engines: engines({ claude: { installed: true, loggedIn: true, route: 'plan' } }) } })
+  const toAgent = async (): Promise<void> => {
+    await render(
+      <>
+        <Intro />
+        <Dialogs />
+      </>
+    )
+    await click(/^Começar$/)
+    await click(/^Continuar$/)
+    await click(/Organizar minha semana/)
+  }
+  const rows = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.autonomy-pick__row')]
+  const picked = (): string => rows().find((r) => r.getAttribute('aria-checked') === 'true')?.textContent ?? ''
+  const hint = (): string => document.querySelector('.autonomy-pick__hint')?.textContent ?? ''
+  const create = async (): Promise<Agent> => {
+    await click(/Chamar Lia pro time/)
+    await act(async () => new Promise((r) => setTimeout(r, 700)))
+    return vi.mocked(store.saveAgent).mock.calls[0]![0] as Agent
+  }
+
+  it('asks it on the agent, with Normal picked and recommended, and no lock line', async () => {
+    fake = ready()
+    await toAgent()
+    expect(text()).toContain('Quanto Lia faz por conta própria?')
+    expect(text()).not.toContain('pede o seu ok')
+    expect(rows().map((r) => r.textContent)).toEqual(['Me pergunta antes de mudar qualquer coisa', 'Faz o dia a dia por conta própria e pergunta antes do que importaRecomendado', 'Faz tudo por conta própria, até enviar e pagar'])
+    expect(picked()).toContain('Faz o dia a dia')
+    expect(hint()).toContain('Pede antes de enviar, apagar, publicar, pagar')
+  })
+
+  it('creates the agent with Careful when that is the answer, and the hint follows', async () => {
+    fake = ready()
+    await toAgent()
+    await click(rows()[0]!)
+    expect(picked()).toContain('Me pergunta antes')
+    expect(hint()).toContain('Pede antes de escrever num app')
+    expect((await create()).autonomy).toBe('careful')
+  })
+
+  it('asks the same confirmation as Settings before No guardrails; cancelled, nothing changes', async () => {
+    fake = ready()
+    await toAgent()
+    await click(rows()[2]!)
+    expect(text()).toContain('Deixar agir sem travas?')
+    expect(text()).toContain('Envia, apaga, publica, paga e clica sem te perguntar.')
+    await click(/^Cancelar$/)
+    expect(text()).not.toContain('Deixar agir sem travas?')
+    expect(picked()).toContain('Faz o dia a dia')
+    await click(rows()[2]!)
+    await click(/^Sem travas$/)
+    expect(picked()).toContain('Faz tudo por conta própria')
+    expect(hint()).toContain('Ainda pede o que é de alto risco')
+    expect((await create()).autonomy).toBe('free')
+  })
+
+  it('keeps Normal as the agent\'s own when Settings say otherwise', async () => {
+    fake = ready()
+    fake.settings.autonomy = 'careful'
+    await toAgent()
+    expect(picked()).toContain('Faz o dia a dia')
+    expect((await create()).autonomy).toBe('normal')
+  })
+
+  it('is also in the detailed form, from "Prefiro configurar do zero"', async () => {
+    fake = ready()
+    await render(
+      <>
+        <Intro />
+        <Dialogs />
+      </>
+    )
+    await click(/^Começar$/)
+    await click(/^Continuar$/)
+    await click(/Prefiro configurar do zero/)
+    await click(/^Continuar$/)
+    expect(text()).toMatch(/Quanto .+ faz por conta própria\?/)
+    expect(picked()).toContain('Faz o dia a dia')
+    expect(text()).not.toContain('Nada disso acontece sem o seu ok')
+  })
+
+  it("the tour's balloon promises only what the level does", () => {
+    expect(askTitle('Lia')).toBe('Quando Lia precisar de você, pede aqui.')
+    expect(askBody('careful')).toContain('Antes de mudar qualquer coisa')
+    expect(askBody('normal')).toContain('Antes de enviar, apagar, publicar ou pagar')
+    expect(askBody('free')).toContain('só pede o que é de alto risco')
+    expect(askBody('free')).toContain('depois de ler algo de fora')
+    expect(askBody('free', false)).not.toContain('de fora')
+    for (const l of ['careful', 'normal', 'free'] as const) expect(askTitle('Lia') + askBody(l)).not.toMatch(/Nada acontece sem você/)
   })
 })
 
