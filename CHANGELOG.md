@@ -6,7 +6,25 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Added
 
-- **Phones sign in to a Tucano on a server, as their person.** **Settings › People › Connect a phone** shows a QR code that's good once, for 10 minutes: the Tucano app on the iPhone reads it and gets a key of its own, signed in as whoever made the code, with their DMs, approvals and questions. On the server, `npm run server -- pair [minutes]` makes one for the owner (the same link opens a browser too, with `/?code=`). An invite link also works in the app: it asks the name and the person is in.
+- **How many replies agents give in a row is a setting.** Agents mentioning each other stopped after 3 replies from one message, which cut flows like planner → developer → reviewer → developer halfway. **Settings › Agents › Limits** now has **Agent replies in a row**, from 1 to 10; left alone, it stays 3.
+
+### Changed
+
+- **Long skill recipes are kept whole.** A recipe over 20,000 characters was refused when written or proposed, cut when linked from Claude Code or Codex, and left out of an imported team. Now 10,000 characters is a recommendation: past it, Tucano says by how much and keeps the whole recipe, up to a million characters.
+
+### Fixed
+
+- **The wiki no longer misses a long reply.** A reply that started before another and ended well after it never reached the wiki, because the wiki's curator had already read past where it started. It now goes by when each reply ended, the same order the conversation shows.
+
+## [0.2.16] - 2026-11-07
+
+> **Em português:**
+> - **O celular entra como você.** Num Tucano em servidor, Configurações › Pessoas › Conectar um celular mostra um QR code que vale uma vez, por 10 minutos: o app do Tucano pro iPhone (chegando na App Store) lê o código e entra como você, com suas DMs, aprovações e perguntas. No servidor, `npm run server -- pair` gera um pro dono. Um link de convite também funciona no app: ele pede o nome e a pessoa entra.
+> - **Sair de um Tucano por conta própria.** Quem foi convidado pode sair pelo app: o acesso acaba na hora, em todos os aparelhos, e as DMs, memórias e rotinas da pessoa são apagadas. O que ela disse nos canais fica com o time.
+
+### Added
+
+- **Phones sign in to a Tucano on a server, as their person.** **Settings › People › Connect a phone** shows a QR code that's good once, for 10 minutes: the Tucano app for iPhone (coming to the App Store) reads it and gets a key of its own, signed in as whoever made the code, with their DMs, approvals and questions. On the server, `npm run server -- pair [minutes]` makes one for the owner (the same link opens a browser too, with `/?code=`). An invite link also works in the app: it asks the name and the person is in.
 - **Leaving a Tucano on your own.** Someone invited (not the owner) can leave from the iPhone app: their access ends at once on every device, and their direct messages, memories and own routines are deleted right away instead of after 30 days. What they said in channels stays the channel's, and the agents they made go to the owner.
 
 ## [0.2.15] - 2026-11-07
@@ -390,6 +408,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.16]: https://github.com/eduwxyz/tucano/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/eduwxyz/tucano/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/eduwxyz/tucano/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/eduwxyz/tucano/compare/v0.2.12...v0.2.13

@@ -1002,6 +1002,11 @@ export class Db {
     return (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND at > ? ORDER BY at').all(conversationId, at) as Row[]).map((r) => this.toMessage(r))
   }
 
+  // What was said after `at`: a reply counts from when it ended (saidAt), so one that started before `at` is still here.
+  messagesSaidAfter(conversationId: string, at: number): Message[] {
+    return (this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ? AND COALESCE(json_extract(run, '$.endedAt'), at) > ? ORDER BY at`).all(conversationId, at) as Row[]).map((r) => this.toMessage(r))
+  }
+
   // What the window opens with: each conversation's latest `n` messages outside threads, the threads
   // still going wherever they started, and every routine's request with its reply (Routines draws what
   // ran), each with all its replies. `since`: per conversation with older ones left, from when it's whole.

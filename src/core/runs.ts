@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type ResultTable, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type ResultTable, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -51,7 +51,6 @@ export const MAX_CONCURRENT_URGENT = 6
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
-const MAX_DEPTH = 3 // agent replies chained from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 // Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
@@ -1952,7 +1951,7 @@ export class Runner {
         }
         this.callPeople(conv, msg, agent.name)
         const next = this.mentions(agent, conv, msg)
-        if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, finished)
+        if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
         else finished()
       }
     } else {
@@ -2306,7 +2305,7 @@ export class Runner {
   }
 
   // An agent that mentions another agent of the conversation may hand it the turn,
-  // up to MAX_DEPTH replies in a row without a human message in between.
+  // up to the limit set in Settings (chainDepth) without a human message in between.
   // The agents a reply mentions (none while paused).
   private mentions(agent: Agent, conv: Conversation, msg: Message): Agent[] {
     if (this.paused) return []
@@ -2315,7 +2314,7 @@ export class Runner {
 
   // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
   // router can't say, everyone mentioned is called. `finished` runs when no one gets the turn.
-  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, finished: () => void): Promise<void> {
+  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, limit: number, finished: () => void): Promise<void> {
     const { db, engines } = this.deps
     const and = L(' e ', ' and ')
     const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
@@ -2366,8 +2365,8 @@ export class Runner {
         if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
       }
       if (called.length === 0) return finished()
-      if (depth >= MAX_DEPTH) {
-        this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${MAX_DEPTH} replies in a row. Send a message to go on.`))
+      if (depth >= limit) {
+        this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: ${limit === 1 ? 'foi 1 resposta seguida' : `foram ${limit} respostas seguidas`}. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${limit === 1 ? '1 reply' : `${limit} replies`} in a row. Send a message to go on.`))
         return finished()
       }
       // A noted follow-up counts as someone taking the turn: the agent will answer it, so no "done" yet.

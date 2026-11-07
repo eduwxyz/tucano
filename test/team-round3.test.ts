@@ -47,7 +47,7 @@ describe('E. a source removed while the curator reads it', () => {
   const curatorOver = (w: Wiki, llm: () => Promise<string>, conversations: Record<string, { id: string; kind: string; name: string }> = {}): WikiCurator =>
     new WikiCurator({
       wiki: w,
-      db: { conversation: (id) => conversations[id], messagesAfter: () => [], message: () => undefined, saveMessage: () => {}, agents: () => [] },
+      db: { conversation: (id) => conversations[id], messagesAfter: () => [], messagesSaidAfter: () => [], message: () => undefined, saveMessage: () => {}, agents: () => [] },
       settings: () => ({ workspaceName: 'Ana', wikiEdits: 'auto' }) as Settings,
       llm,
       emitMessage: () => {}
@@ -72,7 +72,7 @@ describe('E. a source removed while the curator reads it', () => {
     const convs: Record<string, { id: string; kind: string; name: string }> = { dm: { id: 'dm', kind: 'dm', name: 'x' } }
     const c = new WikiCurator({
       wiki: w,
-      db: { conversation: (id) => convs[id], messagesAfter: () => [], message: (id) => (id === 'm1' ? { id: 'm1', conversationId: 'dm', author: { kind: 'person', id: 'p' }, text: 'O salário da Ana é 12000.', at: 1 } : undefined), saveMessage: () => {}, agents: () => [] },
+      db: { conversation: (id) => convs[id], messagesAfter: () => [], messagesSaidAfter: () => [], message: (id) => (id === 'm1' ? { id: 'm1', conversationId: 'dm', author: { kind: 'person', id: 'p' }, text: 'O salário da Ana é 12000.', at: 1 } : undefined), saveMessage: () => {}, agents: () => [] },
       settings: () => ({ workspaceName: 'Ana', wikiEdits: 'auto' }) as Settings,
       llm: async () => {
         delete convs['dm']

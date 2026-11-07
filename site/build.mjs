@@ -115,17 +115,19 @@ const sitemap = [] // [{ urls }]
 const PAGES = [
   { file: 'alternativa-grok-bot.html', 'pt-BR': 'alternativa-grok-bot/', en: 'en/grok-bot-alternative/' },
   { file: 'alternativa-openclaw.html', 'pt-BR': 'alternativa-openclaw/', en: 'en/openclaw-alternative/' },
+  { file: 'suporte.html', 'pt-BR': 'suporte/', en: 'en/support/' },
+  { file: 'privacidade.html', 'pt-BR': 'privacidade/', en: 'en/privacy/', faq: false }, // no questions: no FAQPage
 ]
 for (const page of PAGES) {
   const src = read(page.file)
   const urls = { 'pt-BR': `${SITE}/${page['pt-BR']}`, en: `${SITE}/${page.en}` }
-  const faq = faqOf(src, page.file)
+  const faq = page.faq === false ? null : faqOf(src, page.file)
   const title = (lang) => lang === 'en' ? src.match(/<title data-en="([^"]+)">/)[1] : src.match(/<title[^>]*>([^<]+)<\/title>/)[1]
   const desc = (lang) => src.match(lang === 'en' ? /<meta name="description" content="[^"]+" data-en="([^"]+)">/ : /<meta name="description" content="([^"]+)"/)[1]
   const data = (lang) => jsonLd([
     ORG,
     { '@type': 'WebPage', '@id': `${urls[lang]}#page`, url: urls[lang], name: title(lang), description: desc(lang), inLanguage: lang, about: { '@id': `${SITE}/#app` }, publisher: { '@id': `${SITE}/#org` } },
-    faqPage(faq, lang, urls[lang]),
+    ...(faq ? [faqPage(faq, lang, urls[lang])] : []),
   ])
   const head = (lang) => `${links(lang, urls)}${data(lang)}</head>`
 
