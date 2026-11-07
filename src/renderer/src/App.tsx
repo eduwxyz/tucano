@@ -13,6 +13,7 @@ import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
 import { Onboarding } from './components/Onboarding'
 import { Dialogs } from './components/Dialogs'
+import { AgentCardLayer } from './components/AgentCard'
 import { WhatsNew } from './components/Update'
 import { CoreDown, Toasts } from './components/Toast'
 import { Icon } from './components/ui'
@@ -106,6 +107,7 @@ export function App(): ReactNode {
         {view.kind === 'report' && <ReportPage />}
         {view.kind === 'settings' && <SettingsPage />}
       </main>
+      <AgentCardLayer />
       <Dialogs />
       <NameModal />
       <WhatsNew />
