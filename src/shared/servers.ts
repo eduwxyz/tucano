@@ -35,8 +35,10 @@ export function parsePairing(link: string): Pairing | null {
 
 // The link that pairs it: with the server's token (`server.js link`), or with a one-time code
 // (`server.js pair`, Settings › Pessoas › Conectar um celular) that the phone trades for a key of its own.
-export const pairingLink = (p: { origin: string } & ({ token: string } | { code: string })): string =>
-  `tucano://connect?url=${encodeURIComponent(p.origin)}&${'code' in p ? `code=${encodeURIComponent(p.code)}` : `token=${encodeURIComponent(p.token)}`}`
+// A computer at home (src/main/home-link.ts) adds its certificate's fingerprint (`fp`): the phone
+// talks to that certificate and no other.
+export const pairingLink = (p: { origin: string; fp?: string } & ({ token: string } | { code: string })): string =>
+  `tucano://connect?url=${encodeURIComponent(p.origin)}&${'code' in p ? `code=${encodeURIComponent(p.code)}` : `token=${encodeURIComponent(p.token)}`}${p.fp ? `&fp=${encodeURIComponent(p.fp)}` : ''}`
 
 // Where a server's window may go: its own pages, and nothing else.
 export function onServer(url: string, origin: string): boolean {

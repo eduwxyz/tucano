@@ -737,6 +737,7 @@ export interface PortLike {
 
 export class Hub<P extends PortLike> {
   private ports = new Map<P, string>() // port → person id
+  private devices = new Map<P, string>() // port → the hash of the key it signed in with (a server's browser)
 
   constructor(private people: People, private db: Db) {}
 
@@ -748,11 +749,27 @@ export class Hub<P extends PortLike> {
       return undefined
     }
     this.ports.set(port, person.id)
+    const device = (data as { device?: unknown } | null | undefined)?.device
+    if (typeof device === 'string') this.devices.set(port, device)
     return person
   }
 
   delete(port: P): void {
     this.ports.delete(port)
+    this.devices.delete(port)
+  }
+
+  deviceOf(port: P): string | undefined {
+    return this.devices.get(port)
+  }
+
+  // A device disconnected: the connections it opened end at once.
+  closeDevice(hash: string): void {
+    for (const [port, h] of [...this.devices]) {
+      if (h !== hash) continue
+      this.delete(port)
+      port.close()
+    }
   }
 
   personOf(port: P): Person | undefined {
@@ -774,7 +791,7 @@ export class Hub<P extends PortLike> {
   closeFor(personId: string): void {
     for (const [port, id] of [...this.ports]) {
       if (id !== personId) continue
-      this.ports.delete(port)
+      this.delete(port)
       port.close()
     }
   }

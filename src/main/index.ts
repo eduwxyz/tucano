@@ -13,6 +13,7 @@ import { Servers } from './servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
+import { homePhone } from './home-phone'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, onPath } from '../core/platform'
 
@@ -56,6 +57,8 @@ const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
 const localKey = randomBytes(32).toString('hex')
+// The iPhone on the home Wi-Fi (Settings › Celular › Seu iPhone), once the app is ready.
+let phone: ReturnType<typeof homePhone> | undefined
 
 function startCore(workspace: Workspace): Runtime {
   const existing = cores.get(workspace.id)
@@ -82,7 +85,9 @@ function startCore(workspace: Workspace): Runtime {
     publishWorkspaces()
     child.kill()
   }, 90_000)
+  phone?.coreStarted(workspace.id, child)
   child.on('message', (msg: CoreRequest) => {
+    if (phone?.fromCore(msg as { type?: string; id?: string })) return
     if (msg.type === 'ready') {
       clearTimeout(timer)
       const theme = registry.theme()
@@ -312,6 +317,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     const wikiFolder = runtime.wikiFolder
     if (path.startsWith(join(workspace.dataDir, 'computers') + sep) || path === join(workspace.dataDir, 'backups') || (!!wikiFolder && (path === wikiFolder || path.startsWith(join(wikiFolder, 'fontes', 'arquivos') + sep)))) void shell.openPath(path)
   } else if (msg.type === 'notify') {
+    phone?.notify(workspace.id, msg)
     // Already looking at that conversation: nothing to tell.
     if (registry.selected().id === workspace.id && msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
     const sound = chirpOf(msg.kind, msg.sound)
@@ -450,6 +456,10 @@ function requestWorkspace(runtime: Runtime, request: object, response: 'workspac
     runtime.child.postMessage(request)
   })
 }
+// Seu iPhone (home-phone.ts): on or off, and a one-time code for the QR.
+ipcMain.handle('home-phone:state', (event) => (fromApp(event) ? phone?.state() : undefined))
+ipcMain.handle('home-phone:set', (event, on: unknown) => (fromApp(event) && typeof on === 'boolean' ? phone?.set(on) : undefined))
+ipcMain.handle('home-phone:code', (event) => (fromApp(event) ? phone?.code() : undefined))
 ipcMain.handle('workspaces:list', (event) => { trustedWorkspaceRequest(event); return workspaceList() })
 ipcMain.handle('workspaces:pause', async (event, paused: unknown, id?: unknown) => {
   trustedWorkspaceRequest(event)
@@ -791,6 +801,20 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   registry = new Workspaces(dataDir())
   nativeTheme.themeSource = registry.theme() ?? 'system'
   startWorkspaces()
+  phone = homePhone({
+    dir: dataDir(),
+    selected: () => registry.selected(),
+    workspace: (id) => registry.list().find((w) => w.id === id),
+    child: async (id) => {
+      const w = registry.list().find((x) => x.id === id)
+      if (!w) return undefined
+      const r = startCore(w)
+      await r.ready
+      return r.child
+    },
+    publish: (state) => mainWindow?.webContents.send('home-phone', state)
+  })
+  void phone.restore()
   // The Mac wakes for a few seconds at a time while asleep (maintenance, "DarkWake"):
   // routines wait for a real wake, so a run doesn't start and freeze mid-way.
   powerMonitor.on('suspend', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: false }) })
@@ -815,6 +839,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true
+  void phone?.quit()
   servers.quit()
   for (const r of cores.values()) r.browsers.quit()
 })

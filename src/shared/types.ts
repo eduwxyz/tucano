@@ -1,5 +1,6 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
+import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
 import { L, lang, type Lang } from './lang'
@@ -85,6 +86,9 @@ export interface Agent {
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
+  actionRules?: ActionRules // what it does about a commit, a push, a PR…: over settings.actionRules, kind by kind; unset kinds follow them
+  autonomy?: Autonomy // how far it goes on its own (src/shared/actions.ts); unset: Settings' level
+  outsideGuard?: boolean // false: what goes out (a send, a post, a payment) runs on its rules even after reading something from outside; unset: Settings'
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
@@ -167,6 +171,7 @@ export interface Run {
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string
+  outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
@@ -239,6 +244,16 @@ export interface Person {
   delegateUntil?: number // …until then
   seenAt?: number // when they last opened the Tucano with a key of theirs
   devices?: number // how many keys (browsers, apps) they have
+}
+
+// One of my own keys (a browser, the phone, the desktop app), as Settings › Pessoas lists them.
+// `id` is the key's hash, never the key. No `seenAt`: it never signed in (a link preview's, say).
+export interface Device {
+  id: string
+  label: string
+  createdAt: number
+  seenAt?: number
+  current?: boolean // the one this page is signed in with
 }
 
 // Whether `of` has `who` covering for them right now.
@@ -384,6 +399,9 @@ export interface Settings {
   defaultLimit: number
   approvalTtlHours: number
   questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)
+  actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
+  autonomy?: Autonomy // every agent's level, unless its page sets its own (default normal)
+  outsideGuard?: boolean // after reading something from outside, what goes out asks first even where rules let it run (default on)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app

@@ -230,6 +230,8 @@ export const NEEDS: Record<Method, Need> = {
   revokeInvite: 'admin',
   listInvites: 'admin',
   removedPeople: 'admin',
+  myDevices: 'anyone', // one's own
+  removeDevice: 'anyone', // one's own (the core looks only among theirs)
   removePerson: 'target',
   setRole: 'target',
   activity: 'admin',

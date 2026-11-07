@@ -18,6 +18,7 @@ import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { admit, admitComputer, can, isAdmin, must } from './policy-people'
+import { cleanRules, isAutonomy } from '../shared/actions'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -316,7 +317,7 @@ const hub = new Hub<MessagePortMain>(people, db)
 // The conversation each person has open: what arrives there is read already.
 const viewing = new Map<string, string | null>()
 let closing = false
-type Ctx = { person: Person }
+type Ctx = { person: Person; device?: string } // device: the hash of the key a server's page signed in with
 const ownerCtx = (): Ctx => ({ person: db.owner() })
 // What the workspace switcher shows of this workspace: its name, whether it's paused, and two
 // counts. Coalesced: a reply streaming updates its message many times a second.
@@ -1172,6 +1173,10 @@ const api: Handlers = {
     // One handle per agent (archived ones keep theirs), and none that reads as a person's (People.agentNameError).
     const taken = people.agentNameError({ id: clean.id, name: clean.name, handle: clean.handle })
     if (taken) throw new Error(taken)
+    // How far it goes on its own: only known rules and levels (saving an agent is an admin's, policy-people.ts).
+    clean.actionRules = cleanRules(clean.actionRules)
+    if (!isAutonomy(clean.autonomy)) delete clean.autonomy
+    if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -1508,6 +1513,7 @@ const api: Handlers = {
     if (Object.keys(patch).length === 0) return void emit({ type: 'settings', settings: settings() })
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
+    if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
     db.setSettings(patch)
     // The settings' name is the owner's: what the agents call them.
     if (patch.workspaceName && cleanName(patch.workspaceName)) {
@@ -1857,6 +1863,15 @@ const api: Handlers = {
   revokeInvite: ({ id }, ctx) => people.revokeInvite(ctx.person, id),
   listInvites: () => db.invites(),
   removedPeople: () => db.removedPeople(),
+  myDevices: (_, ctx) => db.personKeys(ctx.person.id).map((k) => ({ id: k.hash, label: k.label, createdAt: k.createdAt, ...(k.seenAt ? { seenAt: k.seenAt } : {}), ...(k.hash === ctx.device ? { current: true } : {}) })),
+  // One of my devices signs out: its open pages lose the line (a moment after the answer, which may
+  // be going down that very line: this page's own device), and the server asks again for my keys.
+  removeDevice: ({ id }, ctx) => {
+    if (!db.removePersonKey(ctx.person.id, id)) throw new Error(L('Esse aparelho já foi desconectado.', 'That device was already disconnected.'))
+    toMain({ type: 'person-changed', id: ctx.person.id })
+    emitPeople()
+    setTimeout(() => hub.closeDevice(id), 200)
+  },
   // Access ends now: keys, open connections, the server's remembered sign-ins. Their agents and
   // routines go to the owner; their DMs and memories wait 30 days for a re-invite (the daily sweep).
   removePerson: ({ id }, ctx) => {
@@ -2031,7 +2046,7 @@ function handle(port: MessagePortMain, req: Request): void {
   const wrong = paramsError(req.method as Method, req.params) ?? limitError(req.method as Method, req.params)
   if (wrong) return reply({ error: wrong })
   Promise.resolve()
-    .then(() => (admit(person, req.method as Method), fn(req.params ?? {}, { person })))
+    .then(() => (admit(person, req.method as Method), fn(req.params ?? {}, { person, device: hub.deviceOf(port) })))
     .then(
       (result) => reply({ result }),
       (e: unknown) => {

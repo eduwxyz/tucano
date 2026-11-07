@@ -3,6 +3,9 @@ import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../sha
 import type { UpdateState } from '../../shared/types'
 import type { WorkspaceList, WorkspaceParts } from '../../shared/workspaces'
 
+// Seu iPhone: on, where the phone finds this computer, and how many are on the line now.
+export type PhoneState = { on: boolean; address: string; connected: number; workspace: string; error?: string }
+
 declare global {
   interface Window {
     tucano: {
@@ -27,6 +30,13 @@ declare global {
       onUpdate: (cb: (state: UpdateState) => void) => void
       checkUpdates: () => void
       installUpdate: () => void
+      phone?: {
+        // desktop only: the iPhone app over the home Wi-Fi (src/main/home-phone.ts)
+        state: () => Promise<PhoneState | undefined>
+        set: (on: boolean) => Promise<PhoneState | undefined>
+        code: () => Promise<{ link: string; expiresAt: number } | undefined>
+        onChanged: (cb: (state: PhoneState) => void) => () => void
+      }
       servers?: {
         // desktop only: Tucanos on servers, shown in this window over the app; open: the one on screen
         list: () => Promise<{ id: string; name: string; origin: string; open: boolean }[]>

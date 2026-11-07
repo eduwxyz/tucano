@@ -147,6 +147,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   revokeInvite: { id: 's' },
   listInvites: {},
   removedPeople: {},
+  myDevices: {},
+  removeDevice: { id: 's' },
   removePerson: { id: 's' },
   setRole: { id: 's', role: 's' },
   purgePerson: { id: 's' },
