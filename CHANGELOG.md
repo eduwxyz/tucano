@@ -4,6 +4,17 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-11-07
+
+> **Em português:**
+> - **Composio na loja de conectores.** Centenas de apps (Google, Notion, HubSpot…) sem configurar nada: entra pelo navegador. Os dados passam pelos servidores da Composio, e o cartão diz isso com clareza. Cada ação conta pelo que faz: ler roda na hora, escrever pede acesso de escrita, e enviar pede aprovação.
+> - **Enviar algo pra outras pessoas pede antes, por padrão.** Postar, responder, encaminhar, compartilhar, convidar, comentar ou mandar email agora é sensível, como enviar e apagar já eram. Pra deixar um agente postar sem perguntar, use "Aprovar e sempre permitir". Uma classe que você mudou à mão fica.
+> - **Respostas encadeadas entre agentes viram configuração.** Em Configurações › Agentes › Limites, de 1 a 10 (continua 3 se você não mexer).
+> - **Listas de escolha com a cara do app,** com filtro na lista de modelos e modelos agrupados por provedor.
+> - **Receitas de skill longas ficam inteiras:** 10 mil caracteres vira uma recomendação, não um limite.
+>
+> **Correções:** a wiki não perde mais uma resposta longa que terminou depois de outra; os conectores do Google explicam o passo do Developer Preview que faltava.
+
 ### Added
 
 - **How many replies agents give in a row is a setting.** Agents mentioning each other stopped after 3 replies from one message, which cut flows like planner → developer → reviewer → developer halfway. **Settings › Agents › Limits** now has **Agent replies in a row**, from 1 to 10; left alone, it stays 3.
@@ -410,6 +421,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.17]: https://github.com/eduwxyz/tucano/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/eduwxyz/tucano/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/eduwxyz/tucano/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/eduwxyz/tucano/compare/v0.2.13...v0.2.14
