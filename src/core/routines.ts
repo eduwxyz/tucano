@@ -92,7 +92,7 @@ export interface RoutineDeps {
   blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
   paused?: () => boolean // paused: a call from outside says so instead of starting a run
   emit: (e: CoreEvent) => void
-  notify?: (title: string, shortText: string, conversationId: string, fullText?: string) => void
+  notify?: (title: string, shortText: string, conversationId: string, fullText?: string, to?: string[]) => void // to: the people it's for
   now?: () => number
   wait?: (ms: number) => Promise<void> // between tries (tests skip it)
 }
@@ -142,7 +142,9 @@ export class Routines {
     }
   }
 
-  save(input: RoutineInput): Routine {
+  // `owner`: the person a new one is for (unset: the Tucano's owner). A 'channel' routine is the
+  // team's: it posts in a channel and tells only who watches it.
+  save(input: RoutineInput, owner?: string): Routine {
     const { db } = this.deps
     const name = input.name.trim()
     const prompt = input.prompt.trim()
@@ -158,6 +160,8 @@ export class Routines {
     const trigger = input.trigger && this.cleanTrigger(input.trigger, prev?.trigger)
     if (!trigger && days.length === 0) throw new Error(L('Escolha pelo menos um dia.', 'Pick at least one day.'))
     if (!trigger && !validTime(input.schedule.time)) throw new Error(L('Horário inválido.', 'Invalid time.'))
+    const scope = input.scope ?? prev?.scope
+    if (scope === 'channel' && conv.kind !== 'channel') throw new Error(L('Uma rotina do canal posta num canal.', 'A channel routine posts in a channel.'))
 
     const schedule = { days, time: input.schedule.time, ...(input.schedule.once ? { once: true } : {}) }
     const r: Routine = {
@@ -172,7 +176,9 @@ export class Routines {
       enabled: input.enabled,
       nextAt: input.enabled && !trigger ? nextRun(schedule, this.now()) : undefined,
       createdBy: prev ? prev.createdBy : input.createdBy,
-      createdAt: prev?.createdAt ?? this.now()
+      createdAt: prev?.createdAt ?? this.now(),
+      ...(scope === 'channel' ? { scope } : { scope: undefined }),
+      ...((prev?.owner ?? owner) ? { owner: prev?.owner ?? owner } : {})
     }
     this.store(r)
     if (r.enabled && trigger?.kind === 'poll' && trigger.seen === undefined) void this.check(r) // what's there now doesn't fire
@@ -257,12 +263,14 @@ export class Routines {
   }
 
   // `agendar_rotina`: an agent schedules (or changes) a routine for itself, posted where it was asked.
-  schedule(agent: Agent, conv: Conversation, args: Record<string, unknown>): ToolOutcome {
+  // `owner`: whom the agent was working for: the routine is theirs.
+  // `visible`: whether the person it works for sees a conversation (a routine in someone else's DM isn't theirs to change).
+  schedule(agent: Agent, conv: Conversation, args: Record<string, unknown>, owner?: string, visible: (conversationId: string) => boolean = () => true): ToolOutcome {
     const text = (k: string): string => (typeof args[k] === 'string' ? (args[k] as string).trim() : '')
     const fail = (reply: string): ToolOutcome => ({ reply, error: true })
     const replaces = text('substitui')
     const prev = replaces ? this.deps.db.routine(replaces) : undefined
-    if (replaces && prev?.agentId !== agent.id) return fail(L(`Não achei uma rotina sua com id ${replaces}.`, `I couldn't find a routine of yours with id ${replaces}.`))
+    if (replaces && (prev?.agentId !== agent.id || !visible(prev.conversationId))) return fail(L(`Não achei uma rotina sua com id ${replaces}.`, `I couldn't find a routine of yours with id ${replaces}.`))
     const max = routineCap(agent.maxRoutines)
     if (!prev && this.forAgent(agent.id).length >= max) return fail(L(`Você já tem ${max} rotinas ligadas. Cancele uma antes.`, `You already have ${max} routines on. Cancel one first.`))
 
@@ -282,7 +290,7 @@ export class Routines {
         schedule: { days: keys.length ? keys : [0, 1, 2, 3, 4, 5, 6], time, once: args['uma_vez'] === true },
         enabled: true,
         createdBy: agent.id
-      })
+      }, owner)
       return {
         routine,
         reply: L(
@@ -296,16 +304,20 @@ export class Routines {
   }
 
   // `cancelar_rotina`
-  cancel(agent: Agent, id: string): ToolOutcome {
+  cancel(agent: Agent, id: string, visible: (conversationId: string) => boolean = () => true): ToolOutcome {
     const r = this.deps.db.routine(id)
-    if (r?.agentId !== agent.id) return { reply: L(`Não achei uma rotina sua com id ${id}.`, `I couldn't find a routine of yours with id ${id}.`), error: true }
+    if (r?.agentId !== agent.id || !visible(r.conversationId)) return { reply: L(`Não achei uma rotina sua com id ${id}.`, `I couldn't find a routine of yours with id ${id}.`), error: true }
     this.remove(id)
     return { routine: r, reply: L(`Rotina "${r.name}" apagada.`, `Routine "${r.name}" deleted.`) }
   }
 
   remove(id: string): void {
-    this.deps.db.removeRoutine(id)
-    this.deps.emit({ type: 'routine_removed', id })
+    const { db } = this.deps
+    // One in a DM: only its person hears it went.
+    const c = db.conversationOwner(db.routine(id)?.conversationId ?? '')
+    const only = c?.kind === 'dm' ? (c.owner ?? db.ownerId()) : undefined
+    db.removeRoutine(id)
+    this.deps.emit({ type: 'routine_removed', id, ...(only ? { for: only } : {}) })
   }
 
   runNow(id: string): void {
@@ -320,6 +332,14 @@ export class Routines {
   // An archived agent's routines stop; turning one back on is up to me.
   pauseAgent(agentId: string): void {
     for (const r of this.deps.db.routines()) if (r.agentId === agentId && r.enabled) this.store({ ...r, enabled: false, nextAt: undefined })
+  }
+
+  // Routines on again (their person came back): each from its next time.
+  resume(ids: string[]): void {
+    for (const id of ids) {
+      const r = this.deps.db.routine(id)
+      if (r?.enabled) this.store({ ...r, nextAt: r.trigger ? undefined : nextRun(r.schedule, this.now()) })
+    }
   }
 
   private store(r: Routine): void {
@@ -381,7 +401,9 @@ export class Routines {
         if (latest) this.store({ ...latest, lastAt: this.now(), lastMessageId: reply.id })
         const title = `${agentName(this.deps.db, r.agentId)} · ${r.name}`
         const fullText = reply.run?.status === 'done' ? reply.text.trim() : ''
-        this.deps.notify?.(title, outcome(reply), r.conversationId, fullText || undefined)
+        // A person's routine tells them; the team's, only who asked to be told.
+        const to = (latest ?? r).scope === 'channel' ? ((latest ?? r).watchers ?? []) : (latest ?? r).owner ? [(latest ?? r).owner!] : undefined
+        if (!to || to.length) this.deps.notify?.(title, outcome(reply), r.conversationId, fullText || undefined, to)
       })
       .catch((e: unknown) => console.error('[routines]', e))
       .finally(() => {

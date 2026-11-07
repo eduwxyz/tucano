@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { waitingIn, waitingTitle } from '../src/renderer/src/components/waiting'
-import type { Message, RunStatus } from '../src/shared/types'
+import { mineIn, waitingIn, waitingTitle } from '../src/renderer/src/components/waiting'
+import type { Approval, Inbox, Message, RunStatus } from '../src/shared/types'
 
 const msg = (id: string, conversationId: string, agentId: string, status: RunStatus): Message => ({ id, conversationId, author: { kind: 'agent', id: agentId }, text: '', at: 0, run: { status, steps: [] } })
 const names: Record<string, string> = { leo: 'Leo', bia: 'Bia', nina: 'Nina' }
@@ -22,6 +22,20 @@ describe('waitingIn', () => {
   it('counts threads too, and nothing that is done', () => {
     const inThread = { ...msg('1', 'c1', 'leo', 'waiting_input'), threadId: 'root' }
     expect(waitingIn([inThread, msg('2', 'c1', 'bia', 'done')], 'c1')).toEqual({ asked: ['leo'], approval: [] })
+  })
+})
+
+describe('waitingIn with a team', () => {
+  it('marks only what waits on me: a question in my inbox, an approval I can decide', () => {
+    const toBia = msg('1', 'c1', 'leo', 'waiting_input')
+    const toMe = msg('2', 'c1', 'nina', 'waiting_input')
+    const approval = { ...msg('3', 'c1', 'bia', 'waiting_approval'), run: { status: 'waiting_approval' as const, steps: [], approvalId: 'ap1' } }
+    const messages = [toBia, toMe, approval]
+    const inbox: Inbox = { approvals: [], questions: [{ id: '2', agentId: 'nina', text: 'Qual?', askedTo: 'me', requestedBy: 'me', state: 'open', deadlineAt: 0, createdAt: 0 }] }
+    expect(waitingIn(messages, 'c1', { key: inbox, test: mineIn(inbox) })).toEqual({ asked: ['nina'], approval: [] })
+    const mine: Inbox = { ...inbox, approvals: [{ id: 'ap1' } as Approval] }
+    expect(waitingIn(messages, 'c1', { key: mine, test: mineIn(mine) })).toEqual({ asked: ['nina'], approval: ['bia'] })
+    expect(waitingIn(messages, 'c1')).toEqual({ asked: ['leo', 'nina'], approval: ['bia'] }) // alone: everything is mine
   })
 })
 

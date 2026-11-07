@@ -84,7 +84,7 @@ function skill(file: string, origin: string): LocalSkill | undefined {
   try {
     const fm = frontmatter(readFileSync(file, 'utf8'))
     const dir = dirname(file)
-    return { source: file, name: fm.name || basename(dir), description: fm.description || '', origin, ...contents(dir) }
+    return { source: file, name: fm.name || basename(dir), description: fm.description || '', bodyLength: fm.body.trim().length, origin, ...contents(dir) }
   } catch {
     return undefined
   }

@@ -43,7 +43,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
-      } else if (turn.mcpUrl && (turn.system.includes('## Pra montar agentes') || turn.system.includes('## For building agents'))) {
+      } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
         // The Tuca: asks once, then proposes a support agent.
         if (/suporte|ticket|cliente|support|customer/i.test(last)) {
           const r = await callTool(turn.mcpUrl, 'propor_agente', {
@@ -123,14 +123,22 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/decis(õ|o)es demais/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { questions: Array.from({ length: 5 }, (_, i) => ({ question: `Decisão ${i + 1}?`, kind: 'text' })) })
         reply = 'Tentei perguntar demais.'
-      } else if (/decid/i.test(last) && turn.mcpUrl) {
-        await callTool(turn.mcpUrl, 'ask_user', {
+      } else if (/ajuda a decidir|decida com/i.test(last) && turn.mcpUrl) {
+        // "me ajuda a decidir": decisions with options. "decida com a Bia": the same, to someone in
+        // particular (a Tucano with people). Not any "decidimos", which other tests say as a fact.
+        const para = /decida com (?:a |o )?(\p{L}+)/iu.exec(last)?.[1]
+        const r = await callTool(turn.mcpUrl, 'ask_user', {
           questions: [
             { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] },
             { question: 'Pra quando?', kind: 'text' }
-          ]
+          ],
+          ...(para ? { para } : {})
         })
-        reply = 'Te mandei duas decisões.'
+        reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Te mandei duas decisões.'
+      } else if (turn.mcpUrl && /pergunte (?:a|à|pra|para) (\p{L}+)/iu.test(last)) {
+        // "pergunte a Bia": a question to someone in particular (a Tucano with people).
+        const r = await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?', para: /pergunte (?:a|à|pra|para) (\p{L}+)/iu.exec(last)![1]! })
+        reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Mandei a pergunta.'
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'

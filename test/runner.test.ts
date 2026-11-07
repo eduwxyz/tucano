@@ -8,6 +8,7 @@ import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
+import type { Answer } from '../src/shared/questions'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -157,6 +158,43 @@ describe('Runner', () => {
       ['a1', 3]
     ])
     expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
+    expect(db.messages().at(-1)?.text).toContain('foram 3 respostas seguidas')
+  })
+
+  it('the chain goes as far as the limit set in Settings', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 5
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5])
+    expect(db.messages().at(-1)?.text).toContain('foram 5 respostas seguidas')
+  })
+
+  it('a limit below 1 is raised to 1', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 0
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1])
+    expect(db.messages().at(-1)?.text).toContain('foi 1 resposta seguida')
+  })
+
+  it('a limit above 10 is brought down to 10', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 50
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(db.messages().at(-1)?.text).toContain('foram 10 respostas seguidas')
   })
 
   describe('screening a hand-off', () => {
@@ -418,7 +456,8 @@ describe('ask_user through the gateway', () => {
         { question: 'Pra quando?', kind: 'text' }
       ]
     })
-    expect(asked?.run?.question).toBeUndefined()
+    // The same decisions as text, for what reads text only (a team's inbox, the phone, a notification).
+    expect(asked?.run?.question).toBe('1. Paginação no menu? (Busca remota | Scroll infinito)\n2. Pra quando?')
     expect(asked?.run?.steps.find((s) => s.label === 'Perguntou a você')?.detail).toBe('Paginação no menu? (+1)')
   })
 
@@ -439,14 +478,14 @@ describe('ask_user through the gateway', () => {
     await r.idle()
     return { r, asked: agentMessages()[0]! }
   }
-  const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'me')
+  const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'person')
 
   it('sends the answers of a question older than the last 50 messages', async () => {
     const { r, asked } = await askDecisions()
     for (let i = 0; i < 60; i++) db.saveMessage({ id: `routine-${i}`, conversationId: asked.conversationId, author: { kind: 'system' }, text: `Rotina ${i}`, at: asked.at + 1000 + i, ...(asked.threadId ? { threadId: asked.threadId } : {}) })
-    r.answer(asked.id, 0, { chosen: [1] })
-    r.answer(asked.id, 1, { text: 'até sexta' })
-    await r.submitAnswers(asked.id)
+    r.answerDecision(asked.id, 0, { chosen: [1] }, db.owner())
+    r.answerDecision(asked.id, 1, { text: 'até sexta' }, db.owner())
+    await r.submitDecisions(asked.id, db.owner())
     expect(db.message(asked.id)?.run?.status).toBe('done')
     expect(mine().at(-1)?.text).toContain('Scroll infinito')
   })
@@ -455,19 +494,19 @@ describe('ask_user through the gateway', () => {
     const { r, asked } = await askDecisions()
     const newer: Message = { ...asked, id: 'newer', author: { kind: 'agent', id: 'a2' }, at: asked.at + 1000, run: { status: 'waiting_input', steps: [], questions: [{ question: 'Outra?', kind: 'text' }] } }
     db.saveMessage(newer)
-    r.answer(asked.id, 0, { skipped: true })
-    r.answer(asked.id, 1, { text: 'até sexta' })
-    await r.submitAnswers(asked.id)
+    r.answerDecision(asked.id, 0, { skipped: true }, db.owner())
+    r.answerDecision(asked.id, 1, { text: 'até sexta' }, db.owner())
+    await r.submitDecisions(asked.id, db.owner())
     expect(db.message(asked.id)?.run?.status).toBe('done')
     expect(db.message('newer')?.run?.status).toBe('waiting_input')
   })
 
   it('keeps partial answers on the question and sends them as my message', async () => {
     const { r, asked } = await askDecisions()
-    r.answer(asked.id, 0, { chosen: [1] })
+    r.answerDecision(asked.id, 0, { chosen: [1] }, db.owner())
     expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [1] }, null])
-    r.answer(asked.id, 1, { text: 'sexta' })
-    await r.submitAnswers(asked.id)
+    r.answerDecision(asked.id, 1, { text: 'sexta' }, db.owner())
+    await r.submitDecisions(asked.id, db.owner())
     await r.idle()
     expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
     expect(db.message(asked.id)?.run?.status).toBe('done')
@@ -477,7 +516,7 @@ describe('ask_user through the gateway', () => {
 
   it('sends the partial answers along with a free reply', async () => {
     const { r, asked } = await askDecisions()
-    r.answer(asked.id, 0, { chosen: [0] })
+    r.answerDecision(asked.id, 0, { chosen: [0] }, db.owner())
     await r.send('c1', 'o resto eu explico: depois do deploy', [], asked.threadId)
     await r.idle()
     expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Busca remota\n\no resto eu explico: depois do deploy')
@@ -486,31 +525,35 @@ describe('ask_user through the gateway', () => {
 
   it('ignores answers to a question already sent, out of range, or to an unknown option', async () => {
     const { r, asked } = await askDecisions()
-    r.answer(asked.id, 9, { text: 'x' })
-    r.answer(asked.id, 0, { chosen: [7] })
-    r.answer(asked.id, -1, { text: 'x' })
-    r.answer('nope', 0, { chosen: [0] })
+    r.answerDecision(asked.id, 9, { text: 'x' }, db.owner())
+    r.answerDecision(asked.id, 0, { chosen: [7] }, db.owner())
+    r.answerDecision(asked.id, 0, { chosen: [0, 1] }, db.owner()) // a single choice takes one
+    r.answerDecision(asked.id, 1, { chosen: [0] }, db.owner()) // a text decision takes text
+    r.answerDecision(asked.id, -1, { text: 'x' }, db.owner())
+    expect(() => r.answerDecision('nope', 0, { chosen: [0] }, db.owner())).toThrow()
     expect(db.message(asked.id)?.run?.answers).toBeUndefined()
-    r.answer(asked.id, 0, { chosen: [0] })
-    await r.submitAnswers(asked.id)
+    r.answerDecision(asked.id, 0, { chosen: [0], text: 'ignored', extra: 1 } as Answer, db.owner())
+    expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [0] }, null])
+    await r.submitDecisions(asked.id, db.owner())
     await r.idle()
-    r.answer(asked.id, 0, { chosen: [1] })
+    expect(() => r.answerDecision(asked.id, 0, { chosen: [1] }, db.owner())).toThrow()
     expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [0] }, null])
   })
 
   it('sends only once', async () => {
     const { r, asked } = await askDecisions()
-    r.answer(asked.id, 0, { skipped: true })
-    await Promise.all([r.submitAnswers(asked.id), r.submitAnswers(asked.id)])
+    r.answerDecision(asked.id, 0, { skipped: true }, db.owner())
+    const sent = await Promise.allSettled([r.submitDecisions(asked.id, db.owner()), r.submitDecisions(asked.id, db.owner())])
+    expect(sent.map((x) => x.status)).toEqual(['fulfilled', 'rejected'])
     await r.idle()
     expect(mine()).toHaveLength(2)
   })
 
   it('clears an answer with null', async () => {
     const { r, asked } = await askDecisions()
-    r.answer(asked.id, 0, { chosen: [0] })
-    r.answer(asked.id, 1, { text: 'sexta' })
-    r.answer(asked.id, 0, null)
+    r.answerDecision(asked.id, 0, { chosen: [0] }, db.owner())
+    r.answerDecision(asked.id, 1, { text: 'sexta' }, db.owner())
+    r.answerDecision(asked.id, 0, null, db.owner())
     expect(db.message(asked.id)?.run?.answers).toEqual([null, { text: 'sexta' }])
   })
 })

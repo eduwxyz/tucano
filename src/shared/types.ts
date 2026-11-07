@@ -1,7 +1,7 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ChannelLayout } from './channel-layout'
-import type { Answer, Question } from './questions'
+import type { Answer, Decision } from './questions'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -48,6 +48,7 @@ export interface EngineStatus {
   gateway?: string // the gateway's host
   off?: boolean // the person didn't pick this harness: no agent runs on it
   soon?: boolean // the app can't run agents on it yet
+  checking?: boolean // not checked yet: the app has just opened for the first time
 }
 
 // The agents of the team: not archived, and not the Tuca, who belongs to the app.
@@ -87,6 +88,7 @@ export interface Agent {
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
+  owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
 }
 
 // One of the person's apps given to an agent, by the name the system shows.
@@ -120,6 +122,8 @@ export interface Conversation {
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
   threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
+  owner?: string // a DM's person: one DM per agent and person, and only they read it
+  createdBy?: string // a channel's maker: they (and admins) rename it, change its topic and its agents
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -160,15 +164,19 @@ export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done
 export interface Run {
   status: RunStatus
   steps: Step[]
+  endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
-  question?: string // before decisions: what ask_user asked. Read it with questionsOf
-  questions?: Question[] // the decisions asked with ask_user; answered by the next human message here
-  answers?: (Answer | null)[] // what I answered so far, by decision, before sending
-  answeredInText?: true // my reply had text of my own, beyond the decisions answered
+  replyTo?: string // the message (a person's) it answers, when one did
+  answeredBy?: string // who answered its question (another person than the one asked, maybe)
+  question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
+  questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
+  answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  answeredInText?: true // the reply had text of its own, beyond the decisions answered
+  askedTo?: string // the person the question is for (unset with one person: whoever asked the agent)
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
   artifactIds?: string[] // files and screenshots shown in this reply
@@ -212,7 +220,93 @@ export type Proposal = (
   | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean } } // several agents at once, and a channel with them
 ) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string }
 
-export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
+export type Author = { kind: 'person'; id: string } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
+
+// ---------- people ----------
+
+// Every Tucano has people: a desktop has one, its owner; a server, whoever was invited.
+export type Role = 'owner' | 'admin' | 'member'
+
+// What everyone may know of a person: never their keys.
+export interface Person {
+  id: string
+  name: string
+  role: Role
+  about: string // what they do, for the agents ("cuida do financeiro")
+  delegateTo?: string // someone answering and approving for them…
+  delegateUntil?: number // …until then
+  seenAt?: number // when they last opened the Tucano with a key of theirs
+  devices?: number // how many keys (browsers, apps) they have
+}
+
+// Whether `of` has `who` covering for them right now.
+export const delegating = (of: Pick<Person, 'delegateTo' | 'delegateUntil'> | undefined, who: string, now = Date.now()): boolean =>
+  !!of && of.delegateTo === who && (of.delegateUntil ?? 0) > now
+
+// A question an agent asked someone (ask_user). `confirm`: in a DM, a question to someone else
+// waits first for the DM's person to say yes ('pending'); 'no' ends it there.
+export interface Question {
+  id: string // the agent's message that asked it
+  conversationId: string
+  threadId?: string
+  agentId: string
+  text: string
+  askedTo: string // the person it's for
+  requestedBy: string // whose request the agent was working on
+  confirm?: 'pending' | 'yes' | 'no'
+  state: 'open' | 'answered' | 'closed'
+  deadlineAt: number // past it, the requester is told and may answer instead
+  toldAt?: number
+  answeredBy?: string
+  answeredAt?: number
+  createdAt: number
+}
+
+// What's waiting on a person: approvals they can decide and questions to them.
+// A question from someone else's DM comes without where it was asked (they see the question only).
+export interface Inbox {
+  approvals: Approval[]
+  // With the decisions asked (ask_user's options) and what was answered on the card so far.
+  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
+  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
+  proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
+}
+
+// A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
+export interface InboxProposal {
+  id: string // the card's message
+  agentId: string // who proposed it (the Tuca)
+  proposal: Proposal
+  by: string // the member who asked
+  at: number
+}
+
+// The team's log, for owners and admins: who did what, never what a DM said.
+export interface ActivityEntry {
+  id: string
+  at: number
+  personId?: string // who did it (none: the app itself, a sweep)
+  kind: string // 'person.joined', 'approval.decided', 'agent.created'…
+  target?: string // what it was done to: an id
+  detail?: Record<string, unknown>
+}
+
+// An invite as admins see it: never its code, which only its link carries.
+export interface Invite {
+  id: string // the code's hash
+  role: Exclude<Role, 'owner'>
+  about: string
+  restore?: string // a removed person this brings back
+  createdBy: string
+  createdAt: number
+  expiresAt: number
+  usedAt?: number
+  usedBy?: string
+}
+
+// A person's own memories ("about me") live in this scope.
+export const personScope = (personId: string): string => `person:${personId}`
+export const scopePerson = (scope: string): string | undefined => (scope.startsWith('person:') ? scope.slice('person:'.length) : undefined)
 
 export interface Message {
   id: string
@@ -224,6 +318,16 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+}
+
+// When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
+// started, since that's what decides what it had read: agents read each other in that order.
+export const saidAt = (m: Message): number => m.run?.endedAt ?? m.at
+
+// A conversation as people read it: in the order things were said, and whoever is still working at the end.
+export function asSaid(messages: Message[]): Message[] {
+  const working = (m: Message): boolean => m.run?.status === 'working'
+  return [...messages.filter((m) => !working(m)).sort((a, b) => saidAt(a) - saidAt(b)), ...messages.filter(working).sort((a, b) => a.at - b.at)]
 }
 
 // A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.
@@ -277,11 +381,13 @@ export interface Settings {
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
+  questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
+  chainDepth?: number // agent replies in a row from one human message; default CHAIN_DEPTH
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
@@ -361,6 +467,7 @@ export interface BrowserView {
   log: { label: string; detail: string; at: number }[] // the latest actions, oldest first
   doing?: { label: string; detail: string } // the action under way ("Clicando em", "Buscar")
   cursor?: { x: number; y: number; at: number } // where the agent last clicked or typed, as a fraction of the screen
+  conversationId?: string // the conversation whose reply drives it now: only who sees that one sees the page
   at: number
 }
 
@@ -406,6 +513,10 @@ export const SAME_TOOL_STOP = 60 // ...and past it, that tool is refused for the
 export const SLEEPS_FREE = 1 // commands that start by sleeping 20 s or more: the first runs, the next ones are refused
 export const SLEEPS_STOP = 4 // refused sleeps in a reply before it stops
 export const PENDING_WAIT_MINUTES = 5 // a connector result still running (a SQL statement) is awaited by the app this long
+export const CHAIN_DEPTH = 3 // agent replies chained from one human message before Tucano stops them
+export const MAX_CHAIN_DEPTH = 10
+// Agents mentioning each other can't loop and burn tokens with nobody watching: a whole number from 1 to MAX_CHAIN_DEPTH, whatever reached the core.
+export const chainDepthCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.min(MAX_CHAIN_DEPTH, Math.max(1, Math.round(n as number))) : CHAIN_DEPTH)
 
 // What a reply counts against limits: a token read from the cache costs about a
 // tenth of a new one, so it counts a tenth.
@@ -555,10 +666,13 @@ export interface Approval {
   createdAt: number
   expiresAt: number
   decidedAt?: number
+  requestedBy?: string // the person whose request the agent was working on
+  decidedBy?: string // the person who decided it
+  behalf?: string // what it's for, when not a person's message: "rotina da Ana", "rotina do #vendas"
 }
 
-// 'me' memories go to every agent; otherwise the scope is the id of the one agent they belong to.
-export type MemoryScope = 'me' | string
+// A person's memories are `person:<id>` (personScope); otherwise the scope is the id of the one agent they belong to.
+export type MemoryScope = string
 export type MemoryState = 'active' | 'pending' | 'archived' | 'forgotten'
 
 export interface Memory {
@@ -572,6 +686,7 @@ export interface Memory {
   messageIds: string[] // evidence
   replaces?: string // the memory this one supersedes; it becomes archived when this one is active
   reason?: string // why it was forgotten
+  privateTo?: string // an agent's note made in a DM: that DM's person's alone
   createdAt: number
   confirmedAt: number // creation, edit, "still valid", or reinforced by a later conversation
 }
@@ -608,6 +723,7 @@ export interface Service {
   url?: string // on the Mac (127.0.0.1), while the computer runs
   running: boolean
   startedAt: number
+  conversationId?: string // started by a reply there: only who sees that conversation sees it
 }
 
 export interface ComputerInfo {
@@ -692,9 +808,12 @@ export interface Routine {
   lastMessageId?: string // the agent's reply in the last run
   createdBy?: string // the agent that scheduled it with `agendar_rotina`; undefined when I did
   createdAt: number
+  scope?: 'me' | 'channel' // a person's own (unset), or the team's: admins make those, and they notify only who watches
+  owner?: string // the person a 'me' routine belongs to, runs for and notifies
+  watchers?: string[] // who asked to be told of a channel routine's runs ("me avise")
 }
 
-export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled' | 'trigger'> & { id?: string; createdBy?: string }
+export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled' | 'trigger'> & { id?: string; createdBy?: string; scope?: Routine['scope'] }
 
 // What the routine's message in the conversation remembers about that run.
 export interface RoutineRun {
@@ -772,6 +891,7 @@ export interface LocalSkill {
   source: string // the SKILL.md
   name: string
   description: string
+  bodyLength: number // recipe characters, excluding frontmatter
   origin: string // "Claude Code", "Plugin <name>", "Codex"
   files: string[] // its other text files, relative to its folder
   scripts: boolean // it has scripts: an agent needs a computer to run them
@@ -900,6 +1020,7 @@ export interface WikiSource {
   changes?: number // how many change packages it became
   addedBy: string // 'me', 'auto' (the curator) or an agent's id
   addedAt: number
+  private?: boolean // from someone else's DM, as an admin sees it: that it exists, nothing more (decision 1)
 }
 // One change in a package: write a new page, add under a section of one, or swap an exact passage.
 export interface WikiOp {

@@ -4,15 +4,15 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Question } from '../../../shared/questions'
-import { answerQuestion, dismissQuestion, reopenQuestion, submitAnswers, useStore, type Message } from '../store'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerDecision, dismissQuestion, reopenQuestion, submitDecisions, useStore, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
 
 type Step = number | 'review'
 
 // Only a message from before the length limit has a question this long: it reads as text, not as a title.
-const isLong = (q: Question): boolean => q.question.length > MAX_QUESTION_LENGTH || q.question.includes('\n')
+const isLong = (q: Decision): boolean => q.question.length > MAX_QUESTION_LENGTH || q.question.includes('\n')
 const Prose = ({ text, className }: { text: string; className: string }): ReactNode => (
   <div className={className}>
     <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
@@ -29,15 +29,15 @@ const QUIET_MS = 800
 
 const typing = (e: KeyboardEvent): boolean => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
 
-export function DecisionsCard({ message }: { message: Message }): ReactNode {
-  const questions = questionsOf(message.run)
-  const saved = message.run?.answers
+// `id`: the asking message. In place of the message box (my question), or on a question's card
+// (one I may answer for someone, in the conversation or in Pra você).
+export function DecisionsCard({ id, questions, saved }: { id: string; questions: Decision[]; saved: (Answer | null)[] | undefined }): ReactNode {
   // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
   const allAnswered = (list: (Answer | null)[]): boolean => firstUnanswered(questions, list) === -1
   const [step, setStep] = useState<Step>(() => {
-    const unfinished = questions.findIndex((_, i) => drafts.has(draftKey(message.id, i))) // reopened: back where I was typing
+    const unfinished = questions.findIndex((_, i) => drafts.has(draftKey(id, i))) // reopened: back where I was typing
     if (unfinished !== -1) return unfinished
     const first = firstUnanswered(questions, saved)
     return first === -1 ? (questions.length > 1 ? 'review' : 0) : first
@@ -49,15 +49,15 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
   const send = (): void => {
     if (sending) return
     setSending(true)
-    void submitAnswers(message.id).finally(() => setSending(false)) // it failed if the card is still here: it can go again
+    void submitDecisions(id).finally(() => setSending(false)) // it failed if the card is still here: it can go again
   }
 
   const commit = (index: number, answer: Answer | null): void => {
     setEngaged(true)
-    drafts.delete(draftKey(message.id, index))
+    drafts.delete(draftKey(id, index))
     const next = answers.map((a, i) => (i === index ? answer : a))
     setAnswers(next)
-    answerQuestion(message.id, index, answer)
+    answerDecision(id, index, answer)
     if (!answer) return
     if (questions.length === 1) return send()
     const after = questions.findIndex((_, i) => i > index && !isAnswered(next[i]))
@@ -67,14 +67,14 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
   // Leaving a decision with the arrows keeps what's on it, as its answer if it is one.
   const settle = (): (Answer | null)[] => {
     if (step === 'review') return answers
-    const key = draftKey(message.id, step)
+    const key = draftKey(id, step)
     const draft = drafts.get(key)
     if (!draft) return answers
     drafts.delete(key)
     const answer = draftAnswer(questions[step]!, draft)
     const next = answers.map((a, i) => (i === step ? answer : a))
     setAnswers(next)
-    answerQuestion(message.id, step, answer)
+    answerDecision(id, step, answer)
     return next
   }
 
@@ -107,20 +107,20 @@ export function DecisionsCard({ message }: { message: Message }): ReactNode {
             </button>
           </div>
         )}
-        <button className="icon-btn" title={L('Fechar e responder escrevendo', 'Close and answer in writing')} onClick={() => dismissQuestion(message.id)}>
+        <button className="icon-btn" title={L('Fechar e responder escrevendo', 'Close and answer in writing')} onClick={() => dismissQuestion(id)}>
           <Icon name="x" size={14} />
         </button>
       </div>
       {step === 'review' ? (
         <Review questions={questions} answers={answers} onEdit={setStep} onSend={send} sending={sending} />
       ) : (
-        <Decision key={step} draftId={draftKey(message.id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onDismiss={() => dismissQuestion(message.id)} />
+        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onDismiss={() => dismissQuestion(id)} />
       )}
     </div>
   )
 }
 
-function Decision({ draftId, question, answer, last, takeFocus, onAnswer, onDismiss }: { draftId: string; question: Question; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onDismiss: () => void }): ReactNode {
+function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, onDismiss }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onDismiss: () => void }): ReactNode {
   const options = question.options ?? []
   const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
@@ -230,14 +230,14 @@ function Decision({ draftId, question, answer, last, takeFocus, onAnswer, onDism
   )
 }
 
-function Review({ questions, answers, onEdit, onSend, sending }: { questions: Question[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; sending: boolean }): ReactNode {
+function Review({ questions, answers, onEdit, onSend, sending }: { questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; sending: boolean }): ReactNode {
   return (
     <div className="decisions__body">
       <ol className="decisions__review">
         {questions.map((q, i) => (
           <li key={i}>
             <button className="decisions__review-row" title={L('Mudar esta resposta', 'Change this answer')} onClick={() => onEdit(i)}>
-              <span className="decisions__review-question">{isLong(q) ? L('Pergunta', 'Question') : q.question}</span>
+              <span className="decisions__review-question">{isLong(q) ? L('Pergunta', 'Decision') : q.question}</span>
               <span className={`decisions__review-answer ${answers[i]?.skipped ? 'is-skipped' : ''}`}>{answers[i] ? answerLabel(q, answers[i]) : ''}</span>
             </button>
           </li>
@@ -258,7 +258,6 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
   const questions = questionsOf(message.run)
   const dismissed = useStore((s) => s.dismissedQuestions.includes(message.id))
   if (!questions.length) return null
-  const answers = message.run?.answers
   if (message.run?.status === 'waiting_input') {
     return (
       <div className="answers is-waiting">
@@ -272,10 +271,19 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
       </div>
     )
   }
-  const answered = questions.map((q, i) => ({ q, a: answers?.[i] })).filter((x) => isAnswered(x.a))
   return (
     <div className="answers">
       <span className="answers__label">{L('Perguntou', 'Asked')}</span>
+      <DecisionList questions={questions} answers={message.run?.answers} answeredInText={message.run?.answeredInText} />
+    </div>
+  )
+}
+
+// The decisions asked: with what was chosen, once answered on the card; otherwise the questions alone.
+export function DecisionList({ questions, answers, answeredInText }: { questions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean }): ReactNode {
+  const answered = questions.map((q, i) => ({ q, a: answers?.[i] })).filter((x) => isAnswered(x.a))
+  return (
+    <>
       {answered.length ? (
         <dl className="answers__list">
           {answered.map(({ q, a }, i) => (
@@ -288,11 +296,14 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
       ) : (
         <ul className="answers__questions">
           {questions.map((q, i) => (
-            <li key={i}>{isLong(q) ? <Prose className="answers__prose" text={q.question} /> : q.question}</li>
+            <li key={i}>
+              {isLong(q) ? <Prose className="answers__prose" text={q.question} /> : q.question}
+              {q.options && <span className="answers__options"> ({q.options.map((o) => o.label).join(' · ')})</span>}
+            </li>
           ))}
         </ul>
       )}
-      {message.run?.answeredInText && answered.length > 0 && <span className="answers__note">{L('O resto foi respondido em texto.', 'The rest was answered in text.')}</span>}
-    </div>
+      {answeredInText && answered.length > 0 && <span className="answers__note">{L('O resto foi respondido em texto.', 'The rest was answered in text.')}</span>}
+    </>
   )
 }

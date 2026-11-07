@@ -12,20 +12,20 @@ import {
   questionsAsText,
   questionsOf,
   type AnswerDraft,
-  type Question
+  type Decision
 } from '../src/shared/questions'
 import type { Message, Run } from '../src/shared/types'
 
-const pagination: Question = { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] }
-const parts: Question = { question: 'O que remover?', kind: 'multiple', options: [{ label: 'Nó tag' }, { label: 'getUsedTags' }, { label: 'declaredTagIds' }] }
-const deadline: Question = { question: 'Pra quando?', kind: 'text' }
+const pagination: Decision = { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] }
+const parts: Decision = { question: 'O que remover?', kind: 'multiple', options: [{ label: 'Nó tag' }, { label: 'getUsedTags' }, { label: 'declaredTagIds' }] }
+const deadline: Decision = { question: 'Pra quando?', kind: 'text' }
 
 const refused = (args: Record<string, unknown>): boolean => 'error' in parseQuestions(args)
 
 describe('draftAnswer', () => {
-  const single: Question = { question: 'Qual?', kind: 'single', options: [{ label: 'A' }, { label: 'B' }] }
-  const multiple: Question = { ...single, kind: 'multiple' }
-  const text: Question = { question: 'Qual?', kind: 'text' }
+  const single: Decision = { question: 'Qual?', kind: 'single', options: [{ label: 'A' }, { label: 'B' }] }
+  const multiple: Decision = { ...single, kind: 'multiple' }
+  const text: Decision = { question: 'Qual?', kind: 'text' }
   const draft = (patch: Partial<AnswerDraft>): AnswerDraft => ({ chosen: [], other: '', text: '', ...patch })
 
   it('is the text, trimmed, or nothing', () => {

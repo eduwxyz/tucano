@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
-import { appStep, appTools, DesktopApps, grantOf, isTucano, itemize, keyFor, parseLsappinfo, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
+import { appStep, appTools, DesktopApps, grantOf, isTucano, itemize, keyFor, parseLsappinfo, parseMdls, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
 import type { Agent } from '../src/shared/types'
 
 // A Notes window as agent-desktop describes it.
@@ -332,5 +332,26 @@ describe('labels of what happens in an app', () => {
     expect(appStep('app_ver', {}).label).toBe('Read')
     setLang('pt')
     expect(appStep('app_ver', {}).label).toBe('Leu')
+  })
+})
+
+describe('the Mac apps, many per mdls', () => {
+  it('reads two values per app from one answer', () => {
+    const out = 'com.apple.Safari\0Safari\0com.apple.Notes\0Notas.app\0(null)\0(null)'
+    expect(parseMdls(out, ['/Applications/Safari.app', '/System/Applications/Notes.app', '/Applications/Velho.app'])).toEqual([
+      { name: 'Safari', bundleId: 'com.apple.Safari', path: '/Applications/Safari.app' },
+      { name: 'Notas', bundleId: 'com.apple.Notes', path: '/System/Applications/Notes.app' },
+      { name: 'Velho', path: '/Applications/Velho.app' }
+    ])
+  })
+
+  it('stops where mdls stopped, at an app Spotlight can’t read', () => {
+    // Its complaint comes on stdout, glued to the last value it printed.
+    expect(parseMdls('com.apple.Safari\0Safari/a/Safari.app: could not find /a/Quebrado.app.\n', ['/a/Safari.app', '/a/Quebrado.app', '/a/Notes.app'])).toEqual([{ name: 'Safari', bundleId: 'com.apple.Safari', path: '/a/Safari.app' }])
+    expect(parseMdls('/a/Quebrado.app: could not find /a/Quebrado.app.\n', ['/a/Quebrado.app'])).toEqual([])
+  })
+
+  it('an answer whose values don’t pair up is refused, so each app is asked alone', () => {
+    expect(parseMdls('com.apple.Safari\0Safari\0com.apple.Notes', ['/a/Safari.app', '/a/Notes.app'])).toBeUndefined()
   })
 })

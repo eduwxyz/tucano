@@ -4,15 +4,15 @@
 import { L } from './lang'
 import type { Message, Run } from './types'
 
-export type QuestionKind = 'single' | 'multiple' | 'text'
-export interface QuestionOption {
+export type DecisionKind = 'single' | 'multiple' | 'text'
+export interface DecisionOption {
   label: string
   description?: string
 }
-export interface Question {
+export interface Decision {
   question: string
-  kind: QuestionKind
-  options?: QuestionOption[]
+  kind: DecisionKind
+  options?: DecisionOption[]
 }
 export interface Answer {
   chosen?: number[] // indexes into the options
@@ -35,10 +35,10 @@ export const MAX_QUESTION_LENGTH = 200
 export const MAX_LABEL_LENGTH = 80
 export const MAX_DESCRIPTION_LENGTH = 200
 
-const KINDS: QuestionKind[] = ['single', 'multiple', 'text']
+const KINDS: DecisionKind[] = ['single', 'multiple', 'text']
 
 // Messages saved before decisions existed have a question string: it reads as one text decision.
-export function questionsOf(run: Run | undefined): Question[] {
+export function questionsOf(run: Run | undefined): Decision[] {
   if (run?.questions?.length) return run.questions
   return run?.question ? [{ question: run.question, kind: 'text' }] : []
 }
@@ -55,7 +55,7 @@ const tooLong = (question: string): string =>
     `Question too long (${question.length} characters, at most ${MAX_QUESTION_LENGTH}): put the context and the proposal in your reply's text and leave only the decision here.`
   )
 
-export function parseQuestions(args: Record<string, unknown>): { questions: Question[] } | { error: string } {
+export function parseQuestions(args: Record<string, unknown>): { questions: Decision[] } | { error: string } {
   if (args['questions'] === undefined && typeof args['question'] === 'string') {
     const question = trimmed(args['question'])
     if (!question) return { error: L('Faltou a pergunta.', 'Missing the question.') }
@@ -64,12 +64,12 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Ques
   const list = args['questions']
   if (!Array.isArray(list) || list.length === 0) return { error: L('Faltou a pergunta: mande ao menos uma decisão em questions.', 'Missing the question: send at least one decision in questions.') }
   if (list.length > MAX_QUESTIONS) return { error: L(`No máximo ${MAX_QUESTIONS} decisões por pergunta: divida em mais de uma.`, `At most ${MAX_QUESTIONS} decisions per question: split them up.`) }
-  const questions: Question[] = []
+  const questions: Decision[] = []
   for (const item of list as Record<string, unknown>[]) {
     const question = trimmed(item?.['question'])
     if (!question) return { error: L('Toda decisão precisa de uma pergunta.', 'Every decision needs a question.') }
     if (question.length > MAX_QUESTION_LENGTH) return { error: tooLong(question) }
-    const kind = item['kind'] as QuestionKind
+    const kind = item['kind'] as DecisionKind
     if (!KINDS.includes(kind)) return { error: L(`"${question}": kind tem que ser single, multiple ou text.`, `"${question}": kind must be single, multiple or text.`) }
     if (kind === 'text') {
       questions.push({ question, kind })
@@ -77,7 +77,7 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Ques
     }
     const raw = Array.isArray(item['options']) ? (item['options'] as Record<string, unknown>[]) : []
     if (raw.length < MIN_OPTIONS || raw.length > MAX_OPTIONS) return { error: L(`"${question}": de ${MIN_OPTIONS} a ${MAX_OPTIONS} opções.`, `"${question}": ${MIN_OPTIONS} to ${MAX_OPTIONS} options.`) }
-    const options: QuestionOption[] = []
+    const options: DecisionOption[] = []
     for (const o of raw) {
       const label = trimmed(o?.['label'])
       if (!label) return { error: L(`"${question}": toda opção precisa de um label.`, `"${question}": every option needs a label.`) }
@@ -100,7 +100,7 @@ export function isAnswered(answer: Answer | null | undefined): boolean {
   return !!answer && (!!answer.chosen?.length || !!answer.other || !!answer.text || !!answer.skipped)
 }
 
-export function draftAnswer(question: Question, draft: AnswerDraft): Answer | null {
+export function draftAnswer(question: Decision, draft: AnswerDraft): Answer | null {
   if (question.kind === 'text') return draft.text.trim() ? { text: draft.text.trim() } : null
   const other = draft.other.trim()
   if (question.kind === 'single') return other ? { other } : draft.chosen.length ? { chosen: draft.chosen } : null
@@ -108,11 +108,11 @@ export function draftAnswer(question: Question, draft: AnswerDraft): Answer | nu
   return { ...(draft.chosen.length ? { chosen: [...draft.chosen].sort((a, b) => a - b) } : {}), ...(other ? { other } : {}) }
 }
 
-export function firstUnanswered(questions: Question[], answers: (Answer | null)[] | undefined): number {
+export function firstUnanswered(questions: Decision[], answers: (Answer | null)[] | undefined): number {
   return questions.findIndex((_, i) => !isAnswered(answers?.[i]))
 }
 
-export function answerLabel(question: Question, answer: Answer): string {
+export function answerLabel(question: Decision, answer: Answer): string {
   if (answer.skipped) return L('(pulou)', '(skipped)')
   if (question.kind === 'text') return answer.text ?? ''
   const chosen = [...(answer.chosen ?? [])].sort((a, b) => a - b).map((i) => question.options?.[i]?.label).filter(Boolean)
@@ -121,7 +121,7 @@ export function answerLabel(question: Question, answer: Answer): string {
 }
 
 // A Markdown list: one line each, in my message bubble as well as for the agent.
-export function formatAnswers(questions: Question[], answers: (Answer | null)[] | undefined): string {
+export function formatAnswers(questions: Decision[], answers: (Answer | null)[] | undefined): string {
   // One text question reads as a reply, as it did before decisions: the agent knows what it asked.
   const lone = questions.length === 1 && questions[0]!.kind === 'text' ? answers?.[0] : undefined
   if (lone && isAnswered(lone)) return answerLabel(questions[0]!, lone)
@@ -134,22 +134,22 @@ export function formatAnswers(questions: Question[], answers: (Answer | null)[] 
     .join('\n')
 }
 
-export function questionHeadline(questions: Question[]): string {
+export function questionHeadline(questions: Decision[]): string {
   const first = questions[0]?.question ?? ''
   return questions.length > 1 ? `${first} (+${questions.length - 1})` : first
 }
 
 // For the agent's context: a lone text question reads exactly as a question did before.
-export function describeQuestions(questions: Question[]): string {
+export function describeQuestions(questions: Decision[]): string {
   return numberedQuestions(questions, '; ')
 }
 
 // For a text-only place (the phone): the question alone, or one numbered line per decision.
-export function questionsAsText(questions: Question[]): string {
+export function questionsAsText(questions: Decision[]): string {
   return numberedQuestions(questions, '\n')
 }
 
-function numberedQuestions(questions: Question[], separator: string): string {
+function numberedQuestions(questions: Decision[], separator: string): string {
   if (questions.length === 1 && !questions[0]!.options) return questions[0]!.question
   return questions.map((q, i) => `${i + 1}. ${q.question}${q.options ? ` (${q.options.map((o) => o.label).join(' | ')})` : ''}`).join(separator)
 }

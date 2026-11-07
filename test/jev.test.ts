@@ -15,7 +15,7 @@ const agent = (id: string, handle: string, role: string): Agent => ({
 const lia = agent('a1', 'lia', 'Engenharia')
 const nina = agent('a2', 'nina', 'Conteúdo')
 const theo = agent('a3', 'theo', 'Dados')
-const messages = [{ id: 'm1', conversationId: 'c1', author: { kind: 'me' as const }, text: 'o build quebrou', at: 1 }]
+const messages = [{ id: 'm1', conversationId: 'c1', author: { kind: 'person' as const, id: 'me' }, text: 'o build quebrou', at: 1 }]
 
 // A stand-in for TypeSafe's API: records requests, answers with the given probabilities.
 function typesafe(probabilities: Record<string, number> | number) {

@@ -2,7 +2,7 @@
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
 import { voiceRefusal } from '../shared/voice'
-import { ModelDownload, Transcriber, voiceStatus, warmUp } from './transcribe'
+import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -12,9 +12,12 @@ import { basename, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
-import { friendly } from '../shared/errors'
-import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { errorFor } from '../shared/errors'
+import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
+import { limitError, paramsError } from '../shared/rpc-shapes'
+import { ACCOUNT_ENGINES, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
+import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -25,8 +28,10 @@ import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
-import { accountDir, accountStatus, adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
+import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
+import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { fakeEngine } from './engines/fake'
+import { relocating } from './engines/relocate'
 import { DesktopApps, macApps, SELF } from './apps'
 import { linuxApps, windowsApps, type SystemApp } from './apps-os'
 import type { Engine } from './engines/types'
@@ -38,7 +43,8 @@ import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
-import { Wiki } from './wiki'
+import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
+import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
@@ -99,24 +105,36 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
   language: langOf(process.env['TUCANO_LOCALE'])
 }
 
-const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
-let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine, cursor: unknownEngine, grok: unknownEngine }
-// The models OpenCode and Pi list (what the person has logins for), from the last check.
-let listed: Partial<Record<EngineId, string[]>> = {}
-// Codex's own catalog for this login (names and what each model is for), from the last check.
-let codexCatalog: CodexModel[] = []
+// The owner is a person like any other, named after the settings' name (what the agents call them):
+// a new install fills it in, and a name changed in the settings changes theirs.
+const people = new People(db)
+if (!db.owner().name) db.renamePerson(db.ownerId(), db.getSettings(DEFAULTS).workspaceName, false)
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
-async function detect(): Promise<void> {
-  if (fake) {
-    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } }
-    listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
-  } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
-  await checkAccounts()
-  rememberModels(codexCatalog.map((m) => ({ id: m.slug, engine: 'codex', label: m.label, hint: m.description ?? '' })))
-  gatewayLists.clear()
-  emit({ type: 'settings', settings: settings() })
-}
+const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
+  engines: { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
+  listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] },
+  codexCatalog: []
+})
+// The harnesses' last check, kept in the data folder: the window opens on it while the next runs.
+const engineCheck = new EngineCheck({
+  file: join(dataDir, 'engines.json'),
+  all: async () => (fake ? fakeFindings() : detectEngines(codexHome)),
+  one: async (e) => (fake ? { status: fakeFindings().engines[e], listed: fakeFindings().listed[e] } : detectEngine(e, codexHome)),
+  after: async (found, engine) => {
+    ;({ engines, listed, codexCatalog } = found)
+    await checkAccounts(undefined, engine)
+    rememberModels(codexCatalog.map((m) => ({ id: m.slug, engine: 'codex', label: m.label, hint: m.description ?? '' })))
+    gatewayLists.clear()
+    emit({ type: 'settings', settings: settings() })
+    return { accounts: Object.fromEntries(accountLogins) }
+  }
+})
+// The models OpenCode and Pi list (what the person has logins for), and Codex's own catalog for
+// this login (names and what each model is for), from the last check.
+let { engines, listed, codexCatalog } = engineCheck.current
+// Everything checked again; a call while a check runs gets that one.
+const detect = (): Promise<unknown> => engineCheck.detect().catch((e: unknown) => console.error('[engines]', e))
 // The harness's own sign-in, in a terminal, with the variables that say which login it is.
 function openLogin(engine: EngineId, vars: Record<string, string>): { opened: boolean; command: string } {
   const bin = engines[engine].path ?? ENGINES[engine].cli
@@ -137,19 +155,29 @@ function openLogin(engine: EngineId, vars: Record<string, string>): { opened: bo
 
 // After a sign-in or an install in a terminal, the harness is checked again every few
 // seconds until it shows up (for 10 minutes at most): it appears with no "Check again".
+// Only that harness is checked, not all of them.
 let watching: ReturnType<typeof setInterval> | undefined
+let watched: EngineId | undefined
 function watchEngine(engine: EngineId, done: (s: EngineStatus) => boolean): void {
   if (watching) clearInterval(watching)
   const until = Date.now() + 10 * 60_000
+  const stop = (): void => (clearInterval(watching), (watched = undefined))
+  watched = engine
   watching = setInterval(() => {
-    if (done(engines[engine]) || Date.now() > until) return void clearInterval(watching)
-    void detect()
+    if (done(engines[engine]) || Date.now() > until) return stop()
+    void engineCheck.recheck(engine).catch((e: unknown) => console.error('[engines]', e))
   }, 4_000)
   watching.unref()
 }
 
 const gateway = new Gateway()
-const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
+// The login shell's PATH comes before any CLI starts: harnesses, connectors and Docker are found on it.
+const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e))
+// The harnesses are checked behind the window (it opens on the last check). What truly needs
+// them (a reply, the memory, routines, a connection test) waits for this.
+const enginesReady = pathReady.then(detect)
+// The window waits only for the database, open by now, and the gateway.
+const ready = gateway.start()
 
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
@@ -159,12 +187,13 @@ const settings = (): Settings => {
 
 // More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
 // the CLI's own status when the harnesses are, and every few seconds after a sign-in.
-const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>()
+const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>(Object.entries(engineCheck.current.accounts ?? {}))
 const savedAccounts = (): Account[] => (db.getSettings(DEFAULTS).accounts ?? []).map(({ id, engine, name }) => ({ id, engine, name }))
-async function checkAccounts(only?: string): Promise<void> {
+// `only`: that account; `engine`: that harness's accounts.
+async function checkAccounts(only?: string, engine?: EngineId): Promise<void> {
   await Promise.all(
     savedAccounts()
-      .filter((a) => !only || a.id === only)
+      .filter((a) => (!only || a.id === only) && (!engine || a.engine === engine))
       .map(async (a) => {
         const bin = engines[a.engine].path
         if (fake) accountLogins.set(a.id, { loggedIn: true, detail: L('Motor de teste', 'Test engine') })
@@ -178,22 +207,30 @@ function watchAccount(id: string): void {
   const until = Date.now() + 10 * 60_000
   watchingAccount = setInterval(() => {
     if (accountLogins.get(id)?.loggedIn || Date.now() > until || !savedAccounts().some((a) => a.id === id)) return void clearInterval(watchingAccount!)
-    void checkAccounts(id).then(() => emit({ type: 'settings', settings: settings() }))
+    void checkAccounts(id).then(() => {
+      engineCheck.setAccounts(Object.fromEntries(accountLogins))
+      emit({ type: 'settings', settings: settings() })
+    })
   }, 4_000)
   watchingAccount.unref()
 }
 
 
+// A harness that moved since it was found (an update to another folder) is looked for again.
+function moved(id: EngineId): Parameters<typeof relocating>[1] {
+  return { path: () => engines[id].path, label: ENGINES[id].label, redetect: () => detect().then(() => undefined) }
+}
+
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   : {
-      claude: claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())),
-      codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())),
-      opencode: opencodeEngine(() => engines.opencode.path, join(dataDir, 'opencode-home'), loginEnv, () => engines.opencode.version),
-      pi: piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv),
-      gemini: geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv),
-      cursor: cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv),
-      grok: grokEngine(() => engines.grok.path, loginEnv)
+      claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
+      codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
+      opencode: relocating(opencodeEngine(() => engines.opencode.path, join(dataDir, 'opencode-home'), loginEnv, () => engines.opencode.version), moved('opencode')),
+      pi: relocating(piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv), moved('pi')),
+      gemini: relocating(geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv), moved('gemini')),
+      cursor: relocating(cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv), moved('cursor')),
+      grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok'))
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
@@ -228,9 +265,13 @@ const gatewayLists = new Map<EngineId, Promise<{ models: string[]; error?: strin
 
 // ---------- ports ----------
 
-const ports = new Set<MessagePortMain>()
-let viewing: string | null = null
+// Each port is a person's (a desktop's one window is the owner's); events go through what each may see.
+const hub = new Hub<MessagePortMain>(people, db)
+// The conversation each person has open: what arrives there is read already.
+const viewing = new Map<string, string | null>()
 let closing = false
+type Ctx = { person: Person }
+const ownerCtx = (): Ctx => ({ person: db.owner() })
 // What the workspace switcher shows of this workspace: its name, whether it's paused, and two
 // counts. Coalesced: a reply streaming updates its message many times a second.
 let summaryTimer: NodeJS.Timeout | undefined
@@ -239,7 +280,10 @@ function workspaceSummary(): void {
   summaryTimer ??= setTimeout(() => {
     summaryTimer = undefined
     const current = db.getSettings(DEFAULTS)
-    const summary = { type: 'workspace-summary', name: workspaceLabel(current), paused: !!current.paused, unread: db.unread(), approvals: db.approvals().filter((a) => a.state === 'pending').length }
+    // The owner's counts: the switcher is on the desktop, the owner's app.
+    const owner = db.owner()
+    const unread = db.conversations(owner.id).filter((c) => people.canSeeConversation(owner, c)).reduce((n, c) => n + (c.unread ?? 0), 0)
+    const summary = { type: 'workspace-summary', name: workspaceLabel(current), paused: !!current.paused, unread, approvals: db.pendingApprovals() }
     const wire = JSON.stringify(summary)
     if (wire !== lastSummary) process.parentPort.postMessage(summary)
     lastSummary = wire
@@ -247,12 +291,13 @@ function workspaceSummary(): void {
 }
 function emit(event: CoreEvent): void {
   const more = event.type === 'message' && db.recordActivity(event.message, viewing)
-  const wire: Wire = { event }
-  for (const p of ports) p.postMessage(wire)
+  hub.emit(event)
+  // An approval asked or decided changes what waits on its deciders.
+  if (event.type === 'approval') hub.emit({ type: 'inbox' })
   toPhone(event)
-  // A new unread one: the sidebar's count goes up.
+  // A new unread one: the sidebar's count goes up (each person's own).
   const conversation = more ? db.conversation(event.message.conversationId) : undefined
-  if (conversation) for (const p of ports) p.postMessage({ event: { type: 'conversation', conversation } } satisfies Wire)
+  if (conversation) hub.emit({ type: 'conversation', conversation })
   if (['message', 'conversation', 'conversation_removed', 'approval', 'settings'].includes(event.type)) workspaceSummary()
 }
 
@@ -260,23 +305,37 @@ function emit(event: CoreEvent): void {
 let telegram: Telegram | undefined
 const sentToPhone = new Set<string>()
 function toPhone(e: CoreEvent): void {
-  if (!telegram) return
+  // The phone is the owner's: only what the owner may see reaches it.
+  if (!telegram || (e.type !== 'approval' && e.type !== 'message') || !people.eventFor(e, db.owner())) return
   const name = (id: string): string => db.agent(id)?.name ?? L('Um agente', 'An agent')
   if (e.type === 'approval' && e.approval.state === 'pending' && !sentToPhone.has(e.approval.id)) {
     sentToPhone.add(e.approval.id)
     void telegram.approvalAsked(e.approval, name(e.approval.agentId))
-  } else if (e.type === 'message' && e.message.author.kind === 'agent' && isNewQuestion(e.message) && !sentToPhone.has(e.message.id)) {
+  } else if (e.type === 'message' && e.message.author.kind === 'agent' && isNewQuestion(e.message) && !sentToPhone.has(e.message.id) && forOwner(e.message.id)) {
     sentToPhone.add(e.message.id)
     const conv = db.conversation(e.message.conversationId)
     void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM'))
   }
 }
 
+// A question the owner answers: theirs (or one from before questions were kept).
+const forOwner = (messageId: string): boolean => {
+  const q = db.question(messageId)
+  return !q || (q.confirm === 'pending' ? q.requestedBy : q.askedTo) === db.ownerId()
+}
+
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
-const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string } = {}): void => {
-  toMain({ type: 'notify', title, body: shortText, conversationId, ...more, sound: settings().sounds !== false })
-  void telegram?.notice(title, fullText ?? shortText)
+// `to`: the people it's for; unset, everyone (but a DM's news only ever reaches its person).
+const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string; to?: string[] } = {}): void => {
+  const to = notifyTo(conversationId, more.to)
+  toMain({ type: 'notify', title, body: shortText, conversationId, ...more, ...(to ? { to } : {}), sound: settings().sounds !== false })
+  if (!to || to.includes(db.ownerId())) void telegram?.notice(title, fullText ?? shortText)
+}
+function notifyTo(conversationId: string | undefined, to: string[] | undefined): string[] | undefined {
+  const c = conversationId ? db.conversationOwner(conversationId) : undefined
+  const dm = c && dmOwner(c, db.ownerId())
+  return dm ? (to ?? [dm]) : to
 }
 
 // Asks the main process to do what only it can: open the browser or a folder, show a notification.
@@ -287,7 +346,12 @@ type ToMain =
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
-  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; to?: string[] } // to: the people it's for (a server delivers it only to them); unset: everyone
+  | { type: 'auth-result'; id: string; person?: Person; removed?: true } // removed: a key of someone removed since
+  | { type: 'join-result'; id: string; data: { key?: string; person?: Person; error?: string } }
+  | { type: 'device-key-result'; id: string; data: { key?: string; person?: Person } }
+  | { type: 'person-removed'; id: string }
+  | { type: 'person-changed'; id: string } // a role changed: the server forgets what it remembered of them
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -302,11 +366,11 @@ const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error)
 // Agents' browsers too (spec §24).
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown } | undefined
   if (r?.type === 'workspace-pause') {
     try {
       if (closing || typeof r.paused !== 'boolean') throw new Error('Workspace cannot change pause state right now')
-      api.updateSettings({ patch: { paused: r.paused } })
+      api.updateSettings({ patch: { paused: r.paused } }, ownerCtx())
       process.parentPort.postMessage({ type: 'workspace-paused' })
     } catch (error) {
       process.parentPort.postMessage({ type: 'workspace-paused', error: error instanceof Error ? error.message : String(error) })
@@ -332,7 +396,7 @@ process.parentPort.on('message', (e) => {
   // The workspace whose folder held this wiki is being deleted: the folder moved here.
   if (r?.type === 'wiki-relocate') {
     void Promise.resolve()
-      .then(() => api.setWikiDir({ dir: typeof r.path === 'string' ? r.path : '' }))
+      .then(() => api.setWikiDir({ dir: typeof r.path === 'string' ? r.path : '' }, ownerCtx()))
       .then(
         () => process.parentPort.postMessage({ type: 'wiki-relocated' }),
         (e: unknown) => process.parentPort.postMessage({ type: 'wiki-relocated', error: e instanceof Error ? e.message : String(e) })
@@ -358,11 +422,50 @@ process.parentPort.on('message', (e) => {
     })().catch((e: unknown) => process.parentPort.postMessage({ type: 'workspace-cleaned', error: e instanceof Error ? e.message : String(e) }))
     return
   }
+  // The desktop says which conversation its window shows: the owner's (a person may be named).
   if (r?.type === 'viewing') {
-    viewing = typeof r.conversationId === 'string' ? r.conversationId : null
-    if (viewing) { db.markRead(viewing); emitConversations([viewing]) }
+    const who = typeof r.person === 'string' ? db.person(r.person) : db.owner()
+    if (!who) return
+    const open = typeof r.conversationId === 'string' && people.canSeeConversation(who, db.conversation(r.conversationId)) ? r.conversationId : null
+    viewing.set(who.id, open)
+    if (open) { db.markRead(open, who.id); emitConversations([open]) }
     workspaceSummary()
     return
+  }
+  // A server's sign-in: the person a key opens (src/server keeps the answer a few seconds).
+  if (r?.type === 'auth') {
+    const person = people.authenticate(r.key)
+    return toMain({ type: 'auth-result', id: r.id, ...(person ? { person } : people.removedKey(r.key) ? { removed: true } : {}) })
+  }
+  // A server's file or page: may this person see it? An artifact is its conversation's; an agent's
+  // page, the conversation whose reply started its service (one started by hand: everyone's).
+  if (r?.type === 'access') {
+    const who = typeof r.person === 'string' ? db.person(r.person) : undefined
+    const a = typeof r.artifact === 'string' ? db.artifacts().find((x) => x.id === r.artifact) : undefined
+    const svc = typeof r.port === 'number' ? db.agents().flatMap((x) => computers.info(x).services).find((x) => x.url && Number(new URL(x.url).port) === r.port) : undefined
+    const ok = !!who && (a ? people.canSeeFrom(who, a.conversationId) : svc ? people.canSeeFrom(who, svc.conversationId) : false)
+    return process.parentPort.postMessage({ type: 'access-result', id: r.id, ok })
+  }
+  // A server's invite page: the name of whom a restoring invite brings back, to fill in.
+  if (r?.type === 'invite-info') {
+    const name = people.inviteName(r.code)
+    return process.parentPort.postMessage({ type: 'invite-info-result', id: r.id, data: name ? { name } : {} })
+  }
+  // A server's /join: an invite's code and a name become a person with a key.
+  if (r?.type === 'join') {
+    const out = people.join(r.code, r.name)
+    if ('person' in out) {
+      inherit()
+      emitPeople()
+      if (out.routines) routines.resume(out.routines)
+    }
+    return toMain({ type: 'join-result', id: r.id, data: 'person' in out ? { person: out.person, key: out.key } : out })
+  }
+  // A server's POST /pair: a one-time code it checked, spent for this person (none: the owner), becomes a key of a device's own.
+  if (r?.type === 'device-key') {
+    const out = people.deviceKey(r.person, r.label)
+    if (out) emitPeople()
+    return toMain({ type: 'device-key-result', id: r.id, data: out ?? {} })
   }
   if (r?.type === 'power') return routines.setAwake(r.awake === true)
   // A server's /oauth/callback: the code the provider sent back, checked against the state only this core made.
@@ -409,7 +512,8 @@ const appIcons = (paths: string[]): Promise<Record<string, string>> =>
 
 // The person's installed apps, with their icons, kept in the data folder: the apps picker
 // shows them at once, even right after a restart, and a refresh runs behind it when they
-// may have changed. Made once a few seconds after start, so even the first look is instant.
+// may have changed. Made at start only when the kept one is a day old: a scan starts a hundred
+// processes, so it waits for the harnesses' check to end too.
 // bundleId: a Mac app's bundle id, a Windows app's AppUserModelID, a Linux desktop id.
 type ShelfApp = { name: string; bundleId?: string; path?: string; icon?: string; exe?: string; exec?: string[]; chromium?: boolean }
 // Each system's own list: the Mac's Applications folders, Windows' Start menu, Linux's application menu.
@@ -451,7 +555,7 @@ const shelfNow = async (): Promise<ShelfApp[]> => {
   if (Date.now() - shelf.at > 5 * 60_000) void restock()
   return shelf.list
 }
-if (!serverMode && !fake) setTimeout(() => void restock(), 4_000).unref()
+if (!serverMode && !fake && (!shelf || Date.now() - shelf.at > 24 * 3600_000)) void enginesReady.then(() => setTimeout(() => void restock(), 5_000).unref())
 
 // On a server there's no Electron: the agents' Chrome takes the picture instead.
 const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
@@ -545,7 +649,7 @@ const oauthCallback = async (url: URL): Promise<string> => {
 }
 gateway.route('/oauth/callback', oauthCallback)
 
-const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
+const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 
 const computers = new Computers({ db, dataDir, emit, shoot })
 const backups = join(dataDir, 'backups')
@@ -559,7 +663,7 @@ const routines = new Routines({
   blocked: () => !!settings().paused || inQuietHours(settings().quietHours),
   paused: () => !!settings().paused,
   emit,
-  notify: notifyAll
+  notify: (title, body, conversationId, fullText, to) => notifyAll(title, body, conversationId, fullText, to ? { to } : {})
 })
 
 // A proposal waits for a decision: the knock at the door, and a click opens Skills.
@@ -569,11 +673,18 @@ const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, 
 const wikiHome = join(dataDir, 'wiki')
 const wikiIndex = (dir: string): string => (dir === wikiHome ? join(dataDir, 'wiki.db') : join(dataDir, `wiki-${createHash('sha256').update(dir).digest('hex').slice(0, 12)}.db`))
 const wikiDir = (): string => process.env['TUCANO_WIKI'] || settings().wikiDir || wikiHome
-const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }) })
-wiki.init()
+// Whose DM a conversation is (null: not a DM; undefined: gone), for where each page's versions came from.
+const dmOf = (conversationId: string): string | null | undefined => {
+  const c = db.conversationOwner(conversationId)
+  return c ? (dmOwner(c, db.ownerId()) ?? null) : undefined
+}
+const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }), dmOf })
+// The folder is read behind the window: a big Obsidian vault takes a while.
+wiki.init(true, true)
 toMain({ type: 'wiki_dir', path: wiki.dir })
 // The curator reads the conversations with the memory's cheap model, and keeps what lasts.
 const wikiLlm = async (system: string, prompt: string): Promise<string> => {
+  await enginesReady
   const s = settings()
   const model = usable(modelInfo(s.memoryModel)) ?? modelInfo('haiku')!
   const st = s.engines[model.engine]
@@ -591,7 +702,8 @@ const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   }
   return text
 }
-const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm })
+// A curation from someone's DM may read the pages held for them; any other, none that's held.
+const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm, hidden: (id) => wiki.heldTitles(id ? (dmOf(id) ?? undefined) : undefined) })
 // The review: by hand, or once a week when asked (checked every hour).
 const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
 setInterval(() => {
@@ -601,7 +713,7 @@ setInterval(() => {
 const runner = new Runner({
   db,
   engines: engineImpls,
-  settings: () => ready.then(settings),
+  settings: () => enginesReady.then(settings),
   emit,
   workDir: join(dataDir, 'agents'),
   dataDir,
@@ -617,8 +729,11 @@ const runner = new Runner({
   wikiCurator: curator,
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
-  notify: (title, body, conversationId, kind, threadId) =>
-    kind ? toMain({ type: 'notify', title, body, conversationId, threadId, kind, sound: settings().sounds !== false }) : notifyAll(title, body, conversationId, undefined, { threadId }),
+  notify: (title, body, conversationId, kind, threadId, to) => {
+    if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}) })
+    const who = notifyTo(conversationId, to)
+    toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
+  },
   jev: { key: () => secrets.get(JEV_SECRET) },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
   onQuota: (quota) => {
@@ -628,7 +743,7 @@ const runner = new Runner({
 })
 runner.setPaused(!!settings().paused)
 // Installs from before the Tuca get him at the first start after the introduction.
-void ready.then(() => {
+void enginesReady.then(() => {
   if (settings().onboarding?.done) ensureTuca()
 })
 
@@ -679,20 +794,20 @@ hooks.on('error', (e) => console.error(`[gatilhos] porta ${runtimePorts.webhook}
 
 
 void ready.then(async () => {
-  connectors.connectAll()
-  returnChannelFolders()
-  for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
+  toMain({ type: 'ready' })
+  workspaceSummary()
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   // A thread that went quiet gets its own summary, and the memories in it.
   setInterval(() => void memory.sweep().catch((e: unknown) => console.error('[memory]', e)), 60_000).unref()
+  // A question to someone that waited past its deadline: its requester hears of it.
+  setInterval(() => runner.sweepQuestions(), 60_000).unref()
   if (!fake) {
     // A port taken (another Tucano open, say) is logged and the rest goes on: a call there reaches
     // a server that doesn't know its token, never this workspace's data.
     hooks.listen(runtimePorts.webhook, '127.0.0.1')
     void telegram?.start()
   }
-  routines.start()
   // A copy of the database once a day, the last 7 kept.
   const daily = (): void => {
     try {
@@ -700,11 +815,24 @@ void ready.then(async () => {
     } catch (e) {
       console.error('[backup]', e)
     }
+    // People removed over 30 days ago: their DMs and memories go (checked hourly, due once a day at most).
+    try {
+      purged(people.sweep())
+    } catch (e) {
+      console.error('[people]', e)
+    }
   }
   daily()
   setInterval(daily, 3_600_000).unref()
-  toMain({ type: 'ready' })
-  workspaceSummary()
+  // Connectors and computers start programs: they're found on the login shell's PATH.
+  await pathReady
+  connectors.connectAll()
+  returnChannelFolders()
+  for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
+  await enginesReady
+  routines.start()
+  // A Tucano that had more people (or an invite out) before the heritage existed gets it now.
+  if (db.people({ removed: true }).length > 1 || db.invites().length) inherit()
 }).catch((e: unknown) => {
   console.error('[core] startup failed', e)
   process.exit(1)
@@ -749,7 +877,8 @@ function readyModel(s: Settings, first?: string): string | undefined {
   return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
 }
 
-function ensureTuca(modelId?: string, fresh = false): { agentId: string; conversationId: string } {
+// `person`: whose builder screen it is: each person has their own DM with him.
+function ensureTuca(modelId?: string, fresh = false, person = db.ownerId()): { agentId: string; conversationId: string } {
   const s = settings()
   const works = worksWith(s)
   let tuca = db.agents().find((a) => a.kind === 'tuca')
@@ -772,16 +901,17 @@ function ensureTuca(modelId?: string, fresh = false): { agentId: string; convers
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
   }
-  let dm = db.conversations().find((c) => c.kind === 'dm' && c.name === tuca!.id)
+  const theirs = (c: { kind: 'channel' | 'dm'; owner?: string; name: string }): boolean => c.kind === 'dm' && c.name === tuca!.id && dmOwner(c, db.ownerId()) === person
+  let dm = db.conversations().find(theirs)
   if (dm && fresh) {
-    for (const m of db.messages()) if (m.conversationId === dm.id && m.run?.status === 'working') runner.stop(m.id)
+    for (const m of db.messagesWithRun(['working'])) if (m.conversationId === dm.id) runner.stop(m.id)
     db.deleteConversation(dm.id)
-    emit({ type: 'conversation_removed', id: dm.id })
+    emit({ type: 'conversation_removed', id: dm.id, for: person })
     dm = undefined
   }
   if (!dm) {
-    db.createConversation({ id: randomUUID(), kind: 'dm', name: tuca.id, members: [tuca.id] })
-    dm = db.conversations().find((c) => c.kind === 'dm' && c.name === tuca!.id)!
+    db.createConversation({ id: randomUUID(), kind: 'dm', name: tuca.id, members: [tuca.id], owner: person })
+    dm = db.conversations().find(theirs)!
     const hello: Message = { id: randomUUID(), conversationId: dm.id, author: { kind: 'agent', id: tuca.id }, text: tucaHello(), at: Date.now() }
     db.saveMessage(hello)
     emitConversations([dm.id])
@@ -797,6 +927,7 @@ function settleProposal(messageId: string, appliedId?: string): void {
   const updated: Message = { ...m, run: { ...m.run, proposal: { ...m.run.proposal, state: appliedId ? 'applied' : 'dismissed', ...(appliedId ? { appliedId } : {}) } } }
   db.saveMessage(updated)
   emit({ type: 'message', message: updated })
+  emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
 }
 
 // A Tuca's card is settled once: created (with the agent) or dismissed.
@@ -806,18 +937,123 @@ function settleDraft(messageId: string, agentId?: string): void {
   const updated: Message = { ...m, run: { ...m.run, agentDraft: { ...m.run.agentDraft, state: agentId ? 'created' : 'dismissed', ...(agentId ? { agentId } : {}) } } }
   db.saveMessage(updated)
   emit({ type: 'message', message: updated })
+  emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
 }
 
 
-const api: Api = {
-  markRead: ({ conversationId }) => {
-    db.markRead(conversationId)
+const PAGE = 100 // messages outside threads per conversation, per page sent to the window
+
+// Each method gets who is asking: every human action is that person's.
+type Handlers = { [M in Method]: (p: Params<M>, ctx: Ctx) => ReturnType<Api[M]> }
+
+// Someone else's DM is out of reach (and says so, no more); one that's gone, gone.
+function reach(ctx: Ctx, conversationId: string | undefined): void {
+  const why = people.conversationError(ctx.person, conversationId)
+  if (why) throw new Error(why)
+}
+// A message from a channel's heritage (People.visibleAt) is, to a member, as if it weren't there.
+function reachMessage(ctx: Ctx, messageId: string): void {
+  reach(ctx, db.messageConversation(messageId))
+  const m = db.message(messageId)
+  if (m && !people.visibleAt(ctx.person, m)) throw new Error(L('Essa mensagem não existe mais.', 'That message no longer exists.'))
+}
+// How a conversation works (threads, the wiki, its summary): a DM's person's; a channel's, whoever
+// made it and the admins, like its name and agents.
+function manage(ctx: Ctx, conversationId: string): void {
+  reach(ctx, conversationId)
+  const c = db.conversation(conversationId)
+  if (c?.kind === 'channel' && !mayEditChannel(ctx.person, c, db.ownerId())) throw new Error(channelEditError())
+}
+// A person's own memories are theirs alone to change; an agent's notes are the admins'.
+function ownMemory(ctx: Ctx, id: string): void {
+  const m = db.memory(id)
+  if (m) must(ctx.person, { kind: 'memory', scope: m.scope, ...(m.privateTo ? { privateTo: m.privateTo } : {}) })
+}
+// What the wiki made of a source is seen by whoever sees the source: one from someone's DM, by
+// them alone. A change or version whose source is gone went with it.
+const seesSource = (ctx: Ctx) => (sourceId: string): boolean => {
+  const src = wiki.source(sourceId)
+  return !!src && people.canSeeFrom(ctx.person, src.origin.conversationId)
+}
+// A change this person may know of: not from a source they don't see, not on a page held (or ever
+// held) for someone else, and, once decided, not from before the heritage (the owner's history, as
+// its versions are: wikiHistory). One rule for the list, a single read, and every action by id.
+const seesChange = (ctx: Ctx, c: WikiChange): boolean =>
+  (!c.source || seesSource(ctx)(c.source.id)) && !c.ops.some((o) => heldFrom(ctx, o.page) || everHeldFrom(ctx, o.page)) && (c.state === 'pending' || c.state === 'conflict' || (c.decidedAt ?? c.at) >= historySince(ctx))
+function changeInReach(ctx: Ctx, id: string): void {
+  const c = wiki.change(id)
+  if (c && !seesChange(ctx, c)) throw new Error(L('Essa mudança não existe mais.', 'That change no longer exists.'))
+}
+// Someone's DM, to an admin: that a source came from one, nothing of what it says.
+const privateSource = (s: WikiSource): WikiSource => ({ id: s.id, file: s.id, title: L('Uma fonte de uma conversa privada', 'A source from a private conversation'), kind: s.kind, origin: {}, addedBy: s.addedBy, addedAt: s.addedAt, private: true })
+const wikiSourcesFor = (ctx: Ctx, limit = 100): WikiSource[] =>
+  wiki.sources(limit).flatMap((s) => (people.canSeeFrom(ctx.person, s.origin.conversationId) ? [s] : isAdmin(ctx.person) ? [privateSource(s)] : []))
+// The team's log (owners and admins read it): who did what, never what a DM said.
+const record = (ctx: Ctx | undefined, kind: string, target?: string, detail?: Record<string, unknown>): void =>
+  void db.addActivity({ ...(ctx ? { personId: ctx.person.id } : {}), kind, ...(target ? { target } : {}), ...(detail ? { detail } : {}) })
+// A routine's rules: the team's are the admins'; a person's, theirs (and the admins').
+const mayRoutine = (ctx: Ctx, r: Pick<Routine, 'scope' | 'owner'> | undefined): void => must(ctx.person, { kind: 'routine', routine: r ?? { scope: 'channel' } })
+// A browser working for a conversation this person sees is theirs to take over; any other, the admins'.
+function mayBrowser(ctx: Ctx, agentId: string): void {
+  if (!people.canSeeFrom(ctx.person, browser.view(agentId)?.conversationId) || !browser.view(agentId)?.conversationId) must(ctx.person, { kind: 'admin' })
+}
+// What a removed person's DMs had running stops; their files go from the disk, and what the wiki
+// took from those DMs goes too. Only they could see any of it: no one else is told (not even the ids).
+function purged(all: Purged[]): void {
+  for (const p of all) {
+    for (const id of p.dms) {
+      runner.forgetSessions({ conversationId: id })
+      emit({ type: 'conversation_removed', id, for: p.person })
+    }
+    for (const r of p.routines) emit({ type: 'routine_removed', id: r.id, for: p.person })
+    for (const a of p.artifacts) rmSync(join(dataDir, 'artifacts', a.id), { recursive: true, force: true })
+    for (const src of wiki.sources(100_000)) if (src.origin?.conversationId && p.dms.includes(src.origin.conversationId)) wiki.removeSource(src.id)
+  }
+  if (all.some((p) => p.dms.length)) {
+    wiki.scrub() // what those sources proposed leaves the index's file too
+    emit({ type: 'wiki' })
+  }
+}
+// The Tucano gets its second person (its first invite, or someone joining): what was one person's
+// becomes a team's. Once. The channels' summaries (and their threads') are made again from what was
+// said there alone: while alone, the owner's DM memories fed them. The pages that came from the
+// owner's DMs stay theirs until they release each one, and the wiki's history from before is theirs.
+function inherit(): void {
+  if (db.meta('heritageAt')) return
+  const at = Date.now()
+  db.setMeta('heritageAt', String(at))
+  wiki.inherit(db.ownerId(), at)
+  // What a channel held before stays the owner's (People.visibleAt): the team's summaries start here.
+  for (const c of db.conversations()) if (c.kind === 'channel') bg(memory.rebuild(c.id, at), 'heritage')
+  emit({ type: 'wiki' })
+}
+const heritageAt = (): number => Number(db.meta('heritageAt') ?? 0)
+// The wiki's history from before the heritage: the owner's alone.
+const historySince = (ctx: Ctx): number => (ctx.person.role === 'owner' ? 0 : heritageAt())
+// The wiki as this person reads it: without the pages held for someone else, and (but the owner's)
+// its log from the heritage on.
+const wikiFor = (ctx: Ctx): WikiView => wiki.view(wiki.heldTitles(ctx.person.id), ctx.person.role === 'owner' ? {} : { viewer: ctx.person.id, afterSwitch: true, everHidden: wiki.everHeld(ctx.person.id) })
+// Whether a title (any spelling of it: see pageKey) is a page held for someone else.
+const heldFrom = (ctx: Ctx, title: string | undefined): boolean => !!title && wiki.heldTitles(ctx.person.id).has(pageKey(title))
+// ...or ever was (gone or renamed since, not released): what names it (a change's pages) isn't theirs either.
+const everHeldFrom = (ctx: Ctx, title: string | undefined): boolean => !!title && wiki.everHeld(ctx.person.id).has(pageKey(title))
+// A name someone may not take, said the same whether it's a page held for someone else or not.
+const titleUnavailable = (title: string): string => L(`Não dá pra usar o título "${title.trim()}". Escolha outro.`, `The title "${title.trim()}" can't be used. Pick another.`)
+
+// How the wiki's history names someone: the owner by the workspace's name, as before.
+const nameOf = (ctx: Ctx): string => (ctx.person.role === 'owner' ? settings().workspaceName : ctx.person.name) || L('Você', 'You')
+const emitPeople = (): void => emit({ type: 'people', people: db.people(), former: db.formerPeople() })
+
+const api: Handlers = {
+  markRead: ({ conversationId }, ctx) => {
+    reach(ctx, conversationId)
+    db.markRead(conversationId, ctx.person.id)
     emitConversations([conversationId])
   },
   // The page loads from file://, which can't fetch tucano:// (CORS); text comes through the core instead.
-  artifactText: ({ id }) => {
-    const a = db.artifacts().find((x) => x.id === id)
-    if (!a) return null
+  artifactText: ({ id }, ctx) => {
+    const a = db.artifact(id)
+    if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) return null
     const file = join(dataDir, 'artifacts', a.id, a.name)
     try {
       return readFileSync(file, 'utf8').slice(0, 2_000_000)
@@ -826,13 +1062,12 @@ const api: Api = {
     }
   },
 
-  snapshot: () => ({
+  snapshot: (_, ctx) => people.snapshotFor(ctx.person, {
     webhookPort: runtimePorts.webhook,
     defaultWorkspace,
     settings: settings(),
     agents: db.agents(),
-    conversations: db.conversations(),
-    messages: db.messages(),
+    ...db.openingMessages(PAGE), // each conversation's latest: the rest come as the scroll gets there
     connectors: connectors.list(),
     approvals: db.approvals(),
     memories: db.memories(),
@@ -847,30 +1082,50 @@ const api: Api = {
     // inside a container, can't have one, so it isn't.
     isolatedComputers: !serverMode || onPath('docker'),
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
-  }),
+  }, { server: serverMode }),
 
-  sendMessage: ({ conversationId, text, images, threadId }) => {
-    void runner.send(conversationId, text, images, threadId)
+  olderMessages: ({ conversationId, before, through }, ctx) => {
+    reach(ctx, conversationId)
+    // Back to a message to show (a reply: from its thread's first message), or one more page.
+    const target = through ? db.message(through) : undefined
+    const start = target?.threadId ? db.message(target.threadId) : target
+    const page = db.messagesBefore(conversationId, before, PAGE, start?.conversationId === conversationId ? start.at : undefined)
+    const messages = people.pageFor(ctx.person, page.messages)
+    // Past the heritage, to a member, there's nothing more to read.
+    return { messages, since: messages.length < page.messages.length ? 0 : page.since }
+  },
+  threadMessages: ({ rootId }, ctx) => {
+    const root = db.message(rootId)
+    if (!root) return []
+    reach(ctx, root.conversationId)
+    return people.pageFor(ctx.person, [root, ...db.recentMessages(root.conversationId, 100_000, rootId)])
   },
 
-  answerQuestion: ({ messageId, index, answer }) => runner.answer(messageId, index, answer),
-
-  submitAnswers: ({ messageId }) => runner.submitAnswers(messageId),
-
-  typing: ({ conversationId, threadId }) => {
-    void runner.typing(conversationId, threadId).catch((e: unknown) => console.warn('[typing]', e))
+  sendMessage: ({ conversationId, text, images, threadId }, ctx) => {
+    reach(ctx, conversationId)
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id), 'sendMessage')
   },
 
-  stopRun: ({ messageId }) => runner.stop(messageId),
+  typing: ({ conversationId, threadId, opened }, ctx) => {
+    reach(ctx, conversationId)
+    void runner.typing(conversationId, threadId, opened).catch((e: unknown) => console.warn('[typing]', e))
+  },
 
-  retryRun: ({ messageId }) => runner.retry(messageId),
+  stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
-  continueRun: ({ messageId }) => void runner.continue(messageId),
+  retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.retry(messageId)),
 
-  saveAgent: ({ agent, channelIds }) => {
+  continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), bg(runner.continue(messageId), 'continueRun')),
+
+  saveAgent: ({ agent, channelIds }, ctx) => {
     const before = db.agent(agent.id)
     // Archived changes only through archiveAgent, which also stops what the agent was doing.
-    const clean: Agent = { ...cleanLook(agent), name: agent.name.trim(), handle: agent.handle.trim().toLowerCase(), archived: before?.archived ?? false }
+    // Its owner changes only with the removal hand-over, never by an edit (one with none is the
+    // Tucano owner's, as db.agent reads it): a new one is whoever made it.
+    const clean: Agent = { ...cleanLook(agent), name: agent.name.trim(), handle: agent.handle.trim().toLowerCase(), archived: before?.archived ?? false, owner: before ? (before.owner ?? db.ownerId()) : ctx.person.id }
+    // One handle per agent (archived ones keep theirs), and none that reads as a person's (People.agentNameError).
+    const taken = people.agentNameError({ id: clean.id, name: clean.name, handle: clean.handle })
+    if (taken) throw new Error(taken)
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -878,165 +1133,204 @@ const api: Api = {
     // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
     if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})
     if (linux(before) && !linux(clean))
-      void computers.stopLinux(clean.id).then(() => {
+      bg(computers.stopLinux(clean.id).then(() => {
         if (mac(clean)) db.removeServices(clean.id) // the container's services don't exist on the Mac
         return computers.refresh(clean)
-      })
-    if (mac(before) && !mac(clean)) void computers.mac.stopAll(clean.id).then(() => computers.refresh(clean))
-    if (mac(clean) && !mac(before)) void computers.refresh(clean)
-    if (before?.browser && !clean.browser) void browser.close(clean.id) // its logins stay, for when it's turned back on
+      }), 'saveAgent')
+    if (mac(before) && !mac(clean)) bg(computers.mac.stopAll(clean.id).then(() => computers.refresh(clean)), 'saveAgent')
+    if (mac(clean) && !mac(before)) bg(computers.refresh(clean), 'saveAgent')
+    if (before?.browser && !clean.browser) bg(browser.close(clean.id), 'saveAgent') // its logins stay, for when it's turned back on
     const changed = db.setAgentChannels(clean.id, channelIds)
     emit({ type: 'agent', agent: db.agent(clean.id)! })
     emitConversations(changed)
+    record(ctx, before ? 'agent.updated' : 'agent.created', clean.id, { name: clean.name })
   },
 
   // Archived, an agent keeps its history and receipts but stops: replies running end,
   // its routines turn off, its browser closes. Its channels and settings stay for when it comes back.
-  archiveAgent: ({ id, archived }) => {
+  archiveAgent: ({ id, archived }, ctx) => {
     const agent = db.agent(id)
     if (!agent || agent.archived === archived) return
+    record(ctx, archived ? 'agent.archived' : 'agent.restored', id, { name: agent.name })
     if (archived) {
-      for (const m of db.messages()) if (m.author.kind === 'agent' && m.author.id === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
+      for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.author.kind === 'agent' && m.author.id === id) runner.stop(m.id)
       routines.pauseAgent(id)
       runner.forgetSessions({ agentId: id })
-      if (agent.browser) void browser.close(id)
+      if (agent.browser) bg(browser.close(id), 'archiveAgent')
     }
     db.saveAgent({ ...agent, archived })
     emit({ type: 'agent', agent: db.agent(id)! })
     emitConversations()
   },
-  renameChannel: ({ id, name }) => {
+  renameChannel: ({ id, name }, ctx) => {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
+    if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
     const clean = channelName(name)
     if (!clean) throw new Error(L('Dê um nome ao canal.', 'Give the channel a name.'))
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean && c.id !== id)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
     db.renameConversation(id, clean)
     emitConversations([id])
   },
-  setTopic: ({ id, topic }) => {
-    if (db.conversation(id)?.kind !== 'channel') return
+  setTopic: ({ id, topic }, ctx) => {
+    const conv = db.conversation(id)
+    if (conv?.kind !== 'channel') return
+    if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
     db.setTopic(id, topic.trim() || undefined)
     emitConversations([id])
   },
-  setChannelMembers: ({ id, agentIds }) => {
-    if (db.conversation(id)?.kind !== 'channel') return
+  setChannelMembers: ({ id, agentIds }, ctx) => {
+    const conv = db.conversation(id)
+    if (conv?.kind !== 'channel') return
+    if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
     const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
     db.setMembers(id, agentIds.filter((a) => known.has(a)))
     emitConversations([id])
   },
   // Everything that only made sense there goes too: replies still running stop,
   // its routines, its pending approvals.
-  localPath: ({ messageId, path }) => {
+  localPath: ({ messageId, path }, ctx) => {
+    reachMessage(ctx, messageId)
     const reach = localReach(messageId)
     const found = reach && resolveLocal(path, reach)
     if (!found) return null
     const base = serverMode ? '/local' : undefined
-    const seen = (found.kind === 'image' || found.kind === 'video') && localKey ? { url: localUrl(localKey, found.path, base) } : {}
+    // On a server, signed for this person: the address opens nothing for anyone else.
+    const whose = serverMode ? ctx.person.id : undefined
+    const seen = (found.kind === 'image' || found.kind === 'video') && localKey ? { url: localUrl(localKey, found.path, base, whose) } : {}
     // On a server the file isn't on the person's computer: showing it in Finder means nothing, saving it does.
-    const saved = serverMode && localKey && found.kind !== 'folder' ? { download: `${localUrl(localKey, found.path, base)}?download=1` } : {}
+    const saved = serverMode && localKey && found.kind !== 'folder' ? { download: `${localUrl(localKey, found.path, base, whose)}?download=1` } : {}
     return { kind: found.kind, ...seen, ...saved }
   },
-  openLocal: ({ messageId, path, how }) => {
+  openLocal: ({ messageId, path, how }, ctx) => {
+    reachMessage(ctx, messageId)
     const reach = localReach(messageId)
     const found = reach && resolveLocal(path, reach)
     if (found) toMain({ type: 'open_local', path: found.path, how: how === 'open' && (found.kind === 'folder' || found.kind === 'pdf') ? 'open' : 'reveal' })
   },
 
-  deleteConversation: ({ id }) => {
-    if (!db.conversation(id)) return
-    for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
+  deleteConversation: ({ id }, ctx) => {
+    const c = db.conversation(id)
+    if (!c) return
+    reach(ctx, id)
+    if (c.kind === 'channel') must(ctx.person, { kind: 'admin' })
+    record(ctx, c.kind === 'channel' ? 'channel.deleted' : 'dm.deleted', id, c.kind === 'channel' ? { name: c.name } : undefined)
+    for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
     for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
     for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
     runner.forgetSessions({ conversationId: id })
     db.deleteConversation(id)
-    emit({ type: 'conversation_removed', id })
+    emit({ type: 'conversation_removed', id, ...(c.kind === 'dm' ? { for: dmOwner(c, db.ownerId()) } : {}) })
   },
 
-  createChannel: ({ name, threads }) => {
+  createChannel: ({ name, threads }, ctx) => {
     const clean = channelName(name)
     if (!clean) throw new Error(L('Dê um nome ao canal.', 'Give the channel a name.'))
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
     const id = randomUUID()
-    db.createConversation({ id, kind: 'channel', name: clean, members: [], ...(threads ? { threads } : {}) })
+    db.createConversation({ id, kind: 'channel', name: clean, members: [], createdBy: ctx.person.id, ...(threads ? { threads } : {}) })
     emitConversations([id])
+    record(ctx, 'channel.created', id, { name: clean })
     return id
   },
 
-  ensureTuca: ({ modelId, fresh }) => ensureTuca(modelId, fresh),
-  createFromDraft: ({ messageId }) => {
+  ensureTuca: ({ modelId, fresh }, ctx) => ensureTuca(modelId, fresh, ctx.person.id),
+  createFromDraft: ({ messageId }, ctx) => {
+    reachMessage(ctx, messageId)
     const d = db.message(messageId)?.run?.agentDraft
     if (!d) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
     if (d.state === 'created' && d.agentId) throw new Error(L('Esse agente já foi criado.', 'That agent was already created.'))
-    const agent = agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit)
+    const agent = { ...agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit), owner: ctx.person.id }
     db.saveAgent(agent)
     emit({ type: 'agent', agent })
+    record(ctx, 'agent.created', agent.id, { name: agent.name })
     settleDraft(messageId, agent.id)
     const conversationId = randomUUID()
-    db.createConversation({ id: conversationId, kind: 'dm', name: agent.id, members: [agent.id] })
+    db.createConversation({ id: conversationId, kind: 'dm', name: agent.id, members: [agent.id], owner: ctx.person.id })
     emitConversations([conversationId])
     return { agentId: agent.id, conversationId }
   },
-  settleDraft: ({ messageId, agentId }) => settleDraft(messageId, agentId),
+  settleDraft: ({ messageId, agentId }, ctx) => (reachMessage(ctx, messageId), settleDraft(messageId, agentId)),
   // What a Tuca's card proposed, done the way the screens do it (and checked the same way).
-  applyProposal: ({ messageId }) => {
+  applyProposal: ({ messageId }, ctx) => {
+    if (!people.forwarded(ctx.person, messageId)) reachMessage(ctx, messageId)
     const p = db.message(messageId)?.run?.proposal
     if (!p) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
     if (p.state) throw new Error(p.state === 'applied' ? L('Essa proposta já foi aplicada.', 'That proposal was already applied.') : L('Essa proposta foi descartada.', 'That proposal was discarded.'))
+    // Agents are the admins': a member's card goes to them instead (they get what it proposes).
+    if ((p.kind === 'agent' || p.kind === 'team') && !isAdmin(ctx.person)) {
+      const what = p.kind === 'agent' ? L(`mudar ${db.agent(p.agentId)?.name ?? 'um agente'}`, `change ${db.agent(p.agentId)?.name ?? 'an agent'}`) : L(`criar ${p.agents.map((a) => a.name).join(', ')}`, `create ${p.agents.map((a) => a.name).join(', ')}`)
+      notifyAll(L(`${ctx.person.name} pede pra ${what}`, `${ctx.person.name} asks to ${what}`), p.reason ?? L('Uma proposta do Tuca que só um admin aplica.', 'A Tuca proposal only an admin can apply.'), undefined, undefined, { to: db.people().filter(isAdmin).map((x) => x.id) })
+      record(ctx, 'proposal.forwarded', messageId, { kind: p.kind })
+      emit({ type: 'inbox' })
+      throw new Error(L('Só um admin aplica isso: os admins foram avisados.', 'Only an admin can apply this: the admins were told.'))
+    }
+    if (p.kind === 'routine') mayRoutine(ctx, { scope: p.routine.scope, owner: ctx.person.id })
     let id: string
     if (p.kind === 'agent') {
       const agent = db.agent(p.agentId)
       if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
       const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
-      api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds })
+      api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds }, ctx)
       id = agent.id
     } else if (p.kind === 'routine') {
-      const conversationId = p.routine.conversationId || api.openDm({ agentId: p.routine.agentId })
-      id = routines.save({ ...p.routine, conversationId }).id
+      if (p.routine.conversationId) reach(ctx, p.routine.conversationId)
+      const conversationId = p.routine.conversationId || api.openDm({ agentId: p.routine.agentId }, ctx)
+      const made = routines.save({ ...p.routine, conversationId }, ctx.person.id)
+      id = made.id
+      record(ctx, 'routine.created', id, routineDetail(db, made))
     } else if (p.kind === 'channel') {
-      id = api.createChannel({ name: p.name, ...(p.threads ? { threads: true } : {}) })
-      api.setChannelMembers({ id, agentIds: p.members })
-      if (p.topic) api.setTopic({ id, topic: p.topic })
+      id = api.createChannel({ name: p.name, ...(p.threads ? { threads: true } : {}) }, ctx)
+      api.setChannelMembers({ id, agentIds: p.members }, ctx)
+      if (p.topic) api.setTopic({ id, topic: p.topic }, ctx)
     } else {
       // A team: its agents, each with a DM, and the channel they share when there is one.
       if (p.channel && db.conversations().some((c) => c.kind === 'channel' && c.name === p.channel!.name)) throw new Error(L(`Já existe o canal #${p.channel.name}.`, `There's already a #${p.channel.name} channel.`))
       const made: string[] = []
       for (const d of p.agents) {
-        const agent = agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit)
+        const agent = { ...agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit), owner: ctx.person.id }
         db.saveAgent(agent)
         emit({ type: 'agent', agent })
-        api.openDm({ agentId: agent.id })
+        record(ctx, 'agent.created', agent.id, { name: agent.name })
+        api.openDm({ agentId: agent.id }, ctx)
         made.push(agent.id)
       }
       if (p.channel) {
-        id = api.createChannel({ name: p.channel.name, ...(p.channel.threads ? { threads: true } : {}) })
-        api.setChannelMembers({ id, agentIds: made })
-        if (p.channel.topic) api.setTopic({ id, topic: p.channel.topic })
+        id = api.createChannel({ name: p.channel.name, ...(p.channel.threads ? { threads: true } : {}) }, ctx)
+        api.setChannelMembers({ id, agentIds: made }, ctx)
+        if (p.channel.topic) api.setTopic({ id, topic: p.channel.topic }, ctx)
       } else id = made[0]!
     }
     settleProposal(messageId, id)
     return { id }
   },
-  dismissProposal: ({ messageId }) => settleProposal(messageId),
-  openDm: ({ agentId }) => {
-    const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId)
+  dismissProposal: ({ messageId }, ctx) => (people.forwarded(ctx.person, messageId) || reachMessage(ctx, messageId), settleProposal(messageId)),
+  // One DM per agent and person.
+  openDm: ({ agentId }, ctx) => {
+    const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)
     if (existing) return existing.id
     const id = randomUUID()
-    db.createConversation({ id, kind: 'dm', name: agentId, members: [agentId] })
+    db.createConversation({ id, kind: 'dm', name: agentId, members: [agentId], owner: ctx.person.id })
     emitConversations([id])
     return id
   },
 
-  saveSkill: ({ skill }) => skills.save(skill),
-  localSkills: () => findLocalSkills(),
-  linkSkill: ({ source, agents }) => {
-    if (!findLocalSkills().some((k) => k.source === source)) throw new Error(L('Essa skill não está mais no seu Claude Code nem no Codex.', "That skill is no longer in your Claude Code or Codex."))
-    return skills.link(source, agents)
+  saveSkill: ({ skill }, ctx) => {
+    const saved = skills.save(skill)
+    record(ctx, skill.id ? 'skill.updated' : 'skill.created', saved.id, { name: saved.name })
+    return saved
   },
-  decideSkill: ({ id, approve }) => void skills.decide(id, approve),
-  restoreSkill: ({ skillId, versionId }) => void skills.restore(skillId, versionId),
-  archiveSkill: ({ id, archived }) => void skills.archive(id, archived),
-  removeSkill: ({ id }) => skills.remove(id),
+  localSkills: () => findLocalSkills(),
+  linkSkill: ({ source, agents }, ctx) => {
+    if (!findLocalSkills().some((k) => k.source === source)) throw new Error(L('Essa skill não está mais no seu Claude Code nem no Codex.', "That skill is no longer in your Claude Code or Codex."))
+    const linked = skills.link(source, agents)
+    record(ctx, 'skill.created', linked.id, { name: linked.name, source })
+    return linked
+  },
+  decideSkill: ({ id, approve }, ctx) => (record(ctx, 'skill.decided', id, { approve }), void skills.decide(id, approve)),
+  restoreSkill: ({ skillId, versionId }, ctx) => (record(ctx, 'skill.updated', skillId, { restored: versionId }), void skills.restore(skillId, versionId)),
+  archiveSkill: ({ id, archived }, ctx) => (record(ctx, archived ? 'skill.archived' : 'skill.restored', id), void skills.archive(id, archived)),
+  removeSkill: ({ id }, ctx) => (record(ctx, 'skill.removed', id), skills.remove(id)),
   skillVersions: ({ skillId }) => db.skillVersions(skillId),
 
   checkTrigger: ({ trigger }) => routines.preview(trigger),
@@ -1045,16 +1339,18 @@ const api: Api = {
     if (!telegram) throw new Error(L('O Telegram fica no workspace padrão.', 'Telegram belongs to the default workspace.'))
     return telegram.setToken(token)
   },
-  exportTeam: () => exportTeam(db),
-  importTeam: ({ text }) => {
-    const r = importTeam(db, text, settings().defaultLimit)
+  exportTeam: (_, ctx) => exportTeam(db, ctx.person.id),
+  importTeam: ({ text }, ctx) => {
+    const r = importTeam(db, text, settings().defaultLimit, ctx.person.id)
+    record(ctx, 'team.imported')
     for (const a of db.agents()) emit({ type: 'agent', agent: a })
     emitConversations()
     for (const k of db.skills()) emit({ type: 'skill', skill: k })
     for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
     return r
   },
-  importAgents: ({ path, data }) => {
+  importAgents: ({ path, data }, ctx) => {
+    record(ctx, 'team.imported')
     if (!path && !data) throw new Error(L('Escolha um arquivo .zip.', 'Choose a .zip file.'))
     const zip = path ? zipFromFile(path) : zipFromBuffer(Buffer.from(data!, 'base64'))
     try {
@@ -1077,7 +1373,7 @@ const api: Api = {
   },
   report: ({ week }) => report(db, Date.now(), week),
   usage: () => usage(db),
-  unpairTelegram: () => void telegram?.unpair(),
+  unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
   // Checked with TypeSafe before it's saved; null removes it.
   setJevKey: async ({ key }) => {
@@ -1091,6 +1387,7 @@ const api: Api = {
   // The models a harness offers, besides the app's list for a plan: what OpenCode
   // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
   engineModels: async ({ engine }) => {
+    if (!engineCheck.known) await enginesReady
     if (engine === 'codex' && codexCatalog.length)
       return { models: codexCatalog.map((m) => m.slug), labels: Object.fromEntries(codexCatalog.map((m) => [m.slug, { label: m.label, ...(m.description ? { hint: m.description } : {}) }])) }
     if (listed[engine]) return { models: listed[engine]! }
@@ -1109,6 +1406,7 @@ const api: Api = {
 
   // A real question through the chosen engine and model: what fails here would fail every reply.
   testEngine: async ({ model }) => {
+    await enginesReady
     const m = modelInfo(model)
     if (!m?.id) return { ok: false, message: L('Escolha um modelo pra testar.', 'Pick a model to test.') }
     const st = settings().engines[m.engine]
@@ -1133,29 +1431,63 @@ const api: Api = {
     const voice = settings().voice
     return { text: await transcriber.transcribe(id, audio, await dictation(), voice?.detect ? undefined : settings().language) }
   },
-  voiceDownload: ({ model }) => void modelDownload.start(model),
+  voiceDownload: ({ model }) => {
+    if (!Object.hasOwn(VOICE_MODELS, model)) throw new Error(L('Esse modelo de voz não existe.', "That voice model doesn't exist."))
+    bg(modelDownload.start(model), 'voiceDownload')
+  },
   voiceCancelDownload: () => modelDownload.cancel(),
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...patch } }) => {
-    if (patch.theme !== undefined && !isTheme(patch.theme)) throw new Error('Invalid theme')
+  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...all } }, ctx) => {
+    // Only the settings there are, each of its kind and size: what's kept goes to everyone, every snapshot.
+    const bad = settingsPatchError(all)
+    if (bad) throw new Error(bad)
+    must(ctx.person, { kind: 'settings', keys: Object.keys(all) })
+    // The settings' name is the owner's own: only they change it, and never to someone else's.
+    // Kept as typed (spaces too: the field saves at each key), less what can't be seen; the person's
+    // name is the same, cleaned, under the same rules as setMyName.
+    if (all.workspaceName !== undefined) {
+      if (ctx.person.role !== 'owner') throw new Error(L('Só o dono muda o próprio nome.', 'Only the owner changes their own name.'))
+      if (typeof all.workspaceName !== 'string') throw new Error('Invalid workspaceName')
+      all.workspaceName = stripInvisible(all.workspaceName)
+      const clean = cleanName(all.workspaceName)
+      if (clean.length > MAX_NAME) throw new Error(nameLongError())
+      if (clean && people.nameTaken(clean, ctx.person.id)) throw new Error(nameTakenError())
+    }
+    if (all.theme !== undefined && !isTheme(all.theme)) throw new Error('Invalid theme')
+    if (all.language !== undefined && all.language !== 'pt' && all.language !== 'en') throw new Error('Invalid language')
+    // Someone else's display preferences are theirs: kept on them, the rest is the Tucano's.
+    const patch = people.takePrefs(ctx.person, all)
+    if (Object.keys(patch).length === 0) return void emit({ type: 'settings', settings: settings() })
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     db.setSettings(patch)
+    // The settings' name is the owner's: what the agents call them.
+    if (patch.workspaceName && cleanName(patch.workspaceName)) {
+      db.renamePerson(db.ownerId(), cleanName(patch.workspaceName))
+      emitPeople()
+    }
     if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
-    if (patch.onboarding?.done) void ready.then(() => ensureTuca()) // skipping the introduction still gets the Tuca
+    if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
     emit({ type: 'settings', settings: settings() })
   },
 
   // Validation errors come back to the form; connecting continues in the background.
-  addConnector: ({ input }) => connectors.add(input, !serverMode), // a server hands the sign-in page over with Authorize instead
+  addConnector: async ({ input }, ctx) => {
+    const id = await connectors.add(input, !serverMode) // a server hands the sign-in page over with Authorize instead
+    record(ctx, 'connector.created', id, { name: input.name })
+    return id
+  },
 
-  removeConnector: ({ id }) => void connectors.remove(id),
-  reconnectConnector: ({ id }) => void connectors.connect(id),
+  removeConnector: ({ id }, ctx) => (record(ctx, 'connector.removed', id, { name: connectors.list().find((c) => c.id === id)?.name }), bg(connectors.remove(id), 'removeConnector')),
+  reconnectConnector: ({ id }) => {
+    if (!connectors.list().some((c) => c.id === id)) throw new Error(L('Esse conector não existe mais.', 'That connector no longer exists.'))
+    bg(connectors.connect(id), 'reconnectConnector')
+  },
   setConnectorToken: ({ id, token }) => connectors.setToken(id, token),
   ownApp: ({ provider }) => connectors.ownApp(provider),
   setOwnApp: ({ provider, clientId, clientSecret }) => connectors.setOwnApp(provider, { clientId, clientSecret }),
@@ -1165,27 +1497,50 @@ const api: Api = {
   },
   finishConnectorAuth: ({ url }) => connectors.finishOAuthFromUrl(url),
   harnessMcps: async () => (await foundMcps()).map(publicMcp),
-  importHarnessMcp: async ({ key }) => {
+  importHarnessMcp: async ({ key }, ctx) => {
     const m = (await foundMcps()).find((x) => x.key === key)
     if (!m) throw new Error(L('Esse servidor não está mais na configuração do harness.', "That server is no longer in the harness's configuration."))
     if (m.added) throw new Error(L(`${m.name} já é um conector.`, `${m.name} is already a connector.`))
-    return connectors.add(m.input)
+    const id = await connectors.add(m.input)
+    record(ctx, 'connector.created', id, { name: m.name })
+    return id
   },
-  updateTool: ({ connectorId, name, patch }) => connectors.updateTool(connectorId, name, patch),
-  decideApproval: ({ id, decision, reason, always }) => void runner.decide(id, decision, reason?.trim() || undefined, always),
+  updateTool: ({ connectorId, name, patch }, ctx) => (record(ctx, 'connector.updated', connectorId, { tool: name, ...patch }), connectors.updateTool(connectorId, name, patch)),
+  // The agent's person, admins, and whoever covers for that person now.
+  decideApproval: ({ id, decision, reason, always }, ctx) => {
+    const a = db.approval(id)
+    if (!a) return
+    if (!people.canSeeApproval(ctx.person, a)) throw new Error(L('Esse pedido não existe mais.', 'That request no longer exists.'))
+    must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, a.agentId) })
+    bg(runner.decide(id, decision, reason?.trim() || undefined, always, ctx.person.id), 'decideApproval')
+  },
 
-  addMemory: ({ scope, text }) => memory.add(scope, text),
-  editMemory: ({ id, text }) => memory.edit(id, text),
-  confirmMemory: ({ id }) => memory.confirm(id),
-  decideMemory: ({ id, accept }) => memory.decide(id, accept),
-  forgetMemory: ({ id, reason }) => memory.forget(id, reason?.trim() || undefined),
-  purgeMemory: ({ id }) => memory.purge(id),
-  editSummary: ({ conversationId, text }) => memory.editSummary(conversationId, text),
-  summarizeNow: ({ conversationId }) => void memory.consolidate(conversationId, true),
-  editThreadSummary: ({ rootId, text }) => memory.editThreadSummary(rootId, text),
-  summarizeThreadNow: ({ rootId }) => void memory.consolidateThread(rootId, 'now'),
+  // "About me" ('me', from screens of before people) is the person's own scope; no one writes in another's.
+  addMemory: ({ scope, text }, ctx) => {
+    const of = scope === 'me' ? ctx.person.id : scopePerson(scope)
+    if (of && of !== ctx.person.id) throw new Error(L('Só a própria pessoa guarda memórias sobre ela.', 'Only a person keeps memories about themselves.'))
+    const final = of ? personScope(of) : scope
+    must(ctx.person, { kind: 'memory', scope: final })
+    memory.add(final, text)
+  },
+  editMemory: ({ id, text }, ctx) => (ownMemory(ctx, id), memory.edit(id, text)),
+  confirmMemory: ({ id }, ctx) => (ownMemory(ctx, id), memory.confirm(id)),
+  decideMemory: ({ id, accept }, ctx) => (ownMemory(ctx, id), memory.decide(id, accept)),
+  forgetMemory: ({ id, reason }, ctx) => (ownMemory(ctx, id), memory.forget(id, reason?.trim() || undefined)),
+  purgeMemory: ({ id }, ctx) => (ownMemory(ctx, id), memory.purge(id)),
+  // The agents read it as the conversation so far: a channel's is its managers' to write.
+  editSummary: ({ conversationId, text }, ctx) => {
+    manage(ctx, conversationId)
+    memory.editSummary(conversationId, text)
+    if (db.conversationOwner(conversationId)?.kind === 'channel') record(ctx, 'channel.summary_edited', conversationId)
+  },
+  summarizeNow: ({ conversationId }, ctx) => (manage(ctx, conversationId), bg(memory.consolidate(conversationId, true), 'summarizeNow')),
+  // A thread's summary goes by its conversation's rule: a channel's, its managers'.
+  editThreadSummary: ({ rootId, text }, ctx) => (manage(ctx, db.messageConversation(rootId) ?? ''), reachMessage(ctx, rootId), memory.editThreadSummary(rootId, text)),
+  summarizeThreadNow: ({ rootId }, ctx) => (manage(ctx, db.messageConversation(rootId) ?? ''), reachMessage(ctx, rootId), bg(memory.consolidateThread(rootId, 'now'), 'summarizeThreadNow')),
 
-  computerAction: ({ agentId, action }) => {
+  computerAction: ({ agentId, action }, ctx) => {
+    admitComputer(ctx.person, action)
     const agent = db.agent(agentId)
     if (!agent) return
     if (action === 'open_folder') {
@@ -1195,14 +1550,20 @@ const api: Api = {
     const run = { start: () => computers.ensure(agentId), restart: () => computers.restart(agentId), erase: () => computers.erase(agentId), refresh: () => computers.refresh(agent) }[action]
     void run().catch((e: unknown) => console.error('[computer]', e))
   },
-  stopService: ({ agentId, name }) => void computers.stopService(agentId, name),
+  stopService: ({ agentId, name }) => {
+    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    bg(computers.stopService(agentId, name), 'stopService')
+  },
   // Driving a taken-over browser from the panel (Tucano as a server: no window to open).
-  browserInput: async ({ agentId, input }) => {
+  browserInput: async ({ agentId, input }, ctx) => {
     if (!serverMode || !chrome) throw new Error(L('Só no Tucano em servidor.', 'Only on Tucano as a server.'))
+    mayBrowser(ctx, agentId)
     await chrome.run(agentId, 'input', input)
   },
 
-  browserAction: ({ agentId, action }) => {
+  browserAction: ({ agentId, action }, ctx) => {
+    if (action === 'clear') must(ctx.person, { kind: 'admin' })
+    else mayBrowser(ctx, agentId)
     const agent = db.agent(agentId)
     if (agent) void browser.action(agent, action).catch((e: unknown) => console.error('[navegador]', e))
   },
@@ -1225,81 +1586,189 @@ const api: Api = {
   },
   openExternal: ({ url }) => toMain({ type: 'open', url }),
 
-  saveRoutine: ({ routine }) => routines.save(routine),
-  removeRoutine: ({ id }) => routines.remove(id),
-  wiki: () => ({ dir: wiki.dir, pages: wiki.list(), kinds: wiki.kinds(), log: wiki.log(), pending: [...wiki.changes('pending'), ...wiki.changes('conflict')].filter((c) => c.by !== 'review').length, findings: wiki.findings().length, server: serverMode, graph: wiki.graph(), recent: wiki.recent(), sources: wiki.sourceCount() }),
-  wikiPage: ({ title }) => wiki.page(title) ?? null,
-  wikiSearch: ({ q }) => wiki.search(q, 20),
-  wikiSave: ({ title, body, kind, expectedHash, rename }) => wiki.save({ title, body, by: 'me', byName: settings().workspaceName || L('Você', 'You'), ...(kind !== undefined ? { kind } : {}), ...(expectedHash !== undefined ? { expectedHash } : {}), ...(rename ? { rename } : {}) }),
-  wikiRemove: ({ title }) => wiki.remove(title, 'me', settings().workspaceName || L('Você', 'You')),
-  wikiHistory: ({ title }) => wiki.history(title),
-  wikiRestore: ({ id }) => wiki.restore(id, 'me', settings().workspaceName || L('Você', 'You')),
+  // A person's own routine is anyone's to make for themselves; a channel's, the admins'. A connector
+  // check (a trigger reading a connector) is the admins' too: connectors are.
+  saveRoutine: ({ routine }, ctx) => {
+    const prev = people.routineSave(ctx.person, routine)
+    const saved = routines.save(routine, ctx.person.id)
+    record(ctx, prev ? 'routine.updated' : 'routine.created', saved.id, routineDetail(db, saved))
+    return saved
+  },
+  removeRoutine: ({ id }, ctx) => {
+    const r = db.routine(id)
+    reach(ctx, r?.conversationId)
+    mayRoutine(ctx, r)
+    record(ctx, 'routine.removed', id, routineDetail(db, r))
+    routines.remove(id)
+  },
+  // "Me avise": told of a channel routine's runs (one's own routine always tells its person).
+  watchRoutine: ({ id, on }, ctx) => {
+    people.watch(ctx.person, id)
+    db.watchRoutine(id, ctx.person.id, on)
+    emit({ type: 'routine', routine: db.routine(id)! })
+  },
+  wiki: (_, ctx) => {
+    const w = wikiFor(ctx)
+    const owner = ctx.person.role === 'owner' && heritageAt() > 0
+    return {
+      dir: ctx.person.role === 'owner' ? wiki.dir : '', // a path on the owner's machine
+      pages: w.list(),
+      kinds: w.kinds(),
+      log: w.log(),
+      pending: [...wiki.changes('pending'), ...wiki.changes('conflict')].filter((c) => c.by !== 'review' && seesChange(ctx, c)).length,
+      findings: wiki.findings().filter((f) => !f.pages.some((t) => heldFrom(ctx, t))).length,
+      server: serverMode,
+      graph: w.graph(),
+      recent: w.recent(12, seesSource(ctx), historySince(ctx)),
+      sources: wikiSourcesFor(ctx, 100_000).length,
+      // The owner's, after the heritage: the pages still held for them, and the notice until they've read it.
+      ...(owner ? { held: wiki.held(ctx.person.id) } : {}),
+      ...(owner && !db.meta('heritageSeen') ? { heritage: { at: heritageAt() } } : {})
+    }
+  },
+  wikiPage: ({ title }, ctx) => wikiFor(ctx).page(title) ?? null,
+  wikiSearch: ({ q }, ctx) => wikiFor(ctx).search(q, 20),
+  // A page held for someone else is as good as taken: its name isn't free, and it isn't there to change.
+  wikiSave: ({ title, body, kind, expectedHash, rename }, ctx) => {
+    if (heldFrom(ctx, rename)) throw new Error(L('Essa página não existe mais.', 'That page no longer exists.'))
+    if (heldFrom(ctx, title)) throw new Error(titleUnavailable(title))
+    return wiki.save({ title, body, by: ctx.person.id, byName: nameOf(ctx), ...(kind !== undefined ? { kind } : {}), ...(expectedHash !== undefined ? { expectedHash } : {}), ...(rename ? { rename } : {}) })
+  },
+  wikiRemove: ({ title }, ctx) => (heldFrom(ctx, title) ? undefined : wiki.remove(title, ctx.person.id, nameOf(ctx))),
+  wikiHistory: ({ title }, ctx) => (heldFrom(ctx, title) ? [] : wiki.history(title, seesSource(ctx), historySince(ctx), ctx.person.id)),
+  // Like editing the page (anyone), but never a version this person can't see: from a source they
+  // don't see, of a page held for someone else, or from before the heritage (the owner's).
+  wikiRestore: ({ id }, ctx) => {
+    const from = wiki.versionSource(id)
+    const v = wiki.versionInfo(id)
+    if (!v || (from && !seesSource(ctx)(from)) || wiki.heldTitles(ctx.person.id).has(v.key) || (v.heldFor && v.heldFor !== ctx.person.id) || v.at < historySince(ctx)) throw new Error(L('Essa versão não existe mais.', 'That version no longer exists.'))
+    const { reheld, ...page } = wiki.restore(id, ctx.person.id, nameOf(ctx))
+    // Text from a DM put back on a page the team could read: the page is held again (never published
+    // in silence), and its owner hears why.
+    if (reheld) {
+      notifyAll(L('Página guardada pra você', 'Page held for you'), L(`"${page.title}" tem texto que veio de uma conversa privada: ficou só sua até você liberar pro time.`, `"${page.title}" has text from a private conversation: it's yours alone until you release it to the team.`), undefined, undefined, { to: [db.ownerId()] })
+      emit({ type: 'wiki' })
+    }
+    return page
+  },
+  // "Liberar pro time": a page held for this person is everyone's from now on.
+  wikiRelease: ({ title }, ctx) => {
+    const page = wiki.held(ctx.person.id).find((h) => pageKey(h.title) === pageKey(title))
+    if (!page) throw new Error(L('Essa página não está guardada pra você.', "That page isn't held for you."))
+    wiki.release(page.title)
+    record(ctx, 'wiki.released', undefined, { title: page.title })
+  },
+  heritageSeen: (_, ctx) => {
+    must(ctx.person, { kind: 'owner' })
+    db.setMeta('heritageSeen', '1')
+    emit({ type: 'wiki' })
+  },
   wikiSchema: () => wiki.schema(),
   wikiSaveSchema: ({ text }) => wiki.saveSchema(text),
-  wikiChanges: ({ state }) => wiki.changes(state),
-  wikiChange: ({ id }) => wiki.change(id) ?? null,
-  wikiApplyChange: ({ id }) => wiki.applyChange(id, settings().workspaceName || L('Você', 'You')),
-  wikiRefuseChange: ({ id }) => wiki.refuseChange(id),
-  wikiUndoChange: ({ id }) => wiki.undoChange(id, settings().workspaceName || L('Você', 'You')),
-  wikiSources: () => wiki.sources(),
-  wikiSource: ({ id }) => wiki.source(id) ?? null,
-  wikiKeepMessage: async ({ messageId }) => (await curator.keepMessage(messageId)).length,
-  wikiRedoChange: async ({ id }) => (await curator.redo(id)).length,
-  wikiAddFile: async ({ name, data }) => {
+  wikiChanges: ({ state }, ctx) => wiki.changes(state).filter((c) => seesChange(ctx, c)),
+  wikiChange: ({ id }, ctx) => {
+    const c = wiki.change(id)
+    return c && seesChange(ctx, c) ? c : null
+  },
+  wikiApplyChange: ({ id }, ctx) => (changeInReach(ctx, id), wiki.applyChange(id, nameOf(ctx))),
+  wikiRefuseChange: ({ id }, ctx) => (changeInReach(ctx, id), wiki.refuseChange(id)),
+  // Undoing puts back what the pages were: from before the heritage, that's the owner's history to restore.
+  wikiUndoChange: ({ id }, ctx) => {
+    // Said in so many words (before the reach check hides the change as the owner's history).
+    if ((wiki.change(id)?.decidedAt ?? Infinity) < historySince(ctx)) throw new Error(L('Só o dono desfaz uma mudança de antes de o Tucano ter mais gente.', 'Only the owner undoes a change from before the Tucano had more people.'))
+    changeInReach(ctx, id)
+    wiki.undoChange(id, nameOf(ctx), ctx.person.id)
+  },
+  // A source that came from a conversation is for whoever can see that conversation. An admin sees
+  // that one from someone's DM exists (decision 1), and may delete it, never what it says.
+  wikiSources: (_, ctx) => wikiSourcesFor(ctx),
+  wikiSource: ({ id }, ctx) => {
+    const src = wiki.source(id)
+    if (!src) return null
+    if (people.canSeeFrom(ctx.person, src.origin.conversationId)) return src
+    return isAdmin(ctx.person) ? { ...privateSource(src), text: '' } : null
+  },
+  // The admins', and a DM's own person's for a source from their DM.
+  wikiRemoveSource: ({ id }, ctx) => {
+    const src = wiki.source(id)
+    if (!src) return
+    const c = src.origin.conversationId ? db.conversationOwner(src.origin.conversationId) : undefined
+    const theirs = !!c && dmOwner(c, db.ownerId()) === ctx.person.id
+    if (!isAdmin(ctx.person) && !theirs) throw new Error(L('Só um admin pode fazer isso.', 'Only an admin can do that.'))
+    if (!wiki.removeSource(src.id)) return
+    // A DM's source leaves no title in the log (its words are the DM's); any other, its title.
+    record(ctx, 'wiki.source_removed', src.id, c?.kind === 'dm' ? { private: true } : { title: src.title })
+  },
+  wikiKeepMessage: async ({ messageId }, ctx) => (reachMessage(ctx, messageId), (await curator.keepMessage(messageId)).length),
+  wikiRedoChange: async ({ id }, ctx) => (changeInReach(ctx, id), (await curator.redo(id)).length),
+  wikiAddFile: async ({ name: given, data }, ctx) => {
+    const name = cleanTitle(given)
+    if (!name || /[\u0000-\u001f]/.test(given)) throw new Error(L('Esse nome de arquivo tem caracteres que não valem.', 'That file name has characters that are not allowed.'))
     const buf = Buffer.from(data, 'base64')
     const text = await extractFile(name, buf)
-    const src = wiki.addSource({ title: name, text, kind: 'file', file: { name, data: buf }, by: 'me', status: 'reading' })
-    void curator.ingest(src.id)
+    const src = wiki.addSource({ title: name, text, kind: 'file', file: { name, data: buf }, by: ctx.person.id, status: 'reading' })
+    bg(curator.ingest(src.id), 'wikiIngest')
     return src
   },
-  wikiAddLink: async ({ url }) => {
-    const page = await extractLink(url.trim())
-    const src = wiki.addSource({ title: page.title, text: `${url.trim()}\n\n${page.text}`, kind: 'link', origin: { url: url.trim() }, by: 'me', status: 'reading' })
-    void curator.ingest(src.id)
+  wikiAddLink: async ({ url }, ctx) => {
+    // The desktop's owner reads any link, a local one too, as always; on a server, or for anyone
+    // else, the machine's own network (loopback, LAN, the cloud's metadata) is out of reach.
+    const page = await extractLink(url.trim(), !serverMode && ctx.person.role === 'owner' ? fetch : undefined)
+    const src = wiki.addSource({ title: page.title, text: `${url.trim()}\n\n${page.text}`, kind: 'link', origin: { url: url.trim() }, by: ctx.person.id, status: 'reading' })
+    bg(curator.ingest(src.id), 'wikiIngest')
     return src
   },
-  wikiAddNote: ({ text, title }) => {
-    const first = text.trim().split('\n')[0]!.replace(/^#+\s*/, '').slice(0, 60)
-    const src = wiki.addSource({ title: title?.trim() || first || L('Anotação', 'Note'), text, kind: 'note', by: 'me', status: 'reading' })
-    void curator.ingest(src.id)
+  wikiAddNote: ({ text, title }, ctx) => {
+    if (title && /\u0000/.test(title)) throw new Error(L('Esse título tem caracteres que não valem.', 'That title has characters that are not allowed.'))
+    const first = cleanTitle(text.trim().split('\n')[0]!.replace(/^#+\s*/, '')).slice(0, 60)
+    const src = wiki.addSource({ title: cleanTitle(title ?? '') || first || L('Anotação', 'Note'), text, kind: 'note', by: ctx.person.id, status: 'reading' })
+    bg(curator.ingest(src.id), 'wikiIngest')
     return src
   },
-  wikiOpenOriginal: ({ id }) => {
+  wikiOpenOriginal: ({ id }, ctx) => {
+    if (!people.canSeeFrom(ctx.person, wiki.source(id)?.origin.conversationId)) return null
     const p = wiki.originalPath(id)
     if (!p || !existsSync(p)) return null
     if (serverMode) return { name: basename(p), data: readFileSync(p).toString('base64') }
     toMain({ type: 'open_path', path: p })
     return null
   },
-  wikiIngestAgain: ({ id }) => void curator.ingest(id),
-  wikiReview: () => reviewer.status(),
+  wikiIngestAgain: ({ id }, ctx) => {
+    if (people.canSeeFrom(ctx.person, wiki.source(id)?.origin.conversationId)) bg(curator.ingest(id), 'wikiIngest')
+  },
+  wikiReview: (_, ctx) => {
+    const r = reviewer.status()
+    return { ...r, findings: r.findings.filter((f) => !f.pages.some((t) => heldFrom(ctx, t)) && !(f.change && !seesChange(ctx, f.change))) }
+  },
   wikiRunReview: () => {
-    void reviewer.review().then(() => emit({ type: 'wiki' }))
+    bg(reviewer.review().then(() => emit({ type: 'wiki' })), 'wikiRunReview')
     emit({ type: 'wiki' })
   },
   wikiDismissFinding: ({ id }) => wiki.dismissFinding(id),
-  wikiImport: ({ dir }) => wiki.importVault(dir, settings().workspaceName || L('Você', 'You')),
+  wikiImport: ({ dir }, ctx) => wiki.importVault(dir, nameOf(ctx)),
   // On a server: a vault zipped on the person's computer and sent up. Only from the uploads folder
   // the server writes to; unpacked apart, copied in as any vault, then both go.
-  wikiImportZip: ({ path }) => {
+  wikiImportZip: ({ path }, ctx) => {
     const uploads = join(dataDir, 'uploads')
     if (!serverMode || typeof path !== 'string' || !resolve(path).startsWith(uploads + sep) || !path.toLowerCase().endsWith('.zip')) throw new Error(L('Envie o vault como um arquivo .zip.', 'Send the vault as a .zip file.'))
     const unpacked = mkdtempSync(join(uploads, 'vault-'))
     const zip = zipFromFile(path)
     try {
-      return wiki.importVault(extractZip(zip, unpacked), settings().workspaceName || L('Você', 'You'))
+      return wiki.importVault(extractZip(zip, unpacked), nameOf(ctx))
     } finally {
       zip.close()
       rmSync(unpacked, { recursive: true, force: true })
       rmSync(path, { force: true })
     }
   },
-  setWikiCapture: ({ conversationId, on }) => {
+  setWikiCapture: ({ conversationId, on }, ctx) => {
+    manage(ctx, conversationId)
     db.setWikiCapture(conversationId, on)
     const c = db.conversation(conversationId)
     if (c) emit({ type: 'conversation', conversation: c })
   },
-  setThreads: ({ conversationId, on }) => {
+  setThreads: ({ conversationId, on }, ctx) => {
+    manage(ctx, conversationId)
     db.setThreads(conversationId, on)
     const c = db.conversation(conversationId)
     if (c) emit({ type: 'conversation', conversation: c })
@@ -1314,10 +1783,88 @@ const api: Api = {
     return next
   },
   openWikiFolder: () => (serverMode ? undefined : toMain({ type: 'open_path', path: wiki.dir })),
-  runRoutine: ({ id }) => routines.runNow(id),
 
+  // The owner's name is also the settings' (what the agents have always called them).
+  setMyName: ({ name, about }, ctx) => {
+    const clean = cleanName(name)
+    if (!clean) throw new Error(L('Diga seu nome.', 'Tell us your name.'))
+    if (clean.length > MAX_NAME) throw new Error(nameLongError())
+    if (people.nameTaken(clean, ctx.person.id)) throw new Error(nameTakenError())
+    db.renamePerson(ctx.person.id, clean)
+    if (typeof about === 'string') db.setAbout(ctx.person.id, about.trim().slice(0, 500))
+    if (ctx.person.role === 'owner') {
+      db.setSettings({ workspaceName: clean })
+      emit({ type: 'settings', settings: settings() })
+    }
+    emitPeople()
+  },
+  setDelegation: ({ to, until }, ctx) => {
+    people.setDelegation(ctx.person, to, until)
+    emitPeople()
+    emit({ type: 'inbox' })
+  },
+  createInvite: (p, ctx) => {
+    const invite = people.createInvite(ctx.person, p)
+    inherit()
+    return invite
+  },
+  revokeInvite: ({ id }, ctx) => people.revokeInvite(ctx.person, id),
+  listInvites: () => db.invites(),
+  removedPeople: () => db.removedPeople(),
+  // Access ends now: keys, open connections, the server's remembered sign-ins. Their agents and
+  // routines go to the owner; their DMs and memories wait 30 days for a re-invite (the daily sweep).
+  removePerson: ({ id }, ctx) => {
+    const { agents, routines: given } = people.remove(ctx.person, id)
+    hub.closeFor(id)
+    viewing.delete(id)
+    toMain({ type: 'person-removed', id })
+    for (const a of agents) emit({ type: 'agent', agent: db.agent(a)! })
+    for (const r of given) emit({ type: 'routine', routine: db.routine(r)! })
+    emitPeople()
+    emit({ type: 'inbox' })
+  },
+  setRole: ({ id, role }, ctx) => {
+    people.setRole(ctx.person, id, role)
+    // The server's remembered sign-in carries the role: it asks again on the next request.
+    toMain({ type: 'person-changed', id })
+    emitPeople()
+    emit({ type: 'inbox' })
+  },
+  purgePerson: ({ id }, ctx) => purged([people.purge(ctx.person, id)]),
+  // Leaving on one's own: gone now, with what was theirs alone. Their own line closes a moment after
+  // the answer, so the app hears that it worked.
+  leave: (_, ctx) => {
+    const id = ctx.person.id
+    const { agents, routines: given, purged: gone } = people.leave(ctx.person)
+    purged([gone])
+    for (const a of agents) emit({ type: 'agent', agent: db.agent(a)! })
+    for (const r of given) emit({ type: 'routine', routine: db.routine(r)! })
+    setTimeout(() => {
+      hub.closeFor(id)
+      viewing.delete(id)
+      toMain({ type: 'person-removed', id })
+      emitPeople()
+      emit({ type: 'inbox' })
+    }, 200)
+  },
+  activity: ({ personId, kind, before }) => db.activity({ personId, kind, before }),
+  inbox: (_, ctx) => people.inbox(ctx.person),
+  answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),
+  confirmQuestion: ({ id, ok }, ctx) => runner.confirm(id, ok, ctx.person),
+  // A question's decisions, answered on the card one at a time and then sent: by whoever may answer it (Runner.decidable).
+  answerDecision: ({ messageId, index, answer }, ctx) => runner.answerDecision(messageId, index, answer, ctx.person),
+  submitDecisions: ({ messageId }, ctx) => runner.submitDecisions(messageId, ctx.person),
+  runRoutine: ({ id }, ctx) => {
+    const r = db.routine(id)
+    if (!r) throw new Error(L('Essa rotina não existe mais.', 'That routine no longer exists.'))
+    reach(ctx, r.conversationId)
+    mayRoutine(ctx, r)
+    return routines.runNow(id)
+  },
+
+  // While a sign-in or an install is being watched, only that harness: the screens ask every few seconds.
   refreshEngines: () => {
-    void detect()
+    bg(watched ? engineCheck.recheck(watched) : detect(), 'refreshEngines')
   },
 
   // Login always happens in the CLI's own flow; the app never sees credentials.
@@ -1330,10 +1877,17 @@ const api: Api = {
 
   // Another login of Claude Code or Codex: a folder of its own, signed into in a terminal like the first.
   addAccount: ({ engine, name }) => {
+    if (!ACCOUNT_ENGINES.includes(engine)) throw new Error(L('Só dá pra ter outra conta do Claude Code ou do Codex.', 'Only Claude Code or Codex can have another account.'))
     const account: Account = { id: randomUUID().slice(0, 8), engine, name: name.trim() || ENGINES[engine].label }
     mkdirSync(join(accountDir(dataDir, account.id), '.codex'), { recursive: true })
     db.setSettings({ accounts: [...savedAccounts(), account] })
-    void checkAccounts(account.id).then(() => emit({ type: 'settings', settings: settings() }))
+    bg(
+      checkAccounts(account.id).then(() => {
+        engineCheck.setAccounts(Object.fromEntries(accountLogins))
+        emit({ type: 'settings', settings: settings() })
+      }),
+      'addAccount'
+    )
     emit({ type: 'settings', settings: settings() })
     return account
   },
@@ -1377,7 +1931,7 @@ const api: Api = {
   installDesktop: () => installer('npm install -g agent-desktop@1.0.2'), // the version the apps feature is tested with
   desktopPermissions: () => {
     // Opens the system's privacy settings at Accessibility (agent-desktop knows where).
-    void desktopApps.guide()
+    bg(desktopApps.guide(), 'desktopPermissions')
   }
 }
 
@@ -1398,29 +1952,45 @@ function installer(command: string): { opened: boolean; command: string; needsNo
   return { opened: !!term, command }
 }
 
+// What a call leaves running in the background: a failure there is logged, never a crash (an
+// unhandled rejection ends the process: on a server, everyone's Tucano).
+function bg(p: Promise<unknown>, what: string): void {
+  p.catch((e: unknown) => console.error(`[core] ${what}`, e))
+}
+// The last line of defense, for one that slipped through: logged, the core goes on.
+process.on('unhandledRejection', (e) => console.error('[core] unhandled rejection', e))
+
 function handle(port: MessagePortMain, req: Request): void {
   const reply = (r: Omit<Extract<Wire, { id: number }>, 'id'>): void => port.postMessage({ id: req.id, ...r } satisfies Wire)
-  const fn = api[req.method as Method] as ((p: unknown) => unknown) | undefined
+  const fn = api[req.method as Method] as ((p: unknown, ctx: Ctx) => unknown) | undefined
   if (!fn) return reply({ error: `unknown method ${req.method}` })
   if (closing) return reply({ error: L('Este workspace está sendo excluído.', 'This workspace is being deleted.') })
+  // Who asks is read now: a person removed since doesn't act anymore.
+  const person = hub.personOf(port)
+  if (!person) return reply({ error: L('Seu acesso a este Tucano terminou.', 'Your access to this Tucano has ended.') })
+  // The params must have the shape the contract says, before any handler reads them.
+  const wrong = paramsError(req.method as Method, req.params) ?? limitError(req.method as Method, req.params)
+  if (wrong) return reply({ error: wrong })
   Promise.resolve()
-    .then(() => fn(req.params))
+    .then(() => (admit(person, req.method as Method), fn(req.params ?? {}, { person })))
     .then(
       (result) => reply({ result }),
       (e: unknown) => {
         console.error(`[core] ${req.method}`, e)
-        // The page shows it as it comes: in people's words, the raw text stays in the log above.
-        reply({ error: friendly(e).text })
+        // The page shows it as it comes: in people's words, the raw text stays in the log above
+        // (and for anyone but the owner, no path on this machine).
+        reply({ error: errorFor(e, person.role === 'owner') })
       }
     )
 }
 
+// A desktop's window sends no data (the owner); a server names the person it signed in.
 process.parentPort.on('message', (e) => {
   const port = e.ports[0]
   if (!port) return
-  ports.add(port)
+  if (!hub.add(port, e.data)) return
   port.on('message', (m) => handle(port, m.data as Request))
-  port.on('close', () => ports.delete(port))
+  port.on('close', () => hub.delete(port))
   port.start()
 })
 

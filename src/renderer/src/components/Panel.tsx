@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
-import { agentById, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { agentById, amAdmin, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 
@@ -58,6 +58,7 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
 export function ServiceCard({ agentId, name }: { agentId: string; name: string }): ReactNode {
   const svc = useStore((s) => computerOf(s, agentId)?.services.find((x) => x.name === name))
   const open = useStore((s) => s.panel?.kind === 'service' && s.panel.agentId === agentId && s.panel.name === name)
+  const admin = useStore(amAdmin) // stopping a service is the admins'
   if (!svc) return null
   return (
     <div className={`artifact-card artifact-card--service ${open ? 'is-open' : ''}`}>
@@ -75,9 +76,11 @@ export function ServiceCard({ agentId, name }: { agentId: string; name: string }
           <button className="btn btn--sm btn--primary" onClick={() => openPanel({ kind: 'service', agentId, name })}>
             {L('Abrir', 'Open')}
           </button>
-          <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, name)}>
-            {L('Parar', 'Stop')}
-          </button>
+          {admin && (
+            <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, name)}>
+              {L('Parar', 'Stop')}
+            </button>
+          )}
         </>
       )}
     </div>
@@ -114,7 +117,7 @@ const clock = (at: number): string => new Date(at).toLocaleTimeString(locale(), 
 
 // Live while the agent is answering with it, or while I drive it.
 function useLive(agentId: string): boolean {
-  const working = useStore((s) => s.messages.some((m) => m.author.kind === 'agent' && m.author.id === agentId && m.run?.status === 'working'))
+  const working = useStore((s) => workingAgents(s).has(agentId))
   const view = useStore((s) => browserOf(s, agentId))
   return working || !!view?.doing || !!view?.shown
 }
@@ -153,9 +156,10 @@ function UrlBar({ url }: { url: string }): ReactNode {
 // The screen: what Chrome streams, with the agent's cursor where it last clicked or typed.
 function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => void }): ReactNode {
   const view = useStore((s) => browserOf(s, agentId))
+  const frame = useFrame(agentId) // apart from the view: it changes many times a second
   const agent = useStore((s) => agentById(s, agentId))
   const live = useLive(agentId)
-  if (!view?.frame)
+  if (!view || !frame)
     return (
       <div className="screen screen--empty">
         <Icon name="globe" size={22} />
@@ -165,10 +169,10 @@ function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => vo
   const c = view.cursor
   // Taken over on a server: the picture is the browser. Clicks land where I click,
   // keys and pastes go to the page, the wheel scrolls it.
-  if (view.shown && windowless() && !onOpen) return <DrivenScreen agentId={agentId} frame={view.frame} title={view.title} />
+  if (view.shown && windowless() && !onOpen) return <DrivenScreen agentId={agentId} frame={frame} title={view.title} />
   return (
     <div className={`screen ${onOpen ? 'screen--button' : ''}`} onClick={onOpen} role={onOpen ? 'button' : undefined}>
-      <img className="screen__frame" src={view.frame} alt={view.title} draggable={false} />
+      <img className="screen__frame" src={frame} alt={view.title} draggable={false} />
       {c && !view.shown && agent && (
         <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ ...ownColor(agent), transform: `translate(${c.x * 100}%, ${c.y * 100}%)` }}>
           <i key={c.at} className="screen__ripple" />
@@ -288,6 +292,7 @@ function TakeOver({ agentId }: { agentId: string }): ReactNode {
 // with what it did. Older messages get a small card.
 export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }): ReactNode {
   const view = useStore((s) => browserOf(s, agentId))
+  const frame = useFrame(agentId)
   const name = useStore((s) => agentById(s, agentId)?.name ?? L('agente', 'agent'))
   const open = useStore((s) => s.panel?.kind === 'browser' && s.panel.agentId === agentId)
   const show = (): void => openPanel({ kind: 'browser', agentId })
@@ -321,8 +326,8 @@ export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }
 
   return (
     <button className={`artifact-card browser-card ${open ? 'is-open' : ''}`} onClick={show}>
-      {view?.frame ? (
-        <img className="browser-card__thumb" src={view.frame} alt="" />
+      {frame ? (
+        <img className="browser-card__thumb" src={frame} alt="" />
       ) : (
         <span className="artifact-card__icon">
           <Icon name="globe" size={16} />

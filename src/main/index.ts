@@ -112,6 +112,20 @@ function startCore(workspace: Workspace): Runtime {
   return runtime
 }
 
+// The workspace on screen starts first; the others follow it one at a time, a few seconds
+// apart, so they don't all run their login shell and check every harness at once.
+function startWorkspaces(): void {
+  const first = registry.selected()
+  const rest = registry.list().filter((w) => w.id !== first.id)
+  void startCore(first).ready.catch(() => {}).then(async () => {
+    for (const w of rest) {
+      await new Promise((r) => setTimeout(r, 5_000))
+      if (quitting) return
+      if (registry.list().some((x) => x.id === w.id)) startCore(w) // not deleted meanwhile
+    }
+  })
+}
+
 type CoreRequest =
   | { type: 'theme'; theme: Settings['theme']; initial?: boolean }
   | { type: 'ready' }
@@ -776,7 +790,7 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   protocol.handle('tucano', serveArtifact)
   registry = new Workspaces(dataDir())
   nativeTheme.themeSource = registry.theme() ?? 'system'
-  for (const workspace of registry.list()) startCore(workspace)
+  startWorkspaces()
   // The Mac wakes for a few seconds at a time while asleep (maintenance, "DarkWake"):
   // routines wait for a real wake, so a run doesn't start and freeze mid-way.
   powerMonitor.on('suspend', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: false }) })
