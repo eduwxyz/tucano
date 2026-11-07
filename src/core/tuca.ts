@@ -205,16 +205,22 @@ export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Re
 
 // What the Tuca sees of the workspace in his prompt.
 // `tuca`: him, whose instructions already say how; any other agent gets the short version, and when to propose.
-export function builderSection(s: Pick<Settings, 'engines'>, ctx: { models: { id: string; label: string }[]; connectors: Connector[]; team: Agent[]; own: string; tuca?: boolean; me?: string }): string {
-  const gateway = (Object.keys(s.engines) as (keyof Settings['engines'])[]).filter((e) => s.engines[e].loggedIn && s.engines[e].route === 'gateway')
+// How to propose: the same in every reply, so it goes in the system prompt. What there is to propose
+// with (models, connectors, the team) changes, and goes in the live context: builderSection.
+export function builderGuide(ctx: { tuca?: boolean; me?: string }): string {
   const me = ctx.me ?? L('a pessoa', 'the person')
+  return ctx.tuca
+    ? L('## Pra montar agentes', '## For building agents')
+    : L(
+          `## Pra propor agentes, times, rotinas e canais\nVocê pode propor, num card que ${me} aplica: um agente novo (propor_agente), um time de agentes com um canal (propor_time), mudar um agente (propor_ajuste), uma rotina de outro agente (propor_rotina; as suas, agende com agendar_rotina) e um canal (propor_canal). Proponha quando ${me} pedir, ou quando for claramente o que resolve o pedido; não no meio de outra tarefa. Nada existe ou muda até ${me} aplicar. Num agente novo: instruções de 4 a 8 linhas falando com ele, conectores só em leitura se a tarefa não pede escrita, o modelo mais simples que dá conta. Dúvida de como usar o Tucano (telas, configurações, por que algo não funciona) é com o Tuca: diga pra perguntar a ele. Ele não muda o seu acesso nem as suas permissões: se faltar uma, diga a ${me} qual, sem mandar pedir ao Tuca.`,
+          `## For proposing agents, teams, routines and channels\nYou can propose, as a card ${me} applies: a new agent (propor_agente), a team of agents with a channel (propor_time), changing an agent (propor_ajuste), a routine for another agent (propor_rotina; your own you schedule with agendar_rotina) and a channel (propor_canal). Propose when ${me} asks, or when it's clearly what solves the request; not in the middle of another task. Nothing exists or changes until ${me} applies it. For a new agent: 4 to 8 lines of instructions talking to it, connectors read-only unless the task needs writing, the simplest model that does the job. Questions about how to use Tucano (screens, settings, why something isn't working) are for the Tuca: say to ask him. He doesn't change your access or permissions: if one is missing, tell ${me} which, without sending them to the Tuca.`
+        )
+}
+
+export function builderSection(s: Pick<Settings, 'engines'>, ctx: { models: { id: string; label: string }[]; connectors: Connector[]; team: Agent[]; own: string }): string {
+  const gateway = (Object.keys(s.engines) as (keyof Settings['engines'])[]).filter((e) => s.engines[e].loggedIn && s.engines[e].route === 'gateway')
   return [
-    ctx.tuca
-      ? L('## Pra montar agentes', '## For building agents')
-      : L(
-          `## Pra propor agentes, times, rotinas e canais\nVocê pode propor, num card que ${me} aplica: um agente novo (propor_agente), um time de agentes com um canal (propor_time), mudar um agente (propor_ajuste), uma rotina de outro agente (propor_rotina; as suas, agende com agendar_rotina) e um canal (propor_canal). Proponha quando ${me} pedir, ou quando for claramente o que resolve o pedido; não no meio de outra tarefa. Nada existe ou muda até ${me} aplicar. Num agente novo: instruções de 4 a 8 linhas falando com ele, conectores só em leitura se a tarefa não pede escrita, o modelo mais simples que dá conta. Dúvida de como usar o Tucano (telas, configurações, por que algo não funciona) é com o Tuca: diga pra perguntar a ele.`,
-          `## For proposing agents, teams, routines and channels\nYou can propose, as a card ${me} applies: a new agent (propor_agente), a team of agents with a channel (propor_time), changing an agent (propor_ajuste), a routine for another agent (propor_rotina; your own you schedule with agendar_rotina) and a channel (propor_canal). Propose when ${me} asks, or when it's clearly what solves the request; not in the middle of another task. Nothing exists or changes until ${me} applies it. For a new agent: 4 to 8 lines of instructions talking to it, connectors read-only unless the task needs writing, the simplest model that does the job. Questions about how to use Tucano (screens, settings, why something isn't working) are for the Tuca: say to ask him.`
-        ),
+    L('## Pra propor: o que existe agora', '## For proposing: what there is now'),
     `${L('Modelos que dá pra usar (passe o id em "modelo")', 'Models you can use (pass the id in "modelo")')}:\n${ctx.models.map((m) => `- ${m.id}: ${m.label}`).join('\n') || `- ${ctx.own}: ${L('o seu', 'yours')}`}`,
     gateway.length > 0 &&
       L(

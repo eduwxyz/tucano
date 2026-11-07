@@ -10,8 +10,9 @@ import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import { call } from '../rpc'
-import { agentById, navigate, setTab, updateSettings, useStore, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
+import { agentById, amAdmin, navigate, personName, setTab, updateSettings, useStore, type State, type View, type WikiChange, type WikiFinding, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
 import { Sheet, Toggle } from './Pages'
+import { AdminOnly } from './People'
 import { confirmDialog } from './Dialogs'
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { screenOf } from '../../../shared/screens'
@@ -20,7 +21,7 @@ const DEFAULT_KINDS = (): string[] => [L('Pessoa', 'Person'), L('Projeto', 'Proj
 const CODE = /```[\s\S]*?```|`[^`\n]*`/g
 
 type Graph = { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }
-type WikiData = { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: Graph; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number }
+type WikiData = { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: Graph; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number; held?: { title: string; at: number }[]; heritage?: { at: number } }
 type WikiViewState = Extract<View, { kind: 'wiki' }>
 
 // ---------- small things used everywhere ----------
@@ -75,21 +76,84 @@ function rel(t: number): string {
 }
 const when = (t: number): string => new Date(t).toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' })
 
-// Who changed something: you, an agent, the curator, the review, or another app (Obsidian).
+// Who changed something: a person (by their id; "me" from before people is whoever this is), an
+// agent, the curator, the review, or another app (Obsidian). Someone who left keeps their name.
+export function wikiWho(state: Pick<State, 'you' | 'me' | 'people' | 'former' | 'agents'>): (by: string) => string {
+  return (by) =>
+    by === 'me'
+      ? state.me.name
+      : by === 'outside'
+        ? L('fora do Tucano', 'outside Tucano')
+        : by === 'auto'
+          ? L('o curador', 'the curator')
+          : by === 'review'
+            ? L('a revisão', 'the review')
+            : by === 'import'
+              ? L('veio do Obsidian', 'came from Obsidian')
+              : (agentById(state as State, by)?.name ?? (by === state.you || state.people.some((p) => p.id === by) || state.former?.some((p) => p.id === by) ? personName(state, by) : by))
+}
 function useWho(): (by: string) => string {
-  const me = useStore((s) => s.me.name)
-  const state = useStore((s) => s)
-  return (by) => (by === 'me' ? me : by === 'outside' ? L('fora do Tucano', 'outside Tucano') : by === 'auto' ? L('o curador', 'the curator') : by === 'review' ? L('a revisão', 'the review') : by === 'import' ? L('veio do Obsidian', 'came from Obsidian') : (agentById(state, by)?.name ?? by))
+  const you = useStore((s) => s.you)
+  const me = useStore((s) => s.me)
+  const people = useStore((s) => s.people)
+  const former = useStore((s) => s.former)
+  const agents = useStore((s) => s.agents)
+  return useMemo(() => wikiWho({ you, me, people, former, agents }), [you, me, people, former, agents])
 }
 function Who({ by, size = 22 }: { by: string; size?: number }): ReactNode {
   const me = useStore((s) => s.me)
   const agent = useStore((s) => (by.length > 20 ? agentById(s, by) : undefined))
+  const person = useStore((s) => (by === 'me' || by === s.you ? undefined : (s.people.find((p) => p.id === by) ?? s.former.find((p) => p.id === by))))
   if (agent) return <AgentAvatar agent={agent} size={size} />
   const icon: IconName | null = by === 'auto' ? 'layers' : by === 'review' ? 'shield' : by === 'outside' || by === 'import' ? 'folder' : null
+  const initials = person ? person.name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') : me.initials
   return (
     <span className={`wk-who ${by === 'auto' || by === 'review' ? 'wk-who--curator' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42 }}>
-      {icon ? <Icon name={icon} size={Math.round(size * 0.55)} /> : me.initials}
+      {icon ? <Icon name={icon} size={Math.round(size * 0.55)} /> : initials}
     </span>
+  )
+}
+
+// The Tucano got its second person: a line for its owner saying what changed, and the pages that came
+// from their private conversations, held for them until they release each one.
+export function WikiHeritage({ held, notice }: { held: { title: string; at: number }[]; notice: boolean }): ReactNode {
+  const [busy, setBusy] = useState('')
+  if (!notice && !held.length) return null
+  const release = (title: string): void => {
+    setBusy(title)
+    void call('wikiRelease', { title }).finally(() => setBusy(''))
+  }
+  return (
+    <div className="wk-heritage">
+      {notice && (
+        <p>
+          {L(
+            'Seu Tucano agora tem mais gente: os resumos dos canais foram refeitos sem o que veio das suas DMs, o histórico da wiki de antes continua só seu, e as páginas feitas das suas conversas privadas ficam só com você até você liberar.',
+            "Your Tucano has more people now: the channels' summaries were made again without what came from your DMs, the wiki's history from before stays yours alone, and the pages made from your private conversations stay with you until you release them."
+          )}
+          <button className="text-btn" onClick={() => void call('heritageSeen')}>
+            {L('Entendi', 'Got it')}
+          </button>
+        </p>
+      )}
+      {held.length > 0 && (
+        <>
+          <h5>{L('Páginas que vieram das suas conversas privadas', 'Pages that came from your private conversations')}</h5>
+          <ul>
+            {held.map((h) => (
+              <li key={h.title}>
+                <button className="text-btn" onClick={() => navigate({ kind: 'wiki', title: h.title })}>
+                  {h.title}
+                </button>
+                <button className="btn btn--ghost btn--sm" disabled={busy === h.title} onClick={() => release(h.title)}>
+                  {L('Liberar pro time', 'Release to the team')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -585,6 +649,7 @@ const SEARCH_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(na
 function WikiShell({ view }: { view: WikiViewState }): ReactNode {
   const data = useWikiData()
   const rev = useStore((s) => s.wikiRev)
+  const admin = useStore(amAdmin)
   const [searching, setSearching] = useState(false)
   const [settings, setSettings] = useState(false)
   const [dropping, setDropping] = useState(0)
@@ -598,6 +663,23 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
   const close = (): void => navigate({ kind: 'wiki' })
   const [imported, setImported] = useState<WikiImport | { error: string } | 'busy' | null>(null)
   const startImport = (): void => {
+    const failed = (e: Error): void => setImported({ error: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+    // On a server the vault is on the person's computer, not there: it goes up as a .zip.
+    const upload = window.tucano.upload
+    if (upload) {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.zip,application/zip'
+      input.onchange = () => {
+        const file = input.files?.[0]
+        if (!file) return
+        setSettings(false)
+        setImported('busy')
+        void upload(file).then((path) => call('wikiImportZip', { path })).then(setImported, failed)
+      }
+      input.click()
+      return
+    }
     const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> }).pickFolder
     void pick?.().then((dir) => {
       if (!dir) return
@@ -646,7 +728,9 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
     setKinds(list)
     return list
   }, [data])
-  const content = view.source ? <WikiSourceView key={view.source} id={view.source} /> : view.title ? <WikiPageView key={view.title} title={view.title} data={data} /> : view.tab === 'pending' ? <WikiPending /> : view.tab === 'sources' ? <WikiSources errors={dropError} /> : view.tab === 'review' ? <WikiReviewPane /> : null
+  // The curator's decisions, the review and the wiki's place are the admins'; anyone reads and writes pages.
+  const curating = admin ? (view.tab === 'pending' ? <WikiPending /> : view.tab === 'review' ? <WikiReviewPane /> : null) : view.tab === 'pending' || view.tab === 'review' ? <AdminOnly>{L('Só um admin decide o que o curador muda e revisa a wiki.', "Only an admin decides the curator's changes and reviews the wiki.")}</AdminOnly> : null
+  const content = view.source ? <WikiSourceView key={view.source} id={view.source} /> : view.title ? <WikiPageView key={view.title} title={view.title} data={data} /> : view.tab === 'sources' ? <WikiSources errors={dropError} /> : curating
 
   return (
     <Sheet
@@ -673,16 +757,18 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
             <Icon name="search" size={14} />
             <kbd>{SEARCH_KEY}</kbd>
           </button>
-          <button className="btn btn--ghost btn--sm wk-icon-btn" title={L('Ajustes da wiki', 'Wiki settings')} onClick={() => setSettings(true)}>
-            <Icon name="gear" size={15} />
-          </button>
+          {admin && (
+            <button className="btn btn--ghost btn--sm wk-icon-btn" title={L('Ajustes da wiki', 'Wiki settings')} onClick={() => setSettings(true)}>
+              <Icon name="gear" size={15} />
+            </button>
+          )}
           <button className="btn btn--primary btn--sm" title={L('Nova página (N)', 'New page (N)')} onClick={() => navigate({ kind: 'wiki', edit: true, title: '' })}>
             <Icon name="plus" size={14} /> {L('Nova página', 'New page')}
           </button>
         </>
       }
     >
-      {(pending.length > 0 || reading.length > 0 || (data?.findings ?? 0) > 0) && (
+      {admin && (pending.length > 0 || reading.length > 0 || (data?.findings ?? 0) > 0) && (
         <div className="cal-watch wk-watch">
           {pending.length > 0 && <span className="cal-watch__label">{L('Esperando você', 'Waiting for you')}</span>}
           {pending.slice(0, 3).map((c) => (
@@ -711,6 +797,7 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
         </div>
       )}
 
+      {data && <WikiHeritage held={data.held ?? []} notice={!!data.heritage} />}
       <div className="wk-stage" {...drop}>
         {data && count === 0 && !panel ? <WikiEmpty onImport={startImport} /> : data && <WikiCanvas graph={data.graph} selected={view.title} pending={touched} only={only} panel={panel} />}
         {panel && content && (
@@ -736,12 +823,16 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
         <button className="text-btn" onClick={() => navigate({ kind: 'wiki', tab: 'sources' })}>
           <Icon name="book" size={13} /> {data?.sources === 1 ? L('1 fonte', '1 source') : L(`${data?.sources ?? 0} fontes`, `${data?.sources ?? 0} sources`)}
         </button>
-        <button className="text-btn" onClick={() => navigate({ kind: 'wiki', tab: 'pending' })}>
-          <Icon name="hand" size={13} /> {L('Decisões do curador', "The curator's changes")}
-        </button>
-        <button className="text-btn" onClick={() => navigate({ kind: 'wiki', tab: 'review' })}>
-          <Icon name="shield" size={13} /> {L('Revisar a wiki', 'Review the wiki')}
-        </button>
+        {admin && (
+          <>
+            <button className="text-btn" onClick={() => navigate({ kind: 'wiki', tab: 'pending' })}>
+              <Icon name="hand" size={13} /> {L('Decisões do curador', "The curator's changes")}
+            </button>
+            <button className="text-btn" onClick={() => navigate({ kind: 'wiki', tab: 'review' })}>
+              <Icon name="shield" size={13} /> {L('Revisar a wiki', 'Review the wiki')}
+            </button>
+          </>
+        )}
         <span className="grow" />
         <span>{L('Arraste um arquivo pra cá pra trazer pra wiki', 'Drag a file here to bring it in')}</span>
       </footer>
@@ -1048,7 +1139,11 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
           <div className="wk-setting">
             <span>
               <b>{L('Importar um cofre do Obsidian', 'Import an Obsidian vault')}</b>
-              <small>{L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', 'The notes come in as they are, with their folders, links and attachments. The original vault stays as it was.')}</small>
+              <small>
+                {window.tucano.upload
+                  ? L('Compacte a pasta do cofre num .zip e envie: as notas entram como estão, com as pastas, os links e os anexos.', 'Zip the vault’s folder and send it: the notes come in as they are, with their folders, links and attachments.')
+                  : L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', 'The notes come in as they are, with their folders, links and attachments. The original vault stays as it was.')}
+              </small>
             </span>
             <button className="btn btn--sm" onClick={onImport}>
               {L('Importar…', 'Import…')}
@@ -1481,6 +1576,9 @@ function download(file: { name: string; data: string } | null): void {
 function WikiSourceView({ id }: { id: string }): ReactNode {
   const rev = useStore((s) => s.wikiRev)
   const [src, setSrc] = useState<(WikiSource & { text: string }) | null | undefined>(undefined)
+  // Admins of a team may delete a source for good (the pages made from it stay); one person alone sees it as always.
+  const canRemove = useStore((s) => amAdmin(s) && s.people.length > 1)
+  const [removing, setRemoving] = useState(false)
   useEffect(() => void call('wikiSource', { id }).then(setSrc), [id, rev])
   if (src === undefined) return null
   if (!src)
@@ -1502,6 +1600,7 @@ function WikiSourceView({ id }: { id: string }): ReactNode {
         <SourceStatus s={src} />
       </div>
       <h1 className="wk-read__title">{src.title}</h1>
+      {src.private && <p className="muted">{L('Veio da conversa privada de alguém: só essa pessoa lê o que ela diz. Dá pra apagar a fonte, junto com as mudanças feitas dela.', "It came from someone's private conversation: only they read what it says. You can delete the source, along with the changes made from it.")}</p>}
       <div className="wk-row">
         {src.origin.conversationId && (
           <button className="btn btn--sm" onClick={() => navigate({ kind: 'conversation', id: src.origin.conversationId! })}>
@@ -1523,11 +1622,23 @@ function WikiSourceView({ id }: { id: string }): ReactNode {
             {L('Tentar de novo', 'Try again')}
           </button>
         )}
+        {canRemove &&
+          (removing ? (
+            <button className="btn btn--sm btn--danger" onClick={() => void call('wikiRemoveSource', { id: src.id }).then(() => navigate({ kind: 'wiki', tab: 'sources' }))}>
+              {L('Apagar de vez (as páginas ficam)', 'Delete for good (the pages stay)')}
+            </button>
+          ) : (
+            <button className="btn btn--sm" onClick={() => setRemoving(true)}>
+              {L('Apagar a fonte', 'Delete the source')}
+            </button>
+          ))}
       </div>
       {src.error && <p className="field__error">{src.error}</p>}
-      <article className="wk-doc md wk-doc--source">
-        <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{src.text.trimStart().replace(/^# .*\n+/, '')}</Markdown>
-      </article>
+      {!src.private && (
+        <article className="wk-doc md wk-doc--source">
+          <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{src.text.trimStart().replace(/^# .*\n+/, '')}</Markdown>
+        </article>
+      )}
     </div>
   )
 }

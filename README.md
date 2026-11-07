@@ -7,14 +7,15 @@
 **Your team of AI agents, on your computer. Your rules.**
 
 Agents that talk in channels, write code, review each other and use your team's tools.<br>
-They do the work. Anything that touches the real world waits for your yes.
+They do the work. Anything that touches the real world waits for your yes.<br>
+A free, open-source alternative to Grok Bot: [see how it compares](https://tucano.sh/en/grok-bot-alternative/).
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
-[![License](https://img.shields.io/badge/license-Apache--2.0-141210)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-141210)](LICENSE) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/uQp4x7wUgT)
 [![macOS](https://img.shields.io/badge/macOS-Apple%20silicon%20%7C%20Intel-141210?logo=apple)](#install) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#install) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#install)
-[![Runs on](https://img.shields.io/badge/runs%20on-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20OpenCode%20·%20Pi-E2541B)](#runs-on-what-you-already-have)
+[![Runs on](https://img.shields.io/badge/runs%20on-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Grok%20·%20OpenCode%20·%20Pi-E2541B)](#runs-on-what-you-already-have)
 
-**English** · [Português](README.pt-BR.md) · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Changelog](CHANGELOG.md)
+**English** · [Português](README.pt-BR.md) · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Discord](https://discord.gg/uQp4x7wUgT) · [Changelog](CHANGELOG.md)
 
 https://github.com/user-attachments/assets/533e1bf1-b4ca-4f4a-aad4-e015c6b4c421
 
@@ -153,7 +154,7 @@ On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps 
 
 - **Connect a tool:** **Connectors → Add**, paste the MCP server's address. OAuth servers open the browser; the others ask for a token. Then, on each agent's page, set its access to each connector.
 - **Archived agents** leave the sidebar and stop answering, but keep their history and receipts. Find them under **Archived** to bring them back.
-- **Approve from your phone:** connect the Telegram bot in **Settings → Phone and GitHub**; approvals and questions arrive with their buttons.
+- **Approve from your phone:** connect the Telegram bot in **Settings → Phone**; approvals and questions arrive with their buttons.
 - **Getting started**, in the sidebar, walks you through the rest: build a team, connect a tool, teach the memory, schedule a routine, lend a project.
 
 ## How it works
@@ -253,6 +254,10 @@ You need Node 24+ and one harness signed in. `npm run dev` keeps its own data in
 **On Windows?** Development works there too, with Git for Windows. See [docs/windows.md](docs/windows.md) for what you need, how it differs from the Mac, and every change made for it.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. The original design document, in Portuguese, is in [docs/spec-mvp.md](docs/spec-mvp.md).
+
+## Community
+
+Questions, ideas and setups: join us on [Discord](https://discord.gg/uQp4x7wUgT). Bugs and feature requests go to [GitHub Issues](https://github.com/eduwxyz/tucano/issues).
 
 ## License
 

@@ -157,7 +157,7 @@ Shortcuts (Ctrl off a Mac), their labels (`shortcut(platform, key)`), the menu a
 
 - `npm run typecheck`: clean.
 - `npm test`: every test passes, including the 17 Docker tests with Docker Desktop 29.6 running. Without Docker running, those are skipped, as on the Mac.
-- `npm run build`, then `scripts/screens.mjs` with the fake engines, through screen 24 of 27: channels, router, handoffs, `ask_user`, connectors with the demo MCP server, grants, approvals, memory, summaries, and the Linux computer in Docker with a lent command, a service on port 8000, a screenshot and the side panel. The last steps (routines) fail on every system: their selectors (`.routine-example`, `.routine-form`) predate the calendar redesign of the Routines page. The routine engine is covered by `test/routines.test.ts`.
+- `npm run build`, then `scripts/screens.mjs` with the fake engines, through all 27 screens (with `TUCANO_LOCALE=pt-BR`, which the selectors need): channels, router, handoffs, `ask_user`, connectors with the demo MCP server, grants, approvals, memory, summaries, and the Linux computer in Docker with a lent command, a service on port 8000, a screenshot and the side panel.
 - One real turn with Claude Code 2.x (`claude.exe`): detected and signed in, the agent replied through the per-turn MCP gateway, receipt included.
 - The packaged app (`electron-builder --win --dir`): starts, finds its bundled sounds, has the Windows menu, and Ctrl+K opens *Go to*.
 

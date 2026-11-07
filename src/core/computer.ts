@@ -371,12 +371,11 @@ export interface ComputerDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
-  gitRemote?: (agentId: string) => string | undefined // the app's GitHub proxy for this agent (spec §22)
 }
 
 export class Computers {
   private infos = new Map<string, ComputerInfo>()
-  private gitSet = new Set<string>() // computers whose git already goes through the proxy, this session
+  private gitSet = new Set<string>() // computers whose git was taken off the old GitHub proxy, this session
   private ports = new Map<string, Record<number, number>>()
   private starting = new Map<string, Promise<void>>()
   private prefix: string
@@ -419,19 +418,19 @@ export class Computers {
 
   // Before a turn: when Docker was last seen off, whether it still is (what the person has to do), read
   // again now. A quick `docker inspect`, which fails at once with the daemon down; nothing when it was fine,
-  // so a turn never waits on Docker for nothing.
+  // so a turn never waits on Docker for nothing. A daemon still starting doesn't hold the reply past 3 s.
   async unavailable(agent: Agent): Promise<string | undefined> {
     if (agent.computerKind === 'mac' || this.infos.get(agent.id)?.state !== 'no_docker') return undefined
-    await this.refresh(agent)
+    await this.refresh(agent, 3_000)
     const info = this.infos.get(agent.id)
     return info?.state === 'no_docker' ? info.detail : undefined
   }
 
   // Reads the container's real state, for the agent page.
-  async refresh(agent: Agent): Promise<void> {
+  async refresh(agent: Agent, timeoutMs = 10_000): Promise<void> {
     if (agent.computerKind === 'mac') return this.mac.refresh(agent)
     if (!agent.computer) return this.set(agent.id, { state: 'off', services: [] })
-    const r = await docker(['inspect', '-f', '{{.State.Running}}', this.name(agent.id)], { timeoutMs: 10_000 })
+    const r = await docker(['inspect', '-f', '{{.State.Running}}', this.name(agent.id)], { timeoutMs })
     if (r.code !== 0) {
       const problem = dockerProblem(r.stderr, r.late)
       return this.set(agent.id, { state: problem ? 'no_docker' : 'stopped', detail: problem, services: [] })
@@ -494,7 +493,7 @@ export class Computers {
     }
     if (state.code === 0 && running === 'true') {
       if (!this.ports.has(agentId)) await this.readPorts(agentId)
-      await this.pointGit(agentId)
+      await this.unpointGit(agentId)
       if (this.infos.get(agentId)?.state !== 'running') this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
       return
     }
@@ -550,19 +549,17 @@ export class Computers {
       await docker(['exec', name, 'bash', '-c', clean], { timeoutMs: 15_000 })
     }
     await this.readPorts(agentId)
-    await this.pointGit(agentId)
+    await this.unpointGit(agentId)
     this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
   }
 
-  // GitHub, by any of its URL forms, goes through the app's proxy, which adds the
-  // token outside the computer and lets through only what its lent folders allow.
-  private async pointGit(agentId: string): Promise<void> {
-    const via = this.deps.gitRemote?.(agentId)
-    if (!via || this.gitSet.has(agentId)) return
+  // A computer made when GitHub went through the app's proxy (push and PR from the agent's computer,
+  // since removed) still sends git there: those rewrites go, so git reaches GitHub as it would.
+  private async unpointGit(agentId: string): Promise<void> {
+    if (this.gitSet.has(agentId)) return
     const name = this.name(agentId)
-    for (const [from, match] of [['https://github.com/', '^https://github'], ['git@github.com:', '^git@github'], ['ssh://git@github.com/', '^ssh://']] as const) {
-      await docker(['exec', name, 'git', 'config', '--global', '--replace-all', `url.${via}.insteadOf`, from, match], { timeoutMs: 15_000 })
-    }
+    const drop = "for k in $(git config --global --name-only --get-regexp '^url\\..*/git/.*\\.insteadof$' 2>/dev/null | sed 's/\\.insteadof$//' | sort -u); do git config --global --remove-section \"$k\" 2>/dev/null; done; true"
+    await docker(['exec', name, 'bash', '-c', drop], { timeoutMs: 15_000 }).catch(() => {})
     this.gitSet.add(agentId)
   }
 
@@ -686,7 +683,7 @@ export class Computers {
     return r.code === 0
   }
 
-  private async startService(agentId: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolOutcome> {
+  private async startService(agentId: string, args: Record<string, unknown>, signal?: AbortSignal, conversationId?: string): Promise<ToolOutcome> {
     const name = typeof args['name'] === 'string' ? args['name'].trim() : ''
     const command = typeof args['command'] === 'string' ? args['command'].trim() : ''
     const port = Number(args['port'])
@@ -703,7 +700,7 @@ export class Computers {
     const script = `echo $$ > /run/tucano/${name}.pid; cd ${WORK}; exec bash -lc ${q(command)} >> ${q(log)} 2>&1`
     const start = await docker(['exec', '-d', this.name(agentId), 'setsid', 'bash', '-c', script], { timeoutMs: 15_000 })
     if (start.code !== 0) return { result: textResult(L(`Não consegui iniciar: ${start.stderr.trim()}`, `I couldn't start it: ${start.stderr.trim()}`), true) }
-    this.deps.db.saveService(agentId, { name, command, port, startedAt: Date.now() })
+    this.deps.db.saveService(agentId, { name, command, port, startedAt: Date.now(), conversationId })
 
     // Wait for the port, up to 60 s, and check it is reachable from the Mac.
     let where: 'all' | 'loopback' | null = null
@@ -885,7 +882,7 @@ export class Computers {
       case 'edit_file':
         return { result: await this.editFile(agent.id, args) }
       case 'start_service':
-        return this.startService(agent.id, args, ctx.signal)
+        return this.startService(agent.id, args, ctx.signal, ctx.conversationId)
       case 'stop_service': {
         const svc = String(args['name'] ?? '')
         if (!this.deps.db.services(agent.id).some((s) => s.name === svc)) return { result: textResult(noService(svc), true) }

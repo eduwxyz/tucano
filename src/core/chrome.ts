@@ -216,6 +216,10 @@ export class ChromeBrowsers {
   private tabs = new Map<string, Tab>()
   private starting = new Map<string, Promise<Tab>>()
   private handingBack = new Set<string>()
+  private used = new Map<string, number>() // when each agent last asked its Chrome for something
+  private busy = new Map<string, number>() // what it's doing right now
+  private resumeAt = new Map<string, string>() // the page a Chrome closed for idling was on
+  private closing = new Map<string, Promise<void>>() // a Chrome closed for idling, still writing its cookies
 
   constructor(
     private dir: string, // profiles live in <dir>/<agentId>
@@ -224,9 +228,35 @@ export class ChromeBrowsers {
     private onFrame?: OnFrame,
     // No screen to open a window on (Tucano as a server): taking over keeps it
     // headless and I drive it from the panel, through 'input'.
-    private windowless = false
+    private windowless = false,
+    // A Chrome nobody asked anything of for this long is closed (cookies kept) and reopens on the
+    // same page when next needed: on a server several people share, each costs hundreds of MB.
+    private idleMs?: number
   ) {
     process.on('exit', () => this.quit())
+    if (idleMs) setInterval(() => void this.closeIdle(), Math.min(60_000, Math.max(100, idleMs / 2))).unref()
+  }
+
+  running(agentId: string): boolean {
+    return this.tabs.has(agentId)
+  }
+
+  // Not one taken over (the person is on it), nor one handing back or in the middle of something.
+  private async closeIdle(): Promise<void> {
+    const now = Date.now()
+    for (const [agentId, t] of this.tabs) {
+      if (t.headed || this.handingBack.has(agentId) || this.starting.has(agentId) || (this.busy.get(agentId) ?? 0) > 0) continue
+      if (now - (this.used.get(agentId) ?? now) < this.idleMs!) continue
+      this.tabs.delete(agentId)
+      if (/^https?:/.test(t.url)) this.resumeAt.set(agentId, t.url)
+      // Until it's gone, a new one for this agent waits: started on the same profile, it would
+      // take it over from the one still writing its cookies, and the login would be lost.
+      const done = this.shutDown(t)
+        .catch(() => {})
+        .finally(() => this.closing.get(agentId) === done && this.closing.delete(agentId))
+      this.closing.set(agentId, done)
+      await done
+    }
   }
 
   quit(): void {
@@ -268,7 +298,8 @@ export class ChromeBrowsers {
     let timer: ReturnType<typeof setTimeout> | undefined
     const failed = new Promise<never>((_, reject) => {
       proc.once('exit', () => reject(new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))))
-      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 15 s', "Chrome didn't open in 15 s"))), 15_000)
+      // The first open on a computer can be slow, with nothing of Chrome in memory yet. As long as any other answer gets (see send).
+      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 30 s', "Chrome didn't open in 30 s"))), 30_000)
     })
     try {
       await Promise.race([tab.connect(), failed])
@@ -294,7 +325,8 @@ export class ChromeBrowsers {
   private async shutDown(t: Tab): Promise<void> {
     t.closedAll = undefined // this is the app closing it, not the person handing it back
     await Promise.race([t.send('Browser.close').catch(() => {}), wait(2000)])
-    await exited(t.proc, 5000)
+    // Usually under a second; a loaded machine (a server, CI) can take several to write them.
+    await exited(t.proc, 15_000)
     t.close()
     await gone(t.proc)
   }
@@ -305,7 +337,15 @@ export class ChromeBrowsers {
     if (t) return t
     const going = this.starting.get(agentId)
     if (going) return going
-    const p = this.launch(agentId, false).finally(() => this.starting.delete(agentId))
+    const back = this.resumeAt.get(agentId)
+    this.resumeAt.delete(agentId)
+    const closing = this.closing.get(agentId)
+    const p = (closing ? closing.then(() => this.launch(agentId, false, back)) : this.launch(agentId, false, back))
+      .then(async (tab) => {
+        if (back) await this.settle(tab)
+        return tab
+      })
+      .finally(() => this.starting.delete(agentId))
     this.starting.set(agentId, p)
     return p
   }
@@ -332,7 +372,19 @@ export class ChromeBrowsers {
   }
 
   async run(agentId: string, op: BrowserOp, args: Record<string, unknown> = {}): Promise<BrowserReply> {
+    this.used.set(agentId, Date.now())
+    this.busy.set(agentId, (this.busy.get(agentId) ?? 0) + 1)
+    try {
+      return await this.runOp(agentId, op, args)
+    } finally {
+      this.busy.set(agentId, (this.busy.get(agentId) ?? 1) - 1)
+      this.used.set(agentId, Date.now())
+    }
+  }
+
+  private async runOp(agentId: string, op: BrowserOp, args: Record<string, unknown>): Promise<BrowserReply> {
     if (op === 'close' || op === 'clear') {
+      this.resumeAt.delete(agentId)
       const t = this.tabs.get(agentId)
       this.tabs.delete(agentId)
       if (t && op === 'close') await this.shutDown(t)

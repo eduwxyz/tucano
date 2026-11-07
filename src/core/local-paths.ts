@@ -62,15 +62,25 @@ export function resolveLocal(raw: string, reach: LocalReach, home = homedir()): 
 }
 
 // An address for the window to load a file by. Signed, so the protocol serves only what the core
-// has checked, and a page in the window can't ask for anything else.
-const sign = (key: string, path: string): string => createHmac('sha256', key).update(path).digest('base64url')
+// has checked, and a page in the window can't ask for anything else. On a server it's signed for
+// one person too: an address someone passes on opens nothing for anyone else.
+const sign = (key: string, path: string, person?: string): string => createHmac('sha256', key).update(person ? `${person}\n${path}` : path).digest('base64url')
 
-export const localUrl = (key: string, path: string): string => `tucano://local/${sign(key, path)}/${Buffer.from(path).toString('base64url')}`
+// On a desktop the app's tucano: protocol serves it; on a server, its own /local/ path (src/server).
+export const localUrl = (key: string, path: string, base = 'tucano://local', person?: string): string =>
+  `${base}/${sign(key, path, person)}/${Buffer.from(path).toString('base64url')}${person ? `/${Buffer.from(person).toString('base64url')}` : ''}`
+
+// The path an address opens and, when it was signed for someone, whom.
+export function verifyLocal(key: string, url: URL): { path: string; person?: string } | null {
+  const [signature = '', encoded = '', whose = ''] = url.pathname.slice(1).split('/')
+  const path = Buffer.from(encoded, 'base64url').toString()
+  const person = whose ? Buffer.from(whose, 'base64url').toString() : undefined
+  const want = Buffer.from(sign(key, path, person))
+  const got = Buffer.from(signature)
+  return want.length === got.length && timingSafeEqual(want, got) ? { path, ...(person ? { person } : {}) } : null
+}
 
 export function verifyLocalUrl(key: string, url: URL): string | null {
-  const [signature = '', encoded = ''] = url.pathname.slice(1).split('/')
-  const path = Buffer.from(encoded, 'base64url').toString()
-  const want = Buffer.from(sign(key, path))
-  const got = Buffer.from(signature)
-  return want.length === got.length && timingSafeEqual(want, got) ? path : null
+  const v = verifyLocal(key, url)
+  return v && !v.person ? v.path : null
 }

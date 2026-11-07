@@ -12,10 +12,12 @@ import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } fr
 import { L } from '../shared/lang'
 import { friendly } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
+import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connector-catalog'
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify } from './policy'
 import type { Secrets } from './secrets'
+import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
 const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
@@ -80,7 +82,12 @@ export interface ConnectorDeps {
   emit: (e: CoreEvent) => void
   openUrl: (url: string) => void
   oauthCallbackUrl: () => string
+  readOp?: (ref: string) => Promise<string> // a 1Password reference's value (the op CLI; tests fake it)
   callTimeoutMs?: number // how long a tool call may take; tests shorten it
+  // Where a sign-in with the person's own app comes back: Slack takes only the address registered in the
+  // app, port and all, which the gateway's (new on each launch) can't be.
+  fixedCallbackUrl?: () => string
+  ownAppOf?: (url: string | undefined) => CatalogEntry['app'] // which servers sign in with the person's app; tests point it at their own
 }
 
 interface Live {
@@ -102,6 +109,33 @@ export const staleSession = (e: unknown): boolean =>
   (e instanceof StreamableHTTPError && e.code === 404) || (e instanceof Error && /session not found|no valid session|invalid session id|^not connected$/i.test(e.message))
 
 const key = (id: string, what: string): string => `connector:${id}:${what}`
+const appKey = (provider: AppProvider): string => `${provider}:app`
+const PROVIDER = { google: 'Google', slack: 'Slack' } satisfies Record<AppProvider, string>
+
+// The OAuth client the person made (in Google Cloud, in their Slack workspace): neither takes an app it hasn't met.
+export interface OwnApp {
+  clientId: string
+  clientSecret: string
+}
+
+// The authorization page, asking only for the scopes the connector's tools need (Google's servers list
+// the full ones too, which the SDK would ask for). Google's also asks for a refresh token: it gives one
+// only offline, and only on consent, so a connector doesn't stop working an hour after signing in.
+export function ownAuthorization(url: URL, app: NonNullable<CatalogEntry['app']>): URL {
+  const u = new URL(url)
+  u.searchParams.set('scope', app.scopes.join(' '))
+  if (app.provider === 'google') {
+    u.searchParams.set('access_type', 'offline')
+    u.searchParams.set('prompt', 'consent')
+  }
+  return u
+}
+
+// What a client ID of each looks like: Google's end in .apps.googleusercontent.com, Slack's are two numbers.
+const CLIENT_ID: Record<AppProvider, { re: RegExp; pt: string; en: string }> = {
+  google: { re: /^[\w.-]+\.apps\.googleusercontent\.com$/, pt: 'ele termina em .apps.googleusercontent.com', en: 'it ends in .apps.googleusercontent.com' },
+  slack: { re: /^\d+\.\d+$/, pt: 'são dois números com um ponto, como 1234567890.1234567890', en: 'it is two numbers with a dot, like 1234567890.1234567890' }
+}
 
 // The gateway's callback port changes on every launch, and RFC 8252 §7.3 has an
 // authorization server treat a loopback redirect as port-agnostic. Comparing the
@@ -177,6 +211,38 @@ export class ConnectorManager {
     this.emitConnector(id)
     void this.connect(id, interactive)
     return id
+  }
+
+  // The person's app for a provider, and the address its sign-in comes back to (Slack's app registers it).
+  async ownApp(provider: AppProvider): Promise<{ clientId?: string; redirectUrl: string }> {
+    const app = await this.deps.secrets.getJson<OwnApp>(appKey(provider))
+    return { ...(app ? { clientId: app.clientId } : {}), redirectUrl: this.redirectFor(provider) }
+  }
+
+  // Saves the person's app. Another one leaves its connectors signed in to the old one without a way
+  // to renew: they sign in again, with this one.
+  async setOwnApp(provider: AppProvider, input: OwnApp): Promise<void> {
+    const clientId = input.clientId.trim()
+    const clientSecret = input.clientSecret.trim()
+    const shape = CLIENT_ID[provider]
+    if (!shape.re.test(clientId)) throw new Error(L(`Esse não parece um ID do cliente do ${PROVIDER[provider]}: ${shape.pt}.`, `That doesn't look like a ${PROVIDER[provider]} client ID: ${shape.en}.`))
+    if (!clientSecret) throw new Error(L('Cole a chave secreta do cliente.', 'Paste the client secret.'))
+    const before = await this.deps.secrets.getJson<OwnApp>(appKey(provider))
+    await this.deps.secrets.setJson(appKey(provider), { clientId, clientSecret })
+    if (before && before.clientId === clientId) return
+    for (const c of this.deps.db.connectors()) {
+      if (c.kind !== 'remote' || this.appOf(c.url)?.provider !== provider) continue
+      await this.deps.secrets.set(key(c.id, 'oauth_tokens'), undefined)
+      void this.connect(c.id)
+    }
+  }
+
+  private appOf(url: string | undefined): CatalogEntry['app'] {
+    return (this.deps.ownAppOf ?? ownAppOf)(url)
+  }
+
+  private redirectFor(provider: AppProvider): string {
+    return provider === 'slack' && this.deps.fixedCallbackUrl ? this.deps.fixedCallbackUrl() : this.deps.oauthCallbackUrl()
   }
 
   // Sets or replaces the token of a connector that signs in with one, and connects with it.
@@ -255,20 +321,32 @@ export class ConnectorManager {
       { listChanged: { tools: { onChanged: () => void this.refreshTools(id).catch(() => {}) } } }
     )
     let transport: Transport
-    if (c.kind === 'remote') {
-      const headers: Record<string, string> = {}
-      if (c.auth === 'token') {
-        const token = await this.deps.secrets.get(key(id, 'token'))
-        if (token) headers['Authorization'] = `Bearer ${token}`
+    const own = c.kind === 'remote' && c.auth === 'oauth' ? this.appOf(c.url) : undefined
+    if (own && !(await this.deps.secrets.getJson<OwnApp>(appKey(own.provider)))) {
+      const name = PROVIDER[own.provider]
+      this.setStatus(id, 'error', L(`Falta o seu app do ${name}: em Conectores, clique em Conectar no ${own.provider === 'google' ? 'conector do Google' : 'Slack'} e siga os passos.`, `Your ${name} app is missing: in Connectors, click Connect on ${own.provider === 'google' ? 'a Google connector' : 'Slack'} and follow the steps.`))
+      return
+    }
+    try {
+      if (c.kind === 'remote') {
+        const headers: Record<string, string> = {}
+        if (c.auth === 'token') {
+          const token = await this.deps.secrets.get(key(id, 'token'))
+          if (token) headers['Authorization'] = `Bearer ${await resolveOp(token, this.deps.readOp)}`
+        }
+        const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
+          requestInit: { headers },
+          authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own) : undefined
+        })
+        transport = http
+      } else {
+        const env = await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp)
+        transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
       }
-      const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
-        requestInit: { headers },
-        authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive) : undefined
-      })
-      transport = http
-    } else {
-      const env = (await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}
-      transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
+    } catch (e) {
+      // A 1Password secret that wasn't read: it needs you (unlock, install the CLI), so no retries.
+      this.setStatus(id, 'error', e instanceof OpError ? e.message : connectError(e))
+      return
     }
 
     try {
@@ -440,9 +518,10 @@ export class ConnectorManager {
     return true
   }
 
-  private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean): OAuthClientProvider {
+  // `own`: a server that signs in with the person's own app (Google's, Slack's) instead of registering one.
+  private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, own?: CatalogEntry['app']): OAuthClientProvider {
     const { secrets } = this.deps
-    const redirectUrl = this.deps.oauthCallbackUrl()
+    const redirectUrl = own ? this.redirectFor(own.provider) : this.deps.oauthCallbackUrl()
     let state = ''
     return {
       get redirectUrl() {
@@ -466,23 +545,28 @@ export class ConnectorManager {
       // redirect). Signing in again, it must be the exact address: a server that
       // doesn't take any port on loopback would turn the new one away, so it registers again.
       clientInformation: async () => {
+        if (own) {
+          const app = await secrets.getJson<OwnApp>(appKey(own.provider))
+          return app && { client_id: app.clientId, client_secret: app.clientSecret }
+        }
         const info = await secrets.getJson<OAuthClientInformationMixed & { redirect_uris?: string[] }>(key(id, 'oauth_client'))
         const fits = (u: string): boolean => (interactive ? u === redirectUrl : sameLoopbackRedirect(u, redirectUrl))
         return info && (!info.redirect_uris || info.redirect_uris.some(fits)) ? info : undefined
       },
-      saveClientInformation: (info) => secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] }),
+      saveClientInformation: (info) => (own ? undefined : secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] })),
       tokens: () => secrets.getJson<OAuthTokens>(key(id, 'oauth_tokens')),
       saveTokens: (t) => secrets.setJson(key(id, 'oauth_tokens'), t),
       saveCodeVerifier: (v) => secrets.set(key(id, 'oauth_verifier'), v),
       codeVerifier: async () => (await secrets.get(key(id, 'oauth_verifier'))) ?? '',
-      redirectToAuthorization: (url) => {
+      redirectToAuthorization: (page) => {
         if (!interactive) return // never pop a browser on a background reconnect
+        const url = own ? ownAuthorization(page, own) : page
         this.oauthStates.set(state || url.searchParams.get('state') || '', { connectorId: id, transport: transport() })
         this.authUrls.set(id, url.toString())
         this.deps.openUrl(url.toString())
       },
       invalidateCredentials: async (scope) => {
-        if (scope === 'all' || scope === 'client') await secrets.set(key(id, 'oauth_client'), undefined)
+        if ((scope === 'all' || scope === 'client') && !own) await secrets.set(key(id, 'oauth_client'), undefined) // the app is the person's
         if (scope === 'all' || scope === 'tokens') await secrets.set(key(id, 'oauth_tokens'), undefined)
         if (scope === 'all' || scope === 'verifier') await secrets.set(key(id, 'oauth_verifier'), undefined)
       }
