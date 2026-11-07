@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
-import { agentById, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { agentById, amAdmin, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 
@@ -58,6 +58,7 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
 export function ServiceCard({ agentId, name }: { agentId: string; name: string }): ReactNode {
   const svc = useStore((s) => computerOf(s, agentId)?.services.find((x) => x.name === name))
   const open = useStore((s) => s.panel?.kind === 'service' && s.panel.agentId === agentId && s.panel.name === name)
+  const admin = useStore(amAdmin) // stopping a service is the admins'
   if (!svc) return null
   return (
     <div className={`artifact-card artifact-card--service ${open ? 'is-open' : ''}`}>
@@ -75,9 +76,11 @@ export function ServiceCard({ agentId, name }: { agentId: string; name: string }
           <button className="btn btn--sm btn--primary" onClick={() => openPanel({ kind: 'service', agentId, name })}>
             {L('Abrir', 'Open')}
           </button>
-          <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, name)}>
-            {L('Parar', 'Stop')}
-          </button>
+          {admin && (
+            <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, name)}>
+              {L('Parar', 'Stop')}
+            </button>
+          )}
         </>
       )}
     </div>

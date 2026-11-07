@@ -53,7 +53,7 @@ describe('parseRoute', () => {
 describe('routerPrompt', () => {
   it('lists agents with role and first instruction line, and the last messages', () => {
     const messages: Message[] = [
-      { id: 'm1', conversationId: 'c', author: { kind: 'me' }, text: 'o build quebrou', at: 1 },
+      { id: 'm1', conversationId: 'c', author: { kind: 'person', id: 'me' }, text: 'o build quebrou', at: 1 },
       { id: 'm2', conversationId: 'c', author: { kind: 'system' }, text: 'Chamei Lia', at: 2 },
       { id: 'm3', conversationId: 'c', author: { kind: 'agent', id: 'a1' }, text: 'olhando', at: 3 }
     ]
@@ -77,7 +77,7 @@ describe('routerPrompt', () => {
 
 describe('handoffPrompt', () => {
   const messages: Message[] = [
-    { id: 'm1', conversationId: 'c', author: { kind: 'me' }, text: 'revisa o build', at: 1 },
+    { id: 'm1', conversationId: 'c', author: { kind: 'person', id: 'me' }, text: 'revisa o build', at: 1 },
     { id: 'm2', conversationId: 'c', author: { kind: 'system' }, text: 'Chamei Lia', at: 2 }
   ]
   const p = handoffPrompt({ reply: 'Valeu, @nina!', author: lia, candidates: [nina], messages, members: team, me: 'Edu' })

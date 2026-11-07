@@ -2,8 +2,9 @@
 // Claude subscription's windows, and where each agent will end the month.
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { agentById, countedTokens, ENGINES, isTeam, loadUsage, modelInfo, navigate, useStore, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
+import { agentById, amAdmin, countedTokens, ENGINES, isTeam, loadUsage, modelInfo, navigate, useStore, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
 import { Sheet } from './Pages'
+import { AdminOnly } from './People'
 import { AgentAvatar, duration, Icon, tokens, usd } from './ui'
 
 const DAY = 86_400_000
@@ -53,7 +54,9 @@ export function UsagePage(): ReactNode {
   const [u, setU] = useState<UsageReport | null>(null)
   // Recomputed whenever a reply lands with its receipt.
   const receipts = useStore((s) => s.messages.reduce((n, m) => n + (m.run?.receipt ? 1 : 0), 0))
-  useEffect(() => void loadUsage().then(setU), [receipts])
+  // What the team spends is the admins' (a member can still land here from the search).
+  const admin = useStore(amAdmin)
+  useEffect(() => void (admin && loadUsage().then(setU)), [receipts, admin])
   const billing = useBilling(u)
   const allPlan = billing.length > 0 && billing.every((b) => b.status.route === 'plan')
 
@@ -73,6 +76,12 @@ export function UsagePage(): ReactNode {
     </>
   )
 
+  if (!admin)
+    return (
+      <Sheet wide title={L('Uso e limites', 'Usage and limits')}>
+        <AdminOnly>{L('Só um admin vê o uso e os limites do Tucano.', 'Only an admin sees the Tucano’s usage and limits.')}</AdminOnly>
+      </Sheet>
+    )
   return (
     <Sheet wide title={L('Uso e limites', 'Usage and limits')} lede={subtitle}>
       {!u ? (

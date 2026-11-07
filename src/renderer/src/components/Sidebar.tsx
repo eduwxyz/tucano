@@ -9,12 +9,22 @@ import {
   markRead,
   navigate,
   openDialog,
+  setTab,
   openDm,
   pendingApprovals,
   pendingMemories,
   shortcut,
   updateSettings,
   useStore,
+  amAdmin,
+  amOwner,
+  canEditChannel,
+  inboxCount,
+  initials,
+  personById,
+  roleLabel,
+  teamMode,
+  youPerson,
   type Agent,
   type View
 } from '../store'
@@ -25,7 +35,7 @@ import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
 import { WorkspaceSelector } from './Workspaces'
-import { AgentAvatar, Icon, TucaMark, useJustEnded, type IconName } from './ui'
+import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } from './ui'
 
 // The wiki stays lit on any of its pages.
 const same = (a: View | null, b: View): boolean => (b.kind === 'wiki' ? a?.kind === 'wiki' : JSON.stringify(a) === JSON.stringify(b))
@@ -101,7 +111,11 @@ export function Sidebar(): ReactNode {
   const s = useStore((s) => s)
   const channels = s.conversations.filter((c) => c.kind === 'channel')
   const dms = s.conversations.filter((c) => c.kind === 'dm' && agentById(s, c.name)?.kind !== 'tuca')
-  const pending = pendingApprovals(s).length
+  // With a team: who I am, what waits on me, and only what my role may change.
+  const team = teamMode(s)
+  const admin = amAdmin(s)
+  const me = youPerson(s)
+  const pending = team ? inboxCount(s) : pendingApprovals(s).length
   const suggestions = pendingMemories(s).length
   const proposals = s.skills.filter((k) => k.state === 'pending').length
   const [menu, setMenu] = useState<MenuState>(null)
@@ -160,16 +174,22 @@ export function Sidebar(): ReactNode {
     onClick: () => void call('setWikiCapture', { conversationId: id, on: !on })
   })
   const channelMenu = (c: (typeof channels)[number]): MenuItem[] => [
-    { label: L('Adicionar ou remover agentes…', 'Add or remove agents…'), icon: 'users', onClick: () => openDialog({ kind: 'members', id: c.id }) },
+    ...(canEditChannel(s, c) ? [{ label: L('Adicionar ou remover agentes…', 'Add or remove agents…'), icon: 'users' as const, onClick: () => openDialog({ kind: 'members', id: c.id }) }] : []),
     { label: L('Configurações do canal…', 'Channel settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id: c.id }) },
     ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
-    wikiItem(c.id, c.wikiCapture !== false),
+    ...(canEditChannel(s, c) ? [wikiItem(c.id, c.wikiCapture !== false)] : []),
+    ...channelMenuRest(c)
+  ]
+  const channelMenuRest = (c: (typeof channels)[number]): MenuItem[] => [
     'separator',
     { label: L('Mover para cima', 'Move up'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
     { label: L('Mover para baixo', 'Move down'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
     ...arranged.groups.filter((g) => !g.channels.includes(c)).map((g): MenuItem => ({ label: L(`Mover para ${g.name}`, `Move to ${g.name}`), onClick: () => saveLayout(moveChannel(channels, layout, c.id, { group: g.id })) })),
     ...(arranged.groups.some((g) => g.channels.includes(c)) ? [{ label: L('Tirar do grupo', 'Take out of the group'), onClick: () => saveLayout(moveChannel(channels, layout, c.id, {})) }] : []),
     { label: L('Novo grupo com este canal', 'New group with this channel'), icon: 'plus', onClick: () => newGroup(c.id) },
+    ...(admin ? channelDelete(c) : [])
+  ]
+  const channelDelete = (c: (typeof channels)[number]): MenuItem[] => [
     'separator',
     {
       label: L('Excluir canal…', 'Delete channel…'),
@@ -209,6 +229,9 @@ export function Sidebar(): ReactNode {
   ]
   const agentMenu = (agentId: string, agentName: string): MenuItem[] => [
     { label: L('Mandar mensagem', 'Send a message'), icon: 'send', onClick: () => void openDm(agentId) },
+    ...(admin ? agentAdminMenu(agentId, agentName) : [{ label: L(`Ver ${agentName}`, `See ${agentName}`), icon: 'eye' as const, onClick: () => navigate({ kind: 'agent', id: agentId }) }])
+  ]
+  const agentAdminMenu = (agentId: string, agentName: string): MenuItem[] => [
     { label: L('Editar', 'Edit'), icon: 'edit', onClick: () => navigate({ kind: 'agent', id: agentId }) },
     'separator',
     {
@@ -233,13 +256,13 @@ export function Sidebar(): ReactNode {
       <div className="sidebar__drag" />
       <div className="workspace">
         <WorkspaceSelector />
-        <button
+        {admin && <button
           className={`icon-btn ${s.settings.paused ? 'is-paused' : ''}`}
           title={s.settings.paused ? L('Retomar os agentes deste workspace', 'Resume agents in this workspace') : L('Pausar este workspace: nenhum agente começa a trabalhar e nenhuma rotina roda', 'Pause this workspace: no agent starts working and no routine runs')}
           onClick={() => updateSettings({ paused: !s.settings.paused })}
         >
           <Icon name={s.settings.paused ? 'play' : 'pause'} />
-        </button>
+        </button>}
         <button
           className="icon-btn"
           title={L('Trocar tema', 'Switch theme')}
@@ -249,19 +272,28 @@ export function Sidebar(): ReactNode {
         </button>
       </div>
 
+      {team && me && (
+        <button className="me-row" title={L('Seu nome e quem te cobre: Configurações › Pessoas', 'Your name and who covers for you: Settings › People')} onClick={() => (setTab('settings', 'pessoas'), navigate({ kind: 'settings' }))}>
+          <MeAvatar initials={initials(me.name)} size={24} />
+          <span className="me-row__who">
+            <strong>{me.name}</strong>
+            <span>{roleLabel(me.role)}</span>
+          </span>
+        </button>
+      )}
       {s.settings.paused && (
-        <button className="paused-banner" onClick={() => updateSettings({ paused: false })}>
-          <Icon name="pause" size={13} /> {L('Agentes pausados', 'Agents paused')} · <u>{L('retomar', 'resume')}</u>
+        <button className="paused-banner" disabled={!admin} onClick={() => updateSettings({ paused: false })}>
+          <Icon name="pause" size={13} /> {L('Agentes pausados', 'Agents paused')}{admin && <> · <u>{L('retomar', 'resume')}</u></>}
         </button>
       )}
       <nav className="sidebar__scroll">
         <TucaItem />
-        <NavItem view={{ kind: 'approvals' }} icon="shield" label={L('Aprovações', 'Approvals')} badge={pending} />
+        <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />
         <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} />
         <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" />
         <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} />
         <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} />
-        <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} />
+        {admin && <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} />}
 
         <Section
           id="channels"
@@ -316,7 +348,7 @@ export function Sidebar(): ReactNode {
         </Section>
 
         {dms.length > 0 && (
-        <Section id="dms" label={L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)}>
+        <Section id="dms" label={team ? L('Suas mensagens diretas', 'Your direct messages') : L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)}>
           {dms.map((c) => {
             const agent = agentById(s, c.name)
             if (!agent) return null
@@ -333,16 +365,18 @@ export function Sidebar(): ReactNode {
           id="agents"
           label={L('Agentes', 'Agents')}
           action={
-            <button className="icon-btn icon-btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={openTuca}>
-              <Icon name="plus" size={14} />
-            </button>
+            admin ? (
+              <button className="icon-btn icon-btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={openTuca}>
+                <Icon name="plus" size={14} />
+              </button>
+            ) : undefined
           }
         >
           {s.agents
             .filter(isTeam)
             .map((a) => (
               <div key={a.id} onContextMenu={(e) => open(e, agentMenu(a.id, a.name))}>
-                <AgentItem id={a.id} />
+                <AgentItem id={a.id} owner={team && a.owner !== s.you ? personById(s, a.owner)?.name : undefined} />
               </div>
             ))}
           {s.agents.some((a) => a.archived) && (
@@ -355,11 +389,12 @@ export function Sidebar(): ReactNode {
         </Section>
       </nav>
 
-      {s.settings.onboarding?.done && !s.settings.onboarding.checklistHidden && <GettingStarted />}
+      {/* The introduction's checklist sets the Tucano up (and its phone): the owner's. */}
+      {amOwner(s) && s.settings.onboarding?.done && !s.settings.onboarding.checklistHidden && <GettingStarted />}
       <ContextMenu menu={menu} onClose={closeMenu} />
       <div className="sidebar__foot">
         <UpdateNote />
-        <NavItem view={{ kind: 'usage' }} icon="chart" label={L('Uso e limites', 'Usage and limits')} />
+        {admin && <NavItem view={{ kind: 'usage' }} icon="chart" label={L('Uso e limites', 'Usage and limits')} />}
         <NavItem view={{ kind: 'connectors' }} icon="plug" label={L('Conectores', 'Connectors')} />
         <NavItem view={{ kind: 'settings' }} icon="gear" label={L('Configurações', 'Settings')} />
       </div>
@@ -401,7 +436,8 @@ function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: numb
   )
 }
 
-function AgentItem({ id }: { id: string }): ReactNode {
+// `owner`: with a team, whose agent it is (its approvals go to them), when it isn't mine.
+function AgentItem({ id, owner }: { id: string; owner?: string }): ReactNode {
   const agent = useStore((s) => agentById(s, id))
   const active = useStore((s) => s.view?.kind === 'agent' && s.view.id === id)
   // The agent list is configuration: working shows on the thread (DM, channel),
@@ -412,7 +448,7 @@ function AgentItem({ id }: { id: string }): ReactNode {
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'agent', id })}>
       <AgentAvatar agent={agent} size={18} />
       <span className="nav-item__label">{agent.name}</span>
-      <span className="nav-item__meta nav-item__role" title={agent.role}>{agent.role}</span>
+      <span className="nav-item__meta nav-item__role" title={owner ? L(`${agent.role ? `${agent.role} · ` : ''}de ${owner}`, `${agent.role ? `${agent.role} · ` : ''}${owner}'s`) : agent.role}>{agent.role}</span>
       {agent.computer && agent.computerKind === 'mac' && (
         <span className="nav-item__mac" title={L('Roda no seu computador', 'Runs on your computer')}>
           <Icon name="laptop" size={13} />
