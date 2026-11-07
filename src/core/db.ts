@@ -1713,6 +1713,26 @@ export class Db {
     this.db.prepare('INSERT INTO person_keys (hash, person_id, label, created_at) VALUES (?, ?, ?, ?)').run(hash, personId, label ?? null, Date.now())
   }
 
+  // A person's own keys, newest first: what each device said it is, and when it was last seen.
+  personKeys(personId: string): { hash: string; label: string; createdAt: number; seenAt?: number }[] {
+    return (this.db.prepare('SELECT hash, label, created_at, last_seen FROM person_keys WHERE person_id = ? ORDER BY created_at DESC').all(personId) as Row[]).map((r) => ({
+      hash: str(r['hash']),
+      label: str(r['label']),
+      createdAt: Number(r['created_at']),
+      ...(r['last_seen'] ? { seenAt: Number(r['last_seen']) } : {})
+    }))
+  }
+
+  // One of a person's keys goes; its browser reads "no access" (removed_keys) instead of counting a guess.
+  removePersonKey(personId: string, hash: string): boolean {
+    return this.tx(() => {
+      if (!this.db.prepare('SELECT 1 FROM person_keys WHERE hash = ? AND person_id = ?').get(hash, personId)) return false
+      this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE hash = ?').run(Date.now(), hash)
+      this.db.prepare('DELETE FROM person_keys WHERE hash = ?').run(hash)
+      return true
+    })
+  }
+
   // The person a key opens, if they still have access; seen now.
   removedKey(hash: string): boolean {
     return !!this.db.prepare('SELECT 1 FROM removed_keys WHERE hash = ?').get(hash)

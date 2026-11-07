@@ -151,11 +151,11 @@ export function personNotice(
   return true
 }
 
-const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+export const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
 // The plain page every server-made page shares (the OAuth callback's look).
 export const PAGE_STYLE =
-  'body{font:15px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f6f3ee;color:#1d1a16}@media(prefers-color-scheme:dark){body{background:#1a1917;color:#f1ece4}input{background:#262421;color:inherit}}main{max-width:460px;padding:24px}p{opacity:.8;line-height:1.5}form{display:grid;gap:10px;margin-top:16px}input{font:inherit;padding:10px 12px;border:1px solid #8884;border-radius:8px}button{font:inherit;padding:10px 12px;border:0;border-radius:8px;background:#1d1a16;color:#f6f3ee;cursor:pointer}.err{color:#b3261e;opacity:1}'
+  'body{font:15px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f6f3ee;color:#1d1a16}@media(prefers-color-scheme:dark){body{background:#1a1917;color:#f1ece4}input{background:#262421;color:inherit}}main{max-width:460px;padding:24px}p{opacity:.8;line-height:1.5}form{display:grid;gap:10px;margin-top:16px}input{font:inherit;padding:10px 12px;border:1px solid #8884;border-radius:8px}button{font:inherit;padding:10px 12px;border:0;border-radius:8px;background:#1d1a16;color:#f6f3ee;cursor:pointer}.err{color:#b3261e;opacity:1}@media(prefers-color-scheme:dark){button{background:#f1ece4;color:#1a1917}}'
 export const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"
 
 // "Você foi convidado pro Tucano de <name>": a name, and in. The code goes back in a hidden field;

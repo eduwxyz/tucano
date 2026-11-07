@@ -71,11 +71,13 @@ export function homePhone(deps: {
       const r = await ask({ type: 'device-key', person: null, label })
       return (r?.['data'] as { key?: string } | undefined)?.key
     },
-    open: (person, onMessage) => {
+    open: (person, onMessage, o) => {
       const { port1, port2 } = new MessageChannelMain()
       port2.on('message', (e) => onMessage(e.data))
+      // The core closed it: the device was disconnected (hub.closeDevice).
+      port2.on('close', () => o?.onClose?.())
       port2.start()
-      child?.postMessage({ person }, [port1])
+      child?.postMessage({ person, ...(o?.device ? { device: o.device } : {}) }, [port1])
       return { post: (data) => port2.postMessage(data), close: () => port2.close() }
     },
     dataDir: () => deps.workspace(current())?.dataDir ?? deps.selected().dataDir

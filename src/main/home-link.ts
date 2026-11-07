@@ -7,7 +7,7 @@
 // trades a one-time code for a key of the phone's own (the core keeps it, as on a server), then the
 // key opens /events (the core's port, as an event stream), /rpc (requests up), /artifact and /upload.
 // Only addresses of a private network get an answer: nothing here is for the internet.
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer, type Server } from 'node:https'
@@ -24,8 +24,10 @@ export interface HomeCore {
   auth(key: string): Promise<Person | { removed: true } | undefined>
   // A new key for the owner, for one device.
   deviceKey(label: string): Promise<string | undefined>
-  // A port to the core as this person: what the core says comes to onMessage.
-  open(person: string, onMessage: (msg: unknown) => void): { post(data: unknown): void; close(): void }
+  // A port to the core as this person: what the core says comes to onMessage. `device`: the hash of
+  // the key the phone signed in with, so the core can end this line when that device is disconnected
+  // (Settings › Celular › Seu iPhone); then onClose.
+  open(person: string, onMessage: (msg: unknown) => void, o?: { device?: string; onClose?: () => void }): { post(data: unknown): void; close(): void }
   // Where the workspace keeps what agents showed (artifacts/<id>/<name>).
   dataDir(): string
 }
@@ -129,7 +131,7 @@ export class HomeLink {
 
   // Something the core tells the phones (a notification): to each one on the line.
   deliver(msg: unknown): void {
-    for (const s of this.streams.values()) s.res.write(`data: ${JSON.stringify(msg)}\n\n`)
+    for (const s of this.streams.values()) if (!s.res.writableEnded) s.res.write(`data: ${JSON.stringify(msg)}\n\n`)
   }
 
   private handle(req: IncomingMessage, res: ServerResponse): void {
@@ -147,7 +149,7 @@ export class HomeLink {
         (who) => {
           if (!who) return this.unauthorized(res, ip)
           if ('removed' in who) return void res.writeHead(401, BASE_HEADERS).end()
-          this.signedIn(req, res, url, who, core)
+          this.signedIn(req, res, url, who, core, key)
         },
         () => !res.headersSent && res.writeHead(503, BASE_HEADERS).end()
       )
@@ -181,15 +183,24 @@ export class HomeLink {
     this.o.onChange?.()
   }
 
-  private signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Person, core: HomeCore): void {
+  private signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Person, core: HomeCore, key: string): void {
     if (url.pathname === '/events') {
       const id = randomUUID()
       res.writeHead(200, { ...BASE_HEADERS, 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
       res.write(`event: hello\ndata: ${id}\n\n`)
-      const port = core.open(who.id, (msg) => res.write(`data: ${JSON.stringify(msg)}\n\n`))
+      // Disconnected from the computer (the core closed the port): the phone loses the line now,
+      // and its next request finds its key gone.
+      const device = createHash('sha256').update(key).digest('base64url')
+      const port = core.open(who.id, (msg) => void (!res.writableEnded && res.write(`data: ${JSON.stringify(msg)}\n\n`)), {
+        device,
+        onClose: () => {
+          if (this.streams.delete(id)) this.o.onChange?.()
+          if (!res.writableEnded) res.end()
+        }
+      })
       this.streams.set(id, { person: who.id, res, port })
       // A beat the phone hears: it tells a dead line from a quiet one.
-      const beat = setInterval(() => res.write('event: ping\ndata: \n\n'), 25_000)
+      const beat = setInterval(() => !res.writableEnded && res.write('event: ping\ndata: \n\n'), 25_000)
       req.on('close', () => {
         clearInterval(beat)
         this.streams.delete(id)
