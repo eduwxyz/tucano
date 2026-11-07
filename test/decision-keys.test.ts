@@ -6,7 +6,9 @@ const press = (key: string, extra: Partial<DecisionKeyPress> = {}): DecisionKeyP
 describe('decisionKey', () => {
   it('a number picks that option', () => {
     expect(decisionKey(press('2'), null, 3)).toEqual({ kind: 'pick', index: 1 })
-    expect(decisionKey(press('4'), null, 3)).toBeNull()
+    expect(decisionKey(press('4'), null, 3)).toEqual({ kind: 'other' }) // the one after the options: Something else
+    expect(decisionKey(press('5'), null, 3)).toBeNull()
+    expect(decisionKey(press('1'), null, 0)).toBeNull() // a text decision has no options
   })
   it('a number with ⌘, Ctrl or Alt is not an answer', () => {
     expect(decisionKey(press('2', { modifier: true }), null, 3)).toBeNull()
@@ -26,7 +28,7 @@ describe('decisionKey', () => {
     expect(decisionKey(press('ArrowUp'), null, 3)).toEqual({ kind: 'focus', index: 3 })
     expect(decisionKey(press('ArrowUp'), 0, 3)).toEqual({ kind: 'focus', index: 3 })
   })
-  it('Esc closes the card instead of answering', () => {
+  it('Esc leaves Something else, or the card, instead of answering', () => {
     expect(decisionKey(press('Escape'), 0, 3)).toEqual({ kind: 'dismiss' })
     expect(decisionKey(press('Escape', { inField: true }), 0, 3)).toEqual({ kind: 'dismiss' })
   })

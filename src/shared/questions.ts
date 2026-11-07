@@ -28,8 +28,9 @@ export interface AnswerDraft {
 }
 
 export const MAX_QUESTIONS = 4
-export const MIN_OPTIONS = 2
-export const MAX_OPTIONS = 4
+export const MIN_OPTIONS = 1
+// The card always adds "Something else" (a free answer) after the agent's options: 4 rows at most.
+export const MAX_OPTIONS = 3
 // A decision is read at a glance: the context goes in the reply's text, not here.
 export const MAX_QUESTION_LENGTH = 200
 export const MAX_LABEL_LENGTH = 80
@@ -75,8 +76,9 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Deci
       questions.push({ question, kind })
       continue
     }
-    const raw = Array.isArray(item['options']) ? (item['options'] as Record<string, unknown>[]) : []
-    if (raw.length < MIN_OPTIONS || raw.length > MAX_OPTIONS) return { error: L(`"${question}": de ${MIN_OPTIONS} a ${MAX_OPTIONS} opções.`, `"${question}": ${MIN_OPTIONS} to ${MAX_OPTIONS} options.`) }
+    // Past the limit, the first ones are kept: "Something else" covers the rest.
+    const raw = (Array.isArray(item['options']) ? (item['options'] as Record<string, unknown>[]) : []).slice(0, MAX_OPTIONS)
+    if (raw.length < MIN_OPTIONS) return { error: L(`"${question}": de ${MIN_OPTIONS} a ${MAX_OPTIONS} opções.`, `"${question}": ${MIN_OPTIONS} to ${MAX_OPTIONS} options.`) }
     const options: DecisionOption[] = []
     for (const o of raw) {
       const label = trimmed(o?.['label'])

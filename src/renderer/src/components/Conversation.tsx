@@ -63,7 +63,6 @@ import { canEditChannel,
   type ImageUpload,
   type Author,
   type Message,
-  type State,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
@@ -76,7 +75,6 @@ import { canEditChannel,
   answerQuestion,
   canDecide,
   confirmQuestion,
-  reopenQuestion,
   personById,
   teamMode,
   type Person
@@ -88,8 +86,8 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal, ProposalCard } from './Tuca'
 import { FoldToggle } from './Fold'
-import { AnswersSummary, DecisionList, DecisionsCard } from './Decisions'
-import { isAnswered, questionsOf, type Answer, type Decision } from '../../../shared/questions'
+import { AnswersSummary, AskCard } from './Decisions'
+import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
@@ -501,11 +499,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ))}
           </div>
         )}
-        {/* Alone, my question: the decisions take the message box's place, and this says what waits or what I chose. With
-            a team, a question says whom it's for, and who may answer it for them gets the decisions on it. */}
+        {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
+            may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
           (team && message.run?.askedTo ? (
-            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} decisions={questionsOf(message.run)} answers={message.run.answers} answeredInText={message.run.answeredInText} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
+            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
           ) : (
             <AnswersSummary message={message} />
           ))}
@@ -974,37 +972,18 @@ function RoutineChip({ id }: { id: string }): ReactNode {
 // A question an agent asked (ask_user). Alone (a desktop), it's mine: my next message answers it.
 // With a team it says whom it's for; who may answer it (the person, whoever covers for them, an
 // admin, or past the deadline the requester) gets a field; in my DM, a question to someone else
-// first asks me whether it may go. Its decisions (ask_user's options) are answered on it, one at
-// a time, by whoever may answer it; closed (✕), the field takes a written answer, as before.
+// first asks me whether it may go. With decisions (ask_user's options), it's their card
+// (TeamAsk): answered on it by whoever may answer the question.
 // What someone was typing to answer a question, kept by question: if someone else answers first,
 // or the card moves (Pra você drops it), it's still there, with who answered.
 export const questionDrafts = new Map<string, string>()
 
-export function QuestionCard({
-  id,
-  agentName,
-  askedTo,
-  question,
-  decisions,
-  answers,
-  answeredInText,
-  answered,
-  answeredBy,
-  inbox
-}: {
-  id: string
-  agentName?: string
-  askedTo?: string
-  question: string
-  decisions?: Decision[]
-  answers?: (Answer | null)[]
-  answeredInText?: boolean
-  answered: boolean
-  answeredBy?: string
-  inbox?: boolean
-}): ReactNode {
+export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+  return props.decisions?.length ? <TeamAsk {...props} decisions={props.decisions} /> : <TextQuestion {...props} />
+}
+
+function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; question: string; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   const team = useStore(teamMode)
-  const dismissed = useStore((s) => s.dismissedQuestions.includes(id))
   const you = useStore((s) => s.you)
   const admin = useStore(amAdmin)
   const waiting = useStore((s) => s.inbox.questions.find((q) => q.id === id))
@@ -1019,14 +998,11 @@ export function QuestionCard({
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
   const who = agentName ?? L('O agente', 'The agent')
-  // Options, several decisions, or answers chosen on the card: a list. A lone question: its text.
-  const structured = !!decisions?.length && (decisions.length > 1 || !!decisions[0]!.options)
-  const asked = structured || answers?.some(isAnswered) ? <DecisionList questions={decisions!} answers={answered ? answers : undefined} answeredInText={answeredInText} /> : <p>{question}</p>
   if (!team || !target)
     return (
       <div className={`question ${answered ? 'is-answered' : ''}`}>
         <span className="question__label">{answered ? L('Perguntou', 'Asked') : L('Pergunta pra você', 'A question for you')}</span>
-        {asked}
+        <p>{question}</p>
         {!answered && <span className="hint">{L('Sua próxima mensagem aqui é a resposta.', 'Your next message here is the answer.')}</span>}
       </div>
     )
@@ -1038,7 +1014,7 @@ export function QuestionCard({
           {toMe ? L('Perguntou', 'Asked') : L(`Perguntou a ${target.name}`, `Asked ${target.name}`)}
           {answerer && ` · ${L(`Respondida por ${answerer.name}`, `Answered by ${answerer.name}`)}`}
         </span>
-        {asked}
+        <p>{question}</p>
         {/* Answered by someone else while this person was typing: what they wrote stays, and says why it didn't go. */}
         {text.trim() && (
           <>
@@ -1052,7 +1028,7 @@ export function QuestionCard({
     return (
       <div className="question">
         <span className="question__label">{L(`${who} quer perguntar a ${target.name}`, `${who} wants to ask ${target.name}`)}</span>
-        {asked}
+        <p>{question}</p>
         <span className="hint">{L(`${target.name} vê só a pergunta, nunca esta conversa.`, `${target.name} sees the question only, never this conversation.`)}</span>
         <div className="row question__actions">
           <button className="btn btn--primary btn--sm" onClick={() => confirmQuestion(id, true)}>
@@ -1076,36 +1052,68 @@ export function QuestionCard({
   return (
     <div className="question">
       <span className="question__label">{toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)}</span>
+      <p>{question}</p>
       {toMe && !inbox ? (
-        <>
-          {asked}
-          <span className="hint">{L('Sua próxima mensagem aqui é a resposta.', 'Your next message here is the answer.')}</span>
-        </>
-      ) : mayAnswer && structured && !dismissed ? (
-        <DecisionsCard id={id} questions={decisions!} saved={answers} />
+        <span className="hint">{L('Sua próxima mensagem aqui é a resposta.', 'Your next message here is the answer.')}</span>
       ) : mayAnswer ? (
-        <>
-          {asked}
-          {structured && (
-            <button className="link" onClick={() => reopenQuestion(id)}>
-              {L('Escolher nas opções', 'Pick from the options')}
-            </button>
-          )}
         <form className="row question__answer" onSubmit={(e) => (e.preventDefault(), send())}>
           <input className="grow" value={text} placeholder={toMe ? L('Sua resposta', 'Your answer') : L(`Responder no lugar de ${target.name}`, `Answer for ${target.name}`)} onChange={(e) => (setText(e.target.value), setError(''))} />
           <button className="btn btn--primary btn--sm" disabled={sending || !text.trim()}>
             {L('Responder', 'Answer')}
           </button>
         </form>
-        </>
       ) : (
-        <>
-          {asked}
-          <span className="hint">{L(`Esperando ${target.name} responder.`, `Waiting for ${target.name} to answer.`)}</span>
-        </>
+        <span className="hint">{L(`Esperando ${target.name} responder.`, `Waiting for ${target.name} to answer.`)}</span>
       )}
       {error && <span className="note note--error">{error}</span>}
     </div>
+  )
+}
+
+
+// A question with decisions, with a team: whom it's for and who asked; answered on the card by
+// whoever may (the person, whoever covers for them or, past the deadline, the requester: those
+// who have it in For you; an admin, after choosing to answer for them); for anyone else, to read.
+function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+  const team = useStore(teamMode)
+  const you = useStore((s) => s.you)
+  const admin = useStore(amAdmin)
+  const waiting = useStore((s) => s.inbox.questions.find((q) => q.id === id))
+  const target = useStore((s) => personById(s, askedTo ?? waiting?.askedTo))
+  const answerer = useStore((s) => (answeredBy && answeredBy !== s.you ? personById(s, answeredBy) : undefined))
+  const [answering, setAnswering] = useState(false)
+  const who = agentName ?? L('O agente', 'The agent')
+  const card = { id, questions: decisions, saved: answers }
+  if (!team || !target) return <AskCard {...card} mode={answered ? 'done' : 'answer'} badge={answered ? L('Respondida', 'Answered') : L('Esperando você', 'Waiting for you')} answeredInText={!!answeredInText} />
+  const toMe = target.id === you
+  const asked = toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)
+  if (answered)
+    return <AskCard {...card} mode="done" badge={answerer ? L(`Respondida por ${answerer.name}`, `Answered by ${answerer.name}`) : L('Respondida', 'Answered')} byline={toMe ? L(`${who} perguntou a você`, `${who} asked you`) : L(`${who} perguntou a ${target.name}`, `${who} asked ${target.name}`)} answeredInText={!!answeredInText} />
+  if (waiting?.confirm === 'pending')
+    return (
+      <AskCard {...card} mode="view" badge={L(`${who} quer perguntar a ${target.name}`, `${who} wants to ask ${target.name}`)}>
+        <p className="ask__note">{L(`${target.name} vê só a pergunta, nunca esta conversa.`, `${target.name} sees the question only, never this conversation.`)}</p>
+        <div className="ask__foot">
+          <button className="btn btn--sm" onClick={() => confirmQuestion(id, false)}>
+            {L('Não pergunte', "Don't ask")}
+          </button>
+          <button className="btn btn--primary btn--sm" onClick={() => confirmQuestion(id, true)}>
+            {L(`Pode perguntar a ${target.name}`, `Go ahead and ask ${target.name}`)}
+          </button>
+        </div>
+      </AskCard>
+    )
+  if (waiting || (admin && answering)) return <AskCard {...card} mode="answer" badge={waiting ? L('Esperando você', 'Waiting for you') : L(`Respondendo no lugar de ${target.name}`, `Answering for ${target.name}`)} byline={asked} />
+  return (
+    <AskCard {...card} mode="view" badge={L(`Esperando ${target.name}`, `Waiting for ${target.name}`)} byline={asked}>
+      {admin && !inbox && (
+        <div className="ask__foot">
+          <button className="btn btn--sm" onClick={() => setAnswering(true)}>
+            {L(`Responder no lugar de ${target.name}`, `Answer for ${target.name}`)}
+          </button>
+        </div>
+      )}
+    </AskCard>
   )
 }
 
@@ -1825,15 +1833,10 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // messages, so a reply's steps don't redraw the field.
   const working = useStore((s) => workingIds(s, conversationId, threadId))
   // With a team, only a question my message would answer (mine, or one I may answer) asks me here.
-  const mine = (s: State, q: Message | undefined): Message | undefined => (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending') ? undefined : q)
   const asker = useStore((s) => {
-    const q = mine(s, askerIn(s, conversationId, threadId))
+    const q = askerIn(s, conversationId, threadId)
+    if (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending')) return undefined
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
-  })
-  // The decisions waiting here for me take the field's place, until I close them to answer in writing.
-  const deciding = useStore((s) => {
-    const q = mine(s, askerIn(s, conversationId, threadId))
-    return q?.author.kind === 'agent' && questionsOf(q.run).length > 0 && !s.dismissedQuestions.includes(q.id) ? q : undefined
   })
 
   // What's typed but not sent, per conversation, so leaving a channel and coming
@@ -1892,14 +1895,12 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
   // With a thread open there are two fields: a drop on the thread goes to its own.
   const inThread = !!threadId
-  const hidden = useRef(false) // behind the decisions: an image dropped now would come back unasked when they close
-  hidden.current = !!deciding
   useEffect(() => {
     let depth = 0
     const files = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
     const mine = (e: DragEvent): boolean => !!(e.target instanceof Element && e.target.closest('.side-panel--thread')) === inThread
     const enter = (e: DragEvent): void => {
-      if (!files(e) || hidden.current) return
+      if (!files(e)) return
       depth++
       setDragging(true)
     }
@@ -1914,7 +1915,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       e.preventDefault()
       depth = 0
       setDragging(false)
-      if (mine(e) && !hidden.current) void addFiles([...(e.dataTransfer?.files ?? [])])
+      if (mine(e)) void addFiles([...(e.dataTransfer?.files ?? [])])
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)
@@ -2081,8 +2082,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           )}
         </div>
       )}
-      {deciding && <DecisionsCard key={deciding.id} id={deciding.id} questions={questionsOf(deciding.run)} saved={deciding.run?.answers} />}
-      <div className="composer" hidden={!!deciding}>
+      <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">
             {images.map((img, i) => (

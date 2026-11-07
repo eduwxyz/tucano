@@ -108,7 +108,6 @@ export interface State {
   demoServer?: { command: string; args: string[] }
   toasts: Toast[] // short notes at the bottom: an action that didn't go through
   coreDown: boolean // the core's process ended; a banner offers to reopen
-  dismissedQuestions: string[] // questions whose card I closed to answer in writing, while the app is open
 }
 
 export interface Toast {
@@ -188,8 +187,7 @@ let state: State = {
   dialog: null,
   tabs: {},
   toasts: [],
-  coreDown: false,
-  dismissedQuestions: []
+  coreDown: false
 }
 
 // ---------- store plumbing ----------
@@ -916,8 +914,6 @@ export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>
   set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
 export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog, navOpen: dialog ? false : s.navOpen }))
-export const dismissQuestion = (messageId: string): void => set((s) => ({ ...s, dismissedQuestions: [...s.dismissedQuestions, messageId] }))
-export const reopenQuestion = (messageId: string): void => set((s) => ({ ...s, dismissedQuestions: s.dismissedQuestions.filter((id) => id !== messageId) }))
 export const setTab = (page: string, tab: string): void => set((s) => ({ ...s, tabs: { ...s.tabs, [page]: tab } }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })

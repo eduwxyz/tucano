@@ -24,6 +24,7 @@ export function decisionKey(press: DecisionKeyPress, focus: number | null, optio
   }
   const n = Number(press.key)
   if (Number.isInteger(n) && n >= 1 && n <= optionCount) return { kind: 'pick', index: n - 1 }
+  if (optionCount > 0 && n === optionCount + 1) return { kind: 'other' }
   if (press.key === 'ArrowDown') return move(1)
   if (press.key === 'ArrowUp') return move(-1)
   if (press.key === 'Enter' && press.onBody && focus !== null) return focus === optionCount ? { kind: 'other' } : { kind: 'pick', index: focus }

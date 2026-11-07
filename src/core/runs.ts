@@ -70,8 +70,8 @@ export const ASK_USER: ToolDef = {
   name: 'ask_user',
   get description() {
     return L(
-      'Pede ao usuário as decisões que faltam pra continuar. Escreva a análise e a proposta no texto da sua resposta, antes de chamar; aqui vão só as decisões, cada uma com uma pergunta curta e, quando der, opções curtas (detalhe em description). Tipos: single (uma opção), multiple (várias), text (resposta livre). De 1 a 4 decisões, de 2 a 4 opções. Depois de chamar, encerre a resposta: as respostas chegam na próxima mensagem.',
-      "Asks the user for the decisions missing to go on. Write your analysis and proposal in your reply's text, before calling; here go only the decisions, each with a short question and, when possible, short options (detail in description). Kinds: single (one option), multiple (several), text (free answer). 1 to 4 decisions, 2 to 4 options. After calling it, end your reply: the answers come in the next message."
+      'Pede ao usuário as decisões que faltam pra continuar. Escreva a análise e a proposta no texto da sua resposta, antes de chamar; aqui vão só as decisões, cada uma com uma pergunta curta e, quando der, opções curtas (detalhe em description). Tipos: single (uma opção), multiple (várias), text (resposta livre). De 1 a 4 decisões; de 1 a 3 opções por decisão, as mais prováveis: o app sempre acrescenta "Outra coisa", com resposta livre, então não inclua essa opção. Depois de chamar, encerre a resposta: as respostas chegam na próxima mensagem.',
+      "Asks the user for the decisions missing to go on. Write your analysis and proposal in your reply's text, before calling; here go only the decisions, each with a short question and, when possible, short options (detail in description). Kinds: single (one option), multiple (several), text (free answer). 1 to 4 decisions; 1 to 3 options per decision, the likeliest ones: the app always adds \"Something else\", with a free answer, so don't include that option. After calling it, end your reply: the answers come in the next message."
     )
   },
   get inputSchema() {

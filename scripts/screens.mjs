@@ -55,21 +55,20 @@ await shot('03-router-escolheu')
 await send('@lia antes de sugerir qualquer coisa, use a ferramenta de pergunta pra me perguntar qual é o meu prazo.')
 await settle()
 await shot('04-pergunta')
-await win.fill('.decisions__text', 'Até sexta.')
-await win.keyboard.press('Enter')
+await send('Até sexta.') // the message box still answers, as before
 await settle()
 await shot('05-respondeu-pergunta')
 
-// Several decisions: one at a time in place of the message box, then a review before sending.
+// Several decisions: a card under the reply, one at a time, then a review before sending.
 await send('@lia me ajuda a decidir')
 await settle()
-await win.waitForSelector('.decisions')
+await win.waitForSelector('.ask--answer')
 await shot('05a-decisoes')
-await win.locator('.decisions__option').first().click()
-await win.keyboard.type('Até sexta.')
+await win.locator('.ask-option').first().click()
+await win.fill('.ask__text', 'Até sexta.')
 await win.keyboard.press('Enter')
 await shot('05b-decisoes-revisao')
-await win.locator('.decisions .btn--primary').click()
+await win.locator('.ask .btn--primary').click()
 await settle()
 
 // Handoff: Lia mentions Theo, who answers next.

@@ -98,13 +98,18 @@ describe('parseQuestions', () => {
     expect(refused({})).toBe(true)
     expect(refused({ questions: [] })).toBe(true)
     expect(refused({ questions: Array.from({ length: 5 }, () => deadline) })).toBe(true)
-    expect(refused({ questions: [{ question: 'x', kind: 'single', options: [{ label: 'a' }] }] })).toBe(true)
-    expect(refused({ questions: [{ question: 'x', kind: 'multiple', options: [...two, ...two, { label: 'e' }] }] })).toBe(true)
+    expect(refused({ questions: [{ question: 'x', kind: 'single', options: [] }] })).toBe(true)
+    expect(refused({ questions: [{ question: 'x', kind: 'single', options: [{ label: 'a' }] }] })).toBe(false) // one suggestion, and Something else
     expect(refused({ questions: [{ question: ' ', kind: 'text' }] })).toBe(true)
     expect(refused({ questions: [{ question: 'x', kind: 'single', options: [{ label: 'a' }, { label: ' ' }] }] })).toBe(true)
     expect(refused({ questions: [{ question: 'x', kind: 'dropdown', options: two }] })).toBe(true)
     expect(refused({ question: '  ' })).toBe(true)
   })
+  it('keeps the first 3 options of a longer list: the card adds Something else', () => {
+    const r = parseQuestions({ questions: [{ question: 'x', kind: 'multiple', options: ['a', 'b', 'c', 'd', 'e'].map((label) => ({ label })) }] })
+    expect(r).toEqual({ questions: [{ question: 'x', kind: 'multiple', options: [{ label: 'a' }, { label: 'b' }, { label: 'c' }] }] })
+  })
+
   it('drops options from a text decision', () => {
     expect(parseQuestions({ questions: [{ question: 'Pra quando?', kind: 'text', options: [{ label: 'a' }, { label: 'b' }] }] })).toEqual({ questions: [deadline] })
   })

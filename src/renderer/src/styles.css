@@ -1567,12 +1567,14 @@ h3 {
 }
 /* A request (or a question) arriving: it rises in, rings twice to be seen, and goes quiet. */
 .approval--pending,
-.decisions {
+.question:not(.is-answered),
+.ask--answer {
   --rise: 6px;
   animation: rise 280ms var(--ease-out) backwards;
 }
 .approval--pending::after,
-.decisions::after {
+.question:not(.is-answered)::after,
+.ask--answer::after {
   content: '';
   position: absolute;
   inset: -1px;
@@ -2295,293 +2297,430 @@ h3 {
   --pulse-min: 0.45;
   animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
 }
-/* The decisions an agent asked: the message box turns into them, one at a time. The bar on
-   top has a segment per decision, filled as each is answered. */
-.decisions {
+.question {
   position: relative;
   --ring: var(--accent-soft);
+  margin-top: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  max-width: 560px;
+  transition: border-color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
+}
+.question p {
+  margin: 2px 0 0;
+  font-weight: 500;
+}
+.question .hint {
+  margin-top: 6px;
+}
+.question.is-answered {
+  border-color: var(--border);
+  background: transparent;
+}
+.question.is-answered p {
+  font-weight: 400;
+  color: var(--text-2);
+}
+.question__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+.question.is-answered .question__label {
+  color: var(--text-3);
+}
+/* The decisions an agent asked (ask_user), as a card under its reply: the approval card's
+   build (a left accent, a badge with an icon, buttons at the foot) in the orange of what's
+   asked of you. One decision at a time, its options as rows to pick (number, label, tick), then
+   "Something else"; answered, the card keeps what was chosen. */
+.ask {
+  position: relative;
+  --ring: var(--accent-soft);
+  margin: 10px 0 4px;
+  max-width: 560px;
   border: 1px solid var(--border-strong);
-  border-radius: 20px;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
   background: var(--panel);
   box-shadow: var(--shadow);
-  padding: 14px 14px 8px;
-  outline: none;
+  transition: border-left-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
 }
-.decisions:focus-within {
-  box-shadow: var(--shadow), 0 0 0 4px var(--accent-soft);
+.ask--answer::after {
+  inset: -1px -1px -1px -3px;
 }
-.decisions__body {
-  outline: none;
+.ask--view {
+  box-shadow: none;
+  border-left-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
 }
-.decisions__progress {
+.ask--done {
+  box-shadow: none;
+  border-color: var(--border);
+  border-left-color: var(--border-strong);
+}
+.ask__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 24px;
+  margin-bottom: 8px;
+}
+.ask__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ask--done .ask__badge {
+  color: var(--text-3);
+}
+.ask__byline {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ask__byline::before {
+  content: '·';
+  margin-right: 8px;
+}
+.ask__nav {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.ask__next .icon {
+  transform: scaleX(-1);
+}
+.ask__count {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.ask__progress {
   display: flex;
   gap: 4px;
-  padding: 0 4px;
-  margin-bottom: 12px;
+  margin: -2px 0 10px;
 }
-.decisions__progress:has(> :only-child) {
-  display: none;
-}
-.decisions__segment {
+.ask__segment {
   flex: 1;
   height: 3px;
   border-radius: 2px;
   background: var(--border);
   transition: background-color var(--dur-base) var(--ease-out);
 }
-.decisions__segment.is-done {
-  background: color-mix(in srgb, var(--accent) 45%, var(--border));
+.ask__segment.is-done {
+  background: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
-.decisions__segment.is-current {
+.ask__segment.is-current {
   background: var(--accent);
 }
-.decisions__head {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 0 4px 10px;
+.ask__body {
+  outline: none;
 }
-.decisions__question {
-  flex: 1;
-  margin: 0;
-  font-size: 15px;
+.ask__title {
   font-weight: 600;
+  font-size: 14.5px;
   line-height: 1.4;
-  letter-spacing: -0.005em;
-  text-wrap: pretty;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
 }
-.decisions__nav {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.decisions__next .icon {
-  transform: rotate(180deg);
-}
-.decisions__count {
-  min-width: 52px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
-.decisions__prose,
-.answers__prose {
+.ask__prose {
   max-height: 220px;
   overflow-y: auto;
+  margin-bottom: 10px;
+  padding-right: 6px;
   font-size: 13.5px;
   line-height: 1.55;
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
-.decisions__prose {
-  margin: 0 4px 10px;
-  padding-right: 6px;
+.ask-summary .ask__prose,
+.ask-list .ask__prose {
+  max-height: none;
+  margin: 0;
 }
-.decisions__prose > :first-child,
-.answers__prose > :first-child {
+.ask__prose > :first-child {
   margin-top: 0;
 }
-.decisions__prose > :last-child,
-.answers__prose > :last-child {
+.ask__prose > :last-child {
   margin-bottom: 0;
 }
-.decisions__prose code,
-.answers__prose code {
+.ask__prose code {
   font: 0.92em var(--mono);
   background: var(--code-bg);
   padding: 1px 4px;
   border-radius: 4px;
 }
-.answers__prose {
-  max-height: none;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-.decisions__options {
+/* An option: a row to pick, with its number (the key), its label and a tick when chosen. */
+.ask-options {
   display: flex;
   flex-direction: column;
+  gap: 4px;
 }
-.decisions__option {
+.ask-option {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  padding: 9px 8px;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  text-align: left;
+  background: var(--panel);
   color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   transition: var(--transition-ui);
 }
-.decisions__option + .decisions__option {
-  margin-top: 1px;
-}
-.decisions__option.is-focus {
+.ask-option:hover,
+.ask-option.is-focus {
   background: var(--hover);
+  border-color: var(--border-strong);
 }
-.decisions__option.is-on {
+.ask-option:focus-visible,
+.ask-option:focus-within {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ask-option.is-on {
+  border-color: var(--accent);
   background: var(--accent-soft);
 }
-.decisions__key {
+.ask-option__key {
   flex: none;
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border-strong);
-  font-size: 12px;
+  background: var(--bg);
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
   transition: var(--transition-ui);
 }
-.decisions__option.is-on .decisions__key {
+.ask-option.is-on .ask-option__key {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
 }
-.decisions__label {
+.ask-option__text {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  font-size: 13.5px;
-  line-height: 1.4;
 }
-.decisions__detail {
+.ask-option__label {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.ask-option__detail {
   font-size: 12px;
   color: var(--text-3);
+  overflow-wrap: anywhere;
 }
-.decisions__option--other {
-  cursor: text;
+.ask-option__mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
 }
-.decisions__option--other .decisions__key {
-  border-style: dashed;
+.ask-option__mark.is-box {
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+.ask-option.is-on .ask-option__mark.is-box {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.ask-option--other .ask-option__label {
+  font-weight: 400;
+  color: var(--text-2);
+}
+.ask-option--other .ask-option__mark {
   color: var(--text-3);
 }
-.decisions__option--other input {
-  flex: 1;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  box-shadow: none;
-  font-size: 13.5px;
+.ask-option--other.is-open {
+  cursor: text;
 }
-.decisions__text {
+.ask-option .ask-option__input,
+.ask-option .ask-option__input:focus {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+}
+.ask__text {
   width: 100%;
   resize: vertical;
-  min-height: 64px;
-  border-radius: var(--radius);
+  min-height: 60px;
 }
-.decisions__bar {
+.ask__foot {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 8px 0 0;
+  margin-top: 10px;
 }
-.decisions__hint {
-  flex: 1;
+.ask__hint {
+  margin-right: auto;
   font-size: 11.5px;
   color: var(--text-3);
 }
-.decisions__review {
+.ask__note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+/* Before sending: each decision and its answer, a click away from changing it. */
+.ask-review {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-.decisions__review-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-  width: 100%;
-  padding: 9px 8px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
+  overflow: hidden;
+}
+.ask-review li + li {
+  border-top: 1px solid var(--border);
+}
+.ask-review__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  font: inherit;
   text-align: left;
+  color: var(--text);
+  cursor: pointer;
   transition: var(--transition-ui);
 }
-.decisions__review-row:hover {
+.ask-review__row:hover {
   background: var(--hover);
 }
-.decisions__review li + li .decisions__review-row {
-  border-top: 1px solid var(--border);
-  border-radius: 0;
+.ask-review__row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
 }
-.decisions__review-question {
-  font-size: 13px;
+.ask-review__row .icon {
+  color: var(--text-3);
+}
+.ask-review__q {
+  font-size: 12.5px;
   color: var(--text-2);
+  overflow-wrap: anywhere;
 }
-.decisions__review-answer {
+.ask-review__a {
   font-size: 13.5px;
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
-.is-skipped {
+.ask .is-muted {
   color: var(--text-3);
   font-weight: 400;
   font-style: italic;
 }
-/* On the agent's message: what is waiting, or what I chose. */
-.answers {
-  margin-top: 8px;
-  max-width: 560px;
-}
-.answers.is-waiting {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--accent);
-}
-.answers__label {
-  font-size: 12px;
-  color: var(--text-3);
-}
-.answers__list {
-  margin: 4px 0 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--border);
+/* To read: someone else's question, with its options. */
+.ask-list {
+  margin: 0;
+  padding-left: 18px;
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+}
+.ask-list__q {
+  font-weight: 500;
+}
+.ask-list__options {
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-}
-.answers__list dt {
-  font-size: 12px;
-  color: var(--text-3);
-}
-.answers__list dd {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-2);
-}
-.answers__questions {
-  margin: 2px 0 0;
-  padding-left: 18px;
-  color: var(--text-2);
-  font-size: 13px;
-}
-.answers__questions:has(> :only-child) {
-  list-style: none;
-  padding-left: 0;
-  white-space: pre-wrap;
-}
-.answers__options {
-  color: var(--text-3);
-}
-/* On a question to someone (a team): the decisions sit inside its card. */
-.question .answers__list,
-.question .answers__questions {
-  margin-top: 6px;
-}
-.question .decisions {
-  margin-top: 8px;
-  box-shadow: none;
-}
-.answers__note {
-  display: block;
   margin-top: 4px;
+}
+.ask-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--bg);
+}
+/* Answered: each decision over what was chosen. */
+.ask-summary {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ask-summary__row {
+  display: grid;
+  gap: 1px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+.ask-summary dt {
   font-size: 12px;
   color: var(--text-3);
+}
+.ask-summary dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .ask {
+    padding: 10px 12px;
+  }
+  .ask-review__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ask-review__a {
+    grid-column: 1;
+  }
+  .ask-review__row .icon {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
+  .ask__hint {
+    display: none;
+  }
 }
 .retry {
   margin-top: 6px;
