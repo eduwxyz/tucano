@@ -592,7 +592,8 @@ const wikiHome = join(dataDir, 'wiki')
 const wikiIndex = (dir: string): string => (dir === wikiHome ? join(dataDir, 'wiki.db') : join(dataDir, `wiki-${createHash('sha256').update(dir).digest('hex').slice(0, 12)}.db`))
 const wikiDir = (): string => process.env['TUCANO_WIKI'] || settings().wikiDir || wikiHome
 const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }) })
-wiki.init()
+// The folder is read behind the window: a big Obsidian vault takes a while.
+wiki.init(true, true)
 toMain({ type: 'wiki_dir', path: wiki.dir })
 // The curator reads the conversations with the memory's cheap model, and keeps what lasts.
 const wikiLlm = async (system: string, prompt: string): Promise<string> => {
