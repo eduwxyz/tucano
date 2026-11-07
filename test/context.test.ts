@@ -74,7 +74,7 @@ describe('transcript', () => {
   const off = -new Date(at).getTimezoneOffset()
   const stampZone = `UTC${off < 0 ? '-' : '+'}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`
   const messages: Message[] = [
-    { id: 'm1', conversationId: 'c1', author: { kind: 'me' }, text: 'Oi, time', at },
+    { id: 'm1', conversationId: 'c1', author: { kind: 'person', id: 'me' }, text: 'Oi, time', at },
     { id: 'm2', conversationId: 'c1', author: { kind: 'system' }, text: 'Router chamou Lia', at },
     { id: 'm3', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: 'Oi!', at },
     { id: 'm4', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Olá', at },

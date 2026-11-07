@@ -9,7 +9,7 @@ let emit: (e: CoreEvent) => void
 const asked: { method: string; params: unknown }[] = []
 
 const conv = (id: string): Conversation => ({ id, kind: 'channel', name: id, members: [], threads: true }) as Conversation
-const msg = (id: string, conversationId: string, at: number, extra: Partial<Message> = {}): Message => ({ id, conversationId, author: { kind: 'me' }, text: id, at, ...extra })
+const msg = (id: string, conversationId: string, at: number, extra: Partial<Message> = {}): Message => ({ id, conversationId, author: { kind: 'person', id: 'p1' }, text: id, at, ...extra })
 
 // c1 opens with its last three messages (from t=10) and, from before that, a routine's run (t=2).
 const opening = [msg('ask', 'c1', 2, { author: { kind: 'routine', id: 'r1' } }), msg('m10', 'c1', 10), msg('m11', 'c1', 11), msg('root', 'c1', 12), msg('r1', 'c1', 13, { threadId: 'root' }), msg('x1', 'c2', 5)]
@@ -23,7 +23,7 @@ beforeAll(async () => {
       asked.push({ method: req.method, params: req.params })
       const result =
         req.method === 'snapshot'
-          ? { settings: { workspaceName: 'Edu', language: 'pt', engines: {} }, agents: [], conversations: [conv('c1'), conv('c2')], messages: opening, since: { c1: 10 }, connectors: [], approvals: [], memories: [], artifacts: [], computers: [], browsers: [], routines: [], skills: [], platform: 'mac', packaged: false, isolatedComputers: true }
+          ? { settings: { workspaceName: 'Edu', language: 'pt', engines: {} }, agents: [], conversations: [conv('c1'), conv('c2')], messages: opening, since: { c1: 10 }, connectors: [], approvals: [], memories: [], artifacts: [], computers: [], browsers: [], routines: [], skills: [], platform: 'mac', packaged: false, isolatedComputers: true, people: [], you: '' }
           : req.method === 'olderMessages'
             ? { messages: [...older, opening[0]], since: 0 }
             : undefined

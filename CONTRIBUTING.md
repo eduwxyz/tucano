@@ -2,6 +2,8 @@
 
 Thanks for wanting to help. Tucano is a small codebase on purpose: an Electron app, a core process with SQLite, and the coding-agent CLIs people already use. This guide gets you from clone to pull request.
 
+Development talk happens in `#contributing` on our [Discord](https://discord.gg/uQp4x7wUgT): a good place for quick questions or when you get stuck. Anything bigger than a fix still starts as an issue (see below).
+
 ## Setup
 
 You need macOS on Apple silicon or Linux (x64 or ARM64), Node 24 or later, and at least one harness signed in (`claude auth login` is the quickest). Windows 10/11 works too, with Git for Windows installed: see [docs/windows.md](docs/windows.md).

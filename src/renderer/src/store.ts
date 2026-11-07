@@ -5,6 +5,7 @@ import { L, setLang } from '../../shared/lang'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
+  asSaid,
   type Account,
   type AccountEngine,
   MAX_AGENT_ROUTINES,
@@ -28,6 +29,11 @@ import {
   type MemoryScope,
   type Message,
   type Model,
+  type Person,
+  type Inbox,
+  type Invite,
+  type ActivityEntry,
+  delegating,
   type Routine,
   type RoutineInput,
   type Settings,
@@ -70,6 +76,11 @@ export interface State {
   navOpen: boolean // on a phone, the sidebar slid in over the view
   view: View | null
   me: { name: string; initials: string }
+  you: string // the person this window is (snapshot.you)
+  people: Person[]
+  former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
+  inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
+  needsName: boolean // a server's first access: the owner says what the agents call them
   settings: Settings
   models: Model[]
   agents: Agent[]
@@ -109,7 +120,7 @@ export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'arc
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
 
-const initials = (name: string): string =>
+export const initials = (name: string): string =>
   name
     .split(/\s+/)
     .filter(Boolean)
@@ -137,6 +148,11 @@ let state: State = {
   navOpen: false,
   view: null,
   me: { name: 'Eu', initials: 'EU' },
+  you: '',
+  people: [],
+  former: [],
+  inbox: { approvals: [], questions: [] },
+  needsName: false,
   settings: {
     workspaceName: '',
     context: '',
@@ -271,7 +287,8 @@ function indexOf(list: Message[]): ConversationIndex {
   const had = indexes.get(list)
   if (had) return had
   const ix: ConversationIndex = { byId: new Map(), timeline: [], replies: new Map(), working: [], waiting: [], browser: new Map(), receipts: [], agentDone: false }
-  for (const m of list) {
+  // In the order things were said (a reply when it ended), whoever is still working at the end.
+  for (const m of asSaid(list)) {
     ix.byId.set(m.id, m)
     if (!m.threadId) ix.timeline.push(m)
     else {
@@ -473,10 +490,16 @@ export function useFrame(agentId: string): string | undefined {
 
 // ---------- core sync ----------
 
+// My name: the owner's is the settings' (what the agents have always called them); anyone else's, theirs.
+function withMe(s: State): State {
+  const person = s.people.find((p) => p.id === s.you)
+  const name = (person && person.role !== 'owner' ? person.name : s.settings.workspaceName) || L('Eu', 'Me')
+  return s.me.name === name ? s : { ...s, me: { name, initials: initials(name) } }
+}
+
 function withSettings(s: State, settings: Settings): State {
   setLang(settings.language)
-  const name = settings.workspaceName || L('Eu', 'Me')
-  return { ...s, settings, me: { name, initials: initials(name) } }
+  return withMe({ ...s, settings })
 }
 
 function apply(e: CoreEvent): void {
@@ -543,6 +566,10 @@ function apply(e: CoreEvent): void {
         return { ...s, wikiRev: s.wikiRev + 1 }
       case 'voice':
         return { ...s, voiceRev: s.voiceRev + 1 }
+      case 'people':
+        return withMe({ ...s, people: e.people, ...(e.former ? { former: e.former } : {}) })
+      case 'inbox':
+        return { ...s, inbox: e.inbox ?? s.inbox }
     }
   })
   // A full message carries all its text so far: what streamed before it is in there.
@@ -575,8 +602,9 @@ export async function start(): Promise<void> {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
     const view = s.view ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
     return {
-      ...withSettings(s, snap.settings),
+      ...withSettings({ ...s, you: snap.you, people: snap.people }, snap.settings),
       ready: true,
+      needsName: !!snap.needsName,
       webhookPort: snap.webhookPort ?? 47717,
       defaultWorkspace: snap.defaultWorkspace ?? true,
       view,
@@ -595,7 +623,11 @@ export async function start(): Promise<void> {
       platform: snap.platform,
       packaged: snap.packaged,
       isolatedComputers: snap.isolatedComputers,
-      demoServer: snap.demoServer
+      demoServer: snap.demoServer,
+      you: snap.you,
+      inbox: snap.inbox ?? { approvals: [], questions: [] },
+      people: snap.people,
+      former: snap.former ?? []
     }
   })
 }
@@ -609,6 +641,41 @@ export const pendingApprovals = (s: State): Approval[] => s.approvals.filter((a)
 export const computerOf = (s: State, agentId: string): ComputerInfo | undefined => s.computers.find((c) => c.agentId === agentId)
 export const browserOf = (s: State, agentId: string): BrowserView | undefined => s.browsers.find((b) => b.agentId === agentId)
 export const pendingMemories = (s: State): Memory[] => s.memories.filter((m) => m.state === 'pending')
+// A message of this window's person (one from before people has no id to compare, and was the owner's: theirs too).
+export const isMine = (s: Pick<State, 'you'>, a: Message['author']): boolean => a.kind === 'person' && (!s.you || a.id === s.you)
+// Another person's name, as the conversation shows it.
+// Someone who left keeps their name on what they wrote, marked as gone.
+export const personName = (s: Pick<State, 'you' | 'people' | 'me'> & { former?: State['former'] }, id: string): string => {
+  if (id === s.you) return s.me.name
+  const here = s.people.find((p) => p.id === id)?.name
+  if (here) return here
+  const gone = s.former?.find((p) => p.id === id)?.name
+  return gone ? L(`${gone} (saiu)`, `${gone} (left)`) : L('Alguém', 'Someone')
+}
+export const personById = (s: Pick<State, 'people'>, id: string | undefined): Person | undefined => (id ? s.people.find((p) => p.id === id) : undefined)
+// Who this window is. Before the snapshot (or on an old core) there's no one: the owner, as always.
+export const youPerson = (s: Pick<State, 'people' | 'you'>): Person | undefined => s.people.find((p) => p.id === s.you)
+// The same rule the core enforces (policy-people.ts): owners and admins manage the team's things.
+export const amAdmin = (s: Pick<State, 'people' | 'you'>): boolean => {
+  const me = youPerson(s)
+  return !me || me.role === 'owner' || me.role === 'admin'
+}
+export const amOwner = (s: Pick<State, 'people' | 'you'>): boolean => (youPerson(s)?.role ?? 'owner') === 'owner'
+// A channel's name, topic and agents: whoever made it (the owner, for one from before) and the admins.
+export const canEditChannel = (s: Pick<State, 'people' | 'you'>, c: Pick<Conversation, 'kind' | 'createdBy'>): boolean =>
+  c.kind === 'channel' && (amAdmin(s) || (c.createdBy ?? s.people.find((p) => p.role === 'owner')?.id) === s.you)
+// A Tucano with a team: more than one person, or a server (where people come in). A desktop alone
+// shows nothing of people, as always.
+export const teamMode = (s: Pick<State, 'people'>): boolean => s.people.length > 1 || windowless()
+export const roleLabel = (r: Person['role']): string => (r === 'owner' ? L('Dono', 'Owner') : r === 'admin' ? 'Admin' : L('Membro', 'Member'))
+// Who decides an agent's approvals: admins, the agent's person, and whoever covers for them now.
+export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<Approval, 'agentId'>): boolean => {
+  if (amAdmin(s)) return true
+  const owner = personById(s, s.agents.find((x) => x.id === a.agentId)?.owner)
+  return !!owner && (owner.id === s.you || delegating(owner, s.you))
+}
+// How many things wait on me (approvals I decide, questions, cards members sent).
+export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0)
 
 export function conversationTitle(s: State, c: Conversation): string {
   if (c.kind === 'channel') return c.name
@@ -673,7 +740,8 @@ export const navigate = (view: View): void =>
   }))
 
 export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void {
-  set((s) => withSettings(s, { ...s.settings, ...patch })) // optimistic, so typing stays instant
+  // optimistic, so typing stays instant; the owner's name given here (the introduction) is the name asked once
+  set((s) => ({ ...withSettings(s, { ...s.settings, ...patch }), needsName: patch.workspaceName?.trim() ? false : s.needsName }))
   void fire(L('Não consegui salvar a configuração.', "I couldn't save the setting."), 'updateSettings', { patch })
 }
 
@@ -889,6 +957,23 @@ export const openBackups = (): void => void fire(L('Não consegui abrir a pasta 
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })
 export const loadUsage = (): Promise<UsageReport> => call('usage')
 export const removeRoutine = (id: string): void => void fire(L('Não consegui remover a rotina.', "I couldn't remove the routine."), 'removeRoutine', { id })
+// People: who I am, who comes in (admins), who covers for me.
+export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })
+export const doneNaming = (): void => set((s) => ({ ...s, needsName: false }))
+export const setDelegation = (to: string | null, until?: number): Promise<void> => call('setDelegation', { to, ...(until ? { until } : {}) })
+export const createInvite = (role: 'admin' | 'member', about: string, restore?: string): Promise<{ code: string; expiresAt: number }> => call('createInvite', { role, about, ...(restore ? { restore } : {}) })
+export const revokeInvite = (id: string): Promise<void> => call('revokeInvite', { id })
+export const listInvites = (): Promise<Invite[]> => call('listInvites')
+export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => call('removedPeople')
+export const removePerson = (id: string): Promise<void> => call('removePerson', { id })
+export const setRole = (id: string, role: 'admin' | 'member'): Promise<void> => call('setRole', { id, role })
+export const purgePerson = (id: string): Promise<void> => call('purgePerson', { id })
+export const loadActivity = (f: { personId?: string; kind?: string; before?: number }): Promise<ActivityEntry[]> => call('activity', f)
+export const answerQuestion = (id: string, text: string): Promise<void> => call('answerQuestion', { id, text })
+export const confirmQuestion = (id: string, ok: boolean): void => void fire(L('Não consegui responder.', "I couldn't answer."), 'confirmQuestion', { id, ok })
+export const watchRoutine = (id: string, on: boolean): void => void fire(L('Não consegui mudar o aviso.', "I couldn't change the notice."), 'watchRoutine', { id, on })
+// The link an invite's code makes: this page's address (a server's) with ?invite=.
+export const inviteLink = (code: string): string => `${window.location.origin}/?invite=${encodeURIComponent(code)}`
 export const runRoutine = (id: string): void => void fire(L('Não consegui rodar a rotina.', "I couldn't run the routine."), 'runRoutine', { id })
 // A @handle from a name: "Lúcia M." → "luciam".
 export const slug = (name: string): string =>

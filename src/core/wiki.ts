@@ -32,7 +32,26 @@ const sha = (s: string): string => createHash('sha256').update(s).digest('hex').
 // [[Clientes/Marcos Lima]] and [[Marcos Lima.md]] are the page Marcos Lima, as in Obsidian.
 export const pageName = (target: string): string => target.replace(/\.md$/i, '').split('/').pop()!.trim()
 // A page's file name is its title, minus what file systems refuse.
-export const fileOf = (title: string): string => `${title.replace(/[\\/:*?"<>|\n\r\t]/g, '-').replace(/^\.+/, '').trim().slice(0, 120) || 'sem-titulo'}.md`
+export const fileOf = (title: string): string => `${clip(title.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '-').replace(/^\.+/, '').trim()) || 'sem-titulo'}.md`
+// Format characters (zero width, soft hyphen, bidi controls), controls (NUL and the rest of C0/C1),
+// variation selectors, the combining grapheme joiner, and the blank letters some scripts have.
+const INVISIBLE = /[\p{Cf}\p{Cc}\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\uffa0\ufe00-\ufe0f]|\udb40[\udd00-\uddef]/gu
+// A title as the wiki keeps it: one way of writing its letters (NFC), nothing that can't be seen,
+// single spaces. Empty when nothing visible is left. Every title (a save, a rename, a note's, a
+// file's, the curator's) comes through here; ordinary titles come out as they went in.
+export const cleanTitle = (t: string): string => t.normalize('NFC').replace(/\s+/g, ' ').replace(INVISIBLE, '').trim()
+// What tells one page from another: its file name, the way a title becomes one (NFC, case folded).
+// Whatever goes by a page (held, where it came from, its history, its links) goes by this, so no other
+// spelling of its title (" Title", "Title\n", "A/b" for "A-b", NFD, a zero width inside) reads around it.
+export const pageKey = (title: string): string => fileOf(cleanTitle(title)).slice(0, -3).normalize('NFC').toLowerCase()
+// A line's text the same way (no cut), to find a key in it.
+const keyText = (s: string): string => cleanTitle(s).replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '-').toLowerCase()
+// A name cut to what a file system takes: 120 characters, 200 bytes (an accent or an emoji is more than one).
+export function clip(s: string, chars = 120, bytes = 200): string {
+  let out = [...s].slice(0, chars).join('')
+  while (Buffer.byteLength(out) > bytes) out = [...out].slice(0, -1).join('')
+  return out.trim()
+}
 
 // "---\nkey: value\n---\nbody": the frontmatter Obsidian shows as Properties.
 export function parsePage(text: string): { meta: Record<string, string>; body: string } {
@@ -217,7 +236,13 @@ export interface WikiDeps {
   dir: string // the folder of Markdown files: the truth
   indexPath: string // the SQLite file with the search, the links and the history
   onChange?: () => void
+  // Whose DM a conversation is: a person's id, null for one that isn't a DM, undefined when it's
+  // not known (gone). Where each version of a page came from is kept with it (see `inherit`).
+  dmOf?: (conversationId: string) => string | null | undefined
 }
+
+// What someone may read of the wiki: everything but the pages held for someone else (see `inherit`).
+export type WikiView = Pick<Wiki, 'count' | 'list' | 'kinds' | 'page' | 'search' | 'indexText' | 'graph' | 'log' | 'recent'>
 
 export class Wiki {
   dir: string
@@ -277,6 +302,10 @@ export class Wiki {
       CREATE TABLE IF NOT EXISTS marks (conversation_id TEXT PRIMARY KEY, until INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, key TEXT NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, pages TEXT NOT NULL, text TEXT NOT NULL, name TEXT, change_id TEXT, state TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS provenance (title TEXT NOT NULL, at INTEGER NOT NULL, origin TEXT NOT NULL, private_to TEXT);
+      CREATE INDEX IF NOT EXISTS provenance_by_title ON provenance (title COLLATE NOCASE);
+      CREATE TABLE IF NOT EXISTS held (title TEXT PRIMARY KEY COLLATE NOCASE, person TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS held_log (title TEXT PRIMARY KEY, person TEXT NOT NULL);
     `)
     for (const col of ['status TEXT', 'error TEXT', 'changes INTEGER']) {
       try {
@@ -285,9 +314,40 @@ export class Wiki {
         // already there
       }
     }
+    // Which source a version came from (a change the curator made of it): it's seen by whoever sees
+    // the source, and goes with it.
+    try {
+      this.db.exec('ALTER TABLE versions ADD COLUMN source_id TEXT')
+      // The versions from before: the ones a source's change wrote (same author, its pages, when it was applied).
+      for (const c of this.db.prepare("SELECT source_id, by, ops, decided_at FROM changes WHERE source_id IS NOT NULL AND state IN ('applied', 'undone') AND decided_at IS NOT NULL").all() as { source_id: string; by: string; ops: string; decided_at: number }[]) {
+        const pages = [...new Set((JSON.parse(c.ops) as WikiOp[]).map((o) => o.page.toLowerCase()))]
+        for (const page of pages)
+          this.db.prepare('UPDATE versions SET source_id = ? WHERE source_id IS NULL AND by = ? AND lower(title) = ? AND at BETWEEN ? AND ?').run(c.source_id, c.by, page, c.decided_at - 5000, c.decided_at + 1000)
+      }
+    } catch {
+      // already there
+    }
+    // Each page and version by its key (see pageKey); what was kept by a title before, by its key now.
+    for (const col of ['pages ADD COLUMN key TEXT', 'versions ADD COLUMN key TEXT', 'versions ADD COLUMN held_for TEXT']) {
+      try {
+        this.db.exec(`ALTER TABLE ${col}`)
+      } catch {
+        // already there
+      }
+    }
+    for (const r of this.db.prepare('SELECT file, title FROM pages WHERE key IS NULL').all() as { file: string; title: string }[]) this.db.prepare('UPDATE pages SET key = ? WHERE file = ?').run(pageKey(r.title), r.file)
+    for (const r of this.db.prepare('SELECT id, title FROM versions WHERE key IS NULL').all() as { id: number; title: string }[]) this.db.prepare('UPDATE versions SET key = ? WHERE id = ?').run(pageKey(r.title), r.id)
+    for (const r of this.db.prepare('SELECT rowid, title FROM provenance').all() as { rowid: number; title: string }[]) if (pageKey(r.title) !== r.title) this.db.prepare('UPDATE provenance SET title = ? WHERE rowid = ?').run(pageKey(r.title), r.rowid)
+    for (const r of this.db.prepare('SELECT title FROM held').all() as { title: string }[]) if (pageKey(r.title) !== r.title) this.db.prepare('UPDATE OR REPLACE held SET title = ? WHERE title = ?').run(pageKey(r.title), r.title)
+    this.db.exec('CREATE INDEX IF NOT EXISTS pages_by_key ON pages (key); CREATE INDEX IF NOT EXISTS versions_by_key ON versions (key, at)')
+    // Every key ever held (see everHeld): what was held before this was kept, and the pages gone whose versions say so.
+    this.db.exec('INSERT OR IGNORE INTO held_log (title, person) SELECT title, person FROM held; INSERT OR IGNORE INTO held_log (title, person) SELECT DISTINCT key, held_for FROM versions WHERE held_for IS NOT NULL')
+    // A source deleted before its changes went with it: they go now.
+    this.dropOrphans()
     this.indexed++
     if (!background) {
       this.scan()
+      this.linksByKey()
       this.writeIndex()
       if (watchFolder) this.watchFolder()
       return
@@ -296,11 +356,22 @@ export class Wiki {
     this.loaded = this.scanAsync()
       .then((changed) => {
         if (gen !== this.gen) return
+        this.linksByKey()
         this.writeIndex()
         if (watchFolder) this.watchFolder()
         if (changed) this.onChange()
       })
       .catch((e: unknown) => console.error('[wiki]', e))
+  }
+
+  // Links kept by the target's lowercase title before: by its key now (see pageKey), once. After a scan.
+  private linksByKey(): void {
+    if (this.getMeta('linksByKey')) return
+    for (const r of this.db.prepare('SELECT file FROM pages').all() as { file: string }[]) {
+      const path = join(this.pagesDir, r.file)
+      if (existsSync(path)) this.indexLinks(r.file, parsePage(readFileSync(path, 'utf8')))
+    }
+    this.setMeta('linksByKey', '1')
   }
 
   // Another folder: the index is that folder's own; what was in the old one stays there.
@@ -419,6 +490,7 @@ export class Wiki {
       this.version(title, 'outside', 'delete', this.bodyOf(file), null)
       logs.push(L(`${title} saiu da pasta`, `${title} left the folder`))
       this.unindex(file)
+      this.release(title, true)
       changed = true
     }
     return changed
@@ -459,10 +531,15 @@ export class Wiki {
     const { meta, body } = parsePage(text)
     const title = this.titleOf(file, text)
     this.unindex(file)
-    this.db.prepare('INSERT INTO pages (file, title, kind, summary, body, hash, mtime, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(file, title, this.kindOf(file, meta), summaryOf(body), body, sha(text), mtime, Date.now(), by)
-    // links in the properties count too, as in Obsidian (cliente: "[[Marcos Lima]]")
-    for (const target of new Set([...linksIn(body), ...linksIn(Object.values(meta).join('\n'))].map((t) => t.toLowerCase()))) this.db.prepare('INSERT INTO links (src, target) VALUES (?, ?)').run(file, target)
+    this.db.prepare('INSERT INTO pages (file, title, key, kind, summary, body, hash, mtime, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(file, title, pageKey(title), this.kindOf(file, meta), summaryOf(body), body, sha(text), mtime, Date.now(), by)
+    this.indexLinks(file, { meta, body })
     for (const c of chunks(body)) this.db.prepare('INSERT INTO fts (title, body, file) VALUES (?, ?, ?)').run(title, c, file)
+  }
+  // The pages a page links to, by their keys (see pageKey: "[[ÍNSULA]]" is the page Ínsula, past what
+  // SQLite's lower() folds). Links in the properties count too, as in Obsidian (cliente: "[[Marcos Lima]]").
+  private indexLinks(file: string, { meta, body }: { meta: Record<string, string>; body: string }): void {
+    this.db.prepare('DELETE FROM links WHERE src = ?').run(file)
+    for (const target of new Set([...linksIn(body), ...linksIn(Object.values(meta).join('\n'))].map(pageKey))) this.db.prepare('INSERT INTO links (src, target) VALUES (?, ?)').run(file, target)
   }
   private unindex(file: string): void {
     this.indexed++
@@ -470,8 +547,147 @@ export class Wiki {
     this.db.prepare('DELETE FROM links WHERE src = ?').run(file)
     this.db.prepare('DELETE FROM fts WHERE file = ?').run(file)
   }
-  private version(title: string, by: string, action: WikiVersion['action'], before: string | null, after: string | null, reason?: string): void {
-    this.db.prepare('INSERT INTO versions (title, at, by, action, before, after, reason) VALUES (?, ?, ?, ?, ?, ?, ?)').run(title, Date.now(), by, action, before, after, reason ?? null)
+  private version(title: string, by: string, action: WikiVersion['action'], before: string | null, after: string | null, reason?: string, sourceId?: string): void {
+    const at = Date.now()
+    this.db.prepare('INSERT INTO versions (title, key, at, by, action, before, after, reason, source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(title, pageKey(title), at, by, action, before, after, reason ?? null, sourceId ?? null)
+    if (action === 'delete') return
+    const [origin, privateTo] = this.originOf(by, sourceId)
+    this.db.prepare('INSERT INTO provenance (title, at, origin, private_to) VALUES (?, ?, ?, ?)').run(pageKey(title), at, origin, privateTo)
+  }
+
+  // Where a version came from: a DM (whose: only they read it), a channel, a file, a link or a note
+  // brought in, a hand, another app. '?' is "may have come from a DM": not known any more.
+  private originOf(by: string, sourceId?: string): [string, string | null] {
+    if (sourceId) {
+      const src = this.source(sourceId)
+      if (!src) return ['source', '?']
+      const conv = src.origin.conversationId
+      if (!conv) return [src.kind, null]
+      const dm = this.deps.dmOf?.(conv)
+      return dm ? ['dm', dm] : dm === null ? ['channel', null] : ['conversation', '?']
+    }
+    if (by === 'outside' || by === 'import' || by === 'review') return [by, null]
+    return by === 'auto' ? ['auto', '?'] : ['hand', null]
+  }
+
+  // ---------- pages held for one person ----------
+
+  // The Tucano got its second person: the pages that hold what came from its owner's DMs (all its
+  // DMs were theirs) stay theirs alone until they release each one. What a page's history says
+  // decides it: where each version came from (kept since then), and before that, each version's
+  // source; a version that may have come from a DM counts as one. Returns the pages held.
+  inherit(owner: string, at = Date.now()): string[] {
+    const held: string[] = []
+    for (const p of this.list()) {
+      const key = pageKey(p.title)
+      const kept = this.db.prepare('SELECT 1 FROM provenance WHERE title = ? AND private_to IS NOT NULL LIMIT 1').get(key)
+      const old = (this.db.prepare('SELECT by, source_id FROM versions WHERE key = ?').all(key) as { by: string; source_id: string | null }[]).some((v) => {
+        if (!v.source_id) return v.by === 'auto'
+        const src = this.source(v.source_id)
+        const conv = src?.origin.conversationId
+        if (!src) return true
+        return !!conv && this.deps.dmOf?.(conv) !== null
+      })
+      if (!kept && !old) continue
+      this.hold(key, owner, at)
+      held.push(p.title)
+    }
+    // Where the log stood: what it says from here on is the team's; before, the owner's.
+    this.db.prepare('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)').run('logAtSwitch', String(this.logLines().length))
+    if (held.length) this.onChange()
+    return held
+  }
+
+  // A page held for someone (its key), and written down as ever held (see everHeld).
+  private hold(key: string, person: string, at = Date.now()): void {
+    this.db.prepare('INSERT OR IGNORE INTO held (title, person, at) VALUES (?, ?, ?)').run(key, person, at)
+    this.db.prepare('INSERT OR IGNORE INTO held_log (title, person) VALUES (?, ?)').run(key, person)
+  }
+
+  // The keys (see pageKey) of the pages held for someone other than `person`: out of their view.
+  heldTitles(person?: string): Set<string> {
+    const rows = this.db.prepare('SELECT title, person FROM held').all() as { title: string; person: string }[]
+    return new Set(rows.filter((r) => r.person !== person).map((r) => r.title))
+  }
+
+  // Every key ever held for someone other than `person`, released ones apart: a held page deleted or
+  // renamed leaves its title here, so nothing that names it (the log) reaches anyone else.
+  everHeld(person?: string): Set<string> {
+    const rows = this.db.prepare('SELECT title, person FROM held_log').all() as { title: string; person: string }[]
+    return new Set(rows.filter((r) => r.person !== person).map((r) => r.title))
+  }
+
+  // The pages held, that still exist (`person`: only the ones held for them), by their titles.
+  held(person?: string): { title: string; at: number }[] {
+    const rows = new Map((this.db.prepare('SELECT title, person, at FROM held').all() as { title: string; person: string; at: number }[]).filter((r) => person === undefined || r.person === person).map((r) => [r.title, Number(r.at)]))
+    return this.list().flatMap((p) => (rows.has(pageKey(p.title)) ? [{ title: p.title, at: rows.get(pageKey(p.title))! }] : []))
+  }
+
+  // "Liberar pro time": the page is everyone's from now on. `gone`: the page went, and what was
+  // held of it stays its person's (its versions), so a page made later under that name is seen.
+  release(title: string, gone = false): boolean {
+    const key = pageKey(title)
+    const row = this.db.prepare('SELECT person FROM held WHERE title = ?').get(key) as { person: string } | undefined
+    if (!row) return false
+    if (gone) this.db.prepare('UPDATE versions SET held_for = ? WHERE key = ? AND held_for IS NULL').run(row.person, key)
+    else this.db.prepare('DELETE FROM held_log WHERE title = ?').run(key) // released: its name is the team's, log lines and all
+    this.db.prepare('DELETE FROM held WHERE title = ?').run(key)
+    this.onChange()
+    return true
+  }
+
+  // The wiki as someone reads it: the pages in `hidden` (keys) aren't there, nor anything that
+  // names them (links from them, the log's lines, the map). `viewer`: who reads (what was held for
+  // them of a page gone is theirs); `afterSwitch`: the log from the heritage on only; `everHidden`:
+  // keys (ever held, see everHeld) no log line may name, even of a page gone or renamed since.
+  view(hidden: Set<string>, opts: { viewer?: string; afterSwitch?: boolean; everHidden?: Set<string> } = {}): WikiView {
+    const from = opts.afterSwitch ? Number((this.db.prepare("SELECT value FROM meta WHERE key = 'logAtSwitch'").get() as { value: string } | undefined)?.value ?? 0) : 0
+    const unnamed = new Set([...hidden, ...(opts.everHidden ?? [])])
+    if (!hidden.size && !unnamed.size && !from && opts.viewer === undefined) return this
+    const shown = (t: string): boolean => !hidden.has(pageKey(t))
+    const list = (): WikiPageInfo[] => this.list().filter((p) => shown(p.title))
+    return {
+      count: () => list().length,
+      list,
+      kinds: () => this.kinds(list()),
+      page: (title) => {
+        const p = shown(title) ? this.page(title) : undefined
+        return p && { ...p, backlinks: p.backlinks.filter(shown), missing: [...new Set([...p.missing, ...p.links.filter((t) => !shown(t))])] }
+      },
+      search: (q, limit = 8) => this.search(q, limit, hidden),
+      indexText: () => this.indexFor(list()),
+      graph: () => {
+        const g = this.graph()
+        return { nodes: g.nodes.filter((n) => shown(n.title)), edges: g.edges.filter(([a, b]) => shown(a) && shown(b)) }
+      },
+      log: (limit = 30) =>
+        this.logLines()
+          .slice(from)
+          .reverse()
+          .filter((l) => ![...unnamed].some((k) => keyText(l).includes(k)))
+          .slice(0, limit),
+      recent: (limit = 12, sees = () => true, since) => this.recent(limit, sees, since, hidden, opts.viewer)
+    }
+  }
+
+  // When a version was written, and of which page (its key: the page it's of now, renames and all).
+  versionInfo(id: number): { at: number; title: string; key: string; heldFor?: string } | undefined {
+    const r = this.db.prepare('SELECT at, title, key, held_for FROM versions WHERE id = ?').get(id) as { at: number; title: string; key: string; held_for: string | null } | undefined
+    return r && { at: Number(r.at), title: String(r.title), key: String(r.key), ...(r.held_for ? { heldFor: String(r.held_for) } : {}) }
+  }
+
+  // The source a version came from, if any (see `sees` below).
+  versionSource(id: number): string | undefined {
+    const r = this.db.prepare('SELECT source_id FROM versions WHERE id = ?').get(id) as { source_id: string | null } | undefined
+    return r?.source_id ?? undefined
+  }
+
+  // What a source gone for good left behind (its changes, their findings, the versions they wrote) goes too.
+  dropOrphans(): void {
+    const gone = (this.db.prepare('SELECT id FROM changes WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').all() as { id: string }[]).map((r) => r.id)
+    for (const id of gone) this.db.prepare('DELETE FROM findings WHERE change_id = ?').run(id)
+    this.db.prepare('DELETE FROM changes WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').run()
+    this.db.prepare('DELETE FROM versions WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').run()
   }
 
   // ---------- reading ----------
@@ -490,12 +706,12 @@ export class Wiki {
     }))
   }
 
-  kinds(): string[] {
-    return [...new Set(this.list().map((p) => p.kind))].sort((a, b) => (a === KIND_OTHER() ? 1 : b === KIND_OTHER() ? -1 : a.localeCompare(b, locale())))
+  kinds(pages: WikiPageInfo[] = this.list()): string[] {
+    return [...new Set(pages.map((p) => p.kind))].sort((a, b) => (a === KIND_OTHER() ? 1 : b === KIND_OTHER() ? -1 : a.localeCompare(b, locale())))
   }
 
   private fileFor(title: string): string | undefined {
-    const r = this.db.prepare('SELECT file FROM pages WHERE lower(title) = lower(?)').get(title.trim()) as { file: string } | undefined
+    const r = this.db.prepare('SELECT file FROM pages WHERE key = ?').get(pageKey(title)) as { file: string } | undefined
     return r?.file
   }
 
@@ -507,8 +723,8 @@ export class Wiki {
     const text = readFileSync(path, 'utf8')
     const { meta, body } = parsePage(text)
     const r = this.db.prepare('SELECT title, kind, updated_at, updated_by FROM pages WHERE file = ?').get(file) as Record<string, unknown>
-    const backlinks = (this.db.prepare('SELECT DISTINCT p.title FROM links l JOIN pages p ON p.file = l.src WHERE l.target = lower(?) AND l.src != ? ORDER BY p.title').all(String(r['title']), file) as { title: string }[]).map((x) => x.title)
-    const known = new Set(this.list().map((p) => p.title.toLowerCase()))
+    const backlinks = (this.db.prepare('SELECT DISTINCT p.title FROM links l JOIN pages p ON p.file = l.src WHERE l.target = ? AND l.src != ? ORDER BY p.title').all(pageKey(String(r['title'])), file) as { title: string }[]).map((x) => x.title)
+    const known = new Set(this.list().map((p) => pageKey(p.title)))
     return {
       title: String(r['title']),
       kind: String(r['kind']),
@@ -519,19 +735,21 @@ export class Wiki {
       updatedAt: Number(r['updated_at']),
       updatedBy: String(r['updated_by']),
       links: linksIn(body),
-      missing: linksIn(body).filter((t) => !known.has(t.toLowerCase())),
+      missing: linksIn(body).filter((t) => !known.has(pageKey(t))),
       backlinks,
       file: relative(this.dir, join(this.pagesDir, file)).split(sep).join('/')
     }
   }
 
-  search(q: string, limit = 8): WikiHit[] {
+  // `skip`: titles (lowercase) left out, as if they weren't there.
+  search(q: string, limit = 8, skip?: Set<string>): WikiHit[] {
     const run = (match: string): WikiHit[] =>
       match
         ? (this.db
             .prepare(`SELECT p.title, p.kind, snippet(fts, 1, '**', '**', '…', 18) AS snip, bm25(fts, 6.0, 1.0) AS rank FROM fts JOIN pages p ON p.file = fts.file WHERE fts MATCH ? ORDER BY rank LIMIT ?`)
-            .all(match, limit * 3) as Record<string, unknown>[])
+            .all(match, (limit + (skip?.size ?? 0)) * 3) as Record<string, unknown>[])
             .map((r) => ({ title: String(r['title']), kind: String(r['kind']), snippet: plainSnippet(String(r['snip'])) }))
+            .filter((h) => !skip?.has(pageKey(h.title)))
         : []
     let hits: WikiHit[] = []
     try {
@@ -544,8 +762,11 @@ export class Wiki {
     return hits.filter((h) => !seen.has(h.title) && seen.add(h.title)).slice(0, limit)
   }
 
-  history(title: string): WikiVersion[] {
-    return (this.db.prepare('SELECT * FROM versions WHERE lower(title) = lower(?) ORDER BY at DESC, id DESC LIMIT 100').all(title) as Record<string, unknown>[]).map((r) => ({
+  // `sees`: whether the one asking may see what came from a source (a DM's is its person's alone).
+  // `since`: only versions from then on (what came before is someone else's to see). `viewer`: who
+  // asks (the versions held for someone else of a page gone aren't theirs).
+  history(title: string, sees: (sourceId: string) => boolean = () => true, since = 0, viewer?: string): WikiVersion[] {
+    return (this.db.prepare('SELECT * FROM versions WHERE key = ? AND at >= ? ORDER BY at DESC, id DESC LIMIT 100').all(pageKey(title), since) as Record<string, unknown>[]).filter((r) => (!r['source_id'] || sees(String(r['source_id']))) && (viewer === undefined || !r['held_for'] || r['held_for'] === viewer)).map((r) => ({
       id: Number(r['id']),
       title: String(r['title']),
       at: Number(r['at']),
@@ -573,11 +794,18 @@ export class Wiki {
 
   // The latest lines of the log, newest first. Read again only when the file changed: it only grows.
   log(limit = 30): string[] {
+    const lines = this.logLines()
+    if (this.logShown?.from !== lines || this.logShown.limit !== limit) this.logShown = { from: lines, limit, list: lines.slice(-limit).reverse() }
+    return this.logShown.list
+  }
+  private logShown?: { from: string[]; limit: number; list: string[] }
+  // All of the log's lines, oldest first.
+  private logLines(): string[] {
     const p = join(this.dir, LOG)
     let key: string
     try {
       const st = statSync(p)
-      key = `${p}|${st.mtimeMs}|${st.size}|${limit}`
+      key = `${p}|${st.mtimeMs}|${st.size}`
     } catch {
       return []
     }
@@ -585,8 +813,6 @@ export class Wiki {
     const lines = readFileSync(p, 'utf8')
       .split(/\r?\n/)
       .filter((l) => l.startsWith('- '))
-      .slice(-limit)
-      .reverse()
       .map((l) => l.slice(2))
     this.logKept = { key, lines }
     return lines
@@ -595,9 +821,12 @@ export class Wiki {
   // ---------- writing ----------
 
   // Creates or changes a page. expectedHash: the copy the change was made on; a page that moved on since is refused.
-  save(p: { title: string; body: string; kind?: string; by: string; byName: string; expectedHash?: string; rename?: string; reason?: string }): WikiPage {
-    const title = p.title.trim().replace(/\s+/g, ' ')
+  save(p: { title: string; body: string; kind?: string; by: string; byName: string; expectedHash?: string; rename?: string; reason?: string; sourceId?: string }): WikiPage {
+    const title = cleanTitle(p.title)
     if (!title) throw new Error(L('A página precisa de um título.', 'The page needs a title.'))
+    if (p.rename !== undefined) p = { ...p, rename: cleanTitle(p.rename) }
+    // Its file is its title: one longer than a file name holds would be cut, and be another page.
+    if (title.length > 120 || Buffer.byteLength(title) > 200) throw new Error(L('Título longo demais: use até 120 caracteres.', 'Title too long: use up to 120 characters.'))
     const oldFile = this.fileFor(p.rename ?? title)
     // a page in a folder stays in it, renamed or not
     const folder = oldFile?.includes('/') ? oldFile.slice(0, oldFile.lastIndexOf('/') + 1) : ''
@@ -607,6 +836,12 @@ export class Wiki {
     if (existing === undefined && p.expectedHash) throw new WikiConflict()
     const other = this.fileFor(title)
     if (other && other !== oldFile) throw new Error(L(`Já existe uma página chamada "${title}".`, `There's already a page called "${title}".`))
+    // A new page whose title is another spelling of one that's there ("A/b" for "A-b", "foo" for
+    // "Foo") isn't that page: one never overwrites the other.
+    if (oldFile && !p.rename && p.expectedHash === undefined && this.titleOf(oldFile) !== title) {
+      const there = this.titleOf(oldFile)
+      throw new Error(L(`Já existe uma página chamada "${there}".`, `There's already a page called "${there}".`))
+    }
     const day = new Date().toISOString().slice(0, 10)
     const prev = existing ? parsePage(existing).meta : {}
     const body = p.body.replace(/\r\n/g, '\n').trimEnd() + '\n'
@@ -622,25 +857,35 @@ export class Wiki {
     if (oldFile && oldFile !== file) {
       renameSync(join(this.pagesDir, oldFile), join(this.pagesDir, file)) // Obsidian's links by name follow it
       this.unindex(oldFile)
+      // Where it came from, whom it's held for and its history go with it.
+      const [was, now] = [pageKey(this.titleOf(oldFile)), pageKey(title)]
+      if (was !== now) {
+        this.db.prepare('UPDATE provenance SET title = ? WHERE title = ?').run(now, was)
+        this.db.prepare('UPDATE OR REPLACE held SET title = ? WHERE title = ?').run(now, was)
+        this.db.prepare('INSERT OR IGNORE INTO held_log (title, person) SELECT ?, person FROM held_log WHERE title = ?').run(now, was) // the old name stays unnamed too
+        this.db.prepare('UPDATE versions SET key = ? WHERE key = ?').run(now, was)
+      }
     }
     writeFileSync(join(this.pagesDir, file), text)
     this.indexFile(file, text, Math.round(statSync(join(this.pagesDir, file)).mtimeMs), p.by)
     const before = existing !== undefined ? parsePage(existing).body : null
-    this.version(title, p.by, existing === undefined ? 'create' : 'edit', before, parsePage(text).body, p.reason)
+    this.version(title, p.by, existing === undefined ? 'create' : 'edit', before, parsePage(text).body, p.reason, p.sourceId)
     this.appendLog(existing === undefined ? L(`**${p.byName}** criou [[${title}]]`, `**${p.byName}** created [[${title}]]`) : p.rename && p.rename !== title ? L(`**${p.byName}** renomeou [[${p.rename}]] pra [[${title}]]`, `**${p.byName}** renamed [[${p.rename}]] to [[${title}]]`) : L(`**${p.byName}** editou [[${title}]]`, `**${p.byName}** edited [[${title}]]`))
     this.writeIndex()
     this.onChange()
     return this.page(title)!
   }
 
-  remove(title: string, by: string, byName: string): void {
+  remove(raw: string, by: string, byName: string, sourceId?: string): void {
+    const title = cleanTitle(raw) // as save and rename keep it: what the history and the log say
     const file = this.fileFor(title)
     if (!file) return
     const path = join(this.pagesDir, file)
     const before = existsSync(path) ? parsePage(readFileSync(path, 'utf8')).body : this.bodyOf(file)
     if (existsSync(path)) rmSync(path)
     this.unindex(file)
-    this.version(title, by, 'delete', before, null)
+    this.version(title, by, 'delete', before, null, undefined, sourceId)
+    this.release(title, true)
     this.appendLog(L(`**${byName}** apagou ${title}`, `**${byName}** deleted ${title}`))
     this.writeIndex()
     this.onChange()
@@ -700,14 +945,27 @@ export class Wiki {
     }
   }
 
-  // Puts a page back as it was after a version (or before it, for a deletion).
-  restore(versionId: number, by: string, byName: string): WikiPage {
+  // Puts a page back as it was after a version (or before it, for a deletion). `reheld`: the text
+  // came from a DM (the version was held, or its provenance says so) and the page wasn't held: it is
+  // now, for that person, instead of that text going public under a name someone else may have taken.
+  restore(versionId: number, by: string, byName: string): WikiPage & { reheld?: boolean } {
     const v = this.db.prepare('SELECT * FROM versions WHERE id = ?').get(versionId) as Record<string, unknown> | undefined
     if (!v) throw new Error(L('Essa versão não existe mais.', 'That version no longer exists.'))
     const body = v['action'] === 'delete' ? v['before'] : v['after']
     if (body == null) throw new Error(L('Não há texto pra restaurar nessa versão.', 'There is no text to restore in that version.'))
-    const current = this.page(String(v['title']))
-    return this.save({ title: String(v['title']), body: String(body), by, byName, ...(current ? { expectedHash: current.hash } : {}), reason: L('restaurou uma versão anterior', 'restored an earlier version') })
+    // The page as it's called now (it may have been renamed since that version).
+    const current = (this.db.prepare('SELECT title FROM pages WHERE key = ?').get(String(v['key'])) as { title: string } | undefined)?.title
+    const page = current ? this.page(current) : undefined
+    const saved = this.save({ title: current ?? String(v['title']), body: String(body), by, byName, ...(page ? { expectedHash: page.hash } : {}), reason: L('restaurou uma versão anterior', 'restored an earlier version') })
+    // Whose the text is: the person it was held for, or the DM's (unknown: whoever restores, the owner).
+    const team = !!this.getMeta('logAtSwitch') // only once there are people to hold pages from
+    const origin = team ? (this.db.prepare('SELECT private_to FROM provenance WHERE title = ? AND at = ? AND private_to IS NOT NULL').get(String(v['key']), Number(v['at'])) as { private_to: string } | undefined) : undefined
+    const whose = v['held_for'] ? String(v['held_for']) : origin ? (origin.private_to === '?' ? by : origin.private_to) : undefined
+    const key = pageKey(saved.title)
+    if (!whose || this.db.prepare('SELECT 1 FROM held WHERE title = ?').get(key)) return saved
+    this.hold(key, whose)
+    this.onChange()
+    return { ...saved, reheld: true }
   }
 
   // Several lines at once, as a scan has them: the file is rewritten once, not once per page.
@@ -719,31 +977,38 @@ export class Wiki {
 
   // índice.md: every page by kind, with its first line. Kept by Tucano, read by the agents.
   private writeIndex(): void {
-    const pages = this.list()
+    const text = this.indexFor(this.list())
+    const path = join(this.dir, INDEX)
+    if (!existsSync(path) || readFileSync(path, 'utf8') !== text) writeFileSync(path, text)
+  }
+
+  // The index of these pages, as índice.md writes it.
+  private indexFor(pages: WikiPageInfo[]): string {
     const byKind = new Map<string, WikiPageInfo[]>()
     for (const p of pages) byKind.set(p.kind, [...(byKind.get(p.kind) ?? []), p])
     const head = L(`# Índice\n\n${pages.length === 1 ? '1 página' : `${pages.length} páginas`}. Mantido pelo Tucano: não precisa editar.\n`, `# Index\n\n${pages.length === 1 ? '1 page' : `${pages.length} pages`}. Kept by Tucano: no need to edit it.\n`)
-    const body = this.kinds()
+    const body = this.kinds(pages)
       .map((k) => `\n## ${k}\n${byKind.get(k)!.map((p) => `- [[${p.title}]]${p.summary ? `: ${p.summary}` : ''}`).join('\n')}\n`)
       .join('')
-    const text = head + body
-    const path = join(this.dir, INDEX)
-    if (!existsSync(path) || readFileSync(path, 'utf8') !== text) writeFileSync(path, text)
+    return head + body
   }
 
   // ---------- sources: what the wiki is made from, kept as it came ----------
 
   addSource(p: { title: string; text: string; kind: WikiSource['kind']; origin?: WikiSource['origin']; by: string; file?: { name: string; data: Buffer }; status?: WikiSource['status'] }): WikiSource {
+    p = { ...p, title: cleanTitle(p.title) || L('Fonte', 'Source') }
     const at = Date.now()
     const d = new Date(at)
     const stamp = `${d.toISOString().slice(0, 10)} ${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`
-    let file = fileOf(`${stamp} ${p.title}`)
-    for (let k = 2; existsSync(join(this.dir, SOURCES, file)); k++) file = fileOf(`${stamp} ${p.title} ${k}`)
+    // The title is what gets cut, never the number that tells two apart: this always ends.
+    const base = fileOf(`${stamp} ${p.title}`).slice(0, -3)
+    let file = `${base}.md`
+    for (let k = 2; existsSync(join(this.dir, SOURCES, file)); k++) file = `${base} ${k}.md`
     const origin: WikiSource['origin'] = { ...(p.origin ?? {}) }
     // The file as it came, next to its text: fontes/arquivos/<date> <name>.
     if (p.file) {
       mkdirSync(join(this.dir, SOURCES, 'arquivos'), { recursive: true })
-      const safe = p.file.name.replace(/[\\/:*?"<>|\n\r\t]/g, '-').slice(0, 120)
+      const safe = clip(p.file.name.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '-').replace(/^\.+/, ''), 120, 180) || 'arquivo'
       let name = `${stamp} ${safe}`
       for (let k = 2; existsSync(join(this.dir, SOURCES, 'arquivos', name)); k++) name = `${stamp} ${k} ${safe}`
       writeFileSync(join(this.dir, SOURCES, 'arquivos', name), p.file.data)
@@ -792,6 +1057,29 @@ export class Wiki {
     return { ...src, text: existsSync(path) ? parsePage(readFileSync(path, 'utf8')).body : '' }
   }
 
+  // A source gone for good: its text and the file as it came, and the changes made of it with the
+  // versions they wrote (the pages made from it stay; they are the team's). Its messages count as read no more.
+  removeSource(id: string): boolean {
+    const src = this.source(id)
+    if (!src) return false
+    rmSync(join(this.dir, `${src.file}.md`), { force: true })
+    if (src.origin.original) rmSync(join(this.dir, src.origin.original), { force: true })
+    this.db.prepare('DELETE FROM sources WHERE id = ?').run(src.id)
+    this.dropOrphans()
+    this.onChange()
+    return true
+  }
+
+  // What was deleted leaves the index's file too (after a purge took someone's sources).
+  scrub(): void {
+    this.db.exec('VACUUM')
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    } catch {
+      // not in WAL mode: nothing to empty
+    }
+  }
+
   // ---------- conversations: how far the curator has read each one ----------
 
   // The messages of a conversation some source already holds.
@@ -811,7 +1099,7 @@ export class Wiki {
   private makeGraph(): ReturnType<Wiki['graph']> {
     const pages = this.db.prepare('SELECT file, title, kind FROM pages').all() as { file: string; title: string; kind: string }[]
     const byFile = new Map(pages.map((p) => [p.file, p.title]))
-    const byName = new Map(pages.map((p) => [p.title.toLowerCase(), p.title]))
+    const byName = new Map(pages.map((p) => [pageKey(p.title), p.title]))
     const ghosts = new Map<string, string>()
     const edges: [string, string][] = []
     const seen = new Set<string>()
@@ -839,12 +1127,15 @@ export class Wiki {
 
   private linkAsWritten(file: string, target: string): string | undefined {
     const text = existsSync(join(this.pagesDir, file)) ? readFileSync(join(this.pagesDir, file), 'utf8') : ''
-    return linksIn(text).find((t) => t.toLowerCase() === target)
+    return linksIn(text).find((t) => pageKey(t) === target)
   }
 
   // The latest changes to any page, newest first.
-  recent(limit = 12): Omit<WikiVersion, 'before' | 'after'>[] {
-    return (this.db.prepare('SELECT id, title, at, by, action, reason FROM versions ORDER BY at DESC, id DESC LIMIT ?').all(limit) as Record<string, unknown>[]).map((r) => ({ id: Number(r['id']), title: String(r['title']), at: Number(r['at']), by: String(r['by']), action: String(r['action']) as WikiVersion['action'], ...(r['reason'] ? { reason: String(r['reason']) } : {}) }))
+  // `skip`: keys of pages left out (held for someone else); `viewer`: as in history.
+  recent(limit = 12, sees: (sourceId: string) => boolean = () => true, since = 0, skip?: Set<string>, viewer?: string): Omit<WikiVersion, 'before' | 'after'>[] {
+    return (this.db.prepare('SELECT id, title, key, at, by, action, reason, source_id, held_for FROM versions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?').all(since, (limit + (skip?.size ?? 0)) * 4) as Record<string, unknown>[])
+      .filter((r) => (!r['source_id'] || sees(String(r['source_id']))) && !skip?.has(String(r['key'])) && (viewer === undefined || !r['held_for'] || r['held_for'] === viewer))
+      .slice(0, limit).map((r) => ({ id: Number(r['id']), title: String(r['title']), at: Number(r['at']), by: String(r['by']), action: String(r['action']) as WikiVersion['action'], ...(r['reason'] ? { reason: String(r['reason']) } : {}) }))
   }
 
   sourceCount(): number {
@@ -944,6 +1235,11 @@ export class Wiki {
     const r = this.db.prepare('SELECT * FROM changes WHERE id = ?').get(id) as Record<string, unknown> | undefined
     if (!r) throw new Error(L('Essa mudança não existe mais.', 'That change no longer exists.'))
     if (r['state'] !== 'pending' && r['state'] !== 'conflict') return this.toChange(r)
+    // One whose source went (taken back, purged) is gone with it: nothing of it gets written.
+    if (r['source_id'] && !this.source(String(r['source_id']))) {
+      this.dropOrphans()
+      throw new Error(L('Essa mudança não existe mais.', 'That change no longer exists.'))
+    }
     const ops = JSON.parse(String(r['ops'])) as WikiOp[]
     const base = JSON.parse(String(r['base'])) as Record<string, string | null>
     const by = String(r['by'])
@@ -968,7 +1264,7 @@ export class Wiki {
     for (const [title, n] of next) {
       const p = this.page(title)
       before[title] = p ? p.body : null
-      this.save({ title, body: n.body, ...(n.kind ? { kind: n.kind } : {}), by, byName, ...(p ? { expectedHash: p.hash } : {}), ...(r['reason'] ? { reason: String(r['reason']) } : {}) })
+      this.save({ title, body: n.body, ...(n.kind ? { kind: n.kind } : {}), by, byName, ...(p ? { expectedHash: p.hash } : {}), ...(r['reason'] ? { reason: String(r['reason']) } : {}), ...(r['source_id'] ? { sourceId: String(r['source_id']) } : {}) })
     }
     this.db.prepare("UPDATE changes SET state = 'applied', before = ?, decided_at = ? WHERE id = ?").run(JSON.stringify(before), Date.now(), id)
     this.onChange()
@@ -997,15 +1293,16 @@ export class Wiki {
   }
 
   // Puts the pages back as they were before a package, unless they changed again since.
-  undoChange(id: string, byName: string): void {
+  undoChange(id: string, byName: string, by = 'me'): void {
     const r = this.db.prepare('SELECT * FROM changes WHERE id = ?').get(id) as Record<string, unknown> | undefined
     if (!r || r['state'] !== 'applied' || !r['before']) return
     const before = JSON.parse(String(r['before'])) as Record<string, string | null>
+    const sourceId = r['source_id'] ? String(r['source_id']) : undefined
     for (const [title, body] of Object.entries(before)) {
-      if (body === null) this.remove(title, 'me', byName)
+      if (body === null) this.remove(title, by, byName, sourceId)
       else {
         const p = this.page(title)
-        this.save({ title, body, by: 'me', byName, ...(p ? { expectedHash: p.hash } : {}), reason: L('desfez uma mudança da wiki', 'undid a wiki change') })
+        this.save({ title, body, by, byName, ...(p ? { expectedHash: p.hash } : {}), reason: L('desfez uma mudança da wiki', 'undid a wiki change'), ...(sourceId ? { sourceId } : {}) })
       }
     }
     this.db.prepare("UPDATE changes SET state = 'undone', decided_at = ? WHERE id = ?").run(Date.now(), id)

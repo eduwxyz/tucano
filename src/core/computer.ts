@@ -683,7 +683,7 @@ export class Computers {
     return r.code === 0
   }
 
-  private async startService(agentId: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolOutcome> {
+  private async startService(agentId: string, args: Record<string, unknown>, signal?: AbortSignal, conversationId?: string): Promise<ToolOutcome> {
     const name = typeof args['name'] === 'string' ? args['name'].trim() : ''
     const command = typeof args['command'] === 'string' ? args['command'].trim() : ''
     const port = Number(args['port'])
@@ -700,7 +700,7 @@ export class Computers {
     const script = `echo $$ > /run/tucano/${name}.pid; cd ${WORK}; exec bash -lc ${q(command)} >> ${q(log)} 2>&1`
     const start = await docker(['exec', '-d', this.name(agentId), 'setsid', 'bash', '-c', script], { timeoutMs: 15_000 })
     if (start.code !== 0) return { result: textResult(L(`Não consegui iniciar: ${start.stderr.trim()}`, `I couldn't start it: ${start.stderr.trim()}`), true) }
-    this.deps.db.saveService(agentId, { name, command, port, startedAt: Date.now() })
+    this.deps.db.saveService(agentId, { name, command, port, startedAt: Date.now(), conversationId })
 
     // Wait for the port, up to 60 s, and check it is reachable from the Mac.
     let where: 'all' | 'loopback' | null = null
@@ -882,7 +882,7 @@ export class Computers {
       case 'edit_file':
         return { result: await this.editFile(agent.id, args) }
       case 'start_service':
-        return this.startService(agent.id, args, ctx.signal)
+        return this.startService(agent.id, args, ctx.signal, ctx.conversationId)
       case 'stop_service': {
         const svc = String(args['name'] ?? '')
         if (!this.deps.db.services(agent.id).some((s) => s.name === svc)) return { result: textResult(noService(svc), true) }

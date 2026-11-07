@@ -12,7 +12,7 @@ const agent = (id: string, handle: string): Agent => ({
 
 let db: Db
 let clock: number
-const say = (conversationId: string, text: string, author: Author = { kind: 'me' }, threadId?: string): Message => {
+const say = (conversationId: string, text: string, author: Author = { kind: 'person', id: 'p1' }, threadId?: string): Message => {
   const m: Message = { id: `m${clock}`, conversationId, author, text, at: clock++, ...(threadId ? { threadId } : {}) }
   db.saveMessage(m)
   return m

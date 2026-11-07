@@ -20,7 +20,8 @@ import {
   type Agent,
   type AgentDraft,
   type AgentChanges,
-  type Message
+  type Message,
+  amAdmin
 } from '../store'
 import { AgentAvatar, Icon, tokens } from './ui'
 import { describeRoutine } from './Routines'
@@ -143,7 +144,10 @@ export function ProposalCard({ message }: { message: Message }): ReactNode {
   const replaced = useStore((s) => messagesIn(s, message.conversationId).some((m) => m.at > message.at && !!m.run?.proposal))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [sent, setSent] = useState('')
   const [open, setOpen] = useState(false)
+  // Agents and teams are the admins': a member's card goes to them instead (the core tells them).
+  const forAdmin = useStore((s) => (p.kind === 'agent' || p.kind === 'team') && !amAdmin(s))
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const by = (message.author.kind === 'agent' && agentOf(message.author.id)?.name) || 'Tuca'
   const grantList = (g: Record<string, string>): string =>
@@ -159,7 +163,9 @@ export function ProposalCard({ message }: { message: Message }): ReactNode {
     try {
       await applyProposal(message.id)
     } catch (e) {
-      setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
+      const why = e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)
+      if (forAdmin) setSent(L('Mandei pros admins aplicarem. Você recebe um aviso quando decidirem.', 'Sent to the admins to apply. You’ll hear when they decide.'))
+      else setError(why)
     } finally {
       setBusy(false)
     }
@@ -333,10 +339,12 @@ export function ProposalCard({ message }: { message: Message }): ReactNode {
           <span className="tag">{L('descartado', 'discarded')}</span>
         ) : replaced ? (
           <span className="muted small">{L('Trocada por uma proposta mais nova.', 'Replaced by a newer proposal.')}</span>
+        ) : sent ? (
+          <span className="muted small">{sent}</span>
         ) : (
           <>
             <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => void apply()}>
-              {p.kind === 'team' ? L('Criar time', 'Create team') : L('Aplicar', 'Apply')}
+              {forAdmin ? L('Pedir a um admin', 'Ask an admin') : p.kind === 'team' ? L('Criar time', 'Create team') : L('Aplicar', 'Apply')}
             </button>
             <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => dismissProposal(message.id)}>
               {L('Descartar', 'Discard')}

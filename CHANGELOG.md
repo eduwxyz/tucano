@@ -4,6 +4,15 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Teams: several people on the same Tucano.** On a Tucano on a server, **Settings › People** invites someone with a one-time link (good for 7 days), as owner, admin or member. Each person has their own name, their own direct messages with the agents (private, even from the owner), their own memory, display preferences and unread counts; every message and approval carries who wrote, asked and decided it. An agent's approvals go to its owner (or admins), and **For you** gathers what waits on each person. A `@name` calls a person; an agent can ask a specific person and wait for that one task, with a deadline and someone covering for whoever is away. Routines are "just for me" or the channel's. **Activity** shows the owner and admins who joined, left, approved and changed what, never what was said in a DM. Removing someone ends their access at once and keeps their private things 30 days before they're deleted. On the first invite, channel summaries are rebuilt without anything from the owner's DMs, older channel messages and wiki history stay the owner's, and wiki pages that came from the owner's DMs wait for the owner to release them. A Tucano used by one person, on the desktop, works exactly as before.
+
+### Fixed
+
+- **An agent's Chrome gets more time to open.** The first open on a slow computer could pass the 15 s it had, and the agent got an error instead of the page. It now gets 30 s.
+- **Replies show in the order they ended.** With several agents answering at once, a reply that took longer stayed above one that was already done. Now it takes its place when it ends, with that time on it, and whoever is still working stays at the end of the conversation. Agents still read each other in the order they started, so what each one saw doesn't change.
+
 ## [0.2.14] - 2026-11-06
 
 > **Em português:**

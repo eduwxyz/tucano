@@ -158,7 +158,7 @@ describe("an agent's browser", () => {
     await new Promise((r) => setTimeout(r, 150))
     expect(browser.view('lia-0001')!.frame).toBe(`data:image/jpeg;base64,${Buffer.from('novo').toString('base64')}`)
     // Only the picture goes out, not the whole view with its log.
-    expect(events.at(-1)).toEqual({ type: 'browser_frame', agentId: 'lia-0001', frame: `data:image/jpeg;base64,${Buffer.from('novo').toString('base64')}` })
+    expect(events.at(-1)).toEqual({ type: 'browser_frame', agentId: 'lia-0001', frame: `data:image/jpeg;base64,${Buffer.from('novo').toString('base64')}`, conversationId: ctx.conversationId })
   })
 
   it('clicks and types by text, without any model', async () => {

@@ -219,7 +219,7 @@ describe('a reply with a kept session', () => {
     const r = runner()
     await r.send('d1', 'oi')
     await r.idle()
-    const mine = db.messages().find((m) => m.author.kind === 'me')!
+    const mine = db.messages().find((m) => m.author.kind === 'person')!
     db.saveMessage({ ...mine, text: 'olá' })
     await r.send('d1', 'de novo')
     await r.idle()

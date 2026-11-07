@@ -1,7 +1,7 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider } from './connector-catalog'
-import type { Os, Account, AccountEngine, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
+import type { Os, Account, AccountEngine, ActivityEntry, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -23,6 +23,11 @@ export interface Snapshot {
   packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
   isolatedComputers: boolean // agents can have an isolated Linux computer: Docker is there (not inside a server's container)
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
+  people: Person[] // everyone with access now (no keys)
+  former?: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
+  you: string // the person this connection is
+  needsName?: boolean // a server's first access: the owner hasn't said their name yet (setMyName)
+  inbox: Inbox // what waits on this person: approvals they can decide, questions to them
 }
 
 export interface Api {
@@ -123,12 +128,14 @@ export interface Api {
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
   // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.
-  wiki(): { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number } // pending: the curator's changes; the review's are in findings
+  wiki(): { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number; held?: { title: string; at: number }[]; heritage?: { at: number } } // pending: the curator's changes; the review's are in findings
   wikiPage(p: { title: string }): WikiPage | null
   wikiSearch(p: { q: string }): WikiHit[]
   wikiSave(p: { title: string; body: string; kind?: string; expectedHash?: string; rename?: string }): WikiPage // throws on a conflict or a taken title
   wikiRemove(p: { title: string }): void
   wikiHistory(p: { title: string }): WikiVersion[]
+  wikiRelease(p: { title: string }): void // "Liberar pro time": a page held for me since the Tucano got its second person
+  heritageSeen(): void // the owner read the notice about what changed when the Tucano got its second person
   wikiRestore(p: { id: number }): WikiPage
   wikiSchema(): string
   wikiSaveSchema(p: { text: string }): void
@@ -140,6 +147,7 @@ export interface Api {
   wikiUndoChange(p: { id: string }): void
   wikiSources(): WikiSource[]
   wikiSource(p: { id: string }): (WikiSource & { text: string }) | null
+  wikiRemoveSource(p: { id: string }): void // admins: a source gone for good (its text and file; the pages stay)
   wikiKeepMessage(p: { messageId: string }): Promise<number> // how many changes it made; throws when no model is ready
   wikiRedoChange(p: { id: string }): Promise<number> // a conflict, made again on the newer page
   // Sources brought on purpose: the text is taken now, the curator reads it next (status on the source).
@@ -156,6 +164,21 @@ export interface Api {
   setWikiCapture(p: { conversationId: string; on: boolean }): void
   setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now
+  // People: who I am, and (admins) who comes in. The link is the page's origin with ?invite=<code>.
+  setMyName(p: { name: string; about?: string }): void // about: what I do, for the agents
+  setDelegation(p: { to: string | null; until?: number }): void // someone answers and approves for me until then; null ends it
+  createInvite(p: { role: Exclude<Role, 'owner'>; about?: string; restore?: string }): { code: string; expiresAt: number }
+  revokeInvite(p: { id: string }): void
+  listInvites(): Invite[]
+  removedPeople(): (Person & { removedAt: number })[] // admins: who left in the last 30 days (still restorable)
+  removePerson(p: { id: string }): void // their access ends at once: keys gone, open connections closed; what they owned goes to the owner
+  setRole(p: { id: string; role: Exclude<Role, 'owner'> }): void
+  purgePerson(p: { id: string }): void // the owner, before the 30 days: a removed person's DMs and memories go now
+  activity(p: { personId?: string; kind?: string; before?: number }): ActivityEntry[] // admins: newest first, a page at a time (before: the last page's oldest `at`)
+  inbox(): Inbox
+  answerQuestion(p: { id: string; text: string }): void // a question an agent asked me (or someone I cover for)
+  confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?
+  watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
 }
 
 export type Method = keyof Api
@@ -173,17 +196,25 @@ export type CoreEvent =
   | { type: 'connector_removed'; id: string }
   | { type: 'approval'; approval: Approval }
   | { type: 'memory'; memory: Memory }
-  | { type: 'memory_removed'; id: string }
+  | { type: 'memory_removed'; id: string; for?: string } // for: whose it was, when it was someone's own (no one else hears of it)
   | { type: 'computer'; computer: ComputerInfo }
   | { type: 'browser'; view: BrowserView }
-  | { type: 'browser_frame'; agentId: string; frame: string } // the browser's screen as it changes, without the rest of its view
+  | { type: 'browser_frame'; agentId: string; frame: string; conversationId?: string } // the browser's screen as it changes, without the rest of its view (conversationId: whom it works for, who may see it)
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'routine'; routine: Routine }
-  | { type: 'routine_removed'; id: string }
-  | { type: 'conversation_removed'; id: string }
+  | { type: 'routine_removed'; id: string; for?: string } // for: a DM's person, the only one who saw it
+  | { type: 'conversation_removed'; id: string; for?: string }
   | { type: 'skill'; skill: Skill }
   | { type: 'skill_removed'; id: string }
   | { type: 'wiki' } // a page changed: here, by an agent or in another app
+  | { type: 'people'; people: Person[]; former?: Pick<Person, 'id' | 'name'>[] } // someone joined, left or changed their name
+  | { type: 'inbox'; inbox?: Inbox } // what waits on this person changed (each gets their own)
+
+// Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
+export const CORE_EVENT_TYPES = ['voice', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox'] as const satisfies readonly CoreEvent['type'][]
+// …and none left out: a new kind of event fails to compile here until it's listed.
+type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
+export const _allEventsListed: _AllListed = true
 
 export type Request = { id: number; method: Method; params: unknown }
 export type Response = { id: number; result?: unknown; error?: string }

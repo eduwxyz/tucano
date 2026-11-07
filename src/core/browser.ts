@@ -306,7 +306,7 @@ export class Browser {
         if (f.next && now?.url) {
           const frame = `data:image/jpeg;base64,${f.next}`
           this.views.set(agentId, { ...now, frame })
-          this.deps.emit({ type: 'browser_frame', agentId, frame })
+          this.deps.emit({ type: 'browser_frame', agentId, frame, ...(now.conversationId ? { conversationId: now.conversationId } : {}) })
         }
         f.next = undefined
       }, 100)
@@ -396,7 +396,8 @@ export class Browser {
           true
         )
       }
-    this.update(id, { doing: { label: doing()[name] ?? step.label, detail: step.detail } })
+    // Whose conversation it works for now: only who sees that one sees the page (people.ts).
+    this.update(id, { doing: { label: doing()[name] ?? step.label, detail: step.detail }, conversationId: ctx.conversationId })
     try {
       switch (name) {
         case 'navegador_abrir': {
