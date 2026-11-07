@@ -233,7 +233,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
         <label className="grow harness__name" htmlFor={checkId}>
           <strong>{ENGINES[engine].label}</strong>
           <span className="harness__account">
-            {!st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
+            {st.checking ? L('Conferindo…', 'Checking…') : !st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
           </span>
         </label>
         {st.soon ? (

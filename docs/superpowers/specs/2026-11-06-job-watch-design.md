@@ -75,7 +75,7 @@ Todo texto visível usa `L(pt, en)`. Como o módulo roda no núcleo, ele também
 
 ## Modelo de dados
 
-Migração nova em `MIGRATIONS`, criando `job_watches`. A estrutura guardada:
+A coluna `agents.job_watch` e a tabela `job_watches` são criadas pelo nome quando faltam, fora de `MIGRATIONS`, para nenhuma ordem de migrações de outras branches pedir que sejam criadas duas vezes. A estrutura guardada:
 
 ```ts
 interface JobWatch {

@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { commandWords, isFinal, isReadCommand, JOB_WATCH_DEFAULTS, jobWatchConfig, type DatabricksStatus, type JobState, type JobTask, type JobWatch, type JobWatchSettings } from '../../../shared/job-watch'
 import { safeUrl } from '../links'
-import { cancelJobRun, checkDatabricks, stopJobWatch, updateSettings, useStore } from '../store'
+import { amAdmin, cancelJobRun, checkDatabricks, stopJobWatch, updateSettings, useStore } from '../store'
 import { confirmDialog } from './Dialogs'
 import { Card, Field, Toggle } from './Pages'
 import { ago, duration, Icon, NumberInput } from './ui'
@@ -225,8 +225,11 @@ export function JobWatchSettingsCard(): ReactNode {
     setCheck('checking')
     checkDatabricks().then(setCheck, (e: unknown) => setCheck({ ok: false, text: e instanceof Error ? e.message : String(e), profiles: [] }))
   }
-  // Nothing to fill in: it looks as the card opens, and again when a choice changes.
-  useEffect(detect, [saved?.profile])
+  // Nothing to fill in: it looks as the card opens, and again when a choice changes. Only an admin sees what it finds.
+  const admin = useStore(amAdmin)
+  useEffect(() => {
+    if (admin) detect()
+  }, [saved?.profile, admin])
   const status = check !== 'checking' ? check : null
 
   // A command that doesn't only read asks before it goes on the list; running it asks again, each time.

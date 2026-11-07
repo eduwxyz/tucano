@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it } from 'vitest'
-import { Db } from '../src/core/db'
+import { Db, MIGRATIONS } from '../src/core/db'
 import { workspacePorts } from '../src/core/ports'
 import { Memories } from '../src/core/memory'
 import { fakeEngine } from '../src/core/engines/fake'
@@ -100,19 +100,18 @@ it('migrates every opened workspace and backs up older schemas before changing t
   const dir = mkdtempSync(join(tmpdir(), 'tucano-migrations-'))
   dirs.push(dir)
   const file = join(dir, 'tucano.db')
-  const first = new Db(file)
-  first.createConversation({ id: 'kept', name: 'kept', kind: 'channel', members: [] })
-  first.close()
+  // A database from before the unread table (two migrations back: people came after it).
+  const version = MIGRATIONS.length - 1
   const raw = new DatabaseSync(file)
-  const version = (raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-  raw.exec(`DROP TABLE job_watches; ALTER TABLE agents DROP COLUMN job_watch; DROP TABLE message_notifications; PRAGMA user_version = ${version - 2}`)
+  for (const m of MIGRATIONS.slice(0, version - 1)) raw.exec(m)
+  raw.exec(`INSERT INTO conversations (id, kind, name, created_at) VALUES ('kept', 'channel', 'kept', 1); PRAGMA user_version = ${version - 1}`)
   raw.close()
   const migrated = open(file)
   expect(migrated.conversation('kept')?.unread).toBe(0)
   const backups = readdirSync(join(dir, 'backups'))
   expect(backups).toHaveLength(1)
   const before = new DatabaseSync(join(dir, 'backups', backups[0]!))
-  expect(before.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: version - 2 })
+  expect(before.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: version - 1 })
   before.close()
   const again = open(file)
   expect(again.conversation('kept')?.name).toBe('kept')

@@ -4,8 +4,37 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-11-07
+
+> **Em português:**
+> - **Respostas mais rápidas no Claude Code.** As ferramentas dos conectores ficam atrás da busca de ferramentas, em vez de irem todas em cada chamada: um agente com 198 ferramentas mandava 239 mil tokens por chamada e agora manda 11 mil, cerca de 7% do que ia antes. As que o agente usou nos últimos 14 dias já vêm carregadas. Uma memória nova, uma página na wiki ou uma rotina não reiniciam mais a conversa do agente. Suas mensagens passam na frente de rotinas e repasses.
+> - **O Codex escreve na hora.** O texto aparece enquanto é escrito, e uma conversa continua do ponto em que estava, sem reenviar tudo.
+> - **O app abre em menos de 1 segundo** (eram 4 a 9) e não trava mais enquanto a resposta chega, nem com conversas longas.
+> - **Times: várias pessoas no mesmo Tucano.** Num Tucano em servidor, Configurações › Pessoas convida alguém por link. Cada pessoa tem suas DMs com os agentes (privadas, nem o dono lê), sua memória e o que espera por ela em **Pra você**.
+> - **Mofi na loja de conectores:** contas, cartões, faturas e gastos dos seus bancos, pelo Open Finance, sem movimentar dinheiro.
+> - **O GitHub passa pelo conector.** Os agentes publicam no GitHub (branch, arquivos, PR) com as ferramentas do conector do GitHub; o push pelo computador do agente saiu.
+>
+> **Correções:** um pedido a alguém no fim de uma resposta longa chega a essa pessoa; as respostas aparecem na ordem em que terminaram; o Chrome de um agente tem 30 s pra abrir; o botão da nota de atualização fica embaixo do texto.
+
 ### Added
 
+- **Mofi in the connector store.** Your bank accounts, cards, invoices and spending from Brazilian banks (through Open Finance), from [Mofi](https://omofi.com.br/docs/mcp)'s official server. It signs in through the browser, and its tools only read: none moves money; the most they do is set a transaction's category or ask the banks for an update.
+- **Teams: several people on the same Tucano.** On a Tucano on a server, **Settings › People** invites someone with a one-time link (good for 7 days), as owner, admin or member. Each person has their own name, their own direct messages with the agents (private, even from the owner), their own memory, display preferences and unread counts; every message and approval carries who wrote, asked and decided it. An agent's approvals go to its owner (or admins), and **For you** gathers what waits on each person. A `@name` calls a person; an agent can ask a specific person and wait for that one task, with a deadline and someone covering for whoever is away. Routines are "just for me" or the channel's. **Activity** shows the owner and admins who joined, left, approved and changed what, never what was said in a DM. Removing someone ends their access at once and keeps their private things 30 days before they're deleted. On the first invite, channel summaries are rebuilt without anything from the owner's DMs, older channel messages and wiki history stay the owner's, and wiki pages that came from the owner's DMs wait for the owner to release them. A Tucano used by one person, on the desktop, works exactly as before.
+
+### Changed
+
+- **Faster replies on Claude Code.** Connector tools now wait behind the CLI's tool search instead of going into every model call: for one agent with 198 tools, a call went from 239k input tokens to 11k, and on 30 scenarios a reply sends 6–7% of what it did, with the same answers. The app's own tools stay loaded, and so do the connector tools the agent used in the last 14 days (up to 12), so a familiar tool doesn't cost a search. Memories, the wiki, skills, routines and disconnected connectors moved out of the system prompt, so a change to them no longer starts every agent's session over: a kept session gets them again only when they changed. Multi-step tasks and conversations got about 20–25% faster; turns after the first in a 6-turn conversation took 3.8 s instead of 5.9 s.
+- **Your replies go first.** A message, an approval, a retry or a browser handed back goes ahead of routines, hand-offs and follow-ups, and may run past the usual 4 at once, up to 6. Up to 4 Claude Code processes stay ready 10 minutes after a reply (was 2 for 5), typing in a channel readies whoever answered last there, and opening a conversation readies its session.
+- **Codex streams as it writes.** Agents on Codex run on one long-lived `codex app-server` per login: threads are kept and resumed, so only what's new is sent, and the text shows as it's written (the second turn's first text came in 1.0 s, was 2.4 s). Every isolation setting stays as it was; an older Codex, a Codex home with its own `config.toml` or rules, or `TUCANO_CODEX_EXEC=1` still use `codex exec`.
+- **The app opens sooner and stays light.** The core is ready in under a second (was 4.5–9.4 s); finding the CLIs happens after, and what was found is kept for the next launch. Installed apps are rescanned at most once a day, a big Obsidian vault is indexed without blocking, and the workspace on screen starts first. While a reply streams, only its own message redraws. A conversation opens with its last 100 messages, and older ones load as you scroll back.
+- **GitHub goes through its connector.** Agents publish to GitHub (a branch, files, a pull request) with the GitHub connector's tools, with the permissions and approvals of any connector. Pushing from the agent's computer and the `abrir_pr` tool are gone, and Settings' "Phone and GitHub" tab is just **Phone**. A computer that pushed through Tucano's proxy before gets its git settings put back when it starts.
+
+### Fixed
+
+- **An agent's Chrome gets more time to open.** The first open on a slow computer could pass the 15 s it had, and the agent got an error instead of the page. It now gets 30 s.
+- **Replies show in the order they ended.** With several agents answering at once, a reply that took longer stayed above one that was already done. Now it takes its place when it ends, with that time on it, and whoever is still working stays at the end of the conversation. Agents still read each other in the order they started, so what each one saw doesn't change.
+- **An ask at the end of a long reply reaches its person.** The hand-off check read only the first 3,000 characters of a reply, so a `@name` asked at the end of a long plan was missed. It now reads the start and the lines around each mention.
+- **The update note's button goes under its text.** With an agent working, a long "Restart anyway" squeezed the note's text into a narrow column.
 - **An agent follows a Databricks run.** Ask it to follow a job or a run: the app checks through the Databricks CLI, on the login you already have and spending no tokens, shows a live card with state, tasks, shuffle, spill and memory, and wakes the agent only on a failure, the end or a possible stall (no progress, a straggler task, a run far past its median). The analysis goes in the card's thread. It finds the CLI and the profile on its own. Off by default for each agent (**Tools › Follow jobs**), with the allowed commands and every limit in **Settings › Agents**; starting and canceling jobs are off too, and ask for approval when on. Spark's numbers come only from a run still going on a classic cluster, and how the app reaches them is still to be checked against a real workspace.
 
 ## [0.2.14] - 2026-11-06
@@ -355,6 +384,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.15]: https://github.com/eduwxyz/tucano/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/eduwxyz/tucano/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/eduwxyz/tucano/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/eduwxyz/tucano/compare/v0.2.11...v0.2.12
