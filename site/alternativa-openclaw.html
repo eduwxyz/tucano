@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- build.mjs publishes this page twice: as is at /alternativa-openclaw/, and with the English texts at /en/openclaw-alternative/ -->
+<title data-en="OpenClaw alternative: Tucano, an AI agent team in an app, no terminal">Alternativa ao OpenClaw: Tucano, um time de agentes de IA num app, sem terminal</title>
+<meta name="description" content="O Tucano é uma alternativa grátis e open source ao OpenClaw: um time de agentes de IA num app pro seu computador, sem configurar nada no terminal, com a assinatura que você já tem. Comparamos com OpenClaw, Hermes Agent e NanoClaw." data-en="Tucano is a free, open-source OpenClaw alternative: a team of AI agents in an app for your computer, no terminal setup, on the subscription you already have. Compared with OpenClaw, Hermes Agent and NanoClaw.">
+<meta property="og:title" content="Alternativa ao OpenClaw: Tucano, um time de agentes de IA num app, sem terminal" data-en="OpenClaw alternative: Tucano, an AI agent team in an app, no terminal">
+<meta property="og:description" content="Um time de agentes de IA num app pro seu computador, com a assinatura que você já tem. Comparado com OpenClaw, Hermes Agent e NanoClaw." data-en="A team of AI agents in an app for your computer, on the subscription you already have. Compared with OpenClaw, Hermes Agent and NanoClaw.">
+<meta property="og:image" content="https://tucano.sh/assets/brand/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://tucano.sh/assets/brand/og.png">
+<meta name="twitter:site" content="@tucanosh">
+<meta name="theme-color" content="#F3EFE6">
+<link rel="icon" type="image/png" href="/assets/brand/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/brand/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/compare.css?v=1">
+</head>
+<body>
+<script>
+// A visitor who picked the other language on tucano.sh goes to this page in that language.
+;(() => {
+  let l
+  try { l = localStorage.getItem('tucano-lang') } catch {}
+  const other = (l === 'en' || l === 'pt-BR') && l !== document.documentElement.lang && document.querySelector(`link[rel="alternate"][hreflang="${l}"]`)
+  if (other) location.replace(other.href)
+})()
+</script>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <clipPath id="mark-clip"><rect width="100" height="100" rx="28"/></clipPath>
+    <symbol id="mark" viewBox="0 0 100 100">
+      <g clip-path="url(#mark-clip)">
+        <rect width="100" height="100" fill="#F1ECE2"/>
+        <circle cx="27" cy="73" r="48" fill="#121212"/>
+        <circle cx="38" cy="47" r="14" fill="#fff"/>
+        <circle cx="43" cy="47" r="5.5" fill="#121212"/>
+        <path d="M53 24 Q84 25 93 44 L96 57 L53 57 Z" fill="#FF8C24"/>
+        <path d="M53 57 L95 57 Q86 70 53 71 Z" fill="#E5531F"/>
+        <path d="M83 57 A9 12 0 0 1 97 47 L97 57 Z" fill="#121212"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+<header>
+  <a class="brand" href="/" data-en-href="/en/"><svg><use href="#mark"/></svg><span>tucano</span></a>
+  <div class="lang" role="group" aria-label="Idioma / Language"><a href="/alternativa-openclaw/" hreflang="pt-BR">PT</a><a href="/en/openclaw-alternative/" hreflang="en">EN</a></div>
+  <a class="btn btn--beak" href="/#instalar" data-en-href="/en/#instalar"><span lang="pt-BR">Baixar o Tucano</span><span lang="en">Get Tucano</span></a>
+</header>
+
+<main>
+<div class="hero">
+  <div class="eyebrow"><span lang="pt-BR">Comparação · atualizada em 6 de novembro de 2026</span><span lang="en">Comparison · updated November 6, 2026</span></div>
+  <h1><span lang="pt-BR">Uma alternativa ao OpenClaw <em>que você baixa e abre.</em></span><span lang="en">An OpenClaw alternative <em>you download and open.</em></span></h1>
+  <p class="answer"><span lang="pt-BR">O <b>Tucano</b> é uma alternativa <b>grátis e open source</b> (Apache-2.0) ao OpenClaw. Em vez de um serviço que você instala pelo terminal e conversa pelo WhatsApp, ele é <b>um app pro Mac, Windows ou Linux</b> onde um time de agentes trabalha junto em canais, com a <b>assinatura que você já tem</b> (Claude Code, Codex, Cursor, Grok…), e você decide o que cada agente pode ler, escrever e o que espera o seu sim.</span><span lang="en"><b>Tucano</b> is a <b>free, open-source</b> (Apache-2.0) alternative to OpenClaw. Instead of a service you install from the terminal and talk to on WhatsApp, it's <b>an app for Mac, Windows or Linux</b> where a team of agents works together in channels, on the <b>subscription you already have</b> (Claude Code, Codex, Cursor, Grok…), and you decide what each agent can read, write, and what waits for your yes.</span></p>
+  <div class="ctas">
+    <a class="btn btn--beak" href="/#instalar" data-en-href="/en/#instalar"><span lang="pt-BR">Baixar grátis</span><span lang="en">Download free</span></a>
+    <a class="btn btn--ghost" href="https://github.com/eduwxyz/tucano"><span lang="pt-BR">Ver o código no GitHub</span><span lang="en">See the code on GitHub</span></a>
+  </div>
+</div>
+
+<section>
+  <h2><span lang="pt-BR">Tucano, OpenClaw e as alternativas, <em>lado a lado.</em></span><span lang="en">Tucano, OpenClaw and the alternatives, <em>side by side.</em></span></h2>
+  <p class="sub"><span lang="pt-BR">O que cada um diz no próprio site, na documentação ou no README, com as fontes no fim da página. Os quatro são grátis e open source.</span><span lang="en">What each one says on its own site, docs or README, with the sources at the end of the page. All four are free and open source.</span></p>
+  <div class="table">
+    <table>
+      <thead><tr><th></th><th class="us">Tucano</th><th>OpenClaw</th><th>Hermes Agent</th><th>NanoClaw</th></tr></thead>
+      <tbody>
+        <tr><th><span lang="pt-BR">Preço</span><span lang="en">Price</span></th>
+          <td class="us"><span lang="pt-BR">Grátis, sem plano pago</span><span lang="en">Free, no paid plan</span></td>
+          <td><span lang="pt-BR">Grátis, sem plano pago</span><span lang="en">Free, no paid plan</span></td>
+          <td><span lang="pt-BR">Grátis; o Nous Portal, opcional, vai de US$ 20 a 200 por mês</span><span lang="en">Free; the optional Nous Portal runs $20 to $200 a month</span></td>
+          <td><span lang="pt-BR">Grátis</span><span lang="en">Free</span></td></tr>
+        <tr><th><span lang="pt-BR">Como instala</span><span lang="en">How you install it</span></th>
+          <td class="us"><span lang="pt-BR">Baixa o app e abre (.dmg, .exe, .deb)</span><span lang="en">Download the app and open it (.dmg, .exe, .deb)</span></td>
+          <td><span lang="pt-BR">Um comando no terminal e um serviço em segundo plano</span><span lang="en">A terminal command and a background service</span></td>
+          <td><span lang="pt-BR">Um comando no terminal; tem app de desktop</span><span lang="en">A terminal command; there's a desktop app</span></td>
+          <td><span lang="pt-BR">Clona o repositório e roda um script; exige Docker e Claude Code</span><span lang="en">Clone the repo and run a script; needs Docker and Claude Code</span></td></tr>
+        <tr><th><span lang="pt-BR">Como você conversa</span><span lang="en">How you talk to it</span></th>
+          <td class="us"><span lang="pt-BR">No app, em canais com vários agentes; aprovações e perguntas pelo Telegram</span><span lang="en">In the app, in channels with several agents; approvals and questions on Telegram</span></td>
+          <td><span lang="pt-BR">WhatsApp, Telegram, Slack, Discord, iMessage e mais de 20 outros; painel web</span><span lang="en">WhatsApp, Telegram, Slack, Discord, iMessage and 20+ more; a web dashboard</span></td>
+          <td><span lang="pt-BR">Terminal, app de desktop, Telegram, Discord, Slack, WhatsApp</span><span lang="en">Terminal, desktop app, Telegram, Discord, Slack, WhatsApp</span></td>
+          <td><span lang="pt-BR">WhatsApp, Telegram, Slack, Discord e outros; terminal</span><span lang="en">WhatsApp, Telegram, Slack, Discord and more; terminal</span></td></tr>
+        <tr><th><span lang="pt-BR">Com o computador desligado</span><span lang="en">With your computer off</span></th>
+          <td class="us"><span lang="pt-BR">Só no modo servidor (experimental)</span><span lang="en">Only in server mode (experimental)</span></td>
+          <td><span lang="pt-BR">Sim, num servidor seu</span><span lang="en">Yes, on a server of your own</span></td>
+          <td><span lang="pt-BR">Sim, num VPS ou na nuvem</span><span lang="en">Yes, on a VPS or in the cloud</span></td>
+          <td><span lang="pt-BR">Sim, num servidor seu</span><span lang="en">Yes, on a server of your own</span></td></tr>
+        <tr><th><span lang="pt-BR">Modelos</span><span lang="en">Models</span></th>
+          <td class="us"><span lang="pt-BR">O Claude Code, Codex, Cursor, Grok, OpenCode ou Pi que você já tem, sem chave de API</span><span lang="en">The Claude Code, Codex, Cursor, Grok, OpenCode or Pi you already have, no API key</span></td>
+          <td><span lang="pt-BR">Chaves de API, login do ChatGPT ou modelos locais; desde abril de 2026 a assinatura do Claude cobra uso extra</span><span lang="en">API keys, ChatGPT sign-in or local models; since April 2026 a Claude subscription bills extra usage</span></td>
+          <td><span lang="pt-BR">Qualquer provedor, assinaturas do ChatGPT e do SuperGrok, modelos locais</span><span lang="en">Any provider, ChatGPT and SuperGrok subscriptions, local models</span></td>
+          <td><span lang="pt-BR">Claude, pela assinatura ou chave de API; outros por skills</span><span lang="en">Claude, by subscription or API key; others through skills</span></td></tr>
+        <tr><th><span lang="pt-BR">Onde os comandos rodam</span><span lang="en">Where commands run</span></th>
+          <td class="us"><span lang="pt-BR">Num Linux isolado (Docker) de cada agente, ou no seu computador, se você escolher</span><span lang="en">In each agent's isolated Linux (Docker), or on your computer if you choose</span></td>
+          <td><span lang="pt-BR">No seu computador: o isolamento vem desligado e se configura à parte</span><span lang="en">On your computer: isolation is off by default and set up separately</span></td>
+          <td><span lang="pt-BR">Docker reforçado, com bloqueio de comandos destrutivos</span><span lang="en">Hardened Docker, with destructive commands blocked</span></td>
+          <td><span lang="pt-BR">Num container por agente</span><span lang="en">In a container per agent</span></td></tr>
+        <tr><th><span lang="pt-BR">Antes de ações sensíveis</span><span lang="en">Before sensitive actions</span></th>
+          <td class="us"><span lang="pt-BR">Pede o seu sim, amarrado à chamada exata; acesso por agente e por ferramenta</span><span lang="en">Asks for your yes, tied to the exact call; access per agent and per tool</span></td>
+          <td><span lang="pt-BR">Regras de permitir e negar, e aprovação de comandos pelo chat</span><span lang="en">Allow and deny rules, and command approval in chat</span></td>
+          <td><span lang="pt-BR">Um segundo modelo avalia o risco de cada comando</span><span lang="en">A second model judges each command's risk</span></td>
+          <td><span lang="pt-BR">Cartões de aprovação pra quem administra</span><span lang="en">Approval cards for admins</span></td></tr>
+        <tr><th><span lang="pt-BR">No celular</span><span lang="en">On your phone</span></th>
+          <td class="us"><span lang="pt-BR">Aprovações pelo Telegram</span><span lang="en">Approvals on Telegram</span></td>
+          <td><span lang="pt-BR">Apps de iOS e Android, e os apps de conversa</span><span lang="en">iOS and Android apps, and the chat apps</span></td>
+          <td><span lang="pt-BR">Pelos apps de conversa</span><span lang="en">Through the chat apps</span></td>
+          <td><span lang="pt-BR">Pelos apps de conversa</span><span lang="en">Through the chat apps</span></td></tr>
+        <tr><th><span lang="pt-BR">Várias pessoas nos mesmos agentes</span><span lang="en">Several people, same agents</span></th>
+          <td class="us"><span lang="pt-BR">Ainda não</span><span lang="en">Not yet</span></td>
+          <td><span lang="pt-BR">Sim, com papéis e login por pessoa</span><span lang="en">Yes, with roles and per-person sign-in</span></td>
+          <td><span lang="pt-BR">Pessoas liberadas no chat</span><span lang="en">People allowed in chat</span></td>
+          <td><span lang="pt-BR">Sim, com papéis</span><span lang="en">Yes, with roles</span></td></tr>
+        <tr><th><span lang="pt-BR">Em português</span><span lang="en">In Portuguese</span></th>
+          <td class="us"><span lang="pt-BR">Sim: o app e o site</span><span lang="en">Yes: the app and the site</span></td>
+          <td><span lang="pt-BR">O painel web</span><span lang="en">The web dashboard</span></td>
+          <td><span lang="pt-BR">Em parte: o terminal e o painel</span><span lang="en">Partly: the terminal and the dashboard</span></td>
+          <td><span lang="pt-BR">Não encontramos</span><span lang="en">Not found</span></td></tr>
+        <tr><th><span lang="pt-BR">Licença</span><span lang="en">License</span></th>
+          <td class="us">Apache-2.0</td>
+          <td>MIT</td>
+          <td>MIT</td>
+          <td>MIT</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><span lang="pt-BR">Onde cada um <em>se sai melhor.</em></span><span lang="en">Where each one <em>does better.</em></span></h2>
+  <div class="cols">
+    <div class="card">
+      <h3><span lang="pt-BR">Onde o Tucano se sai melhor</span><span lang="en">Where Tucano does better</span></h3>
+      <ul>
+        <li><span lang="pt-BR"><b>Sem terminal.</b> Você baixa um app, abre e cria os agentes numa janela. Não tem serviço pra configurar nem porta pra deixar aberta.</span><span lang="en"><b>No terminal.</b> You download an app, open it and create agents in a window. No service to configure, no port to leave open.</span></li>
+        <li><span lang="pt-BR"><b>Um time, não um assistente.</b> Os agentes conversam em canais e passam o trabalho com @menções, e você vê cada passo: o que buscaram, leram, rodaram e editaram, com o recibo de tokens e tempo.</span><span lang="en"><b>A team, not an assistant.</b> Agents talk in channels and hand work over with @mentions, and you see every step: what they searched, read, ran and edited, with a receipt of tokens and time.</span></li>
+        <li><span lang="pt-BR"><b>Isolado e com permissão desde o começo.</b> Cada agente recebe, pra cada ferramenta, sem acesso, ler, ou ler e escrever, e roda os comandos num Linux só dele. Merge, e-mail, post e exclusão esperam o seu sim.</span><span lang="en"><b>Isolated and permissioned from the start.</b> Each agent gets, for each tool, no access, read, or read and write, and runs commands on a Linux of its own. Merges, emails, posts and deletes wait for your yes.</span></li>
+        <li><span lang="pt-BR"><b>A assinatura que você já tem.</b> Ele roda o Claude Code, o Codex, o Cursor, o Grok, o OpenCode ou o Pi do seu computador, do jeito que você já configurou. Sem chave de API.</span><span lang="en"><b>The subscription you already have.</b> It runs the Claude Code, Codex, Cursor, Grok, OpenCode or Pi on your computer, the way you set them up. No API key.</span></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span lang="pt-BR">Onde os outros se saem melhor hoje</span><span lang="en">Where the others do better today</span></h3>
+      <ul>
+        <li><span lang="pt-BR"><b>Conversar pelo WhatsApp ou iMessage:</b> OpenClaw, NanoClaw e Hermes moram nos apps de conversa. No Tucano, a conversa é no app, e o Telegram recebe aprovações e perguntas.</span><span lang="en"><b>Talking on WhatsApp or iMessage:</b> OpenClaw, NanoClaw and Hermes live in chat apps. In Tucano, you talk in the app, and Telegram gets approvals and questions.</span></li>
+        <li><span lang="pt-BR"><b>Rodar 24 horas num servidor:</b> os três foram feitos pra isso. No Tucano, é o modo servidor, ainda experimental.</span><span lang="en"><b>Running around the clock on a server:</b> all three were built for it. In Tucano, that's server mode, still experimental.</span></li>
+        <li><span lang="pt-BR"><b>Várias pessoas com os mesmos agentes:</b> OpenClaw e NanoClaw, com papéis.</span><span lang="en"><b>Several people sharing agents:</b> OpenClaw and NanoClaw, with roles.</span></li>
+        <li><span lang="pt-BR"><b>Modelos locais:</b> OpenClaw e Hermes falam direto com o Ollama e outros. No Tucano, isso passa pelo OpenCode ou pelo Pi, com os provedores que você configurou neles.</span><span lang="en"><b>Local models:</b> OpenClaw and Hermes talk to Ollama and others directly. In Tucano, that goes through OpenCode or Pi, with the providers you set up there.</span></li>
+        <li><span lang="pt-BR"><b>Tamanho da comunidade:</b> o OpenClaw tem centenas de milhares de estrelas no GitHub e um marketplace de skills.</span><span lang="en"><b>Community size:</b> OpenClaw has hundreds of thousands of GitHub stars and a skills marketplace.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span lang="pt-BR">Qual escolher</span><span lang="en">Which one to pick</span></h2>
+  <ul class="pick">
+    <li><span lang="pt-BR"><b>Você quer falar com o agente pelo WhatsApp ou Telegram e não se importa de configurar no terminal:</b> o OpenClaw.</span><span lang="en"><b>You want to talk to your agent on WhatsApp or Telegram and don't mind setting it up in the terminal:</b> OpenClaw.</span></li>
+    <li><span lang="pt-BR"><b>Você quer um agente só, que aprende com o uso, num VPS barato:</b> o Hermes Agent.</span><span lang="en"><b>You want one agent that learns as you use it, on a cheap VPS:</b> Hermes Agent.</span></li>
+    <li><span lang="pt-BR"><b>Você programa e quer um código pequeno, com agentes em containers, pra adaptar do seu jeito:</b> o NanoClaw.</span><span lang="en"><b>You code and want a small codebase, with agents in containers, to shape your own way:</b> NanoClaw.</span></li>
+    <li><span lang="pt-BR"><b>Você quer um time de agentes num app, sem terminal, com a assinatura que já tem, decidindo o que cada um pode fazer:</b> o Tucano.</span><span lang="en"><b>You want a team of agents in an app, no terminal, on the subscription you already have, deciding what each one can do:</b> Tucano.</span></li>
+  </ul>
+</section>
+
+<section>
+  <h2><span lang="pt-BR">Perguntas</span><span lang="en">Questions</span></h2>
+  <div class="qa" data-faq>
+    <details open><summary><span lang="pt-BR">O Tucano é uma alternativa ao OpenClaw?</span><span lang="en">Is Tucano an OpenClaw alternative?</span></summary><p><span lang="pt-BR">Sim. Os dois são grátis e open source e dão a você agentes de IA com memória, rotinas e ferramentas. O OpenClaw é um assistente que você instala pelo terminal e conversa pelos apps de mensagem; o Tucano é um app onde um time de agentes trabalha junto, com permissão por agente e por ferramenta.</span><span lang="en">Yes. Both are free and open source and give you AI agents with memory, routines and tools. OpenClaw is an assistant you install from the terminal and talk to in messaging apps; Tucano is an app where a team of agents works together, with access per agent and per tool.</span></p></details>
+    <details><summary><span lang="pt-BR">Preciso de chave de API pra usar o Tucano?</span><span lang="en">Do I need an API key for Tucano?</span></summary><p><span lang="pt-BR">Não. Ele roda o Claude Code, o Codex, o Cursor, o Grok, o OpenCode ou o Pi já configurados no seu computador, com a assinatura que você já paga. O app nunca vê nem guarda a sua senha.</span><span lang="en">No. It runs the Claude Code, Codex, Cursor, Grok, OpenCode or Pi already set up on your computer, on the subscription you already pay for. The app never sees or stores your password.</span></p></details>
+    <details><summary><span lang="pt-BR">Dá pra falar com o Tucano pelo WhatsApp ou Telegram?</span><span lang="en">Can I talk to Tucano on WhatsApp or Telegram?</span></summary><p><span lang="pt-BR">Pelo Telegram, chegam as aprovações e as perguntas dos agentes, com botões pra responder. A conversa com os agentes acontece no app. WhatsApp não tem.</span><span lang="en">On Telegram you get the agents' approvals and questions, with buttons to answer. Talking with the agents happens in the app. There's no WhatsApp.</span></p></details>
+    <details><summary><span lang="pt-BR">Preciso saber programar?</span><span lang="en">Do I need to know how to code?</span></summary><p><span lang="pt-BR">Pra instalar e usar, não: você baixa o app, conecta as ferramentas e cria os agentes conversando com o Tuca, que monta cada um com você. Os motores de IA que ele usa (como o Claude Code ou o Codex) precisam estar instalados e com login feito.</span><span lang="en">To install and use it, no: you download the app, connect your tools and create agents by talking to Tuca, who builds each one with you. The AI engines it uses (like Claude Code or Codex) need to be installed and signed in.</span></p></details>
+  </div>
+</section>
+
+<section class="sources">
+  <p><span lang="pt-BR">Fontes, consultadas em 6 de novembro de 2026. Viu algo desatualizado? <a href="https://github.com/eduwxyz/tucano/issues">Abra uma issue</a> que a gente corrige.</span><span lang="en">Sources, checked on November 6, 2026. Spotted something out of date? <a href="https://github.com/eduwxyz/tucano/issues">Open an issue</a> and we'll fix it.</span></p>
+  <ul>
+    <li><a href="https://openclaw.ai">OpenClaw: openclaw.ai</a></li>
+    <li><a href="https://github.com/openclaw/openclaw">OpenClaw: GitHub</a></li>
+    <li><a href="https://docs.openclaw.ai/gateway/sandboxing">OpenClaw: sandboxing</a></li>
+    <li><a href="https://docs.openclaw.ai/start/multiplayer">OpenClaw: multiplayer</a></li>
+    <li><a href="https://techcrunch.com/2026/04/04/anthropic-says-claude-code-subscribers-will-need-to-pay-extra-for-openclaw-support/">TechCrunch: Claude e OpenClaw</a></li>
+    <li><a href="https://github.com/NousResearch/hermes-agent">Hermes Agent: GitHub</a></li>
+    <li><a href="https://hermes-agent.nousresearch.com/docs/user-guide/security">Hermes Agent: security</a></li>
+    <li><a href="https://github.com/nanocoai/nanoclaw">NanoClaw: GitHub</a></li>
+    <li><a href="https://docs.nanoclaw.dev/concepts/entity-model.md">NanoClaw: entity model</a></li>
+    <li><a href="https://github.com/eduwxyz/tucano">Tucano: GitHub</a></li>
+  </ul>
+</section>
+</main>
+
+<footer>
+  <span><span lang="pt-BR">Feito no Brasil.</span><span lang="en">Made in Brazil.</span></span>
+  <nav><a href="/" data-en-href="/en/">tucano.sh</a><a href="/alternativa-grok-bot/" data-en-href="/en/grok-bot-alternative/"><span lang="pt-BR">Alternativa ao Grok Bot</span><span lang="en">Grok Bot alternative</span></a><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://github.com/eduwxyz/tucano/blob/HEAD/LICENSE">Apache-2.0</a></nav>
+</footer>
+</div>
+<script>
+// PT | EN remembers the choice, as on the home page.
+document.querySelectorAll('.lang a').forEach((a) => a.addEventListener('click', () => { try { localStorage.setItem('tucano-lang', a.hreflang) } catch {} }))
+</script>
+</body>
+</html>

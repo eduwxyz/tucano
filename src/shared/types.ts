@@ -159,6 +159,7 @@ export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done
 export interface Run {
   status: RunStatus
   steps: Step[]
+  endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
@@ -220,6 +221,16 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+}
+
+// When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
+// started, since that's what decides what it had read: agents read each other in that order.
+export const saidAt = (m: Message): number => m.run?.endedAt ?? m.at
+
+// A conversation as people read it: in the order things were said, and whoever is still working at the end.
+export function asSaid(messages: Message[]): Message[] {
+  const working = (m: Message): boolean => m.run?.status === 'working'
+  return [...messages.filter((m) => !working(m)).sort((a, b) => saidAt(a) - saidAt(b)), ...messages.filter(working).sort((a, b) => a.at - b.at)]
 }
 
 // A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.

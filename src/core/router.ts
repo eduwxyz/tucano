@@ -4,7 +4,8 @@
 // can read Linear. It also screens an agent's reply that mentions others, so a
 // "thanks, @bia" doesn't wake her up.
 import { L } from '../shared/lang'
-import type { Agent, Connector, Message } from '../shared/types'
+import { MENTION } from '../shared/mention-text'
+import { CODE_SPANS, type Agent, type Connector, type Message } from '../shared/types'
 import type { Engine, TurnShape, Usage } from './engines/types'
 import type { ThreadDigest } from './memory'
 
@@ -110,10 +111,62 @@ export const handoffSystem = (): string =>
     ].join('\n')
   )
 
+// A long reply goes to the hand-off screen as its opening plus the lines around each mention
+// of a candidate, so an ask written at the end of a long plan ("@rafa, I need two decisions")
+// is what gets judged. What's left out shows as "[…]". A short reply goes in whole.
+const REPLY_MAX = 3000
+const OPENING = 1000
+const BEFORE = 600
+const AFTER = 1200
+// A cut moves to the nearest line break when one is this close, so lines arrive whole.
+const SNAP = 200
+
+const lineStart = (t: string, i: number): number => {
+  const n = t.lastIndexOf('\n', i)
+  return n >= 0 && i - n <= SNAP ? n + 1 : i
+}
+const lineEnd = (t: string, i: number): number => {
+  const n = t.indexOf('\n', i)
+  return n >= 0 && n - i <= SNAP ? n : i
+}
+
+export function replyExcerpt(reply: string, handles: string[]): string {
+  const text = reply.trim()
+  if (text.length <= REPLY_MAX) return text
+  const wanted = new Set(handles.map((h) => h.toLowerCase()))
+  // Same rule as `mentioned`: a handle inside code doesn't count. Blanking keeps the offsets.
+  const plain = text.replace(CODE_SPANS, (s) => ' '.repeat(s.length))
+  // The first and the last mention of each candidate: the ask is usually one of them, and a reply
+  // that names someone on every line still goes in bounded.
+  const at = new Map<string, number[]>()
+  for (const m of plain.matchAll(MENTION)) {
+    const h = m[2]!.toLowerCase()
+    if (!wanted.has(h)) continue
+    const i = m.index + m[1]!.length
+    const seen = at.get(h)
+    if (!seen) at.set(h, [i])
+    else seen[1] = i
+  }
+  const spans: [number, number][] = [[0, lineEnd(text, OPENING)]]
+  for (const i of [...at.values()].flat()) spans.push([lineStart(text, Math.max(0, i - BEFORE)), lineEnd(text, Math.min(text.length, i + AFTER))])
+  spans.sort((a, b) => a[0] - b[0])
+  const merged: [number, number][] = []
+  for (const [from, to] of spans) {
+    const last = merged[merged.length - 1]
+    if (last && from <= last[1] + 1) last[1] = Math.max(last[1], to)
+    else merged.push([from, to])
+  }
+  const parts = merged.map(([from, to]) => text.slice(from, to).trim())
+  const end = merged[merged.length - 1]![1]
+  return parts.join('\n[…]\n') + (end < text.length ? '\n[…]' : '')
+}
+
 // The reply sits between <reply> tags so it can't be confused with the roster or the history.
 export function handoffPrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; connectors?: Connector[]; busy?: Agent[] }): string {
   const { reply, author, candidates, messages, members, me, connectors = [], busy = [] } = opts
   const name = speaker(members, me)
+  const excerpt = replyExcerpt(reply, candidates.map((a) => a.handle))
+  const cut = excerpt !== reply.trim()
   return [
     L('Agentes mencionados:', 'Mentioned agents:'),
     ...candidates.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`),
@@ -129,9 +182,14 @@ export function handoffPrompt(opts: { reply: string; author: Agent; candidates: 
     L('Conversa recente:', 'Recent conversation:'),
     ...messages.filter(said).slice(-ROUTER_HISTORY).map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`),
     '',
-    L(`Resposta de ${author.name} que você avalia:`, `${author.name}'s reply you are judging:`),
+    cut
+      ? L(
+          `Resposta de ${author.name} que você avalia (longa: vão o começo e os trechos com as menções; […] marca o que ficou de fora):`,
+          `${author.name}'s reply you are judging (long: its opening and the parts with the mentions; […] marks what was left out):`
+        )
+      : L(`Resposta de ${author.name} que você avalia:`, `${author.name}'s reply you are judging:`),
     '<reply>',
-    reply.trim().slice(0, 3000),
+    excerpt,
     '</reply>',
     '',
     REPLY_JSON()
