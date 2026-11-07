@@ -1,6 +1,7 @@
 import { L, lang, locale } from '../../../shared/lang'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { runnerRules } from '../../../shared/classify'
+import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
@@ -13,6 +14,7 @@ import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import { canEditChannel,
   agentById,
   askerIn,
+  messagesIn,
   attachedTo,
   conversationIndex,
   initials,
@@ -86,6 +88,9 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal, ProposalCard } from './Tuca'
 import { FoldToggle } from './Fold'
+import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
+import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
+import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -179,10 +184,18 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            <button className="topbar__name" title={conv.kind === 'channel' ? L('Configurações do canal', 'Channel settings') : L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
-              {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
-              <h1>{title}</h1>
-            </button>
+            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card (its settings: the gear on the right, or the card). */}
+            {dmAgent ? (
+              <AgentCardButton agentId={dmAgent.id} settingsOf={id} below className="topbar__name" title={L(`Perfil de ${dmAgent.name}`, `${dmAgent.name}’s profile`)}>
+                <AgentAvatar agent={dmAgent} size={22} />
+                <h1>{title}</h1>
+              </AgentCardButton>
+            ) : (
+              <button className="topbar__name" title={L('Configurações do canal', 'Channel settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+                <Icon name="hash" />
+                <h1>{title}</h1>
+              </button>
+            )}
             {dmAgent?.role && (
               <span className="tag topbar__role" title={dmAgent.role}>
                 {dmAgent.role}
@@ -194,9 +207,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
             {conv.kind === 'channel' && (
               <div className="stack" title={L('Agentes no canal', 'Agents in the channel')}>
                 {members.map((a) => (
-                  <button key={a.id} className="stack__item" onClick={() => navigate({ kind: 'agent', id: a.id })} title={a.name}>
+                  <AgentCardButton key={a.id} agentId={a.id} below className="stack__item" title={a.name}>
                     <AgentAvatar agent={a} size={24} />
-                  </button>
+                  </AgentCardButton>
                 ))}
                 <span className="stack__count">{members.length} {L(`agente${members.length === 1 ? '' : 's'}`, `agent${members.length === 1 ? '' : 's'}`)}</span>
                 {editsChannel && (
@@ -210,8 +223,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
             </button>
             {dmAgent && (
-              <button className="btn btn--ghost" onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
-                {L('Ver perfil', 'See profile')}
+              <button className="icon-btn" title={L('Configurações da conversa', 'Conversation settings')} aria-label={L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+                <Icon name="gear" size={16} />
               </button>
             )}
           </div>
@@ -231,7 +244,10 @@ const NO_REPLIES: Message[] = []
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
-export function MessageList({ messages, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+  // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
+  const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
+  const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
@@ -408,6 +424,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
+  const team = useStore(teamMode)
   // Someone else's message reads with their name and initials; mine, as always.
   const other = useStore((s) => (message.author.kind === 'person' && !isMine(s, message.author) ? personName(s, message.author.id) : undefined))
   const attached = useStore((s) => (message.author.kind === 'person' ? attachedTo(s, message.id) : NO_ATTACHED))
@@ -443,15 +460,22 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
     // Someone else's message reads like any other voice in the conversation: on the left, with their name.
     <article className={`msg ${agent ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
-        {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={other ? initials(other) : me.initials} size={34} />)}
+        {!grouped &&
+          (agent ? (
+            <AgentCardButton agentId={agent.id} className="msg__face" tabIndex={-1} label={L(`Perfil de ${agent.name}`, `${agent.name}’s profile`)}>
+              <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} />
+            </AgentCardButton>
+          ) : (
+            <MeAvatar initials={other ? initials(other) : me.initials} size={34} />
+          ))}
       </div>
       <div className="msg__body">
         {!grouped && (
           <div className="msg__head">
             {agent ? (
-              <button className="msg__author link" onClick={() => navigate({ kind: 'agent', id: agent.id })}>
+              <AgentCardButton agentId={agent.id} className="msg__author link">
                 {name}
-              </button>
+              </AgentCardButton>
             ) : (
               <span className="msg__author">{name}</span>
             )}
@@ -480,7 +504,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ))}
           </div>
         )}
-        {message.run?.question && <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />}
+        {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
+            may answer it does it there. One from before decisions, with a team, is the question card it was. */}
+        {questionsOf(message.run).length > 0 &&
+          (team && message.run?.askedTo ? (
+            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
+          ) : (
+            <AnswersSummary message={message} />
+          ))}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.agentDraft && <AgentProposal message={message} />}
         {message.run?.proposal && <ProposalCard message={message} />}
@@ -946,12 +977,17 @@ function RoutineChip({ id }: { id: string }): ReactNode {
 // A question an agent asked (ask_user). Alone (a desktop), it's mine: my next message answers it.
 // With a team it says whom it's for; who may answer it (the person, whoever covers for them, an
 // admin, or past the deadline the requester) gets a field; in my DM, a question to someone else
-// first asks me whether it may go.
+// first asks me whether it may go. With decisions (ask_user's options), it's their card
+// (TeamAsk): answered on it by whoever may answer the question.
 // What someone was typing to answer a question, kept by question: if someone else answers first,
 // or the card moves (Pra você drops it), it's still there, with who answered.
 export const questionDrafts = new Map<string, string>()
 
-export function QuestionCard({ id, agentName, askedTo, question, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; question: string; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+  return props.decisions?.length ? <TeamAsk {...props} decisions={props.decisions} /> : <TextQuestion {...props} />
+}
+
+function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; question: string; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   const team = useStore(teamMode)
   const you = useStore((s) => s.you)
   const admin = useStore(amAdmin)
@@ -1039,6 +1075,53 @@ export function QuestionCard({ id, agentName, askedTo, question, answered, answe
   )
 }
 
+
+// A question with decisions, with a team: whom it's for and who asked; answered on the card by
+// whoever may (the person, whoever covers for them or, past the deadline, the requester: those
+// who have it in For you; an admin, after choosing to answer for them); for anyone else, to read.
+function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+  const team = useStore(teamMode)
+  const you = useStore((s) => s.you)
+  const admin = useStore(amAdmin)
+  const waiting = useStore((s) => s.inbox.questions.find((q) => q.id === id))
+  const target = useStore((s) => personById(s, askedTo ?? waiting?.askedTo))
+  const answerer = useStore((s) => (answeredBy && answeredBy !== s.you ? personById(s, answeredBy) : undefined))
+  const [answering, setAnswering] = useState(false)
+  const who = agentName ?? L('O agente', 'The agent')
+  const card = { id, questions: decisions, saved: answers }
+  if (!team || !target) return <AskCard {...card} mode={answered ? 'done' : 'answer'} badge={answered ? L('Respondida', 'Answered') : L('Esperando você', 'Waiting for you')} answeredInText={!!answeredInText} />
+  const toMe = target.id === you
+  const asked = toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)
+  if (answered)
+    return <AskCard {...card} mode="done" badge={answerer ? L(`Respondida por ${answerer.name}`, `Answered by ${answerer.name}`) : L('Respondida', 'Answered')} byline={toMe ? L(`${who} perguntou a você`, `${who} asked you`) : L(`${who} perguntou a ${target.name}`, `${who} asked ${target.name}`)} answeredInText={!!answeredInText} />
+  if (waiting?.confirm === 'pending')
+    return (
+      <AskCard {...card} mode="view" badge={L(`${who} quer perguntar a ${target.name}`, `${who} wants to ask ${target.name}`)}>
+        <p className="ask__note">{L(`${target.name} vê só a pergunta, nunca esta conversa.`, `${target.name} sees the question only, never this conversation.`)}</p>
+        <div className="ask__foot">
+          <button className="btn btn--sm" onClick={() => confirmQuestion(id, false)}>
+            {L('Não pergunte', "Don't ask")}
+          </button>
+          <button className="btn btn--primary btn--sm" onClick={() => confirmQuestion(id, true)}>
+            {L(`Pode perguntar a ${target.name}`, `Go ahead and ask ${target.name}`)}
+          </button>
+        </div>
+      </AskCard>
+    )
+  if (waiting || (admin && answering)) return <AskCard {...card} mode="answer" badge={waiting ? L('Esperando você', 'Waiting for you') : L(`Respondendo no lugar de ${target.name}`, `Answering for ${target.name}`)} byline={asked} />
+  return (
+    <AskCard {...card} mode="view" badge={L(`Esperando ${target.name}`, `Waiting for ${target.name}`)} byline={asked}>
+      {admin && !inbox && (
+        <div className="ask__foot">
+          <button className="btn btn--sm" onClick={() => setAnswering(true)}>
+            {L(`Responder no lugar de ${target.name}`, `Answer for ${target.name}`)}
+          </button>
+        </div>
+      )}
+    </AskCard>
+  )
+}
+
 // What remarkMentions marked: an agent's @handle becomes its chip, which opens its profile. A handle
 // no agent has stays as it was written, in bold, as any @ always was.
 function MentionSpan({ node: _, ...props }: ComponentProps<'span'> & ExtraProps): ReactNode {
@@ -1050,10 +1133,10 @@ function Mention({ handle }: { handle: string }): ReactNode {
   const agent = useStore((s) => s.agents.find((a) => a.handle.toLowerCase() === handle.toLowerCase()))
   if (!agent) return <strong>@{handle}</strong>
   return (
-    <button className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name} onClick={() => navigate({ kind: 'agent', id: agent.id })}>
+    <AgentCardButton agentId={agent.id} className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name}>
       <AgentAvatar agent={agent} size={16} />
       <span>@{agent.handle}</span>
-    </button>
+    </AgentCardButton>
   )
 }
 const plainMarkdown = { pre: CodeBlock, a: (p: { href?: string; children?: ReactNode }) => <WikiLink href={p.href}>{p.children}</WikiLink>, span: MentionSpan }
@@ -1233,6 +1316,14 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   }
 
   const decided = approval.state !== 'pending'
+  // A command on the agent's computer: what it does, in words, and the command itself.
+  const onComputer = approval.connectorId === COMPUTADOR
+  const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
+  // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && (!onComputer || kinds.length > 0)
+  const alwaysTitle = onComputer
+    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
+    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)
 
   return (
     <div className={`approval approval--${approval.state} ${compact ? 'approval--compact' : ''}`}>
@@ -1247,6 +1338,10 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         {approval.tool === ACCESS_REQUEST ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('pede acesso ao', 'asks for access to')} <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? L('ler e escrever', 'read and write') : L('ler', 'read')}
+          </>
+        ) : onComputer ? (
+          <>
+            {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{kinds.length ? kinds.map(actionVerb).join(L(' e ', ' and ')) : L('rodar um comando', 'run a command')}</strong> {L('no computador dele', 'on its computer')}
           </>
         ) : approval.tool === 'abrir_pr' ? (
           <>
@@ -1299,7 +1394,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
       {approval.why && <p className="approval__why">{approval.why}</p>}
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
-      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !runner && summary.shown.length > 0 && (
+      {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !runner && !onComputer && summary.shown.length > 0 && (
         <div className="approval__args small">
           {summary.shown.map(([k, v], i) => (
             <p key={i}>
@@ -1380,8 +1476,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
                 {L('Aprovar', 'Approve')}
               </button>
-              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && (
-                <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
+              {canAlways && (
+                <button className="btn" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}

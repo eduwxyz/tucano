@@ -451,7 +451,10 @@ export class People {
         q.confirm === 'pending'
           ? q.requestedBy === person.id
           : q.askedTo === person.id || delegating(this.db.person(q.askedTo), person.id, now) || (now >= q.deadlineAt && q.requestedBy === person.id)
-      return waiting ? [shown(q)] : []
+      if (!waiting) return []
+      // Its decisions, to answer them on the card from here too (the question only, as its text is).
+      const run = this.db.message(q.id)?.run
+      return [{ ...shown(q), ...(run?.questions?.length ? { decisions: run.questions, ...(run.answers ? { answers: run.answers } : {}) } : {}) }]
     })
     // Asked to them and answered a moment ago by someone else (an admin, whoever covers for them).
     const answered = this.db.answeredQuestions(now - ANSWERED_SHOWN_MS).filter((q) => q.askedTo === person.id && q.answeredBy !== person.id).map(shown)

@@ -1,6 +1,8 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
+import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
+import type { Answer, Decision } from './questions'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -84,6 +86,9 @@ export interface Agent {
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
+  actionRules?: ActionRules // what it does about a commit, a push, a PR…: over settings.actionRules, kind by kind; unset kinds follow them
+  autonomy?: Autonomy // how far it goes on its own (src/shared/actions.ts); unset: Settings' level
+  outsideGuard?: boolean // false: what goes out (a send, a post, a payment) runs on its rules even after reading something from outside; unset: Settings'
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
@@ -166,12 +171,18 @@ export interface Run {
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string
+  outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   replyTo?: string // the message (a person's) it answers, when one did
   answeredBy?: string // who answered its question (another person than the one asked, maybe)
-  question?: string // asked with ask_user; answered by the next human message here
+  question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
+  questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
+  answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  answeredInText?: true // the reply had text of its own, beyond the decisions answered
+  answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
+  answerTyped?: string // what that message had beyond them, written in the message box
   askedTo?: string // the person the question is for (unset with one person: whoever asked the agent)
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
@@ -262,8 +273,9 @@ export interface Question {
 // A question from someone else's DM comes without where it was asked (they see the question only).
 export interface Inbox {
   approvals: Approval[]
-  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string })[]
-  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
+  // With the decisions asked (ask_user's options) and what was answered on the card so far.
+  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
+  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
 }
 
@@ -377,6 +389,9 @@ export interface Settings {
   defaultLimit: number
   approvalTtlHours: number
   questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)
+  actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
+  autonomy?: Autonomy // every agent's level, unless its page sets its own (default normal)
+  outsideGuard?: boolean // after reading something from outside, what goes out asks first even where rules let it run (default on)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app

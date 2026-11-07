@@ -18,6 +18,7 @@ import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { admit, admitComputer, can, isAdmin, must } from './policy-people'
+import { cleanRules, isAutonomy } from '../shared/actions'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -66,6 +67,7 @@ import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } f
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
+import { isNewQuestion } from '../shared/questions'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
@@ -310,7 +312,7 @@ function toPhone(e: CoreEvent): void {
   if (e.type === 'approval' && e.approval.state === 'pending' && !sentToPhone.has(e.approval.id)) {
     sentToPhone.add(e.approval.id)
     void telegram.approvalAsked(e.approval, name(e.approval.agentId))
-  } else if (e.type === 'message' && e.message.run?.status === 'waiting_input' && e.message.run.question && e.message.author.kind === 'agent' && !sentToPhone.has(e.message.id) && forOwner(e.message.id)) {
+  } else if (e.type === 'message' && e.message.author.kind === 'agent' && isNewQuestion(e.message) && !sentToPhone.has(e.message.id) && forOwner(e.message.id)) {
     sentToPhone.add(e.message.id)
     const conv = db.conversation(e.message.conversationId)
     void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM'))
@@ -1125,6 +1127,10 @@ const api: Handlers = {
     // One handle per agent (archived ones keep theirs), and none that reads as a person's (People.agentNameError).
     const taken = people.agentNameError({ id: clean.id, name: clean.name, handle: clean.handle })
     if (taken) throw new Error(taken)
+    // How far it goes on its own: only known rules and levels (saving an agent is an admin's, policy-people.ts).
+    clean.actionRules = cleanRules(clean.actionRules)
+    if (!isAutonomy(clean.autonomy)) delete clean.autonomy
+    if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -1461,6 +1467,7 @@ const api: Handlers = {
     if (Object.keys(patch).length === 0) return void emit({ type: 'settings', settings: settings() })
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
+    if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
     db.setSettings(patch)
     // The settings' name is the owner's: what the agents call them.
     if (patch.workspaceName && cleanName(patch.workspaceName)) {
@@ -1850,6 +1857,9 @@ const api: Handlers = {
   inbox: (_, ctx) => people.inbox(ctx.person),
   answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),
   confirmQuestion: ({ id, ok }, ctx) => runner.confirm(id, ok, ctx.person),
+  // A question's decisions, answered on the card one at a time and then sent: by whoever may answer it (Runner.decidable).
+  answerDecision: ({ messageId, index, answer }, ctx) => runner.answerDecision(messageId, index, answer, ctx.person),
+  submitDecisions: ({ messageId }, ctx) => runner.submitDecisions(messageId, ctx.person),
   runRoutine: ({ id }, ctx) => {
     const r = db.routine(id)
     if (!r) throw new Error(L('Essa rotina não existe mais.', 'That routine no longer exists.'))

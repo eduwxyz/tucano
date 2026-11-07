@@ -1,9 +1,11 @@
 import { L } from '../../../shared/lang'
-import { memo, useCallback, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { isWaiting, mineIn, waitingIn, waitingTitle, type Waiting } from './waiting'
+import { memo, useCallback, useId, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
   archiveAgent,
   isWorking,
+  messagesIn,
   openTuca,
   isTeam,
   deleteConversation,
@@ -27,6 +29,7 @@ import {
   teamMode,
   youPerson,
   type Agent,
+  type State,
   type View
 } from '../store'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
@@ -67,7 +70,7 @@ function TucaItem(): ReactNode {
   )
 }
 
-function Section({ id, label, unread = 0, action, children }: { id: string; label: string; unread?: number; action?: ReactNode; children: ReactNode }): ReactNode {
+function Section({ id, label, unread = 0, waiting, action, children }: { id: string; label: string; unread?: number; waiting?: boolean; action?: ReactNode; children: ReactNode }): ReactNode {
   const { open, toggle } = useFold(`section:${id}`)
   return (
     <div className={`section ${open ? '' : 'is-folded'}`}>
@@ -76,6 +79,7 @@ function Section({ id, label, unread = 0, action, children }: { id: string; labe
           {label}
         </FoldToggle>
         {/* A closed section still says when something in it is waiting. */}
+        {!open && waiting && <WaitingMark title={L('Um agente está esperando você aqui', 'An agent is waiting for you in here')} />}
         {!open && unread > 0 && (
           <span key={unread} className="badge badge--soft">
             {unread}
@@ -89,7 +93,7 @@ function Section({ id, label, unread = 0, action, children }: { id: string; labe
 }
 
 // A group folds like the sections, in the same list (Fold.tsx), and keeps showing the channel you're in.
-function GroupFold({ id, label, unread, head, naming, children }: { id: string; label: string; unread: number; head: HTMLAttributes<HTMLDivElement>; naming?: ReactNode; children: ReactNode }): ReactNode {
+function GroupFold({ id, label, unread, waiting, head, naming, children }: { id: string; label: string; unread: number; waiting?: boolean; head: HTMLAttributes<HTMLDivElement>; naming?: ReactNode; children: ReactNode }): ReactNode {
   const { open, toggle } = useFold(`group:${id}`)
   return (
     <div className={`channel-group ${open ? '' : 'is-folded'}`}>
@@ -98,6 +102,7 @@ function GroupFold({ id, label, unread, head, naming, children }: { id: string; 
           <FoldToggle open={open} onToggle={toggle}>
             {label}
           </FoldToggle>
+          {!open && waiting && <WaitingMark title={L('Um agente está esperando você aqui', 'An agent is waiting for you in here')} />}
           {!open && unread > 0 && <span className="badge badge--soft">{unread}</span>}
         </div>
       )}
@@ -107,6 +112,31 @@ function GroupFold({ id, label, unread, head, naming, children }: { id: string; 
 }
 
 const unreadIn = (conversations: { unread?: number }[]): number => conversations.reduce((sum, c) => sum + (c.unread ?? 0), 0)
+
+// An agent waits on me there (a question, an approval): it shows instead of the working dot, since it's my turn.
+// A solid speech bubble with the "?" cut out of it, so it reads on any row (hovered, active).
+function WaitingMark({ title }: { title: string }): ReactNode {
+  const mask = `waiting-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
+  return (
+    <span className="waiting-mark" title={title} aria-label={title}>
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        <mask id={mask}>
+          <rect width="24" height="24" fill="white" />
+          <path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.7" fill="none" stroke="black" strokeWidth="2.1" strokeLinecap="round" />
+          <circle cx="12" cy="16.3" r="1.2" fill="black" />
+        </mask>
+        <path mask={`url(#${mask})`} fill="currentColor" d="M12 2.5c5.5 0 9.5 3.9 9.5 8.8s-4 8.8-9.5 8.8c-1.2 0-2.4-.2-3.5-.5L3.5 21.5l1.4-4.3C3.4 15.7 2.5 13.6 2.5 11.3 2.5 6.4 6.5 2.5 12 2.5Z" />
+      </svg>
+    </span>
+  )
+}
+
+// Who waits on me in a conversation, as the hint says it: a string, so the sidebar redraws only when it changes.
+// With a team, only what waits on me (my inbox), not a question to someone else or an approval for them.
+const waitsIn = (s: State, conversationId: string): Waiting => waitingIn(messagesIn(s, conversationId), conversationId, teamMode(s) ? { key: s.inbox, test: mineIn(s.inbox) } : undefined)
+const anyWaiting = (s: State, ids: string[]): boolean => ids.some((id) => isWaiting(waitsIn(s, id)))
+const useWaitingTitle = (conversationId: string): string =>
+  useStore((s) => waitingTitle(waitsIn(s, conversationId), (agentId) => agentById(s, agentId)?.name ?? L('Um agente', 'An agent')))
 
 export function Sidebar(): ReactNode {
   // Only what it draws: the whole state changes with every step an agent takes.
@@ -136,6 +166,10 @@ export function Sidebar(): ReactNode {
   // The order and groups are the person's: the core only keeps them.
   const layout = settings.channelLayout
   const arranged = arrange(channels, layout)
+  // Folded, a section or group still says an agent waits on me in it: values, so only a change redraws.
+  const channelsWaiting = useStore((s) => anyWaiting(s, channels.map((c) => c.id)))
+  const waitingGroups = useStore((s) => arranged.groups.filter((g) => anyWaiting(s, g.channels.map((c) => c.id))).map((g) => g.id).join(' ')).split(' ')
+  const dmsWaiting = useStore((s) => anyWaiting(s, dms.map((c) => c.id)))
   const whole: ChannelLayout = { loose: arranged.loose.map((c) => c.id), groups: arranged.groups.map((g) => ({ ...g, channels: g.channels.map((c) => c.id) })) }
   const saveLayout = (next: ChannelLayout): void => updateSettings({ channelLayout: next })
   const [naming, setNaming] = useState<string | null>(null)
@@ -308,6 +342,7 @@ export function Sidebar(): ReactNode {
           id="channels"
           label={L('Canais', 'Channels')}
           unread={unreadIn(channels)}
+          waiting={channelsWaiting}
           action={
             <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(platform, 'N')})`, `New channel (${shortcut(platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
               <Icon name="plus" size={14} />
@@ -323,6 +358,7 @@ export function Sidebar(): ReactNode {
               id={g.id}
               label={g.name}
               unread={g.channels.reduce((n, c) => n + (c.unread ?? 0), 0)}
+              waiting={waitingGroups.includes(g.id)}
               head={{
                 ...dropOn({ group: g.id }),
                 onContextMenu: (e) =>
@@ -357,7 +393,7 @@ export function Sidebar(): ReactNode {
         </Section>
 
         {dms.length > 0 && (
-        <Section id="dms" label={team ? L('Suas mensagens diretas', 'Your direct messages') : L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)}>
+        <Section id="dms" label={team ? L('Suas mensagens diretas', 'Your direct messages') : L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)} waiting={dmsWaiting}>
           {dms.map((c) => {
             const agent = agentOf(c.name)
             if (!agent) return null
@@ -414,11 +450,12 @@ export function Sidebar(): ReactNode {
 const ChannelItem = memo(function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: number }): ReactNode {
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
+  const waiting = useWaitingTitle(id)
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
       <span className="nav-item__label">{name}</span>
-      <LiveDot working={working} />
+      {waiting ? <WaitingMark title={waiting} /> : <LiveDot working={working} />}
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )
@@ -435,11 +472,12 @@ const DmItem = memo(function DmItem({ id, agent, unread }: { id: string; agent: 
   const name = agent.name
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
+  const waiting = useWaitingTitle(id)
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
-      <LiveDot working={working} />
+      {waiting ? <WaitingMark title={waiting} /> : <LiveDot working={working} />}
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )

@@ -2,6 +2,7 @@
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
+import type { Answer } from '../../shared/questions'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
@@ -852,6 +853,10 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
   if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
 }
+
+export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
+  void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })
+export const submitDecisions = (messageId: string): Promise<void> => fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitDecisions', { messageId })
 
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
 // nobody needs to hear if it didn't work. `opened`: they only opened it (the agent's kept session

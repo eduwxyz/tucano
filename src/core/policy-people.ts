@@ -166,6 +166,8 @@ export const NEEDS: Record<Method, Need> = {
   inbox: 'anyone',
   answerQuestion: 'target',
   confirmQuestion: 'target',
+  answerDecision: 'target', // who may answer the question (Runner.decidable)
+  submitDecisions: 'target',
   // agents, skills and the team
   saveAgent: 'admin',
   archiveAgent: 'admin',
