@@ -238,7 +238,7 @@ function workspaceSummary(): void {
   summaryTimer ??= setTimeout(() => {
     summaryTimer = undefined
     const current = db.getSettings(DEFAULTS)
-    const summary = { type: 'workspace-summary', name: workspaceLabel(current), paused: !!current.paused, unread: db.unread(), approvals: db.approvals().filter((a) => a.state === 'pending').length }
+    const summary = { type: 'workspace-summary', name: workspaceLabel(current), paused: !!current.paused, unread: db.unread(), approvals: db.pendingApprovals() }
     const wire = JSON.stringify(summary)
     if (wire !== lastSummary) process.parentPort.postMessage(summary)
     lastSummary = wire
@@ -773,7 +773,7 @@ function ensureTuca(modelId?: string, fresh = false): { agentId: string; convers
   }
   let dm = db.conversations().find((c) => c.kind === 'dm' && c.name === tuca!.id)
   if (dm && fresh) {
-    for (const m of db.messages()) if (m.conversationId === dm.id && m.run?.status === 'working') runner.stop(m.id)
+    for (const m of db.messagesWithRun(['working'])) if (m.conversationId === dm.id) runner.stop(m.id)
     db.deleteConversation(dm.id)
     emit({ type: 'conversation_removed', id: dm.id })
     dm = undefined
@@ -815,7 +815,7 @@ const api: Api = {
   },
   // The page loads from file://, which can't fetch tucano:// (CORS); text comes through the core instead.
   artifactText: ({ id }) => {
-    const a = db.artifacts().find((x) => x.id === id)
+    const a = db.artifact(id)
     if (!a) return null
     const file = join(dataDir, 'artifacts', a.id, a.name)
     try {
@@ -891,7 +891,7 @@ const api: Api = {
     const agent = db.agent(id)
     if (!agent || agent.archived === archived) return
     if (archived) {
-      for (const m of db.messages()) if (m.author.kind === 'agent' && m.author.id === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
+      for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.author.kind === 'agent' && m.author.id === id) runner.stop(m.id)
       routines.pauseAgent(id)
       runner.forgetSessions({ agentId: id })
       if (agent.browser) void browser.close(id)
@@ -940,7 +940,7 @@ const api: Api = {
 
   deleteConversation: ({ id }) => {
     if (!db.conversation(id)) return
-    for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
+    for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
     for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
     for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
     runner.forgetSessions({ conversationId: id })
