@@ -32,11 +32,12 @@ import {
   type State,
   type View
 } from '../store'
+import type { SidebarPart } from '../../../shared/onboarding'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { call } from '../rpc'
 import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
-import { GettingStarted } from './Onboarding'
+import { MissionsCard, useSidebarParts } from './Missions'
 import { UpdateNote } from './Update'
 import { WorkspaceSelector } from './Workspaces'
 import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } from './ui'
@@ -44,16 +45,19 @@ import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } fr
 // The wiki stays lit on any of its pages.
 const same = (a: View | null, b: View): boolean => (b.kind === 'wiki' ? a?.kind === 'wiki' : JSON.stringify(a) === JSON.stringify(b))
 
-function NavItem({ view, icon, label, badge }: { view: View; icon: IconName; label: string; badge?: number }): ReactNode {
+// `fresh`: a mission just brought it (a new install's short sidebar): tagged until it's opened.
+function NavItem({ view, icon, label, badge, fresh }: { view: View; icon: IconName; label: string; badge?: number; fresh?: () => void }): ReactNode {
   const active = useStore((s) => same(s.view, view))
   return (
-    <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate(view)}>
+    <button className={`nav-item ${active ? 'is-active' : ''} ${fresh ? 'is-fresh' : ''}`} onClick={() => (fresh?.(), navigate(view))}>
       <Icon name={icon} />
       <span className="nav-item__label">{label}</span>
       {badge ? (
         <span key={badge} className="badge">
           {badge}
         </span>
+      ) : fresh ? (
+        <span className="nav-item__new">{L('NOVO', 'NEW')}</span>
       ) : null}
     </button>
   )
@@ -62,7 +66,7 @@ function NavItem({ view, icon, label, badge }: { view: View; icon: IconName; lab
 // The Tuca is a screen, not one of the agents: here at the top, and behind the "+" for a new agent.
 function TucaItem(): ReactNode {
   return (
-    <button className="nav-item" onClick={openTuca} title={L('Monte um agente conversando com o Tuca', 'Build an agent by chatting with Tuca')}>
+    <button className="nav-item" data-coach="tuca" onClick={openTuca} title={L('Monte um agente conversando com o Tuca', 'Build an agent by chatting with Tuca')}>
       <TucaMark size={18} />
       <span className="nav-item__label">Tuca</span>
       <span className="nav-item__meta">{L('te ajuda', 'helps you')}</span>
@@ -151,6 +155,9 @@ export function Sidebar(): ReactNode {
   const admin = amAdmin({ people, you })
   const owner = amOwner({ people, you })
   const me = youPerson({ people, you })
+  // A new install's sidebar starts short and grows with the missions (Missions.tsx).
+  const parts = useSidebarParts()
+  const fresh = (p: SidebarPart): (() => void) | undefined => (parts.fresh(p) ? () => parts.seen(p) : undefined)
   const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
   const suggestions = useStore((s) => pendingMemories(s).length)
   const proposals = useStore((s) => s.skills.filter((k) => k.state === 'pending').length)
@@ -332,11 +339,11 @@ export function Sidebar(): ReactNode {
       <nav className="sidebar__scroll">
         <TucaItem />
         <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />
-        <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} />
-        <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" />
-        <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} />
-        <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} />
-        {admin && <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} />}
+        {(parts.shows('memory') || suggestions > 0) && <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} fresh={fresh('memory')} />}
+        {parts.shows('wiki') && <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} />}
+        {parts.shows('routines') && <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} fresh={fresh('routines')} />}
+        {(parts.shows('skills') || proposals > 0) && <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} fresh={fresh('skills')} />}
+        {admin && parts.shows('report') && <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} fresh={fresh('report')} />}
 
         <Section
           id="channels"
@@ -344,9 +351,11 @@ export function Sidebar(): ReactNode {
           unread={unreadIn(channels)}
           waiting={channelsWaiting}
           action={
-            <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(platform, 'N')})`, `New channel (${shortcut(platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
-              <Icon name="plus" size={14} />
-            </button>
+            parts.shows('channels') ? (
+              <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(platform, 'N')})`, `New channel (${shortcut(platform, 'N')})`)} onClick={() => (parts.seen('channels'), openDialog({ kind: 'new-channel' }))}>
+                <Icon name="plus" size={14} />
+              </button>
+            ) : undefined
           }
         >
           {arranged.loose.map((c) => channelRow(c))}
@@ -434,13 +443,13 @@ export function Sidebar(): ReactNode {
         </Section>
       </nav>
 
-      {/* The introduction's checklist sets the Tucano up (and its phone): the owner's. */}
-      {owner && settings.onboarding?.done && !settings.onboarding.checklistHidden && <GettingStarted />}
+      {/* The missions set the Tucano up and walk through it: the owner's. */}
+      {owner && settings.onboarding?.done && !settings.onboarding.checklistHidden && <MissionsCard />}
       <ContextMenu menu={menu} onClose={closeMenu} />
       <div className="sidebar__foot">
         <UpdateNote />
-        {admin && <NavItem view={{ kind: 'usage' }} icon="chart" label={L('Uso e limites', 'Usage and limits')} />}
-        <NavItem view={{ kind: 'connectors' }} icon="plug" label={L('Conectores', 'Connectors')} />
+        {admin && parts.shows('usage') && <NavItem view={{ kind: 'usage' }} icon="chart" label={L('Uso e limites', 'Usage and limits')} fresh={fresh('usage')} />}
+        {parts.shows('connectors') && <NavItem view={{ kind: 'connectors' }} icon="plug" label={L('Conectores', 'Connectors')} fresh={fresh('connectors')} />}
         <NavItem view={{ kind: 'settings' }} icon="gear" label={L('Configurações', 'Settings')} />
       </div>
     </aside>

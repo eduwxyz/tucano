@@ -40,10 +40,11 @@ type Status = Record<Connector['status'], { label: string; tone: string }>
 
 // The connectors added, on top (with their state; a click opens them), then the ones ready to add, by
 // category, without those already added. The search looks through both.
-export function ConnectorGrid({ status, onManage }: { status: Status; onManage: (id: string) => void }): ReactNode {
+// `query`: what the search starts with (the introduction opens it on the connector its agent could use).
+export function ConnectorGrid({ status, onManage, query: initial = '' }: { status: Status; onManage: (id: string) => void; query?: string }): ReactNode {
   const connectors = useStore((s) => s.connectors)
   const users = useStore((s) => s.agents)
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(initial)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<{ id: string; text: string } | null>(null)
   const [setup, setSetup] = useState<CatalogEntry | null>(null)

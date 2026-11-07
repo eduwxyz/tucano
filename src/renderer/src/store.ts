@@ -38,6 +38,8 @@ import {
   type Routine,
   type RoutineInput,
   type Settings,
+  type SetupEngine,
+  type SetupState,
   type Skill,
   type SkillInput,
   type SkillVersion,
@@ -68,6 +70,7 @@ export type View =
   | { kind: 'skills' }
   | { kind: 'report' }
   | { kind: 'settings' }
+  | { kind: 'missions' } // what to try next, each bringing a part of the sidebar on a new install
 
 export interface State {
   webhookPort: number
@@ -759,6 +762,10 @@ export const addAccount = (engine: AccountEngine, name: string): Promise<Account
 export const loginAccount = (id: string): Promise<{ opened: boolean; command: string }> => call('loginAccount', { id })
 export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
+// Codex or Claude Code with no terminal (the introduction): the CLI downloaded, then its own sign-in in the browser.
+export const setupEngine = (engine: SetupEngine): Promise<SetupState> => call('setupEngine', { engine })
+export const engineSetupState = (): Promise<SetupState | null> => call('engineSetupState')
+export const cancelEngineSetup = (): void => void call('cancelEngineSetup').catch(() => {})
 // The person's own apps, through agent-desktop.
 export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> => call('desktopStatus')
 export type InstalledApp = { name: string; bundleId?: string; path?: string; running?: boolean; icon?: string }
@@ -940,7 +947,7 @@ export const openExternal = (url: string): void =>
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
 export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
-export const testEngine = (model: string): Promise<{ ok: boolean; message: string }> => call('testEngine', { model })
+export const testEngine = (model: string): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
 export const localSkills = (): Promise<LocalSkill[]> => call('localSkills')
 export const linkSkill = (source: string, agents: string[] = []): Promise<Skill> => call('linkSkill', { source, agents })

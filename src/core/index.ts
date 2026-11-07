@@ -30,6 +30,8 @@ import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
+import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
+import { codexEnv } from './engines/codex'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
 import { DesktopApps, macApps, SELF } from './apps'
@@ -111,8 +113,12 @@ const people = new People(db)
 if (!db.owner().name) db.renamePerson(db.ownerId(), db.getSettings(DEFAULTS).workspaceName, false)
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
+// TUCANO_FAKE_NO_AI: a computer with nothing set up yet, until the introduction's setup "signs in" (no network).
+const fakeNoAi = fake && process.env['TUCANO_FAKE_NO_AI'] === '1'
+const fakeSignedIn = new Set<EngineId>()
+const fakeOne = (e: EngineId, s: EngineStatus): EngineStatus => (fakeNoAi && !fakeSignedIn.has(e) ? { installed: false, loggedIn: false } : s)
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
   listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] },
   codexCatalog: []
 })
@@ -170,9 +176,49 @@ function watchEngine(engine: EngineId, done: (s: EngineStatus) => boolean): void
   watching.unref()
 }
 
+// Codex and Claude Code set up from the introduction, with no terminal (engine-setup.ts).
+const engineSetup = new EngineSetup({
+  dir: join(dataDir, 'engines'),
+  os: osOf(),
+  arch: process.arch,
+  musl: () => existsSync('/lib/ld-musl-x86_64.so.1') || existsSync('/lib/ld-musl-aarch64.so.1'),
+  fetch: (...a) => fetch(...a),
+  untar: (archive, into) => new Promise((done, fail) => execFile('tar', ['-xzf', archive, '-C', into], { windowsHide: true }, (e) => (e ? fail(e) : done()))),
+  spawn: (bin, args, env) => {
+    // stdin stays open and unused: the sign-in finishes on the CLI's own callback, never on a pasted code.
+    const p = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    const exit = new Promise<number>((done) => {
+      p.on('error', () => done(1))
+      p.on('exit', (code) => done(code ?? 1))
+    })
+    return { output: (on) => (p.stdout.on('data', (b: Buffer) => on(b.toString())), p.stderr.on('data', (b: Buffer) => on(b.toString()))), exit, kill: () => p.kill() }
+  },
+  status: (e) => engines[e],
+  recheck: async (e) => (await engineCheck.recheck(e)).engines[e],
+  env: (e) => (e === 'codex' ? codexEnv(codexHome) : { ...process.env, DISABLE_AUTOUPDATER: '1' }),
+  changed: () => {}
+})
+
+// The same steps with the test engines: no network, no CLI; the harness is "signed in" at the end.
+function fakeSetup(engine: SetupEngine): SetupState {
+  if (fakeSetupState?.state === 'running') return fakeSetupState
+  const at = (s: SetupState, ms: number): void => void setTimeout(() => fakeSetupState?.state === 'running' && (fakeSetupState = s), ms)
+  fakeSetupState = { engine, step: 'install', state: 'running', progress: 0 }
+  at({ engine, step: 'install', state: 'running', progress: 0.45 }, 700)
+  at({ engine, step: 'login', state: 'running', url: 'https://example.invalid/login' }, 1500)
+  setTimeout(() => {
+    if (fakeSetupState?.state !== 'running') return
+    fakeSignedIn.add(engine)
+    void engineCheck.recheck(engine).then(() => (fakeSetupState = { engine, step: 'login', state: 'done' }))
+  }, 3200)
+  return fakeSetupState
+}
+let fakeSetupState: SetupState | null = null
+
 const gateway = new Gateway()
 // The login shell's PATH comes before any CLI starts: harnesses, connectors and Docker are found on it.
-const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e))
+// Then the CLIs the introduction installed, after the person's own.
+const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e)).then(() => void (process.env['PATH'] = engineSetup.withDirs(process.env['PATH'] ?? '')))
 // The harnesses are checked behind the window (it opens on the last check). What truly needs
 // them (a reply, the memory, routines, a connection test) waits for this.
 const enginesReady = pathReady.then(detect)
@@ -1423,7 +1469,7 @@ const api: Handlers = {
     }
     if (error || !text.trim()) return { ok: false, message: error ?? L('O modelo não respondeu.', "The model didn't answer.") }
     const secs = ((Date.now() - started) / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-    return { ok: true, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
+    return { ok: true, seconds: (Date.now() - started) / 1000, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
   },
 
   voiceStatus: () => dictation(),
@@ -1873,6 +1919,19 @@ const api: Handlers = {
     // The sign-in happens in a terminal: check again until it lands, wherever the person is.
     watchEngine(engine, (s) => s.loggedIn)
     return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {})
+  },
+
+  // The introduction's setup with no terminal: Codex or Claude Code downloaded into the app's folder,
+  // then the CLI's own sign-in in the browser. The screen asks how it goes every moment.
+  setupEngine: ({ engine }) => {
+    if (!SETUP_ENGINES.includes(engine as SetupEngine)) throw new Error(L('Só dá pra preparar o Codex ou o Claude Code daqui.', 'Only Codex or Claude Code can be set up from here.'))
+    if (serverMode) throw new Error(L('Num servidor, o login é feito no terminal dele.', "On a server, the sign-in happens in its terminal."))
+    return fake ? fakeSetup(engine as SetupEngine) : engineSetup.start(engine as SetupEngine)
+  },
+  engineSetupState: () => (fake ? fakeSetupState : engineSetup.current),
+  cancelEngineSetup: () => {
+    if (fake) return void (fakeSetupState = fakeSetupState && { ...fakeSetupState, state: 'cancelled' })
+    engineSetup.cancel()
   },
 
   // Another login of Claude Code or Codex: a folder of its own, signed into in a terminal like the first.

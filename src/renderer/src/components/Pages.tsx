@@ -1245,7 +1245,7 @@ export function HistoryRow({ id }: { id: string }): ReactNode {
 
 const CLASS_LABEL = (): Record<ToolClass, string> => ({ read: L('leitura', 'read'), write: L('escrita', 'write'), sensitive: L('sensível', 'sensitive') })
 
-const STATUS = (): Record<Connector['status'], { label: string; tone: string }> => ({
+export const STATUS = (): Record<Connector['status'], { label: string; tone: string }> => ({
   connected: { label: L('conectado', 'connected'), tone: 'tag--ok' },
   connecting: { label: L('conectando…', 'connecting…'), tone: '' },
   needs_auth: { label: L('precisa autorizar', 'needs authorization'), tone: 'tag--warn' },
@@ -2145,12 +2145,18 @@ export function SettingsPage(): ReactNode {
               <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
             </Field>
             <div className="row">
-              <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: false } })}>
+              {/* What the person already set (the short sidebar, the tour) stays as it was. */}
+              <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { ...settings.onboarding, done: false } })}>
                 {L('Rever a introdução', 'See the introduction again')}
               </button>
               {settings.onboarding?.checklistHidden && (
-                <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: true } })}>
-                  {L('Mostrar os primeiros passos', 'Show getting started')}
+                <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { ...settings.onboarding, done: true, checklistHidden: false } })}>
+                  {L('Mostrar as missões', 'Show the missions')}
+                </button>
+              )}
+              {settings.onboarding?.fresh && !settings.onboarding.showAll && (
+                <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { ...settings.onboarding!, showAll: true } })}>
+                  {L('Mostrar a barra lateral inteira', 'Show the whole sidebar')}
                 </button>
               )}
             </div>

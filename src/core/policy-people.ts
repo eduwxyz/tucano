@@ -206,6 +206,9 @@ export const NEEDS: Record<Method, Need> = {
   loginAccount: 'admin',
   removeAccount: 'admin',
   installEngine: 'admin',
+  setupEngine: 'admin',
+  engineSetupState: 'admin',
+  cancelEngineSetup: 'admin',
   engineModels: 'anyone', // the models a harness lists: an agent's page names its model with them
   testEngine: 'admin',
   setJevKey: 'admin',

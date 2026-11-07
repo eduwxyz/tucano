@@ -13,7 +13,7 @@ const api = rpc.slice(rpc.indexOf('export interface Api {'))
 const methods = [...api.matchAll(/^ {2}(\w+)\((?:p: \{([^\n]*?)\})?\)/gm)].map((m) => ({ name: m[1]!, fields: [...(m[2] ?? '').matchAll(/(?:^|;)\s*(\w+)\??:/g)].map((f) => f[1]!) }))
 // What opens something on this computer (a terminal, a browser, a folder) or goes out to the
 // internet when given a well-typed value: called only with values the guard refuses.
-const OUTSIDE = new Set(['installEngine', 'loginEngine', 'loginAccount', 'openLocal', 'openExternal', 'setTelegramToken', 'setJevKey', 'wikiAddLink', 'authorizeConnector', 'finishConnectorAuth', 'setWikiDir', 'harnessMcps', 'importHarnessMcp'])
+const OUTSIDE = new Set(['installEngine', 'setupEngine', 'loginEngine', 'loginAccount', 'openLocal', 'openExternal', 'setTelegramToken', 'setJevKey', 'wikiAddLink', 'authorizeConnector', 'finishConnectorAuth', 'setWikiDir', 'harnessMcps', 'importHarnessMcp'])
 const crashes: unknown[] = []
 const onCrash = (e: unknown): void => void crashes.push(e)
 let owner: Client

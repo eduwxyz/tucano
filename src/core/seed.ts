@@ -10,7 +10,8 @@ export function initializeWorkspace(db: Db, env: NodeJS.ProcessEnv = process.env
   const demo = env['TUCANO_DEFAULT_WORKSPACE'] !== '0' &&
     (env['TUCANO_SEED'] === '1' || (env['TUCANO_FAKE_ENGINES'] === '1' && env['TUCANO_SEED'] !== '0'))
   if (demo) seed(db)
-  else db.setSettings({ onboarding: { done: false } })
+  // A new install starts with the short sidebar; a workspace made from the switcher is someone's who knows the app.
+  else db.setSettings({ onboarding: { done: false, ...(env['TUCANO_DEFAULT_WORKSPACE'] !== '0' ? { fresh: true } : {}) } })
 }
 
 // First run: a small team and three channels, so there is someone to talk to.

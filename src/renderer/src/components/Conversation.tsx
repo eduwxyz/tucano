@@ -1567,6 +1567,8 @@ try {
   for (const [k, text] of Object.entries(kept)) if (typeof text === 'string' && text.trim()) drafts.set(k, { text, images: [] })
   sessionStorage.removeItem(RELOAD_KEY)
 } catch {}
+// What a conversation's field starts with next time it opens (the introduction leaves the first message there, unsent).
+export const setComposerDraft = (key: string, text: string): void => void drafts.set(key, { text, images: [] })
 const keepForReload = (current?: { key: string; text: string }): void => {
   const texts: Record<string, string> = {}
   for (const [k, d] of drafts) if (d.text.trim()) texts[k] = d.text
@@ -1585,7 +1587,7 @@ const HOLD_MS = 400 // held at least this long, letting go ends it (push to talk
 
 // Click to record, click again to transcribe (or hold and let go). The text goes to the field to be reviewed, never sent:
 // dictation gets names wrong, and a message sets an agent working.
-function useDictation(insert: (text: string) => void, setNote: (note: string) => void, conversationId: string): [DictationState, DictationControls] {
+export function useDictation(insert: (text: string) => void, setNote: (note: string) => void, conversationId: string): [DictationState, DictationControls] {
   const [state, setState] = useState<DictationState>('idle')
   const rec = useRef<Recording | null>(null)
   const startedAt = useRef(0)
@@ -1731,7 +1733,7 @@ function useDictation(insert: (text: string) => void, setNote: (note: string) =>
   return [state, { press, release, stop, cancel, startedAt: () => startedAt.current }]
 }
 
-function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
+export function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
   const platform = useStore((s) => s.platform)
   const hidden = useStore((s) => !!s.settings.voice?.hidden)
   const status = useVoice()
