@@ -614,6 +614,23 @@ h3 {
   background: var(--ok);
   animation: fade var(--dur-enter) var(--ease-in) 1.2s reverse forwards;
 }
+/* An agent waits on me in that conversation: it arrives with a short pop, then stays still. */
+.waiting-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  animation: rise var(--dur-enter) var(--ease-spring) backwards;
+}
+.section__head .waiting-mark,
+.channel-group__head .waiting-mark {
+  margin-left: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting-mark {
+    animation: none;
+  }
+}
 .inline-form {
   display: flex;
   align-items: center;
@@ -1550,12 +1567,14 @@ h3 {
 }
 /* A request (or a question) arriving: it rises in, rings twice to be seen, and goes quiet. */
 .approval--pending,
-.question:not(.is-answered) {
+.question:not(.is-answered),
+.ask--answer {
   --rise: 6px;
   animation: rise 280ms var(--ease-out) backwards;
 }
 .approval--pending::after,
-.question:not(.is-answered)::after {
+.question:not(.is-answered)::after,
+.ask--answer::after {
   content: '';
   position: absolute;
   inset: -1px;
@@ -2313,6 +2332,395 @@ h3 {
 }
 .question.is-answered .question__label {
   color: var(--text-3);
+}
+/* The decisions an agent asked (ask_user), as a card under its reply: the approval card's
+   build (a left accent, a badge with an icon, buttons at the foot) in the orange of what's
+   asked of you. One decision at a time, its options as rows to pick (number, label, tick), then
+   "Something else"; answered, the card keeps what was chosen. */
+.ask {
+  position: relative;
+  --ring: var(--accent-soft);
+  margin: 10px 0 4px;
+  max-width: 560px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  transition: border-left-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
+.ask--answer::after {
+  inset: -1px -1px -1px -3px;
+}
+.ask--view {
+  box-shadow: none;
+  border-left-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+}
+.ask--done {
+  box-shadow: none;
+  border-color: var(--border);
+  border-left-color: var(--border-strong);
+}
+.ask__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 24px;
+  margin-bottom: 8px;
+}
+.ask__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ask--done .ask__badge {
+  color: var(--text-3);
+}
+.ask__byline {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ask__byline::before {
+  content: '·';
+  margin-right: 8px;
+}
+.ask__nav {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.ask__next .icon {
+  transform: scaleX(-1);
+}
+.ask__count {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.ask__progress {
+  display: flex;
+  gap: 4px;
+  margin: -2px 0 10px;
+}
+.ask__segment {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+.ask__segment.is-done {
+  background: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.ask__segment.is-current {
+  background: var(--accent);
+}
+.ask__body {
+  outline: none;
+}
+.ask__title {
+  font-weight: 600;
+  font-size: 14.5px;
+  line-height: 1.4;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
+.ask__prose {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  padding-right: 6px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.ask-summary .ask__prose,
+.ask-list .ask__prose {
+  max-height: none;
+  margin: 0;
+}
+.ask__prose > :first-child {
+  margin-top: 0;
+}
+.ask__prose > :last-child {
+  margin-bottom: 0;
+}
+.ask__prose code {
+  font: 0.92em var(--mono);
+  background: var(--code-bg);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+/* An option: a row to pick, with its number (the key), its label and a tick when chosen. */
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ask-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.ask-option:hover,
+.ask-option.is-focus {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+.ask-option:focus-visible,
+.ask-option:focus-within {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ask-option.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ask-option__key {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  transition: var(--transition-ui);
+}
+.ask-option.is-on .ask-option__key {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.ask-option__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ask-option__label {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.ask-option__detail {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.ask-option__mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.ask-option__mark.is-box {
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+.ask-option.is-on .ask-option__mark.is-box {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.ask-option--other .ask-option__label {
+  font-weight: 400;
+  color: var(--text-2);
+}
+.ask-option--other .ask-option__mark {
+  color: var(--text-3);
+}
+.ask-option--other.is-open {
+  cursor: text;
+}
+.ask-option .ask-option__input,
+.ask-option .ask-option__input:focus {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+}
+.ask__text {
+  width: 100%;
+  resize: vertical;
+  min-height: 60px;
+}
+.ask__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ask__hint {
+  margin-right: auto;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.ask__note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+/* Before sending: each decision and its answer, a click away from changing it. */
+.ask-review {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.ask-review li + li {
+  border-top: 1px solid var(--border);
+}
+.ask-review__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.ask-review__row:hover {
+  background: var(--hover);
+}
+.ask-review__row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+.ask-review__row .icon {
+  color: var(--text-3);
+}
+.ask-review__q {
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.ask-review__a {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.ask .is-muted {
+  color: var(--text-3);
+  font-weight: 400;
+  font-style: italic;
+}
+/* To read: someone else's question, with its options. */
+.ask-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+}
+.ask-list__q {
+  font-weight: 500;
+}
+.ask-list__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.ask-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--bg);
+}
+/* Answered: each decision over what was chosen. */
+.ask-summary {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ask-summary__row {
+  display: grid;
+  gap: 1px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+.ask-summary dt {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ask-summary dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .ask {
+    padding: 10px 12px;
+  }
+  .ask-review__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ask-review__a {
+    grid-column: 1;
+  }
+  .ask-review__row .icon {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
+  .ask__hint {
+    display: none;
+  }
 }
 .retry {
   margin-top: 6px;

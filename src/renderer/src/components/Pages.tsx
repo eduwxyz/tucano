@@ -1174,7 +1174,7 @@ export function InboxPage(): ReactNode {
             {questions.map(({ q, done }) => (
               <div key={q.id}>
                 {meta(q.conversationId, q.agentId, q.createdAt)}
-                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
+                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
               </div>
             ))}
           </div>

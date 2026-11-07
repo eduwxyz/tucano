@@ -152,6 +152,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   inbox: {},
   answerQuestion: { id: 's', text: 's' },
   confirmQuestion: { id: 's', ok: 'b' },
+  answerDecision: { messageId: 's', index: 'n', answer: 'o|null' },
+  submitDecisions: { messageId: 's' },
   watchRoutine: { id: 's', on: 'b' },
 }
 

@@ -13,6 +13,7 @@ import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import { canEditChannel,
   agentById,
   askerIn,
+  messagesIn,
   attachedTo,
   conversationIndex,
   initials,
@@ -86,6 +87,8 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal, ProposalCard } from './Tuca'
 import { FoldToggle } from './Fold'
+import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
+import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
@@ -240,7 +243,10 @@ const NO_REPLIES: Message[] = []
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
-export function MessageList({ messages, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+  // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
+  const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
+  const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
@@ -417,6 +423,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
+  const team = useStore(teamMode)
   // Someone else's message reads with their name and initials; mine, as always.
   const other = useStore((s) => (message.author.kind === 'person' && !isMine(s, message.author) ? personName(s, message.author.id) : undefined))
   const attached = useStore((s) => (message.author.kind === 'person' ? attachedTo(s, message.id) : NO_ATTACHED))
@@ -496,7 +503,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ))}
           </div>
         )}
-        {message.run?.question && <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />}
+        {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
+            may answer it does it there. One from before decisions, with a team, is the question card it was. */}
+        {questionsOf(message.run).length > 0 &&
+          (team && message.run?.askedTo ? (
+            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
+          ) : (
+            <AnswersSummary message={message} />
+          ))}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.agentDraft && <AgentProposal message={message} />}
         {message.run?.proposal && <ProposalCard message={message} />}
@@ -962,12 +976,17 @@ function RoutineChip({ id }: { id: string }): ReactNode {
 // A question an agent asked (ask_user). Alone (a desktop), it's mine: my next message answers it.
 // With a team it says whom it's for; who may answer it (the person, whoever covers for them, an
 // admin, or past the deadline the requester) gets a field; in my DM, a question to someone else
-// first asks me whether it may go.
+// first asks me whether it may go. With decisions (ask_user's options), it's their card
+// (TeamAsk): answered on it by whoever may answer the question.
 // What someone was typing to answer a question, kept by question: if someone else answers first,
 // or the card moves (Pra você drops it), it's still there, with who answered.
 export const questionDrafts = new Map<string, string>()
 
-export function QuestionCard({ id, agentName, askedTo, question, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; question: string; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+  return props.decisions?.length ? <TeamAsk {...props} decisions={props.decisions} /> : <TextQuestion {...props} />
+}
+
+function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; question: string; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   const team = useStore(teamMode)
   const you = useStore((s) => s.you)
   const admin = useStore(amAdmin)
@@ -1052,6 +1071,53 @@ export function QuestionCard({ id, agentName, askedTo, question, answered, answe
       )}
       {error && <span className="note note--error">{error}</span>}
     </div>
+  )
+}
+
+
+// A question with decisions, with a team: whom it's for and who asked; answered on the card by
+// whoever may (the person, whoever covers for them or, past the deadline, the requester: those
+// who have it in For you; an admin, after choosing to answer for them); for anyone else, to read.
+function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+  const team = useStore(teamMode)
+  const you = useStore((s) => s.you)
+  const admin = useStore(amAdmin)
+  const waiting = useStore((s) => s.inbox.questions.find((q) => q.id === id))
+  const target = useStore((s) => personById(s, askedTo ?? waiting?.askedTo))
+  const answerer = useStore((s) => (answeredBy && answeredBy !== s.you ? personById(s, answeredBy) : undefined))
+  const [answering, setAnswering] = useState(false)
+  const who = agentName ?? L('O agente', 'The agent')
+  const card = { id, questions: decisions, saved: answers }
+  if (!team || !target) return <AskCard {...card} mode={answered ? 'done' : 'answer'} badge={answered ? L('Respondida', 'Answered') : L('Esperando você', 'Waiting for you')} answeredInText={!!answeredInText} />
+  const toMe = target.id === you
+  const asked = toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)
+  if (answered)
+    return <AskCard {...card} mode="done" badge={answerer ? L(`Respondida por ${answerer.name}`, `Answered by ${answerer.name}`) : L('Respondida', 'Answered')} byline={toMe ? L(`${who} perguntou a você`, `${who} asked you`) : L(`${who} perguntou a ${target.name}`, `${who} asked ${target.name}`)} answeredInText={!!answeredInText} />
+  if (waiting?.confirm === 'pending')
+    return (
+      <AskCard {...card} mode="view" badge={L(`${who} quer perguntar a ${target.name}`, `${who} wants to ask ${target.name}`)}>
+        <p className="ask__note">{L(`${target.name} vê só a pergunta, nunca esta conversa.`, `${target.name} sees the question only, never this conversation.`)}</p>
+        <div className="ask__foot">
+          <button className="btn btn--sm" onClick={() => confirmQuestion(id, false)}>
+            {L('Não pergunte', "Don't ask")}
+          </button>
+          <button className="btn btn--primary btn--sm" onClick={() => confirmQuestion(id, true)}>
+            {L(`Pode perguntar a ${target.name}`, `Go ahead and ask ${target.name}`)}
+          </button>
+        </div>
+      </AskCard>
+    )
+  if (waiting || (admin && answering)) return <AskCard {...card} mode="answer" badge={waiting ? L('Esperando você', 'Waiting for you') : L(`Respondendo no lugar de ${target.name}`, `Answering for ${target.name}`)} byline={asked} />
+  return (
+    <AskCard {...card} mode="view" badge={L(`Esperando ${target.name}`, `Waiting for ${target.name}`)} byline={asked}>
+      {admin && !inbox && (
+        <div className="ask__foot">
+          <button className="btn btn--sm" onClick={() => setAnswering(true)}>
+            {L(`Responder no lugar de ${target.name}`, `Answer for ${target.name}`)}
+          </button>
+        </div>
+      )}
+    </AskCard>
   )
 }
 

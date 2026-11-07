@@ -129,6 +129,18 @@ describe('Telegram', () => {
     expect(answered).toEqual([['c1', 'Sexta que vem']])
   })
 
+  it('shows every decision as text, and a reply still answers', async () => {
+    await pair()
+    const questions = [{ question: 'Paginação no menu?', kind: 'single' as const, options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] }, { question: 'Pra quando?', kind: 'text' as const }]
+    const question: Message = { id: 'm3', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: '', at: 0, run: { status: 'waiting_input', steps: [], questions } }
+    await tg.questionAsked(question, 'PM', '#simula-oab')
+    const asked = api.sent.at(-1)!
+    expect(asked.body['text']).toContain('PM pergunta (#simula-oab):\n\n1. Paginação no menu? (Busca remota | Scroll infinito)\n2. Pra quando?')
+    api.push({ message: { message_id: 8, chat: me, text: 'busca remota, sexta', reply_to_message: { message_id: asked.id } } })
+    await settle()
+    expect(answered).toEqual([['c1', 'busca remota, sexta']])
+  })
+
   it("a reply to a question asked in a thread goes back to that thread", async () => {
     await pair()
     const question: Message = { id: 'm2', conversationId: 'c1', threadId: 'root', author: { kind: 'agent', id: 'a1' }, text: '', at: 0, run: { status: 'waiting_input', steps: [], question: 'Qual o prazo?' } }

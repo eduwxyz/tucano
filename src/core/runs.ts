@@ -24,6 +24,7 @@ import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
@@ -69,15 +70,43 @@ export const ASK_USER: ToolDef = {
   name: 'ask_user',
   get description() {
     return L(
-      'Faz uma pergunta curta ao usuário quando falta uma informação pra continuar. Depois de chamar, encerre a resposta: a resposta do usuário chega na próxima mensagem.',
-      "Asks the user a short question when a piece of information is missing to go on. After calling it, end your reply: the user's answer comes in the next message."
+      'Pede ao usuário as decisões que faltam pra continuar. Escreva a análise e a proposta no texto da sua resposta, antes de chamar; aqui vão só as decisões, cada uma com uma pergunta curta e, quando der, opções curtas (detalhe em description). Tipos: single (uma opção), multiple (várias), text (resposta livre). De 1 a 4 decisões; de 1 a 3 opções por decisão, as mais prováveis: o app sempre acrescenta "Outra coisa", com resposta livre, então não inclua essa opção. Depois de chamar, encerre a resposta: as respostas chegam na próxima mensagem.',
+      "Asks the user for the decisions missing to go on. Write your analysis and proposal in your reply's text, before calling; here go only the decisions, each with a short question and, when possible, short options (detail in description). Kinds: single (one option), multiple (several), text (free answer). 1 to 4 decisions; 1 to 3 options per decision, the likeliest ones: the app always adds \"Something else\", with a free answer, so don't include that option. After calling it, end your reply: the answers come in the next message."
     )
   },
   get inputSchema() {
     return {
       type: 'object' as const,
-      properties: { question: { type: 'string', description: L('A pergunta, curta e direta.', 'The question, short and direct.') } },
-      required: ['question']
+      properties: {
+        questions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_QUESTIONS,
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', maxLength: MAX_QUESTION_LENGTH, description: L('A pergunta, curta e direta.', 'The question, short and direct.') },
+              kind: { type: 'string', enum: ['single', 'multiple', 'text'] },
+              options: {
+                type: 'array',
+                minItems: MIN_OPTIONS,
+                maxItems: MAX_OPTIONS,
+                description: L('Pra single e multiple.', 'For single and multiple.'),
+                items: {
+                  type: 'object',
+                  properties: {
+                    label: { type: 'string', maxLength: MAX_LABEL_LENGTH, description: L('Curto: o que aparece no botão.', 'Short: what shows on the button.') },
+                    description: { type: 'string', maxLength: MAX_DESCRIPTION_LENGTH, description: L('Opcional: o que essa opção implica.', 'Optional: what this option implies.') }
+                  },
+                  required: ['label']
+                }
+              }
+            },
+            required: ['question', 'kind']
+          }
+        },
+        question: { type: 'string', description: L('Forma antiga: uma pergunta de texto. Prefira questions.', 'Old form: one text question. Prefer questions.') }
+      }
     }
   }
 }
@@ -94,13 +123,32 @@ export const askUserFor = (names: string[]): ToolDef =>
         ),
         inputSchema: {
           type: 'object' as const,
-          properties: { ...ASK_USER.inputSchema.properties, para: { type: 'string', description: L('O nome da pessoa a quem perguntar (opcional).', 'The name of the person to ask (optional).') } },
-          required: ['question']
+          // Every decision of the call goes to that one person.
+          properties: { ...ASK_USER.inputSchema.properties, para: { type: 'string', description: L('O nome da pessoa a quem perguntar (opcional): todas as decisões vão pra ela.', 'The name of the person to ask (optional): every decision goes to them.') } }
         }
       }
 
 // A DM's person saying the agent may ask someone else ("sim", "pode", "yes"); anything else is a no.
 const YES = /^\s*(sim|s|pode( sim)?|ok(ay)?|claro|autorizo|yes|y|sure|go ahead)\b/i
+
+// What the card sent for one decision, as kept: only what that kind of decision takes, options that
+// exist, text cut short. Anything else (not an answer at all): undefined.
+const ANSWER_TEXT_MAX = 10_000
+function cleanAnswer(question: Decision, raw: Answer): Answer | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  if (raw.skipped === true) return { skipped: true }
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim().slice(0, ANSWER_TEXT_MAX) : '')
+  if (question.kind === 'text') {
+    const text = str(raw.text)
+    return text ? { text } : undefined
+  }
+  const count = question.options?.length ?? 0
+  const chosen = Array.isArray(raw.chosen) ? [...new Set(raw.chosen)] : []
+  if (chosen.some((i) => !Number.isInteger(i) || i < 0 || i >= count) || (question.kind === 'single' && chosen.length > 1)) return undefined
+  const other = str(raw.other)
+  if (!chosen.length && !other) return undefined
+  return { ...(chosen.length ? { chosen: chosen.sort((a, b) => a - b) } : {}), ...(other ? { other } : {}) }
+}
 
 // How long a question to someone else waits before the requester is told (settings may say otherwise).
 export const QUESTION_DEADLINE_HOURS = 4
@@ -327,13 +375,14 @@ export class Runner {
   // everything else it sets off, go in its thread (`threadId`, or its own when
   // the conversation answers in threads) or else in the conversation.
   // `by`: the person writing (the Tucano's owner when left out: the phone, older callers).
-  // `answers`: the question this answers, from the inbox (its asker answers, wherever the person writes from).
+  // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
+  // wherever the person writes from). The caller checked that they may answer it.
   async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
-    const body = text.trim()
+    const typed = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
-    if (!conv || (!body && pictures.length === 0)) return
+    if (!conv) return
     const writer = (by ? db.person(by) : undefined) ?? db.owner()
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
     // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
@@ -343,17 +392,22 @@ export class Runner {
     // write outside threads stays outside: it only answers a question that is outside too.
     // A question to someone answers only with their message (or an admin's, or whoever covers
     // for them; past its deadline, the requester's). One waiting on a DM's yes takes a yes or a no.
-    const named = opts.answers ? db.question(opts.answers) : undefined
-    let asked = named ? db.message(named.id) : this.pendingQuestion(conv.id, thread)
+    const named = opts.answers ? db.message(opts.answers) : undefined
+    let asked = opts.answers ? (named?.conversationId === conv.id ? named : undefined) : this.pendingQuestion(conv.id, thread)
     if (asked?.run?.status !== 'waiting_input') asked = undefined
     const q = asked ? db.question(asked.id) : undefined
     let confirmed: boolean | undefined
     if (q && !named) {
       if (q.state === 'open' && q.confirm === 'pending') {
-        if (writer.id === q.requestedBy) confirmed = YES.test(body)
+        if (writer.id === q.requestedBy) confirmed = YES.test(typed)
         asked = undefined
       } else if (q.state === 'open' && !new People(db).canAnswer(writer, q)) asked = undefined
     }
+    // The decisions answered on the card go first, whether they're sent from it or with a reply
+    // written in the field. Only by whoever answers the question: anyone else's message is just theirs.
+    const fromCard = asked ? formatAnswers(questionsOf(asked.run), asked.run?.answers) : ''
+    const body = [fromCard, typed].filter(Boolean).join('\n\n')
+    if (!body && pictures.length === 0) return
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
@@ -362,11 +416,11 @@ export class Runner {
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
-    const calledPeople = this.callPeople(conv, mine, writer.name, writer.id)
+    const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
     const members = this.members(conv)
-    let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
+    let responders = mentioned(typed, members).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
     // the deadline): the agent is told so in so many words.
@@ -376,7 +430,10 @@ export class Runner {
         db.saveQuestion({ ...q, state: 'answered', answeredBy: writer.id, answeredAt: Date.now() })
         emit({ type: 'inbox' })
       }
-      this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}) } })
+      // The message keeps the answers for the agent; the card, which shows them, says which one it is (and
+      // what it had beyond them), so the conversation shows them once. With images, it shows whole.
+      const link = fromCard && pictures.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
+      this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
       if (asker && responders.length === 0) responders = [asker]
       const target = q && q.askedTo !== writer.id ? db.people({ removed: true }).find((p) => p.id === q.askedTo) : undefined
@@ -400,7 +457,7 @@ export class Runner {
     }
     // Written to a person (@Ana) and to no agent: it's for them, not the agents. No router, no
     // reply; a line says who heard about it. So with one who left, or yourself: no one to tell.
-    const toPeople = calledPeople.length > 0 || (db.people().length > 1 && toPeopleOnly(body, db.people({ removed: true }), db.agents()))
+    const toPeople = calledPeople.length > 0 || (db.people().length > 1 && toPeopleOnly(typed, db.people({ removed: true }), db.agents()))
     if (responders.length === 0 && toPeople && conv.kind !== 'dm') {
       const names = calledPeople.map((p) => `**${p.name}**`).join(L(' e ', ' and '))
       // Someone who left, yourself, or a name two people share: whoever wrote it learns no one heard.
@@ -583,10 +640,7 @@ export class Runner {
 
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
   private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
-    return this.deps.db
-      .recentMessages(conversationId, 50, threadId ?? null)
-      .reverse()
-      .find((m) => m.run?.status === 'waiting_input')
+    return this.deps.db.waitingQuestion(conversationId, threadId ?? null)
   }
 
   private post(conversationId: string, threadId: string | undefined, text: string, run?: Run): Message {
@@ -968,7 +1022,8 @@ export class Runner {
 
     // Tools for this turn, served by the gateway under a URL only this turn knows:
     // ask_user plus the connector tools this agent's grants allow.
-    let question: string | undefined
+    let question: string | undefined // what ask_user asked, as text (every decision)
+    let questions: Decision[] | undefined // the same, structured
     let askedTo: Person = requester // whom the question is for
     let confirming = false // in a DM, a question to someone else waits for the DM's person's yes first
     let approval: Approval | undefined
@@ -1068,13 +1123,15 @@ export class Runner {
 
     const runTool = async (name: string, args: Record<string, unknown>): Promise<CallToolResult> => {
         if (name === ASK_USER.name) {
-          const q = typeof args['question'] === 'string' ? args['question'].trim() : ''
-          if (!q) return textResult(L('Faltou a pergunta.', 'Missing the question.'), true)
+          const parsed = parseQuestions(args)
+          if ('error' in parsed) return textResult(parsed.error, true)
           if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
           const para = typeof args['para'] === 'string' ? args['para'].trim() : ''
           const target = para ? personNamed(para, others) : requester
           if (!target) return textResult(L(`Não há ninguém chamado "${para}" no Tucano. As pessoas: ${others.map((p) => p.name).join(', ')}.`, `There's no one called "${para}" in this Tucano. The people: ${others.map((p) => p.name).join(', ')}.`), true)
-          question = q
+          questions = parsed.questions
+          question = questionsAsText(questions)
+          const q = questionHeadline(questions)
           askedTo = target
           if (target.id !== requester.id) {
             // Someone else: in a DM, its person says yes first; then only the question reaches them.
@@ -1326,7 +1383,7 @@ export class Runner {
           if (out.artifact) artifactIds.push(out.artifact.id)
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
           if (out.approval) {
-            if (question || approval) {
+            if (questions || approval) {
               msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
               save()
               return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -1390,7 +1447,7 @@ export class Runner {
           const out = await apps.call(current, name, args)
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
           if (out.approval) {
-            if (question || approval) {
+            if (questions || approval) {
               msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
               save()
               return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -1436,7 +1493,7 @@ export class Runner {
           const c = this.deps.connectors?.list().find((x) => x.name === args['conector'])
           const nivel = args['nivel'] === 'read_write' ? 'read_write' : 'read'
           if (!c) return textResult(L('Esse conector não existe. Use um da lista.', "That connector doesn't exist. Use one from the list."), true)
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+          if (questions || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           const why = typeof args['motivo'] === 'string' ? args['motivo'].trim() : ''
           approval = {
             id: randomUUID(),
@@ -1760,7 +1817,7 @@ export class Runner {
         }
         // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
         // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
-        const reserve = !onReserve && !result && error && !control.reason && !acted && !question && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
+        const reserve = !onReserve && !result && error && !control.reason && !acted && !questions && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
         if (!reserve) break
         const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
         flush()
@@ -1818,7 +1875,7 @@ export class Runner {
       )
     }
 
-    const base = { endedAt, depth: opts.depth, work, receipt, question, ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, ...(replyTo ? { replyTo } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, ...(replyTo ? { replyTo } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -1862,8 +1919,10 @@ export class Runner {
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: question ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        run: { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
+      // The inbox shows a question's decisions from its message, which has them only now.
+      if (question) emit({ type: 'inbox' })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (!question && !approval) {
         const finished = (): void => {
@@ -2159,17 +2218,52 @@ export class Runner {
 
   // People a message calls with @name hear about it: whoever can see it, not who wrote it.
   // Returns who was called.
-  private callPeople(conv: Conversation, msg: Message, authorName: string, except?: string): Person[] {
+  // `text`: what calls them, when it isn't the whole message (the decisions answered on a card don't).
+  private callPeople(conv: Conversation, msg: Message, authorName: string, except?: string, text = msg.text): Person[] {
     const { db } = this.deps
     if (db.people().length < 2) return [] // alone, no one to call: a desktop hears only what it always did
     const people = new People(db)
-    const called = mentionedPeople(msg.text, db.people(), db.agents()).filter((p) => p.id !== except && people.canSeeConversation(p, conv))
+    const called = mentionedPeople(text, db.people(), db.agents()).filter((p) => p.id !== except && people.canSeeConversation(p, conv))
     if (called.length) this.deps.notify?.(L(`${authorName} te mencionou`, `${authorName} mentioned you`), snip(msg.text, 140), conv.id, undefined, msg.threadId, called.map((p) => p.id))
     return called
   }
 
   async expireApprovals(): Promise<void> {
     for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
+  }
+
+  // A question whose decisions `by` may answer on the card now: theirs (or one they may answer for
+  // someone, as a typed reply would: an admin, whoever covers, the requester past the deadline), never
+  // one still waiting on a DM's yes. One from before questions to people: whoever sees the conversation.
+  private decidable(messageId: string, by: Person): Message {
+    const { db } = this.deps
+    const asked = db.message(messageId)
+    const q = db.question(messageId)
+    if (q && q.state !== 'open') throw new Error(L('Essa pergunta já foi respondida.', 'That question was already answered.'))
+    const mayAnswer = q ? q.confirm !== 'pending' && new People(db).canAnswer(by, q) : !!asked && !new People(db).conversationError(by, asked.conversationId)
+    if (!asked || !mayAnswer) throw new Error(L('Essa pergunta não é pra você.', "That question isn't for you."))
+    if (asked.author.kind !== 'agent' || asked.run?.status !== 'waiting_input') throw new Error(L('Essa pergunta já foi respondida.', 'That question was already answered.'))
+    return asked
+  }
+
+  // One decision answered on the card (null clears it): kept on the question until it's sent.
+  answerDecision(messageId: string, index: number, answer: Answer | null, by: Person): void {
+    const asked = this.decidable(messageId, by)
+    const questions = questionsOf(asked.run)
+    const question = questions[index]
+    if (!question) return
+    const clean = answer === null ? null : cleanAnswer(question, answer)
+    if (clean === undefined) return
+    const answers = Array.from({ length: questions.length }, (_, i) => asked.run!.answers?.[i] ?? null)
+    answers[index] = clean
+    this.update(asked, { run: { ...asked.run!, answers } })
+    if (this.deps.db.question(messageId)) this.deps.emit({ type: 'inbox' }) // the card in For you, on another device
+  }
+
+  // Sends the decisions answered on the card as the person's message, as if they wrote them.
+  async submitDecisions(messageId: string, by: Person): Promise<void> {
+    const asked = this.decidable(messageId, by)
+    await this.send(asked.conversationId, '', [], asked.threadId, by.id, { answers: asked.id })
   }
 
   // The user took over the agent's browser ("Assumir") and handed it back

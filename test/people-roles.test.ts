@@ -286,7 +286,7 @@ describe('questions, mentions and memory between people', () => {
   let gateway: Gateway
   let db: Db
   let people: People
-  let ana: Person, bia: Person, carl: Person
+  let ana: Person, bia: Person, carl: Person, dani: Person
   let runner: Runner
   let turns: Turn[]
   let notes: { title: string; conversationId?: string; to?: string[] }[]
@@ -295,7 +295,7 @@ describe('questions, mentions and memory between people', () => {
   beforeEach(async () => {
     gateway = new Gateway()
     await gateway.start()
-    ;({ db, people, ana, bia, carl } = team())
+    ;({ db, people, ana, bia, carl, dani } = team())
     turns = []
     notes = []
     events = []
@@ -417,6 +417,70 @@ describe('questions, mentions and memory between people', () => {
     await runner.send('ch', '@lia peça pra bia', [], undefined, ana.id)
     await runner.idle()
     expect(notes.find((n) => n.title === 'Lia te mencionou')).toMatchObject({ to: [bia.id] })
+  })
+
+  // ask_user with options (decisions): answered on the card, one at a time, only by who may answer the question.
+  it('decisions to Bia: only she (or an admin) answers them on the card; anyone else is refused, and their message stays theirs', async () => {
+    await runner.send('ch', '@lia me ajuda a decidir, decida com a Bia', [], undefined, ana.id)
+    await runner.idle()
+    const [asked] = lia()
+    expect(asked?.run).toMatchObject({ status: 'waiting_input', askedTo: bia.id, questions: [{ kind: 'single' }, { kind: 'text' }] })
+    expect(db.question(asked!.id)?.text).toBe('1. Paginação no menu? (Busca remota | Scroll infinito)\n2. Pra quando?')
+    expect(people.inbox(bia).questions[0]).toMatchObject({ id: asked!.id, decisions: [{ question: 'Paginação no menu?' }, { question: 'Pra quando?' }] })
+
+    expect(() => runner.answerDecision(asked!.id, 0, { chosen: [1] }, carl)).toThrow('Essa pergunta não é pra você.')
+    await expect(runner.submitDecisions(asked!.id, carl)).rejects.toThrow('Essa pergunta não é pra você.')
+    runner.answerDecision(asked!.id, 0, { chosen: [1] }, bia)
+    expect(people.inbox(bia).questions[0]?.answers).toEqual([{ chosen: [1] }, null])
+    // Carl writing there neither answers it nor carries Bia's choices.
+    await runner.send('ch', 'eu acho sexta', [], asked!.threadId, carl.id)
+    await runner.idle()
+    expect(db.messages().find((m) => m.text.includes('eu acho sexta'))?.text).toBe('eu acho sexta')
+    expect(db.message(asked!.id)?.run?.status).toBe('waiting_input')
+
+    runner.answerDecision(asked!.id, 1, { text: 'sexta' }, bia)
+    await runner.submitDecisions(asked!.id, bia)
+    await runner.idle()
+    const sent = db.messages().find((m) => m.text.startsWith('- Paginação'))
+    expect(sent).toMatchObject({ author: { kind: 'person', id: bia.id }, text: '- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta' })
+    expect(db.question(asked!.id)).toMatchObject({ state: 'answered', answeredBy: bia.id })
+    expect(turns.at(-1)?.prompt).toContain('Scroll infinito')
+    expect(() => runner.answerDecision(asked!.id, 0, { chosen: [0] }, bia)).toThrow('Essa pergunta já foi respondida.')
+  })
+
+  it("decisions to Bia: an admin and whoever covers for her may answer them for her, and the agent hears so", async () => {
+    await runner.send('ch', '@lia me ajuda a decidir, decida com a Bia', [], undefined, ana.id)
+    await runner.idle()
+    const [asked] = lia()
+    people.setDelegation(bia, carl.id, Date.now() + 3_600_000)
+    runner.answerDecision(asked!.id, 0, { chosen: [0] }, carl) // covering
+    runner.answerDecision(asked!.id, 1, { skipped: true }, dani) // an admin
+    await runner.submitDecisions(asked!.id, dani)
+    await runner.idle()
+    expect(db.question(asked!.id)).toMatchObject({ state: 'answered', answeredBy: dani.id })
+    expect(db.messages().find((m) => m.author.kind === 'person' && m.author.id === dani.id)?.text).toBe('- Paginação no menu? → Busca remota\n- Pra quando? → (pulou)')
+    expect(turns.at(-1)?.prompt).toContain('Dani (admin) respondeu no lugar de Bia')
+  })
+
+  it("decisions from a DM to someone else wait for the DM's person's yes; then Bia answers them from her inbox", async () => {
+    await runner.send('ana-dm', 'decida com a Bia', [], undefined, ana.id)
+    await runner.idle()
+    const [asked] = lia()
+    expect(db.question(asked!.id)).toMatchObject({ confirm: 'pending', askedTo: bia.id })
+    // Before the yes, no one answers them on the card: not Bia (who hasn't seen it), not Ana (who says yes or no).
+    expect(() => runner.answerDecision(asked!.id, 0, { chosen: [0] }, bia)).toThrow()
+    expect(() => runner.answerDecision(asked!.id, 0, { chosen: [0] }, ana)).toThrow()
+    await runner.send('ana-dm', 'sim', [], undefined, ana.id)
+    await runner.idle()
+    const [forBia] = people.inbox(bia).questions
+    expect(forBia).toMatchObject({ id: asked!.id, decisions: [{ question: 'Paginação no menu?' }, { question: 'Pra quando?' }] })
+    expect(forBia).not.toHaveProperty('conversationId')
+    runner.answerDecision(asked!.id, 0, { chosen: [1] }, bia)
+    runner.answerDecision(asked!.id, 1, { text: 'sexta' }, bia)
+    await runner.submitDecisions(asked!.id, bia)
+    await runner.idle()
+    expect(db.question(asked!.id)).toMatchObject({ state: 'answered', answeredBy: bia.id })
+    expect(db.messages().find((m) => m.author.kind === 'person' && m.author.id === bia.id)).toMatchObject({ conversationId: 'ana-dm', text: '- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta' })
   })
 
   it("memories: each person's words make their own; an agent in a channel gets those of who wrote there", async () => {

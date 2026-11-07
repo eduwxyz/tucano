@@ -1,4 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
+import type { Answer } from './questions'
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider } from './connector-catalog'
 import type { Os, Account, AccountEngine, ActivityEntry, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
@@ -179,6 +180,8 @@ export interface Api {
   inbox(): Inbox
   answerQuestion(p: { id: string; text: string }): void // a question an agent asked me (or someone I cover for)
   confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?
+  answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
+  submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
 }
 

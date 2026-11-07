@@ -66,6 +66,7 @@ import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } f
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
+import { isNewQuestion } from '../shared/questions'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
@@ -310,7 +311,7 @@ function toPhone(e: CoreEvent): void {
   if (e.type === 'approval' && e.approval.state === 'pending' && !sentToPhone.has(e.approval.id)) {
     sentToPhone.add(e.approval.id)
     void telegram.approvalAsked(e.approval, name(e.approval.agentId))
-  } else if (e.type === 'message' && e.message.run?.status === 'waiting_input' && e.message.run.question && e.message.author.kind === 'agent' && !sentToPhone.has(e.message.id) && forOwner(e.message.id)) {
+  } else if (e.type === 'message' && e.message.author.kind === 'agent' && isNewQuestion(e.message) && !sentToPhone.has(e.message.id) && forOwner(e.message.id)) {
     sentToPhone.add(e.message.id)
     const conv = db.conversation(e.message.conversationId)
     void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM'))
@@ -1850,6 +1851,9 @@ const api: Handlers = {
   inbox: (_, ctx) => people.inbox(ctx.person),
   answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),
   confirmQuestion: ({ id, ok }, ctx) => runner.confirm(id, ok, ctx.person),
+  // A question's decisions, answered on the card one at a time and then sent: by whoever may answer it (Runner.decidable).
+  answerDecision: ({ messageId, index, answer }, ctx) => runner.answerDecision(messageId, index, answer, ctx.person),
+  submitDecisions: ({ messageId }, ctx) => runner.submitDecisions(messageId, ctx.person),
   runRoutine: ({ id }, ctx) => {
     const r = db.routine(id)
     if (!r) throw new Error(L('Essa rotina não existe mais.', 'That routine no longer exists.'))

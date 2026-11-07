@@ -1,6 +1,7 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ChannelLayout } from './channel-layout'
+import type { Answer, Decision } from './questions'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -171,7 +172,12 @@ export interface Run {
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   replyTo?: string // the message (a person's) it answers, when one did
   answeredBy?: string // who answered its question (another person than the one asked, maybe)
-  question?: string // asked with ask_user; answered by the next human message here
+  question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
+  questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
+  answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  answeredInText?: true // the reply had text of its own, beyond the decisions answered
+  answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
+  answerTyped?: string // what that message had beyond them, written in the message box
   askedTo?: string // the person the question is for (unset with one person: whoever asked the agent)
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
@@ -262,8 +268,9 @@ export interface Question {
 // A question from someone else's DM comes without where it was asked (they see the question only).
 export interface Inbox {
   approvals: Approval[]
-  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string })[]
-  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
+  // With the decisions asked (ask_user's options) and what was answered on the card so far.
+  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
+  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
 }
 
