@@ -81,6 +81,7 @@ import { ProposalCard } from './Tuca'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import { hasServers, ServersCard } from './Servers'
 import { useWorkspaceList } from './Workspaces'
@@ -707,13 +708,12 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 {/* Cursor's models carry the effort in the name (…-high, …-xhigh): no separate pick. */}
                 {engine !== 'cursor' && (
                   <Field label={L('Esforço de raciocínio', 'Reasoning effort')} hint={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
-                    <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
-                      {EFFORTS.map((ef) => (
-                        <option key={ef.id} value={ef.id}>
-                          {ef.label}
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      value={draft.effort ?? null}
+                      onChange={(v) => { if (v) patch({ effort: v as Agent['effort'] }) }}
+                      options={EFFORTS.map((ef) => ({ value: ef.id, label: ef.label }))}
+                      placeholder={L('Escolha o esforço', 'Pick an effort')}
+                    />
                   </Field>
                 )}
                 <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you.`)}>
@@ -1415,13 +1415,12 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
               {t.name}
               {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
             </code>
-            <select value={t.cls} onChange={(e) => updateTool(c.id, t.name, { cls: e.target.value as ToolClass })}>
-              {(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => (
-                <option key={k} value={k}>
-                  {CLASS_LABEL()[k]}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={t.cls ?? null}
+              onChange={(v) => { if (v) updateTool(c.id, t.name, { cls: v as ToolClass }) }}
+              options={(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
+              placeholder={L('Escolha a classe', 'Pick a class')}
+            />
             <input
               type="checkbox"
               disabled={t.cls !== 'sensitive'}
@@ -1495,11 +1494,16 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
             <input value={url} placeholder="https://mcp.linear.app/mcp" onChange={(e) => setUrl(e.target.value)} />
           </Field>
           <Field label={L('Autenticação', 'Authentication')}>
-            <select value={auth} onChange={(e) => setAuth(e.target.value as ConnectorAuth)}>
-              <option value="oauth">{L('OAuth (abre o navegador pra autorizar)', 'OAuth (opens the browser to authorize)')}</option>
-              <option value="token">{L('Token (cabeçalho Authorization: Bearer)', 'Token (Authorization: Bearer header)')}</option>
-              <option value="none">{L('Nenhuma', 'None')}</option>
-            </select>
+            <Select
+              value={auth ?? null}
+              onChange={(v) => { if (v) setAuth(v as ConnectorAuth) }}
+              options={[
+                { value: 'oauth', label: L('OAuth (abre o navegador pra autorizar)', 'OAuth (opens the browser to authorize)') },
+                { value: 'token', label: L('Token (cabeçalho Authorization: Bearer)', 'Token (Authorization: Bearer header)') },
+                { value: 'none', label: L('Nenhuma', 'None') }
+              ]}
+              placeholder={L('Escolha a autenticação', 'Pick an authentication')}
+            />
           </Field>
           {auth === 'token' && (
             <Field label="Token" hint={L('Ou uma referência do 1Password (op://Cofre/Item/campo), lida a cada conexão.', 'Or a 1Password reference (op://Vault/Item/field), read on each connection.')}>
@@ -1681,15 +1685,15 @@ function ReserveModel({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent
       {on && reserve && reserveAccounts.length > 0 && (
         <label className="field">
           <span className="field__label">{L('Conta da reserva', 'Reserve account')}</span>
-          <select value={reserveAccount?.id ?? ''} onChange={(e) => patch({ fallbackAccountId: e.target.value || undefined })}>
-            <option value="">{L(`A de sempre do ${ENGINES[reserve.engine].label}`, `${ENGINES[reserve.engine].label}’s usual one`)}</option>
-            {reserveAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-                {a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={reserveAccount?.id ?? null}
+            onChange={(v) => patch({ fallbackAccountId: v || undefined })}
+            options={[
+              { value: '', label: L(`A de sempre do ${ENGINES[reserve.engine].label}`, `${ENGINES[reserve.engine].label}’s usual one`) },
+              ...reserveAccounts.map((a) => ({ value: a.id, label: a.name + (a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')) }))
+            ]}
+            placeholder={L(`A de sempre do ${ENGINES[reserve.engine].label}`, `${ENGINES[reserve.engine].label}’s usual one`)}
+          />
           {reserveAccount && !reserveAccount.loggedIn && <span className="hint hint--warn">{L('Essa conta ainda não entrou: a reserva só funciona depois que você entrar nela em Configurações › Modelos.', 'This account isn’t signed in yet: the reserve only works once you sign in under Settings › Models.')}</span>}
         </label>
       )}
@@ -2232,11 +2236,16 @@ export function SettingsPage(): ReactNode {
                 <ModelSelect value={settings.memoryModel} onChange={(memoryModel) => updateSettings({ memoryModel })} />
               </Field>
               <Field label={L('O que ele aprende sobre você', 'What it learns about you')} hint={L('Só conta o que você disse, nunca o que um agente supôs.', 'Only what you said counts, never what an agent assumed.')}>
-                <select value={settings.memoryLearning} onChange={(e) => updateSettings({ memoryLearning: e.target.value as typeof settings.memoryLearning })}>
-                  <option value="approve">{L('Vira sugestão pra você aprovar', 'A suggestion for you to approve')}</option>
-                  <option value="auto">{L('Grava sozinho', 'Saved on its own')}</option>
-                  <option value="off">{L('Nada (só resume)', 'Nothing (just summarizes)')}</option>
-                </select>
+                <Select
+                  value={settings.memoryLearning ?? null}
+                  onChange={(v) => { if (v) updateSettings({ memoryLearning: v as typeof settings.memoryLearning }) }}
+                  options={[
+                    { value: 'approve', label: L('Vira sugestão pra você aprovar', 'A suggestion for you to approve') },
+                    { value: 'auto', label: L('Grava sozinho', 'Saved on its own') },
+                    { value: 'off', label: L('Nada (só resume)', 'Nothing (just summarizes)') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
               </Field>
             </div>
           </Card>
@@ -2311,11 +2320,16 @@ export function SettingsPage(): ReactNode {
                 />
               </Field>
               <Field label={L('Expiração de aprovações', 'Approvals expire after')}>
-                <select value={settings.approvalTtlHours} onChange={(e) => updateSettings({ approvalTtlHours: Number(e.target.value) })}>
-                  <option value="1">{L('1 hora', '1 hour')}</option>
-                  <option value="24">{L('24 horas', '24 hours')}</option>
-                  <option value="168">{L('7 dias', '7 days')}</option>
-                </select>
+                <Select
+                  value={settings.approvalTtlHours ? String(settings.approvalTtlHours) : null}
+                  onChange={(v) => { if (v) updateSettings({ approvalTtlHours: Number(v) }) }}
+                  options={[
+                    { value: '1', label: L('1 hora', '1 hour') },
+                    { value: '24', label: L('24 horas', '24 hours') },
+                    { value: '168', label: L('7 dias', '7 days') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
               </Field>
             </div>
           </Card>

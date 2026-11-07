@@ -11,6 +11,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **Long skill recipes are kept whole.** A recipe over 20,000 characters was refused when written or proposed, cut when linked from Claude Code or Codex, and left out of an imported team. Now 10,000 characters is a recommendation: past it, Tucano says by how much and keeps the whole recipe, up to a million characters.
+- **The pick lists look like the rest of the app.** Effort, model, a tool's class, the routine's agent and where it posts, and the other settings pick lists open a menu of the app's own instead of the system's, with the keyboard working as before. The model list has a filter, and on a harness with models from several providers (OpenCode, Pi), they come grouped by provider.
 
 ### Fixed
 
