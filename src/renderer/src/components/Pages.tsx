@@ -86,6 +86,7 @@ import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, 
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import { hasServers, ServersCard } from './Servers'
+import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
@@ -2379,6 +2380,7 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
+        {pane('integracoes') && window.tucano.phone && <HomePhoneCard />}
         {pane('integracoes') && (defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />)}
 
         {pane('modelos') && (
