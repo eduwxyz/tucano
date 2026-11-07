@@ -29,3 +29,40 @@ export const INSECURE_CONTEXT_SHIM = `(() => {
   }
 })();
 `
+
+// A page whose access ended (its person removed, its key no longer opening anything): the server
+// answers 401. The page then says so, plainly, in place of everything, and the bridge stops
+// reconnecting, so nothing seems to work while it silently doesn't. Defines `access` for the bridge:
+// `answer(status)` with a server's answer (true: access is gone), `check()` after the line dropped
+// for good (asks the server once; a network error is not a refusal).
+export const ACCESS_SHIM = `const access = (() => {
+  let gone = false
+  const show = () => {
+    if (gone) return
+    gone = true
+    const pt = document.documentElement.lang !== 'en'
+    const main = document.createElement('main')
+    main.style.cssText = 'font:15px system-ui;max-width:460px;margin:20vh auto 0;padding:24px;line-height:1.5'
+    const title = document.createElement('h1')
+    title.style.cssText = 'font-size:20px;margin:0 0 8px'
+    title.textContent = pt ? 'Você não tem mais acesso a este Tucano.' : 'You no longer have access to this Tucano.'
+    const why = document.createElement('p')
+    why.style.cssText = 'opacity:.8;margin:0'
+    why.textContent = pt ? 'Se foi engano, peça um novo convite a quem cuida dele.' : 'If that’s a mistake, ask whoever runs it for a new invite.'
+    main.append(title, why)
+    document.body.replaceChildren(main)
+    document.title = 'Tucano'
+  }
+  const answer = (status) => {
+    if (status === 401) show()
+    return gone
+  }
+  return {
+    get gone() {
+      return gone
+    },
+    answer,
+    check: () => fetch('./tucano-web.js', { method: 'HEAD', cache: 'no-store' }).then((r) => answer(r.status), () => gone)
+  }
+})()
+`

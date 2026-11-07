@@ -390,7 +390,8 @@ export class Browser {
           true
         )
       }
-    this.update(id, { doing: { label: doing()[name] ?? step.label, detail: step.detail } })
+    // Whose conversation it works for now: only who sees that one sees the page (people.ts).
+    this.update(id, { doing: { label: doing()[name] ?? step.label, detail: step.detail }, conversationId: ctx.conversationId })
     try {
       switch (name) {
         case 'navegador_abrir': {

@@ -8,8 +8,11 @@ import { asSaid, saidAt } from '../../../shared/types'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
-import {
+import { canEditChannel,
   agentById,
+  initials,
+  isMine,
+  personName,
   conversationTitle,
   openDialog,
   decideApproval,
@@ -52,7 +55,15 @@ import {
   isTeam,
   cancelTranscribe,
   transcribe,
-  voiceStatus
+  voiceStatus,
+  scopePerson,
+  amAdmin,
+  answerQuestion,
+  canDecide,
+  confirmQuestion,
+  personById,
+  teamMode,
+  type Person
 } from '../store'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
 import { canRecord, NoSound, record, type Recording } from '../voice'
@@ -109,6 +120,7 @@ function until(at: number): string {
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
+  const editsChannel = useStore((s) => !!conv && canEditChannel(s, conv))
   const title = useStore((s) => (conv ? conversationTitle(s, conv) : ''))
   // An archived agent stays in the channel for when it comes back, but it isn't in
   // the room: out of the stack, the count and the @ list. A DM still shows whose it is.
@@ -165,9 +177,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
                   </button>
                 ))}
                 <span className="stack__count">{members.length} {L(`agente${members.length === 1 ? '' : 's'}`, `agent${members.length === 1 ? '' : 's'}`)}</span>
-                <button className="icon-btn stack__add" title={L('Adicionar ou remover agentes', 'Add or remove agents')} onClick={() => openDialog({ kind: 'members', id })}>
-                  <Icon name="plus" size={14} />
-                </button>
+                {editsChannel && (
+                  <button className="icon-btn stack__add" title={L('Adicionar ou remover agentes', 'Add or remove agents')} onClick={() => openDialog({ kind: 'members', id })}>
+                    <Icon name="plus" size={14} />
+                  </button>
+                )}
               </div>
             )}
             <button className={`btn btn--ghost ${showSummary ? 'is-active' : ''}`} title={L('O que esta conversa já cobriu', 'What this conversation has covered')} onClick={() => setShowSummary(!showSummary)}>
@@ -195,6 +209,10 @@ const NO_REPLIES: Message[] = []
 
 // `threads`: the timeline shows only what's outside threads, and each message can start one.
 export function MessageList({ messages: all, conversationId, empty, focus, threads, lead }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string; threads?: boolean; lead?: ReactNode }): ReactNode {
+  const editsChannel = useStore((s) => {
+    const c = s.conversations.find((x) => x.id === conversationId)
+    return !!c && canEditChannel(s, c)
+  })
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const [farFromBottom, setFarFromBottom] = useState(false)
@@ -261,9 +279,11 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
           <Icon name="users" size={22} />
           <p>{L('Nenhum agente neste canal ainda.', 'No agents in this channel yet.')}</p>
           <p className="muted">{L('Quem está no canal lê a conversa e pode responder.', 'Whoever is in the channel reads the conversation and can reply.')}</p>
-          <button className="btn btn--primary btn--sm" onClick={() => openDialog({ kind: 'members', id: conversationId })}>
-            <Icon name="plus" size={14} /> {L('Adicionar agentes', 'Add agents')}
-          </button>
+          {editsChannel && (
+            <button className="btn btn--primary btn--sm" onClick={() => openDialog({ kind: 'members', id: conversationId })}>
+              <Icon name="plus" size={14} /> {L('Adicionar agentes', 'Add agents')}
+            </button>
+          )}
         </div>
       </div>
     )
@@ -299,6 +319,7 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
           !!prev &&
           prev.author.kind === m.author.kind &&
           (m.author.kind !== 'agent' || (prev.author.kind === 'agent' && prev.author.id === m.author.id)) &&
+          (m.author.kind !== 'person' || (prev.author.kind === 'person' && prev.author.id === m.author.id)) &&
           m.at - prev.at < 5 * 60_000 &&
           !m.run &&
           m.author.kind !== 'system' &&
@@ -330,7 +351,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
-  const attached = useStore((s) => (message.author.kind === 'me' ? s.artifacts.filter((a) => a.messageId === message.id && a.agentId === '') : []))
+  // Someone else's message reads with their name and initials; mine, as always.
+  const other = useStore((s) => (message.author.kind === 'person' && !isMine(s, message.author) ? personName(s, message.author.id) : undefined))
+  const attached = useStore((s) => (message.author.kind === 'person' ? s.artifacts.filter((a) => a.messageId === message.id && a.agentId === '') : []))
   // The browser shows live on the agent's latest message that used it, unless it's open on the side.
   const liveBrowser = useStore(
     (s) =>
@@ -354,11 +377,12 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
 
   if (message.author.kind === 'routine') return <RoutineMessage message={message} replies={replies} />
 
-  const name = agent ? agent.name : me.name
+  const name = agent ? agent.name : (other ?? me.name)
   return (
-    <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`}>
+    // Someone else's message reads like any other voice in the conversation: on the left, with their name.
+    <article className={`msg ${agent ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`}>
       <div className="msg__gutter">
-        {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={me.initials} size={34} />)}
+        {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={other ? initials(other) : me.initials} size={34} />)}
       </div>
       <div className="msg__body">
         {!grouped && (
@@ -395,7 +419,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ))}
           </div>
         )}
-        {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
+        {message.run?.question && <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.agentDraft && <AgentProposal message={message} />}
         {message.run?.proposal && <ProposalCard message={message} />}
@@ -512,6 +536,10 @@ const repliesLabel = (n: number): string => L(`${n} resposta${n === 1 ? '' : 's'
 function Faces({ authors, busy }: { authors: Author[]; busy: Set<string> }): ReactNode {
   const agents = useStore((s) => s.agents)
   const me = useStore((s) => s.me)
+  const you = useStore((s) => s.you)
+  const people = useStore((s) => s.people)
+  const former = useStore((s) => s.former)
+  const nameOf = (id: string): string | undefined => (isMine({ you }, { kind: 'person', id }) ? undefined : personName({ you, people, me, former }, id))
   return (
     <span className="thread-link__faces" aria-hidden>
       {authors.slice(0, 3).map((a) => {
@@ -519,7 +547,8 @@ function Faces({ authors, busy }: { authors: Author[]; busy: Set<string> }): Rea
           const agent = agents.find((x) => x.id === a.id)
           return agent ? <AgentAvatar key={a.id} agent={agent} size={18} busy={busy.has(a.id)} /> : null
         }
-        return <MeAvatar key="me" initials={me.initials} size={18} />
+        const other = a.kind === 'person' ? nameOf(a.id) : undefined
+        return <MeAvatar key={a.kind === 'person' ? a.id : 'me'} initials={other ? initials(other) : me.initials} size={18} />
       })}
     </span>
   )
@@ -530,14 +559,20 @@ function Faces({ authors, busy }: { authors: Author[]; busy: Set<string> }): Rea
 // the thread on the side. With no reply yet, the system's note says what happened.
 function ThreadLink({ message, replies }: { message: Message; replies: Message[] }): ReactNode {
   const agents = useStore((s) => s.agents)
+  const you = useStore((s) => s.you)
+  const people = useStore((s) => s.people)
+  const me = useStore((s) => s.me)
+  const former = useStore((s) => s.former)
+  const mine = (a: Author): boolean => isMine({ you }, a)
+  const someone = (id: string): string => personName({ you, people, me, former }, id)
   const open = useStore((s) => s.panel?.kind === 'thread' && s.panel.id === message.id)
   const said = replies.filter((m) => m.author.kind !== 'system')
   const done = said.filter((m) => m.run?.status !== 'working')
   const nameOf = (m: Message): string => {
     const a = m.author
-    return a.kind === 'agent' ? (agents.find((x) => x.id === a.id)?.name ?? L('agente', 'agent')) : a.kind === 'me' ? L('você', 'you') : L('rotina', 'routine')
+    return a.kind === 'agent' ? (agents.find((x) => x.id === a.id)?.name ?? L('agente', 'agent')) : a.kind === 'person' ? (mine(a) ? L('você', 'you') : someone(a.id)) : L('rotina', 'routine')
   }
-  const key = (a: Author): string => (a.kind === 'agent' ? a.id : a.kind)
+  const key = (a: Author): string => (a.kind === 'agent' || a.kind === 'person' ? `${a.kind}:${a.id}` : a.kind)
   // The latest to speak first: their face leads.
   const authors = [...new Map([...said].reverse().map((m) => [key(m.author), m.author])).values()]
   const working = said.filter((m) => m.run?.status === 'working')
@@ -548,7 +583,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
   const last = done.at(-1)
   // New: what others said after I last had the thread open (while it's open, nothing is).
   const seen = useStore((s) => s.threadSeen[message.id] ?? 0)
-  const fresh = open ? 0 : done.filter((m) => m.author.kind !== 'me' && saidAt(m) > seen).length
+  const fresh = open ? 0 : done.filter((m) => !mine(m.author) && saidAt(m) > seen).length
   const go = (): void => openThread(message.id)
   return (
     <>
@@ -567,7 +602,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
           <Faces authors={authors} busy={new Set(working.flatMap((m) => (m.author.kind === 'agent' ? [m.author.id] : [])))} />
           {asks ? (
             <span className="thread-link__asks">
-              {asks.run!.status === 'waiting_input' ? L(`${nameOf(asks)} te perguntou algo`, `${nameOf(asks)} asked you something`) : L(`${nameOf(asks)} pede aprovação`, `${nameOf(asks)} asks for approval`)}
+              {asks.run!.status === 'waiting_input' ? (asks.run!.askedTo && asks.run!.askedTo !== you ? L(`${nameOf(asks)} perguntou algo a ${someone(asks.run!.askedTo)}`, `${nameOf(asks)} asked ${someone(asks.run!.askedTo)} something`) : L(`${nameOf(asks)} te perguntou algo`, `${nameOf(asks)} asked you something`)) : L(`${nameOf(asks)} pede aprovação`, `${nameOf(asks)} asks for approval`)}
             </span>
           ) : busy.length > 0 ? (
             <span className="shimmer">{L(`${busy.join(' e ')} ${busy.length === 1 ? 'está' : 'estão'} respondendo…`, `${busy.join(' and ')} ${busy.length === 1 ? 'is' : 'are'} replying…`)}</span>
@@ -685,6 +720,8 @@ function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
 }
 
 function SummaryPanel({ conv, messages, onClose }: { conv: Conversation; messages: Message[]; onClose: () => void }): ReactNode {
+  // The agents read it as the conversation so far: a channel's is written by whoever manages it.
+  const editable = useStore((s) => conv.kind !== 'channel' || canEditChannel(s, conv))
   const since = messages.filter((m) => m.author.kind !== 'system' && m.text.trim() && m.at > (conv.summaryUntil ?? 0)).length
   return (
     <SummaryBox
@@ -699,7 +736,7 @@ function SummaryPanel({ conv, messages, onClose }: { conv: Conversation; message
         `In a thread, agents read only the thread. This summary goes to replies outside threads, like routines': they get ${conv.summary ? 'this summary and ' : ''}the ${since} messages ${conv.summary ? 'since it' : 'of the conversation'}.`
       )}
       onSummarize={() => summarizeNow(conv.id)}
-      onSave={(text) => editSummary(conv.id, text)}
+      {...(editable ? { onSave: (text: string) => editSummary(conv.id, text) } : {})}
       onClose={onClose}
     />
   )
@@ -738,7 +775,7 @@ function SummaryBox(p: {
   empty: string
   hint: string
   onSummarize: () => void
-  onSave: (text: string) => void
+  onSave?: (text: string) => void // none: read only (a channel someone else manages)
   onClose: () => void
 }): ReactNode {
   const [text, setText] = useState(p.summary ?? '')
@@ -773,11 +810,11 @@ function SummaryBox(p: {
           <Icon name="x" size={14} />
         </button>
       </div>
-      {p.summary !== undefined || changed ? <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} /> : <p className="muted small">{p.empty}</p>}
+      {p.summary !== undefined || changed ? <textarea rows={6} value={text} readOnly={!p.onSave} onChange={(e) => setText(e.target.value)} /> : <p className="muted small">{p.empty}</p>}
       <div className="row row--between">
         <span className="hint">{p.hint}</span>
-        {changed && (
-          <button className="btn btn--sm btn--primary" onClick={() => p.onSave(text)}>
+        {changed && p.onSave && (
+          <button className="btn btn--sm btn--primary" onClick={() => p.onSave?.(text)}>
             {L('Salvar resumo', 'Save summary')}
           </button>
         )}
@@ -796,7 +833,7 @@ function MemoryChip({ id }: { id: string }): ReactNode {
       <Icon name="book" size={13} />
       <span className="memory-chip__label">{label}:</span>
       <span className="memory-chip__text">{memory.text}</span>
-      {memory.scope !== 'me' && <span className="tag">{L('nota dele', 'its own note')}</span>}
+      {!scopePerson(memory.scope) && <span className="tag">{L('nota dele', 'its own note')}</span>}
       {memory.state === 'active' && (
         <button className="link" onClick={() => forgetMemory(id)}>
           {L('Desfazer', 'Undo')}
@@ -839,12 +876,98 @@ function RoutineChip({ id }: { id: string }): ReactNode {
   )
 }
 
-function QuestionCard({ question, answered }: { question: string; answered: boolean }): ReactNode {
+// A question an agent asked (ask_user). Alone (a desktop), it's mine: my next message answers it.
+// With a team it says whom it's for; who may answer it (the person, whoever covers for them, an
+// admin, or past the deadline the requester) gets a field; in my DM, a question to someone else
+// first asks me whether it may go.
+// What someone was typing to answer a question, kept by question: if someone else answers first,
+// or the card moves (Pra você drops it), it's still there, with who answered.
+export const questionDrafts = new Map<string, string>()
+
+export function QuestionCard({ id, agentName, askedTo, question, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; question: string; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+  const team = useStore(teamMode)
+  const you = useStore((s) => s.you)
+  const admin = useStore(amAdmin)
+  const waiting = useStore((s) => s.inbox.questions.find((q) => q.id === id))
+  const target = useStore((s) => personById(s, askedTo ?? waiting?.askedTo))
+  const answerer = useStore((s) => (answeredBy && answeredBy !== s.you ? personById(s, answeredBy) : undefined))
+  const [text, setTextState] = useState(() => questionDrafts.get(id) ?? '')
+  const setText = (t: string): void => {
+    if (t) questionDrafts.set(id, t)
+    else questionDrafts.delete(id)
+    setTextState(t)
+  }
+  const [error, setError] = useState('')
+  const [sending, setSending] = useState(false)
+  const who = agentName ?? L('O agente', 'The agent')
+  if (!team || !target)
+    return (
+      <div className={`question ${answered ? 'is-answered' : ''}`}>
+        <span className="question__label">{answered ? L('Perguntou', 'Asked') : L('Pergunta pra você', 'A question for you')}</span>
+        <p>{question}</p>
+        {!answered && <span className="hint">{L('Sua próxima mensagem aqui é a resposta.', 'Your next message here is the answer.')}</span>}
+      </div>
+    )
+  const toMe = target.id === you
+  if (answered)
+    return (
+      <div className="question is-answered">
+        <span className="question__label">
+          {toMe ? L('Perguntou', 'Asked') : L(`Perguntou a ${target.name}`, `Asked ${target.name}`)}
+          {answerer && ` · ${L(`Respondida por ${answerer.name}`, `Answered by ${answerer.name}`)}`}
+        </span>
+        <p>{question}</p>
+        {/* Answered by someone else while this person was typing: what they wrote stays, and says why it didn't go. */}
+        {text.trim() && (
+          <>
+            <input className="grow" readOnly value={text} aria-label={L('Sua resposta (não enviada)', 'Your answer (not sent)')} />
+            {!answerer && <span className="note note--error">{error || L('Essa pergunta já foi respondida.', 'That question was already answered.')}</span>}
+          </>
+        )}
+      </div>
+    )
+  if (waiting?.confirm === 'pending')
+    return (
+      <div className="question">
+        <span className="question__label">{L(`${who} quer perguntar a ${target.name}`, `${who} wants to ask ${target.name}`)}</span>
+        <p>{question}</p>
+        <span className="hint">{L(`${target.name} vê só a pergunta, nunca esta conversa.`, `${target.name} sees the question only, never this conversation.`)}</span>
+        <div className="row question__actions">
+          <button className="btn btn--primary btn--sm" onClick={() => confirmQuestion(id, true)}>
+            {L(`Pode perguntar a ${target.name}`, `Go ahead and ask ${target.name}`)}
+          </button>
+          <button className="btn btn--sm" onClick={() => confirmQuestion(id, false)}>
+            {L('Não pergunte', "Don't ask")}
+          </button>
+        </div>
+      </div>
+    )
+  const mayAnswer = !!waiting || admin
+  const send = (): void => {
+    if (!text.trim()) return
+    setSending(true)
+    answerQuestion(id, text.trim()).then(
+      () => setText(''),
+      (e: unknown) => (setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)), setSending(false))
+    )
+  }
   return (
-    <div className={`question ${answered ? 'is-answered' : ''}`}>
-      <span className="question__label">{answered ? L('Perguntou', 'Asked') : L('Pergunta pra você', 'A question for you')}</span>
+    <div className="question">
+      <span className="question__label">{toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)}</span>
       <p>{question}</p>
-      {!answered && <span className="hint">{L('Sua próxima mensagem aqui é a resposta.', 'Your next message here is the answer.')}</span>}
+      {toMe && !inbox ? (
+        <span className="hint">{L('Sua próxima mensagem aqui é a resposta.', 'Your next message here is the answer.')}</span>
+      ) : mayAnswer ? (
+        <form className="row question__answer" onSubmit={(e) => (e.preventDefault(), send())}>
+          <input className="grow" value={text} placeholder={toMe ? L('Sua resposta', 'Your answer') : L(`Responder no lugar de ${target.name}`, `Answer for ${target.name}`)} onChange={(e) => (setText(e.target.value), setError(''))} />
+          <button className="btn btn--primary btn--sm" disabled={sending || !text.trim()}>
+            {L('Responder', 'Answer')}
+          </button>
+        </form>
+      ) : (
+        <span className="hint">{L(`Esperando ${target.name} responder.`, `Waiting for ${target.name} to answer.`)}</span>
+      )}
+      {error && <span className="note note--error">{error}</span>}
     </div>
   )
 }
@@ -1015,6 +1138,13 @@ function ReceiptLine({ receipt }: { receipt: NonNullable<NonNullable<Message['ru
 export function ApprovalCard({ approval, compact }: { approval: Approval; compact?: boolean }): ReactNode {
   const agent = useStore((s) => agentById(s, approval.agentId))
   const me = useStore((s) => s.me)
+  // With a team: who asked, whose decision it is, and who decided; only who may decide gets buttons.
+  const team = useStore(teamMode)
+  const you = useStore((s) => s.you)
+  const mayDecide = useStore((s) => canDecide(s, approval))
+  const decider = useStore((s) => personById(s, agent?.owner))
+  const requester = useStore((s) => personById(s, approval.requestedBy))
+  const decidedBy = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : me.name))
   const [refusing, setRefusing] = useState(false)
   const [reason, setReason] = useState('')
   const summary = argSummary(approval.args)
@@ -1037,7 +1167,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
       <div className="approval__head">
         <span className="approval__badge">
           <Icon name="shield" size={13} />
-          {approval.state === 'pending' ? L('Esperando você', 'Waiting for you') : approval.state === 'approved' ? L('Aprovado', 'Approved') : approval.state === 'refused' ? L('Recusado', 'Refused') : L('Expirado', 'Expired')}
+          {approval.state === 'pending' ? (mayDecide ? L('Esperando você', 'Waiting for you') : L('Esperando aprovação', 'Waiting for approval')) : approval.state === 'approved' ? L('Aprovado', 'Approved') : approval.state === 'refused' ? L('Recusado', 'Refused') : L('Expirado', 'Expired')}
         </span>
         {approval.highRisk && <span className="tag tag--danger">{L('alto risco', 'high risk')}</span>}
       </div>
@@ -1079,6 +1209,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         )}
       </div>
       {approval.why && <p className="approval__why">{approval.why}</p>}
+      {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
       {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && summary.shown.length > 0 && (
         <div className="approval__args small">
@@ -1106,10 +1237,16 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
 
       {decided ? (
         <div className="approval__decided">
-          {approval.state === 'expired' ? L('Expirou sem decisão', 'Expired without a decision') : L(`${approval.state === 'approved' ? 'Aprovado' : 'Recusado'} por ${me.name}`, `${approval.state === 'approved' ? 'Approved' : 'Refused'} by ${me.name}`)}
+          {approval.state === 'expired' ? L('Expirou sem decisão', 'Expired without a decision') : L(`${approval.state === 'approved' ? 'Aprovado' : 'Recusado'} por ${decidedBy}`, `${approval.state === 'approved' ? 'Approved' : 'Refused'} by ${decidedBy}`)}
           {approval.decidedAt ? ` · ${time(approval.decidedAt)}` : ''}
           {approval.reason ? ` · “${approval.reason}”` : ''}
           {approval.outcome ? ` · ${approval.outcome}` : ''}
+        </div>
+      ) : !mayDecide ? (
+        <div className="approval__decided">
+          {approval.requestedBy === you
+            ? L(`Você pediu. Esperando ${decider?.name ?? 'um admin'} decidir.`, `You asked. Waiting for ${decider?.name ?? 'an admin'} to decide.`)
+            : L(`Esperando ${decider?.name ?? 'um admin'} decidir. Só ${decider ? `${decider.name} e os admins aprovam` : 'os admins aprovam'}.`, `Waiting for ${decider?.name ?? 'an admin'} to decide. Only ${decider ? `${decider.name} and the admins approve` : 'the admins approve'}.`)}
         </div>
       ) : refusing ? (
         <form
@@ -1167,6 +1304,30 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+// "Ana Souza" → "ana" (or "anasouza" when another Ana is here): how the core finds a person by @.
+const fold = (t: string): string => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+function peopleHandles(people: Person[]): { person: Person; handle: string }[] {
+  const words = people.map((p) => fold(p.name).split(/\s+/).map((w) => w.replace(/[^a-z0-9_-]/g, '')).filter(Boolean))
+  return people.map((person, i) => {
+    const first = words[i]![0] ?? ''
+    const shared = words.filter((w) => w[0] === first).length > 1
+    return { person, handle: shared ? words[i]!.join('') : first }
+  })
+}
+
+// Whose request it is and whose decision: "Pedido do Bruno · Vai pro Edu, dono do Leo", or a routine's.
+function ApprovalRoute({ approval, agent, requester, decider, you }: { approval: Approval; agent?: Agent; requester?: Person; decider?: Person; you: string }): ReactNode {
+  const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
+  const asked = approval.behalf ? cap(approval.behalf) : requester ? (requester.id === you ? L('Pedido seu', 'Your request') : L(`Pedido de ${requester.name}`, `Asked by ${requester.name}`)) : undefined
+  const goes = decider ? (decider.id === you ? L(`Vai pra você, dono de ${agent?.name ?? 'o agente'}`, `Goes to you, ${agent?.name ?? 'the agent'}'s owner`) : L(`Vai pra ${decider.name}, dono de ${agent?.name ?? 'o agente'}`, `Goes to ${decider.name}, ${agent?.name ?? 'the agent'}'s owner`)) : L('Vai pros admins', 'Goes to the admins')
+  return (
+    <div className="approval__route">
+      {asked && <span className="tag">{asked}</span>}
+      <span className="tag">{goes}</span>
     </div>
   )
 }
@@ -1485,11 +1646,16 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const agents = useStore((s) => s.agents)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
+  const team = useStore(teamMode)
+  const people = useStore((s) => s.people)
+  const you = useStore((s) => s.you)
   // Replies at work and questions asked here: in this thread, or outside threads.
   const here = (m: Message): boolean => m.conversationId === conversationId && m.threadId === threadId
   const working = useStore((s) => s.messages.filter((m) => here(m) && m.author.kind === 'agent' && m.run?.status === 'working'))
+  // With a team, only a question my message would answer (mine, or one I may answer) asks me here.
   const asker = useStore((s) => {
     const q = s.messages.findLast((m) => here(m) && m.run?.status === 'waiting_input')
+    if (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending')) return undefined
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
   })
 
@@ -1628,9 +1794,12 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     )
   })
 
-  const options = mention
+  const agentOptions = mention
     ? members.filter((a) => a.handle.startsWith(mention.query.toLowerCase()) || a.name.toLowerCase().startsWith(mention.query.toLowerCase()))
     : []
+  // With a team, the people too (not in a DM: no one else reads it), by the handle the core knows them by.
+  const personOptions = mention && !isDm && team ? peopleHandles(people).filter((x) => x.person.id !== you && x.handle.startsWith(fold(mention.query))) : []
+  const options: { key: string; handle: string; agent?: Agent; person?: Person }[] = [...agentOptions.map((a) => ({ key: a.id, handle: a.handle, agent: a })), ...personOptions.map((x) => ({ key: x.person.id, handle: x.handle, person: x.person }))]
   const outsiders = mention ? allAgents.filter((a) => !members.includes(a) && a.handle.startsWith(mention.query.toLowerCase())) : []
 
   const updateMention = (value: string, caret: number): void => {
@@ -1642,7 +1811,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     } else setMention(null)
   }
 
-  const pick = (a: Agent): void => {
+  const pick = (a: { handle: string }): void => {
     if (!mention) return
     const caret = ref.current?.selectionStart ?? text.length
     const next = `${text.slice(0, mention.start)}@${a.handle} ${text.slice(caret)}`
@@ -1696,19 +1865,19 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       )}
       {mention && (options.length > 0 || outsiders.length > 0) && (
         <div className="mention-menu" role="listbox">
-          {options.map((a, i) => (
+          {options.map((o, i) => (
             <button
-              key={a.id}
+              key={o.key}
               className={`mention-menu__item ${i === active ? 'is-active' : ''}`}
               onMouseDown={(e) => {
                 e.preventDefault()
-                pick(a)
+                pick(o)
               }}
             >
-              <AgentAvatar agent={a} size={20} />
-              <strong>{a.name}</strong>
-              <span className="muted">@{a.handle}</span>
-              <span className="mention-menu__role">{a.role}</span>
+              {o.agent ? <AgentAvatar agent={o.agent} size={20} /> : <MeAvatar initials={initials(o.person!.name)} size={20} />}
+              <strong>{o.agent?.name ?? o.person!.name}</strong>
+              <span className="muted">@{o.handle}</span>
+              <span className="mention-menu__role">{o.agent ? o.agent.role : o.person!.about || L('pessoa', 'person')}</span>
             </button>
           ))}
           {outsiders.length > 0 && (

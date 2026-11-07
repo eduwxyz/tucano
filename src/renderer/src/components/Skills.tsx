@@ -23,9 +23,11 @@ import {
   type SkillInput,
   type SkillReport,
   type SkillVersion,
-  isTeam
+  isTeam,
+  amAdmin
 } from '../store'
 import { Card, Field, Sheet } from './Pages'
+import { AdminOnly } from './People'
 import { confirmDialog } from './Dialogs'
 import { ago, AgentAvatar, Icon, time } from './ui'
 import { Modal } from './Modal'
@@ -45,7 +47,12 @@ function result(r?: SkillReport): string {
 
 const from = (k: Skill): string => (k.source ? L(`do seu ${k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}`, `from your ${k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}`) : L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`))
 
+// Skills are the admins': a member reads them (what the agents follow), changes nothing.
 export function SkillsPage(): ReactNode {
+  return <Skills admin={useStore(amAdmin)} />
+}
+
+function Skills({ admin }: { admin: boolean }): ReactNode {
   const skills = useStore((s) => s.skills)
   const [place, setPlace] = useState<Place>({ kind: 'list' })
   const [draft, setDraft] = useState<SkillInput | null>(null)
@@ -53,8 +60,8 @@ export function SkillsPage(): ReactNode {
   const [showArchived, setShowArchived] = useState(false)
   const [stats, setStats] = useState<SkillReport[]>([])
   useEffect(() => {
-    void loadReport().then((r) => setStats(r.skills))
-  }, [skills.length])
+    if (admin) void loadReport().then((r) => setStats(r.skills), () => {})
+  }, [skills.length, admin])
 
   const pending = skills.filter((k) => k.state === 'pending')
   const active = skills.filter((k) => k.state === 'active')
@@ -91,17 +98,20 @@ export function SkillsPage(): ReactNode {
       title="Skills"
       lede={L('Receitas que os agentes seguem pra um tipo de tarefa.', 'Recipes the agents follow for a kind of task.')}
       actions={
-        <>
-          <button className="text-btn" onClick={() => setAdding(true)}>
-            {L('Buscar skills existentes', 'Find existing skills')}
-          </button>
-          <button className="btn btn--primary btn--sm" onClick={() => setDraft({ name: '', description: '', body: '', agents: [] })}>
-            <Icon name="plus" size={14} /> {L('Nova skill', 'New skill')}
-          </button>
-        </>
+        admin && (
+          <>
+            <button className="text-btn" onClick={() => setAdding(true)}>
+              {L('Buscar skills existentes', 'Find existing skills')}
+            </button>
+            <button className="btn btn--primary btn--sm" onClick={() => setDraft({ name: '', description: '', body: '', agents: [] })}>
+              <Icon name="plus" size={14} /> {L('Nova skill', 'New skill')}
+            </button>
+          </>
+        )
       }
     >
-      {pending.length > 0 && (
+      {!admin && <AdminOnly>{L('Só um admin cria, aprova ou muda skills.', 'Only an admin creates, approves or changes skills.')}</AdminOnly>}
+      {admin && pending.length > 0 && (
         <div className="notice-line">
           <span>
             <b>{pending.length}</b> {pending.length === 1 ? L('proposta dos agentes esperando você', 'proposal from the agents waiting for you') : L('propostas dos agentes esperando você', 'proposals from the agents waiting for you')}
@@ -133,7 +143,7 @@ export function SkillsPage(): ReactNode {
         </section>
       )}
 
-      {archived.length > 0 && (
+      {admin && archived.length > 0 && (
         <section className="read-group">
           <h2>
             <button onClick={() => setShowArchived(!showArchived)}>
@@ -177,6 +187,7 @@ export function SkillsPage(): ReactNode {
 // One skill as a page: when to use it, who does, how it's going, the recipe and its history.
 function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: SkillReport; onBack: () => void; onEdit: () => void }): ReactNode {
   const [picking, setPicking] = useState(false)
+  const admin = useStore(amAdmin)
   const setAgents = (agents: string[]): void => void saveSkill({ id: k.id, name: k.name, description: k.description, body: k.body, agents, source: k.source })
   const changed = stat?.changedAt && stat.before && stat.since && stat.before.replies + stat.since.replies > 0
   const pct = (r: { replies: number; ok: number }): string => (r.replies ? `${Math.round((r.ok / r.replies) * 100)}%` : '—')
@@ -186,14 +197,16 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
       title={k.name}
       lede={k.description}
       actions={
-        <>
-          <button className="text-btn" onClick={onEdit}>
-            {L('Editar', 'Edit')}
-          </button>
-          <button className="text-btn" onClick={() => (archiveSkill(k.id, true), onBack())}>
-            {L('Arquivar', 'Archive')}
-          </button>
-        </>
+        admin && (
+          <>
+            <button className="text-btn" onClick={onEdit}>
+              {L('Editar', 'Edit')}
+            </button>
+            <button className="text-btn" onClick={() => (archiveSkill(k.id, true), onBack())}>
+              {L('Arquivar', 'Archive')}
+            </button>
+          </>
+        )
       }
     >
       <dl className="skill-facts">
@@ -201,9 +214,11 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
           <dt>{L('Quem usa', 'Who uses it')}</dt>
           <dd>
             <Who ids={k.agents} />
-            <button className="text-btn" onClick={() => setPicking(!picking)}>
-              {picking ? L('pronto', 'done') : L('mudar', 'change')}
-            </button>
+            {admin && (
+              <button className="text-btn" onClick={() => setPicking(!picking)}>
+                {picking ? L('pronto', 'done') : L('mudar', 'change')}
+              </button>
+            )}
           </dd>
         </div>
         <div>
@@ -238,7 +253,7 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
           <p className="read-empty">{L(`A receita é lida de ${k.source} a cada uso.`, `The recipe is read from ${k.source} on every use.`)}</p>
         )}
       </section>
-      {!k.source && (
+      {admin && !k.source && (
         <section className="read-group">
           <h2>{L('Histórico', 'History')}</h2>
           <History skill={k} />

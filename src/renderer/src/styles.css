@@ -2079,6 +2079,23 @@ h3 {
 .table__row:last-child {
   border-bottom: 0;
 }
+/* "Pra você" history: a long tool name wraps inside its own column, the rest keeps its size. */
+.history-row__what {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.history-row > :not(.history-row__what):not(.history-row__outcome) {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.history-row__outcome {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .table > .table__row {
   animation: rise var(--dur-enter) var(--ease-out) backwards;
 }
@@ -8291,3 +8308,117 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 [data-os='mac'] .server-bar { padding-left: 84px; }
 .server-bar__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .workspace-picker__head--servers { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 8px; }
+
+/* ---------- Tucano with a team: who I am, people, activity ---------- */
+.me-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--text);
+}
+.me-row:hover {
+  background: var(--hover);
+}
+.me-row__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+.me-row__who strong {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.me-row__who span {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.row--end {
+  justify-content: flex-end;
+}
+.approval__route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.question__actions,
+.question__answer {
+  margin-top: 8px;
+  gap: 8px;
+}
+.question__answer input {
+  min-width: 0;
+}
+.admin-only {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+.person-row__who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.person-row__role {
+  width: auto;
+}
+.invite-link {
+  gap: 8px;
+  width: 100%;
+}
+.invite-link input {
+  font-size: 12px;
+}
+.cover-row {
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.cover-row select,
+.cover-row input {
+  width: auto;
+}
+.activity-filters {
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.activity-filters select {
+  width: auto;
+}
+.activity-list__app {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.member-lock {
+  display: contents;
+}
+@media (max-width: 640px) {
+  .person-row {
+    flex-wrap: wrap;
+  }
+}
+.admin-only--lead .admin-only {
+  margin: 0 0 14px;
+}
+
+/* The heritage: what changed when the Tucano got its second person, and the pages held for its owner. */
+.wk-heritage { margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); font-size: 13px; }
+.wk-heritage p { margin: 0 0 6px; line-height: 1.5; }
+.wk-heritage p .text-btn { margin-left: 8px; }
+.wk-heritage h5 { margin: 8px 0 4px; font-size: 12px; opacity: .8; }
+.wk-heritage ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.wk-heritage li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
