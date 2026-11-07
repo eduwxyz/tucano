@@ -1,4 +1,6 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
+import { runnerRules } from '../../../shared/classify'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
@@ -84,6 +86,7 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal, ProposalCard } from './Tuca'
 import { FoldToggle } from './Fold'
+import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -177,10 +180,18 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            <button className="topbar__name" title={conv.kind === 'channel' ? L('Configurações do canal', 'Channel settings') : L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
-              {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
-              <h1>{title}</h1>
-            </button>
+            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card (its settings: the gear on the right, or the card). */}
+            {dmAgent ? (
+              <AgentCardButton agentId={dmAgent.id} settingsOf={id} below className="topbar__name" title={L(`Perfil de ${dmAgent.name}`, `${dmAgent.name}’s profile`)}>
+                <AgentAvatar agent={dmAgent} size={22} />
+                <h1>{title}</h1>
+              </AgentCardButton>
+            ) : (
+              <button className="topbar__name" title={L('Configurações do canal', 'Channel settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+                <Icon name="hash" />
+                <h1>{title}</h1>
+              </button>
+            )}
             {dmAgent?.role && (
               <span className="tag topbar__role" title={dmAgent.role}>
                 {dmAgent.role}
@@ -192,9 +203,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
             {conv.kind === 'channel' && (
               <div className="stack" title={L('Agentes no canal', 'Agents in the channel')}>
                 {members.map((a) => (
-                  <button key={a.id} className="stack__item" onClick={() => navigate({ kind: 'agent', id: a.id })} title={a.name}>
+                  <AgentCardButton key={a.id} agentId={a.id} below className="stack__item" title={a.name}>
                     <AgentAvatar agent={a} size={24} />
-                  </button>
+                  </AgentCardButton>
                 ))}
                 <span className="stack__count">{members.length} {L(`agente${members.length === 1 ? '' : 's'}`, `agent${members.length === 1 ? '' : 's'}`)}</span>
                 {editsChannel && (
@@ -208,8 +219,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
             </button>
             {dmAgent && (
-              <button className="btn btn--ghost" onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
-                {L('Ver perfil', 'See profile')}
+              <button className="icon-btn" title={L('Configurações da conversa', 'Conversation settings')} aria-label={L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+                <Icon name="gear" size={16} />
               </button>
             )}
           </div>
@@ -441,15 +452,24 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
     // Someone else's message reads like any other voice in the conversation: on the left, with their name.
     <article className={`msg ${agent ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
-        {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={other ? initials(other) : me.initials} size={34} />)}
+        {!grouped &&
+          (agent?.kind === 'removed' ? (
+            <AgentAvatar agent={agent} size={34} />
+          ) : agent ? (
+            <AgentCardButton agentId={agent.id} className="msg__face" tabIndex={-1} label={L(`Perfil de ${agent.name}`, `${agent.name}’s profile`)}>
+              <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} />
+            </AgentCardButton>
+          ) : (
+            <MeAvatar initials={other ? initials(other) : me.initials} size={34} />
+          ))}
       </div>
       <div className="msg__body">
         {!grouped && (
           <div className="msg__head">
             {agent && agent.kind !== 'removed' ? (
-              <button className="msg__author link" onClick={() => navigate({ kind: 'agent', id: agent.id })}>
+              <AgentCardButton agentId={agent.id} className="msg__author link">
                 {name}
-              </button>
+              </AgentCardButton>
             ) : (
               <span className="msg__author">{name}</span>
             )}
@@ -1048,10 +1068,10 @@ function Mention({ handle }: { handle: string }): ReactNode {
   const agent = useStore((s) => s.agents.find((a) => a.handle.toLowerCase() === handle.toLowerCase()))
   if (!agent) return <strong>@{handle}</strong>
   return (
-    <button className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name} onClick={() => navigate({ kind: 'agent', id: agent.id })}>
+    <AgentCardButton agentId={agent.id} className={`mention c-${agent.color}`} style={ownColor(agent)} title={agent.role ? `${agent.name} · ${agent.role}` : agent.name}>
       <AgentAvatar agent={agent} size={16} />
       <span>@{agent.handle}</span>
-    </button>
+    </AgentCardButton>
   )
 }
 const plainMarkdown = { pre: CodeBlock, a: (p: { href?: string; children?: ReactNode }) => <WikiLink href={p.href}>{p.children}</WikiLink>, span: MentionSpan }
@@ -1213,6 +1233,11 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const [refusing, setRefusing] = useState(false)
   const [reason, setReason] = useState('')
   const summary = argSummary(approval.args)
+  // A runner's call (Composio's): the actions it runs are what's being approved.
+  const runner = isRunner(approval.tool)
+  const actions = runner ? innerActions(approval.tool, approval.args) : undefined
+  // What "always allow" covers there: each inner tool that asked, on its own (none for a raw request or code).
+  const forGood = runner ? runnerRules(approval.connectorId, approval.tool, approval.args)?.map((r) => r.slice(r.indexOf(':') + 1)) : undefined
   // Hold to approve: CSS fills the button in 1.5s (.is-holding); the approval goes when
   // that fill ends while still held. Letting go drains it back. Space or Enter hold too.
   const [holding, setHolding] = useState(false)
@@ -1273,10 +1298,26 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           </>
         )}
       </div>
+      {runner && (
+        <div className="approval__args small">
+          {actions ? (
+            <>
+              <p className="muted">{L(`${actions.length === 1 ? 'Ação' : `${actions.length} ações`} que esta chamada roda:`, `${actions.length === 1 ? 'The action' : `${actions.length} actions`} this call runs:`)}</p>
+              {actions.map((a, i) => (
+                <p key={i}>
+                  <code>{actionLabel(a)}</code>
+                </p>
+              ))}
+            </>
+          ) : (
+            <p>{L('Chamada fora do formato documentado: confira os detalhes exatos antes de aprovar.', 'A call outside the documented shape: check the exact details before approving.')}</p>
+          )}
+        </div>
+      )}
       {approval.why && <p className="approval__why">{approval.why}</p>}
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
-      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && summary.shown.length > 0 && (
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !runner && summary.shown.length > 0 && (
         <div className="approval__args small">
           {summary.shown.map(([k, v], i) => (
             <p key={i}>
@@ -1357,9 +1398,21 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
                 {L('Aprovar', 'Approve')}
               </button>
-              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (
+              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && (
                 <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
+                </button>
+              )}
+              {forGood && (
+                <button
+                  className="btn"
+                  title={L(
+                    `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
+                    `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call. Other actions still ask. You can take it back on its page.`
+                  )}
+                  onClick={() => decideApproval(approval.id, 'approved', undefined, true)}
+                >
+                  {L(`Aprovar e sempre permitir ${forGood.join(', ')}`, `Approve and always allow ${forGood.join(', ')}`)}
                 </button>
               )}
             </>

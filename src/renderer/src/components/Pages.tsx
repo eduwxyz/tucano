@@ -38,6 +38,8 @@ import {
   EFFORTS,
   ENGINES,
   MAX_AGENT_ROUTINES,
+  MAX_CHAIN_DEPTH,
+  chainDepthCap,
   RUN_BUDGET_PCT,
   routineCap,
   RUN_STALL_MINUTES,
@@ -72,13 +74,15 @@ import { voiceRefusal } from '../../../shared/voice'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
-import { ConnectorGrid, OwnAppSetup } from './ConnectorStore'
+import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
+import { perCallTool } from '../../../shared/composio'
 import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
 import { confirmDeleteAgent, confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import { hasServers, ServersCard } from './Servers'
 import { useWorkspaceList } from './Workspaces'
@@ -723,13 +727,12 @@ function AgentForm({ id, draft: proposed, fromMessage }: AgentPageProps): ReactN
                 {/* Cursor's models carry the effort in the name (…-high, …-xhigh): no separate pick. */}
                 {engine !== 'cursor' && (
                   <Field label={L('Esforço de raciocínio', 'Reasoning effort')} hint={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
-                    <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
-                      {EFFORTS.map((ef) => (
-                        <option key={ef.id} value={ef.id}>
-                          {ef.label}
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      value={draft.effort ?? null}
+                      onChange={(v) => { if (v) patch({ effort: v as Agent['effort'] }) }}
+                      options={EFFORTS.map((ef) => ({ value: ef.id, label: ef.label }))}
+                      placeholder={L('Escolha o esforço', 'Pick an effort')}
+                    />
                   </Field>
                 )}
                 <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you.`)}>
@@ -1328,8 +1331,8 @@ export function ConnectorsPage(): ReactNode {
     <Page
       title={L('Conectores', 'Connectors')}
       subtitle={L(
-        'Os serviços com que seus agentes trabalham. O login é pelo navegador e o acesso fica neste computador; cada chamada dos agentes passa pelas permissões e aprovações.',
-        'The services your agents work with. You sign in through the browser and the access stays on this computer; every call the agents make goes through permissions and approvals.'
+        'Os serviços com que seus agentes trabalham. O login é pelo navegador e o acesso fica neste computador (menos nos que passam por terceiros, como a Composio); cada chamada dos agentes passa pelas permissões e aprovações.',
+        'The services your agents work with. You sign in through the browser and the access stays on this computer (except for those that go through a third party, like Composio); every call the agents make goes through permissions and approvals.'
       )}
       actions={
         !adding && (
@@ -1357,7 +1360,8 @@ export function ConnectorsPage(): ReactNode {
 // A connector's state, who uses it and its tools, in a window over the page.
 function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void }): ReactNode {
   const users = useStore((s) => s.agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none'))
-  const own = entryOf(c)?.app // signs in with the person's own app: it can be changed here
+  const entry = entryOf(c)
+  const own = entry?.app // signs in with the person's own app: it can be changed here
   const [changing, setChanging] = useState(false)
   return (
     <Modal title={c.name} onClose={onClose} className="connector-modal">
@@ -1375,6 +1379,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
             L('Nenhum agente usa ainda. Dê acesso na página de cada agente, em Ferramentas.', "No agent uses it yet. Give access on each agent's page, under Tools.")
           )}
         </p>
+        {entry?.warning && <ThirdPartyWarning text={entry.warning()} />}
         {c.kind === 'stdio' && (
           <p className="warn-box">
             <Icon name="terminal" size={14} /> {L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}
@@ -1425,28 +1430,37 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
             <span>{L('Ligada', 'On')}</span>
           </div>
         )}
-        {c.tools.map((t) => (
-          <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
-            <code>
-              {t.name}
-              {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
-            </code>
-            <select value={t.cls} onChange={(e) => updateTool(c.id, t.name, { cls: e.target.value as ToolClass })}>
-              {(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => (
-                <option key={k} value={k}>
-                  {CLASS_LABEL()[k]}
-                </option>
-              ))}
-            </select>
-            <input
-              type="checkbox"
-              disabled={t.cls !== 'sensitive'}
-              checked={t.highRisk && t.cls === 'sensitive'}
-              onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
-            />
-            <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
-          </div>
-        ))}
+        {c.tools.map((t) => {
+          // A runner (Composio's) has no class of its own: each call counts as what it runs.
+          const runner = perCallTool(c.url, t.name)
+          return (
+            <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
+              <code>
+                {t.name}
+                {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
+              </code>
+              {runner ? (
+                <span className="small muted" title={L('Leituras rodam na hora; escritas pedem acesso de escrita; ações sensíveis pedem aprovação a cada chamada.', 'Reads run right away; writes need write access; sensitive actions ask for approval on each call.')}>
+                  {L('por chamada', 'per call')}
+                </span>
+              ) : (
+                <Select
+                  value={t.cls ?? null}
+                  onChange={(v) => { if (v) updateTool(c.id, t.name, { cls: v as ToolClass }) }}
+                  options={(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
+                  placeholder={L('Escolha a classe', 'Pick a class')}
+                />
+              )}
+              <input
+                type="checkbox"
+                disabled={t.cls !== 'sensitive' && !runner}
+                checked={t.highRisk && (t.cls === 'sensitive' || runner)}
+                onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
+              />
+              <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
+            </div>
+          )
+        })}
         <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
       </div>
       {changing && own && <OwnAppSetup provider={own.provider} onClose={() => setChanging(false)} />}
@@ -1511,11 +1525,16 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
             <input value={url} placeholder="https://mcp.linear.app/mcp" onChange={(e) => setUrl(e.target.value)} />
           </Field>
           <Field label={L('Autenticação', 'Authentication')}>
-            <select value={auth} onChange={(e) => setAuth(e.target.value as ConnectorAuth)}>
-              <option value="oauth">{L('OAuth (abre o navegador pra autorizar)', 'OAuth (opens the browser to authorize)')}</option>
-              <option value="token">{L('Token (cabeçalho Authorization: Bearer)', 'Token (Authorization: Bearer header)')}</option>
-              <option value="none">{L('Nenhuma', 'None')}</option>
-            </select>
+            <Select
+              value={auth ?? null}
+              onChange={(v) => { if (v) setAuth(v as ConnectorAuth) }}
+              options={[
+                { value: 'oauth', label: L('OAuth (abre o navegador pra autorizar)', 'OAuth (opens the browser to authorize)') },
+                { value: 'token', label: L('Token (cabeçalho Authorization: Bearer)', 'Token (Authorization: Bearer header)') },
+                { value: 'none', label: L('Nenhuma', 'None') }
+              ]}
+              placeholder={L('Escolha a autenticação', 'Pick an authentication')}
+            />
           </Field>
           {auth === 'token' && (
             <Field label="Token" hint={L('Ou uma referência do 1Password (op://Cofre/Item/campo), lida a cada conexão.', 'Or a 1Password reference (op://Vault/Item/field), read on each connection.')}>
@@ -1697,15 +1716,15 @@ function ReserveModel({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent
       {on && reserve && reserveAccounts.length > 0 && (
         <label className="field">
           <span className="field__label">{L('Conta da reserva', 'Reserve account')}</span>
-          <select value={reserveAccount?.id ?? ''} onChange={(e) => patch({ fallbackAccountId: e.target.value || undefined })}>
-            <option value="">{L(`A de sempre do ${ENGINES[reserve.engine].label}`, `${ENGINES[reserve.engine].label}’s usual one`)}</option>
-            {reserveAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-                {a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={reserveAccount?.id ?? null}
+            onChange={(v) => patch({ fallbackAccountId: v || undefined })}
+            options={[
+              { value: '', label: L(`A de sempre do ${ENGINES[reserve.engine].label}`, `${ENGINES[reserve.engine].label}’s usual one`) },
+              ...reserveAccounts.map((a) => ({ value: a.id, label: a.name + (a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')) }))
+            ]}
+            placeholder={L(`A de sempre do ${ENGINES[reserve.engine].label}`, `${ENGINES[reserve.engine].label}’s usual one`)}
+          />
           {reserveAccount && !reserveAccount.loggedIn && <span className="hint hint--warn">{L('Essa conta ainda não entrou: a reserva só funciona depois que você entrar nela em Configurações › Modelos.', 'This account isn’t signed in yet: the reserve only works once you sign in under Settings › Models.')}</span>}
         </label>
       )}
@@ -2248,11 +2267,16 @@ export function SettingsPage(): ReactNode {
                 <ModelSelect value={settings.memoryModel} onChange={(memoryModel) => updateSettings({ memoryModel })} />
               </Field>
               <Field label={L('O que ele aprende sobre você', 'What it learns about you')} hint={L('Só conta o que você disse, nunca o que um agente supôs.', 'Only what you said counts, never what an agent assumed.')}>
-                <select value={settings.memoryLearning} onChange={(e) => updateSettings({ memoryLearning: e.target.value as typeof settings.memoryLearning })}>
-                  <option value="approve">{L('Vira sugestão pra você aprovar', 'A suggestion for you to approve')}</option>
-                  <option value="auto">{L('Grava sozinho', 'Saved on its own')}</option>
-                  <option value="off">{L('Nada (só resume)', 'Nothing (just summarizes)')}</option>
-                </select>
+                <Select
+                  value={settings.memoryLearning ?? null}
+                  onChange={(v) => { if (v) updateSettings({ memoryLearning: v as typeof settings.memoryLearning }) }}
+                  options={[
+                    { value: 'approve', label: L('Vira sugestão pra você aprovar', 'A suggestion for you to approve') },
+                    { value: 'auto', label: L('Grava sozinho', 'Saved on its own') },
+                    { value: 'off', label: L('Nada (só resume)', 'Nothing (just summarizes)') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
               </Field>
             </div>
           </Card>
@@ -2318,12 +2342,25 @@ export function SettingsPage(): ReactNode {
                   onChange={(n) => updateSettings({ runStallMinutes: Math.max(5, Math.round(n)) })}
                 />
               </Field>
+              <Field label={L('Respostas seguidas entre agentes', 'Agent replies in a row')} hint={L('Quantas respostas os agentes podem dar em sequência, passando a vez entre si, antes de parar e esperar você. De 1 a 10.', 'How many replies agents can give in a row, passing the turn between them, before they stop and wait for you. From 1 to 10.')}>
+                <NumberInput
+                  min={1}
+                  max={MAX_CHAIN_DEPTH}
+                  value={chainDepthCap(settings.chainDepth)}
+                  onChange={(n) => updateSettings({ chainDepth: chainDepthCap(n) })}
+                />
+              </Field>
               <Field label={L('Expiração de aprovações', 'Approvals expire after')}>
-                <select value={settings.approvalTtlHours} onChange={(e) => updateSettings({ approvalTtlHours: Number(e.target.value) })}>
-                  <option value="1">{L('1 hora', '1 hour')}</option>
-                  <option value="24">{L('24 horas', '24 hours')}</option>
-                  <option value="168">{L('7 dias', '7 days')}</option>
-                </select>
+                <Select
+                  value={settings.approvalTtlHours ? String(settings.approvalTtlHours) : null}
+                  onChange={(v) => { if (v) updateSettings({ approvalTtlHours: Number(v) }) }}
+                  options={[
+                    { value: '1', label: L('1 hora', '1 hour') },
+                    { value: '24', label: L('24 horas', '24 hours') },
+                    { value: '168', label: L('7 dias', '7 days') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
               </Field>
             </div>
           </Card>

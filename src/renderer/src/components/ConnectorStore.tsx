@@ -17,7 +17,7 @@ const light = (hex: string): boolean => {
 }
 
 // Brands without a mark in Simple Icons, or with only a wordmark: their initial, on their color.
-const OWN_COLOR: Record<string, string> = { jam: 'FF2D55', monday: '6161FF', granola: '3F6212', canva: '00C4CC', context7: '0F172A', exa: '1F40ED', aave: 'B6509E', coinbase: '0052FF', zapier: 'FF4F00', 'azure-devops': '0078D4', cloudwatch: 'E7157B' }
+const OWN_COLOR: Record<string, string> = { jam: 'FF2D55', monday: '6161FF', granola: '3F6212', canva: '00C4CC', context7: '0F172A', exa: '1F40ED', aave: 'B6509E', coinbase: '0052FF', zapier: 'FF4F00', composio: '1A1A1A', 'azure-devops': '0078D4', cloudwatch: 'E7157B' }
 
 export function CatalogLogo({ entry, size = 36 }: { entry: CatalogEntry; size?: number }): ReactNode {
   const logo = LOGOS[entry.id]
@@ -59,7 +59,7 @@ export function ConnectorGrid({ status, onManage }: { status: Status; onManage: 
 
   const connect = (c: CatalogEntry): void => {
     if (c.app && !apps[c.app.provider]) return setAppSetup({ provider: c.app.provider, then: c })
-    if (c.fields?.length) return setSetup(c)
+    if (c.fields?.length || c.warning) return setSetup(c) // asks something, or says something, first
     setBusy(c.id)
     setError(null)
     addConnector(catalogInput(c))
@@ -144,7 +144,7 @@ export function ConnectorGrid({ status, onManage }: { status: Status; onManage: 
                 </button>
               )}
             </h3>
-            {cat.id === 'google' && !google && <p className="muted small catalog__note">{L('O Google pede um app seu, criado uma vez no Google Cloud: o primeiro Conectar mostra como, em 5 passos. Depois, os cinco entram com um clique.', 'Google asks for an app of your own, made once in Google Cloud: the first Connect shows how, in 5 steps. After that, all five sign in with one click.')}</p>}
+            {cat.id === 'google' && !google && <p className="muted small catalog__note">{L('O Google pede um app seu, criado uma vez no Google Cloud: o primeiro Conectar mostra como, em 6 passos. Depois, os cinco entram com um clique.', 'Google asks for an app of your own, made once in Google Cloud: the first Connect shows how, in 6 steps. After that, all five sign in with one click.')}</p>}
             <div className="catalog__grid">
               {entries.map((c) => (
                 <div key={c.id} className="catalog__card">
@@ -191,8 +191,23 @@ export function ConnectorGrid({ status, onManage }: { status: Status; onManage: 
   )
 }
 
+// A service that puts its own servers between the agents and the person's accounts says so, in full,
+// before connecting and on its page.
+export function ThirdPartyWarning({ text }: { text: string }): ReactNode {
+  return (
+    <div className="warn-box warn-box--third-party" role="note">
+      <Icon name="globe" size={16} />
+      <span>
+        <strong>{L('Seus dados passam por terceiros', 'Your data goes through a third party')}</strong>
+        {text}
+      </span>
+    </div>
+  )
+}
+
 // What a service asks before connecting: the address of your own instance, a token, an account. The
 // values go into the connector as the custom form would put them; the secrets, into the system vault.
+// A service with a warning opens here too, even with nothing to ask, so it's read before connecting.
 function ConnectorSetup({ entry, onClose, onAdded }: { entry: CatalogEntry; onClose: () => void; onAdded: (id: string) => void }): ReactNode {
   const [values, setValues] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
@@ -225,6 +240,7 @@ function ConnectorSetup({ entry, onClose, onAdded }: { entry: CatalogEntry; onCl
           <CatalogLogo entry={entry} size={40} />
           <span className="muted small">{entry.about()}</span>
         </div>
+        {entry.warning && <ThirdPartyWarning text={entry.warning()} />}
         {runs && (
           <p className="warn-box small">
             <Icon name="terminal" size={14} /> {L(`Roda o servidor oficial neste computador, com o seu usuário: ${runs}.`, `Runs the official server on this computer, as your user: ${runs}.`)}
@@ -247,13 +263,17 @@ function ConnectorSetup({ entry, onClose, onAdded }: { entry: CatalogEntry; onCl
         {error && <p className="note note--error">{error}</p>}
         <div className="row connector__actions">
           <span className="small muted grow">
-            <Icon name="shield" size={12} /> {L('Os segredos ficam cifrados no cofre do sistema.', 'Secrets are encrypted in the system vault.')}
+            {entry.fields?.some((f) => f.secret) && (
+              <>
+                <Icon name="shield" size={12} /> {L('Os segredos ficam cifrados no cofre do sistema.', 'Secrets are encrypted in the system vault.')}
+              </>
+            )}
           </span>
           <button type="button" className="btn btn--ghost" onClick={onClose}>
             {L('Cancelar', 'Cancel')}
           </button>
           <button type="submit" className="btn btn--primary" disabled={busy}>
-            {busy ? L('Conectando…', 'Connecting…') : L('Conectar', 'Connect')}
+            {busy ? L('Conectando…', 'Connecting…') : entry.warning ? L('Entendi, conectar', 'I understand, connect') : L('Conectar', 'Connect')}
           </button>
         </div>
       </form>
@@ -313,6 +333,13 @@ export function OwnAppSetup({ provider, connecting = false, onClose, onSaved }: 
             {L(': com o projeto escolhido no topo, clique em Próxima e em Ativar. São as do Gmail, Drive, Calendar, Docs e Sheets e a MCP de cada um.', ': with the project chosen at the top, click Next and Enable. They are Gmail, Drive, Calendar, Docs and Sheets, and the MCP one of each.')}
           </li>
           <li>
+            {link('https://developers.google.com/workspace/preview', L('Inscreva o projeto no Developer Preview', 'Enroll the project in the Developer Preview'))}
+            {L(
+              ': os servidores MCP do Google ainda estão em prévia e só atendem projetos inscritos no Google Workspace Developer Preview Program. O formulário pede o número do projeto (no painel do projeto). A aprovação costuma levar uns dias: siga os passos e salve, mas até lá os conectores do Google falham.',
+              ": Google's MCP servers are still in preview and only serve projects enrolled in the Google Workspace Developer Preview Program. The form asks for the project number (on the project's dashboard). Approval usually takes a couple of days: go on with the steps and save, but until then the Google connectors fail."
+            )}
+          </li>
+          <li>
             {link(cloud('auth/overview'), L('Configure a tela de login', 'Set up the sign-in screen'))}
             {L(
               ' (Google Auth Platform › Começar): o nome do app e o seu e-mail; em Público-alvo, Externo (ou Interno, numa conta Google Workspace de empresa). Depois, em Público-alvo › Usuários de teste, adicione o seu e-mail.',
@@ -355,6 +382,11 @@ export function OwnAppSetup({ provider, connecting = false, onClose, onSaved }: 
               'In a company workspace, an admin may need to approve the app first: Slack says so at sign-in, and the request goes to them.'
             )}
       </p>
+      {google && (
+        <p className="muted small">
+          {L('Prefere não configurar? A Composio, na loja, conecta o Google sem isso, mas seus dados passam pelos servidores dela.', "Rather not set this up? Composio, in the store, connects Google without it, but your data goes through its servers.")}
+        </p>
+      )}
       {error && <p className="catalog__error small">{error}</p>}
       <div className="modal__foot">
         <button className="btn btn--ghost" onClick={onClose}>

@@ -8318,6 +8318,23 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .connector-setup__body .warn-box {
   margin: 0 0 8px;
 }
+/* A service whose servers sit between the agents and your accounts: a paragraph, not a line, and
+   the warn color as its border too, so it can't pass for a hint. */
+.warn-box--third-party {
+  align-items: flex-start;
+  border: 1px solid var(--warn);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.warn-box--third-party .icon {
+  flex: none;
+  margin-top: 2px;
+}
+.warn-box--third-party strong {
+  display: block;
+  margin-bottom: 2px;
+}
 /* A connector's details, over the page: the tools scroll, the head stays. */
 .modal__card.connector-modal {
   width: min(680px, calc(100vw - 32px));
@@ -8332,6 +8349,200 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 }
 .catalog__card .btn {
   flex: none;
+}
+
+/* ---------- an agent's profile card ---------- */
+/* A face on a message opens the card: a real button the size of the face. */
+.msg__face {
+  display: inline-flex;
+  border-radius: 30%;
+}
+.msg__face:hover .avatar {
+  filter: brightness(1.04);
+}
+.msg__face:active {
+  transform: scale(0.96);
+}
+/* Opened from the top of a DM (or the faces of a channel), the button shows it's open. */
+.topbar__name[aria-expanded='true'],
+.msg__author[aria-expanded='true'] {
+  background: var(--hover);
+}
+.msg__author.link {
+  border-radius: 4px;
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+/* Next to the click, like Slack: who the agent is, what it's doing, where it works. */
+.agent-card {
+  position: fixed;
+  z-index: 65;
+  width: 320px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border);
+  color: var(--text);
+  --pop-y: 2px;
+  animation: pop var(--dur-fast) var(--ease-out) both;
+}
+.agent-card:focus {
+  outline: none;
+}
+.agent-card:focus-visible {
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+/* A band of the agent's own color, the face sitting on its edge. */
+.agent-card__band {
+  height: 52px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--agent, var(--accent)) 34%, var(--panel)), color-mix(in srgb, var(--agent, var(--accent)) 14%, var(--panel)));
+}
+.agent-card__head {
+  padding: 0 16px;
+  margin-top: -32px;
+}
+.agent-card__face {
+  flex: none;
+  display: inline-flex;
+  border-radius: 30%;
+  box-shadow: 0 0 0 3px var(--panel);
+  background: var(--panel);
+}
+.agent-card__who {
+  min-width: 0;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.agent-card__name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.agent-card__handle {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.agent-card__name + .agent-card__handle {
+  margin-top: 1px;
+}
+.agent-card__role {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.agent-card__now {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: calc(100% - 24px);
+  margin: 12px 12px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--hover);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-2);
+  text-align: left;
+}
+.agent-card__now b {
+  font-weight: 600;
+  color: var(--text);
+}
+button.agent-card__now:hover {
+  background: var(--active);
+}
+.agent-card__doing {
+  display: block;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 250px;
+}
+.agent-card__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.is-idle .agent-card__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ok);
+}
+.is-working .agent-card__dot {
+  background: var(--accent);
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
+}
+.is-waiting .agent-card__dot {
+  background: var(--warn);
+}
+.is-limit .agent-card__dot {
+  background: var(--danger);
+}
+.is-archived .agent-card__dot {
+  background: var(--text-3);
+}
+.agent-card__facts {
+  display: grid;
+  gap: 6px;
+  margin: 12px 16px 0;
+  font-size: 13px;
+}
+.agent-card__facts > div {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+.agent-card__facts dt {
+  color: var(--text-3);
+}
+.agent-card__facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.agent-card__channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.agent-card__channel {
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.agent-card__channel:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.agent-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 16px;
+}
+.agent-card__actions .btn {
+  flex: 1;
+  justify-content: center;
+}
+.agent-card__settings {
+  flex: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-card,
+  .is-working .agent-card__dot {
+    animation: none;
+  }
 }
 
 /* Over a server's page (Servers.tsx): the window's top 40 px stay the app's. */
@@ -8454,3 +8665,119 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-heritage h5 { margin: 8px 0 4px; font-size: 12px; opacity: .8; }
 .wk-heritage ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .wk-heritage li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* Conectar um celular (People.tsx PhoneCard) */
+.device-pair { display: flex; gap: 18px; align-items: flex-start; padding: 14px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 10px; }
+.device-pair__text { flex: 1; min-width: 0; display: grid; gap: 10px; align-content: start; }
+.device-pair__text .steps-list { margin: 0; }
+.device-pair__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.device-qr { flex: none; width: 168px; height: 168px; padding: 6px; border-radius: 10px; background: #fff; }
+.device-qr svg { display: block; width: 100%; height: 100%; }
+@media (max-width: 560px) { .device-pair { flex-direction: column; align-items: center; } }
+
+/* ---------- reusable select (shadcn-style) ---------- */
+.select { position: relative; display: flex; flex-direction: column; width: 100%; min-width: 0; }
+.select__trigger {
+  position: relative;
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  transition: var(--transition-ui);
+  cursor: pointer;
+}
+.select__trigger:not(:disabled):hover { border-color: var(--border); background: var(--hover); }
+.select__trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+  border-color: var(--accent);
+}
+.select__trigger.is-disabled { opacity: 0.5; cursor: not-allowed; background: var(--bg); }
+.select__trigger.is-open { border-color: var(--accent); z-index: 40; }
+.select__trigger__value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.select__placeholder { color: var(--text-3); }
+.select__value { color: var(--text); font-weight: 500; }
+.select__chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 1px 7px; border-radius: 6px; background: var(--accent-soft); color: var(--accent);
+  font-size: 12px; font-weight: 500; margin-right: 4px; margin-bottom: 2px;
+}
+.select__caret { flex: none; display: inline-flex; color: var(--text-3); transition: transform var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out); }
+.select__trigger:not(:disabled):hover .select__caret { color: var(--text-2, var(--text)); }
+.select__trigger.is-open .select__caret { transform: rotate(180deg); color: var(--accent); }
+/* Portaled to <body>; Select.tsx sets top/bottom/left/width/max-height from the trigger's rect. */
+.select__menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  z-index: 1100;
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
+  outline: none;
+}
+.select__menu[data-placement='top'] { --pop-y: -4px; }
+.select__search {
+  display: flex; align-items: center; gap: 8px;
+  flex: none;
+  margin: -4px -4px 4px; padding: 6px 10px; border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.select__search__icon { color: var(--text-3); flex: none; }
+.select__search__icon svg { width: 14px; height: 14px; }
+.select__search input,
+.select__search input:hover,
+.select__search input:focus {
+  flex: 1; min-width: 0; height: auto; box-shadow: none; border-radius: 0;
+  border: 0; background: transparent; outline: none;
+  font: inherit; font-size: 12.5px; color: var(--text);
+  padding: 3px 0;
+}
+.select__list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; outline: none; }
+.select__list:focus { outline: none; }
+.select__option {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 7px 8px; border: 0; border-radius: calc(var(--radius) - 3px); background: transparent; color: var(--text);
+  font-size: 13px; text-align: left; cursor: pointer; transition: var(--transition-ui);
+  user-select: none;
+}
+.select__option:hover, .select__option.is-active { background: var(--hover); color: var(--text); }
+.select__option[aria-selected='true'] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.select__option.is-active[aria-selected='true'] { background: var(--accent); color: var(--accent-text); }
+.select__check { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--panel); }
+.select__check.is-on { background: var(--accent); border-color: var(--accent); }
+.select__check svg { color: var(--accent-text); }
+.select__tick { flex: none; display: inline-flex; color: currentColor; }
+.select__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; font-weight: 500; }
+.select__option__text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.select__option__text .select__label { font-weight: 500; }
+.select__hint { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.select__section + .select__section { margin-top: 4px; border-top: 1px solid var(--border); }
+/* Group title sticks to the top of the list while its section scrolls by. */
+.select__group {
+  position: sticky; top: 0; z-index: 1;
+  padding: 7px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-3); background: var(--panel);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.select__empty {
+  padding: 8px 10px; font-size: 12.5px; color: var(--text-3); text-align: center;
+}
+.field__required { color: var(--danger); margin-left: 2px; }
+
+

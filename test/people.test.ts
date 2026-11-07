@@ -270,6 +270,33 @@ describe('invites, keys and removal', () => {
   })
 })
 
+describe('leaving on one\'s own', () => {
+  it('ends access now and takes what was theirs alone with it; the owner cannot leave', () => {
+    const db = new Db(':memory:')
+    const people = new People(db)
+    const owner = db.owner()
+    const joined = people.join(people.createInvite(owner, { role: 'member' }).code, 'Bia')
+    if (!('person' in joined)) throw new Error(joined.error)
+    const bia = joined.person
+    db.saveAgent(agent('a1', 'lia'))
+    db.createConversation({ id: 'bia-dm', kind: 'dm', name: 'a1', members: ['a1'], owner: bia.id })
+    db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1'] })
+    db.saveMessage({ id: 'm1', conversationId: 'bia-dm', author: { kind: 'person', id: bia.id }, text: 'só meu', at: 1 })
+    db.saveMessage({ id: 'm2', conversationId: 'ch', author: { kind: 'person', id: bia.id }, text: 'pro time', at: 2 })
+    db.saveMemory({ id: 'k', scope: personScope(bia.id), text: 'da Bia', state: 'active', origin: 'me', messageIds: [], createdAt: 1, confirmedAt: 1 })
+
+    expect(() => people.leave(owner)).toThrow()
+    const out = people.leave(bia)
+    expect(out.purged.dms).toEqual(['bia-dm'])
+    expect(people.authenticate(joined.key)).toBeUndefined()
+    expect(db.people().map((p) => p.id)).toEqual([owner.id])
+    expect(db.conversation('bia-dm')).toBeUndefined()
+    expect(db.memories().some((m) => m.id === 'k')).toBe(false)
+    expect(db.messages().map((m) => m.id)).toEqual(['m2']) // what was said in a channel stays the channel's
+    expect(db.removedPeople().some((p) => p.id === bia.id)).toBe(false) // nothing kept for a re-invite
+  })
+})
+
 describe('a reply, with people', () => {
   let db: Db
   let turns: Turn[]

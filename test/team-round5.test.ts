@@ -281,6 +281,8 @@ describe('8. channel messages from before the heritage are the owner’s', () =>
 describe('9. two wordings', () => {
   it('an unknown setting is refused in plain words, whatever its key is called', () => {
     expect(settingsPatchError({ quota: 1 })).toBe('Essa configuração não existe.')
+    expect(settingsPatchError({ chainDepth: 5 })).toBeUndefined() // the limit on agent replies in a row
+    expect(settingsPatchError({ chainDepth: 'muitas' })).toBeTruthy()
     expect(settingsPatchError({ quota: 1 })).not.toMatch(/quota/)
   })
   it('the router’s limit note reads as one sentence, no parentheses around the reason', async () => {
