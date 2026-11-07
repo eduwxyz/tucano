@@ -430,7 +430,8 @@ const appIcons = (paths: string[]): Promise<Record<string, string>> =>
 
 // The person's installed apps, with their icons, kept in the data folder: the apps picker
 // shows them at once, even right after a restart, and a refresh runs behind it when they
-// may have changed. Made once a few seconds after start, so even the first look is instant.
+// may have changed. Made at start only when the kept one is a day old: a scan starts a hundred
+// processes, so it waits for the harnesses' check to end too.
 // bundleId: a Mac app's bundle id, a Windows app's AppUserModelID, a Linux desktop id.
 type ShelfApp = { name: string; bundleId?: string; path?: string; icon?: string; exe?: string; exec?: string[]; chromium?: boolean }
 // Each system's own list: the Mac's Applications folders, Windows' Start menu, Linux's application menu.
@@ -472,7 +473,7 @@ const shelfNow = async (): Promise<ShelfApp[]> => {
   if (Date.now() - shelf.at > 5 * 60_000) void restock()
   return shelf.list
 }
-if (!serverMode && !fake) setTimeout(() => void restock(), 4_000).unref()
+if (!serverMode && !fake && (!shelf || Date.now() - shelf.at > 24 * 3600_000)) void enginesReady.then(() => setTimeout(() => void restock(), 5_000).unref())
 
 // On a server there's no Electron: the agents' Chrome takes the picture instead.
 const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
