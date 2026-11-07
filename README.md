@@ -7,12 +7,13 @@
 **Your team of AI agents, on your computer. Your rules.**
 
 Agents that talk in channels, write code, review each other and use your team's tools.<br>
-They do the work. Anything that touches the real world waits for your yes.
+They do the work. Anything that touches the real world waits for your yes.<br>
+A free, open-source alternative to Grok Bot: [see how it compares](https://tucano.sh/en/grok-bot-alternative/).
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-141210)](LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-Apple%20silicon%20%7C%20Intel-141210?logo=apple)](#install) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#install) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#install)
-[![Runs on](https://img.shields.io/badge/runs%20on-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20OpenCode%20·%20Pi-E2541B)](#runs-on-what-you-already-have)
+[![Runs on](https://img.shields.io/badge/runs%20on-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Grok%20·%20OpenCode%20·%20Pi-E2541B)](#runs-on-what-you-already-have)
 
 **English** · [Português](README.pt-BR.md) · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Changelog](CHANGELOG.md)
 

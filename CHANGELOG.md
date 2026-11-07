@@ -14,6 +14,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An agent does one thing at a time in each place.** Work that comes for an agent already replying in that conversation or thread (another message, a task, a question in a channel) no longer starts a second reply alongside the first: it shows up at once as **Queued** and starts when the agent is done there, in the order it came. In other conversations and threads it works at once, and other agents keep working meanwhile.
 - **Agents pass on what isn't theirs.** Every agent now sees what each colleague does (its role and the first line of its instructions), not only its role, and is told to hand over, without being asked, a request or part of one that's a colleague's area (a data table to whoever handles data, code to engineering), saying in a sentence who it went to and why, then deliver the answer; when it doesn't know whose it is, it asks a channel. In a busy channel, whoever answers does the same out in the open.
 
+### Fixed
+
+- **An agent's Chrome gets more time to open.** The first open on a slow computer could pass the 15 s it had, and the agent got an error instead of the page. It now gets 30 s.
+- **Replies show in the order they ended.** With several agents answering at once, a reply that took longer stayed above one that was already done. Now it takes its place when it ends, with that time on it, and whoever is still working stays at the end of the conversation. Agents still read each other in the order they started, so what each one saw doesn't change.
+
 ## [0.2.14] - 2026-11-06
 
 > **Em português:**
