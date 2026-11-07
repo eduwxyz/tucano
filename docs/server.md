@@ -45,6 +45,19 @@ npm install -g @openai/codex
 
 Codex is signed in from Tucano's **Settings › Models**, like on a desktop. On a server, the **Sign in** button can't open a terminal, so it shows the command to run in your SSH session.
 
+### On a phone
+
+The Tucano app for iPhone signs in with a one-time code, not the token. On the server, run:
+
+```bash
+npm run server -- pair          # tucano://connect?url=…&code=…   and   https://…/?code=…
+npm run server -- pair 1440     # good for a day instead of 10 minutes (up to a week: 10080)
+```
+
+Open the first line on the phone (or show it as a QR code and point the Camera at it). The app trades the code for a key of its own, and the code stops working. The second line does the same for a browser. Once you're signed in, **Settings › People › Connect a phone** makes a code too, as a QR code, for whoever is signed in: each person connects their own phone, as themselves. Each phone has its own key; removing someone ends all of theirs. The app needs the server on HTTPS (a reverse proxy, below), or on `127.0.0.1` while testing.
+
+Someone you invite can also open the invite link in the app: it asks their name, and they're in.
+
 ## Reaching it
 
 By default the server only listens on the server itself (`127.0.0.1`), because anyone who has the token controls your agents. Pick one of these ways to reach it:

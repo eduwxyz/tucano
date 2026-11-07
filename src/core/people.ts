@@ -571,6 +571,16 @@ export class People {
     })
   }
 
+  // A one-time pairing code spent on a server (src/server/pair-codes.ts): a new key for that person
+  // (unset: the owner), for one device. Someone removed, or no one, gets none.
+  deviceKey(personId: unknown, label: unknown): { person: Person; key: string } | undefined {
+    const person = personId === undefined || personId === null ? this.db.owner() : typeof personId === 'string' ? this.db.person(personId) : undefined
+    if (!person) return undefined
+    const key = newKey()
+    this.db.addPersonKey(hashSecret(key), person.id, typeof label === 'string' && label ? label.slice(0, 120) : 'aparelho')
+    return { person: this.db.person(person.id) ?? person, key }
+  }
+
   // Whether this name would read as someone else's: a person here, one removed who may still come
   // back (until purged), or, once there are people to call, an agent (by its name or its handle: @lia
   // would call both). A Tucano of one calls no person: its owner may be a Nina next to the agent Nina.

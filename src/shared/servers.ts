@@ -1,6 +1,7 @@
 // A Tucano on a server, opened from this app: the link that pairs it, and what belongs to it.
 //
 //   tucano://connect?url=https://ana.example.com&token=…   (`server.js link` prints it)
+//   tucano://connect?url=https://ana.example.com&code=…    (a one-time code: `server.js pair`, for the phone)
 
 export interface Pairing {
   origin: string // https://ana.example.com, nothing after it
@@ -32,8 +33,10 @@ export function parsePairing(link: string): Pairing | null {
   return { origin: server.origin, token }
 }
 
-// The link that pairs it again (`server.js link` prints the first one).
-export const pairingLink = (p: Pairing): string => `tucano://connect?url=${encodeURIComponent(p.origin)}&token=${encodeURIComponent(p.token)}`
+// The link that pairs it: with the server's token (`server.js link`), or with a one-time code
+// (`server.js pair`, Settings › Pessoas › Conectar um celular) that the phone trades for a key of its own.
+export const pairingLink = (p: { origin: string } & ({ token: string } | { code: string })): string =>
+  `tucano://connect?url=${encodeURIComponent(p.origin)}&${'code' in p ? `code=${encodeURIComponent(p.code)}` : `token=${encodeURIComponent(p.token)}`}`
 
 // Where a server's window may go: its own pages, and nothing else.
 export function onServer(url: string, origin: string): boolean {
