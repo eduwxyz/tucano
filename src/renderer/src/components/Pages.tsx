@@ -30,7 +30,7 @@ import {
   unpairTelegram,
   exportTeam,
   importAgents,
-  importTeam,
+  previewTeam,
   backupNow,
   openBackups,
   type TelegramInfo,
@@ -63,6 +63,7 @@ import {
   type VoiceModelId,
   type VoiceSettings
 } from '../store'
+import type { TeamUpdate } from '../../../shared/types'
 import { voiceRefusal } from '../../../shared/voice'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
@@ -74,6 +75,7 @@ import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
+import { KnownTeams, TeamImportDialog } from './TeamImport'
 import { hasServers, ServersCard } from './Servers'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
@@ -1528,6 +1530,8 @@ export function LanguagePicker({ className = '' }: { className?: string }): Reac
 const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
+  const [importing, setImporting] = useState<{ text: string; update: TeamUpdate } | null>(null)
+  const [version, setVersion] = useState(0) // a team was imported or exported: the list below reloads
   const settings = useStore((s) => s.settings)
   // Grok Bot has no export: one of the person's agents there runs this skill and writes our .zip.
   const grokSkill = (): void => {
@@ -1559,12 +1563,20 @@ function TeamCard(): ReactNode {
       a.click()
       URL.revokeObjectURL(a.href)
       setNote(L(`Exportação feita: ${file}.`, `Exported: ${file}.`))
+      setVersion((v) => v + 1)
     }).catch((e: unknown) => setNote(e instanceof Error ? e.message : String(e)))
   }
   const failed = (e: unknown): void => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
   const upload = (file?: File): void => {
     if (!file) return
-    void file.text().then(importTeam).then(setNote, failed)
+    void file.text().then(
+      (text) =>
+        previewTeam(text).then((update) => {
+          if (update.changes.length) setImporting({ text, update })
+          else setNote(L('Nada novo: você já tem tudo o que esse arquivo traz.', 'Nothing new: you already have everything this file brings.'))
+        }, failed),
+      failed
+    )
   }
   // Another app's export: on the desktop the core reads the file where it is; in a browser it goes up whole.
   const fromApp = (file?: File): void => {
@@ -1584,7 +1596,7 @@ function TeamCard(): ReactNode {
       .then(setNote, failed)
   }
   return (
-    <Card title={L('Time', 'Team')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada.', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot and Grok Bot come in too, with no connector and web search off.')}>
+    <Card title={L('Time', 'Team')} lead={L('O time num arquivo .md (agentes, skills, canais, rotinas, conectores e o contexto, sem credenciais nem conversas), pra guardar, levar pra outro computador ou passar pro time. Importar de novo um arquivo mais novo do mesmo time mostra o que mudou pra você escolher, sem sobrescrever o que você mudou aqui. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada.', 'The team in a .md file (agents, skills, channels, routines, connectors and the context, without credentials or conversations), to keep, take to another computer or pass to your team. Importing a newer file of the same team again shows what changed for you to choose, without overwriting what you changed here. Agents from OpenBot and Grok Bot come in too, with no connector and web search off.')}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button className="btn btn--sm" onClick={download}>
           {L('Exportar time', 'Export team')}
@@ -1620,6 +1632,19 @@ function TeamCard(): ReactNode {
         </button>
       </div>
       {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
+      <KnownTeams version={version} />
+      {importing && (
+        <TeamImportDialog
+          text={importing.text}
+          update={importing.update}
+          onClose={() => setImporting(null)}
+          onDone={(n) => {
+            setImporting(null)
+            setNote(n)
+            setVersion((v) => v + 1)
+          }}
+        />
+      )}
     </Card>
   )
 }

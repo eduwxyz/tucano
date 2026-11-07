@@ -42,7 +42,8 @@ import { Wiki } from './wiki'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
-import { backup, backupIfDue, exportTeam, importTeam } from './team'
+import { backup, backupIfDue } from './team'
+import { TeamFiles } from './team-files'
 import { applyForeignTeam, readForeignZip } from './agent-import'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
@@ -590,6 +591,9 @@ const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   }
   return text
 }
+// The team's .md file: exporting carries this team's id, importing a newer one offers what changed.
+const teamFiles = new TeamFiles({ db, dir: join(dataDir, 'teams'), defaultLimit: () => settings().defaultLimit, context: () => settings().context, name: () => settings().workspaceName })
+
 const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm })
 // The review: by hand, or once a week when asked (checked every hour).
 const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
@@ -1040,15 +1044,24 @@ const api: Api = {
     if (!telegram) throw new Error(L('O Telegram fica no workspace padrão.', 'Telegram belongs to the default workspace.'))
     return telegram.setToken(token)
   },
-  exportTeam: () => exportTeam(db),
-  importTeam: ({ text }) => {
-    const r = importTeam(db, text, settings().defaultLimit)
+  exportTeam: () => teamFiles.export(),
+  previewTeam: ({ text }) => teamFiles.preview(text),
+  importTeam: ({ text, choices }) => {
+    const r = teamFiles.apply(text, choices)
     for (const a of db.agents()) emit({ type: 'agent', agent: a })
     emitConversations()
     for (const k of db.skills()) emit({ type: 'skill', skill: k })
     for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
-    return r
+    emit({ type: 'settings', settings: settings() })
+    for (const id of r.connectors) {
+      const c = connectors.get(id)
+      if (c) emit({ type: 'connector', connector: c })
+      void connectors.connect(id) // each person signs in with their own account
+    }
+    return r.note
   },
+  teams: () => teamFiles.list(),
+  forgetTeam: ({ id }) => teamFiles.forget(id),
   importAgents: ({ path, data }) => {
     if (!path && !data) throw new Error(L('Escolha um arquivo .zip.', 'Choose a .zip file.'))
     const zip = path ? zipFromFile(path) : zipFromBuffer(Buffer.from(data!, 'base64'))
