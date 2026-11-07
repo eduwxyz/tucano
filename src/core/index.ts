@@ -25,7 +25,8 @@ import { piEngine } from './engines/pi'
 import { geminiAppDir, geminiEngine } from './engines/gemini'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
-import { accountDir, accountStatus, adoptLoginShellPath, detectEngines, type CodexModel } from './engines/detect'
+import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
+import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { fakeEngine } from './engines/fake'
 import { DesktopApps, macApps, SELF } from './apps'
 import { linuxApps, windowsApps, type SystemApp } from './apps-os'
@@ -98,24 +99,31 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
   language: langOf(process.env['TUCANO_LOCALE'])
 }
 
-const unknownEngine: EngineStatus = { installed: false, loggedIn: false }
-let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: unknownEngine, opencode: unknownEngine, pi: unknownEngine, gemini: unknownEngine, cursor: unknownEngine, grok: unknownEngine }
-// The models OpenCode and Pi list (what the person has logins for), from the last check.
-let listed: Partial<Record<EngineId, string[]>> = {}
-// Codex's own catalog for this login (names and what each model is for), from the last check.
-let codexCatalog: CodexModel[] = []
-
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
-async function detect(): Promise<void> {
-  if (fake) {
-    engines = { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } }
-    listed = { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] }
-  } else ({ engines, listed, codexCatalog } = await detectEngines(codexHome))
-  await checkAccounts()
-  rememberModels(codexCatalog.map((m) => ({ id: m.slug, engine: 'codex', label: m.label, hint: m.description ?? '' })))
-  gatewayLists.clear()
-  emit({ type: 'settings', settings: settings() })
-}
+const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
+  engines: { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
+  listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] },
+  codexCatalog: []
+})
+// The harnesses' last check, kept in the data folder: the window opens on it while the next runs.
+const engineCheck = new EngineCheck({
+  file: join(dataDir, 'engines.json'),
+  all: async () => (fake ? fakeFindings() : detectEngines(codexHome)),
+  one: async (e) => (fake ? { status: fakeFindings().engines[e], listed: fakeFindings().listed[e] } : detectEngine(e, codexHome)),
+  after: async (found, engine) => {
+    ;({ engines, listed, codexCatalog } = found)
+    await checkAccounts(undefined, engine)
+    rememberModels(codexCatalog.map((m) => ({ id: m.slug, engine: 'codex', label: m.label, hint: m.description ?? '' })))
+    gatewayLists.clear()
+    emit({ type: 'settings', settings: settings() })
+    return { accounts: Object.fromEntries(accountLogins) }
+  }
+})
+// The models OpenCode and Pi list (what the person has logins for), and Codex's own catalog for
+// this login (names and what each model is for), from the last check.
+let { engines, listed, codexCatalog } = engineCheck.current
+// Everything checked again; a call while a check runs gets that one.
+const detect = (): Promise<unknown> => engineCheck.detect().catch((e: unknown) => console.error('[engines]', e))
 // The harness's own sign-in, in a terminal, with the variables that say which login it is.
 function openLogin(engine: EngineId, vars: Record<string, string>): { opened: boolean; command: string } {
   const bin = engines[engine].path ?? ENGINES[engine].cli
@@ -136,19 +144,29 @@ function openLogin(engine: EngineId, vars: Record<string, string>): { opened: bo
 
 // After a sign-in or an install in a terminal, the harness is checked again every few
 // seconds until it shows up (for 10 minutes at most): it appears with no "Check again".
+// Only that harness is checked, not all of them.
 let watching: ReturnType<typeof setInterval> | undefined
+let watched: EngineId | undefined
 function watchEngine(engine: EngineId, done: (s: EngineStatus) => boolean): void {
   if (watching) clearInterval(watching)
   const until = Date.now() + 10 * 60_000
+  const stop = (): void => (clearInterval(watching), (watched = undefined))
+  watched = engine
   watching = setInterval(() => {
-    if (done(engines[engine]) || Date.now() > until) return void clearInterval(watching)
-    void detect()
+    if (done(engines[engine]) || Date.now() > until) return stop()
+    void engineCheck.recheck(engine).catch((e: unknown) => console.error('[engines]', e))
   }, 4_000)
   watching.unref()
 }
 
 const gateway = new Gateway()
-const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
+// The login shell's PATH comes before any CLI starts: harnesses, connectors and Docker are found on it.
+const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e))
+// The harnesses are checked behind the window (it opens on the last check). What truly needs
+// them (a reply, the memory, routines, a connection test) waits for this.
+const enginesReady = pathReady.then(detect)
+// The window waits only for the database, open by now, and the gateway.
+const ready = gateway.start()
 
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
@@ -158,12 +176,13 @@ const settings = (): Settings => {
 
 // More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
 // the CLI's own status when the harnesses are, and every few seconds after a sign-in.
-const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>()
+const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>(Object.entries(engineCheck.current.accounts ?? {}))
 const savedAccounts = (): Account[] => (db.getSettings(DEFAULTS).accounts ?? []).map(({ id, engine, name }) => ({ id, engine, name }))
-async function checkAccounts(only?: string): Promise<void> {
+// `only`: that account; `engine`: that harness's accounts.
+async function checkAccounts(only?: string, engine?: EngineId): Promise<void> {
   await Promise.all(
     savedAccounts()
-      .filter((a) => !only || a.id === only)
+      .filter((a) => (!only || a.id === only) && (!engine || a.engine === engine))
       .map(async (a) => {
         const bin = engines[a.engine].path
         if (fake) accountLogins.set(a.id, { loggedIn: true, detail: L('Motor de teste', 'Test engine') })
@@ -177,7 +196,10 @@ function watchAccount(id: string): void {
   const until = Date.now() + 10 * 60_000
   watchingAccount = setInterval(() => {
     if (accountLogins.get(id)?.loggedIn || Date.now() > until || !savedAccounts().some((a) => a.id === id)) return void clearInterval(watchingAccount!)
-    void checkAccounts(id).then(() => emit({ type: 'settings', settings: settings() }))
+    void checkAccounts(id).then(() => {
+      engineCheck.setAccounts(Object.fromEntries(accountLogins))
+      emit({ type: 'settings', settings: settings() })
+    })
   }, 4_000)
   watchingAccount.unref()
 }
@@ -238,7 +260,7 @@ function workspaceSummary(): void {
   summaryTimer ??= setTimeout(() => {
     summaryTimer = undefined
     const current = db.getSettings(DEFAULTS)
-    const summary = { type: 'workspace-summary', name: workspaceLabel(current), paused: !!current.paused, unread: db.unread(), approvals: db.approvals().filter((a) => a.state === 'pending').length }
+    const summary = { type: 'workspace-summary', name: workspaceLabel(current), paused: !!current.paused, unread: db.unread(), approvals: db.pendingApprovals() }
     const wire = JSON.stringify(summary)
     if (wire !== lastSummary) process.parentPort.postMessage(summary)
     lastSummary = wire
@@ -408,7 +430,8 @@ const appIcons = (paths: string[]): Promise<Record<string, string>> =>
 
 // The person's installed apps, with their icons, kept in the data folder: the apps picker
 // shows them at once, even right after a restart, and a refresh runs behind it when they
-// may have changed. Made once a few seconds after start, so even the first look is instant.
+// may have changed. Made at start only when the kept one is a day old: a scan starts a hundred
+// processes, so it waits for the harnesses' check to end too.
 // bundleId: a Mac app's bundle id, a Windows app's AppUserModelID, a Linux desktop id.
 type ShelfApp = { name: string; bundleId?: string; path?: string; icon?: string; exe?: string; exec?: string[]; chromium?: boolean }
 // Each system's own list: the Mac's Applications folders, Windows' Start menu, Linux's application menu.
@@ -450,7 +473,7 @@ const shelfNow = async (): Promise<ShelfApp[]> => {
   if (Date.now() - shelf.at > 5 * 60_000) void restock()
   return shelf.list
 }
-if (!serverMode && !fake) setTimeout(() => void restock(), 4_000).unref()
+if (!serverMode && !fake && (!shelf || Date.now() - shelf.at > 24 * 3600_000)) void enginesReady.then(() => setTimeout(() => void restock(), 5_000).unref())
 
 // On a server there's no Electron: the agents' Chrome takes the picture instead.
 const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
@@ -544,7 +567,7 @@ const oauthCallback = async (url: URL): Promise<string> => {
 }
 gateway.route('/oauth/callback', oauthCallback)
 
-const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
+const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 
 const computers = new Computers({ db, dataDir, emit, shoot })
 const backups = join(dataDir, 'backups')
@@ -569,10 +592,12 @@ const wikiHome = join(dataDir, 'wiki')
 const wikiIndex = (dir: string): string => (dir === wikiHome ? join(dataDir, 'wiki.db') : join(dataDir, `wiki-${createHash('sha256').update(dir).digest('hex').slice(0, 12)}.db`))
 const wikiDir = (): string => process.env['TUCANO_WIKI'] || settings().wikiDir || wikiHome
 const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }) })
-wiki.init()
+// The folder is read behind the window: a big Obsidian vault takes a while.
+wiki.init(true, true)
 toMain({ type: 'wiki_dir', path: wiki.dir })
 // The curator reads the conversations with the memory's cheap model, and keeps what lasts.
 const wikiLlm = async (system: string, prompt: string): Promise<string> => {
+  await enginesReady
   const s = settings()
   const model = usable(modelInfo(s.memoryModel)) ?? modelInfo('haiku')!
   const st = s.engines[model.engine]
@@ -600,7 +625,7 @@ setInterval(() => {
 const runner = new Runner({
   db,
   engines: engineImpls,
-  settings: () => ready.then(settings),
+  settings: () => enginesReady.then(settings),
   emit,
   workDir: join(dataDir, 'agents'),
   dataDir,
@@ -627,7 +652,7 @@ const runner = new Runner({
 })
 runner.setPaused(!!settings().paused)
 // Installs from before the Tuca get him at the first start after the introduction.
-void ready.then(() => {
+void enginesReady.then(() => {
   if (settings().onboarding?.done) ensureTuca()
 })
 
@@ -678,9 +703,8 @@ hooks.on('error', (e) => console.error(`[gatilhos] porta ${runtimePorts.webhook}
 
 
 void ready.then(async () => {
-  connectors.connectAll()
-  returnChannelFolders()
-  for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
+  toMain({ type: 'ready' })
+  workspaceSummary()
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   // A thread that went quiet gets its own summary, and the memories in it.
@@ -691,7 +715,6 @@ void ready.then(async () => {
     hooks.listen(runtimePorts.webhook, '127.0.0.1')
     void telegram?.start()
   }
-  routines.start()
   // A copy of the database once a day, the last 7 kept.
   const daily = (): void => {
     try {
@@ -702,8 +725,13 @@ void ready.then(async () => {
   }
   daily()
   setInterval(daily, 3_600_000).unref()
-  toMain({ type: 'ready' })
-  workspaceSummary()
+  // Connectors and computers start programs: they're found on the login shell's PATH.
+  await pathReady
+  connectors.connectAll()
+  returnChannelFolders()
+  for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
+  await enginesReady
+  routines.start()
 }).catch((e: unknown) => {
   console.error('[core] startup failed', e)
   process.exit(1)
@@ -773,7 +801,7 @@ function ensureTuca(modelId?: string, fresh = false): { agentId: string; convers
   }
   let dm = db.conversations().find((c) => c.kind === 'dm' && c.name === tuca!.id)
   if (dm && fresh) {
-    for (const m of db.messages()) if (m.conversationId === dm.id && m.run?.status === 'working') runner.stop(m.id)
+    for (const m of db.messagesWithRun(['working'])) if (m.conversationId === dm.id) runner.stop(m.id)
     db.deleteConversation(dm.id)
     emit({ type: 'conversation_removed', id: dm.id })
     dm = undefined
@@ -817,7 +845,7 @@ const api: Api = {
   },
   // The page loads from file://, which can't fetch tucano:// (CORS); text comes through the core instead.
   artifactText: ({ id }) => {
-    const a = db.artifacts().find((x) => x.id === id)
+    const a = db.artifact(id)
     if (!a) return null
     const file = join(dataDir, 'artifacts', a.id, a.name)
     try {
@@ -904,7 +932,7 @@ const api: Api = {
     const agent = db.agent(id)
     if (!agent || agent.archived === archived) return
     if (archived) {
-      for (const m of db.messages()) if (m.author.kind === 'agent' && m.author.id === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
+      for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.author.kind === 'agent' && m.author.id === id) runner.stop(m.id)
       routines.pauseAgent(id)
       runner.forgetSessions({ agentId: id })
       if (agent.browser) void browser.close(id)
@@ -953,7 +981,7 @@ const api: Api = {
 
   deleteConversation: ({ id }) => {
     if (!db.conversation(id)) return
-    for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
+    for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
     for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
     for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
     runner.forgetSessions({ conversationId: id })
@@ -1099,6 +1127,7 @@ const api: Api = {
   // The models a harness offers, besides the app's list for a plan: what OpenCode
   // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
   engineModels: async ({ engine }) => {
+    if (!engineCheck.known) await enginesReady
     if (engine === 'codex' && codexCatalog.length)
       return { models: codexCatalog.map((m) => m.slug), labels: Object.fromEntries(codexCatalog.map((m) => [m.slug, { label: m.label, ...(m.description ? { hint: m.description } : {}) }])) }
     if (listed[engine]) return { models: listed[engine]! }
@@ -1117,6 +1146,7 @@ const api: Api = {
 
   // A real question through the chosen engine and model: what fails here would fail every reply.
   testEngine: async ({ model }) => {
+    await enginesReady
     const m = modelInfo(model)
     if (!m?.id) return { ok: false, message: L('Escolha um modelo pra testar.', 'Pick a model to test.') }
     const st = settings().engines[m.engine]
@@ -1154,7 +1184,7 @@ const api: Api = {
     if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
-    if (patch.onboarding?.done) void ready.then(() => ensureTuca()) // skipping the introduction still gets the Tuca
+    if (patch.onboarding?.done) void enginesReady.then(() => ensureTuca()) // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
     emit({ type: 'settings', settings: settings() })
   },
@@ -1324,8 +1354,9 @@ const api: Api = {
   openWikiFolder: () => (serverMode ? undefined : toMain({ type: 'open_path', path: wiki.dir })),
   runRoutine: ({ id }) => routines.runNow(id),
 
+  // While a sign-in or an install is being watched, only that harness: the screens ask every few seconds.
   refreshEngines: () => {
-    void detect()
+    void (watched ? engineCheck.recheck(watched).catch((e: unknown) => console.error('[engines]', e)) : detect())
   },
 
   // Login always happens in the CLI's own flow; the app never sees credentials.
@@ -1341,7 +1372,10 @@ const api: Api = {
     const account: Account = { id: randomUUID().slice(0, 8), engine, name: name.trim() || ENGINES[engine].label }
     mkdirSync(join(accountDir(dataDir, account.id), '.codex'), { recursive: true })
     db.setSettings({ accounts: [...savedAccounts(), account] })
-    void checkAccounts(account.id).then(() => emit({ type: 'settings', settings: settings() }))
+    void checkAccounts(account.id).then(() => {
+      engineCheck.setAccounts(Object.fromEntries(accountLogins))
+      emit({ type: 'settings', settings: settings() })
+    })
     emit({ type: 'settings', settings: settings() })
     return account
   },

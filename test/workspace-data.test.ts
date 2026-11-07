@@ -105,14 +105,14 @@ it('migrates every opened workspace and backs up older schemas before changing t
   first.close()
   const raw = new DatabaseSync(file)
   const version = (raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-  raw.exec(`DROP TABLE message_notifications; PRAGMA user_version = ${version - 1}`)
+  raw.exec(`DROP TABLE message_notifications; PRAGMA user_version = ${version - 2}`) // the unread table, and the indexes after it
   raw.close()
   const migrated = open(file)
   expect(migrated.conversation('kept')?.unread).toBe(0)
   const backups = readdirSync(join(dir, 'backups'))
   expect(backups).toHaveLength(1)
   const before = new DatabaseSync(join(dir, 'backups', backups[0]!))
-  expect(before.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: version - 1 })
+  expect(before.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: version - 2 })
   before.close()
   const again = open(file)
   expect(again.conversation('kept')?.name).toBe('kept')
