@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **An agent's profile card, from its face or name.** A click on an agent's face or name (on its message, in a thread, an `@mention`, the faces at the top of a channel, the top of its DM) opens a small card next to it, as Slack does; resting the mouse there for half a second opens it too, and it goes when the mouse leaves. The card shows its picture, name, `@handle` and role; what it's doing now (working, and on which step, with a link to the conversation; waiting for an answer or an approval, and whose, when there's a team; at its monthly limit; archived; or when it last spoke); its model and harness; its computer; the channels it's in; and buttons to message it or open its full page. The faces at the top of a channel and the name at the top of a DM open the card instead of the agent's page, and the DM's **See profile** button is now a gear for the conversation's settings. People's faces stay as they were. Esc gives the focus back to what opened it. Thanks [@rjgdias](https://github.com/rjgdias)! ([#134](https://github.com/eduwxyz/tucano/pull/134))
+
 ## [0.2.17] - 2026-11-07
 
 > **Em português:**
