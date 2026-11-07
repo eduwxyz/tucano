@@ -154,6 +154,79 @@ describe('HomeLink', () => {
   })
 })
 
+// A phone paired over the home Wi-Fi is one of the owner's devices (people.deviceKey): Settings ›
+// Celular › Seu iPhone lists it and disconnects it (removeDevice), which ends its open line at once.
+describe('HomeLink, a phone disconnected from the computer', () => {
+  let dir: string
+  let link: HomeLink
+  afterEach(async () => {
+    await link.stop()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('shows as a device of the owner, and losing it closes its stream and its key', async () => {
+    const { Db } = await import('../src/core/db')
+    const { Hub, People } = await import('../src/core/people')
+    dir = mkdtempSync(join(tmpdir(), 'home-link-dev-'))
+    const db = new Db(':memory:')
+    const people = new People(db)
+    type P = { postMessage(m: unknown): void; close(): void }
+    const hub = new Hub<P>(people, db)
+    // The core as home-phone.ts wires it, minus Electron: a port the hub knows by person and device.
+    const core: HomeCore = {
+      auth: async (key) => people.authenticate(key) ?? (db.removedKey(createHash('sha256').update(key).digest('base64url')) ? { removed: true } : undefined),
+      deviceKey: async (label) => people.deviceKey(null, label)?.key,
+      open: (person, onMessage, o) => {
+        let open = true
+        const port: P = { postMessage: (m) => open && onMessage(m), close: () => void (open && ((open = false), o?.onClose?.())) }
+        hub.add(port, { person, device: o?.device })
+        return { post: () => {}, close: () => port.close() }
+      },
+      dataDir: () => dir
+    }
+    link = new HomeLink({ tls: makeCertificate('Tucano', ['localhost']), codesFile: join(dir, 'codes.json'), core: () => core })
+    const port = await link.start(47390, '127.0.0.1')
+    const code = new URL(link.makeCode().link).searchParams.get('code')!
+    const { key } = JSON.parse((await call(port, '/pair', { method: 'POST', body: JSON.stringify({ code, name: 'iPhone de Eduardo', platform: 'ios' }) })).body) as { key: string }
+    const mine = db.personKeys(db.ownerId())
+    expect(mine.map((k) => k.label)).toEqual(['iPhone de Eduardo · ios'])
+
+    // On the line; then disconnected from the computer, as the core's removeDevice does.
+    let ended = false
+    const stream = new Promise<string>((resolve) => {
+      const req = request({ host: '127.0.0.1', port, path: '/events', rejectUnauthorized: false, headers: { cookie: `tucano=${key}` } }, (res) => {
+        let text = ''
+        res.on('data', (c) => (text += c))
+        res.on('end', () => ((ended = true), resolve(text)))
+      })
+      req.end()
+    })
+    await new Promise((r) => setTimeout(r, 150))
+    expect(link.connected).toBe(1)
+    expect(db.removePersonKey(db.ownerId(), mine[0]!.hash)).toBe(true)
+    hub.closeDevice(mine[0]!.hash)
+    expect(await stream).toContain('event: hello')
+    expect(ended).toBe(true)
+    expect(link.connected).toBe(0)
+    // Its key opens nothing now (and reads as signed out, not as a guess).
+    expect((await call(port, '/events', { cookie: key })).status).toBe(401)
+    expect(people.authenticate(key)).toBeUndefined()
+    // Deliveries to a closed line go nowhere.
+    expect(() => link.deliver({ notify: {} })).not.toThrow()
+  })
+
+  it('never spends a code on a GET', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'home-link-get-'))
+    const core = fakeCore(dir)
+    link = new HomeLink({ tls: makeCertificate('Tucano', ['localhost']), codesFile: join(dir, 'codes.json'), core: () => core })
+    const port = await link.start(47395, '127.0.0.1')
+    const code = new URL(link.makeCode().link).searchParams.get('code')!
+    for (const path of [`/?code=${code}`, `/pair?code=${code}`]) expect((await call(port, path)).status).toBe(401)
+    expect(core.keys).toHaveLength(0)
+    expect((await call(port, '/pair', { method: 'POST', body: JSON.stringify({ code, name: 'iPhone', platform: 'ios' }) })).status).toBe(200)
+  })
+})
+
 describe('lanAddress', () => {
   it('picks the Wi-Fi or the cable over the virtual networks Windows and Linux add', async () => {
     const { lanAddress } = await import('../src/main/home-phone-net')

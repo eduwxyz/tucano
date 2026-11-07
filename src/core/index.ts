@@ -271,7 +271,7 @@ const hub = new Hub<MessagePortMain>(people, db)
 // The conversation each person has open: what arrives there is read already.
 const viewing = new Map<string, string | null>()
 let closing = false
-type Ctx = { person: Person }
+type Ctx = { person: Person; device?: string } // device: the hash of the key a server's page signed in with
 const ownerCtx = (): Ctx => ({ person: db.owner() })
 // What the workspace switcher shows of this workspace: its name, whether it's paused, and two
 // counts. Coalesced: a reply streaming updates its message many times a second.
@@ -1817,6 +1817,15 @@ const api: Handlers = {
   revokeInvite: ({ id }, ctx) => people.revokeInvite(ctx.person, id),
   listInvites: () => db.invites(),
   removedPeople: () => db.removedPeople(),
+  myDevices: (_, ctx) => db.personKeys(ctx.person.id).map((k) => ({ id: k.hash, label: k.label, createdAt: k.createdAt, ...(k.seenAt ? { seenAt: k.seenAt } : {}), ...(k.hash === ctx.device ? { current: true } : {}) })),
+  // One of my devices signs out: its open pages lose the line (a moment after the answer, which may
+  // be going down that very line: this page's own device), and the server asks again for my keys.
+  removeDevice: ({ id }, ctx) => {
+    if (!db.removePersonKey(ctx.person.id, id)) throw new Error(L('Esse aparelho já foi desconectado.', 'That device was already disconnected.'))
+    toMain({ type: 'person-changed', id: ctx.person.id })
+    emitPeople()
+    setTimeout(() => hub.closeDevice(id), 200)
+  },
   // Access ends now: keys, open connections, the server's remembered sign-ins. Their agents and
   // routines go to the owner; their DMs and memories wait 30 days for a re-invite (the daily sweep).
   removePerson: ({ id }, ctx) => {
@@ -1978,7 +1987,7 @@ function handle(port: MessagePortMain, req: Request): void {
   const wrong = paramsError(req.method as Method, req.params) ?? limitError(req.method as Method, req.params)
   if (wrong) return reply({ error: wrong })
   Promise.resolve()
-    .then(() => (admit(person, req.method as Method), fn(req.params ?? {}, { person })))
+    .then(() => (admit(person, req.method as Method), fn(req.params ?? {}, { person, device: hub.deviceOf(port) })))
     .then(
       (result) => reply({ result }),
       (e: unknown) => {

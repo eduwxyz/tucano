@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import type { PhoneState } from '../rpc'
-import { toast } from '../store'
+import { toast, useStore, youPerson } from '../store'
 import { Card } from './Pages'
-import { Qr } from './People'
+import { MyDevices, Qr } from './People'
 import { Icon } from './ui'
 
 // Seu iPhone (desktop only): the Tucano app on the phone, over the home Wi-Fi, as you
@@ -16,6 +16,8 @@ export function HomePhoneCard(): ReactNode {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [paired, setPaired] = useState(false)
+  // The phones paired with this computer: each one a key of the owner's (people.deviceKey).
+  const devices = useStore(youPerson)?.devices ?? 0
 
   useEffect(() => {
     if (!api) return
@@ -137,6 +139,13 @@ export function HomePhoneCard(): ReactNode {
             {L('Desligar', 'Turn off')}
           </button>
         </div>
+      )}
+      {!code && devices > 0 && (
+        <MyDevices
+          count={devices}
+          refresh={state?.connected}
+          lead={L(`Pareados com este computador: ${devices} aparelho${devices > 1 ? 's' : ''}. Desconectar tira o acesso na hora.`, `Paired with this computer: ${devices} device${devices > 1 ? 's' : ''}. Disconnecting takes the access away at once.`)}
+        />
       )}
       {on && (
         <p className="muted small">

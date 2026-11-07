@@ -32,6 +32,7 @@ import {
   type Model,
   type Person,
   type Inbox,
+  type Device,
   type Invite,
   type ActivityEntry,
   delegating,
@@ -971,6 +972,8 @@ export const revokeInvite = (id: string): Promise<void> => call('revokeInvite', 
 export const listInvites = (): Promise<Invite[]> => call('listInvites')
 export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => call('removedPeople')
 export const removePerson = (id: string): Promise<void> => call('removePerson', { id })
+export const myDevices = (): Promise<Device[]> => call('myDevices')
+export const removeDevice = (id: string): Promise<void> => call('removeDevice', { id })
 export const setRole = (id: string, role: 'admin' | 'member'): Promise<void> => call('setRole', { id, role })
 export const purgePerson = (id: string): Promise<void> => call('purgePerson', { id })
 export const loadActivity = (f: { personId?: string; kind?: string; before?: number }): Promise<ActivityEntry[]> => call('activity', f)

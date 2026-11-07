@@ -246,6 +246,16 @@ export interface Person {
   devices?: number // how many keys (browsers, apps) they have
 }
 
+// One of my own keys (a browser, the phone, the desktop app), as Settings › Pessoas lists them.
+// `id` is the key's hash, never the key. No `seenAt`: it never signed in (a link preview's, say).
+export interface Device {
+  id: string
+  label: string
+  createdAt: number
+  seenAt?: number
+  current?: boolean // the one this page is signed in with
+}
+
 // Whether `of` has `who` covering for them right now.
 export const delegating = (of: Pick<Person, 'delegateTo' | 'delegateUntil'> | undefined, who: string, now = Date.now()): boolean =>
   !!of && of.delegateTo === who && (of.delegateUntil ?? 0) > now
