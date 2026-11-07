@@ -30,6 +30,7 @@ import { AdminOnly } from './People'
 import { Card, Field, Sheet, Toggle } from './Pages'
 import { AgentAvatar, Icon, ownColor, shiftWeek, startOfWeek, weekRange } from './ui'
 import { Modal } from './Modal'
+import { Select } from './Select'
 
 const DAYS = (): string[] => (lang() === 'en' ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'])
 const DAY_NAMES = (): string[] => (lang() === 'en' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'])
@@ -748,14 +749,12 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
             <input autoFocus value={draft.name} placeholder={L('Bom dia', 'Good morning')} onChange={(e) => set({ name: e.target.value })} />
           </Field>
           <Field label={L('Agente', 'Agent')}>
-            <select value={draft.agentId} onChange={(e) => set({ agentId: e.target.value, conversationId: '' })}>
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                  {a.role ? ` · ${a.role}` : ''}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={draft.agentId ?? null}
+              onChange={(v) => { if (v) set({ agentId: v, conversationId: '' }) }}
+              options={agents.map((a) => ({ value: a.id, label: a.name + (a.role ? ` · ${a.role}` : '') }))}
+              placeholder={L('Escolha um agente', 'Pick an agent')}
+            />
           </Field>
         </div>
         <Field label={L('O que fazer', 'What to do')} hint={L('Como você escreveria numa mensagem. Ele usa as ferramentas, os conectores e o computador que já tem.', 'As you’d write it in a message. It uses the tools, connectors and computer it already has.')}>
@@ -790,25 +789,20 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
             <>
               <div className="grid2">
                 <Field label={L('Conector', 'Connector')}>
-                  <select value={t.connectorId} onChange={(e) => (setPreview(null), set({ trigger: pollTrigger({ connectorId: e.target.value }) }))}>
-                    {connectors.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    value={t.connectorId ?? null}
+                    onChange={(v) => { if (v) { setPreview(null); set({ trigger: pollTrigger({ connectorId: v }) }) } }}
+                    options={connectors.map((c) => ({ value: c.id, label: c.name }))}
+                    placeholder={L('Escolha um conector', 'Pick a connector')}
+                  />
                 </Field>
                 <Field label={L('Ferramenta de leitura', 'Read tool')}>
-                  <select value={t.tool} onChange={(e) => (setPreview(null), set({ trigger: pollTrigger({ tool: e.target.value }) }))}>
-                    {connectors
-                      .find((c) => c.id === t.connectorId)
-                      ?.tools.filter((x) => x.cls === 'read' && x.enabled)
-                      .map((x) => (
-                        <option key={x.name} value={x.name}>
-                          {x.name}
-                        </option>
-                      ))}
-                  </select>
+                  <Select
+                    value={t.tool ?? null}
+                    onChange={(v) => { if (v) { setPreview(null); set({ trigger: pollTrigger({ tool: v }) }) } }}
+                    options={connectors.find((c) => c.id === t.connectorId)?.tools.filter((x) => x.cls === 'read' && x.enabled).map((x) => ({ value: x.name, label: x.name }))}
+                    placeholder={L('Escolha uma ferramenta', 'Pick a tool')}
+                  />
                 </Field>
               </div>
               <div className="grid2">
@@ -816,13 +810,12 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
                   <textarea rows={2} className="mono" value={argsText} onChange={(e) => (setPreview(null), setArgsText(e.target.value))} />
                 </Field>
                 <Field label={L('Olhar a cada', 'Check every')}>
-                  <select value={t.everyMinutes} onChange={(e) => set({ trigger: pollTrigger({ everyMinutes: Number(e.target.value) }) })}>
-                    {POLL_MINUTES.map((m) => (
-                      <option key={m} value={m}>
-                        {m < 60 ? `${m} min` : L('1 hora', '1 hour')}
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    value={String(t.everyMinutes)}
+                    onChange={(v) => { if (v) set({ trigger: pollTrigger({ everyMinutes: Number(v) }) }) }}
+                    options={POLL_MINUTES.map((m) => ({ value: String(m), label: m < 60 ? `${m} min` : L('1 hora', '1 hour') }))}
+                    placeholder={L('Escolha um intervalo', 'Pick an interval')}
+                  />
                 </Field>
               </div>
               <div className="row row--center routine-test">
@@ -891,14 +884,15 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
         )}
         {team && !admin && !locked && <AdminOnly>{L('Só um admin cria rotinas do canal.', 'Only an admin creates channel routines.')}</AdminOnly>}
         <Field label={L('Onde postar', 'Where to post')}>
-          <select value={target} onChange={(e) => set({ conversationId: e.target.value })}>
-            {!(team && scope === 'channel') && <option value="">{L(`DM com ${agent?.name ?? 'o agente'}`, `DM with ${agent?.name ?? 'the agent'}`)}</option>}
-            {channels.map((c) => (
-              <option key={c.id} value={c.id}>
-                #{c.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={target ?? null}
+            onChange={(v) => set({ conversationId: v ?? '' })}
+            options={[
+              ...(team && scope === 'channel' ? [] : [{ value: '', label: L(`DM com ${agent?.name ?? 'o agente'}`, `DM with ${agent?.name ?? 'the agent'}`) }]),
+              ...channels.map((c) => ({ value: c.id, label: `#${c.name}` }))
+            ]}
+            placeholder={team && scope === 'channel' ? L('Escolha um canal', 'Pick a channel') : L(`DM com ${agent?.name ?? 'o agente'}`, `DM with ${agent?.name ?? 'the agent'}`)}
+          />
         </Field>
         {team && scope === 'channel' && (
           <div className="key-row">
