@@ -59,7 +59,7 @@ describe('A. a team from its first invite (before anyone joins)', () => {
     const curator = (): WikiCurator =>
       new WikiCurator({
         wiki,
-        db: { conversation: (id) => db.conversation(id), messagesAfter: (id) => (id === 'dm-ana' ? said : []), message: () => undefined, saveMessage: () => {}, agents: () => [], ownerId: () => db.ownerId(), people: (o) => db.people(o), teamMode: () => db.teamMode() },
+        db: { conversation: (id) => db.conversation(id), messagesAfter: (id) => (id === 'dm-ana' ? said : []), messagesSaidAfter: (id) => (id === 'dm-ana' ? said : []), message: () => undefined, saveMessage: () => {}, agents: () => [], ownerId: () => db.ownerId(), people: (o) => db.people(o), teamMode: () => db.teamMode() },
         settings: () => settings,
         llm: async () => (asked++, JSON.stringify({ worth: false, reason: '', source_title: '', changes: [] })),
         emitMessage: () => {}

@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **The wiki no longer misses a long reply.** A reply that started before another and ended well after it never reached the wiki, because the wiki's curator had already read past where it started. It now goes by when each reply ended, the same order the conversation shows.
+
 ## [0.2.16] - 2026-11-07
 
 > **Em português:**
