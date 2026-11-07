@@ -150,6 +150,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   removePerson: { id: 's' },
   setRole: { id: 's', role: 's' },
   purgePerson: { id: 's' },
+  leave: {},
   activity: { personId: 's?', kind: 's?', before: 'n?' },
   inbox: {},
   answerQuestion: { id: 's', text: 's' },
