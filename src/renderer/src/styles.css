@@ -8521,3 +8521,32 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   .job-card__dot--live::after { animation: none; }
   .job-card__bar > i { transition: none; }
 }
+
+/* What a query brought back: a preview of its rows under the reply. */
+.result-card {
+  margin-top: 8px;
+  max-width: 760px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.result-card__head { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.result-card__head strong { font-weight: 550; font-size: 13px; }
+.result-card__sql { display: block; width: 100%; padding: 7px 14px; border: 0; border-bottom: 1px solid var(--border); background: none; color: var(--text-2); font: 12px var(--mono, ui-monospace, monospace); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.result-card__sql.is-open { white-space: pre-wrap; overflow-wrap: anywhere; }
+.result-card__scroll { max-height: 420px; overflow: auto; }
+.result-card__table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.result-card__table th { position: sticky; top: 0; z-index: 1; padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--bg); color: var(--text-2); font-weight: 550; text-align: left; white-space: nowrap; }
+.result-card__table td { max-width: 320px; padding: 6px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-card__table tr:last-child td { border-bottom: 0; }
+.result-card__table .is-number { text-align: right; font-variant-numeric: tabular-nums; }
+.result-card__table .is-null { color: var(--text-3); font-style: italic; }
+.result-card__foot { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.result-card__count { margin-left: auto; }
+.result-card__filter { width: 180px; max-width: 100%; margin-left: auto; padding: 4px 8px; font-size: 12.5px; }
+.result-card__sort { display: inline-flex; align-items: center; gap: 4px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; justify-content: inherit; }
+.result-card__table th.is-number .result-card__sort { justify-content: flex-end; }
+.result-card__arrow { color: var(--text-3); font-size: 11px; }
+.result-card__sort.is-on, .result-card__sort.is-on .result-card__arrow { color: var(--text); }
+.result-card__empty { padding: 14px 12px; color: var(--text-3); text-align: center; }

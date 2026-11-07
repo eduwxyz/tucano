@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type ResultTable, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -33,7 +33,7 @@ import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, pr
 import { can } from './policy-people'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
-import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
+import { commandStep, execSummary, isSql, keyArg, maskSecrets, resultSummary, resultTable, stdoutOf } from './step-text'
 
 // An old approval of the push-from-the-computer PRs (they left Tucano): still decided, never run.
 const GITHUB = 'github'
@@ -172,6 +172,11 @@ export function resultText(r: CallToolResult): string {
 }
 
 // Text is clipped; images go through (screenshots, charts), a few at most.
+// A query's rows show in a card under the reply: the agent is told, so it sums up instead of copying them.
+const TABLE_NOTE = (): string =>
+  L('[Essas linhas aparecem numa tabela abaixo da sua resposta, para quem lê. Não as repita: diga o que importa nelas.]', "[These rows show in a table below your reply, for whoever reads it. Don't repeat them: say what matters in them.]")
+const noted = (r: CallToolResult): CallToolResult => ({ ...r, content: [...r.content, { type: 'text', text: TABLE_NOTE() }] })
+
 const clip = (r: CallToolResult): CallToolResult => {
   const images = r.content.filter((c) => c.type === 'image').slice(0, 3)
   const rest = images.length ? { ...r, content: r.content.filter((c) => c.type !== 'image') } : r
@@ -1366,8 +1371,10 @@ export class Runner {
           save()
           const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
           const failed = !!out.result.isError
-          const end: Pick<Step, 'output' | 'error'> = command
-            ? execSummary(resultText(out.result), failed)
+          // A query run from a command: its rows, when they read as a table.
+          const table = command?.sql && !failed ? resultTable(stdoutOf(resultText(out.result))) : undefined
+          const end: Pick<Step, 'output' | 'error' | 'table'> = command
+            ? { ...execSummary(resultText(out.result), failed), ...(table ? { table } : {}) }
             : failed
               ? { error: maskSecrets(errorReason(out.result)) }
               : SUMMED_COMPUTER_TOOLS.has(name)
@@ -1389,7 +1396,7 @@ export class Runner {
           }
           stepStarted = Date.now()
           save()
-          return clip(out.result)
+          return table ? noted(clip(out.result)) : clip(out.result)
         }
 
         if (browser && BROWSER_TOOL_NAMES.has(name)) {
@@ -1601,10 +1608,10 @@ export class Runner {
         msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
         save()
         // A failure keeps its reason on the step: a bare ✗ leaves nobody knowing why.
-        const finish = (status: 'done' | 'error', why?: string, output?: string): void => {
+        const finish = (status: 'done' | 'error', why?: string, output?: string, table?: ResultTable): void => {
           const error = why && maskSecrets(why)
           if (error) console.warn(`[connector] ${detail} failed: ${error}`)
-          const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : output ? { output } : {}
+          const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : output ? { output, ...(table ? { table } : {}) } : {}
           msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s)), thinking()] }
           stepStarted = Date.now()
           save()
@@ -1617,10 +1624,17 @@ export class Runner {
           // deploy finished wants the answer now), nor a write (starting a job doesn't mean waiting for it).
           const pending = current.cls === 'read' && !isStatusTool(current.name) ? pendingOf(first) : undefined
           const poller = pending && pollTool(db.tools(hit.connector.id), pending, (t) => allowed(t, db.agent(agent.id)?.grants[hit.connector.id]))
-          const done = (r: CallToolResult): void => (r.isError ? finish('error', errorReason(r)) : finish('done', undefined, resultSummary(resultText(r))))
+          // A query's rows, when what was asked reads like SQL and what came back like a table.
+          let table: ResultTable | undefined
+          const done = (r: CallToolResult): void => {
+            if (r.isError) return finish('error', errorReason(r))
+            table = isSql(input) ? resultTable(resultText(r)) : undefined
+            finish('done', undefined, resultSummary(resultText(r)), table)
+          }
+          const out = (r: CallToolResult): CallToolResult => (table ? noted(r) : r)
           if (!pending || !poller) {
             done(first)
-            return clip(first)
+            return out(clip(first))
           }
           const w = await awaitDone(first, async (p) => this.deps.connectors!.call(hit.connector.id, poller.tool.name, pollTool([poller.tool], p, () => true)?.args ?? poller.args), {
             maxMs: PENDING_WAIT_MINUTES * 60_000,
@@ -1631,7 +1645,7 @@ export class Runner {
           const took = w.ms >= 60_000 ? `${Math.round(w.ms / 60_000)} min` : `${Math.max(1, Math.round(w.ms / 1000))} s`
           msg.run = { ...msg.run!, steps: msg.run!.steps.map((s) => (s.id === step.id ? { ...s, detail: `${detail} · ${L(`esperou ${took}`, `waited ${took}`)}` } : s)) }
           done(w.result)
-          if (!w.pending) return clip(w.result)
+          if (!w.pending) return out(clip(w.result))
           const ids = Object.entries(poller.args).map(([k, v]) => `${k}=${v}`).join(', ')
           const r = clip(w.result)
           return {

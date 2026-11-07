@@ -82,6 +82,7 @@ import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { JobWatchCard } from './JobWatch'
+import { ResultTableCard } from './ResultTable'
 import { when } from './Routines'
 import { AgentProposal, ProposalCard } from './Tuca'
 import { FoldToggle } from './Fold'
@@ -486,6 +487,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
         {message.run?.jobWatchIds?.map((wid) => <JobWatchCard key={wid} id={wid} />)}
+        {message.run?.steps.filter((s) => s.table).map((s) => <ResultTableCard key={s.id} step={s} />)}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">

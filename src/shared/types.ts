@@ -139,6 +139,15 @@ export const channelName = (s: string): string =>
     .slice(0, 60)
 
 export type StepStatus = 'running' | 'done' | 'error'
+// What a query brought back, for the card under the reply: a preview, never the whole result.
+export interface ResultTable {
+  columns: string[]
+  numeric: boolean[] // per column: every value a number, so it lines up on the right
+  rows: (string | null)[][] // null: SQL's NULL
+  total: number // rows in the result, beyond the ones kept
+  cut?: boolean // the result itself came cut, so there may be more than total says
+}
+
 export interface Step {
   id: string
   label: string
@@ -147,6 +156,7 @@ export interface Step {
   error?: string // why it failed, in the tool's own words
   input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
   output?: string // what came back, in a few words ("120 rows")
+  table?: ResultTable // what a query brought back, as a table
   status: StepStatus
   ms?: number
 }

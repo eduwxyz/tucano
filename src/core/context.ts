@@ -401,6 +401,24 @@ export const snip = (text: string, max: number): string => {
 }
 
 // The blocks, and which block each message became (where its images go).
+// The queries whose rows showed as a table under a reply: the rows themselves aren't in the conversation,
+// so a question about them ("the average of this by state") is answered with a query of its own.
+const QUERY_MAX = 600
+function queriesOf(m: Message): string[] {
+  return (m.run?.steps ?? []).flatMap((s) => {
+    if (!s.table) return []
+    const sql = (s.input ?? '').replace(/\s+/g, ' ').trim()
+    const query = sql.length > QUERY_MAX ? `${sql.slice(0, QUERY_MAX)}…` : sql
+    const columns = s.table.columns.join(', ')
+    return [
+      L(
+        `[Consulta cujo resultado apareceu em tabela: ${query || 'sem SQL'} → colunas ${columns}; ${s.table.total} linhas. Para outra conta sobre esses dados (uma média, um agrupamento, um filtro), rode uma consulta nova a partir dessa, em vez de calcular pelas linhas.]`,
+        `[Query whose result showed as a table: ${query || 'no SQL'} → columns ${columns}; ${s.table.total} rows. For another calculation on this data (an average, a grouping, a filter), run a new query built from this one, instead of working it out from the rows.]`
+      )
+    ]
+  })
+}
+
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
   const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable, unix, people, live } = opts
   const scheduler = (id: string): string | undefined => (typeof opts.routineOwner === 'function' ? opts.routineOwner(id) : (opts.routineOwner ?? me))
@@ -422,7 +440,8 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
     [
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
-      m.run?.question && L(`(pergunta enviada a ${m.run.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${m.run.question})`, `(question sent to ${m.run.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${m.run.question})`)
+      m.run?.question && L(`(pergunta enviada a ${m.run.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${m.run.question})`, `(question sent to ${m.run.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${m.run.question})`),
+      ...queriesOf(m)
     ]
       .filter(Boolean)
       .join('\n\n')
