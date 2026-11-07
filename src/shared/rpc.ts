@@ -176,6 +176,7 @@ export type CoreEvent =
   | { type: 'memory_removed'; id: string }
   | { type: 'computer'; computer: ComputerInfo }
   | { type: 'browser'; view: BrowserView }
+  | { type: 'browser_frame'; agentId: string; frame: string } // the browser's screen as it changes, without the rest of its view
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'routine'; routine: Routine }
   | { type: 'routine_removed'; id: string }

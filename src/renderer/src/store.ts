@@ -453,6 +453,24 @@ export function useLiveText(m: Message, every = 0): string {
   return useSyncExternalStore(subscribe, () => live.get(m.id) ?? m.text)
 }
 
+// ---------- browser frames ----------
+// An agent's browser sends its screen up to ten times a second: kept apart, like the streamed words.
+
+const frames = new Map<string, string>()
+const frameListeners = new Map<string, Set<() => void>>()
+
+function showFrame(agentId: string, frame: string | undefined): void {
+  if (frames.get(agentId) === frame) return
+  if (frame) frames.set(agentId, frame)
+  else frames.delete(agentId)
+  wake(frameListeners, agentId)
+}
+
+export function useFrame(agentId: string): string | undefined {
+  const subscribe = useCallback((l: () => void) => listen(frameListeners, agentId, l), [agentId])
+  return useSyncExternalStore(subscribe, () => frames.get(agentId))
+}
+
 // ---------- core sync ----------
 
 function withSettings(s: State, settings: Settings): State {
@@ -462,8 +480,9 @@ function withSettings(s: State, settings: Settings): State {
 }
 
 function apply(e: CoreEvent): void {
-  // Streamed words come many times a second: they wake only the row that shows them.
+  // Streamed words and the browser's screen come many times a second: they wake only what shows them.
   if (e.type === 'delta') return stream(e.id, e.text)
+  if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   set((s) => {
     switch (e.type) {
       case 'message': {
@@ -528,6 +547,7 @@ function apply(e: CoreEvent): void {
   })
   // A full message carries all its text so far: what streamed before it is in there.
   if (e.type === 'message' && live.delete(e.message.id)) wake(liveListeners, e.message.id)
+  if (e.type === 'browser') showFrame(e.view.agentId, e.view.frame)
 }
 
 export async function start(): Promise<void> {
@@ -550,6 +570,7 @@ export async function start(): Promise<void> {
   })
   await connect(apply)
   const snap = await call('snapshot')
+  for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
     const view = s.view ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })

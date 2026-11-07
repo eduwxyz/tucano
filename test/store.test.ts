@@ -76,6 +76,12 @@ describe("the window's messages", () => {
     expect(store.repliesOf(store.getState(), 'c1', 'other').map((m) => m.id)).toEqual(['r-other'])
   })
 
+  it("doesn't wake the store for a browser's frame", () => {
+    const before = store.getState()
+    emit({ type: 'browser_frame', agentId: 'a1', frame: 'data:image/jpeg;base64,AAAA' })
+    expect(store.getState()).toBe(before)
+  })
+
   it('load older ones in time order, once, and then the timeline is whole', async () => {
     await Promise.all([store.loadOlder('c1'), store.loadOlder('c1')])
     expect(asked.filter((a) => a.method === 'olderMessages')).toEqual([{ method: 'olderMessages', params: { conversationId: 'c1', before: 10 } }])
