@@ -5,7 +5,7 @@
 // "thanks, @bia" doesn't wake her up.
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
-import { CODE_SPANS, type Agent, type Connector, type Message } from '../shared/types'
+import { CODE_SPANS, type Agent, type Connector, type Message, type Person } from '../shared/types'
 import type { Engine, TurnShape, Usage } from './engines/types'
 import type { ThreadDigest } from './memory'
 
@@ -51,21 +51,24 @@ export const REPLY_JSON = (): string => L('Responda só com o JSON.', 'Reply wit
 const said = (m: Message): boolean => !!m.text.trim() && m.author.kind !== 'system'
 
 // Who wrote a message, as the router reads it.
+// A person's message reads with their name (one not in `people`, as `me`).
+type People = Pick<Person, 'id' | 'name'>[]
 const speaker =
-  (agents: Agent[], me: string) =>
+  (agents: Agent[], me: string, people?: People) =>
   (m: Message): string =>
-    m.author.kind === 'me'
-      ? me
+    m.author.kind === 'person'
+      ? (people?.find((p) => m.author.kind === 'person' && p.id === m.author.id)?.name ?? me)
       : m.author.kind === 'routine'
         ? L(`rotina de ${me}`, `${me}'s routine`)
         : (agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent'))
 
 // `thread`: the message that started the thread the last message is in; `messages` are then
 // that thread, and `threads` the conversation's other threads, a line each (who took what).
-export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; thread?: Message; threads?: ThreadDigest[] }): string {
-  const { messages, agents, me, connectors = [], thread, threads = [] } = opts
+// `team`: more than one person talks here; what they say to each other isn't for the agents.
+export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; people?: People; connectors?: Connector[]; thread?: Message; threads?: ThreadDigest[]; team?: boolean }): string {
+  const { messages, agents, me, people, connectors = [], thread, threads = [], team } = opts
   const roster = agents.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`)
-  const name = speaker(agents, me)
+  const name = speaker(agents, me, people)
   const recent = messages.filter((m) => said(m) && m.id !== thread?.id).slice(-ROUTER_HISTORY)
   const lines = [...(thread && said(thread) ? [thread] : []), ...recent].map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`)
   // Who answered what elsewhere, so a follow-up goes to whoever handled the subject.
@@ -85,6 +88,15 @@ export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: s
       : L('Conversa (a última é a que precisa de resposta):', 'Conversation (the last one is the one that needs an answer):'),
     ...lines,
     '',
+    ...(team
+      ? [
+          L(
+            'Aqui conversam várias pessoas. Um cumprimento ou recado entre as pessoas, sem pergunta nem pedido pros agentes ("bom dia", "chego às 10", "@Ana valeu"), não precisa de agente: lista vazia e "todos" falso. Isso vale no lugar da regra do cumprimento.',
+            'Several people talk here. A greeting or note between the people, with no question or request for the agents ("good morning", "in at 10", "@Ana thanks"), needs no agent: empty list and "everyone" false. This replaces the greeting rule.'
+          ),
+          ''
+        ]
+      : []),
     REPLY_JSON()
   ].join('\n')
 }
@@ -162,9 +174,9 @@ export function replyExcerpt(reply: string, handles: string[]): string {
 }
 
 // The reply sits between <reply> tags so it can't be confused with the roster or the history.
-export function handoffPrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; connectors?: Connector[]; busy?: Agent[] }): string {
-  const { reply, author, candidates, messages, members, me, connectors = [], busy = [] } = opts
-  const name = speaker(members, me)
+export function handoffPrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; people?: People; connectors?: Connector[]; busy?: Agent[] }): string {
+  const { reply, author, candidates, messages, members, me, people, connectors = [], busy = [] } = opts
+  const name = speaker(members, me, people)
   const excerpt = replyExcerpt(reply, candidates.map((a) => a.handle))
   const cut = excerpt !== reply.trim()
   return [
@@ -230,9 +242,11 @@ export async function route(opts: {
   messages: Message[]
   agents: Agent[]
   me: string
+  people?: People
   connectors?: Connector[]
   thread?: Message
   threads?: ThreadDigest[]
+  team?: boolean
   cwd: string
 }): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()
@@ -262,6 +276,7 @@ export async function screenHandoff(opts: {
   messages: Message[]
   members: Agent[]
   me: string
+  people?: People
   connectors?: Connector[]
   busy?: Agent[]
   cwd: string

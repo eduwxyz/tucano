@@ -84,7 +84,7 @@ describe('the curator', () => {
       emitMessage: (m) => emitted.push(m)
     })
     const say = (id: string, who: 'me' | 'lia', text: string, at: number): void => {
-      messages.push({ id, conversationId: 'c', author: who === 'me' ? { kind: 'me' } : { kind: 'agent', id: 'lia' }, text, at, ...(who === 'lia' ? { run: { status: 'done', steps: [] } } : {}) } as Message)
+      messages.push({ id, conversationId: 'c', author: who === 'me' ? { kind: 'person', id: 'me' } : { kind: 'agent', id: 'lia' }, text, at, ...(who === 'lia' ? { run: { status: 'done', steps: [] } } : {}) } as Message)
     }
     return { w, curator, say, calls, emitted, messages }
   }
@@ -287,7 +287,7 @@ describe('the curator and replies that overlap', () => {
     }
     return { db, w, curator, calls, by, overlap, end }
   }
-  const message = (id: string, at: number, run?: Message['run']): Message => ({ id, conversationId: 'c', author: run ? { kind: 'agent', id: 'lia' } : { kind: 'me' }, text: `${id} ${'z'.repeat(200)}`, at, ...(run ? { run } : {}) })
+  const message = (id: string, at: number, run?: Message['run']): Message => ({ id, conversationId: 'c', author: run ? { kind: 'agent', id: 'lia' } : { kind: 'person', id: 'p1' }, text: `${id} ${'z'.repeat(200)}`, at, ...(run ? { run } : {}) })
 
   it('reads a reply that started first and ended last, once it ends, and nothing twice', async () => {
     const { db, w, curator, calls, by, overlap, end } = world()

@@ -202,7 +202,7 @@ describe('the Tuca helping, in a conversation', () => {
     await runner.idle()
     expect(turns[0]!.system).toContain('## O guia do Tucano')
     expect(turns[0]!.system).toContain('(#abrir/conectores)')
-    expect(turns[0]!.system).toContain('Lia (@lia)')
+    expect(turns[0]!.prompt).toContain('Lia (@lia)')
     const texts = results.map((r) => (r as { content: { text: string }[] }).content[0]!.text)
     if (GUIDE.length) expect(texts[0]).toContain(`# ${GUIDE[0]!.title}`)
     expect(texts[1]).toContain('Linear: pede login')

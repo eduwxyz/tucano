@@ -12,7 +12,7 @@ describe('asSaid', () => {
   const said = (id: string, at: number, status?: RunStatus, endedAt?: number): Message => ({
     id,
     conversationId: 'c',
-    author: status ? { kind: 'agent', id: 'a' } : { kind: 'me' },
+    author: status ? { kind: 'agent', id: 'a' } : { kind: 'person', id: 'owner' },
     text: id,
     at,
     ...(status ? { run: { status, steps: [], ...(endedAt ? { endedAt } : {}) } } : {})
@@ -74,7 +74,8 @@ describe('replies that overlap', () => {
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ro-work-')) })
   }
 
-  const whose = (m: Message): string => (m.author.kind === 'agent' ? m.author.id : m.author.kind)
+  // A person's message reads as 'me': the single person of the desktop app.
+  const whose = (m: Message): string => (m.author.kind === 'agent' ? m.author.id : m.author.kind === 'person' ? 'me' : m.author.kind)
   const of = (id: string): Message => db.messages().find((m) => whose(m) === id)!
 
   // Lia is asked first and is at work when Theo is asked: two messages, since agents called in one may take turns.
