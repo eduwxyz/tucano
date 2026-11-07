@@ -706,7 +706,7 @@ export class Db {
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
-      ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
+      ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : str(r['kind']) === 'removed' ? { kind: 'removed' as const } : {}),
       // One with no owner (put there by another tool, after the people came) is the Tucano owner's.
       owner: r['owner'] ? str(r['owner']) : this.ownerId()
     }

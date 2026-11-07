@@ -760,6 +760,7 @@ export class Runner {
     const { db, emit, engines } = this.deps
     let settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
+    if (agent.kind === 'removed') throw new Error(`agent ${agent.id} was deleted while its reply was queued`)
     const model = modelInfo(agent.modelId)
     // The model this reply runs on: the agent's, or its reserve once the main one's subscription is out.
     let modelId = agent.modelId
@@ -1108,7 +1109,7 @@ export class Runner {
             workspaceState(args['area'], {
               settings: await this.deps.settings(),
               connectors: this.deps.connectors?.list() ?? [],
-              agents: db.agents().filter((a) => a.kind !== 'tuca'),
+              agents: db.agents().filter((a) => a.kind !== 'tuca' && a.kind !== 'removed'),
               // What the person he's helping sees: never someone else's DM, nor what came from one.
               conversations: db.conversations(requester.id).filter((c) => seen.canSeeConversation(requester, c)),
               routines: db.routines().filter((r) => seen.canSeeFrom(requester, r.conversationId)),

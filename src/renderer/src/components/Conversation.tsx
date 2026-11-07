@@ -446,7 +446,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
       <div className="msg__body">
         {!grouped && (
           <div className="msg__head">
-            {agent ? (
+            {agent && agent.kind !== 'removed' ? (
               <button className="msg__author link" onClick={() => navigate({ kind: 'agent', id: agent.id })}>
                 {name}
               </button>

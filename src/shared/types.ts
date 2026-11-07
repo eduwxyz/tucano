@@ -86,7 +86,7 @@ export interface Agent {
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
-  kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
+  kind?: 'tuca' | 'removed' // 'tuca': the agent that builds the others, it proposes and the person creates; 'removed': deleted, only its name and look stay, for its old messages (always archived too)
   owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
 }
 

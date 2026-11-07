@@ -76,7 +76,7 @@ import { ConnectorGrid, OwnAppSetup } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
 import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
-import { confirmDialog } from './Dialogs'
+import { confirmDeleteAgent, confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { UpdateSettings } from './Update'
@@ -241,7 +241,20 @@ const LEVELS = (): { value: GrantLevel; label: string }[] => [
   { value: 'read_write', label: L('Ler e escrever', 'Read and write') }
 ]
 
-export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; draft?: Agent; fromMessage?: string }): ReactNode {
+type AgentPageProps = { id?: string; draft?: Agent; fromMessage?: string }
+
+export function AgentPage(props: AgentPageProps): ReactNode {
+  const removed = useStore((s) => (props.id ? agentById(s, props.id) : undefined))
+  if (removed?.kind !== 'removed') return <AgentForm {...props} />
+  // Old links still lead here: a message's Tuca card, a report line.
+  return (
+    <Page title={removed.name}>
+      <p className="muted">{L('Este agente foi excluído. As mensagens dele continuam nos canais.', 'This agent was deleted. Its messages stay in the channels.')}</p>
+    </Page>
+  )
+}
+
+function AgentForm({ id, draft: proposed, fromMessage }: AgentPageProps): ReactNode {
   const existing = useStore((s) => (id ? agentById(s, id) : undefined))
   const engines = useStore((s) => s.settings.engines)
   const connectors = useStore((s) => s.connectors)
@@ -333,6 +346,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               }
             >
               {L('Arquivar', 'Archive')}
+            </button>
+          )}
+          {admin && !isNew && draft.kind !== 'tuca' && (
+            <button className="btn btn--ghost" title={L('Apaga o agente para sempre', 'Deletes the agent for good')} onClick={() => void confirmDeleteAgent(draft)}>
+              {L('Excluir', 'Delete')}
             </button>
           )}
           {saved && <span className="saved">{L('Salvo', 'Saved')}</span>}

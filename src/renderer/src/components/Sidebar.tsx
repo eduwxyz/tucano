@@ -31,7 +31,7 @@ import {
 } from '../store'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { call } from '../rpc'
-import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
+import { ContextMenu, confirmDeleteAgent, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
 import { GettingStarted } from './Onboarding'
 import { UpdateNote } from './Update'
@@ -254,7 +254,8 @@ export function Sidebar(): ReactNode {
         }).then((ok) => {
           if (ok) void archiveAgent(agentId, true)
         })
-    }
+    },
+    { label: L('Excluir…', 'Delete…'), icon: 'trash', danger: true, onClick: () => void confirmDeleteAgent({ id: agentId, name: agentName }) }
   ]
 
   const isDark =
@@ -388,11 +389,11 @@ export function Sidebar(): ReactNode {
                 <AgentItem id={a.id} owner={team && a.owner !== you ? personById({ people }, a.owner)?.name : undefined} />
               </div>
             ))}
-          {agents.some((a) => a.archived) && (
+          {agents.some((a) => a.archived && a.kind !== 'removed') && (
             <button className="nav-item nav-item--quiet" onClick={() => openDialog({ kind: 'archived' })}>
               <Icon name="layers" />
               <span className="nav-item__label">{L('Arquivados', 'Archived')}</span>
-              <span className="nav-item__meta">{agents.filter((a) => a.archived).length}</span>
+              <span className="nav-item__meta">{agents.filter((a) => a.archived && a.kind !== 'removed').length}</span>
             </button>
           )}
         </Section>

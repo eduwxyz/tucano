@@ -43,6 +43,7 @@ import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
+import { deleteAgent } from './agent-delete'
 import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
 import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
@@ -1036,6 +1037,19 @@ const titleUnavailable = (title: string): string => L(`Não dá pra usar o títu
 const nameOf = (ctx: Ctx): string => (ctx.person.role === 'owner' ? settings().workspaceName : ctx.person.name) || L('Você', 'You')
 const emitPeople = (): void => emit({ type: 'people', people: db.people(), former: db.formerPeople() })
 
+// A conversation and what only made sense there: replies still running stop, its routines,
+// its pending approvals. The checks of who may are the caller's.
+function dropConversation(id: string): void {
+  const c = db.conversation(id)
+  if (!c) return
+  for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
+  for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
+  for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
+  runner.forgetSessions({ conversationId: id })
+  db.deleteConversation(id)
+  emit({ type: 'conversation_removed', id, ...(c.kind === 'dm' ? { for: dmOwner(c, db.ownerId()) } : {}) })
+}
+
 const api: Handlers = {
   markRead: ({ conversationId }, ctx) => {
     reach(ctx, conversationId)
@@ -1111,6 +1125,7 @@ const api: Handlers = {
 
   saveAgent: ({ agent, channelIds }, ctx) => {
     const before = db.agent(agent.id)
+    if (before?.kind === 'removed') throw new Error(L('Esse agente foi excluído.', 'That agent was deleted.'))
     // Archived changes only through archiveAgent, which also stops what the agent was doing.
     // Its owner changes only with the removal hand-over, never by an edit (one with none is the
     // Tucano owner's, as db.agent reads it): a new one is whoever made it.
@@ -1142,7 +1157,7 @@ const api: Handlers = {
   // its routines turn off, its browser closes. Its channels and settings stay for when it comes back.
   archiveAgent: ({ id, archived }, ctx) => {
     const agent = db.agent(id)
-    if (!agent || agent.archived === archived) return
+    if (!agent || agent.kind === 'removed' || agent.archived === archived) return
     record(ctx, archived ? 'agent.archived' : 'agent.restored', id, { name: agent.name })
     if (archived) {
       for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.author.kind === 'agent' && m.author.id === id) runner.stop(m.id)
@@ -1153,6 +1168,31 @@ const api: Handlers = {
     db.saveAgent({ ...agent, archived })
     emit({ type: 'agent', agent: db.agent(id)! })
     emitConversations()
+  },
+
+  deleteAgent: ({ id }, ctx) => {
+    const agent = db.agent(id)
+    // Throws, changing nothing, for what can't be deleted; the disk and Docker go on after this returns.
+    const erased = deleteAgent(id, {
+      db,
+      emit,
+      emitConversations,
+      workDir: join(dataDir, 'agents'),
+      stopRun: (messageId) => runner.stop(messageId),
+      forgetSessions: (agentId) => runner.forgetSessions({ agentId }),
+      removeRoutine: (routineId) => routines.remove(routineId),
+      deleteConversation: dropConversation,
+      forgetMemories: (agentId) => memory.forgetAgent(agentId),
+      forgetSkills: (agentId) => skills.forgetAgent(agentId),
+      eraseComputer: async (a) => {
+        if (a.computer && a.computerKind === 'mac') await computers.mac.erase(a.id)
+        // Also for a computer since turned off: its container and files wait for it to be turned back on.
+        if (a.computer || existsSync(join(dataDir, 'computers', a.id))) await computers.erase(a.id)
+      },
+      eraseBrowser: (a) => browser.action(a, 'clear')
+    })
+    if (agent && agent.kind !== 'removed') record(ctx, 'agent.deleted', id, { name: agent.name })
+    void erased
   },
   renameChannel: ({ id, name }, ctx) => {
     const conv = db.conversation(id)
@@ -1207,12 +1247,7 @@ const api: Handlers = {
     reach(ctx, id)
     if (c.kind === 'channel') must(ctx.person, { kind: 'admin' })
     record(ctx, c.kind === 'channel' ? 'channel.deleted' : 'dm.deleted', id, c.kind === 'channel' ? { name: c.name } : undefined)
-    for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
-    for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
-    for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
-    runner.forgetSessions({ conversationId: id })
-    db.deleteConversation(id)
-    emit({ type: 'conversation_removed', id, ...(c.kind === 'dm' ? { for: dmOwner(c, db.ownerId()) } : {}) })
+    dropConversation(id)
   },
 
   createChannel: ({ name, threads }, ctx) => {
@@ -1299,6 +1334,7 @@ const api: Handlers = {
   dismissProposal: ({ messageId }, ctx) => (people.forwarded(ctx.person, messageId) || reachMessage(ctx, messageId), settleProposal(messageId)),
   // One DM per agent and person.
   openDm: ({ agentId }, ctx) => {
+    if (db.agent(agentId)?.kind === 'removed') throw new Error(L('Esse agente foi excluído.', 'That agent was deleted.'))
     const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)
     if (existing) return existing.id
     const id = randomUUID()

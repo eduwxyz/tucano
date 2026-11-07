@@ -3,7 +3,7 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as KeyEvent, type ReactNode } from 'react'
-import { agentById, amAdmin, archiveAgent, canEditChannel, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
+import { agentById, amAdmin, archiveAgent, canEditChannel, deleteAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
@@ -36,6 +36,19 @@ export function confirmDialog(o: { title: string; body?: string; confirm: string
   asking?.resolve(false)
   return new Promise((resolve) => setAsking({ ...o, resolve }))
 }
+
+export const confirmDeleteAgent = (agent: { id: string; name: string }): Promise<void> =>
+  confirmDialog({
+    title: L(`Excluir ${agent.name}?`, `Delete ${agent.name}?`),
+    body: L(
+      'Vão junto as configurações, as DMs, as rotinas, as memórias e as skills só deste agente, o computador dele com tudo que está lá e os logins do navegador. Não dá pra desfazer.\n\nAs mensagens nos canais e os recibos ficam, e as pastas que você emprestou não são tocadas. Pra poder voltar atrás, use Arquivar.',
+      'Its settings, DMs, routines, the memories and skills only this agent has, its computer with everything on it and its browser logins go too. This can’t be undone.\n\nIts messages in channels and receipts stay, and the folders you lent aren’t touched. To be able to bring it back, use Archive.'
+    ),
+    confirm: L(`Excluir ${agent.name}`, `Delete ${agent.name}`),
+    danger: true
+  }).then((ok) => {
+    if (ok) void deleteAgent(agent.id)
+  })
 
 function ConfirmHost(): ReactNode {
   const ask = useSyncExternalStore(
@@ -292,7 +305,8 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
 
 // The agents taken out of the sidebar, to see or bring back.
 function Archived({ onClose }: { onClose: () => void }): ReactNode {
-  const agents = useStore((s) => s.agents.filter((a) => a.archived))
+  const agents = useStore((s) => s.agents.filter((a) => a.archived && a.kind !== 'removed'))
+  const admin = useStore(amAdmin)
   return (
     <Modal title={L('Agentes arquivados', 'Archived agents')} onClose={onClose}>
       <p className="muted small modal__lead">{L('Não respondem, não rodam rotinas e não são escolhidos pra responder nos canais. O histórico e os recibos continuam. Reativado, o agente volta aos canais em que estava; as rotinas dele você liga de novo em Rotinas.', 'They don’t reply, don’t run routines and aren’t picked to answer in channels. History and receipts stay. Once reactivated, an agent returns to the channels it was in; you turn its routines back on in Routines.')}</p>
@@ -319,6 +333,11 @@ function Archived({ onClose }: { onClose: () => void }): ReactNode {
               >
                 {L('Ver', 'See')}
               </button>
+              {admin && (
+                <button className="btn btn--sm btn--ghost" onClick={() => void confirmDeleteAgent(a)}>
+                  {L('Excluir', 'Delete')}
+                </button>
+              )}
               <button className="btn btn--sm" onClick={() => void archiveAgent(a.id, false)}>
                 {L('Reativar', 'Reactivate')}
               </button>
