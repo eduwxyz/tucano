@@ -1,4 +1,6 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
+import { runnerRules } from '../../../shared/classify'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
@@ -1213,6 +1215,11 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const [refusing, setRefusing] = useState(false)
   const [reason, setReason] = useState('')
   const summary = argSummary(approval.args)
+  // A runner's call (Composio's): the actions it runs are what's being approved.
+  const runner = isRunner(approval.tool)
+  const actions = runner ? innerActions(approval.tool, approval.args) : undefined
+  // What "always allow" covers there: each inner tool that asked, on its own (none for a raw request or code).
+  const forGood = runner ? runnerRules(approval.connectorId, approval.tool, approval.args)?.map((r) => r.slice(r.indexOf(':') + 1)) : undefined
   // Hold to approve: CSS fills the button in 1.5s (.is-holding); the approval goes when
   // that fill ends while still held. Letting go drains it back. Space or Enter hold too.
   const [holding, setHolding] = useState(false)
@@ -1273,10 +1280,26 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           </>
         )}
       </div>
+      {runner && (
+        <div className="approval__args small">
+          {actions ? (
+            <>
+              <p className="muted">{L(`${actions.length === 1 ? 'Ação' : `${actions.length} ações`} que esta chamada roda:`, `${actions.length === 1 ? 'The action' : `${actions.length} actions`} this call runs:`)}</p>
+              {actions.map((a, i) => (
+                <p key={i}>
+                  <code>{actionLabel(a)}</code>
+                </p>
+              ))}
+            </>
+          ) : (
+            <p>{L('Chamada fora do formato documentado: confira os detalhes exatos antes de aprovar.', 'A call outside the documented shape: check the exact details before approving.')}</p>
+          )}
+        </div>
+      )}
       {approval.why && <p className="approval__why">{approval.why}</p>}
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
-      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && summary.shown.length > 0 && (
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !runner && summary.shown.length > 0 && (
         <div className="approval__args small">
           {summary.shown.map(([k, v], i) => (
             <p key={i}>
@@ -1357,9 +1380,21 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
                 {L('Aprovar', 'Approve')}
               </button>
-              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && (
+              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && (
                 <button className="btn" title={L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
+                </button>
+              )}
+              {forGood && (
+                <button
+                  className="btn"
+                  title={L(
+                    `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
+                    `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call. Other actions still ask. You can take it back on its page.`
+                  )}
+                  onClick={() => decideApproval(approval.id, 'approved', undefined, true)}
+                >
+                  {L(`Aprovar e sempre permitir ${forGood.join(', ')}`, `Approve and always allow ${forGood.join(', ')}`)}
                 </button>
               )}
             </>

@@ -8318,6 +8318,23 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .connector-setup__body .warn-box {
   margin: 0 0 8px;
 }
+/* A service whose servers sit between the agents and your accounts: a paragraph, not a line, and
+   the warn color as its border too, so it can't pass for a hint. */
+.warn-box--third-party {
+  align-items: flex-start;
+  border: 1px solid var(--warn);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.warn-box--third-party .icon {
+  flex: none;
+  margin-top: 2px;
+}
+.warn-box--third-party strong {
+  display: block;
+  margin-bottom: 2px;
+}
 /* A connector's details, over the page: the tools scroll, the head stays. */
 .modal__card.connector-modal {
   width: min(680px, calc(100vw - 32px));
