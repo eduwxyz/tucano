@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- build.mjs publishes this page twice: as is at /privacidade/, and with the data-en texts at /en/privacy/ -->
+<title data-en="Privacy policy · Tucano">Política de privacidade · Tucano</title>
+<meta name="description" content="Onde ficam os seus dados no Tucano (no seu computador, num servidor seu ou no Tucano Pro), o que o app do iPhone guarda, quem é o responsável e como pedir uma cópia ou a exclusão." data-en="Where your data lives in Tucano (on your computer, on a server of yours or on Tucano Pro), what the iPhone app keeps, who is responsible and how to ask for a copy or deletion.">
+<meta property="og:title" content="Política de privacidade · Tucano" data-en="Privacy policy · Tucano">
+<meta property="og:description" content="Onde ficam os seus dados no Tucano, quem é o responsável e como pedir uma cópia ou a exclusão." data-en="Where your data lives in Tucano, who is responsible and how to ask for a copy or deletion.">
+<meta property="og:image" content="https://tucano.sh/assets/brand/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://tucano.sh/assets/brand/og.png">
+<meta name="twitter:site" content="@tucanosh">
+<meta name="theme-color" content="#F3EFE6">
+<link rel="icon" type="image/png" href="/assets/brand/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/brand/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/compare.css?v=2">
+</head>
+<body>
+<script>
+// A visitor who picked the other language on tucano.sh goes to this page in that language.
+;(() => {
+  let l
+  try { l = localStorage.getItem('tucano-lang') } catch {}
+  const other = (l === 'en' || l === 'pt-BR') && l !== document.documentElement.lang && document.querySelector(`link[rel="alternate"][hreflang="${l}"]`)
+  if (other) location.replace(other.href)
+})()
+</script>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <clipPath id="mark-clip"><rect width="100" height="100" rx="28"/></clipPath>
+    <symbol id="mark" viewBox="0 0 100 100">
+      <g clip-path="url(#mark-clip)">
+        <rect width="100" height="100" fill="#F1ECE2"/>
+        <circle cx="27" cy="73" r="48" fill="#121212"/>
+        <circle cx="38" cy="47" r="14" fill="#fff"/>
+        <circle cx="43" cy="47" r="5.5" fill="#121212"/>
+        <path d="M53 24 Q84 25 93 44 L96 57 L53 57 Z" fill="#FF8C24"/>
+        <path d="M53 57 L95 57 Q86 70 53 71 Z" fill="#E5531F"/>
+        <path d="M83 57 A9 12 0 0 1 97 47 L97 57 Z" fill="#121212"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+<header>
+  <a class="brand" href="/" data-en-href="/en/"><svg><use href="#mark"/></svg><span>tucano</span></a>
+  <div class="lang" role="group" aria-label="Idioma / Language"><a href="/privacidade/" hreflang="pt-BR" data-lang>PT</a><a href="/en/privacy/" hreflang="en" data-lang>EN</a></div>
+  <a class="btn btn--beak" href="/#instalar" data-en-href="/en/#instalar"><span lang="pt-BR">Baixar o Tucano</span><span lang="en">Get Tucano</span></a>
+</header>
+
+<main>
+<div class="hero">
+  <div class="eyebrow"><span lang="pt-BR">Política de privacidade · última atualização: 7 de novembro de 2026</span><span lang="en">Privacy policy · last updated: November 7, 2026</span></div>
+  <h1><span lang="pt-BR">Seus dados, <em>em palavras simples.</em></span><span lang="en">Your data, <em>in plain words.</em></span></h1>
+  <p class="answer"><span lang="pt-BR">O Tucano roda de três jeitos, e <b>onde ficam os seus dados depende de qual você usa</b>. Esta página explica cada um, o que o app do iPhone guarda, quem é o responsável e como pedir uma cópia ou a exclusão dos seus dados.</span><span lang="en">Tucano runs in three ways, and <b>where your data lives depends on which one you use</b>. This page explains each one, what the iPhone app keeps, who is responsible and how to ask for a copy or deletion of your data.</span></p>
+</div>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Quem é o responsável</span><span lang="en">Who is responsible</span></h2>
+  <p><span lang="pt-BR">O Tucano é feito por <b>Eduardo Victor Machado da Silva</b>, pessoa física, no Brasil. Sou eu quem publica o app do Tucano para iPhone e quem oferece o <b>Tucano Pro</b>, o Tucano hospedado. Nesses dois casos, sou o responsável pelos dados tratados, no sentido da Lei Geral de Proteção de Dados (LGPD).</span><span lang="en">Tucano is made by <b>Eduardo Victor Machado da Silva</b>, an individual in Brazil. I publish the Tucano app for iPhone and offer <b>Tucano Pro</b>, the hosted Tucano. In those two cases I'm responsible for the data processed, as Brazil's data protection law (LGPD) puts it.</span></p>
+  <div class="contact"><span lang="pt-BR">Privacidade e pedidos sobre os seus dados: <a href="mailto:privacidade@tucano.sh">privacidade@tucano.sh</a>. Qualquer outro assunto: <a href="mailto:contato@tucano.sh">contato@tucano.sh</a>.</span><span lang="en">Privacy and requests about your data: <a href="mailto:privacidade@tucano.sh">privacidade@tucano.sh</a>. Anything else: <a href="mailto:contato@tucano.sh">contato@tucano.sh</a>.</span></div>
+</section>
+
+<section>
+  <h2><span lang="pt-BR">Onde ficam os seus dados</span><span lang="en">Where your data lives</span></h2>
+  <p class="sub"><span lang="pt-BR">Conversas, agentes, memórias, a wiki, os arquivos e os logins dos conectores ficam sempre no Tucano onde você trabalha. O que muda é onde esse Tucano roda.</span><span lang="en">Conversations, agents, memories, the wiki, files and connector logins always stay in the Tucano you work in. What changes is where that Tucano runs.</span></p>
+  <div class="cols cols--3">
+    <div class="card">
+      <h3><span lang="pt-BR">No seu computador</span><span lang="en">On your computer</span></h3>
+      <p><span lang="pt-BR">Com o app do Tucano para Mac, Windows ou Linux, <b>tudo fica no seu computador</b>. Eu não recebo nada disso.</span><span lang="en">With the Tucano app for Mac, Windows or Linux, <b>everything stays on your computer</b>. I receive none of it.</span></p>
+      <p><span lang="pt-BR">Os agentes trabalham pelo Claude Code, Codex, Cursor, OpenCode, Pi, Gemini ou Grok, <b>com a sua própria conta</b>: o que eles mandam vai pra esses provedores, sob a sua conta e as políticas deles. O app procura atualizações nas versões publicadas no GitHub.</span><span lang="en">The agents work through Claude Code, Codex, Cursor, OpenCode, Pi, Gemini or Grok, <b>on your own account</b>: what they send goes to those providers, under your account and their policies. The app checks for updates in the versions published on GitHub.</span></p>
+    </div>
+    <div class="card">
+      <h3><span lang="pt-BR">Num servidor seu ou da sua empresa</span><span lang="en">On a server of yours or your company's</span></h3>
+      <p><span lang="pt-BR">Quando você ou a sua empresa roda o Tucano num servidor (um VPS, uma máquina em casa), <b>os dados ficam nesse servidor</b>, sob a responsabilidade de quem o mantém. Eu não tenho acesso a ele.</span><span lang="en">When you or your company run Tucano on a server (a VPS, a machine at home), <b>the data stays on that server</b>, under whoever runs it. I have no access to it.</span></p>
+      <p><span lang="pt-BR">Pedidos sobre esses dados vão pra quem cuida do servidor.</span><span lang="en">Requests about that data go to whoever runs the server.</span></p>
+    </div>
+    <div class="card">
+      <h3><span lang="pt-BR">No Tucano Pro</span><span lang="en">On Tucano Pro</span></h3>
+      <p><span lang="pt-BR">No Tucano Pro (os endereços <b>*.pro.tucano.sh</b>), eu hospedo o seu Tucano: <b>cada cliente num container isolado</b>, num servidor da Hetzner em Nuremberg, na Alemanha.</span><span lang="en">On Tucano Pro (the <b>*.pro.tucano.sh</b> addresses), I host your Tucano: <b>each customer in an isolated container</b>, on a Hetzner server in Nuremberg, Germany.</span></p>
+      <p><span lang="pt-BR">As respostas da IA vêm da Anthropic (Claude) e da OpenAI, por um gateway mantido por mim, que guarda as chaves de acesso.</span><span lang="en">The AI's answers come from Anthropic (Claude) and OpenAI, through a gateway I run, which holds the access keys.</span></p>
+    </div>
+  </div>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">O Tucano Pro, em detalhe</span><span lang="en">Tucano Pro, in detail</span></h2>
+  <h3><span lang="pt-BR">O que fica guardado</span><span lang="en">What is stored</span></h3>
+  <p><span lang="pt-BR">No container do seu Tucano ficam as conversas, os agentes, as memórias, a wiki, os arquivos enviados ou criados pelos agentes, os logins dos conectores (com os segredos cifrados) e o nome das pessoas do time, com o que cada uma faz, se ela contar.</span><span lang="en">Your Tucano's container holds the conversations, the agents, the memories, the wiki, the files sent or made by the agents, the connector logins (with their secrets encrypted) and the names of the team's people, with what each one does, if they say.</span></p>
+  <h3><span lang="pt-BR">Para quem vai</span><span lang="en">Who it goes to</span></h3>
+  <p><span lang="pt-BR">Pra gerar cada resposta, o conteúdo do pedido (a mensagem, o contexto que o agente usa e o que ele lê nos conectores) vai pra <b>Anthropic</b> ou pra <b>OpenAI</b>, passando pelo meu gateway. Veja as políticas delas: <a href="https://www.anthropic.com/legal/privacy">Anthropic</a> e <a href="https://openai.com/policies/privacy-policy/">OpenAI</a>. O servidor fica na <b>Hetzner</b> (<a href="https://www.hetzner.com/legal/privacy-policy/">política</a>).</span><span lang="en">To produce each answer, the request's content (the message, the context the agent uses and what it reads in the connectors) goes to <b>Anthropic</b> or <b>OpenAI</b>, through my gateway. See their policies: <a href="https://www.anthropic.com/legal/privacy">Anthropic</a> and <a href="https://openai.com/policies/privacy-policy/">OpenAI</a>. The server is at <b>Hetzner</b> (<a href="https://www.hetzner.com/legal/privacy-policy/">policy</a>).</span></p>
+  <p><span lang="pt-BR">Isso quer dizer que os seus dados saem do Brasil: o servidor fica na Alemanha, e a Anthropic e a OpenAI são empresas dos Estados Unidos.</span><span lang="en">This means your data leaves Brazil: the server is in Germany, and Anthropic and OpenAI are United States companies.</span></p>
+  <h3><span lang="pt-BR">Quando é uma empresa</span><span lang="en">When it's a company</span></h3>
+  <p><span lang="pt-BR">Quando uma empresa usa o Tucano Pro com o seu time, <b>é a empresa que decide</b> sobre os dados do time (o controlador), e eu trato esses dados em nome dela (o operador). Se você usa o Tucano da sua empresa, os pedidos sobre os seus dados vão primeiro pra ela, e eu ajudo a atendê-los.</span><span lang="en">When a company uses Tucano Pro with its team, <b>the company decides</b> about its team's data (the controller), and I process that data on its behalf (the processor). If you use your company's Tucano, requests about your data go to the company first, and I help it answer them.</span></p>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">O app do Tucano para iPhone</span><span lang="en">The Tucano app for iPhone</span></h2>
+  <ul>
+    <li><span lang="pt-BR"><b>Ele só fala com o Tucano que você conectou.</b> Não tem anúncios, não rastreia você e não tem nenhum serviço de análise de uso.</span><span lang="en"><b>It only talks to the Tucano you connected.</b> It has no ads, doesn't track you and has no usage analytics service.</span></li>
+    <li><span lang="pt-BR"><b>No iPhone, ele guarda</b> a lista dos Tucanos conectados, a chave de acesso de cada um (no Keychain, só neste aparelho) e a aparência que você escolheu.</span><span lang="en"><b>On the iPhone, it keeps</b> the list of connected Tucanos, each one's access key (in the Keychain, this device only) and the appearance you picked.</span></li>
+    <li><span lang="pt-BR"><b>Câmera:</b> só pra ler o QR code de conexão. <b>Microfone e reconhecimento de fala:</b> pra ditar mensagens, com o reconhecimento de fala da Apple, no próprio iPhone. <b>Fotos:</b> só as que você escolhe mandar.</span><span lang="en"><b>Camera:</b> only to read the connection QR code. <b>Microphone and speech recognition:</b> to dictate messages, with Apple's speech recognition, on the iPhone itself. <b>Photos:</b> only the ones you pick to send.</span></li>
+    <li><span lang="pt-BR"><b>Antes do primeiro uso</b> em cada Tucano, o app pede o seu consentimento pro que vai aos provedores de IA configurados nele.</span><span lang="en"><b>Before first use</b> on each Tucano, the app asks your consent for what goes to the AI providers it's set up with.</span></li>
+    <li><span lang="pt-BR"><b>Sair e apagar:</b> em Mais › Pessoas › Sair deste Tucano, o seu acesso acaba na hora, em todos os aparelhos, e as suas conversas diretas, memórias e rotinas são apagadas. O que você disse nos canais fica com o time.</span><span lang="en"><b>Leave and delete:</b> in Mais (More) › Pessoas (People) › Sair deste Tucano (Leave this Tucano), your access ends at once, on every device, and your direct messages, memories and routines are deleted. What you said in channels stays with the team.</span></li>
+  </ul>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Conectores</span><span lang="en">Connectors</span></h2>
+  <p><span lang="pt-BR">Os agentes só acessam os serviços que você conecta (Gmail, Slack, GitHub e outros) e só com as permissões que você dá. Eles leem e agem lá em seu nome, e as ações marcadas como arriscadas esperam a sua aprovação.</span><span lang="en">The agents only reach the services you connect (Gmail, Slack, GitHub and others), and only with the permissions you give. They read and act there on your behalf, and actions marked as risky wait for your approval.</span></p>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Este site</span><span lang="en">This site</span></h2>
+  <p><span lang="pt-BR">O tucano.sh é servido pela <b>Cloudflare</b>. As fontes vêm do <b>Google Fonts</b>, que recebe o seu endereço IP ao entregá-las.</span><span lang="en">tucano.sh is served by <b>Cloudflare</b>. The fonts come from <b>Google Fonts</b>, which receives your IP address when serving them.</span></p>
+  <p><span lang="pt-BR">Só a página inicial usa o <b>PostHog</b> (servidores nos Estados Unidos) pra entender como o site é usado: páginas vistas, saídas, cliques em baixar e no GitHub, e gravações da sessão com tudo o que é digitado escondido. Nada fica guardado no seu navegador: sem cookies. As outras páginas, como esta, não usam o PostHog.</span><span lang="en">Only the home page uses <b>PostHog</b> (servers in the United States) to understand how the site is used: pages viewed, exits, clicks on download and GitHub, and session recordings with everything typed hidden. Nothing is stored in your browser: no cookies. The other pages, like this one, don't use PostHog.</span></p>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Por quanto tempo</span><span lang="en">For how long</span></h2>
+  <ul>
+    <li><span lang="pt-BR"><b>Tucano Pro:</b> os dados ficam enquanto a conta existir.</span><span lang="en"><b>Tucano Pro:</b> the data is kept while the account exists.</span></li>
+    <li><span lang="pt-BR"><b>Quem sai pelo app</b> (Sair deste Tucano): as conversas diretas, as memórias e as rotinas da pessoa são apagadas na hora.</span><span lang="en"><b>Someone who leaves from the app</b> (Leave this Tucano): their direct messages, memories and routines are deleted at once.</span></li>
+    <li><span lang="pt-BR"><b>Quem é removido por um admin:</b> o que era só da pessoa fica guardado por 30 dias, caso ela volte, e depois é apagado.</span><span lang="en"><b>Someone removed by an admin:</b> what was theirs alone is kept for 30 days, in case they come back, and then deleted.</span></li>
+    <li><!-- CONFIRMAR: prazo --><span lang="pt-BR"><b>Ao cancelar o Tucano Pro:</b> peça a exclusão por <a href="mailto:privacidade@tucano.sh">privacidade@tucano.sh</a>. O container e os dados dele são apagados em até 30 dias depois do pedido.</span><span lang="en"><b>When you cancel Tucano Pro:</b> ask for deletion at <a href="mailto:privacidade@tucano.sh">privacidade@tucano.sh</a>. The container and its data are deleted within 30 days of the request.</span></li>
+  </ul>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Segurança</span><span lang="en">Security</span></h2>
+  <p><span lang="pt-BR">O app e o Tucano Pro falam por HTTPS. No servidor, as chaves de acesso ficam guardadas só como resumo (hash), os segredos dos conectores ficam cifrados (AES-256-GCM) e cada cliente roda num container isolado dos outros.</span><span lang="en">The app and Tucano Pro talk over HTTPS. On the server, access keys are kept only as a hash, connector secrets are encrypted (AES-256-GCM) and each customer runs in a container isolated from the others.</span></p>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Seus direitos</span><span lang="en">Your rights</span></h2>
+  <p><span lang="pt-BR">Pela LGPD, você pode pedir: <b>acesso</b> aos seus dados, <b>correção</b>, <b>exclusão</b>, <b>portabilidade</b>, <b>informação sobre com quem eles são compartilhados</b> e <b>revogar o seu consentimento</b>.</span><span lang="en">Under the LGPD, you can ask for: <b>access</b> to your data, <b>correction</b>, <b>deletion</b>, <b>portability</b>, <b>information about who it's shared with</b> and <b>withdrawing your consent</b>.</span></p>
+  <p><span lang="pt-BR">Escreva pra <a href="mailto:privacidade@tucano.sh">privacidade@tucano.sh</a> dizendo qual Tucano você usa e o que precisa. Eu respondo em até 15 dias. Se não ficar satisfeito, você pode reclamar à <a href="https://www.gov.br/anpd/">Autoridade Nacional de Proteção de Dados (ANPD)</a>.</span><span lang="en">Write to <a href="mailto:privacidade@tucano.sh">privacidade@tucano.sh</a> saying which Tucano you use and what you need. I answer within 15 days. If you're not satisfied, you can complain to Brazil's <a href="https://www.gov.br/anpd/">National Data Protection Authority (ANPD)</a>.</span></p>
+  <p><span lang="pt-BR">Os dados de um Tucano no seu computador ou num servidor que não é meu eu não acesso: aí, quem atende é quem cuida desse Tucano.</span><span lang="en">I can't reach the data of a Tucano on your computer or on a server that isn't mine: there, whoever runs that Tucano is the one to answer.</span></p>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Crianças</span><span lang="en">Children</span></h2>
+  <p><span lang="pt-BR">O Tucano não é feito pra menores de 13 anos. No Brasil, menores de 18 anos só devem usá-lo com o consentimento de um responsável.</span><span lang="en">Tucano isn't made for children under 13. In Brazil, people under 18 should only use it with a parent's or guardian's consent.</span></p>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Mudanças nesta política</span><span lang="en">Changes to this policy</span></h2>
+  <p><span lang="pt-BR">Quando esta política mudar, a data no topo muda junto.</span><span lang="en">When this policy changes, the date at the top changes with it.</span></p>
+</section>
+</main>
+
+<footer>
+  <span><span lang="pt-BR">Feito no Brasil.</span><span lang="en">Made in Brazil.</span></span>
+  <nav><a href="/" data-en-href="/en/">tucano.sh</a><a href="/suporte/" data-en-href="/en/support/"><span lang="pt-BR">Suporte</span><span lang="en">Support</span></a><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://discord.gg/uQp4x7wUgT">Discord</a><a href="https://github.com/eduwxyz/tucano/blob/HEAD/LICENSE">Apache-2.0</a></nav>
+</footer>
+</div>
+<script>
+// PT | EN remembers the choice, as on the home page.
+document.querySelectorAll('.lang a').forEach((a) => a.addEventListener('click', () => { try { localStorage.setItem('tucano-lang', a.hreflang) } catch {} }))
+</script>
+</body>
+</html>
