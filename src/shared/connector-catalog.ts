@@ -203,7 +203,8 @@ export const CATALOG: CatalogEntry[] = [
 
   e('coinbase', 'Coinbase', 'https://agents.coinbase.com/mcp', 'finance', 'Carteira e cripto', 'Wallet and crypto'),
   e('robinhood', 'Robinhood', 'https://agent.robinhood.com/mcp/trading', 'finance', 'Ações e investimentos', 'Stocks and investments'),
-  e('aave', 'Aave', 'https://mcp.aave.com/mcp', 'finance', 'Dados do protocolo Aave', 'Aave protocol data', 'none')
+  e('aave', 'Aave', 'https://mcp.aave.com/mcp', 'finance', 'Dados do protocolo Aave', 'Aave protocol data', 'none'),
+  e('mofi', 'Mofi', 'https://omofi.com.br/api/mcp', 'finance', 'Contas, cartões e gastos dos seus bancos, pelo Open Finance', 'Accounts, cards and spending from your Brazilian banks, through Open Finance')
 ]
 
 // What a catalog entry adds once its fields are filled in. Throws on one left empty.
