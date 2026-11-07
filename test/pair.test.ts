@@ -19,7 +19,7 @@ describe('one-time pairing codes', () => {
     const { code, expiresAt } = codes.make('bia')
     expect(code).toMatch(/^[A-Za-z0-9_-]{24}$/)
     expect(expiresAt - Date.now()).toBeGreaterThan((CODE_MINUTES - 1) * 60_000)
-    expect(statSync(f).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') expect(statSync(f).mode & 0o777).toBe(0o600) // Windows has no Unix modes
     expect(readFileSync(f, 'utf8')).not.toContain(code)
     expect(codes.spend(code)).toEqual({ person: 'bia' })
     expect(codes.spend(code)).toBeUndefined()
