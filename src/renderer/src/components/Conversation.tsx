@@ -245,8 +245,8 @@ const NO_REPLIES: Message[] = []
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
 export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
-  const answers = useStore((s) => cardAnswers(messagesIn(s, conversationId)))
-  const messages = useMemo(() => asShown(all, answers), [all, answers])
+  const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
+  const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
