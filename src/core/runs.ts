@@ -26,7 +26,8 @@ import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
-import { allowed, approvalHash, canonical } from './policy'
+import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
+import { perCallTool } from '../shared/composio'
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
@@ -981,7 +982,7 @@ export class Runner {
       // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
       // (a refused token, a sign-in to finish) takes them away.
       if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
-      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
+      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id], perCallTool(c.url, t.name))) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
     const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write')
@@ -1033,13 +1034,21 @@ export class Runner {
       ...ownTools.map((t) => ({ ...t, _meta: { ...t._meta, ...ALWAYS_LOAD } })),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
-        if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
+        const perCall = perCallTool(connector.url, tool.name)
+        if (tool.cls !== 'sensitive' && !perCall) return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
         return {
           name,
-          description: `[${connector.name}] ${tool.description}\n${L(
-            `Ação sensível: não roda na hora. Vira um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
-            `Sensitive action: it doesn't run right away. It becomes an approval request for ${settings.workspaceName}, with exactly these arguments.`
-          )}`,
+          description: `[${connector.name}] ${tool.description}\n${
+            perCall
+              ? L(
+                  `Cada chamada vale pelo que ela roda: só leituras rodam na hora; escritas precisam de acesso de leitura e escrita; ações sensíveis (enviar, apagar, rodar código) e qualquer chamada fora do formato documentado viram um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
+                  `Each call counts as what it runs: reads alone run right away; writes need read-and-write access; sensitive actions (send, delete, run code) and any call outside the documented shape become an approval request for ${settings.workspaceName}, with exactly these arguments.`
+                )
+              : L(
+                  `Ação sensível: não roda na hora. Vira um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
+                  `Sensitive action: it doesn't run right away. It becomes an approval request for ${settings.workspaceName}, with exactly these arguments.`
+                )
+          }`,
           inputSchema: {
             ...schema,
             type: 'object',
@@ -1464,14 +1473,29 @@ export class Runner {
         if (!hit) return textResult(L(`Ferramenta desconhecida: ${name}`, `Unknown tool: ${name}`), true)
         // Defense in depth: grants or the tool may have changed since the turn started.
         const current = db.tools(hit.connector.id).find((t) => t.name === hit.tool.name)
-        if (!current || !allowed(current, db.agent(agent.id)?.grants[hit.connector.id])) return textResult(L(`Ferramenta não permitida agora: ${name}`, `Tool not allowed right now: ${name}`), true)
+        const grant = db.agent(agent.id)?.grants[hit.connector.id]
+        const perCall = perCallTool(hit.connector.url, hit.tool.name)
+        if (!current || !allowed(current, grant, perCall)) return textResult(L(`Ferramenta não permitida agora: ${name}`, `Tool not allowed right now: ${name}`), true)
         const detail = `${hit.connector.name} · ${current.name}`
+        // What runs is exactly what was judged: these arguments, classified here, go to the server (or into the approval) as they are.
+        const { [REASON_PARAM]: why, ...callArgs } = args
+        // A runner (Composio's) counts as what this call runs; any other tool, as its class.
+        const cls = callClass(current, hit.connector.url, callArgs)
+        if (!permits(cls, grant))
+          return textResult(
+            L(
+              `Recusada: esta chamada ${cls === 'sensitive' ? 'tem uma ação sensível' : 'muda algo'} e precisa de acesso de leitura e escrita ao ${hit.connector.name}; você só tem leitura. Use só ações de leitura, ou peça acesso com ${ACCESS_REQUEST}.`,
+              `Refused: this call ${cls === 'sensitive' ? 'has a sensitive action' : 'changes something'} and needs read-and-write access to ${hit.connector.name}; you only have read access. Use read actions only, or ask for access with ${ACCESS_REQUEST}.`
+            ),
+            true
+          )
 
         // "Sempre permitir": a sensitive tool approved for good runs like a write one (never a high-risk one).
-        const always = current.cls === 'sensitive' && !current.highRisk && !!db.agent(agent.id)?.autoApprove?.includes(`${hit.connector.id}:${current.name}`)
-        if (current.cls === 'sensitive' && !always) {
+        // A runner's call, only when every inner tool that would ask is allowed for good on its own.
+        const rules = db.agent(agent.id)?.autoApprove ?? []
+        const always = cls === 'sensitive' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : rules.includes(`${hit.connector.id}:${current.name}`))
+        if (cls === 'sensitive' && !always) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
-          const { [REASON_PARAM]: why, ...callArgs } = args
           approval = {
             id: randomUUID(),
             hash: approvalHash(hit.connector.id, current.name, callArgs),
@@ -1504,10 +1528,9 @@ export class Runner {
         }
 
         const t0 = Date.now()
-        const step: Step = { id: randomUUID(), label: current.cls === 'read' ? L('Consultou', 'Looked up') : always ? L('Executou (sempre permitido)', 'Ran (always allowed)') : L('Executou', 'Ran'), detail, status: 'running' }
+        const step: Step = { id: randomUUID(), label: cls === 'read' ? L('Consultou', 'Looked up') : always ? L('Executou (sempre permitido)', 'Ran (always allowed)') : L('Executou', 'Ran'), detail, status: 'running' }
         // What it asked (the SQL, the path) shows while it runs; what came back, when it's done.
-        const { [REASON_PARAM]: _reason, ...toolArgs } = args
-        const input = keyArg(toolArgs)
+        const input = keyArg(callArgs)
         if (input) step.input = input
         flush()
         msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
@@ -1522,12 +1545,11 @@ export class Runner {
           save()
         }
         try {
-          const { [REASON_PARAM]: _reason, ...toolArgs } = args
-          const first = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
+          const first = await this.deps.connectors!.call(hit.connector.id, current.name, callArgs)
           // A query still running: the app waits for it here, with the connector's own status tool, instead
           // of the agent sleeping and asking again. Not a status tool the agent called itself (asking whether a
           // deploy finished wants the answer now), nor a write (starting a job doesn't mean waiting for it).
-          const pending = current.cls === 'read' && !isStatusTool(current.name) ? pendingOf(first) : undefined
+          const pending = cls === 'read' && !isStatusTool(current.name) ? pendingOf(first) : undefined
           const poller = pending && pollTool(db.tools(hit.connector.id), pending, (t) => allowed(t, db.agent(agent.id)?.grants[hit.connector.id]))
           const done = (r: CallToolResult): void => (r.isError ? finish('error', errorReason(r)) : finish('done', undefined, resultSummary(resultText(r))))
           if (!pending || !poller) {
@@ -1882,10 +1904,14 @@ export class Runner {
     emit({ type: 'approval', approval: db.approval(id)! })
     if (decider) db.addActivity({ personId: decider, kind: 'approval.decided', target: id, detail: { decision, agentId: ap.agentId, connector: ap.connectorName, tool: ap.tool } })
     const owner = db.agent(ap.agentId)
-    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
-      db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), `${ap.connectorId}:${ap.tool}`] })
+    // A runner (Composio's) is never allowed for good itself: "always" allows the inner tools that asked, each on its own.
+    const runner = perCallTool(this.deps.connectors?.list().find((c) => c.id === ap.connectorId)?.url, ap.tool)
+    const rules = runner ? (runnerRules(ap.connectorId, ap.tool, ap.args) ?? []) : [`${ap.connectorId}:${ap.tool}`]
+    const fresh = rules.filter((r) => !owner?.autoApprove?.includes(r))
+    if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS) {
+      db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), ...fresh] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
-      db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: ap.tool } })
+      db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: fresh.map((r) => r.slice(r.indexOf(':') + 1)).join(', ') } })
     }
     const settings = await this.deps.settings()
     // Who decided, or (expired) who it was waiting on: the requester.
@@ -1979,7 +2005,8 @@ export class Runner {
     } else if (decision === 'approved') {
       const tool = db.tools(ap.connectorId).find((t) => t.name === ap.tool)
       const connector = this.deps.connectors?.list().find((c) => c.id === ap.connectorId)
-      if (!agent || !connector || !tool || !allowed(tool, agent.grants[ap.connectorId])) {
+      const grant = agent?.grants[ap.connectorId]
+      if (!agent || !connector || !tool || !allowed(tool, grant, runner) || !permits(callClass(tool, connector.url, ap.args), grant)) {
         outcome = L('Não executou: o acesso mudou depois do pedido.', "Didn't run: access changed after the request.")
         task = L(
           `${me} aprovou o seu pedido ${call}, mas o app não executou: o seu acesso a essa ferramenta mudou depois do pedido. Avise ${me} em uma frase.`,

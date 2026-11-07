@@ -4,7 +4,7 @@ import { LOGOS } from '../src/renderer/src/connector-logos'
 
 describe('the connector catalog', () => {
   it('lists each service once, at an https address, in a category that exists', () => {
-    expect(CATALOG.length).toBe(47)
+    expect(CATALOG.length).toBe(48)
     expect(new Set(CATALOG.map((c) => c.id)).size).toBe(CATALOG.length)
     const remote = CATALOG.filter((c) => !c.local)
     expect(new Set(remote.map((c) => c.url)).size).toBe(remote.length)
@@ -73,6 +73,16 @@ describe('the connector catalog', () => {
       expect(entryOf(catalogInput(get(id), values))?.id, id).toBe(id)
     expect(entryOf({ kind: 'remote', url: 'https://bi.acme.com/api/other' })).toBeUndefined()
     expect(entryOf({ kind: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-postgres'] })).toBeUndefined()
+  })
+
+  it('warns, before connecting, when the data goes through a third party', () => {
+    const composio = CATALOG.find((c) => c.id === 'composio')!
+    expect(catalogInput(composio)).toEqual({ name: 'Composio', kind: 'remote', url: 'https://connect.composio.dev/mcp', auth: 'oauth' })
+    expect(composio.about()).toMatch(/Composio/) // on the card, too
+    expect(composio.warning?.()).toMatch(/Composio/)
+    expect(searchCatalog('composio').map((c) => c.id)).toEqual(['composio'])
+    // Only the ones that go through someone else's servers say so.
+    expect(CATALOG.filter((c) => c.warning).map((c) => c.id)).toEqual(['composio'])
   })
 
   it("signs in to Google's five with the person's app, asking only what their tools need", () => {
