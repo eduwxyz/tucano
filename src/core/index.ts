@@ -15,6 +15,7 @@ import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { friendly } from '../shared/errors'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
 import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { cleanRules } from '../shared/actions'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -1137,6 +1138,7 @@ const api: Api = {
     if (patch.theme !== undefined && !isTheme(patch.theme)) throw new Error('Invalid theme')
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
+    if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
     db.setSettings(patch)
     if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
