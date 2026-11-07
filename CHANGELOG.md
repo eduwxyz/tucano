@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Changed
+
+- **Messages in a row go together.** What you send while an agent is still on your last message no longer starts a reply of its own: it waits in a **Message queue** over the field, and goes in the conversation only when the agent reads it: after the reply it was working on, in the order you sent it, just before the one reply to everything that came in, which reads it as more of the same request. In a channel it waits for the agent answering you there, or for the router's pick while it still picks, unless you name someone else. While it waits you can edit it, delete it, or **Steer** with it, which stops the agent and starts it again with it in hand, without redoing what's done. A message in another thread, or an answer to the agent's question, still gets its own reply.
+
 ### Fixed
 
 - **An agent's Chrome gets more time to open.** The first open on a slow computer could pass the 15 s it had, and the agent got an error instead of the page. It now gets 30 s.

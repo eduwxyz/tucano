@@ -29,7 +29,11 @@ import {
   removeRoutine,
   retryRun,
   continueRun,
+  steer,
+  editQueued,
+  cancelQueued,
   ACCESS_REQUEST,
+  ROUTING,
   countedTokens,
   sendMessage,
   typing,
@@ -117,7 +121,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
     const all = conv.members.map((m) => agentById(s, m)).filter((a): a is Agent => !!a)
     return conv.kind === 'dm' ? all : all.filter(isTeam)
   })
-  const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
+  // A message waiting in line isn't in the conversation yet: it's over the field until the agent reads it.
+  const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id && !m.queued))
   const focus = useStore((s) => (s.view?.kind === 'conversation' && s.view.id === id ? s.view.message : undefined))
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
   const [showSummary, setShowSummary] = useState(false)
@@ -319,6 +324,86 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
 const AGENT_PLUGINS = [remarkGfm, remarkMentions, remarkLocalPaths]
 const PLAIN_PLUGINS = [remarkGfm, remarkMentions]
 
+// My messages sent while the agent was still on my last one, over the field: they aren't in the
+// conversation yet, since the agent hasn't read them. They go in, in this order, when it's done and
+// takes them all in one reply. Until then each can be changed, taken back, or sent at once ("Orientar":
+// the agent stops and starts again with it in hand).
+function QueuePanel({ items }: { items: Message[] }): ReactNode {
+  const agent = useStore((s) => (items[0]?.queued ? agentById(s, items[0].queued) : undefined))
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  const [steering, setSteering] = useState<string | null>(null)
+  const who = agent?.name ?? L('O agente', 'The agent')
+  // The router is still picking: no one to steer yet.
+  const picking = items.every((m) => m.queued === ROUTING)
+  const save = (): void => {
+    if (editing?.text.trim()) editQueued(editing.id, editing.text)
+    setEditing(null)
+  }
+  return (
+    <section className="queue" aria-label={L('Fila de mensagens', 'Message queue')}>
+      <div className="queue__head">
+        <Icon name="clock" size={13} />
+        <strong>{L('Fila de mensagens', 'Message queue')}</strong>
+        <span className="muted">
+          {picking
+            ? L('Aguardando · escolhendo quem responde', 'Waiting · picking who answers')
+            : L(`Aguardando · ${who} está respondendo e lê na sequência`, `Waiting · ${who} is replying and reads these next`)}
+        </span>
+      </div>
+      <ol className="queue__list">
+        {items.map((m, i) => (
+          <li key={m.id} className={`queue__item ${editing?.id === m.id ? 'is-editing' : ''}`} aria-label={L(`Mensagem na fila ${i + 1}: ${m.text}`, `Queued message ${i + 1}: ${m.text}`)}>
+            <span className="queue__n">{i + 1}</span>
+            {editing?.id === m.id ? (
+              <textarea
+                className="queue__edit"
+                value={editing.text}
+                autoFocus
+                rows={Math.min(5, editing.text.split('\n').length + 1)}
+                onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                onBlur={save}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    save()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setEditing(null)
+                  }
+                }}
+              />
+            ) : (
+              <span className="queue__text">{m.text || L('(imagem)', '(image)')}</span>
+            )}
+            <span className="queue__actions">
+              {m.queued !== ROUTING && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={steering === m.id}
+                  title={L(`${who} para o que está fazendo e recomeça já com esta mensagem`, `${who} stops what it's doing and starts again with this message`)}
+                  onClick={() => {
+                    setSteering(m.id)
+                    steer(m.id)
+                  }}
+                >
+                  {steering === m.id ? L('Orientando…', 'Steering…') : L('Orientar', 'Steer')}
+                </button>
+              )}
+              <button type="button" className="icon-btn" title={L('Editar mensagem', 'Edit message')} aria-label={L(`Editar mensagem na fila ${i + 1}`, `Edit queued message ${i + 1}`)} onClick={() => setEditing({ id: m.id, text: m.text })}>
+                <Icon name="edit" size={14} />
+              </button>
+              <button type="button" className="icon-btn" title={L('Excluir mensagem', 'Delete message')} aria-label={L(`Excluir mensagem na fila ${i + 1}`, `Delete queued message ${i + 1}`)} onClick={() => cancelQueued(m.id)}>
+                <Icon name="trash" size={14} />
+              </button>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
 // Parsing is by far the most expensive part of drawing a message, so it only runs when the text changes.
 const MessageMarkdown = memo(Markdown)
 
@@ -411,7 +496,12 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
         {agent && message.run?.browser && <BrowserCard agentId={agent.id} big={liveBrowser} />}
-        {message.run?.status === 'stopped' && <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>}
+        {message.run?.status === 'stopped' &&
+          (message.run.steered ? (
+            <div className="note">{L('Parei aqui para seguir a sua orientação: continuo logo abaixo.', 'I stopped here to follow your steer: I carry on right below.')}</div>
+          ) : (
+            <div className="note">{L('Interrompido por você.', 'Stopped by you.')}</div>
+          ))}
         {message.run?.status === 'interrupted' && <div className="note">{L('Interrompido: o app fechou no meio da resposta.', 'Interrupted: the app closed in the middle of the reply.')}</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
         {message.run?.errorDetail && (
@@ -430,7 +520,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </>
         )}
         {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
+        {message.run && !message.run.steered && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             {L('Tentar de novo', 'Try again')}
           </button>
@@ -594,7 +684,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
 // field that answers there.
 function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
   const root = useStore((s) => s.messages.find((m) => m.id === rootId))
-  const replies = useStore((s) => s.messages.filter((m) => m.threadId === rootId))
+  const replies = useStore((s) => s.messages.filter((m) => m.threadId === rootId && !m.queued))
   const agents = useStore((s) => s.agents)
   const [showSummary, setShowSummary] = useState(false)
   const said = replies.filter((m) => m.author.kind !== 'system' && m.run?.status !== 'working').length
@@ -1488,6 +1578,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // Replies at work and questions asked here: in this thread, or outside threads.
   const here = (m: Message): boolean => m.conversationId === conversationId && m.threadId === threadId
   const working = useStore((s) => s.messages.filter((m) => here(m) && m.author.kind === 'agent' && m.run?.status === 'working'))
+  const queue = useStore((s) => s.messages.filter((m) => here(m) && !!m.queued))
   const asker = useStore((s) => {
     const q = s.messages.findLast((m) => here(m) && m.run?.status === 'waiting_input')
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
@@ -1685,6 +1776,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
 
   return (
     <div className="composer-wrap">
+      {queue.length > 0 && <QueuePanel items={queue} />}
       {dragging && !inThread && (
         <div className="drop-overlay">
           <div className="drop-overlay__card">

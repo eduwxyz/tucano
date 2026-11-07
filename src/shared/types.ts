@@ -162,6 +162,7 @@ export interface Run {
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string
+  steered?: boolean // stopped by "Orientar agora": the reply right after it carries on
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
@@ -221,7 +222,13 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+  // Sent while this agent was still on my last message: it waits and goes with that reply's follow-up. Not
+  // stored: it lives as long as the reply it waits for, and the app forgets it with that reply.
+  queued?: string
 }
+
+// `queued` on a message of mine that waits while the router still picks who answers the one before it.
+export const ROUTING = '@router'
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
 // started, since that's what decides what it had read: agents read each other in that order.

@@ -1,11 +1,11 @@
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, ROUTING, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, mentioned, snip, systemPrompt, transcript, transcriptBlocks } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -150,13 +150,21 @@ export interface RoutineEvent {
 
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string }
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'steered' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
+// An agent answering in a conversation: replies running there, their thread, and my messages waiting for them.
+// `mine`: it answers my message (not another agent's or a routine's), so my next one may wait for it.
+type Line = { n: number; threadId?: string; waiting: string[]; steered?: boolean; mine?: boolean }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
+  // Who is answering where right now (agent + conversation), the thread it answers in, and my messages
+  // that came in meanwhile: they wait, and go together in one follow-up once it's done.
+  private working = new Map<string, Line>()
+  // My messages waiting for the router's pick, by place: the conversation and the thread (or '').
+  private holds = new Map<string, Line>()
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
   private sessions: Sessions
@@ -275,6 +283,29 @@ export class Runner {
     // write outside threads stays outside: it only answers a question that is outside too.
     const asked = this.pendingQuestion(conv.id, thread)
 
+    // The agent is still on my last message here: this one is almost always more of the same (a detail, a
+    // correction). It goes in that reply's thread and waits, instead of starting a reply of its own.
+    const line = asked || this.paused ? undefined : this.lineFor(conv, body, thread)
+    // The router is still picking who answers my last message here: this one waits for its pick, then
+    // goes in that agent's line (or, if no one or several were picked, gets an answer of its own).
+    const hold = line || asked || this.paused || mentioned(body, this.members(conv)).length ? undefined : this.holds.get(`${conv.id}:${thread ?? ''}`)
+    if (hold) {
+      const waiting: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
+      for (const img of pictures) this.keepImage(waiting, img)
+      db.saveMessage(waiting)
+      hold.waiting.push(waiting.id)
+      emit({ type: 'message', message: { ...waiting, queued: ROUTING } })
+      return
+    }
+    if (line) {
+      const waiting: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(line.threadId ? { threadId: line.threadId } : {}) }
+      for (const img of pictures) this.keepImage(waiting, img)
+      db.saveMessage(waiting)
+      line.waiting.push(waiting.id)
+      emit({ type: 'message', message: { ...waiting, queued: line.agentId } })
+      return
+    }
+
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'me' }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
@@ -338,7 +369,7 @@ export class Runner {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (this.paused) return // nobody starts working while paused
-    if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status)) return
+    if (!msg?.run || msg.author.kind !== 'agent' || !RETRYABLE.includes(msg.run.status) || msg.run.steered) return
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
@@ -497,6 +528,10 @@ export class Runner {
     const { db, engines } = this.deps
     if (this.paused) return // nobody starts working while paused
     this.routing++
+    const place = `${conv.id}:${threadId ?? ''}`
+    const hold: Line = { n: 0, waiting: [], threadId }
+    this.holds.set(place, hold)
+    let picked: Agent[] = []
     const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void =>
       this.update(note, { text: L(`Não consegui escolher quem responde (${why}). Mencione um agente com **@nome**.`, `I couldn't pick who answers (${why}). Mention an agent with **@name**.`), run: undefined })
@@ -517,7 +552,7 @@ export class Runner {
       if (settings.routerModel === JEV_MODEL) {
         const key = await this.deps.jev?.key()
         const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
+        if (!('error' in j)) return this.routed(conv, note, (picked = j.agents), `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
         fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
       }
 
@@ -530,13 +565,30 @@ export class Runner {
       const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       if ('error' in r) return fail(r.error)
-      this.routed(conv, note, r.agents, `${r.reason}${fellBack}`)
+      this.routed(conv, note, (picked = r.agents), `${r.reason}${fellBack}`)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
+      if (this.holds.get(place) === hold) this.holds.delete(place)
+      this.handOn(conv, members, hold, picked)
       this.routing--
       this.checkIdle()
     }
+  }
+
+  // My messages that waited for the router go in now, just before the replies, which read them along with the
+  // first: no second reply for them. With no one picked they still want an answer, so the router reads them.
+  private handOn(conv: Conversation, members: Agent[], hold: Line, picked: Agent[]): void {
+    const { db, emit } = this.deps
+    if (!hold.waiting.length) return
+    const at = Date.now()
+    hold.waiting.forEach((id, i) => {
+      const m = db.message(id)
+      if (!m) return
+      db.setMessageAt(id, at + i)
+      emit({ type: 'message', message: { ...m, at: at + i } })
+    })
+    if (!picked.length && !this.paused) void this.routeAndRun(conv, members, hold.threadId)
   }
 
   private routed(conv: Conversation, note: Message, agents: Agent[], reason: string): void {
@@ -588,23 +640,157 @@ export class Runner {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
+    // My messages that come in while it runs wait in this line (see lineFor).
+    const lineKey = `${agent.id}:${conv.id}`
+    const w: Line = this.working.get(lineKey) ?? { n: 0, waiting: [] }
+    w.n++
+    w.threadId = threadId
+    w.mine = opts.depth === 1 && !opts.routine
+    this.working.set(lineKey, w)
     this.followups.start(key, reserved)
-    let msg: Message
+    let msg: Message | undefined
     let f: Followup | undefined
     try {
       msg = await this.reply(agent, conv, rest)
     } finally {
       this.followups.end(key)
       f = this.followups.take(key) // taken even when the reply threw: a stale follow-up must not wait for the next one
+      if (--w.n === 0) {
+        this.working.delete(lineKey)
+        // One reply for my messages that waited: it reads a hand-off noted meanwhile too.
+        if (w.waiting.length) {
+          f = undefined
+          void this.followUp(agent, conv, w, msg)
+        }
+      }
     }
-    if (f && msg.run?.status === 'done' && !this.paused) {
+    if (f && msg?.run?.status === 'done' && !this.paused) {
       this.followups.reserve(key)
       this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }))
     }
-    return msg
+    return msg!
   }
 
   // `threadId`: the reply goes in that thread (an existing reply keeps its own).
+  // Where my next message to one agent waits: that agent is answering in this conversation right now, and the
+  // message goes to it alone (named, or the DM's or the channel's only agent), outside threads or in its thread.
+  private lineFor(conv: Conversation, body: string, thread: string | undefined): (Line & { agentId: string }) | undefined {
+    const members = this.members(conv)
+    const named = mentioned(body, members).slice(0, MAX_MENTIONS)
+    const here = (w: Line | undefined): w is Line => !!w && (!thread || thread === w.threadId)
+    // A channel, no one named: the one agent answering me here right now takes it, as in a DM.
+    const busy = members.filter((a) => {
+      const w = this.working.get(`${a.id}:${conv.id}`)
+      return here(w) && !!w.mine
+    })
+    const to = named.length ? named : conv.kind === 'dm' || members.length === 1 ? members : busy
+    if (to.length !== 1) return undefined
+    const w = this.working.get(`${to[0]!.id}:${conv.id}`)
+    if (!here(w)) return undefined
+    return Object.assign(w, { agentId: to[0]!.id })
+  }
+
+  // The line my message waits in, and the agent it waits for.
+  private lineOf(messageId: string): { w: Line; agentId: string } | undefined {
+    for (const [key, w] of this.working) if (w.waiting.includes(messageId)) return { w, agentId: key.slice(0, key.lastIndexOf(':')) }
+    for (const w of this.holds.values()) if (w.waiting.includes(messageId)) return { w, agentId: ROUTING }
+    return undefined
+  }
+
+  // My message waiting in line: the agent stops what it's doing and starts again with it, now.
+  steer(messageId: string): void {
+    const { db } = this.deps
+    const m = db.message(messageId)
+    const line = this.lineOf(messageId)
+    if (!m || !line || line.agentId === ROUTING) return // no one to steer while the router picks
+    line.w.steered = true
+    const live = db
+      .recentMessages(m.conversationId, 60)
+      .reverse()
+      .find((x) => x.author.kind === 'agent' && x.author.id === line.agentId && x.run?.status === 'working')
+    const c = live && this.controllers.get(live.id)
+    if (c) {
+      c.reason = 'steered'
+      c.ctl.abort()
+    }
+  }
+
+  // What waits over the field instead of in the conversation, for when the app reads everything again.
+  withQueue(messages: Message[]): Message[] {
+    const queued = new Map<string, string>()
+    for (const [key, w] of this.working) for (const id of w.waiting) queued.set(id, key.slice(0, key.lastIndexOf(':')))
+    for (const w of this.holds.values()) for (const id of w.waiting) queued.set(id, ROUTING)
+    return messages.map((m) => {
+      const q = queued.get(m.id)
+      return q ? { ...m, queued: q } : m
+    })
+  }
+
+  // My message still in line, changed before the agent reads it.
+  editQueued(messageId: string, text: string): void {
+    const { db, emit } = this.deps
+    const body = text.trim()
+    const m = db.message(messageId)
+    const line = this.lineOf(messageId)
+    if (!body || !m || !line) return
+    const edited = { ...m, text: body }
+    db.saveMessage(edited)
+    emit({ type: 'message', message: { ...edited, queued: line.agentId } })
+  }
+
+  // My message still in line, taken back: the agent never gets it.
+  cancelQueued(messageId: string): void {
+    const { db, emit } = this.deps
+    const line = this.lineOf(messageId)
+    if (!line) return
+    line.w.waiting = line.w.waiting.filter((id) => id !== messageId)
+    const images = db.artifactsOf(messageId)
+    db.deleteMessage(messageId)
+    for (const a of images) if (this.deps.dataDir) rmSync(join(this.deps.dataDir, 'artifacts', a.id), { recursive: true, force: true })
+    emit({ type: 'message_removed', id: messageId })
+  }
+
+  // One reply for the messages that waited: they're read together, as what they nearly always are, more of
+  // the same request. Steered, it knows it was cut short and what it had done.
+  private async followUp(agent: Agent, conv: Conversation, w: Line, last: Message | undefined): Promise<void> {
+    const { db, emit } = this.deps
+    // They reach the agent now, so they go in the conversation now: after what came in meanwhile, in the
+    // order I sent them, just before the reply to them.
+    const at = Date.now()
+    w.waiting.forEach((id, i) => {
+      const m = db.message(id)
+      if (!m) return
+      db.setMessageAt(id, at + i)
+      emit({ type: 'message', message: { ...m, at: at + i } }) // no longer waiting
+    })
+    const current = db.agent(agent.id)
+    if (!current || current.archived || this.paused) return
+    const me = (await this.deps.settings()).workspaceName
+    const n = w.waiting.length
+    const more = n === 1 ? L('uma mensagem', 'one message') : L(`${n} mensagens`, `${n} messages`)
+    const steps = (last?.run?.steps ?? [])
+      .filter((s) => s.status !== 'running' && !['Pensou', 'Pensando', 'Parado', 'Thought', 'Thinking', 'Stopped'].includes(s.label))
+      .slice(-40)
+      .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : ''}`)
+    const task = w.steered
+      ? [
+          L(
+            `${me} te interrompeu: mandou ${more}, logo acima, enquanto você trabalhava, e pediu que você parasse e levasse em conta agora. Leia o pedido e as mensagens novas juntos, como uma coisa só.`,
+            `${me} interrupted you: they sent ${more}, right above, while you were working, and asked you to stop and take it into account now. Read the request and the new messages together, as one thing.`
+          ),
+          steps.length ? `${L('O que você já tinha feito', 'What you had already done')}:\n${steps.join('\n')}` : '',
+          L('Continue com o rumo novo, sem refazer o que já está feito e ainda vale.', "Go on in the new direction, without redoing what's already done and still holds.")
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : L(
+          `Enquanto você respondia, ${me} mandou ${more}, logo depois da sua resposta acima. Leia como continuação do mesmo pedido: responda o que elas acrescentam ou mudam, numa resposta só, sem repetir o que você já disse. Se mudam algo que você respondeu, corrija.`,
+          `While you were answering, ${me} sent ${more}, right after your reply above. Read them as more of the same request: answer what they add or change, in one reply, without repeating what you already said. If they change something you answered, correct it.`
+        )
+    this.followups.reserve(replyKey(current.id, conv.id, w.threadId))
+    this.enqueue(() => this.execute(current, conv, { depth: 1, task, work: last?.run?.work, threadId: w.threadId, reserved: true }))
+  }
+
   private async reply(agent: Agent, conv: Conversation, opts: ReplyOpts): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
@@ -1558,7 +1744,10 @@ export class Runner {
     }
 
     const base = { endedAt, depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal }
-    if (control.reason === 'stopped') {
+    if (control.reason === 'steered') {
+      // Not a failure: the reply right after picks up with the new direction.
+      save({ run: { ...base, ...again, status: 'stopped', steered: true, steps: closeThinking('done', L('Parado', 'Stopped')) } })
+    } else if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
       const why = {

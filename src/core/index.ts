@@ -183,8 +183,10 @@ function watchAccount(id: string): void {
 }
 
 
+// TUCANO_FAKE_DELAY_MS slows the fake engines down, to see in the app what happens while an agent works.
+const fakeOpts = { delayMs: Number(process.env['TUCANO_FAKE_DELAY_MS']) || undefined }
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+  ? { claude: fakeEngine('claude', fakeOpts), codex: fakeEngine('codex', fakeOpts), opencode: fakeEngine('opencode', fakeOpts), pi: fakeEngine('pi', fakeOpts), gemini: fakeEngine('gemini', fakeOpts), cursor: fakeEngine('cursor', fakeOpts), grok: fakeEngine('grok', fakeOpts) }
   : {
       claude: claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())),
       codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())),
@@ -831,7 +833,7 @@ const api: Api = {
     settings: settings(),
     agents: db.agents(),
     conversations: db.conversations(),
-    messages: db.messages(),
+    messages: runner.withQueue(db.messages()),
     connectors: connectors.list(),
     approvals: db.approvals(),
     memories: db.memories(),
@@ -861,6 +863,12 @@ const api: Api = {
   retryRun: ({ messageId }) => runner.retry(messageId),
 
   continueRun: ({ messageId }) => void runner.continue(messageId),
+
+  steer: ({ messageId }) => runner.steer(messageId),
+
+  editQueued: ({ messageId, text }) => runner.editQueued(messageId, text),
+
+  cancelQueued: ({ messageId }) => runner.cancelQueued(messageId),
 
   saveAgent: ({ agent, channelIds }) => {
     const before = db.agent(agent.id)
