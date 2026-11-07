@@ -15,7 +15,7 @@ import type { CoreEvent } from '../shared/rpc'
 import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connector-catalog'
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
-import { classify } from './policy'
+import { classify, legacyClassify } from './policy'
 import type { Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
@@ -58,6 +58,25 @@ export function contentText(r: Pick<CallToolResult, 'content' | 'structuredConte
 // Why a tool returned an error: what it said, or that it said nothing (an empty failure would show a bare ✗).
 export function errorReason(r: Pick<CallToolResult, 'content' | 'structuredContent'>): string {
   return contentText(r).trim() || L('O servidor devolveu um erro sem mensagem.', 'The server returned an error with no message.')
+}
+
+// Google's MCP servers are in Developer Preview: until the person's Cloud project is enrolled, every tool
+// answers "Access to this tool requires that your Google Cloud project (…) is enrolled in the Google
+// Workspace Developer Preview Program". Said plainly, so the agent sends the person to that step instead
+// of trying again or sending them to the Tuca, who can't do it either.
+export const GOOGLE_PREVIEW_URL = 'https://developers.google.com/workspace/preview'
+export function googlePreviewHint(url: string | undefined, text: string): string | undefined {
+  let host = ''
+  try {
+    host = new URL(url ?? '').hostname
+  } catch {
+    return undefined
+  }
+  if (!/(^|\.)googleapis\.com$/i.test(host) || !/Developer Preview Program/i.test(text)) return undefined
+  return L(
+    `[Isto é um passo de configuração do Google, que só a pessoa pode fazer: os servidores MCP do Google estão em Developer Preview, e o projeto dela no Google Cloud precisa estar inscrito no Google Workspace Developer Preview Program, em ${GOOGLE_PREVIEW_URL} (o formulário pede o número do projeto). A aprovação costuma levar alguns dias, e até lá as ferramentas do Google falham. Nem você nem o Tuca conseguem resolver isso: explique o passo e não tente de novo. Enquanto isso, a Composio, na loja de conectores, conecta o Google sem esse passo, mas os dados passam pelos servidores dela.]`,
+    `[This is a Google setup step only the person can do: Google's MCP servers are in Developer Preview, and their Google Cloud project must be enrolled in the Google Workspace Developer Preview Program, at ${GOOGLE_PREVIEW_URL} (the form asks for the project number). Approval usually takes a few days, and until then Google's tools fail. Neither you nor the Tuca can fix this: explain the step and don't retry. Meanwhile, Composio, in the connector store, connects Google without this step, but the data goes through its servers.]`
+  )
 }
 
 // Why a tool call threw, in words: a timeout says how long it waited, an MCP error keeps the code and the
@@ -438,7 +457,7 @@ export class ConnectorManager {
     do {
       const page = await client.listTools(cursor ? { cursor } : undefined)
       for (const t of page.tools) {
-        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t) })
+        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t) })
       }
       cursor = page.nextCursor
     } while (cursor)
@@ -459,7 +478,7 @@ export class ConnectorManager {
     try {
       const r = (await l.client.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult
       l.failures = 0
-      return r
+      return this.explained(id, r)
     } catch (e) {
       let failure = e
       if (staleSession(e)) {
@@ -467,7 +486,7 @@ export class ConnectorManager {
         const again = this.live.get(id)?.client
         if (again) {
           try {
-            return (await again.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult
+            return this.explained(id, (await again.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult)
           } catch (e2) {
             failure = e2
           }
@@ -478,8 +497,16 @@ export class ConnectorManager {
       }
       const c = this.deps.db.connector(id)
       if (c?.kind === 'stdio' && ++l.failures >= MAX_STDIO_FAILURES) this.setStatus(id, 'error', L(`Falhou ${l.failures} vezes seguidas.`, `Failed ${l.failures} times in a row.`))
-      throw new Error(callError(failure, timeout), { cause: failure })
+      const why = callError(failure, timeout)
+      const hint = googlePreviewHint(c?.url, why)
+      throw new Error(hint ? `${hint} ${why}` : why, { cause: failure })
     }
+  }
+
+  // A failed result with a known cause gets that cause first, in words the agent can pass on.
+  private explained(id: string, r: CallToolResult): CallToolResult {
+    const hint = r.isError ? googlePreviewHint(this.deps.db.connector(id)?.url, errorReason(r)) : undefined
+    return hint ? { ...r, content: [{ type: 'text', text: hint }, ...(r.content ?? [])] } : r
   }
 
   // ---------- OAuth ----------

@@ -482,6 +482,12 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS messages_by_thread_id ON messages (thread_id, at);
   CREATE INDEX IF NOT EXISTS messages_by_author ON messages (author_id, at);
   CREATE INDEX IF NOT EXISTS receipts_by_message ON receipts (message_id);
+  `,
+  // The class the rules gave a tool at its last sync: a class equal to it is still automatic and
+  // follows the rules when they change; any other was chosen by hand and stays. Empty until the first
+  // sync after this, which tells the two apart with the rules from before.
+  `
+  ALTER TABLE connector_tools ADD COLUMN cls_auto TEXT;
   `
 ]
 
@@ -1215,19 +1221,27 @@ export class Db {
 
   // Applies the server's current tool list. On the first sync every tool comes
   // in enabled; afterwards, tools the server adds come in disabled and flagged.
-  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass }[]): void {
+  // `cls`: the class the rules give the tool now; `legacyCls`, the one the rules before outbound verbs
+  // gave it, which tells an automatic class from a hand-picked one on a tool synced before cls_auto.
+  // A class still automatic follows the rules; one chosen by hand stays.
+  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass; legacyCls?: ToolClass }[]): void {
     this.tx(() => {
       const first = !(this.db.prepare('SELECT synced FROM connectors WHERE id = ?').get(connectorId) as { synced: number } | undefined)?.synced
-      const known = new Set(this.tools(connectorId).map((t) => t.name))
+      const stored = new Map((this.db.prepare('SELECT name, cls, cls_auto FROM connector_tools WHERE connector_id = ?').all(connectorId) as Row[]).map((r) => [str(r['name']), { cls: str(r['cls']), auto: r['cls_auto'] == null ? undefined : str(r['cls_auto']) }]))
       for (const t of listed) {
-        if (known.has(t.name)) {
-          this.db.prepare('UPDATE connector_tools SET description = ?, input_schema = ? WHERE connector_id = ? AND name = ?').run(t.description, JSON.stringify(t.inputSchema), connectorId, t.name)
+        const was = stored.get(t.name)
+        if (was) {
+          const automatic = was.cls === (was.auto ?? t.legacyCls ?? t.cls)
+          this.db
+            .prepare('UPDATE connector_tools SET description = ?, input_schema = ?, cls = ?, cls_auto = ? WHERE connector_id = ? AND name = ?')
+            .run(t.description, JSON.stringify(t.inputSchema), automatic ? t.cls : was.cls, t.cls, connectorId, t.name)
         } else {
           this.db
-            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, 0, ?)')
-            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), t.cls, first ? 1 : 0, first ? 0 : 1)
+            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, cls_auto, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)')
+            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), t.cls, t.cls, first ? 1 : 0, first ? 0 : 1)
         }
       }
+      const known = stored.keys()
       const names = new Set(listed.map((t) => t.name))
       for (const name of known) if (!names.has(name)) this.db.prepare('DELETE FROM connector_tools WHERE connector_id = ? AND name = ?').run(connectorId, name)
       this.db.prepare('UPDATE connectors SET synced = 1 WHERE id = ?').run(connectorId)

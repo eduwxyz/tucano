@@ -75,8 +75,9 @@ import { voiceRefusal } from '../../../shared/voice'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
-import { ConnectorGrid, OwnAppSetup } from './ConnectorStore'
+import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
+import { perCallTool } from '../../../shared/composio'
 import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
 import { confirmDialog } from './Dialogs'
@@ -1334,8 +1335,8 @@ export function ConnectorsPage(): ReactNode {
     <Page
       title={L('Conectores', 'Connectors')}
       subtitle={L(
-        'Os serviços com que seus agentes trabalham. O login é pelo navegador e o acesso fica neste computador; cada chamada dos agentes passa pelas permissões e aprovações.',
-        'The services your agents work with. You sign in through the browser and the access stays on this computer; every call the agents make goes through permissions and approvals.'
+        'Os serviços com que seus agentes trabalham. O login é pelo navegador e o acesso fica neste computador (menos nos que passam por terceiros, como a Composio); cada chamada dos agentes passa pelas permissões e aprovações.',
+        'The services your agents work with. You sign in through the browser and the access stays on this computer (except for those that go through a third party, like Composio); every call the agents make goes through permissions and approvals.'
       )}
       actions={
         !adding && (
@@ -1363,7 +1364,8 @@ export function ConnectorsPage(): ReactNode {
 // A connector's state, who uses it and its tools, in a window over the page.
 function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void }): ReactNode {
   const users = useStore((s) => s.agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none'))
-  const own = entryOf(c)?.app // signs in with the person's own app: it can be changed here
+  const entry = entryOf(c)
+  const own = entry?.app // signs in with the person's own app: it can be changed here
   const [changing, setChanging] = useState(false)
   return (
     <Modal title={c.name} onClose={onClose} className="connector-modal">
@@ -1381,6 +1383,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
             L('Nenhum agente usa ainda. Dê acesso na página de cada agente, em Ferramentas.', "No agent uses it yet. Give access on each agent's page, under Tools.")
           )}
         </p>
+        {entry?.warning && <ThirdPartyWarning text={entry.warning()} />}
         {c.kind === 'stdio' && (
           <p className="warn-box">
             <Icon name="terminal" size={14} /> {L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}
@@ -1431,27 +1434,37 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
             <span>{L('Ligada', 'On')}</span>
           </div>
         )}
-        {c.tools.map((t) => (
-          <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
-            <code>
-              {t.name}
-              {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
-            </code>
-            <Select
-              value={t.cls ?? null}
-              onChange={(v) => { if (v) updateTool(c.id, t.name, { cls: v as ToolClass }) }}
-              options={(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
-              placeholder={L('Escolha a classe', 'Pick a class')}
-            />
-            <input
-              type="checkbox"
-              disabled={t.cls !== 'sensitive'}
-              checked={t.highRisk && t.cls === 'sensitive'}
-              onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
-            />
-            <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
-          </div>
-        ))}
+        {c.tools.map((t) => {
+          // A runner (Composio's) has no class of its own: each call counts as what it runs.
+          const runner = perCallTool(c.url, t.name)
+          return (
+            <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
+              <code>
+                {t.name}
+                {t.isNew && <span className="tag tag--warn tools__new">{L('nova', 'new')}</span>}
+              </code>
+              {runner ? (
+                <span className="small muted" title={L('Leituras rodam na hora; escritas pedem acesso de escrita; ações sensíveis pedem aprovação a cada chamada.', 'Reads run right away; writes need write access; sensitive actions ask for approval on each call.')}>
+                  {L('por chamada', 'per call')}
+                </span>
+              ) : (
+                <Select
+                  value={t.cls ?? null}
+                  onChange={(v) => { if (v) updateTool(c.id, t.name, { cls: v as ToolClass }) }}
+                  options={(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
+                  placeholder={L('Escolha a classe', 'Pick a class')}
+                />
+              )}
+              <input
+                type="checkbox"
+                disabled={t.cls !== 'sensitive' && !runner}
+                checked={t.highRisk && (t.cls === 'sensitive' || runner)}
+                onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
+              />
+              <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
+            </div>
+          )
+        })}
         <p className="hint">{L('Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.', 'New tools the server publishes later come in off until you review them. Sensitive ones always ask for approval.')}</p>
       </div>
       {changing && own && <OwnAppSetup provider={own.provider} onClose={() => setChanging(false)} />}

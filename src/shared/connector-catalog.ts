@@ -32,6 +32,7 @@ export interface CatalogEntry {
   local?: { command: string; args: string[]; env?: Record<string, string> } // runs on this computer
   fields?: CatalogField[]
   app?: { provider: AppProvider; scopes: string[] } // signs in with the person's own app, asking for these scopes
+  warning?: () => string // said before connecting and on its page: the data goes through someone else's servers
 }
 
 // Whose sign-in needs an app the person makes: Google's (one for its five servers) and Slack's.
@@ -192,6 +193,16 @@ export const CATALOG: CatalogEntry[] = [
     ]
   }),
   e('zapier', 'Zapier', 'https://mcp.zapier.com/api/mcp/mcp', 'business', 'Ações em milhares de apps', 'Actions across thousands of apps'),
+  // Composio Connect: hundreds of apps through Composio's servers, which hold the sign-in to each account
+  // and see every call. It offers a handful of tools that find and run the real actions, so each run
+  // asks for approval (see policy.ts).
+  e('composio', 'Composio', 'https://connect.composio.dev/mcp', 'business', 'Seus dados passam pela Composio · centenas de apps sem configurar nada', 'Your data goes through Composio · hundreds of apps with nothing to set up', 'oauth', {
+    warning: () =>
+      L(
+        'Pela Composio, seus dados passam pelos servidores dela: e-mails, planilhas e o que mais os agentes acessarem. O acesso às suas contas (Google, Notion…) fica guardado com a Composio, não no seu computador. O Tucano não controla o que ela guarda nem por quanto tempo. Se preferir que nada passe por terceiros, use os conectores diretos.',
+        "Through Composio, your data goes through its servers: emails, spreadsheets and whatever else the agents reach. The access to your accounts (Google, Notion…) is kept by Composio, not on your computer. Tucano doesn't control what it keeps or for how long. If you'd rather nothing go through a third party, use the direct connectors."
+      )
+  }),
 
   e('canva', 'Canva', 'https://mcp.canva.com/mcp', 'design', 'Designs, modelos e exportações', 'Designs, templates and exports'),
   e('webflow', 'Webflow', 'https://mcp.webflow.com/mcp', 'design', 'Sites, páginas e CMS', 'Sites, pages and CMS'),
