@@ -133,6 +133,7 @@ html[lang="en"] [lang="pt-BR"], html[lang="pt-BR"] [lang="en"] { display: none !
 .langhint button { width: 30px; height: 30px; border: 0; border-radius: 99px; background: none; color: var(--ink-3); font: 400 18px/1 var(--sans); }
 .langhint button:hover { color: var(--cream); }
 header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
+header .btn--icon { width: 40px; padding: 0; justify-content: center; }
 
 /* ---------- hero ---------- */
 .hero { position: relative; padding: 150px 0 110px; overflow: hidden; }
@@ -530,6 +531,7 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
     <div class="right">
       <div class="lang" role="group" aria-label="Idioma / Language"><button type="button" data-set="pt-BR">PT</button><button type="button" data-set="en">EN</button></div>
       <a class="btn btn--ghost" href="https://github.com/eduwxyz/tucano"><img src="assets/logos/github.svg" alt="">GitHub</a>
+      <a class="btn btn--ghost btn--icon" href="https://discord.gg/uQp4x7wUgT" aria-label="Discord" title="Discord"><img src="assets/logos/discord.svg" alt=""></a>
       <a class="btn btn--beak" href="#instalar"><span lang="pt-BR">Instalar</span><span lang="en">Install</span></a>
     </div>
   </div>
@@ -823,7 +825,7 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
     </div>
     <footer>
       <span><span lang="pt-BR">Feito no Brasil.</span><span lang="en">Made in Brazil.</span></span>
-      <nav><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://github.com/eduwxyz/tucano/releases"><span lang="pt-BR">Versões</span><span lang="en">Releases</span></a><a href="https://github.com/eduwxyz/tucano#readme"><span lang="pt-BR">Guia completo</span><span lang="en">Full guide</span></a><a href="https://github.com/eduwxyz/tucano/issues"><span lang="pt-BR">Problemas e ideias</span><span lang="en">Issues and ideas</span></a><a href="https://github.com/eduwxyz/tucano/blob/HEAD/LICENSE">Apache-2.0</a><a href="/alternativa-grok-bot/" data-en-href="/en/grok-bot-alternative/"><span lang="pt-BR">Alternativa ao Grok Bot</span><span lang="en">Grok Bot alternative</span></a><a href="/alternativa-openclaw/" data-en-href="/en/openclaw-alternative/"><span lang="pt-BR">Alternativa ao OpenClaw</span><span lang="en">OpenClaw alternative</span></a></nav>
+      <nav><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://discord.gg/uQp4x7wUgT">Discord</a><a href="https://github.com/eduwxyz/tucano/releases"><span lang="pt-BR">Versões</span><span lang="en">Releases</span></a><a href="https://github.com/eduwxyz/tucano#readme"><span lang="pt-BR">Guia completo</span><span lang="en">Full guide</span></a><a href="https://github.com/eduwxyz/tucano/issues"><span lang="pt-BR">Problemas e ideias</span><span lang="en">Issues and ideas</span></a><a href="https://github.com/eduwxyz/tucano/blob/HEAD/LICENSE">Apache-2.0</a><a href="/alternativa-grok-bot/" data-en-href="/en/grok-bot-alternative/"><span lang="pt-BR">Alternativa ao Grok Bot</span><span lang="en">Grok Bot alternative</span></a><a href="/alternativa-openclaw/" data-en-href="/en/openclaw-alternative/"><span lang="pt-BR">Alternativa ao OpenClaw</span><span lang="en">OpenClaw alternative</span></a></nav>
     </footer>
   </div>
 </section>
@@ -1167,6 +1169,7 @@ setLang(LANG)
     else if (el.matches('.copy')) ph.capture('install_command_copied', { location: where(el) })
     else if (el.matches('a[href^="https://github.com/eduwxyz/tucano"]')) ph.capture('github_clicked', { location: where(el) })
     else if (el.matches('a[href^="https://x.com/tucanosh"]')) ph.capture('x_clicked', { location: where(el) })
+    else if (el.matches('a[href^="https://discord.gg/"]')) ph.capture('discord_clicked', { location: where(el) })
     else if (el.matches('.lang button')) {
       ph.capture('language_changed', { to: el.dataset.set })
       ph.register({ site_lang: el.dataset.set })

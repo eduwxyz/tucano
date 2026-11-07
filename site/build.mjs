@@ -38,7 +38,7 @@ const ORG = {
   name: 'Tucano',
   url: `${SITE}/`,
   logo: `${SITE}/assets/brand/tucano-512.png`,
-  sameAs: ['https://x.com/tucanosh', 'https://github.com/eduwxyz/tucano'],
+  sameAs: ['https://x.com/tucanosh', 'https://github.com/eduwxyz/tucano', 'https://discord.gg/uQp4x7wUgT'],
 }
 const faqPage = (faq, lang, url) => ({
   '@type': 'FAQPage',
