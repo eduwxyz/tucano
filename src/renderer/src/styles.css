@@ -572,6 +572,16 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A DM between agents: the two names stay whole, the task gives way. */
+.nav-item--pair .nav-item__label {
+  flex: none;
+  max-width: 60%;
+}
+.nav-item--pair .nav-item__role {
+  flex: 1;
+  max-width: none;
+  text-align: right;
+}
 .badge {
   background: var(--danger);
   color: #fff;
@@ -7622,6 +7632,70 @@ kbd {
 }
 .swatch--custom.is-active {
   overflow: visible;
+}
+
+/* What an agent handed out: one line per task, with how it's going and where it happens. */
+.handoffs {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 640px;
+}
+.handoff {
+  display: flex;
+  flex-wrap: wrap; /* in a narrow thread panel the link goes to the next line instead of being cut */
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.handoff > .icon {
+  color: var(--text-2);
+  flex: none;
+}
+.handoff__who {
+  font-weight: 600;
+  flex: none;
+}
+.handoff__task {
+  color: var(--text-2);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.handoff .tag,
+.handoff__open {
+  flex: none;
+}
+
+/* Two agents side by side: a DM between agents. */
+.pair-avatars {
+  display: inline-flex;
+  align-items: center;
+}
+.pair-avatars > * + * {
+  margin-left: -5px;
+}
+
+/* Under a lead's report: what it reports on. */
+.report-basis {
+  margin-top: 10px;
+}
+.report-basis__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+.report-basis .handoffs {
+  margin-top: 4px;
 }
 
 /* Dictation */

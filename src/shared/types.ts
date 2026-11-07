@@ -84,6 +84,8 @@ export interface Agent {
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
+  // The agents it coordinates: it may hand them tasks with `delegar`, and their results come back to it.
+  team?: string[]
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
 }
@@ -109,7 +111,8 @@ export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a
 
 export interface Conversation {
   id: string
-  kind: 'channel' | 'dm'
+  // 'agents': a DM between two agents (members), where they work together; the person can read it and write in it.
+  kind: 'channel' | 'dm' | 'agents'
   name: string // channel name, or agent id for a DM
   topic?: string
   members: string[] // agent ids
@@ -119,6 +122,16 @@ export interface Conversation {
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
   threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
+  // A DM between agents opens for one request (the id of the message that started it) and holds only that
+  // work; its topic is the task. One kept from before this (no request) is the pair's old running DM.
+  request?: string
+}
+
+// A DM between agents can be deleted once its request is over: while any reply of that request is still
+// working, asking or waiting for an approval (here or anywhere else it reached), the lead still needs it.
+export function requestRunning(conv: Conversation, messages: Message[]): boolean {
+  const live = (m: Message): boolean => m.run?.status === 'working' || m.run?.status === 'waiting_input' || m.run?.status === 'waiting_approval'
+  return messages.some((m) => live(m) && (m.conversationId === conv.id || (!!conv.request && (m.id === conv.request || m.run?.root === conv.request))))
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -177,6 +190,40 @@ export interface Run {
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
   proposal?: Proposal // what an agent proposed (a change to an agent, a routine, a channel, a team), shown as a card
+  delegation?: Delegation // this reply works on a task another agent handed it
+  delegated?: Delegated[] // the tasks this reply handed its team; it waits for their results
+  round?: number // how many times in a row this agent got its team's results back without a human message
+  reportOf?: string // the message whose delegated work this reply reports on, once it came back
+  released?: boolean // what it delegated came back, but it wasn't called with it (paused, stopped, archived)
+  root?: string // on a reply that delegated or reports back: the message that started the request (see Delegation.root)
+}
+
+// A task one agent handed another with `delegar` (its team, or a colleague whose answer it needs). Every reply of the delegate on it carries
+// the same id; once all of the manager's message's tasks are settled, the manager gets the results back.
+export interface Delegation {
+  id: string
+  by: string // the agent that delegated
+  from: string // its message that delegated: the batch this task belongs to
+  task: string // what it was asked, in the manager's words
+  doneWhen?: string
+  chain: string[] // the agents above it, top first; `by` is the last
+  root: string // the message that started it all: everything one request sets off shares its budget
+  since: number // `at` of the manager's message: what the delegate sees of the conversation starts there
+  reported?: boolean // its result already went back to `by`
+  asked?: string // it answers a question `by` asked in this channel (pedir_ajuda), picked by the router, not named
+}
+
+export interface Delegated {
+  id: string
+  agentId: string
+  conversationId?: string // where it runs, once handed out: the DM between the two agents, or the channel it came from
+  task: string
+  doneWhen?: string
+  // Asked in a channel, of whoever can help (pedir_ajuda): the channel. agentId is '' until the router picks.
+  askedIn?: string
+  threadId?: string // the thread it opened there: the question's, or the request's in a DM between agents set to threads
+  nobody?: boolean // no one there could help
+  reported?: boolean // `nobody` already went back to the one who asked
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
@@ -288,6 +335,7 @@ export interface Settings {
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
+  requestBudget?: number // counted tokens one request may spend across every agent it reaches with delegar; default REQUEST_BUDGET
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
@@ -404,6 +452,7 @@ export const MAX_AGENT_ROUTINES = 10
 export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
 
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
+export const REQUEST_BUDGET = 1_000_000 // counted tokens: past it, a request hands no more work out and reports with what it has
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops

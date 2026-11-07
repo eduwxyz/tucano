@@ -14,7 +14,7 @@ import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { friendly } from '../shared/errors'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { channelName, ENGINES, inQuietHours, modelInfo, rememberModels, requestRunning, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -939,7 +939,10 @@ const api: Api = {
   },
 
   deleteConversation: ({ id }) => {
-    if (!db.conversation(id)) return
+    const conv = db.conversation(id)
+    if (!conv) return
+    if (conv.kind === 'agents' && requestRunning(conv, db.messages()))
+      throw new Error(L('Esse pedido ainda está em andamento. Dá pra apagar a conversa quando ele terminar.', "That request is still going. The conversation can be deleted once it's over."))
     for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
     for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
     for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })

@@ -19,7 +19,7 @@ describe('the team as a file', () => {
     const a = fresh()
     a.saveConnector({ id: 'lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth' })
     a.saveAgent(agent('s', 'staff', { grants: { lin: 'read' } }))
-    a.saveAgent(agent('p', 'pm', { role: 'Produto', computer: false, customColor: '#ff00aa', picture: 'data:image/webp;base64,AAAA', avatar: examples[0] }))
+    a.saveAgent(agent('p', 'pm', { role: 'Produto', computer: false, customColor: '#ff00aa', picture: 'data:image/webp;base64,AAAA', avatar: examples[0], team: ['s'] }))
     a.createConversation({ id: 'c1', kind: 'channel', name: 'simula-oab', members: ['s', 'p'] })
     a.saveSkill({ id: 'k', name: 'testes-do-core', description: 'Ao rodar testes', body: 'swift test', agents: ['s'], state: 'active', createdAt: 1, updatedAt: 1 })
     a.saveRoutine({ id: 'r', name: 'Issues novas', agentId: 'p', conversationId: 'c1', prompt: 'Planeje.', schedule: { days: [], time: '' }, trigger: { kind: 'poll', connectorId: 'lin', tool: 'list_issues', args: { label: 'agente' }, everyMinutes: 5 }, enabled: true, createdAt: 1 })
@@ -28,6 +28,7 @@ describe('the team as a file', () => {
     expect(md).toContain('- **Staff** (@staff) · Engenharia · Opus · com computador · acessa Linear')
     expect(md).toContain('- **Issues novas** (@pm, #simula-oab): quando aparece algo novo em Linear · list_issues')
     expect(md).not.toContain('segredo')
+    expect(md).toContain('coordena @staff')
 
     const b = fresh()
     b.saveConnector({ id: 'lin2', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth' })
@@ -38,6 +39,8 @@ describe('the team as a file', () => {
     const pm = b.agents().find((x) => x.handle === 'pm')!
     expect(pm).toMatchObject({ customColor: '#ff00aa', avatar: { id: examples[0]!.id } })
     expect(pm.picture).toBeUndefined()
+    // Who it coordinates travels by handle.
+    expect(pm.team).toEqual([staff.id])
     expect(b.skills()[0]).toMatchObject({ name: 'testes-do-core', agents: [staff.id] })
     expect(b.routines()[0]).toMatchObject({ enabled: false, trigger: { kind: 'poll', connectorId: 'lin2' } })
     expect(importTeam(b, md, 2_000_000)).toBe('Nada novo: tudo já existia aqui.')

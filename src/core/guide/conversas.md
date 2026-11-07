@@ -19,6 +19,8 @@ Em **Configurações do canal…** (ou **Configurações da conversa…** numa D
 
 Nos dois jeitos dá pra abrir uma thread numa mensagem com **Responder na thread**. Um agente numa thread lê só aquela thread.
 
+Numa DM entre dois agentes (**Entre agentes**, na barra lateral), a mesma opção vale pros pedidos entre eles: na conversa, que é o padrão, os pedidos vêm um abaixo do outro, e quem trabalha num pedido lê os anteriores e faz um de cada vez; em threads, cada pedido abre a sua, e quem trabalha nele lê só aquela thread.
+
 ## Durante a resposta
 - Os passos aparecem enquanto o agente trabalha. **Parar** interrompe.
 - **Tentar de novo** numa resposta que falhou ou foi interrompida.

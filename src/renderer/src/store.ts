@@ -346,6 +346,7 @@ export const pendingMemories = (s: State): Memory[] => s.memories.filter((m) => 
 
 export function conversationTitle(s: State, c: Conversation): string {
   if (c.kind === 'channel') return c.name
+  if (c.kind === 'agents') return c.members.map((id) => agentById(s, id)?.name ?? L('Agente', 'Agent')).join(' ↔ ')
   return agentById(s, c.name)?.name ?? L('Agente', 'Agent')
 }
 

@@ -7,6 +7,7 @@ import { MENTION } from '../shared/mention-text'
 import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Routine, type Settings, type Skill } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { osOf, shellCommand, systemName } from './platform'
+import { delegatedWhere, teamSection, togetherSection } from './delegation'
 
 export const HISTORY_LIMIT = 30
 
@@ -27,13 +28,24 @@ export function systemPrompt(opts: {
   routines?: Routine[] // its own, when it can schedule
   skills?: Skill[] // the active ones it follows, when it has skill tools
   builder?: string // the Tuca's view of the workspace: models, connectors, the team
+  team?: { team: Agent[]; others: Agent[] } // who it can hand work to with delegar: the ones it coordinates, and the rest
+  delegatedBy?: Agent // the agent whose task this reply works on
+  askedIn?: string // that task is a question it asked in this channel, and this agent was picked to answer
+  together?: { before: Agent[]; after: Agent[] } // called with others at once: who answered before it, who answers after
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
   connectors?: boolean // it has connector tools (Slack, Databricks…)
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, builder, wiki, connectors } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, computerOff, macFolder, offline, web, browser, apps, routines, skills, builder, team, delegatedBy, askedIn, together, wiki, connectors } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
-  const where =
-    conversation.kind === 'dm'
+  const other = conversation.kind === 'agents' ? peers[0] : undefined
+  const where = delegatedBy
+    ? delegatedWhere(me, delegatedBy, askedIn)
+    : conversation.kind === 'agents'
+      ? L(
+          `Você está numa DM com ${other ? `${other.name} (@${other.handle}), outro agente` : 'outro agente'}, onde vocês trabalham juntos. ${me} pode ler e escrever aqui.`,
+          `You're in a DM with ${other ? `${other.name} (@${other.handle}), another agent` : 'another agent'}, where you work together. ${me} can read and write here.`
+        )
+      : conversation.kind === 'dm'
       ? L(`Você está numa conversa direta (DM) com ${me}.`, `You're in a direct conversation (DM) with ${me}.`)
       : `${L(`Você está no canal #${conversation.name}.`, `You're in the #${conversation.name} channel.`)}${peers.length ? ` ${L('Outros agentes aqui', 'Other agents here')}: ${peers.map((p) => `${p.name} (@${p.handle}${p.role ? `, ${p.role}` : ''})`).join('; ')}.` : ''}`
 
@@ -82,6 +94,8 @@ export function systemPrompt(opts: {
     browser && browserSection(me),
     apps?.length && appsSection(me, apps),
     builder,
+    team && teamSection(me, team.team, team.others, delegatedBy ? 'task' : conversation.kind === 'dm' ? 'dm' : 'open'),
+    together && togetherSection(me, together.before, together.after),
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0 || !!memories.searchable) && memorySection(me, memories),
     wiki &&
       L(
@@ -349,7 +363,8 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       .join('\n\n')
 
   const shown = messages.filter((m) => m.author.kind !== 'system' && body(m))
-  const where = conversation.kind === 'dm' ? L(`DM com ${me}`, `DM with ${me}`) : `#${conversation.name}`
+  const pair = conversation.kind === 'agents' ? conversation.members.map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent')).join(L(' e ', ' and ')) : ''
+  const where = conversation.kind === 'dm' ? L(`DM com ${me}`, `DM with ${me}`) : conversation.kind === 'agents' ? L(`DM entre ${pair}`, `DM between ${pair}`) : `#${conversation.name}`
   // Who started the thread this reply is in.
   const starter = thread?.author
   const starterName = starter?.kind === 'agent' ? agents.find((a) => a.id === starter.id)?.name : undefined

@@ -38,6 +38,8 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 
 Crie um canal, coloque os agentes e peça. Mencione alguém com `@`, ou não, e um roteador escolhe quem responde. Os agentes passam a vez entre si com `@menção`, então um pedido vai da investigação à correção e à revisão sozinho, e cada passo aparece na conversa: o que pesquisou, leu, rodou e editou, com recibo de tokens e tempo.
 
+Os agentes também passam trabalho uns pros outros, como pessoas num Slack. Qualquer agente pode entregar uma tarefa ou uma pergunta a outro com a ferramenta `delegar`, e retoma sozinho quando a resposta volta. Na página de um agente, **Canais, equipe e skills › Equipe** escolhe os agentes que ele coordena: mande um pedido grande pra ele, ele entrega cada parte ao agente certo e te dá o retorno com o resultado, quem fez o quê, o que foi decidido e aplicado, e o que ficou pendente. A sua DM com um agente é só sua: o trabalho entre eles acontece numa DM entre os dois agentes, em **Entre agentes** na barra lateral, uma por dupla de agentes, com cada pedido numa thread, onde você acompanha e responde as perguntas deles. Tudo o que um pedido envolve divide um teto de tokens.
+
 <img src="docs/images/pt/conversation.png" alt="Um canal onde a Iris achou o erro no Datadog, o Leo corrigiu e abriu a MR, e o Nico revisou e pede aprovação pro merge" width="880">
 
 ### Conecte qualquer ferramenta, até as internas da sua empresa
