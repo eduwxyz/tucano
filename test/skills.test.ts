@@ -56,6 +56,15 @@ describe('skills', () => {
     expect(skills.read(db.agent('a1')!, { nome: 'longa' }).reply.endsWith(body)).toBe(true)
   })
 
+  it('refuses only what is past a million characters: not a recipe at all', () => {
+    const huge = 'x'.repeat(1_000_001)
+    expect(() => skills.save({ ...recipe, body: huge })).toThrow('1.000.000')
+    expect(skills.propose(db.agent('a1')!, { nome: 'enorme', quando_usar: 'Sempre', receita: huge })).toMatchObject({ error: true })
+    const source = join(mkdtempSync(join(tmpdir(), 'ad-skill-')), 'SKILL.md')
+    writeFileSync(source, `---\nname: enorme\ndescription: Sempre\n---\n${huge}`)
+    expect(() => skills.link(source, ['a1'])).toThrow('1.000.000')
+  })
+
   it("an agent's new skill waits for me, and only its proposer gets it once approved", () => {
     const r = skills.propose(db.agent('a1')!, { nome: 'abrir PR', quando_usar: 'Ao terminar uma tarefa', receita: 'git push … (feito pelo Eduardo)', motivo: 'faço sempre igual' })
     expect(r.skill).toMatchObject({ state: 'pending', name: 'abrir-pr', proposedBy: 'a1', agents: ['a1'] })

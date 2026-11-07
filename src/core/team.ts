@@ -218,7 +218,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number, by = db.o
     added.routines && L(`${added.routines} rotina${added.routines > 1 ? 's' : ''} (desligadas)`, `${added.routines} routine${added.routines > 1 ? 's' : ''} (off)`)
   ].filter(Boolean)
   const done = parts.length ? L(`Importei ${parts.join(', ')}.`, `Imported ${parts.join(', ')}.`) : L('Nada novo: tudo já existia aqui.', 'Nothing new: everything already existed here.')
-  const long = longSkills.length ? L(` Skills longas: ${longSkills.join('; ')}.`, `Long skills: ${longSkills.join('; ')}.`) : ''
+  const long = longSkills.length ? L(` Skills longas: ${longSkills.join('; ')}.`, ` Long skills: ${longSkills.join('; ')}.`) : ''
   return `${done}${added.skipped.length ? L(` Ficou de fora: ${added.skipped.join('; ')}.`, ` Left out: ${added.skipped.join('; ')}.`) : ''}${long}`
 }
 

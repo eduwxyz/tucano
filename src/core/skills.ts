@@ -5,7 +5,7 @@
 // version before it, so any can be undone.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { skillLengthNote } from '../shared/skills'
+import { MAX_SKILL_BODY_LENGTH, skillLengthNote, tooLongSkill } from '../shared/skills'
 import type { CoreEvent } from '../shared/rpc'
 import { skillApplies, type Agent, type Skill, type SkillInput } from '../shared/types'
 import type { Db } from './db'
@@ -136,6 +136,7 @@ export class Skills {
     if (!name) throw new Error(L('Dê um nome pra skill.', 'Give the skill a name.'))
     if (!description) throw new Error(L('Diga quando usar.', 'Say when to use it.'))
     if (!body) throw new Error(L('Escreva a receita.', 'Write the recipe.'))
+    if (body.length > MAX_SKILL_BODY_LENGTH) throw new Error(tooLongSkill())
     if (this.active(name, input.id)) throw new Error(exists(name))
     if (prev && prev.state === 'active' && (prev.name !== name || prev.description !== description || prev.body !== body)) this.keep(prev, 'me')
     const at = this.now()
@@ -160,6 +161,7 @@ export class Skills {
     const name = skillName(fm.name || basename(dirname(source)) || '')
     if (!name) throw new Error(L('Essa skill não tem nome.', "That skill has no name."))
     if (this.active(name)) throw new Error(exists(name))
+    if (fm.body.trim().length > MAX_SKILL_BODY_LENGTH) throw new Error(tooLongSkill())
     const at = this.now()
     return this.store({ id: randomUUID(), name, description: fm.description || name, body: fm.body.trim(), agents: [...new Set(agents)], state: 'active', source, createdAt: at, updatedAt: at })
   }
@@ -174,6 +176,7 @@ export class Skills {
     try {
       if (file) return { reply: `# ${k.name} · ${file}\n\n${readLinked(k.source, file)}`, skill: k }
       const body = readLinked(k.source)
+      if (body.length > MAX_SKILL_BODY_LENGTH) return { reply: tooLongSkill(), error: true }
       if (body !== k.body) this.store({ ...k, body }) // the page shows the version the agents read
       return { reply: `# ${k.name}\n${L('Quando usar', 'When to use')}: ${k.description}\n\n${body}${filesNote(k.source)}`, skill: k }
     } catch (e) {
@@ -193,6 +196,7 @@ export class Skills {
     const description = text('quando_usar')
     const body = text('receita')
     if (!name || !description || !body) return { reply: L('Faltou nome, quando_usar ou receita.', 'Missing nome, quando_usar or receita.'), error: true }
+    if (body.length > MAX_SKILL_BODY_LENGTH) return { reply: tooLongSkill(), error: true }
     const all = this.deps.db.skills()
     if (all.filter((s) => s.state === 'pending' && s.proposedBy === agent.id).length >= MAX_PENDING)
       return { reply: L(`Você já tem ${MAX_PENDING} propostas esperando revisão. Espere o usuário decidir.`, `You already have ${MAX_PENDING} proposals waiting for review. Wait for the user to decide.`), error: true }
