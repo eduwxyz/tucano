@@ -28,7 +28,8 @@ export type PromptOpts = {
   apps?: AgentApp[] // the person's own apps it may use
   routines?: Routine[] // its own, when it can schedule
   skills?: Skill[] // the active ones it follows, when it has skill tools
-  builder?: string // the Tuca's view of the workspace: models, connectors, the team
+  builder?: string // the Tuca's view of the workspace: models, connectors, the team (live)
+  builderGuide?: string // how to propose agents, teams, routines and channels, and the Tuca's guide (stable)
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
   connectors?: boolean // it has connector tools (Slack, Databricks…)
 }
@@ -37,7 +38,7 @@ export type PromptOpts = {
 // session (Claude Code keeps the first system prompt on resume), so whatever changes on its own
 // goes in liveContext instead.
 export function systemPrompt(opts: PromptOpts): string {
-  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, macFolder, web, browser, apps, routines, skills, connectors } = opts
+  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, macFolder, web, browser, apps, routines, skills, connectors, builderGuide } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -88,6 +89,7 @@ export function systemPrompt(opts: PromptOpts): string {
         .join('\n'),
     browser && browserSection(me),
     apps?.length && appsSection(me, apps),
+    builderGuide,
     [
       L('## Como responder', '## How to reply'),
       `- ${where} ${L(
