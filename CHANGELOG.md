@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Agents' computers come set up.** **Settings › Agents › Agents' computer** takes a bash script every new Linux computer is set up with, so agents stop spending turns installing (and getting wrong) the same tools on each one. It runs once into a base image that every computer made after it starts from, in seconds; the agent is told what's already there. Ready-made, tested lines add the basics (jq, unzip, ssh, psql), GitHub CLI, GitLab CLI (glab), the Databricks CLI and the AWS CLI. A setup that fails says why, with its last lines, and the computer doesn't start half-done.
+
 ### Fixed
 
 - **An agent's Chrome gets more time to open.** The first open on a slow computer could pass the 15 s it had, and the agent got an error instead of the page. It now gets 30 s.

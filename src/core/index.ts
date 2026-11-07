@@ -546,7 +546,7 @@ gateway.route('/oauth/callback', oauthCallback)
 
 const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
 
-const computers = new Computers({ db, dataDir, emit, shoot })
+const computers = new Computers({ db, dataDir, emit, shoot, setup: () => settings().computerSetup })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.

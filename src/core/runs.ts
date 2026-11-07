@@ -1416,6 +1416,7 @@ export class Runner {
       canRemember,
       hasComputer: !!computers,
       computerOff,
+      computerSetup: settings.computerSetup,
       browser: !!browser,
       apps: apps ? agent.apps : undefined,
       offline: (this.deps.connectors?.list() ?? []).filter((c) => (c.status === 'error' || c.status === 'needs_auth') && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
