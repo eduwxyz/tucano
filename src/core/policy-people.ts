@@ -229,6 +229,7 @@ export const NEEDS: Record<Method, Need> = {
   setRole: 'target',
   activity: 'admin',
   purgePerson: 'owner',
+  leave: 'anyone', // one's own access (the owner is refused in the core)
   setTelegramToken: 'owner', // the phone is the owner's
   unpairTelegram: 'owner'
 }

@@ -7,6 +7,7 @@
 //
 //   node out/main/server.js        (TUCANO_DATA, TUCANO_HOST, TUCANO_PORT, TUCANO_TOKEN, TUCANO_URL, TUCANO_TRUST_PROXY)
 //   node out/main/server.js link   prints the link that signs a browser in
+//   node out/main/server.js pair [minutes]   a one-time link for the owner's phone (or a browser)
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { chmodSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -17,6 +18,7 @@ import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep }
 import { pathToFileURL } from 'node:url'
 import { Forwarder, isPrivate } from './forward'
 import { ARTIFACT_CSP, BASE_HEADERS, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, sameOrigin, signIn } from './guard'
+import { browserName, CODE_SHAPE, codeMinutes, deviceLabel, PairCodes } from './pair-codes'
 import { Preview } from './preview'
 import { vault } from './vault'
 import { verifyLocal } from '../core/local-paths'
@@ -48,6 +50,18 @@ const publicUrl = (process.env['TUCANO_URL'] || `http://${host === '0.0.0.0' || 
 if (process.argv[2] === 'link') {
   console.log(`${publicUrl}/?token=${token}`)
   console.log(pairingLink({ origin: publicUrl, token }))
+  process.exit(0)
+}
+
+// One-time codes that sign a device in as a person (pair-codes.ts).
+const pairCodes = new PairCodes(join(dataDir, 'pair-codes.json'))
+
+// `server.js pair [minutes]`: a one-time code for the owner, as the link the phone opens (or a QR
+// code of it) and as the browser's. Good once, for 10 minutes unless asked otherwise (up to a week).
+if (process.argv[2] === 'pair') {
+  const { code } = pairCodes.make(null, codeMinutes(process.argv[3]))
+  console.log(pairingLink({ origin: publicUrl, code }))
+  console.log(`${publicUrl}/?code=${code}`)
   process.exit(0)
 }
 // The secrets (Telegram, GitHub, connector keys) are sealed with this key; on a
@@ -99,7 +113,7 @@ function fromCore(msg: CoreRequest): void {
     return
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
-  if (msg.type === 'join-result' || msg.type === 'invite-info-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   if (personNotice(msg, { signins, grants, viewers, streams })) return
@@ -266,12 +280,17 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // signed in (the desktop app sends it to the system's). What makes it count is the state, made
   // by the core for that one request and good once.
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
+  // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here;
+  // a browser opens /?code=. No sign-in: the code is what counts, and a wrong one counts as a guess.
+  if (url.pathname === '/pair' && req.method === 'POST') return void pairDevice(req, res, ip)
+  const offeredCode = url.searchParams.get('code')
+  if (offeredCode !== null && req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) return void pairBrowser(req, res, ip, offeredCode)
   const offered = url.searchParams.get('token') ?? undefined
   // An invite's page and its form come before signing in: they're how someone new gets a key. A
   // guesser of codes waits at that door; the other door stays open (see Doors).
   if (doorOf(url.pathname, req.method, url.searchParams.has('invite')) === 'join' && !sameToken(offered)) {
     if (doors.blocked('join', ip)) return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
-    if (req.method === 'GET') return void invitePageFor(res, url.searchParams.get('invite') ?? '')
+    if (req.method === 'GET') return void invitePageFor(req, res, url.searchParams.get('invite') ?? '')
     return void joinPage(req, res, ip)
   }
   // The link with ?token= signs this browser in, then drops it from the address bar. Lax, not
@@ -298,9 +317,53 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 }
 
 // An invite that brings someone back comes with their name filled in (they can still change it).
-async function invitePageFor(res: ServerResponse, code: string): Promise<void> {
+// An app asks for JSON (accept: application/json): whose Tucano it is, and that name.
+async function invitePageFor(req: IncomingMessage, res: ServerResponse, code: string): Promise<void> {
   const info = code ? await ask<{ name?: string }>({ type: 'invite-info', code: code.slice(0, 200) }, 5_000) : undefined
+  if (wantsJson(req)) return json(res, 200, { owner: ownerName, ...(info?.name ? { name: info.name } : {}) })
   page200(res, invitePage({ owner: ownerName, code, ...(info?.name ? { name: info.name } : {}) }))
+}
+
+const wantsJson = (req: IncomingMessage): boolean => /application\/json/.test(String(req.headers['accept'] ?? ''))
+const json = (res: ServerResponse, status: number, value: unknown): void =>
+  void res.writeHead(status, { ...BASE_HEADERS, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(value))
+const cookieFor = (req: IncomingMessage, key: string): string => `tucano=${key}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''}`
+
+// A spent code's person gets a key of this device's own, from the core (people.deviceKey).
+async function keyFor(code: unknown, label: string): Promise<string | undefined> {
+  const spent = pairCodes.spend(code)
+  if (!spent) return undefined
+  const out = await ask<{ key?: string }>({ type: 'device-key', person: spent.person, label })
+  return out?.key
+}
+
+// POST /pair {code, name, platform}: the phone's (or the desktop app's) key, as {key}. A code that's
+// wrong, used or late answers 410 and counts as a guess at the invite's door.
+async function pairDevice(req: IncomingMessage, res: ServerResponse, ip: string): Promise<void> {
+  if (doors.blocked('join', ip)) return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
+  let asked: { code?: unknown; name?: unknown; platform?: unknown } = {}
+  try {
+    asked = JSON.parse(await body(req, 4 * 1024)) as typeof asked
+  } catch {
+    return void res.writeHead(400, BASE_HEADERS).end()
+  }
+  const key = await keyFor(asked?.code, deviceLabel(asked?.name, asked?.platform))
+  if (!key) {
+    doors.fail('join', ip)
+    return json(res, 410, { error: 'Esse código já foi usado ou passou do prazo. Gere outro. · That code was already used or has expired. Make a new one.' })
+  }
+  json(res, 200, { key })
+}
+
+// /?code=: this browser becomes a device of the code's person, signed in with its key.
+async function pairBrowser(req: IncomingMessage, res: ServerResponse, ip: string, code: string): Promise<void> {
+  if (doors.blocked('join', ip)) return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
+  const key = CODE_SHAPE.test(code) ? await keyFor(code, deviceLabel(browserName(String(req.headers['user-agent'] ?? '')), 'browser')) : undefined
+  if (key) return void res.writeHead(302, { ...BASE_HEADERS, 'set-cookie': cookieFor(req, key), location: '/', 'cache-control': 'no-store' }).end()
+  doors.fail('join', ip)
+  res
+    .writeHead(410, { ...BASE_HEADERS, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+    .end('Tucano: este link já foi usado ou passou do prazo. Gere outro em Configurações › Pessoas, ou com `node out/main/server.js pair`.\nTucano: this link was already used or has expired. Make a new one in Settings › People, or with `node out/main/server.js pair`.')
 }
 
 // Same-origin, not no-referrer: with no-referrer the browser sends the invite form's POST with
@@ -313,18 +376,26 @@ function page200(res: ServerResponse, html: string, status = 200): void {
 // A code that's wrong, used or expired counts as a guess.
 async function joinPage(req: IncomingMessage, res: ServerResponse, ip: string): Promise<void> {
   if (!sameOrigin(req)) return void res.writeHead(403, BASE_HEADERS).end()
+  // An app (the phone) sends JSON and reads JSON: the key itself, never a cookie.
+  const app = /application\/json/.test(String(req.headers['content-type'] ?? ''))
   let fields: { code: string; name: string }
   try {
     fields = joinFields(await body(req, 16 * 1024), req.headers['content-type'])
   } catch {
     return void res.writeHead(413, BASE_HEADERS).end()
   }
-  if (!fields.name.trim()) return page200(res, invitePage({ owner: ownerName, code: fields.code, error: 'Diga seu nome. · Tell us your name.' }), 400)
+  if (!fields.name.trim()) {
+    if (app) return json(res, 400, { error: 'Diga seu nome. · Tell us your name.' })
+    return page200(res, invitePage({ owner: ownerName, code: fields.code, error: 'Diga seu nome. · Tell us your name.' }), 400)
+  }
   const out = await ask<{ key?: string; error?: string }>({ type: 'join', code: fields.code, name: fields.name })
   if (!out?.key) {
     doors.fail('join', ip)
-    return page200(res, invitePage({ owner: ownerName, code: fields.code, name: fields.name, error: out?.error ?? 'O Tucano não respondeu. Tente de novo. · Tucano didn’t answer. Try again.' }), 400)
+    const error = out?.error ?? 'O Tucano não respondeu. Tente de novo. · Tucano didn’t answer. Try again.'
+    if (app) return json(res, 400, { error })
+    return page200(res, invitePage({ owner: ownerName, code: fields.code, name: fields.name, error }), 400)
   }
+  if (app) return json(res, 200, { key: out.key })
   const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
   res.writeHead(302, { ...BASE_HEADERS, 'set-cookie': `tucano=${out.key}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`, location: './', 'cache-control': 'no-store' }).end()
 }
@@ -341,7 +412,14 @@ function authed(req: IncomingMessage, res: ServerResponse, url: URL, who: Who): 
 
 function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who): void {
   // Signed in, but asked from another site's page: a sibling subdomain shares the cookie's site.
-  if ((url.pathname === '/events' || url.pathname === '/rpc' || url.pathname === '/upload' || url.pathname === '/viewing') && !sameOrigin(req)) return void res.writeHead(403, BASE_HEADERS).end()
+  if ((url.pathname === '/events' || url.pathname === '/rpc' || url.pathname === '/upload' || url.pathname === '/viewing' || url.pathname === '/pair/new') && !sameOrigin(req)) return void res.writeHead(403, BASE_HEADERS).end()
+
+  // Conectar um celular: a one-time code for whoever asks (their own person), as the link the phone
+  // opens and as the browser's.
+  if (url.pathname === '/pair/new' && req.method === 'POST') {
+    const { code, expiresAt } = pairCodes.make(who.owner ? null : who.person)
+    return json(res, 200, { code, link: pairingLink({ origin: publicUrl, code }), browser: `${publicUrl}/?code=${code}`, expiresAt })
+  }
 
   // A file sent from the person's computer (a vault's .zip): straight to disk, in parts, into a
   // folder of the server's own; the core takes it from there and deletes it when done.

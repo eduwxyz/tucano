@@ -1,5 +1,6 @@
 // The people of a Tucano with a team: the first access's name, Settings › Pessoas and
 // Settings › Atividade, and the "Só um admin…" note where an action is the admins'.
+import qrcode from 'qrcode-generator'
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import {
@@ -23,6 +24,7 @@ import {
   setRole,
   toast,
   useStore,
+  windowless,
   youPerson,
   type ActivityEntry,
   type Invite,
@@ -128,6 +130,7 @@ export function PeoplePane(): ReactNode {
   return (
     <>
       <MeCard />
+      {windowless() && <PhoneCard />}
 
       <Card
         title={L(`Pessoas ${team ? `de ${team}` : 'do Tucano'}`, `People ${team ? `of ${team}` : 'in this Tucano'}`)}
@@ -324,6 +327,101 @@ function InviteCard({ onClose, owner }: { onClose: () => void; owner: boolean })
           </button>
         )}
       </div>
+    </Card>
+  )
+}
+
+// ---------- Conectar um celular ----------
+
+type PairCode = { code: string; link: string; browser: string; expiresAt: number }
+
+// The link as a QR code, drawn here: nothing about it leaves the page.
+function Qr({ text }: { text: string }): ReactNode {
+  const q = qrcode(0, 'M')
+  q.addData(text)
+  q.make()
+  return <div className="device-qr" role="img" aria-label={L('QR code de conexão', 'Connection QR code')} dangerouslySetInnerHTML={{ __html: q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }) }} />
+}
+
+// On a server: the Tucano app on a phone signs in as me with a one-time code (src/server/pair-codes.ts).
+// Each phone gets a key of its own; removing someone ends all of theirs.
+function PhoneCard(): ReactNode {
+  const me = useStore(youPerson)
+  const [code, setCode] = useState<PairCode | null>(null)
+  const [now, setNow] = useState(Date.now())
+  const [error, setError] = useState('')
+  const devices = me?.devices ?? 0
+  const [before, setBefore] = useState(devices)
+  useEffect(() => {
+    if (!code) return
+    const tick = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(tick)
+  }, [code])
+  // A new device of mine arrived (the people event counts keys): the code was used.
+  useEffect(() => {
+    if (code && devices > before) setCode(null)
+  }, [devices])
+  const make = (): void => {
+    setError('')
+    setBefore(devices)
+    void fetch('./pair/new', { method: 'POST' })
+      .then((r) => (r.ok ? (r.json() as Promise<PairCode>) : Promise.reject(new Error(String(r.status)))))
+      .then((c) => (setCode(c), setNow(Date.now())))
+      .catch(() => setError(L('Não consegui gerar o código. Tente de novo.', "I couldn't make the code. Try again.")))
+  }
+  const left = code ? Math.max(0, Math.ceil((code.expiresAt - now) / 1000)) : 0
+  const copy = (text: string): void =>
+    void navigator.clipboard.writeText(text).then(
+      () => toast(L('Copiado', 'Copied')),
+      () => toast(L('Não consegui copiar.', "I couldn't copy."))
+    )
+  return (
+    <Card
+      title={L('Conectar um celular', 'Connect a phone')}
+      lead={L('Use o Tucano no iPhone com a sua conta daqui: suas DMs, suas aprovações e as perguntas que os agentes fazem pra você.', 'Use Tucano on an iPhone with your account here: your DMs, your approvals and the questions agents ask you.')}
+      action={
+        !code ? (
+          <button className="btn btn--primary btn--sm" onClick={make}>
+            <Icon name="plus" size={14} /> {L('Gerar código', 'Make a code')}
+          </button>
+        ) : undefined
+      }
+    >
+      {code &&
+        (left === 0 ? (
+          <div className="row">
+            <span className="small grow">{L('Esse código passou do prazo.', 'This code has expired.')}</span>
+            <button className="btn btn--sm btn--primary" onClick={make}>
+              {L('Gerar outro', 'Make another')}
+            </button>
+          </div>
+        ) : (
+          <div className="device-pair">
+            <Qr text={code.link} />
+            <div className="device-pair__text">
+              <ol className="small steps-list">
+                <li>{L('No iPhone, abra a Câmera ou o app do Tucano e aponte pro código.', 'On the iPhone, open the Camera or the Tucano app and point it at the code.')}</li>
+                <li>{L('Toque em Abrir no Tucano e confirme.', 'Tap Open in Tucano and confirm.')}</li>
+              </ol>
+              <p className="muted small">
+                {L('Vale uma vez, por mais', 'Good once, for')} {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}.
+              </p>
+              <div className="device-pair__actions">
+                <button className="btn btn--sm btn--ghost" onClick={() => copy(code.link)}>
+                  <Icon name="copy" size={13} /> {L('Copiar link do app', 'Copy the app link')}
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={() => copy(code.browser)}>
+                  <Icon name="globe" size={13} /> {L('Copiar link do navegador', 'Copy the browser link')}
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={() => setCode(null)}>
+                  {L('Cancelar', 'Cancel')}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      {!code && devices > 0 && <p className="muted small">{L(`Você está conectado em ${devices} aparelho${devices > 1 ? 's' : ''}.`, `You're signed in on ${devices} device${devices > 1 ? 's' : ''}.`)}</p>}
+      {error && <p className="note note--error">{error}</p>}
     </Card>
   )
 }

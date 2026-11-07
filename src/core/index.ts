@@ -348,6 +348,7 @@ type ToMain =
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; to?: string[] } // to: the people it's for (a server delivers it only to them); unset: everyone
   | { type: 'auth-result'; id: string; person?: Person; removed?: true } // removed: a key of someone removed since
   | { type: 'join-result'; id: string; data: { key?: string; person?: Person; error?: string } }
+  | { type: 'device-key-result'; id: string; data: { key?: string; person?: Person } }
   | { type: 'person-removed'; id: string }
   | { type: 'person-changed'; id: string } // a role changed: the server forgets what it remembered of them
   | { type: 'login_item'; open: boolean }
@@ -364,7 +365,7 @@ const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error)
 // Agents' browsers too (spec §24).
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; artifact?: unknown; port?: unknown } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown } | undefined
   if (r?.type === 'workspace-pause') {
     try {
       if (closing || typeof r.paused !== 'boolean') throw new Error('Workspace cannot change pause state right now')
@@ -458,6 +459,12 @@ process.parentPort.on('message', (e) => {
       if (out.routines) routines.resume(out.routines)
     }
     return toMain({ type: 'join-result', id: r.id, data: 'person' in out ? { person: out.person, key: out.key } : out })
+  }
+  // A server's POST /pair: a one-time code it checked, spent for this person (none: the owner), becomes a key of a device's own.
+  if (r?.type === 'device-key') {
+    const out = people.deviceKey(r.person, r.label)
+    if (out) emitPeople()
+    return toMain({ type: 'device-key-result', id: r.id, data: out ?? {} })
   }
   if (r?.type === 'power') return routines.setAwake(r.awake === true)
   // A server's /oauth/callback: the code the provider sent back, checked against the state only this core made.
@@ -1823,6 +1830,22 @@ const api: Handlers = {
     emit({ type: 'inbox' })
   },
   purgePerson: ({ id }, ctx) => purged([people.purge(ctx.person, id)]),
+  // Leaving on one's own: gone now, with what was theirs alone. Their own line closes a moment after
+  // the answer, so the app hears that it worked.
+  leave: (_, ctx) => {
+    const id = ctx.person.id
+    const { agents, routines: given, purged: gone } = people.leave(ctx.person)
+    purged([gone])
+    for (const a of agents) emit({ type: 'agent', agent: db.agent(a)! })
+    for (const r of given) emit({ type: 'routine', routine: db.routine(r)! })
+    setTimeout(() => {
+      hub.closeFor(id)
+      viewing.delete(id)
+      toMain({ type: 'person-removed', id })
+      emitPeople()
+      emit({ type: 'inbox' })
+    }, 200)
+  },
   activity: ({ personId, kind, before }) => db.activity({ personId, kind, before }),
   inbox: (_, ctx) => people.inbox(ctx.person),
   answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),

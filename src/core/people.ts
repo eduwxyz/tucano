@@ -571,6 +571,16 @@ export class People {
     })
   }
 
+  // A one-time pairing code spent on a server (src/server/pair-codes.ts): a new key for that person
+  // (unset: the owner), for one device. Someone removed, or no one, gets none.
+  deviceKey(personId: unknown, label: unknown): { person: Person; key: string } | undefined {
+    const person = personId === undefined || personId === null ? this.db.owner() : typeof personId === 'string' ? this.db.person(personId) : undefined
+    if (!person) return undefined
+    const key = newKey()
+    this.db.addPersonKey(hashSecret(key), person.id, typeof label === 'string' && label ? label.slice(0, 120) : 'aparelho')
+    return { person: this.db.person(person.id) ?? person, key }
+  }
+
   // Whether this name would read as someone else's: a person here, one removed who may still come
   // back (until purged), or, once there are people to call, an agent (by its name or its handle: @lia
   // would call both). A Tucano of one calls no person: its owner may be a Nina next to the agent Nina.
@@ -614,6 +624,24 @@ export class People {
       this.db.addActivity({ personId: by.id, kind: 'person.removed', target: id, detail: { name: p.name, agents: given.agents.length, routines: given.routines.length }, at: now })
       return { person: p, ...given }
     })
+  }
+
+  // Someone leaves on their own (the phone app's "Sair deste Tucano", the account deletion app
+  // stores ask for): access ends now, and what was theirs alone goes now too, not in 30 days (their
+  // DMs, memories, own routines). What they made for the team (agents, a channel's routines) goes
+  // to the owner, as when someone is removed; what they said in channels stays the channel's. The
+  // owner can't leave their own Tucano.
+  leave(by: Person, now = Date.now()): { agents: string[]; routines: string[]; purged: Purged } {
+    if (by.role === 'owner') throw new Error(L('O dono não sai do próprio Tucano. Pra apagar tudo, desligue o servidor e apague a pasta de dados dele.', "The owner can't leave their own Tucano. To delete everything, stop the server and delete its data folder."))
+    const out = this.db.tx(() => {
+      this.db.removePerson(by.id)
+      const given = this.db.handOver(by.id)
+      const purged = { person: by.id, ...this.db.purgePerson(by.id, now) }
+      this.db.addActivity({ personId: by.id, kind: 'person.left', target: by.id, detail: { name: by.name, agents: given.agents.length, routines: given.routines.length }, at: now })
+      return { ...given, purged }
+    })
+    this.db.scrub()
+    return out
   }
 
   // Member ⇄ admin. Only the owner touches admins (or makes one); no one, the owner.

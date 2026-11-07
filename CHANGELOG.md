@@ -4,6 +4,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Phones sign in to a Tucano on a server, as their person.** **Settings › People › Connect a phone** shows a QR code that's good once, for 10 minutes: the Tucano app on the iPhone reads it and gets a key of its own, signed in as whoever made the code, with their DMs, approvals and questions. On the server, `npm run server -- pair [minutes]` makes one for the owner (the same link opens a browser too, with `/?code=`). An invite link also works in the app: it asks the name and the person is in.
+- **Leaving a Tucano on your own.** Someone invited (not the owner) can leave from the iPhone app: their access ends at once on every device, and their direct messages, memories and own routines are deleted right away instead of after 30 days. What they said in channels stays the channel's, and the agents they made go to the owner.
+
 ## [0.2.15] - 2026-11-07
 
 > **Em português:**

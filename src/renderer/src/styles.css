@@ -8454,3 +8454,12 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-heritage h5 { margin: 8px 0 4px; font-size: 12px; opacity: .8; }
 .wk-heritage ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .wk-heritage li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* Conectar um celular (People.tsx PhoneCard) */
+.device-pair { display: flex; gap: 18px; align-items: flex-start; padding: 14px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 10px; }
+.device-pair__text { flex: 1; min-width: 0; display: grid; gap: 10px; align-content: start; }
+.device-pair__text .steps-list { margin: 0; }
+.device-pair__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.device-qr { flex: none; width: 168px; height: 168px; padding: 6px; border-radius: 10px; background: #fff; }
+.device-qr svg { display: block; width: 100%; height: 100%; }
+@media (max-width: 560px) { .device-pair { flex-direction: column; align-items: center; } }
