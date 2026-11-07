@@ -106,8 +106,18 @@ export class AppServer {
     this.ready.catch(() => this.kill())
   }
 
+  // Also asks the system: on Windows a killed process is gone a while before its exit comes, and a
+  // resumed thread sent to it then would fail instead of going to a new process.
   get alive(): boolean {
-    return this.code === undefined
+    if (this.code !== undefined) return false
+    const pid = this.child.pid
+    if (pid === undefined) return true // still starting (or about to say it couldn't)
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code === 'EPERM'
+    }
   }
 
   get exitCode(): number | null | undefined {
@@ -381,6 +391,7 @@ export class Unsupported extends Error {}
 
 export class CodexApp {
   private hosts = new Map<string, Promise<Host>>()
+  private servers = new Map<string, AppServer>() // each host's process, to tell a dead one before its exit comes
   private kept = new Map<string, Kept>() // by session id
   private spares = new Map<string, Spare>()
   private removing = new Set<Promise<void>>()
@@ -398,8 +409,9 @@ export class CodexApp {
   private host(bin: string, l: Launch): Promise<Host> {
     const key = JSON.stringify([bin, l.key])
     const had = this.hosts.get(key)
-    if (had) return had
+    if (had && this.servers.get(key)?.alive !== false) return had
     const server = new AppServer({ bin, args: l.args, cwd: l.cwd, env: l.env })
+    this.servers.set(key, server)
     const host: Host = { bin, key, home: l.home, server, loaded: new Set(), turns: 0 }
     const ready = server.ready.then(
       () => host,
@@ -416,6 +428,7 @@ export class CodexApp {
     later?.(bin)
     void server.exited().then(() => {
       if (this.hosts.get(key) === ready) this.hosts.delete(key)
+      if (this.servers.get(key) === server) this.servers.delete(key)
       if (host.timer) clearTimeout(host.timer)
       for (const k of this.kept.values()) if (k.host === host) this.unpark(k)
       for (const [sk, s] of this.spares) if (s.host === host) this.dropSpare(sk)
