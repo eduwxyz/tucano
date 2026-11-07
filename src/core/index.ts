@@ -61,6 +61,9 @@ import { Memories } from './memory'
 import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
+import { DatabricksCli, findCli } from './databricks'
+import { giveJobSkill, JobWatches } from './job-watches'
+import { jobWatchConfig } from '../shared/job-watch'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { initializeWorkspace } from './seed'
@@ -406,6 +409,7 @@ process.parentPort.on('message', (e) => {
     if (closing) return
     closing = true
     routines.stop()
+    jobWatches.stop()
     telegram?.stop()
     hooks.close()
     runner.stopAll()
@@ -466,7 +470,10 @@ process.parentPort.on('message', (e) => {
     if (out) emitPeople()
     return toMain({ type: 'device-key-result', id: r.id, data: out ?? {} })
   }
-  if (r?.type === 'power') return routines.setAwake(r.awake === true)
+  if (r?.type === 'power') {
+    jobWatches.setAwake(r.awake === true)
+    return routines.setAwake(r.awake === true)
+  }
   // A server's /oauth/callback: the code the provider sent back, checked against the state only this core made.
   if (r?.type === 'oauth-callback') {
     const { state = '', code = '', error = '' } = (r.data ?? {}) as { state?: string; code?: string; error?: string }
@@ -665,8 +672,26 @@ const routines = new Routines({
   notify: (title, body, conversationId, fullText, to) => notifyAll(title, body, conversationId, fullText, to ? { to } : {})
 })
 
+// Following Databricks runs: the app checks on its own, and the runner wakes the agent for what matters.
+const databricks = new DatabricksCli({ config: () => jobWatchConfig(settings().jobWatch) })
+const jobWatches = new JobWatches({
+  db,
+  emit,
+  cli: databricks,
+  config: () => jobWatchConfig(settings().jobWatch),
+  runner: { runJobEvent: (w, e) => runner.runJobEvent(w, e) },
+  blocked: () => !!settings().paused || inQuietHours(settings().quietHours),
+  notify: (title, body, conversationId, threadId) => notifyAll(title, body, conversationId, undefined, { threadId })
+})
+
 // A proposal waits for a decision: the knock at the door, and a click opens Skills.
 const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, body, undefined, undefined, { kind: 'approval', page: 'skills' }) })
+// The analysis skill that comes with following jobs, for each agent as it's turned on.
+function syncJobSkill(): void {
+  const before = settings().jobSkill
+  const jobSkill = giveJobSkill({ skills: () => db.skills(), save: (s) => skills.save(s) }, before, db.agents())
+  if (JSON.stringify(before) !== JSON.stringify(jobSkill)) db.setSettings({ jobSkill })
+}
 // The wiki's folder is the truth (Markdown, as Obsidian opens it); TUCANO_WIKI points it elsewhere.
 // The default folder keeps wiki.db; another folder gets an index of its own, so going back finds the old one.
 const wikiHome = join(dataDir, 'wiki')
@@ -709,7 +734,7 @@ setInterval(() => {
   if (reviewer.due()) void reviewer.review().then(() => emit({ type: 'wiki' }))
 }, 3600_000).unref()
 
-const runner = new Runner({
+const runner: Runner = new Runner({
   db,
   engines: engineImpls,
   settings: () => enginesReady.then(settings),
@@ -723,6 +748,8 @@ const runner = new Runner({
   browser,
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
+  jobs: jobWatches,
+  jobsFound: () => !!findCli(),
   skills,
   wiki,
   wikiCurator: curator,
@@ -830,6 +857,8 @@ void ready.then(async () => {
   for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
   await enginesReady
   routines.start()
+  jobWatches.start()
+  syncJobSkill()
   // A Tucano that had more people (or an invite out) before the heritage existed gets it now.
   if (db.people({ removed: true }).length > 1 || db.invites().length) inherit()
 }).catch((e: unknown) => {
@@ -1074,6 +1103,7 @@ const api: Handlers = {
     computers: db.agents().map((a) => computers.info(a)),
     browsers: browser.list(),
     routines: db.routines(),
+    jobWatches: db.jobWatches(),
     skills: db.skills(),
     platform: osOf(),
     packaged: process.env['TUCANO_PACKAGED'] === '1',
@@ -1128,6 +1158,7 @@ const api: Handlers = {
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
+    if (clean.jobWatch) syncJobSkill()
     // A Linux computer starts right away when turned on (the first time downloads the system) and stops when
     // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
     if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})
@@ -1782,6 +1813,23 @@ const api: Handlers = {
     return next
   },
   openWikiFolder: () => (serverMode ? undefined : toMain({ type: 'open_path', path: wiki.dir })),
+  // Stopping follows what the person can see; the run itself, and what the CLI finds, are an admin's.
+  stopJobWatch: ({ id }, ctx) => {
+    const w = db.jobWatch(id)
+    if (!w) return
+    reach(ctx, w.conversationId)
+    jobWatches.stopWatch(id)
+  },
+  cancelJobRun: ({ id }, ctx) => {
+    if (!isAdmin(ctx.person)) throw new Error(L('Só quem administra o Tucano cancela runs.', 'Only those who run the Tucano cancel runs.'))
+    const w = db.jobWatch(id)
+    if (w) reach(ctx, w.conversationId)
+    return jobWatches.cancelRun(id)
+  },
+  checkDatabricks: (_, ctx) => {
+    if (!isAdmin(ctx.person)) throw new Error(L('Só quem administra o Tucano vê isso.', 'Only those who run the Tucano see this.'))
+    return databricks.check()
+  },
 
   // The owner's name is also the settings' (what the agents have always called them).
   setMyName: ({ name, about }, ctx) => {

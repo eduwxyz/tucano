@@ -8463,3 +8463,90 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .device-qr { flex: none; width: 168px; height: 168px; padding: 6px; border-radius: 10px; background: #fff; }
 .device-qr svg { display: block; width: 100%; height: 100%; }
 @media (max-width: 560px) { .device-pair { flex-direction: column; align-items: center; } }
+/* A Databricks run being followed: the card under the agent's message. */
+.job-card {
+  --job-tone: var(--text-3);
+  --job-soft: var(--hover);
+  margin-top: 8px;
+  max-width: 640px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.job-card--live { --job-tone: var(--accent); --job-soft: var(--accent-soft); }
+.job-card--warn { --job-tone: var(--warn); --job-soft: var(--warn-soft); }
+.job-card--bad { --job-tone: var(--danger); --job-soft: var(--danger-soft); }
+.job-card--ok { --job-tone: var(--ok); --job-soft: var(--ok-soft); }
+.job-card__head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.job-card__name { min-width: 0; overflow-wrap: anywhere; }
+.job-card__run { white-space: nowrap; }
+.job-card__state { margin-left: auto; padding: 2px 8px; border-radius: 7px; background: var(--job-soft); color: var(--job-tone); font-size: 12px; font-weight: 550; white-space: nowrap; }
+.job-card__dot { position: relative; display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--job-tone); }
+.job-card__dot--live::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: inherit; pointer-events: none; --halo-scale: 2.4; animation: halo 2.2s var(--ease-out) infinite; }
+.job-card__fold { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.job-card__fold > span:first-child { margin-right: auto; }
+.job-card__chev { display: inline-flex; transform: rotate(90deg); }
+.job-card__metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.job-card__metrics > div { min-width: 0; padding: 8px 10px; border-radius: var(--radius); background: var(--hover); }
+.job-card__metrics small { display: block; color: var(--text-2); font-size: 11.5px; }
+.job-card__metrics b { font-weight: 550; font-size: 15px; font-variant-numeric: tabular-nums; }
+.job-card__metrics b.is-none { color: var(--text-3); font-weight: 450; font-size: 12.5px; }
+.job-card__metrics > .is-warn { background: var(--warn-soft); }
+.job-card__metrics > .is-warn b { color: var(--warn); }
+.job-card__stage { display: grid; gap: 6px; margin-bottom: 10px; }
+.job-card__bar { display: block; height: 6px; overflow: hidden; border-radius: 3px; background: var(--hover); }
+.job-card__bar > i { display: block; height: 100%; background: var(--job-tone); transform-origin: left; transition: transform var(--dur-base) var(--ease-out); }
+.job-card__tasks { margin: 0; padding: 0; list-style: none; }
+.job-card__task { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 4px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.job-card__task-mark { display: inline-flex; justify-content: center; color: var(--text-3); }
+.job-card__task-mark .job-card__dot { background: var(--accent); }
+.job-card__task-mark.is-ok { color: var(--ok); }
+.job-card__task-mark.is-bad { color: var(--danger); }
+.job-card__task-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-card__line { margin: 8px 0 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.job-card__line--warn { color: var(--warn); }
+.job-card__line--bad { color: var(--danger); }
+.job-card__foot { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.job-card__foot a { color: inherit; text-decoration: none; }
+.job-card__read { margin-left: auto; }
+.job-settings__path { overflow-wrap: anywhere; }
+.job-settings__more > summary { margin-bottom: 8px; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
+.job-settings__ok { color: var(--ok); }
+.job-settings__bad { color: var(--danger); overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .job-card__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .job-card__dot--live::after { animation: none; }
+  .job-card__bar > i { transition: none; }
+}
+
+/* What a query brought back: a preview of its rows under the reply. */
+.result-card {
+  margin-top: 8px;
+  max-width: 760px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.result-card__head { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.result-card__head strong { font-weight: 550; font-size: 13px; }
+.result-card__sql { display: block; width: 100%; padding: 7px 14px; border: 0; border-bottom: 1px solid var(--border); background: none; color: var(--text-2); font: 12px var(--mono, ui-monospace, monospace); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.result-card__sql.is-open { white-space: pre-wrap; overflow-wrap: anywhere; }
+.result-card__scroll { max-height: 420px; overflow: auto; }
+.result-card__table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.result-card__table th { position: sticky; top: 0; z-index: 1; padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--bg); color: var(--text-2); font-weight: 550; text-align: left; white-space: nowrap; }
+.result-card__table td { max-width: 320px; padding: 6px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-card__table tr:last-child td { border-bottom: 0; }
+.result-card__table .is-number { text-align: right; font-variant-numeric: tabular-nums; }
+.result-card__table .is-null { color: var(--text-3); font-style: italic; }
+.result-card__foot { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.result-card__count { margin-left: auto; }
+.result-card__filter { width: 180px; max-width: 100%; margin-left: auto; padding: 4px 8px; font-size: 12.5px; }
+.result-card__sort { display: inline-flex; align-items: center; gap: 4px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; justify-content: inherit; }
+.result-card__table th.is-number .result-card__sort { justify-content: flex-end; }
+.result-card__arrow { color: var(--text-3); font-size: 11px; }
+.result-card__sort.is-on, .result-card__sort.is-on .result-card__arrow { color: var(--text); }
+.result-card__empty { padding: 14px 12px; color: var(--text-3); text-align: center; }
