@@ -43,7 +43,7 @@ import { Wiki } from './wiki'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
-import { backup, backupIfDue, exportTeam, importTeam } from './team'
+import { backup, backupIfDue, exportTeam, importTeam, listBackups, KEEP_BACKUPS } from './team'
 import { applyForeignTeam, readForeignZip } from './agent-import'
 import { zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
@@ -431,6 +431,61 @@ const connectors = new ConnectorManager({
   openUrl: (url) => serverMode || toMain({ type: 'open', url }),
   oauthCallbackUrl: () => gateway.url('/oauth/callback')
 })
+
+// ---------- Google Drive backup ----------
+
+// The connector whose address is Google's Drive MCP server.
+function driveConnector(): { id: string; name: string } | undefined {
+  return connectors.list().find((c) => c.status === 'connected' && c.url?.includes('drivemcp.googleapis.com'))
+}
+
+// Upload a backup file to Google Drive via the Drive MCP connector.
+// Tools assumed (Google Drive MCP): files.create, files.list, files.delete.
+async function uploadBackupToDrive(filePath: string): Promise<void> {
+  const dc = driveConnector()
+  if (!dc) {
+    console.log('[backup] no Google Drive connector connected, skipping upload')
+    return
+  }
+  const { readFileSync } = await import('node:fs')
+  const buf = readFileSync(filePath)
+  const name = filePath.split('/').pop() ?? 'tucano.db'
+  try {
+    // Create the file on Drive
+    const created = await connectors.call(dc.id, 'files.create', {
+      name,
+      mimeType: 'application/octet-stream',
+      content: buf.toString('base64')
+    })
+    const fileId = (created as any)?.id ?? (created as any)?.fileId
+    if (!fileId) {
+      console.log('[backup] Drive files.create returned no file id', created)
+      return
+    }
+    console.log(`[backup] uploaded ${name} to Google Drive (file ${fileId})`)
+
+    // Keep only the 7 newest backups on Drive: list tucano backups, delete oldest beyond 7
+    const listed = await connectors.call(dc.id, 'files.list', {
+      query: "name contains 'tucano-' and name contains '.db'",
+      fields: 'files(id, name, createdTime)'
+    })
+    const files: Array<{ id: string; name: string; createdTime?: string }> = (listed as any)?.files ?? []
+    files.sort((a: { createdTime?: string }, b: { createdTime?: string }) =>
+      (b.createdTime ?? '').localeCompare(a.createdTime ?? '')
+    )
+    const toDelete = files.slice(KEEP_BACKUPS)
+    for (const f of toDelete) {
+      try {
+        await connectors.call(dc.id, 'files.delete', { fileId: f.id })
+        console.log(`[backup] deleted old Drive backup ${f.name} (${f.id})`)
+      } catch (e) {
+        console.error(`[backup] failed to delete Drive backup ${f.name}:`, e)
+      }
+    }
+  } catch (e) {
+    console.error('[backup] Drive upload failed:', e)
+  }
+}
 gateway.route('/oauth/callback', async (url) => {
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state') ?? ''
@@ -589,7 +644,10 @@ void ready.then(async () => {
   // A copy of the database once a day, the last 7 kept.
   const daily = (): void => {
     try {
-      backupIfDue(db, backups)
+      const file = backupIfDue(db, backups)
+        ? undefined
+        : backup(db, backups)
+      if (file) void uploadBackupToDrive(file)
     } catch (e) {
       console.error('[backup]', e)
     }
@@ -883,7 +941,18 @@ const api: Api = {
       zip.close()
     }
   },
-  backupNow: () => backup(db, backups),
+  backupNow: () => {
+    const file = backup(db, backups)
+    void uploadBackupToDrive(file)
+    return file
+  },
+  backupToDrive: async () => {
+    const files = listBackups(backups)
+    const latest = files[0]
+    if (!latest) return L('Não há backup local ainda.', 'No local backup yet.')
+    await uploadBackupToDrive(latest)
+    return L('Backup enviado pro Google Drive.', 'Backup uploaded to Google Drive.')
+  },
   openBackups: () => {
     mkdirSync(backups, { recursive: true })
     toMain({ type: 'open_path', path: backups })

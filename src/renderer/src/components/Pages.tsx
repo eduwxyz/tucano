@@ -33,6 +33,7 @@ import {
   importAgents,
   importTeam,
   backupNow,
+  backupToDrive,
   openBackups,
   type TelegramInfo,
   useStore,
@@ -1648,6 +1649,9 @@ function TeamCard(): ReactNode {
       <div className="row" style={{ marginTop: 8 }}>
         <button className="btn btn--sm" onClick={() => void backupNow().then((f) => setNote(L(`Backup feito: ${f.split('/').pop()}`, `Backup done: ${f.split('/').pop()}`)))}>
           {L('Fazer backup agora', 'Back up now')}
+        </button>
+        <button className="btn btn--sm" onClick={() => void backupToDrive().then(setNote, failed)}>
+          {L('Enviar pro Google Drive', 'Send to Google Drive')}
         </button>
         <button className="btn btn--sm btn--ghost" onClick={openBackups}>
           {L('Abrir pasta', 'Open folder')}

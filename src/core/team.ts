@@ -12,7 +12,7 @@ import type { Db } from './db'
 
 const FENCE = 'tucano-team'
 const OLD_FENCE = 'agent-desk-team' // teams exported before the rename
-const KEEP_BACKUPS = 7
+export const KEEP_BACKUPS = 7
 const DAY = 86_400_000
 
 interface TeamFile {
@@ -211,6 +211,14 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
 // ---------- backups ----------
 
 // A copy of the database (secrets stay encrypted for this Mac's keychain).
+export function listBackups(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter((f) => /^(tucano|agent-desk)-.*\.db$/.test(f))
+    .map((f) => join(dir, f))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs) // newest first
+}
+
 export function backup(db: Db, dir: string): string {
   mkdirSync(dir, { recursive: true })
   const file = join(dir, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.db`)
@@ -225,7 +233,8 @@ export function backup(db: Db, dir: string): string {
 }
 
 // Once a day, at startup or while the app stays open.
-export function backupIfDue(db: Db, dir: string): void {
+// Returns the path of the backup just made, or undefined if none was needed.
+export function backupIfDue(db: Db, dir: string): string | undefined {
   const last = existsSync(dir)
     ? readdirSync(dir)
         .filter((f) => f.endsWith('.db'))
@@ -233,6 +242,7 @@ export function backupIfDue(db: Db, dir: string): void {
         .sort()
         .at(-1)
     : undefined
-  if (!last || Date.now() - last > DAY) backup(db, dir)
+  if (!last || Date.now() - last > DAY) return backup(db, dir)
+  return undefined
 }
 
