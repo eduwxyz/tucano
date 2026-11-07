@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Changed
+
+- **Long skill recipes are kept whole.** A recipe over 20,000 characters was refused when written or proposed, cut when linked from Claude Code or Codex, and left out of an imported team. Now 10,000 characters is a recommendation: past it, Tucano says by how much and keeps the whole recipe, up to a million characters.
+
 ### Fixed
 
 - **The wiki no longer misses a long reply.** A reply that started before another and ended well after it never reached the wiki, because the wiki's curator had already read past where it started. It now goes by when each reply ended, the same order the conversation shows.
