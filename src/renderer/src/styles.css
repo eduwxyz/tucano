@@ -8620,6 +8620,200 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   flex: none;
 }
 
+/* ---------- an agent's profile card ---------- */
+/* A face on a message opens the card: a real button the size of the face. */
+.msg__face {
+  display: inline-flex;
+  border-radius: 30%;
+}
+.msg__face:hover .avatar {
+  filter: brightness(1.04);
+}
+.msg__face:active {
+  transform: scale(0.96);
+}
+/* Opened from the top of a DM (or the faces of a channel), the button shows it's open. */
+.topbar__name[aria-expanded='true'],
+.msg__author[aria-expanded='true'] {
+  background: var(--hover);
+}
+.msg__author.link {
+  border-radius: 4px;
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+/* Next to the click, like Slack: who the agent is, what it's doing, where it works. */
+.agent-card {
+  position: fixed;
+  z-index: 65;
+  width: 320px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border);
+  color: var(--text);
+  --pop-y: 2px;
+  animation: pop var(--dur-fast) var(--ease-out) both;
+}
+.agent-card:focus {
+  outline: none;
+}
+.agent-card:focus-visible {
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+/* A band of the agent's own color, the face sitting on its edge. */
+.agent-card__band {
+  height: 52px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--agent, var(--accent)) 34%, var(--panel)), color-mix(in srgb, var(--agent, var(--accent)) 14%, var(--panel)));
+}
+.agent-card__head {
+  padding: 0 16px;
+  margin-top: -32px;
+}
+.agent-card__face {
+  flex: none;
+  display: inline-flex;
+  border-radius: 30%;
+  box-shadow: 0 0 0 3px var(--panel);
+  background: var(--panel);
+}
+.agent-card__who {
+  min-width: 0;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.agent-card__name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.agent-card__handle {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.agent-card__name + .agent-card__handle {
+  margin-top: 1px;
+}
+.agent-card__role {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.agent-card__now {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: calc(100% - 24px);
+  margin: 12px 12px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--hover);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-2);
+  text-align: left;
+}
+.agent-card__now b {
+  font-weight: 600;
+  color: var(--text);
+}
+button.agent-card__now:hover {
+  background: var(--active);
+}
+.agent-card__doing {
+  display: block;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 250px;
+}
+.agent-card__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.is-idle .agent-card__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ok);
+}
+.is-working .agent-card__dot {
+  background: var(--accent);
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
+}
+.is-waiting .agent-card__dot {
+  background: var(--warn);
+}
+.is-limit .agent-card__dot {
+  background: var(--danger);
+}
+.is-archived .agent-card__dot {
+  background: var(--text-3);
+}
+.agent-card__facts {
+  display: grid;
+  gap: 6px;
+  margin: 12px 16px 0;
+  font-size: 13px;
+}
+.agent-card__facts > div {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+.agent-card__facts dt {
+  color: var(--text-3);
+}
+.agent-card__facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.agent-card__channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.agent-card__channel {
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.agent-card__channel:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.agent-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 16px;
+}
+.agent-card__actions .btn {
+  flex: 1;
+  justify-content: center;
+}
+.agent-card__settings {
+  flex: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-card,
+  .is-working .agent-card__dot {
+    animation: none;
+  }
+}
+
 /* Over a server's page (Servers.tsx): the window's top 40 px stay the app's. */
 .server-bar { position: fixed; inset: 0 0 auto 0; height: 40px; z-index: 1000; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); -webkit-app-region: drag; font-size: 13px; }
 .server-bar button { -webkit-app-region: no-drag; }
