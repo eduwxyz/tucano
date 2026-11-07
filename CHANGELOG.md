@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Your iPhone, on your computer's Tucano.** **Settings › Phone › Your iPhone › Connect my iPhone** shows a QR code: the Tucano app for iPhone reads it and gets in as you, with your conversations, approvals and the agents' questions, over the home Wi-Fi while the computer is on. No team or server needed. The computer answers only devices on its own network, over HTTPS with a certificate of its own whose fingerprint rides in the QR code, so another device on the Wi-Fi can't pose as it; each phone gets a key of its own from a one-time code. It stays on across restarts until **Turn off**. On a Mac the phone finds the computer by its Bonjour name; on Windows and Linux, by its address on the home network. Away from home the phone can't reach the computer: that's what a server or Tucano Pro is for.
+
 ## [0.2.17] - 2026-11-07
 
 > **Em português:**

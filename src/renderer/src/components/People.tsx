@@ -336,7 +336,7 @@ function InviteCard({ onClose, owner }: { onClose: () => void; owner: boolean })
 type PairCode = { code: string; link: string; browser: string; expiresAt: number }
 
 // The link as a QR code, drawn here: nothing about it leaves the page.
-function Qr({ text }: { text: string }): ReactNode {
+export function Qr({ text }: { text: string }): ReactNode {
   const q = qrcode(0, 'M')
   q.addData(text)
   q.make()
