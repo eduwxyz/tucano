@@ -2,6 +2,7 @@
 // a request it can't read gets a 400 instead of taking it down, guessing the token is
 // slowed to nothing, and the page answers only its own origin, never inside another site's frame.
 import type { IncomingMessage } from 'node:http'
+import type { Person } from '../shared/types'
 
 // Guessing: after this many wrong tokens from one address in the window, that address waits.
 export const MAX_FAILS = 20
@@ -26,6 +27,73 @@ export class Limiter {
     // An address that only ever fails stays bounded: the oldest go first.
     if (this.fails.size > 10_000) this.fails.delete(this.fails.keys().next().value!)
   }
+}
+
+// Two doors, each with its own count: an invite's page and form (codes tried by whoever has the
+// link, or a guesser), and everything signed in (the owner's token, a person's key). Wrong invite
+// codes from an address never lock out the owner or a person with a key at the same address.
+export type Door = 'join' | 'signin'
+
+export const doorOf = (pathname: string, method: string | undefined, invite: boolean): Door =>
+  (pathname === '/join' && method === 'POST') || (invite && method === 'GET' && (pathname === '/' || pathname === '/index.html')) ? 'join' : 'signin'
+
+export class Doors {
+  private limiters: Record<Door, Limiter>
+
+  constructor(now: () => number = Date.now) {
+    this.limiters = { join: new Limiter(now), signin: new Limiter(now) }
+  }
+
+  blocked(door: Door, ip: string): boolean {
+    return this.limiters[door].blocked(ip)
+  }
+
+  fail(door: Door, ip: string): void {
+    this.limiters[door].fail(ip)
+  }
+}
+
+// Signing in: a link with the owner's token (`offered`), or the cookie a browser carries (the
+// owner's token, or a person's key). A valid credential always opens, even from an address that
+// waits after many wrong guesses (a shared office address, someone's old key retrying), as long
+// as it can't be guessed: a person's key (256 random bits) or the token the server made itself.
+// A token the operator chose (TUCANO_TOKEN) may be weak: from a waiting address it waits too.
+// Every wrong credential answers the same: unauthorized, or blocked once the address waits.
+// A removed person's key (the core knows it was one) is "signed out": never a guess.
+export type SignIn = { status: 'link' | 'owner' | 'removed' | 'blocked' | 'unauthorized' } | { status: 'person'; person: Person }
+export const PERSON_KEY = /^p_[\w-]{43}$/
+
+export async function signIn(o: {
+  cookie?: string
+  offered?: string
+  ip: string
+  doors: Doors
+  isOwnerToken: (t: string | undefined) => boolean // constant-time
+  strongOwnerToken: boolean
+  lookup: (key: string) => Promise<{ person?: Person; removed?: boolean } | undefined>
+}): Promise<SignIn> {
+  const waits = (): boolean => o.doors.blocked('signin', o.ip)
+  let guessed = false
+  const guess = (): SignIn => {
+    if (waits()) return { status: 'blocked' }
+    if (!guessed) o.doors.fail('signin', o.ip)
+    guessed = true
+    return { status: 'unauthorized' }
+  }
+  if (o.offered !== undefined) {
+    if (o.isOwnerToken(o.offered)) return o.strongOwnerToken || !waits() ? { status: 'link' } : { status: 'blocked' }
+    const r = guess()
+    if (r.status === 'blocked') return r
+  }
+  const cookie = o.cookie
+  if (cookie === undefined) return waits() ? { status: 'blocked' } : { status: 'unauthorized' }
+  if (o.isOwnerToken(cookie)) return o.strongOwnerToken || !waits() ? { status: 'owner' } : { status: 'blocked' }
+  if (PERSON_KEY.test(cookie)) {
+    const found = await o.lookup(cookie)
+    if (found?.person) return { status: 'person', person: found.person }
+    if (found?.removed) return { status: 'removed' }
+  }
+  return guess()
 }
 
 // Who is asking. Behind a reverse proxy (TUCANO_TRUST_PROXY=1) every request comes from the

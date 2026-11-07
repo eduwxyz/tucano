@@ -45,7 +45,17 @@ describe('Sessions', () => {
     const first = started(s)
     expect(first).toMatchObject({ resume: false, send: ['m1', 'm2'] })
     const next = s.begin('k', { config: cfg, shown: [...msgs('m1', 'm2'), { id: 'r1', block: '[Lia]\nresposta' }, ...msgs('m3', 'm4')] })
-    expect(next).toEqual({ id: first.id, token: first.token, resume: true, send: ['m3', 'm4'] })
+    expect(next).toEqual({ id: first.id, token: first.token, resume: true, send: ['m3', 'm4'], live: false })
+  })
+
+  it('goes on when only the live context changed, and sends it again only then', () => {
+    const s = store()
+    const p = s.begin('k', { config: cfg, shown: msgs('m1'), live: 'memórias: A' })!
+    s.end('k', p, { ok: true, config: cfg, shown: msgs('m1'), live: 'memórias: A', reply: 'r1', context: 1_000 })
+    expect(s.begin('k', { config: cfg, shown: [...msgs('m1'), { id: 'r1', block: 'x' }, ...msgs('m2')], live: 'memórias: A' })).toMatchObject({ id: p.id, resume: true, live: false })
+    s.end('k', p, { ok: true, config: cfg, shown: msgs('m1', 'm2'), live: 'memórias: A', reply: 'r2', context: 1_000 })
+    expect(s.begin('k', { config: cfg, shown: [...msgs('m1'), { id: 'r1', block: 'x' }, ...msgs('m2'), { id: 'r2', block: 'x' }, ...msgs('m3')], live: 'memórias: A, B' })).toMatchObject({ id: p.id, resume: true, send: ['m3'], live: true })
+    expect(forgot).toEqual([])
   })
 
   it('goes on after older messages leave the window', () => {
@@ -209,7 +219,7 @@ describe('a reply with a kept session', () => {
     const r = runner()
     await r.send('d1', 'oi')
     await r.idle()
-    const mine = db.messages().find((m) => m.author.kind === 'me')!
+    const mine = db.messages().find((m) => m.author.kind === 'person')!
     db.saveMessage({ ...mine, text: 'olá' })
     await r.send('d1', 'de novo')
     await r.idle()

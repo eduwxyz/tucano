@@ -3,7 +3,7 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as KeyEvent, type ReactNode } from 'react'
-import { agentById, archiveAgent, deleteAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
+import { agentById, amAdmin, archiveAgent, canEditChannel, deleteAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
@@ -102,6 +102,8 @@ function DialogBody(): ReactNode {
 function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () => void }): ReactNode {
   const dmName = useStore((s) => (conv?.kind === 'dm' && conv.members[0] ? agentById(s, conv.members[0])?.name : undefined))
   const channel = conv?.kind !== 'dm'
+  // Its name and topic are its maker's and the admins'; anyone else only sees them.
+  const editable = useStore((s) => !conv || canEditChannel(s, conv))
   const [name, setName] = useState(conv?.name ?? '')
   const [topic, setTopicText] = useState(conv?.topic ?? '')
   const [threads, setThreadsOn] = useState(!!conv?.threads)
@@ -114,9 +116,9 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
     const done = !conv
       ? createChannel(name, threads)
       : Promise.all([
-          channel && name.trim() !== conv.name ? renameChannel(conv.id, name) : undefined,
-          channel && topic.trim() !== (conv.topic ?? '') ? setTopic(conv.id, topic) : undefined,
-          threads !== !!conv.threads ? setThreads(conv.id, threads) : undefined
+          channel && editable && name.trim() !== conv.name ? renameChannel(conv.id, name) : undefined,
+          channel && editable && topic.trim() !== (conv.topic ?? '') ? setTopic(conv.id, topic) : undefined,
+          editable && threads !== !!conv.threads ? setThreads(conv.id, threads) : undefined
         ])
     done.then(onClose, (e: unknown) => setError(message(e)))
   }
@@ -133,7 +135,7 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
           <span className="field__label">{L('Nome', 'Name')}</span>
           <span className={`row row--center modal__input ${invalid ? 'is-invalid' : ''} ${shaking ? 'is-shaking' : ''}`} onAnimationEnd={() => setShaking(false)}>
             <span className="muted">#</span>
-            <input autoFocus className="grow" value={name} onChange={(e) => (setName(e.target.value), setInvalid(false))} onKeyDown={enter} />
+            <input autoFocus className="grow" value={name} readOnly={!editable} onChange={(e) => (setName(e.target.value), setInvalid(false))} onKeyDown={enter} />
           </span>
           <span className="hint">
             {conv
@@ -146,12 +148,16 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
         <label className="field">
           <span className="field__label">{L('Tema', 'Topic')}</span>
           <span className="row row--center modal__input">
-            <input className="grow" value={topic} onChange={(e) => setTopicText(e.target.value)} onKeyDown={enter} />
+            <input className="grow" value={topic} readOnly={!editable} onChange={(e) => setTopicText(e.target.value)} onKeyDown={enter} />
           </span>
-          <span className="hint">{L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')}</span>
+          <span className="hint">
+            {editable
+              ? L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')
+              : L('O nome, o tema e os agentes, quem muda é quem criou o canal ou um admin.', 'The name, topic and agents are changed by whoever created the channel or an admin.')}
+          </span>
         </label>
       )}
-      <div className="field">
+      {editable && <div className="field">
         <span className="field__label" id="answers-where">
           {L('Onde os agentes respondem', 'Where the agents answer')}
         </span>
@@ -164,7 +170,7 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
           ))}
         </div>
         <span className="hint">{L('Dá pra abrir uma thread numa mensagem quando quiser, nos dois jeitos.', 'You can open a thread on a message whenever you want, either way.')}</span>
-      </div>
+      </div>}
       {error && <p className="field__error">{error}</p>}
       <footer className="modal__foot">
         <span className="grow" />
@@ -300,6 +306,7 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
 // The agents taken out of the sidebar, to see or bring back.
 function Archived({ onClose }: { onClose: () => void }): ReactNode {
   const agents = useStore((s) => s.agents.filter((a) => a.archived && a.kind !== 'removed'))
+  const admin = useStore(amAdmin)
   return (
     <Modal title={L('Agentes arquivados', 'Archived agents')} onClose={onClose}>
       <p className="muted small modal__lead">{L('Não respondem, não rodam rotinas e não são escolhidos pra responder nos canais. O histórico e os recibos continuam. Reativado, o agente volta aos canais em que estava; as rotinas dele você liga de novo em Rotinas.', 'They don’t reply, don’t run routines and aren’t picked to answer in channels. History and receipts stay. Once reactivated, an agent returns to the channels it was in; you turn its routines back on in Routines.')}</p>
@@ -326,9 +333,11 @@ function Archived({ onClose }: { onClose: () => void }): ReactNode {
               >
                 {L('Ver', 'See')}
               </button>
-              <button className="btn btn--sm btn--ghost" onClick={() => void confirmDeleteAgent(a)}>
-                {L('Excluir', 'Delete')}
-              </button>
+              {admin && (
+                <button className="btn btn--sm btn--ghost" onClick={() => void confirmDeleteAgent(a)}>
+                  {L('Excluir', 'Delete')}
+                </button>
+              )}
               <button className="btn btn--sm" onClick={() => void archiveAgent(a.id, false)}>
                 {L('Reativar', 'Reactivate')}
               </button>
@@ -350,14 +359,19 @@ const fold = (s: string): string =>
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
 
-const PAGES = (): { label: string; view: View; icon: IconName }[] => [
+// The report and the usage are the admins' screens, as in the sidebar.
+const PAGES = (admin = true): { label: string; view: View; icon: IconName }[] => [
   { label: L('Aprovações', 'Approvals'), view: { kind: 'approvals' }, icon: 'shield' },
   { label: L('Memória', 'Memory'), view: { kind: 'memory' }, icon: 'book' },
   { label: 'Wiki', view: { kind: 'wiki' }, icon: 'layers' },
   { label: L('Rotinas', 'Routines'), view: { kind: 'routines' }, icon: 'clock' },
   { label: 'Skills', view: { kind: 'skills' }, icon: 'layers' },
-  { label: L('Boletim', 'Report'), view: { kind: 'report' }, icon: 'report' },
-  { label: L('Uso e limites', 'Usage and limits'), view: { kind: 'usage' }, icon: 'chart' },
+  ...(admin
+    ? ([
+        { label: L('Boletim', 'Report'), view: { kind: 'report' }, icon: 'report' },
+        { label: L('Uso e limites', 'Usage and limits'), view: { kind: 'usage' }, icon: 'chart' }
+      ] as const)
+    : []),
   { label: L('Conectores', 'Connectors'), view: { kind: 'connectors' }, icon: 'plug' },
   { label: L('Configurações', 'Settings'), view: { kind: 'settings' }, icon: 'gear' }
 ]
@@ -368,10 +382,15 @@ function hits(s: State): Hit[] {
     ...s.conversations.filter((c) => c.kind === 'channel').map((c): Hit => ({ key: c.id, label: `#${c.name}`, detail: c.topic ?? L('canal', 'channel'), icon: 'hash', go: () => navigate({ kind: 'conversation', id: c.id }) })),
     ...agents.map((a): Hit => ({ key: `dm-${a.id}`, label: a.name, detail: `${L('conversa', 'conversation')}${a.role ? ` · ${a.role}` : ''}`, agent: a.id, go: () => void openDm(a.id) })),
     ...agents.map((a): Hit => ({ key: `agent-${a.id}`, label: L(`${a.name}: configurar`, `${a.name}: settings`), detail: `@${a.handle}`, icon: 'edit', go: () => navigate({ kind: 'agent', id: a.id }) })),
-    ...PAGES().map((p): Hit => ({ key: p.label, label: p.label, detail: L('tela', 'page'), icon: p.icon, go: () => navigate(p.view) })),
+    ...PAGES(amAdmin(s)).map((p): Hit => ({ key: p.label, label: p.label, detail: L('tela', 'page'), icon: p.icon, go: () => navigate(p.view) })),
     { key: 'new-channel', label: L('Novo canal', 'New channel'), detail: shortcut(getState().platform, 'N'), icon: 'plus', go: () => openDialog({ kind: 'new-channel' }) },
-    { key: 'tuca', label: L('Tuca: montar um agente', 'Tuca: build an agent'), detail: L('conversa', 'conversation'), icon: 'plus', go: openTuca },
-    { key: 'new-agent', label: L('Novo agente (formulário)', 'New agent (form)'), detail: L('ação', 'action'), icon: 'plus', go: () => navigate({ kind: 'new-agent' }) }
+    // Making agents is the admins'.
+    ...(amAdmin(s)
+      ? [
+          { key: 'tuca', label: L('Tuca: montar um agente', 'Tuca: build an agent'), detail: L('conversa', 'conversation'), icon: 'plus' as const, go: openTuca },
+          { key: 'new-agent', label: L('Novo agente (formulário)', 'New agent (form)'), detail: L('ação', 'action'), icon: 'plus' as const, go: () => navigate({ kind: 'new-agent' }) }
+        ]
+      : [])
   ]
 }
 

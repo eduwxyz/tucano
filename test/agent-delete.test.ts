@@ -11,6 +11,7 @@ import type { Engine } from '../src/core/engines/types'
 import { Memories } from '../src/core/memory'
 import { Runner } from '../src/core/runs'
 import { Skills } from '../src/core/skills'
+import { NEEDS } from '../src/core/policy-people'
 
 const agent = (id: string, handle: string, more: Partial<Agent> = {}): Agent => ({
   id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: 'Revisa', color: 'sky', instructions: 'Seja breve', modelId: 'sonnet', accountId: 'conta-1', effort: 'low', limit: 1_000_000, used: 0, grants: { c1: 'read_write' }, memory: 'auto', computer: true, computerKind: 'mac', browser: true, apps: [{ name: 'Notas', level: 'read' }], autoApprove: ['c1:merge'], archived: false, ...more
@@ -162,6 +163,11 @@ describe('deleting an agent', () => {
     }
     await expect(deleteAgent('a1', deps)).resolves.toBeUndefined()
     expect(db.agent('a1')!.kind).toBe('removed')
+  })
+
+  it('only an admin may delete an agent, as only an admin may archive one', () => {
+    expect(NEEDS.deleteAgent).toBe('admin')
+    expect(NEEDS.deleteAgent).toBe(NEEDS.archiveAgent)
   })
 
   it("won't delete the Tuca, and changes nothing trying", () => {

@@ -3,7 +3,7 @@
 // core and the window, this does: it stands in for Electron's parentPort, keeps
 // the secrets with a key of its own, and serves the page plus a bridge to the
 // core (events down an event stream, requests up by POST). Every request needs
-// the server's token.
+// the server's token (the owner) or a person's key (someone invited, src/server/people.ts).
 //
 //   node out/main/server.js        (TUCANO_DATA, TUCANO_HOST, TUCANO_PORT, TUCANO_TOKEN, TUCANO_URL, TUCANO_TRUST_PROXY)
 //   node out/main/server.js link   prints the link that signs a browser in
@@ -16,12 +16,14 @@ import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Forwarder, isPrivate } from './forward'
-import { ARTIFACT_CSP, BASE_HEADERS, clientIp, decodedPath, Limiter, PAGE_HEADERS, sameOrigin } from './guard'
+import { ARTIFACT_CSP, BASE_HEADERS, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, sameOrigin, signIn } from './guard'
 import { Preview } from './preview'
 import { vault } from './vault'
-import { verifyLocalUrl } from '../core/local-paths'
+import { verifyLocal } from '../core/local-paths'
 import { pairingLink } from '../shared/servers'
-import { INSECURE_CONTEXT_SHIM } from './web-shim'
+import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from './web-shim'
+import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, PAGE_CSP, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
+import type { Person } from '../shared/types'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
 const host = process.env['TUCANO_HOST'] || '127.0.0.1'
@@ -68,7 +70,7 @@ class Port extends EventEmitter {
   }
 }
 
-type CoreRequest = { type: string; id?: string; op?: string; data?: string; title?: string; body?: string; conversationId?: string; page?: string }
+type CoreRequest = { type: string; id?: string; op?: string; data?: string; title?: string; body?: string; conversationId?: string; page?: string; to?: string[]; person?: Person; removed?: boolean }
 const parent = new Port((msg) => fromCore(msg as CoreRequest))
 const toCore = (data: unknown, ports: Port[] = []): boolean => parent.emit('message', { data, ports })
 
@@ -76,6 +78,18 @@ const toCore = (data: unknown, ports: Port[] = []): boolean => parent.emit('mess
 // open, no login item. Its notifications go to the pages open on it (a browser, the desktop app's
 // server window), which show them while the person is looking elsewhere; Telegram carries them too.
 const oauthWaits = new Map<string, (r: { ok: boolean; why?: string }) => void>()
+// Questions to the core that wait for its answer (a key's person, a join): by id, a few seconds at most.
+const waits = new Map<string, (data: unknown) => void>()
+function ask<T>(msg: Record<string, unknown>, timeoutMs = 10_000): Promise<T | undefined> {
+  const id = randomUUID()
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => waits.delete(id) && resolve(undefined), timeoutMs)
+    waits.set(id, (data) => (clearTimeout(timer), waits.delete(id), resolve(data as T)))
+    toCore({ ...msg, id })
+  })
+}
+const signins = new Signins((key) => ask<Person | { removed: true } | undefined>({ type: 'auth', key }))
+const grants = new Grants((person, what) => ask<boolean>({ type: 'access', person, ...what }))
 
 function fromCore(msg: CoreRequest): void {
   const id = msg.id
@@ -84,9 +98,15 @@ function fromCore(msg: CoreRequest): void {
     oauthWaits.delete(id ?? '')
     return
   }
+  if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
+  if (msg.type === 'join-result' || msg.type === 'invite-info-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
+  // Removed, or their role changed: what the server remembered of them goes (see personNotice).
+  if (personNotice(msg, { signins, grants, viewers, streams })) return
+  // Only to the pages of the people it's for.
   if (msg.type === 'notify') {
     const note = { notify: { title: String(msg.title ?? ''), body: String(msg.body ?? ''), conversationId: msg.conversationId, page: msg.page } }
-    for (const c of clients.values()) c.postMessage(note)
+    streams.deliver(note, Array.isArray(msg.to) ? msg.to : undefined, ownerId)
     return
   }
   if (msg.type === 'secret') {
@@ -103,8 +123,16 @@ function fromCore(msg: CoreRequest): void {
   }
 }
 
-// The page's connections: each one a port of the core, events down its stream.
-const clients = new Map<string, Port>()
+// The page's connections: each one a port of the core, events down its stream, and someone's.
+type Client = Stream & { port: Port }
+const streams = new Streams<Client>()
+// What each page has open: the core marks it read for that page's person, as on a desktop.
+const viewers = new Viewers()
+// '' is the owner's token, which the core takes for the owner (as a desktop's window).
+const tellViewing = (person: string, conversationId: string | null): boolean => toCore({ type: 'viewing', ...(person ? { person } : {}), conversationId })
+// The owner's id and name, from the server's own connection (an owner-token page is the owner's).
+let ownerId: string | undefined
+let ownerName = ''
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -165,10 +193,18 @@ const preview = publicHost
 
 // The server's own connection to the core, to follow the services.
 const watcher = new Port((msg) => {
-  const m = msg as { id?: number; result?: { computers?: Computer[] }; event?: { type: string; computer?: Computer } }
-  if (m.id === 1 && m.result?.computers) sawComputers(m.result.computers)
-  else if (m.event?.type === 'computer' && m.event.computer) sawComputers([m.event.computer])
+  const m = msg as { id?: number; result?: { computers?: Computer[]; you?: string; people?: Person[] }; event?: { type: string; computer?: Computer; people?: Person[] } }
+  if (m.id === 1 && m.result) {
+    if (m.result.computers) sawComputers(m.result.computers)
+    ownerId = m.result.you
+    sawPeople(m.result.people ?? [])
+  } else if (m.event?.type === 'computer' && m.event.computer) sawComputers([m.event.computer])
+  else if (m.event?.type === 'people') sawPeople(m.event.people ?? [])
 })
+function sawPeople(list: Person[]): void {
+  const owner = list.find((p) => p.role === 'owner')
+  if (owner) [ownerId, ownerName] = [owner.id, owner.name]
+}
 
 // The desktop page, told it's in a browser: the bridge script first, and its
 // policy letting it frame the agents' pages from this server.
@@ -178,13 +214,13 @@ function index(): string {
     .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1" />\n    <script src="./tucano-web.js"></script>\n    <title>')
 }
 
-function body(req: IncomingMessage): Promise<string> {
+function body(req: IncomingMessage, max = 64 * 1024 * 1024): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
     req.on('data', (c: Buffer) => {
       size += c.length
-      if (size > 64 * 1024 * 1024) return reject(new Error('too large'))
+      if (size > max) return reject(new Error('too large'))
       chunks.push(c)
     })
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
@@ -208,7 +244,7 @@ function oauthCallback(url: URL, res: ServerResponse): void {
 
 const trustProxy = process.env['TUCANO_TRUST_PROXY'] === '1'
 const MAX_UPLOAD = 1024 * 1024 * 1024 // a vault with its pictures, zipped
-const guesses = new Limiter()
+const doors = new Doors()
 
 // A request it can't read (a scanner's, a broken client's) gets an answer, never the whole server.
 const server = createServer((req, res) => {
@@ -226,29 +262,86 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (previewPort) return preview!.handle(req, res, previewPort)
   const url = new URL(req.url ?? '/', 'http://x')
   const ip = clientIp(req, trustProxy)
-  if (guesses.blocked(ip)) return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
   // Back from a connector's authorization page. No token here: it may open in a browser that never
   // signed in (the desktop app sends it to the system's). What makes it count is the state, made
   // by the core for that one request and good once.
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
+  const offered = url.searchParams.get('token') ?? undefined
+  // An invite's page and its form come before signing in: they're how someone new gets a key. A
+  // guesser of codes waits at that door; the other door stays open (see Doors).
+  if (doorOf(url.pathname, req.method, url.searchParams.has('invite')) === 'join' && !sameToken(offered)) {
+    if (doors.blocked('join', ip)) return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
+    if (req.method === 'GET') return void invitePageFor(res, url.searchParams.get('invite') ?? '')
+    return void joinPage(req, res, ip)
+  }
   // The link with ?token= signs this browser in, then drops it from the address bar. Lax, not
   // Strict: the link is often clicked from elsewhere (a chat), and a Strict cookie wouldn't ride
-  // the redirect that follows. Lax still keeps it off other sites' POSTs to /rpc.
-  const offered = url.searchParams.get('token') ?? undefined
-  if (offered !== undefined && !sameToken(offered)) guesses.fail(ip)
-  if (sameToken(offered)) {
-    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
-    return void res.writeHead(302, { ...BASE_HEADERS, 'set-cookie': `tucano=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`, location: '/' }).end()
+  // the redirect that follows. Lax still keeps it off other sites' POSTs to /rpc. A cookie is the
+  // owner's token or a person's key (the core says whose; the answer is kept a few seconds).
+  void signIn({ cookie: cookieToken(req), offered, ip, doors, isOwnerToken: sameToken, strongOwnerToken: !process.env['TUCANO_TOKEN'], lookup: (key) => signins.lookup(key) })
+    .then((r) => {
+      if (r.status === 'link') {
+        const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
+        return void res.writeHead(302, { ...BASE_HEADERS, 'set-cookie': `tucano=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`, location: '/' }).end()
+      }
+      if (r.status === 'owner') return authed(req, res, url, { owner: true, role: 'owner' })
+      if (r.status === 'person') return authed(req, res, url, { person: r.person.id, role: r.person.role })
+      if (r.status === 'blocked') return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
+      // Someone removed: their page says so (the bridge reads the 401), and nothing more.
+      if (r.status === 'removed') return page200(res, NO_ACCESS_PAGE, 401)
+      res.writeHead(401, { ...BASE_HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(UNAUTHORIZED_TEXT)
+    })
+    .catch((e: unknown) => {
+      console.error('[server]', req.method, e instanceof Error ? e.message : e)
+      if (!res.headersSent) res.writeHead(503, BASE_HEADERS).end()
+    })
+}
+
+// An invite that brings someone back comes with their name filled in (they can still change it).
+async function invitePageFor(res: ServerResponse, code: string): Promise<void> {
+  const info = code ? await ask<{ name?: string }>({ type: 'invite-info', code: code.slice(0, 200) }, 5_000) : undefined
+  page200(res, invitePage({ owner: ownerName, code, ...(info?.name ? { name: info.name } : {}) }))
+}
+
+// Same-origin, not no-referrer: with no-referrer the browser sends the invite form's POST with
+// `Origin: null`, which /join (rightly) refuses as another site's.
+function page200(res: ServerResponse, html: string, status = 200): void {
+  res.writeHead(status, { ...BASE_HEADERS, 'referrer-policy': 'same-origin', 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': PAGE_CSP, 'x-frame-options': 'DENY' }).end(html)
+}
+
+// The invite's form: a code and a name become a person with a key, kept in this browser's cookie.
+// A code that's wrong, used or expired counts as a guess.
+async function joinPage(req: IncomingMessage, res: ServerResponse, ip: string): Promise<void> {
+  if (!sameOrigin(req)) return void res.writeHead(403, BASE_HEADERS).end()
+  let fields: { code: string; name: string }
+  try {
+    fields = joinFields(await body(req, 16 * 1024), req.headers['content-type'])
+  } catch {
+    return void res.writeHead(413, BASE_HEADERS).end()
   }
-  const cookie = cookieToken(req)
-  if (!sameToken(cookie)) {
-    if (cookie !== undefined && offered === undefined) guesses.fail(ip)
-    return void res
-      .writeHead(401, { ...BASE_HEADERS, 'content-type': 'text/plain; charset=utf-8' })
-      .end('Tucano: open the link from `node out/main/server.js link`.\nTucano: abra o link que o `node out/main/server.js link` mostra.')
+  if (!fields.name.trim()) return page200(res, invitePage({ owner: ownerName, code: fields.code, error: 'Diga seu nome. · Tell us your name.' }), 400)
+  const out = await ask<{ key?: string; error?: string }>({ type: 'join', code: fields.code, name: fields.name })
+  if (!out?.key) {
+    doors.fail('join', ip)
+    return page200(res, invitePage({ owner: ownerName, code: fields.code, name: fields.name, error: out?.error ?? 'O Tucano não respondeu. Tente de novo. · Tucano didn’t answer. Try again.' }), 400)
   }
+  const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
+  res.writeHead(302, { ...BASE_HEADERS, 'set-cookie': `tucano=${out.key}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`, location: './', 'cache-control': 'no-store' }).end()
+}
+
+// Signed in: the owner, or a person. A failure here answers this request, never the whole server.
+function authed(req: IncomingMessage, res: ServerResponse, url: URL, who: Who): void {
+  try {
+    signedIn(req, res, url, who)
+  } catch (e) {
+    console.error('[server]', req.method, e instanceof Error ? e.message : e)
+    if (!res.headersSent) res.writeHead(400, BASE_HEADERS).end()
+  }
+}
+
+function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who): void {
   // Signed in, but asked from another site's page: a sibling subdomain shares the cookie's site.
-  if ((url.pathname === '/events' || url.pathname === '/rpc' || url.pathname === '/upload') && !sameOrigin(req)) return void res.writeHead(403, BASE_HEADERS).end()
+  if ((url.pathname === '/events' || url.pathname === '/rpc' || url.pathname === '/upload' || url.pathname === '/viewing') && !sameOrigin(req)) return void res.writeHead(403, BASE_HEADERS).end()
 
   // A file sent from the person's computer (a vault's .zip): straight to disk, in parts, into a
   // folder of the server's own; the core takes it from there and deletes it when done.
@@ -257,7 +350,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     // For a message: ~/Enviados, under its own name (a number added when taken), where the agents
     // on this computer find it. Anything else (a vault): the server's own folder, for the core.
     const forMessage = url.searchParams.get('for') === 'message'
-    const dir = forMessage ? join(homedir(), 'Enviados') : join(dataDir, 'uploads')
+    // Anything but a message's file (a vault for the wiki) is the admins'. Someone invited gets a
+    // folder of their own under Enviados: no name of theirs lands beside the owner's files.
+    if (!forMessage && who.role === 'member') return void res.writeHead(403, BASE_HEADERS).end()
+    const dir = forMessage ? (who.person && who.role !== 'owner' ? join(homedir(), 'Enviados', who.person) : join(homedir(), 'Enviados')) : join(dataDir, 'uploads')
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     let path = forMessage ? join(dir, name) : join(dir, `${randomUUID()}-${name}`)
     for (let n = 2; forMessage && existsSync(path); n++) path = join(dir, name.replace(/(\.[^.]*)?$/, ` (${n})$1`))
@@ -281,24 +377,57 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
 
   if (url.pathname === '/events') {
-    const c = new Port((msg) => res.write(`data: ${JSON.stringify(msg)}\n\n`))
+    const port = new Port((msg) => res.write(`data: ${JSON.stringify(msg)}\n\n`))
     const id = randomUUID()
-    clients.set(id, c)
+    // Ended by the server (the person was removed) or by the core (it closed the port): the page loses the line.
+    const end = (): void => {
+      streams.delete(id)
+      if (!res.writableEnded) res.end()
+    }
+    streams.add(id, { who, port, send: (msg) => port.postMessage(msg), end })
+    port.once('close', end)
     res.writeHead(200, { ...BASE_HEADERS, 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'x-accel-buffering': 'no' })
     res.write(`event: hello\ndata: ${id}\n\n`)
     // A beat the page can hear (a comment line it couldn't): it tells a dead line from a quiet one.
     const beat = setInterval(() => res.write('event: ping\ndata: \n\n'), 25_000)
-    toCore(null, [c])
+    // The core learns whose port this is: nothing named is the owner, as on a desktop.
+    toCore(who.owner ? null : { person: who.person }, [port])
     req.on('close', () => {
       clearInterval(beat)
-      clients.delete(id)
-      c.close()
+      streams.delete(id)
+      port.close()
+      // A closed page isn't looking at anything: its person's other page, if any, still is.
+      const left = viewers.drop(id)
+      if (left) tellViewing(left.person, left.conversation)
     })
     return
   }
 
+  // The conversation a page has open (window.tucano.viewing): only for its own stream.
+  if (url.pathname === '/viewing' && req.method === 'POST') {
+    const stream = url.searchParams.get('c') ?? ''
+    const found = streams.get(stream)
+    if (!found || found.who.person !== who.person || !!found.who.owner !== !!who.owner) return void res.writeHead(410, BASE_HEADERS).end()
+    body(req, 4 * 1024).then(
+      (text) => {
+        let id: unknown
+        try {
+          id = (JSON.parse(text) as { conversationId?: unknown }).conversationId
+        } catch {
+          return void res.writeHead(400, BASE_HEADERS).end()
+        }
+        tellViewing(who.person ?? '', viewers.set(stream, who.person ?? '', typeof id === 'string' ? id : null))
+        res.writeHead(204, BASE_HEADERS).end()
+      },
+      () => res.writeHead(413, BASE_HEADERS).end()
+    )
+    return
+  }
+
   if (url.pathname === '/rpc' && req.method === 'POST') {
-    const c = clients.get(url.searchParams.get('c') ?? '')
+    // Only its own stream: another person's stream id opens nothing.
+    const found = streams.get(url.searchParams.get('c') ?? '')
+    const c = found && found.who.person === who.person && !!found.who.owner === !!who.owner ? found.port : undefined
     if (!c) return void res.writeHead(410, BASE_HEADERS).end()
     body(req).then(
       (text) => {
@@ -326,12 +455,17 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (pv && preview) {
     const p = Number(pv[1])
     if (p === port || ![...servicePorts.values()].some((l) => l.includes(p))) return void res.writeHead(404, BASE_HEADERS).end()
-    return void res.writeHead(302, { ...BASE_HEADERS, location: preview.grantUrl(p, `${pv[2] ?? '/'}${url.search}`), 'cache-control': 'no-store' }).end()
+    // A page started by a reply in someone's DM is theirs alone.
+    void grants.may(who.person ?? ownerId, { port: p }).then((ok) =>
+      ok ? res.writeHead(302, { ...BASE_HEADERS, location: preview.grantUrl(p, `${pv[2] ?? '/'}${url.search}`), 'cache-control': 'no-store' }).end() : res.writeHead(404, BASE_HEADERS).end()
+    )
+    return
   }
 
   // Choosing a folder on the server (the wiki's, one lent to an agent): its subfolders, for the
-  // bridge's picker. Names only; it starts at the home folder.
+  // bridge's picker. Names only; it starts at the home folder. The server's disk is for admins.
   if (url.pathname === '/folders') {
+    if (who.role === 'member') return void res.writeHead(403, BASE_HEADERS).end()
     const asked = url.searchParams.get('path') || homedir()
     const at = isAbsolute(asked) ? resolve(asked) : resolve(homedir(), asked)
     let folders: string[]
@@ -349,7 +483,9 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 
   // A file an agent cited, checked and signed by the core: shown (an image, a video) or saved.
   if (url.pathname.startsWith('/local/')) {
-    const path = verifyLocalUrl(localKey, new URL(url.pathname.replace(/^\/local/, ''), 'tucano://local'))
+    // Signed for one person: anyone else (a link passed on) gets nothing.
+    const signed = verifyLocal(localKey, new URL(url.pathname.replace(/^\/local/, ''), 'tucano://local'))
+    const path = signed && (signed.person ? signed.person === (who.person ?? ownerId) : who.owner) ? signed.path : null
     let size = -1
     try {
       size = path && statSync(path).isFile() ? statSync(path).size : -1
@@ -373,7 +509,9 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     const name = decodedPath(art[2]!)
     const path = name === undefined ? '' : normalize(join(dir, name))
     if (!path.startsWith(dir + sep)) return void res.writeHead(404, BASE_HEADERS).end()
-    return file(res, path, { 'content-security-policy': ARTIFACT_CSP })
+    // Only who sees the conversation it was shown in (someone else's DM: not found).
+    void grants.may(who.person ?? ownerId, { artifact: art[1]! }).then((ok) => (ok ? file(res, path, { 'content-security-policy': ARTIFACT_CSP }) : res.writeHead(404, BASE_HEADERS).end()))
+    return
   }
 
   if (url.pathname === '/tucano-web.js') return void res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES['.js']! }).end(WEB)
@@ -388,10 +526,19 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 // the requests go up by POST; what only the desktop does is left out quietly.
 const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
   window.__TUCANO_WEB__ = true
+  ${ACCESS_SHIM}
   let client = null
+  // The conversation open on this page, told to the server once the line is up (and on each change),
+  // so what arrives there is read already, as on the desktop.
+  let looking = null
+  const tellViewing = () => {
+    if (!client) return
+    fetch('./viewing?c=' + encodeURIComponent(client), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId: looking }) }).catch(() => {})
+  }
   // Starting fresh is how this page reconnects. What's typed in the message field is kept first
   // (Conversation.tsx listens), so a reload on its own never costs a draft.
   const restart = () => {
+    if (access.gone) return
     window.dispatchEvent(new Event('tucano:reloading'))
     location.reload()
   }
@@ -414,7 +561,10 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       opened = true
       client = e.data
       window.postMessage('core:port', '*', [ch.port1])
+      if (looking) tellViewing()
     })
+    // Closed for good (a reconnect the server refused): out of access, or only a network that's down.
+    es.onerror = () => es.readyState === 2 && access.check().then((gone) => gone && es.close())
     es.onmessage = (e) => {
       heard = Date.now()
       const m = JSON.parse(e.data)
@@ -423,6 +573,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     }
     ch.port2.onmessage = (m) => {
       fetch('./rpc?c=' + encodeURIComponent(client), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(m.data) }).then((r) => {
+        if (access.answer(r.status)) return es.close()
         if (r.status === 410) restart()
       })
     }
@@ -514,7 +665,10 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       ),
     onNavigate: (cb) => (toConversation = cb),
     onNavigatePage: (cb) => (toPage = cb),
-    viewing: () => {},
+    viewing: (id) => {
+      looking = typeof id === 'string' ? id : null
+      tellViewing()
+    },
     updateState: async () => ({ version: '', status: 'off' }),
     onUpdate: () => {},
     checkUpdates: () => {},

@@ -20,9 +20,10 @@ export function ServersCard(): ReactNode {
     let alive = true
     const load = (): void => void api.list().then((l) => alive && setList(l))
     load()
-    api.onChanged(load)
+    const off = api.onChanged(load)
     return () => {
       alive = false
+      off()
     }
   }, [api])
 
@@ -111,9 +112,10 @@ export function useServers(): Server[] {
     let alive = true
     const load = (): void => void api.list().then((l) => alive && setList(l))
     load()
-    api.onChanged(load)
+    const off = api.onChanged(load)
     return () => {
       alive = false
+      off()
     }
   }, [api])
   return list
