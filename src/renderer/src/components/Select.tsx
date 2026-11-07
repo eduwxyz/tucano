@@ -19,7 +19,7 @@
 //
 // With filter box:
 //   <Select options={bigList} searchable />
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { L } from '../../../shared/lang'
 import { Icon } from './ui'
@@ -326,7 +326,9 @@ export function Select(props: SelectProps): ReactNode {
     }
   }
 
-  const idBase = id ?? 'select'
+  // Each select its own ids, so two on a page don't share options, lists or menus.
+  const ownId = useId()
+  const idBase = id ?? `select${ownId.replace(/:/g, '')}`
   const optionId = (i: number): string => `${idBase}-option-${i}`
 
   const renderRow = (it: Item, i: number): ReactNode => (
@@ -367,7 +369,8 @@ export function Select(props: SelectProps): ReactNode {
       if (selectedValues.length <= 3) return selectedValues.map((v) => <span key={v} className="select__chip">{labels.get(v) ?? v}</span>)
       return <span className="select__chip">{L(`${selectedValues.length} selecionados`, `${selectedValues.length} selected`)}</span>
     }
-    return selectedValue ? <span className="select__value">{labels.get(selectedValue) ?? selectedValue}</span> : <span className="select__placeholder">{placeholder}</span>
+    // An option whose value is '' ("the usual one") shows as itself, like any other.
+    return selectedValue != null && labels.has(selectedValue) ? <span className="select__value">{labels.get(selectedValue)}</span> : selectedValue ? <span className="select__value">{selectedValue}</span> : <span className="select__placeholder">{placeholder}</span>
   }
 
   const menuId = `${idBase}-menu`

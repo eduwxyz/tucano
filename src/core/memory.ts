@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
-import { ENGINES, usable, modelInfo, splitForPrompt, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type RunStatus, type Settings } from '../shared/types'
+import { ENGINES, personScope, scopePerson, usable, modelInfo, splitForPrompt, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type Person, type RunStatus, type Settings } from '../shared/types'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import type { ToolDef } from './gateway'
@@ -20,6 +20,8 @@ export const THREAD_QUIET_MS = 10 * 60_000
 export const THREAD_MIN = 3
 const THREAD_HORIZON_MS = 24 * 60 * 60_000 // threads quiet for longer were swept already (or predate this)
 const SWEEP_BATCH = 3
+const MAX_CHUNK = 200 // messages one consolidation reads at most: a long backlog goes in parts
+const REBUILD_BATCH = 40 // a summary made again from scratch, this many messages a time
 const MAX_MEMORY_CHARS = 500
 
 export const BUSCAR_MEMORIAS: ToolDef = {
@@ -106,11 +108,12 @@ const JSON_SHAPE = '{"summary": "...", "memories": [{"op": "add", "text": "...",
 type Op = { op: 'add'; text: string; evidence: number[] } | { op: 'update'; id: string; text: string; evidence: number[] } | { op: 'confirm'; id: string }
 
 // `thread`: the stretch is a thread's, since its summary (not what leaves a conversation's window).
-export function consolidationPrompt(opts: { summary?: string; messages: Message[]; me: string; agents: Agent[]; memories: Memory[]; forgotten: Memory[]; thread?: boolean }): string {
-  const { summary, messages, me, agents, memories, forgotten, thread } = opts
+// `others`: more people who wrote in the stretch, each with their own memories (`me` is the first).
+export function consolidationPrompt(opts: { summary?: string; messages: Message[]; me: string; agents: Agent[]; memories: Memory[]; forgotten: Memory[]; thread?: boolean; people?: Pick<Person, 'id' | 'name'>[]; others?: { name: string; memories: Memory[]; forgotten: Memory[] }[] }): string {
+  const { summary, messages, me, agents, memories, forgotten, thread, people, others = [] } = opts
   const author = (m: Message): string =>
-    m.author.kind === 'me'
-      ? me
+    m.author.kind === 'person'
+      ? (people?.find((p) => m.author.kind === 'person' && p.id === m.author.id)?.name ?? me)
       : m.author.kind === 'routine'
         ? L(`rotina agendada por ${me}`, `routine scheduled by ${me}`)
         : `${agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent')} · ${L('agente', 'agent')}`
@@ -129,6 +132,15 @@ export function consolidationPrompt(opts: { summary?: string; messages: Message[
     L(`Esquecidas a pedido de ${me} (não recriar):`, `Forgotten at ${me}'s request (don't recreate):`),
     ...(forgotten.length ? forgotten.map((m) => `- ${m.text}`) : [none]),
     '',
+    // Each person's memories apart: a memory is about whoever said what backs it.
+    ...others.flatMap((o) => [
+      L(`Memórias sobre ${o.name}:`, `Memories about ${o.name}:`),
+      ...(o.memories.length ? o.memories.map((m) => `- [${m.id}] ${m.text}`) : [none]),
+      '',
+      L(`Esquecidas a pedido de ${o.name} (não recriar):`, `Forgotten at ${o.name}'s request (don't recreate):`),
+      ...(o.forgotten.length ? o.forgotten.map((m) => `- ${m.text}`) : [none]),
+      ''
+    ]),
     L('Responda só com o JSON.', 'Reply with the JSON only.')
   ].join('\n')
 }
@@ -228,22 +240,27 @@ export interface ThreadHit {
 // buscar_threads: the threads of these conversations that best match the words, by what was
 // said in them and their summaries (a thread just opened has none yet). `except`: the thread
 // the search is made from.
-export function searchThreads(db: Pick<Db, 'message' | 'recentMessages'>, conversationIds: string[], query: string, except?: string, limit = 5): ThreadHit[] {
+// `keep`: what the one asking may read (a message left out is as if it weren't there).
+export function searchThreads(db: Pick<Db, 'message' | 'recentMessages'>, conversationIds: string[], query: string, except?: string, limit = 5, keep: (m: Message) => boolean = () => true): ThreadHit[] {
   const groups = new Map<string, Message[]>()
   for (const c of conversationIds)
     for (const m of db.recentMessages(c, 400)) {
       const key = m.threadId ?? m.id
-      if (key === except || m.author.kind === 'system' || !m.text.trim()) continue
+      if (key === except || m.author.kind === 'system' || !m.text.trim() || !keep(m)) continue
       groups.set(key, [...(groups.get(key) ?? []), m])
     }
   const docs = [...groups].map(([id, ms]) => {
-    const root = ms.find((m) => m.id === id) ?? db.message(id)
+    const found = db.message(id)
+    const root = ms.find((m) => m.id === id) ?? (found && keep(found) ? found : undefined)
     const replies = ms.filter((m) => m.id !== id)
     const text = [root?.text ?? '', root?.threadSummary?.text ?? '', ...replies.map((m) => m.text)].join('\n')
     return { hit: { id, conversationId: ms[0]!.conversationId, root, last: replies.at(-1), at: ms.at(-1)!.at }, text }
   })
   return rank(docs, (d) => d.text, query, limit, (a, b) => b.hit.at - a.hit.at).map((d) => d.hit)
 }
+
+// Lowercase, no accents, words of letters and digits separated by single spaces.
+const fold = (t: string): string => t.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
 // For matching a new memory against forgotten and existing ones.
 export const normalize = (t: string): string =>
@@ -270,20 +287,72 @@ export class Memories {
 
   // ---------- reading ----------
 
-  // What goes in an agent's prompt: each scope up to the budget, newest first.
+  // Whose memories a stretch may hold: the people who wrote in it (a DM's person in a DM). With
+  // nobody, the DM's person or the owner: the prompt reads as it always did.
+  private learners(conv: Pick<Conversation, 'kind' | 'owner'>, stretch: Message[]): string[] {
+    const ids = [...new Set(stretch.flatMap((m) => (m.author.kind === 'person' ? [m.author.id] : [])))]
+    const dm = conv.kind === 'dm' ? (conv.owner ?? this.deps.db.ownerId()) : undefined
+    const kept = dm ? ids.filter((id) => id === dm) : ids
+    return kept.length ? kept : [dm ?? this.deps.db.ownerId()]
+  }
+
+  // What the extraction prompt gets: the first person's memories as `me`'s, the rest apart.
+  // Only what may be read where the stretch is: what someone said in their DM never goes into a channel's summary.
+  private aboutPeople(learners: string[], settings: Settings, conv?: Pick<Conversation, 'kind' | 'owner'>): Pick<Parameters<typeof consolidationPrompt>[0], 'me' | 'memories' | 'forgotten' | 'others'> {
+    const { db } = this.deps
+    const names = this.names(settings)
+    const here = this.readableIn(conv)
+    const each = learners.map((id) => ({
+      name: names.find((p) => p.id === id)?.name ?? settings.workspaceName,
+      memories: db.memories({ scope: personScope(id), state: 'active' }).filter(here),
+      forgotten: db.memories({ scope: personScope(id), state: 'forgotten' }).filter(here).slice(-50)
+    }))
+    const [first, ...others] = each
+    return { me: first?.name ?? settings.workspaceName, memories: first?.memories ?? [], forgotten: first?.forgotten ?? [], ...(others.length ? { others } : {}) }
+  }
+
+  // What goes in an agent's prompt: each scope up to the budget, newest first. `people`: whose
+  // memories about them it gets (the DM's person, or who is talking; the owner when left out).
   // `searchable` counts the rest, which buscar_memorias reaches.
-  forPrompt(agent: Agent): { aboutMe: Memory[]; own: Memory[]; searchable: number } {
-    const split = (scope: MemoryScope) => splitForPrompt(this.deps.db.memories({ scope, state: 'active' }))
-    const me = split('me')
-    const own = split(agent.id)
+  // `conv`: where the reply goes. An agent's note made in a DM is that DM's person's: it comes in
+  // only where they alone read the reply (their DM, or anywhere when they're the Tucano's one person).
+  // A memory about someone learned in their DM comes in the same way: only where they alone read it.
+  forPrompt(agent: Agent, people: string[] = [this.deps.db.ownerId()], conv?: Pick<Conversation, 'kind' | 'owner'>): { aboutMe: Memory[]; own: Memory[]; searchable: number } {
+    const me = splitForPrompt(this.about(people, conv))
+    const own = splitForPrompt(this.notes(agent, conv))
     return { aboutMe: me.prompt, own: own.prompt, searchable: me.searchable.length + own.searchable.length }
   }
 
   // `buscar_memorias`: only among the memories left out of this agent's prompt.
-  search(agent: Agent, query: string, limit = 5): Memory[] {
-    const scopes: MemoryScope[] = ['me', agent.id]
-    const out = scopes.flatMap((scope) => splitForPrompt(this.deps.db.memories({ scope, state: 'active' })).searchable)
+  search(agent: Agent, query: string, limit = 5, people: string[] = [this.deps.db.ownerId()], conv?: Pick<Conversation, 'kind' | 'owner'>): Memory[] {
+    const out = [splitForPrompt(this.about(people, conv)), splitForPrompt(this.notes(agent, conv))].flatMap((x) => x.searchable)
     return rankMemories(out, query, limit)
+  }
+
+  // The agent's own notes a reply in `conv` may read: the team's, and the private ones of whoever
+  // alone reads it.
+  private notes(agent: Agent, conv?: Pick<Conversation, 'kind' | 'owner'>): Memory[] {
+    return this.deps.db.memories({ scope: agent.id, state: 'active' }).filter(this.readableIn(conv))
+  }
+
+  // These people's memories about them that a reply in `conv` may read.
+  private about(people: string[], conv?: Pick<Conversation, 'kind' | 'owner'>): Memory[] {
+    return people.flatMap((p) => this.deps.db.memories({ scope: personScope(p), state: 'active' })).filter(this.readableIn(conv))
+  }
+
+  // A private memory (a DM's) is read only where its person alone reads: their DM, or anywhere
+  // when they're the Tucano's one person (and no team yet: an invite out makes it one). Everything else, wherever.
+  private readableIn(conv?: Pick<Conversation, 'kind' | 'owner'>): (m: Memory) => boolean {
+    const { db } = this.deps
+    if (conv?.kind !== 'dm' && db.teamMode()) return (m) => !m.privateTo
+    const readers = conv?.kind === 'dm' ? [conv.owner ?? db.ownerId()] : db.people().map((p) => p.id)
+    const only = readers.length === 1 ? readers[0] : readers.length === 0 ? db.ownerId() : undefined
+    return (m) => !m.privateTo || m.privateTo === only
+  }
+
+  // Who alone may read a memory learned in `conv`: a DM's person; anywhere else, no one in particular.
+  private privateIn(conv?: Pick<Conversation, 'kind' | 'owner'>): string | undefined {
+    return conv?.kind === 'dm' ? (conv.owner ?? this.deps.db.ownerId()) : undefined
   }
 
   // What a turn sees of the conversation (contextWindow): in a thread, the thread and its own
@@ -301,9 +370,12 @@ export class Memories {
   consolidate(conversationId: string, force = false): Promise<void> {
     const current = this.running.get(conversationId)
     if (current) return current
-    const p = this.doConsolidate(conversationId, force)
+    const p: Promise<void> = this.doConsolidate(conversationId, force)
+      .then(() => {})
       .catch((e: unknown) => console.error('[memory]', e))
-      .finally(() => this.running.delete(conversationId))
+      .finally(() => {
+        if (this.running.get(conversationId) === p) this.running.delete(conversationId)
+      })
     this.running.set(conversationId, p)
     return p
   }
@@ -312,30 +384,62 @@ export class Memories {
     while (this.running.size) await Promise.all(this.running.values())
   }
 
-  private async doConsolidate(conversationId: string, force: boolean): Promise<void> {
+  // The summaries of a channel and of its threads, made again from what was said there alone
+  // (when the Tucano gets a second person: what one person's DMs taught the old ones isn't the
+  // team's). The old ones go first; nothing is learned again on the way.
+  // The old ones are gone when this returns; the new ones are made after it, in the background.
+  // `from`: the moment the new summaries start at (the heritage: what the channel held before stays
+  // the owner's, so no summary the team reads is made of it).
+  rebuild(conversationId: string, from = 0): Promise<void> {
+    const { db, emit } = this.deps
+    const conv = db.conversation(conversationId)
+    if (!conv || conv.kind !== 'channel') return Promise.resolve()
+    const roots = db.summarizedThreads(conv.id)
+    db.setSummary(conv.id, '', from)
+    for (const id of roots) db.setThreadSummary(id, '', from)
+    emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
+    for (const id of roots) emit({ type: 'message', message: db.message(id)! })
+    const prev = this.running.get(conversationId) ?? Promise.resolve()
+    const p: Promise<void> = prev
+      .then(async () => {
+        while (await this.doConsolidate(conv.id, true, { learn: false, batch: REBUILD_BATCH }));
+        for (const id of roots) while (await this.doThread(id, 'now', { learn: false, batch: REBUILD_BATCH }));
+      })
+      .catch((e: unknown) => console.error('[memory]', e))
+      .finally(() => {
+        if (this.running.get(conversationId) === p) this.running.delete(conversationId)
+      })
+    this.running.set(conversationId, p)
+    return p
+  }
+
+  // True when a part was summarized (a rebuild goes on to the next one).
+  private async doConsolidate(conversationId: string, force: boolean, opts: { learn?: boolean; batch?: number } = {}): Promise<boolean> {
     const { db, engines, emit } = this.deps
     const conv = db.conversation(conversationId)
-    if (!conv) return
+    if (!conv) return false
     const after = db.messagesAfter(conv.id, conv.summaryUntil ?? 0).filter((m) => m.author.kind !== 'system' && m.text.trim())
-    if (!force && after.length <= MAX_AFTER) return
-    const chunk = after.slice(0, Math.max(0, after.length - WINDOW))
-    if (chunk.length === 0) return
+    if (!force && after.length <= MAX_AFTER) return false
+    const chunk = after.slice(0, Math.min(Math.max(0, after.length - WINDOW), opts.batch ?? MAX_CHUNK))
+    if (chunk.length === 0) return false
+    // Made while the Tucano had one person, a summary may hold what only they could read: one that
+    // ends after the Tucano got its second person isn't kept (it's made again without it).
+    const epoch = db.meta('heritageAt')
 
     const settings = await this.deps.settings()
     const model = usable(modelInfo(settings.memoryModel)) ?? modelInfo('haiku')!
     const status = settings.engines[model.engine]
-    if (!status.installed || !status.loggedIn) return console.log(`[memory] skipped: ${ENGINES[model.engine].label} not ready`)
+    if (!status.installed || !status.loggedIn) return (console.log(`[memory] skipped: ${ENGINES[model.engine].label} not ready`), false)
 
     const cwd = join(this.deps.workDir, '_memory')
     mkdirSync(cwd, { recursive: true })
-    const memories = db.memories({ scope: 'me', state: 'active' })
+    const learners = this.learners(conv, chunk)
     const prompt = consolidationPrompt({
       summary: conv.summary,
       messages: chunk,
-      me: settings.workspaceName,
+      people: this.names(settings),
       agents: db.agents(),
-      memories,
-      forgotten: db.memories({ scope: 'me', state: 'forgotten' }).slice(-50)
+      ...this.aboutPeople(learners, settings, conv)
     })
 
     const started = Date.now()
@@ -349,12 +453,14 @@ export class Memories {
       } else if (ev.type === 'error') error = ev.message
     }
     const parsed = error ? null : parseConsolidation(text)
-    if (!parsed) return console.log(`[memory] consolidation failed: ${error ?? 'resposta fora do formato'}`)
+    if (!parsed) return (console.log(`[memory] consolidation failed: ${error ?? 'resposta fora do formato'}`), false)
+    if (db.meta('heritageAt') !== epoch) return false
 
     db.setSummary(conv.id, parsed.summary, chunk.at(-1)!.at)
     emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
     const threads = db.threadRoots(conv.id)
-    if (settings.memoryLearning !== 'off') this.applyExtraction(parsed.ops, chunk, conv.id, settings.memoryLearning, (m) => !m.threadId && !threads.has(m.id))
+    if (settings.memoryLearning !== 'off' && opts.learn !== false) this.applyExtraction(parsed.ops, chunk, conv.id, learners, settings.memoryLearning, (m) => !m.threadId && !threads.has(m.id))
+    return true
   }
 
   // ---------- threads ----------
@@ -367,6 +473,7 @@ export class Memories {
     const current = this.running.get(key)
     if (current) return current
     const p = this.doThread(rootId, reason)
+      .then(() => {})
       .catch((e: unknown) => console.error('[memory]', e))
       .finally(() => this.running.delete(key))
     this.running.set(key, p)
@@ -392,30 +499,34 @@ export class Memories {
     }
   }
 
-  private async doThread(rootId: string, reason: 'grown' | 'quiet' | 'now'): Promise<void> {
+  // True when a part was summarized (a rebuild goes on to the next one).
+  private async doThread(rootId: string, reason: 'grown' | 'quiet' | 'now', opts: { learn?: boolean; batch?: number } = {}): Promise<boolean> {
     const { db, engines, emit } = this.deps
     const root = db.message(rootId)
-    if (!root || root.threadId) return
+    if (!root || root.threadId) return false
     const since = root.threadSummary?.until ?? 0
-    const stretch = [root, ...db.recentMessages(root.conversationId, 1000, root.id)].filter((m) => m.at > since && m.author.kind !== 'system' && m.text.trim())
-    if (reason === 'grown' && stretch.length <= MAX_AFTER) return
-    if (reason === 'quiet' && stretch.length < THREAD_MIN) return
-    if (stretch.length === 0) return
+    const all = [root, ...db.recentMessages(root.conversationId, 1000, root.id)].filter((m) => m.at > since && m.author.kind !== 'system' && m.text.trim())
+    if (reason === 'grown' && all.length <= MAX_AFTER) return false
+    if (reason === 'quiet' && all.length < THREAD_MIN) return false
+    const stretch = all.slice(0, opts.batch ?? MAX_CHUNK)
+    if (stretch.length === 0) return false
+    const epoch = db.meta('heritageAt')
 
     const settings = await this.deps.settings()
     const model = usable(modelInfo(settings.memoryModel)) ?? modelInfo('haiku')!
     const status = settings.engines[model.engine]
-    if (!status.installed || !status.loggedIn) return console.log(`[memory] skipped: ${ENGINES[model.engine].label} not ready`)
+    if (!status.installed || !status.loggedIn) return (console.log(`[memory] skipped: ${ENGINES[model.engine].label} not ready`), false)
 
     const cwd = join(this.deps.workDir, '_memory')
     mkdirSync(cwd, { recursive: true })
+    const where = db.conversationOwner(root.conversationId) ?? { kind: 'channel' as const }
+    const learners = this.learners(where, stretch)
     const prompt = consolidationPrompt({
       summary: root.threadSummary?.text,
       messages: stretch,
-      me: settings.workspaceName,
+      people: this.names(settings),
       agents: db.agents(),
-      memories: db.memories({ scope: 'me', state: 'active' }),
-      forgotten: db.memories({ scope: 'me', state: 'forgotten' }).slice(-50),
+      ...this.aboutPeople(learners, settings, where),
       thread: true
     })
     const started = Date.now()
@@ -429,11 +540,13 @@ export class Memories {
       } else if (ev.type === 'error') error = ev.message
     }
     const parsed = error ? null : parseConsolidation(text)
-    if (!parsed) return console.log(`[memory] thread consolidation failed: ${error ?? 'resposta fora do formato'}`)
+    if (!parsed) return (console.log(`[memory] thread consolidation failed: ${error ?? 'resposta fora do formato'}`), false)
+    if (db.meta('heritageAt') !== epoch || !db.message(rootId)) return false
 
     db.setThreadSummary(rootId, parsed.summary, stretch.at(-1)!.at)
     emit({ type: 'message', message: db.message(rootId)! })
-    if (settings.memoryLearning !== 'off') this.applyExtraction(parsed.ops, stretch, root.conversationId, settings.memoryLearning)
+    if (settings.memoryLearning !== 'off' && opts.learn !== false) this.applyExtraction(parsed.ops, stretch, root.conversationId, learners, settings.memoryLearning)
+    return true
   }
 
   editThreadSummary(rootId: string, text: string): void {
@@ -443,42 +556,72 @@ export class Memories {
     this.deps.emit({ type: 'message', message: this.deps.db.message(rootId)! })
   }
 
+  // Whether a memory about `person` names someone else in the Tucano (by their first or whole name,
+  // as a word of its own). A Tucano of one has no one else: what its person says is kept as always.
+  private namesSomeoneElse(text: string, person: string): boolean {
+    const others = this.deps.db.people({ removed: true }).filter((p) => p.id !== person)
+    if (!others.length) return false
+    const words = ` ${fold(text)} `
+    return others.some((p) => {
+      const name = fold(p.name)
+      const first = name.split(' ')[0] ?? ''
+      return (first.length >= 3 && words.includes(` ${first} `)) || (name.includes(' ') && words.includes(` ${name} `))
+    })
+  }
+
+  // The people's names as the transcript shows them (the owner's is the workspace's name).
+  private names(settings: Settings): Pick<Person, 'id' | 'name'>[] {
+    const owner = this.deps.db.ownerId()
+    return this.deps.db.people({ removed: true }).map((p) => (p.id === owner ? { id: p.id, name: settings.workspaceName } : p))
+  }
+
   // `counts`: which messages of the chunk may back a memory (the rest is only read for context).
-  private applyExtraction(ops: Op[], chunk: Message[], conversationId: string, learning: 'approve' | 'auto', counts: (m: Message) => boolean = () => true): void {
-    const known = new Map(this.deps.db.memories({ scope: 'me', state: 'active' }).map((m) => [m.id, m]))
-    // Only what I said counts as evidence about me (an agent's guess never does).
-    const evidence = (nums: number[]): string[] =>
-      nums
-        .map((n) => chunk[n - 1])
-        .filter((m): m is Message => m?.author.kind === 'me' && counts(m))
-        .map((m) => m.id)
+  // Each memory is about the person whose own words back it, and kept in their scope: someone
+  // else's word about them, or an agent's guess, never is.
+  private applyExtraction(ops: Op[], chunk: Message[], conversationId: string, learners: string[], learning: 'approve' | 'auto', counts: (m: Message) => boolean = () => true): void {
+    const conv = this.deps.db.conversationOwner(conversationId) ?? { kind: 'channel' as const }
+    const known = new Map(this.about(learners, conv).map((m) => [m.id, m]))
+    // Learned in a DM: that person's, for their DMs alone.
+    const privateTo = this.privateIn(conv)
+    const backing = (nums: number[]): Message[] => nums.map((n) => chunk[n - 1]).filter((m): m is Message => m?.author.kind === 'person' && learners.includes(m.author.id) && counts(m))
+    const by = (msgs: Message[], person: string): string[] => msgs.filter((m) => m.author.kind === 'person' && m.author.id === person).map((m) => m.id)
     for (const op of ops) {
       if (op.op === 'confirm') {
         const m = known.get(op.id)
         if (m) this.save({ ...m, confirmedAt: Date.now() })
         continue
       }
-      const ids = evidence(op.evidence)
-      if (ids.length === 0) continue
+      const msgs = backing(op.evidence)
       const replaces = op.op === 'update' ? known.get(op.id) : undefined
       if (op.op === 'update' && !replaces) continue
-      this.propose({ scope: 'me', text: op.text, origin: 'extraction', conversationId, messageIds: ids, replaces: replaces?.id, active: learning === 'auto' })
+      // An update stays with whom the memory was about; a new one goes to who said most of it.
+      const about = replaces ? scopePerson(replaces.scope)! : learners.map((p) => ({ p, n: by(msgs, p).length })).sort((a, b) => b.n - a.n)[0]?.p
+      const ids = about ? by(msgs, about) : []
+      if (!about || ids.length === 0) continue
+      // What one person says about another isn't a fact about either: it would reach prompts as one.
+      if (op.op === 'add' && this.namesSomeoneElse(op.text, about)) continue
+      this.propose({ scope: personScope(about), text: op.text, origin: 'extraction', conversationId, messageIds: ids, replaces: replaces?.id, active: learning === 'auto', ...(privateTo ? { privateTo } : {}) })
     }
   }
 
   // ---------- long term ----------
 
   // The one way memories come in, so every path gets the same checks.
-  private propose(p: { scope: MemoryScope; text: string; origin: Memory['origin']; agentId?: string; conversationId?: string; messageIds: string[]; replaces?: string; active: boolean }):
+  private propose(p: { scope: MemoryScope; text: string; origin: Memory['origin']; agentId?: string; conversationId?: string; messageIds: string[]; replaces?: string; active: boolean; privateTo?: string }):
     | { kind: 'forgotten' }
     | { kind: 'duplicate'; memory: Memory }
     | { kind: 'saved'; memory: Memory } {
     const { db } = this.deps
     const key = normalize(p.text)
-    if (db.memories({ scope: p.scope, state: 'forgotten' }).some((m) => normalize(m.text) === key)) return { kind: 'forgotten' }
-    const same = db.memories({ scope: p.scope }).find((m) => (m.state === 'active' || m.state === 'pending') && normalize(m.text) === key)
+    // Someone's private note is no one else's. About a person, it's the same memory wherever it was
+    // learned: forgotten is forgotten, and said again outside their DM it's no longer the DM's alone.
+    const aboutPerson = !!scopePerson(p.scope)
+    const alike = (m: Memory): boolean => normalize(m.text) === key && (aboutPerson || m.privateTo === p.privateTo)
+    if (db.memories({ scope: p.scope, state: 'forgotten' }).some(alike)) return { kind: 'forgotten' }
+    const same = db.memories({ scope: p.scope }).find((m) => (m.state === 'active' || m.state === 'pending') && alike(m))
     if (same) {
-      if (same.state === 'active') this.save({ ...same, confirmedAt: Date.now() })
+      const opened = same.privateTo && !p.privateTo ? { privateTo: undefined } : {}
+      if (same.state === 'active' || 'privateTo' in opened) this.save({ ...same, ...opened, ...(same.state === 'active' ? { confirmedAt: Date.now() } : {}) })
       return { kind: 'duplicate', memory: same }
     }
     const now = Date.now()
@@ -492,6 +635,7 @@ export class Memories {
       conversationId: p.conversationId,
       messageIds: p.messageIds,
       replaces: p.replaces,
+      ...(p.privateTo ? { privateTo: p.privateTo } : {}),
       createdAt: now,
       confirmedAt: now
     }
@@ -500,25 +644,30 @@ export class Memories {
     return { kind: 'saved', memory }
   }
 
-  // Called by the runner when an agent uses `lembrar`.
-  remember(agent: Agent, conv: Conversation, args: Record<string, unknown>): { memory?: Memory; reply: string; label?: string; error?: boolean } {
+  // Called by the runner when an agent uses `lembrar`. `personId`: who "the user" is in this reply.
+  remember(agent: Agent, conv: Conversation, args: Record<string, unknown>, personId = this.deps.db.ownerId()): { memory?: Memory; reply: string; label?: string; error?: boolean } {
     const text = typeof args['texto'] === 'string' ? args['texto'].trim() : ''
     if (!text) return { reply: L('Faltou o texto da memória.', "Missing the memory's text."), error: true }
     if (text.length > MAX_MEMORY_CHARS) return { reply: L(`Memória longa demais: use até ${MAX_MEMORY_CHARS} caracteres, uma ideia só.`, `Memory too long: use up to ${MAX_MEMORY_CHARS} characters, one idea only.`), error: true }
-    const scope: MemoryScope = args['sobre'] === 'agente' ? agent.id : 'me'
+    const theirs = personScope(personId)
+    const scope: MemoryScope = args['sobre'] === 'agente' ? agent.id : theirs
+    if (scope === theirs && this.namesSomeoneElse(text, personId))
+      return { reply: L('Não guardei: uma memória "usuario" é sobre a pessoa com quem você fala, e esta fala de outra pessoa do Tucano. O que alguém diz de outra pessoa não vira fato sobre ninguém.', "Not saved: a \"usuario\" memory is about the person you talk to, and this one is about someone else in this Tucano. What someone says about another person isn't a fact about anyone."), error: true }
+    // Made in a DM, an agent's note, or what it learned about the person, is that DM's person's alone ("só você vê").
+    const privateTo = this.privateIn(conv)
     let replaces: string | undefined
     if (typeof args['substitui'] === 'string' && args['substitui'].trim()) {
       const old = this.deps.db.memory(args['substitui'].trim())
-      if (!old || old.state !== 'active' || (old.scope !== 'me' && old.scope !== agent.id)) return { reply: L(`Não achei a memória ${args['substitui']} pra substituir.`, `I couldn't find memory ${args['substitui']} to replace.`), error: true }
+      if (!old || old.state !== 'active' || (old.scope !== theirs && old.scope !== agent.id) || (old.privateTo !== undefined && old.privateTo !== personId) || !this.readableIn(conv)(old)) return { reply: L(`Não achei a memória ${args['substitui']} pra substituir.`, `I couldn't find memory ${args['substitui']} to replace.`), error: true }
       if (old.scope !== scope) return { reply: L(`A memória ${old.id} é de outro escopo; use "sobre" igual ao dela.`, `Memory ${old.id} has a different scope; use the same "sobre" as it.`), error: true }
       replaces = old.id
     }
     const lastMine = this.deps.db
       .recentMessages(conv.id, 20)
       .reverse()
-      .find((m) => m.author.kind === 'me')
+      .find((m) => m.author.kind === 'person' && m.author.id === personId)
     const active = agent.memory === 'auto'
-    const r = this.propose({ scope, text, origin: 'agent', agentId: agent.id, conversationId: conv.id, messageIds: lastMine ? [lastMine.id] : [], replaces, active })
+    const r = this.propose({ scope, text, origin: 'agent', agentId: agent.id, conversationId: conv.id, messageIds: lastMine ? [lastMine.id] : [], replaces, active, ...(privateTo ? { privateTo } : {}) })
     if (r.kind === 'forgotten') return { reply: L('Isso foi esquecido a pedido do usuário. Não guarde de novo nem mencione.', "That was forgotten at the user's request. Don't save it again or mention it.") }
     if (r.kind === 'duplicate') return { reply: L('Isso já está na memória.', "That's already in memory.") }
     return active
@@ -577,9 +726,12 @@ export class Memories {
     this.deps.emit({ type: 'memory', memory: m })
   }
 
+  // Gone for good. Someone's own memory (about them, or private to them) is no one else's news.
   private remove(id: string): void {
+    const m = this.deps.db.memory(id)
     this.deps.db.deleteMemory(id)
-    this.deps.emit({ type: 'memory_removed', id })
+    const whose = m ? (m.privateTo ?? scopePerson(m.scope)) : undefined
+    this.deps.emit({ type: 'memory_removed', id, ...(whose ? { for: whose } : {}) })
   }
 
   // Short ids: the model reads and writes them back (`substitui`, `update`).

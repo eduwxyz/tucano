@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, Conversation } from '../src/shared/types'
-import { systemPrompt } from '../src/core/context'
+import { liveContext, systemPrompt } from '../src/core/context'
 import { artifactKind, Computers, computerTools, linuxTools, stepFor } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { loginEnv, MacComputer, macPath } from '../src/core/mac'
@@ -163,7 +163,7 @@ describe('an agent whose computer is this Mac', () => {
     if (win) expect(prompt).toMatch(/Git Bash|cmd\.exe/)
     expect(prompt).toContain(`Eles começam em ${work} (sua pasta de trabalho)`)
     expect(prompt).not.toContain('A pasta de trabalho é /work')
-    const off = systemPrompt({ agent: me, settings: { workspaceName: 'Edu', context: '' }, conversation: conv, peers: [], offline: ['Linear'] })
+    const off = liveContext({ settings: { workspaceName: 'Edu', context: '' }, offline: ['Linear'] })
     expect(off).toContain('Você tem acesso a Linear, mas ele está desconectado agora')
   })
 })

@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { networkInterfaces } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { Forwarder, isPrivate } from '../src/server/forward'
-import { clientIp, decodedPath, Limiter, MAX_FAILS, PAGE_HEADERS, sameOrigin, WINDOW_MS } from '../src/server/guard'
+import { clientIp, decodedPath, Doors, doorOf, Limiter, MAX_FAILS, PAGE_HEADERS, sameOrigin, WINDOW_MS } from '../src/server/guard'
 import { vault } from '../src/server/vault'
 
 describe('the server vault', () => {
@@ -64,6 +66,36 @@ describe('the server on the internet', () => {
     expect(l.blocked('2.2.2.2')).toBe(false)
     now += WINDOW_MS + 1
     expect(l.blocked('1.1.1.1')).toBe(false)
+  })
+
+  // Someone at the same address (an office, a phone network) trying invite codes doesn't lock the
+  // owner or a person with a key out: invite codes are counted on their own door.
+  it('counts wrong invite codes apart from wrong tokens and keys', () => {
+    const d = new Doors()
+    for (let i = 0; i < MAX_FAILS; i++) d.fail('join', '1.1.1.1')
+    expect(d.blocked('join', '1.1.1.1')).toBe(true)
+    expect(d.blocked('signin', '1.1.1.1')).toBe(false)
+    for (let i = 0; i < MAX_FAILS; i++) d.fail('signin', '2.2.2.2')
+    expect(d.blocked('signin', '2.2.2.2')).toBe(true)
+    expect(d.blocked('join', '2.2.2.2')).toBe(false)
+  })
+
+  it('knows the invite door from the rest', () => {
+    expect(doorOf('/join', 'POST', false)).toBe('join')
+    expect(doorOf('/', 'GET', true)).toBe('join')
+    expect(doorOf('/index.html', 'GET', true)).toBe('join')
+    expect(doorOf('/', 'GET', false)).toBe('signin')
+    expect(doorOf('/rpc', 'POST', false)).toBe('signin')
+    expect(doorOf('/join', 'GET', false)).toBe('signin')
+  })
+
+  it('the server asks the door before refusing, and counts a wrong code on the invite door', () => {
+    const src = readFileSync(join(import.meta.dirname, '..', 'src', 'server', 'index.ts'), 'utf8')
+    expect(src).toMatch(/doorOf\(url\.pathname, req\.method, url\.searchParams\.has\('invite'\)\) === 'join'/)
+    expect(src).toMatch(/doors\.blocked\('join', ip\)/)
+    expect(src).toMatch(/void signIn\(\{ cookie: cookieToken\(req\), offered, ip, doors,/) // the sign-in door: see signIn (team-round2.test.ts)
+    expect(src).not.toMatch(/guesses\.blocked\(ip\)/)
+    expect(src).toMatch(/doors\.fail\('join', ip\)/)
   })
 
   it("takes the proxy's word for the address only when told to", () => {

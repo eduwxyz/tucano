@@ -79,7 +79,7 @@ describe('the curator', () => {
       emitMessage: (m) => emitted.push(m)
     })
     const say = (id: string, who: 'me' | 'lia', text: string, at: number): void => {
-      messages.push({ id, conversationId: 'c', author: who === 'me' ? { kind: 'me' } : { kind: 'agent', id: 'lia' }, text, at, ...(who === 'lia' ? { run: { status: 'done', steps: [] } } : {}) } as Message)
+      messages.push({ id, conversationId: 'c', author: who === 'me' ? { kind: 'person', id: 'me' } : { kind: 'agent', id: 'lia' }, text, at, ...(who === 'lia' ? { run: { status: 'done', steps: [] } } : {}) } as Message)
     }
     return { w, curator, say, calls, emitted, messages }
   }

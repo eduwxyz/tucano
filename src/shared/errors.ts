@@ -229,3 +229,25 @@ export const toolLabel = (name: string): string =>
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .toLowerCase()
     .trim();
+
+// What a caller reads of an error. The owner (it's their machine) gets it as `friendly` says; anyone
+// else never a path on the machine nor a system's raw text (a code, a stack): those stay in the
+// core's log. An error written for people goes through, less any path in it.
+export function errorFor(e: unknown, owner: boolean): string {
+  const f = friendly(e);
+  if (owner) return f.text;
+  const ours =
+    e instanceof UserError ||
+    typeof e === "string" ||
+    (e instanceof Error && e.constructor === Error && !("code" in e));
+  return ours
+    ? withoutPaths(f.text)
+    : L(
+        "Algo deu errado. Tente de novo; se continuar, avise quem cuida deste Tucano.",
+        "Something went wrong. Try again; if it keeps happening, tell whoever runs this Tucano."
+      );
+}
+
+// "/srv/tucano/x", "~/x", "C:\x": a place on the machine, said as "…".
+const withoutPaths = (text: string): string =>
+  text.replace(/(^|[\s"'`(=])(?:~?\/|[A-Za-z]:[\\/])[^\s"'`)]*/g, "$1…");

@@ -120,16 +120,15 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
     () => [...choices.map((e) => ({ value: e, label: ENGINES[e].label })), ...(jev ? [{ value: 'jev', label: 'TypeSafe · Jev' }] : [])],
     [choices, jev]
   )
-  // Models grouped by provider (part before "/", or before ":").
-  const modelGroups = useMemo((): Record<string, Record<string, string>> => {
-    const groups: Record<string, Record<string, string>> = {}
-    for (const o of options) {
-      const provider = providerOf(o.value)
-      if (!groups[provider]) groups[provider] = {}
-      groups[provider][o.value] = o.hint ? `${o.label} · ${o.hint}` : o.label
-    }
-    groups[L('Outro modelo…', 'Other model…')] = { __other__: L('Outro modelo…', 'Other model…') }
-    return groups
+  // The models, grouped by provider (part before "/", or before ":") when there's more than one;
+  // "Other model…" last either way.
+  const modelChoices = useMemo((): { groups?: Record<string, Record<string, string>>; options?: { value: string; label: string }[] } => {
+    const label = (o: (typeof options)[number]): string => (o.hint ? `${o.label} · ${o.hint}` : o.label)
+    const otherOne = { value: OTHER, label: L('Outro modelo…', 'Other model…') }
+    const byProvider: Record<string, Record<string, string>> = {}
+    for (const o of options) (byProvider[providerOf(o.value)] ??= {})[o.value] = label(o)
+    if (Object.keys(byProvider).length < 2) return { options: [...options.map((o) => ({ value: o.value, label: label(o) })), otherOne] }
+    return { groups: { ...byProvider, [otherOne.label]: { [OTHER]: otherOne.label } } }
   }, [options])
 
   // A harness's own card passes just that harness: it's already chosen there, so no select.
@@ -160,28 +159,23 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
       )}
       {value !== 'jev' && engine && (
         <>
-          {!other && (
-            <Select
-              className="grow"
-              value={inList ? value : null}
-              showHint
-              searchable
-              groups={modelGroups}
-              placeholder={loading ? L('Buscando os modelos…', 'Fetching the models…') : options.length ? L('Escolha um modelo…', 'Pick a model…') : L('Sem lista: use Outro modelo', 'No list: use Other model')}
-              disabled={loading && !options.length}
-              onChange={(v) => {
-                const vv = v ?? ''
-                if (vv === '__other__') {
-                  setTyping(true)
-                  onChange(customModel(engine, name))
-                  return
-                }
-                setTyping(false)
-                onChange(vv)
-              }}
-            />
-          )}
-          {other && engine && (
+          <Select
+            className="grow"
+            value={other ? OTHER : inList ? value : null}
+            searchable
+            {...modelChoices}
+            placeholder={loading ? L('Buscando os modelos…', 'Fetching the models…') : options.length ? L('Escolha um modelo…', 'Pick a model…') : L('Sem lista: use Outro modelo', 'No list: use Other model')}
+            onChange={(v) => {
+              if (v === OTHER) {
+                setTyping(true)
+                onChange(customModel(engine, name))
+                return
+              }
+              setTyping(false)
+              onChange(v ?? '')
+            }}
+          />
+          {other && (
             <input className="model-name grow" autoFocus={typing && !name} value={name} spellCheck={false} placeholder={L('O nome exato do modelo', 'The exact model name')} onChange={(e) => onChange(customModel(engine, e.target.value))} />
           )}
         </>
@@ -251,7 +245,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
         <label className="grow harness__name" htmlFor={checkId}>
           <strong>{ENGINES[engine].label}</strong>
           <span className="harness__account">
-            {!st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
+            {st.checking ? L('Conferindo…', 'Checking…') : !st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
           </span>
         </label>
         {st.soon ? (

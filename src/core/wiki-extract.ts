@@ -4,8 +4,10 @@
 // nothing leaves the computer except the fetch of the link itself.
 import { extname } from 'node:path'
 import { L } from '../shared/lang'
+import { MAX_WIKI_FILE } from '../shared/rpc-shapes'
+import { safeFetch } from './safe-fetch'
 
-export const MAX_FILE = 20 * 1024 * 1024
+export const MAX_FILE = MAX_WIKI_FILE
 export const MAX_TEXT = 400_000 // characters kept from one source
 const TEXT = new Set(['.txt', '.md', '.markdown', '.json', '.log', '.yml', '.yaml'])
 export const ACCEPTS = ['.pdf', '.docx', '.xlsx', '.csv', ...TEXT]
@@ -51,7 +53,7 @@ export function parseCsv(text: string): string[][] {
 }
 
 export async function extractFile(name: string, data: Buffer): Promise<string> {
-  if (data.length > MAX_FILE) throw new Error(L('O arquivo passa de 20 MB.', 'The file is over 20 MB.'))
+  if (data.length > MAX_FILE) throw new Error(L(`O arquivo passa de ${MAX_FILE / 1024 / 1024} MB.`, `The file is over ${MAX_FILE / 1024 / 1024} MB.`))
   const ext = extname(name).toLowerCase()
   if (ext === '.pdf') {
     const { extractText, getDocumentProxy } = await import('unpdf')
@@ -87,10 +89,13 @@ export async function extractFile(name: string, data: Buffer): Promise<string> {
   throw new Error(L(`Ainda não leio arquivos ${ext}. Dá pra usar PDF, Word, planilha (.xlsx, .csv) ou texto.`, `I can't read ${ext} files yet. PDF, Word, spreadsheets (.xlsx, .csv) or text work.`))
 }
 
-// A web page's main content, and its title.
-export async function extractLink(url: string, fetcher: typeof fetch = fetch): Promise<{ title: string; text: string }> {
+export type Fetcher = (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<Response>
+
+// A web page's main content, and its title. Fetched through the guard against the inside (see
+// safe-fetch) unless the caller passes the plain fetch: the desktop's own person, on their computer.
+export async function extractLink(url: string, fetcher: Fetcher = safeFetch()): Promise<{ title: string; text: string }> {
   if (!/^https?:\/\//i.test(url)) throw new Error(L('O link precisa começar com http:// ou https://.', 'The link must start with http:// or https://.'))
-  const res = await fetcher(url, { headers: { 'user-agent': 'Mozilla/5.0 (Tucano wiki)', accept: 'text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8' }, signal: AbortSignal.timeout(30_000), redirect: 'follow' })
+  const res = await fetcher(url, { headers: { 'user-agent': 'Mozilla/5.0 (Tucano wiki)', accept: 'text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8' }, signal: AbortSignal.timeout(30_000) })
   if (!res.ok) throw new Error(L(`A página respondeu ${res.status}.`, `The page answered ${res.status}.`))
   const type = res.headers.get('content-type') ?? ''
   const buf = Buffer.from(await res.arrayBuffer())

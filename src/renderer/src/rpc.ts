@@ -34,7 +34,7 @@ declare global {
         open: (id: string) => void
         local: () => void // back to this computer's Tucano
         forget: (id: string) => Promise<boolean>
-        onChanged: (cb: () => void) => void
+        onChanged: (cb: () => void) => () => void // returns the unsubscribe
       }
     }
   }
