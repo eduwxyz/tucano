@@ -298,7 +298,8 @@ export class ChromeBrowsers {
     let timer: ReturnType<typeof setTimeout> | undefined
     const failed = new Promise<never>((_, reject) => {
       proc.once('exit', () => reject(new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))))
-      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 15 s', "Chrome didn't open in 15 s"))), 15_000)
+      // The first open on a computer can be slow, with nothing of Chrome in memory yet. As long as any other answer gets (see send).
+      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 30 s', "Chrome didn't open in 30 s"))), 30_000)
     })
     try {
       await Promise.race([tab.connect(), failed])

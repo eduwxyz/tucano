@@ -648,7 +648,7 @@ export class Runner {
     if (used >= agent.limit) {
       save({
         text: L('Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.', "I stopped: I've used all my tokens for this month. It can be raised on my page."),
-        run: { status: 'limit_reached', depth: opts.depth, steps: [], ...again }
+        run: { status: 'limit_reached', endedAt: Date.now(), depth: opts.depth, steps: [], ...again }
       })
       return msg
     }
@@ -659,6 +659,7 @@ export class Runner {
       save({
         run: {
           status: 'failed',
+          endedAt: Date.now(),
           depth: opts.depth,
           steps: [],
           ...again,
@@ -675,6 +676,7 @@ export class Runner {
       save({
         run: {
           status: 'failed',
+          endedAt: Date.now(),
           depth: opts.depth,
           steps: [],
           ...again,
@@ -1528,7 +1530,8 @@ export class Runner {
       this.controllers.delete(msg.id)
     }
 
-    const ms = Date.now() - started
+    const endedAt = Date.now()
+    const ms = endedAt - started
     const receipt: Receipt | undefined = result
       ? { model: modelId, ms, ...result.usage }
       : progress.tokens > 0
@@ -1555,7 +1558,7 @@ export class Runner {
       )
     }
 
-    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {

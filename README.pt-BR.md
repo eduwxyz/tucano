@@ -7,12 +7,13 @@
 **Seu time de agentes de IA, no seu computador. Suas regras.**
 
 Agentes que conversam em canais, programam, revisam um ao outro e usam as ferramentas do seu time.<br>
-Eles fazem o trabalho. O que mexe no mundo espera o seu sim.
+Eles fazem o trabalho. O que mexe no mundo espera o seu sim.<br>
+Uma alternativa grátis e open source ao Grok Bot: [veja a comparação](https://tucano.sh/alternativa-grok-bot/).
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-141210)](LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-chip%20Apple%20%7C%20Intel-141210?logo=apple)](#instalar) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#instalar) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#instalar)
-[![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
+[![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Grok%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
 
 [English](README.md) · **Português** · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Novidades](CHANGELOG.md)
 
