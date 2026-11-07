@@ -4,7 +4,7 @@ import { LOGOS } from '../src/renderer/src/connector-logos'
 
 describe('the connector catalog', () => {
   it('lists each service once, at an https address, in a category that exists', () => {
-    expect(CATALOG.length).toBe(46)
+    expect(CATALOG.length).toBe(48)
     expect(new Set(CATALOG.map((c) => c.id)).size).toBe(CATALOG.length)
     const remote = CATALOG.filter((c) => !c.local)
     expect(new Set(remote.map((c) => c.url)).size).toBe(remote.length)
@@ -35,6 +35,7 @@ describe('the connector catalog', () => {
     expect(searchCatalog('lin').map((c) => c.id)).toContain('linear')
     expect(searchCatalog('deploy').map((c) => c.id)).toEqual(expect.arrayContaining(['vercel', 'netlify', 'railway']))
     expect(searchCatalog('programacao').length).toBeGreaterThan(5) // the category's name
+    expect(searchCatalog('cartoes banco').map((c) => c.id)).toEqual(['mofi'])
     expect(searchCatalog('zzz')).toEqual([])
     expect(searchCatalog('  ')).toHaveLength(CATALOG.length)
   })
@@ -42,6 +43,7 @@ describe('the connector catalog', () => {
   it('fills in what a service asks, however much of its address was pasted', () => {
     const get = (id: string) => CATALOG.find((c) => c.id === id)!
     expect(catalogInput(get('linear'))).toEqual({ name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth' })
+    expect(catalogInput(get('mofi'))).toEqual({ name: 'Mofi', kind: 'remote', url: 'https://omofi.com.br/api/mcp', auth: 'oauth' }) // the server, not its page at /mcp
     expect(catalogInput(get('github'), { token: ' github_pat_1 ' })).toMatchObject({ url: 'https://api.githubcopilot.com/mcp/', auth: 'token', token: 'github_pat_1' })
     expect(catalogInput(get('dynatrace'), { environment: 'https://ABC12345.apps.dynatrace.com/ui', token: 't' }).url).toBe(
       'https://abc12345.apps.dynatrace.com/platform-reserved/mcp-gateway/v0.1/servers/dynatrace-mcp/mcp'
@@ -71,6 +73,16 @@ describe('the connector catalog', () => {
       expect(entryOf(catalogInput(get(id), values))?.id, id).toBe(id)
     expect(entryOf({ kind: 'remote', url: 'https://bi.acme.com/api/other' })).toBeUndefined()
     expect(entryOf({ kind: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-postgres'] })).toBeUndefined()
+  })
+
+  it('warns, before connecting, when the data goes through a third party', () => {
+    const composio = CATALOG.find((c) => c.id === 'composio')!
+    expect(catalogInput(composio)).toEqual({ name: 'Composio', kind: 'remote', url: 'https://connect.composio.dev/mcp', auth: 'oauth' })
+    expect(composio.about()).toMatch(/Composio/) // on the card, too
+    expect(composio.warning?.()).toMatch(/Composio/)
+    expect(searchCatalog('composio').map((c) => c.id)).toEqual(['composio'])
+    // Only the ones that go through someone else's servers say so.
+    expect(CATALOG.filter((c) => c.warning).map((c) => c.id)).toEqual(['composio'])
   })
 
   it("signs in to Google's five with the person's app, asking only what their tools need", () => {

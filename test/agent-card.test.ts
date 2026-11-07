@@ -8,7 +8,7 @@ const agent = { id: 'lia', archived: false, used: 0, limit: 1000 }
 const msg = (id: string, author: string, at: number, run?: Partial<Run>, conversationId = 'c1'): Message => ({
   id,
   conversationId,
-  author: author === 'me' ? { kind: 'me' } : { kind: 'agent', id: author },
+  author: author === 'me' ? { kind: 'person', id: 'p_me' } : { kind: 'agent', id: author },
   text: '',
   at,
   run: run && { status: 'done', steps: [], ...run }
@@ -26,6 +26,12 @@ describe('what an agent’s card says it is doing', () => {
   it('says it waits on me, for an answer or an approval', () => {
     expect(agentNow(agent, [msg('1', 'lia', 1, { status: 'waiting_input' })])).toEqual({ kind: 'waiting', conversationId: 'c1', on: 'input' })
     expect(agentNow(agent, [msg('1', 'lia', 1, { status: 'waiting_approval' })])).toEqual({ kind: 'waiting', conversationId: 'c1', on: 'approval' })
+  })
+  it('with a team, says whom a question is for', () => {
+    expect(agentNow(agent, [msg('1', 'lia', 1, { status: 'waiting_input', askedTo: 'p_ana' })])).toEqual({ kind: 'waiting', conversationId: 'c1', on: 'input', askedTo: 'p_ana' })
+  })
+  it('reads the messages in time order, whatever conversation they come from', () => {
+    expect(agentNow(agent, [msg('1', 'lia', 5, { status: 'done' }, 'c1'), msg('2', 'lia', 2, { status: 'done' }, 'c2')])).toEqual({ kind: 'idle', lastAt: 5 })
   })
   it('puts work before waiting, and both before the limit', () => {
     const messages = [msg('1', 'lia', 1, { status: 'waiting_input' }), msg('2', 'lia', 2, { status: 'working' })]

@@ -4,7 +4,7 @@ import type { Agent, Conversation, Message } from '../../shared/types'
 
 export type AgentNow =
   | { kind: 'working'; conversationId: string; doing?: string; since: number }
-  | { kind: 'waiting'; conversationId: string; on: 'input' | 'approval' }
+  | { kind: 'waiting'; conversationId: string; on: 'input' | 'approval'; askedTo?: string } // askedTo: the person a question is for (team mode)
   | { kind: 'archived' }
   | { kind: 'limit' }
   | { kind: 'idle'; lastAt?: number }
@@ -13,14 +13,18 @@ export type AgentNow =
 // step running), then what waits on me, then the monthly limit, else when it last spoke.
 export function agentNow(agent: Pick<Agent, 'id' | 'archived' | 'used' | 'limit'>, messages: readonly Message[]): AgentNow {
   if (agent.archived) return { kind: 'archived' }
-  const own = messages.filter((m) => m.author.kind === 'agent' && m.author.id === agent.id)
+  // In time order: the messages come per conversation, one list after another.
+  const own = messages.filter((m) => m.author.kind === 'agent' && m.author.id === agent.id).sort((a, b) => a.at - b.at)
   const working = own.findLast((m) => m.run?.status === 'working')
   if (working) {
     const step = working.run!.steps.findLast((st) => st.status === 'running')
     return { kind: 'working', conversationId: working.conversationId, doing: step?.label, since: working.at }
   }
   const waiting = own.findLast((m) => m.run?.status === 'waiting_input' || m.run?.status === 'waiting_approval')
-  if (waiting) return { kind: 'waiting', conversationId: waiting.conversationId, on: waiting.run!.status === 'waiting_input' ? 'input' : 'approval' }
+  if (waiting) {
+    const on = waiting.run!.status === 'waiting_input' ? 'input' : 'approval'
+    return { kind: 'waiting', conversationId: waiting.conversationId, on, ...(on === 'input' && waiting.run!.askedTo ? { askedTo: waiting.run!.askedTo } : {}) }
+  }
   if (agent.limit > 0 && agent.used >= agent.limit) return { kind: 'limit' }
   return { kind: 'idle', lastAt: own.at(-1)?.at }
 }

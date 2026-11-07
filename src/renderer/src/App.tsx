@@ -17,6 +17,7 @@ import { AgentCardLayer } from './components/AgentCard'
 import { WhatsNew } from './components/Update'
 import { CoreDown, Toasts } from './components/Toast'
 import { Icon } from './components/ui'
+import { NameModal } from './components/People'
 
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
@@ -108,6 +109,7 @@ export function App(): ReactNode {
       </main>
       <AgentCardLayer />
       <Dialogs />
+      <NameModal />
       <WhatsNew />
       <Lightbox />
       <Toasts />

@@ -6,7 +6,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { ENGINES } from '../../../shared/types'
-import { agentById, modelById, navigate, openDialog, openDm, useStore } from '../store'
+import { agentById, canDecide, modelById, navigate, openDialog, openDm, personName, useStore } from '../store'
 import { agentChannels, agentNow, cardState, placeCard, type AgentNow, type CardOpen, type CardOptions } from '../agent-card'
 import { AgentAvatar, Icon, ago, ownColor } from './ui'
 
@@ -76,7 +76,14 @@ function AgentCard({ open }: { open: Open }): ReactNode {
     const c = s.conversations.find((x) => x.id === id)
     return c?.kind === 'dm' && c.members[0] === open.agentId
   })
-  const now = useMemo(() => (agent ? agentNow(agent, messages) : undefined), [agent, messages])
+  const now = useMemo(() => (agent ? agentNow(agent, Object.values(messages).flat()) : undefined), [agent, messages])
+  // With a team, what an agent waits on may be someone else's: a question to another person,
+  // an approval only the admins or the agent's person decide.
+  const waitsOn = useStore((s): string | undefined => {
+    if (now?.kind !== 'waiting') return undefined
+    if (now.on === 'approval') return canDecide(s, { agentId: open.agentId }) ? undefined : ''
+    return now.askedTo && s.you && now.askedTo !== s.you ? personName(s, now.askedTo) : undefined
+  })
   const channels = useMemo(() => agentChannels(open.agentId, conversations), [open.agentId, conversations])
   const titleOf = (id: string): string => {
     const c = conversations.find((x) => x.id === id)
@@ -172,7 +179,7 @@ function AgentCard({ open }: { open: Open }): ReactNode {
         </div>
       </div>
 
-      <NowLine now={now} titleOf={titleOf} />
+      <NowLine now={now} titleOf={titleOf} waitsOn={waitsOn} />
 
       <dl className="agent-card__facts">
         <div>
@@ -223,7 +230,8 @@ function AgentCard({ open }: { open: Open }): ReactNode {
   )
 }
 
-function NowLine({ now, titleOf }: { now: AgentNow; titleOf: (conversationId: string) => string }): ReactNode {
+// `waitsOn`: unset, it waits on me; a name, on that person; empty, on someone who decides (not me).
+function NowLine({ now, titleOf, waitsOn }: { now: AgentNow; titleOf: (conversationId: string) => string; waitsOn?: string }): ReactNode {
   const where = 'conversationId' in now ? titleOf(now.conversationId) : ''
   const go = (): void => {
     if (!('conversationId' in now)) return
@@ -244,7 +252,15 @@ function NowLine({ now, titleOf }: { now: AgentNow; titleOf: (conversationId: st
     return (
       <button type="button" className="agent-card__now is-waiting" onClick={go}>
         <span className="agent-card__dot" aria-hidden />
-        <b>{now.on === 'input' ? L(`Esperando sua resposta ${where}`, `Waiting for your answer ${where}`) : L(`Esperando sua aprovação ${where}`, `Waiting for your approval ${where}`)}</b>
+        <b>
+          {now.on === 'input'
+            ? waitsOn
+              ? L(`Esperando ${waitsOn} responder ${where}`, `Waiting for ${waitsOn} to answer ${where}`)
+              : L(`Esperando sua resposta ${where}`, `Waiting for your answer ${where}`)
+            : waitsOn === undefined
+              ? L(`Esperando sua aprovação ${where}`, `Waiting for your approval ${where}`)
+              : L(`Esperando aprovação ${where}`, `Waiting for approval ${where}`)}
+        </b>
       </button>
     )
   return (
