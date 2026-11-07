@@ -37,6 +37,12 @@ describe('local skills', () => {
     expect(frontmatter('---\nname: a\ndescription: |\n  um\n  dois\nlicense: MIT\n---\ncorpo')).toEqual({ name: 'a', description: 'um dois', body: 'corpo' })
   })
 
+  it('counts the recipe body for a non-blocking length recommendation', () => {
+    const body = 'x'.repeat(32_345)
+    put(join(home, '.claude/skills/longa/SKILL.md'), `---\nname: longa\n---\n${body}`)
+    expect(findLocalSkills(home).find((k) => k.name === 'longa')?.bodyLength).toBe(32_345)
+  })
+
   it("finds the user's Claude Code skills, the turned-on plugins' and Codex's, with their files and scripts", () => {
     const found = findLocalSkills(home)
     expect(found.map((k) => [k.name, k.origin])).toEqual([['video', 'Claude Code'], ['verify', 'Plugin sdd'], ['humanize', 'Plugin root'], ['imediato', 'Codex']])
