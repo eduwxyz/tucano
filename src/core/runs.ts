@@ -405,7 +405,8 @@ export class Runner {
     }
     // The decisions answered on the card go first, whether they're sent from it or with a reply
     // written in the field. Only by whoever answers the question: anyone else's message is just theirs.
-    const body = [asked ? formatAnswers(questionsOf(asked.run), asked.run?.answers) : '', typed].filter(Boolean).join('\n\n')
+    const fromCard = asked ? formatAnswers(questionsOf(asked.run), asked.run?.answers) : ''
+    const body = [fromCard, typed].filter(Boolean).join('\n\n')
     if (!body && pictures.length === 0) return
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
@@ -429,7 +430,10 @@ export class Runner {
         db.saveQuestion({ ...q, state: 'answered', answeredBy: writer.id, answeredAt: Date.now() })
         emit({ type: 'inbox' })
       }
-      this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}) } })
+      // The message keeps the answers for the agent; the card, which shows them, says which one it is (and
+      // what it had beyond them), so the conversation shows them once. With images, it shows whole.
+      const link = fromCard && pictures.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
+      this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
       if (asker && responders.length === 0) responders = [asker]
       const target = q && q.askedTo !== writer.id ? db.people({ removed: true }).find((p) => p.id === q.askedTo) : undefined

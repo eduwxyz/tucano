@@ -366,3 +366,25 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
   const waiting = message.run?.status === 'waiting_input'
   return <AskCard id={message.id} questions={questions} saved={message.run?.answers} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} />
 }
+
+// The message that sent a card's answers says nothing the card doesn't: in the conversation it
+// shows only what was written beyond them, or not at all. It stays as it is everywhere else (the
+// agent, the wiki, search, Telegram). Found by the link the card keeps, never by the text.
+const linked = new WeakMap<Message[], Map<string, string>>()
+export function cardAnswers(all: Message[]): Map<string, string> {
+  const had = linked.get(all)
+  if (had) return had
+  const map = new Map<string, string>()
+  for (const m of all) if (m.run?.answerMessage) map.set(m.run.answerMessage, m.run.answerTyped ?? '')
+  linked.set(all, map)
+  return map
+}
+
+export function asShown(messages: Message[], answers: Map<string, string>): Message[] {
+  if (!answers.size || !messages.some((m) => answers.has(m.id))) return messages
+  return messages.flatMap((m) => {
+    if (m.author.kind !== 'person' || !answers.has(m.id)) return [m]
+    const typed = answers.get(m.id)!
+    return typed ? [{ ...m, text: typed }] : []
+  })
+}

@@ -176,6 +176,8 @@ export interface Run {
   questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
   answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
   answeredInText?: true // the reply had text of its own, beyond the decisions answered
+  answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
+  answerTyped?: string // what that message had beyond them, written in the message box
   askedTo?: string // the person the question is for (unset with one person: whoever asked the agent)
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)

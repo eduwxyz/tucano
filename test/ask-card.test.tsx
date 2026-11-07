@@ -12,7 +12,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
   return { ...real, useStore: <T,>(select: (s: State) => T): T => select(fake) }
 })
 const { getState } = await import('../src/renderer/src/store')
-const { AskCard } = await import('../src/renderer/src/components/Decisions')
+const { AskCard, asShown, cardAnswers } = await import('../src/renderer/src/components/Decisions')
 const { QuestionCard } = await import('../src/renderer/src/components/Conversation')
 
 const ana: Person = { id: 'ana', name: 'Ana', role: 'owner', about: '' }
@@ -70,5 +70,22 @@ describe('the decisions card', () => {
     const html = card()
     expect(html).toContain('Lia quer perguntar a Bia')
     expect(html).not.toContain('ask--answer')
+  })
+})
+
+describe('the message that sent the answers', () => {
+  const asked = (run: Record<string, unknown>) => ({ id: 'q', conversationId: 'ch', author: { kind: 'agent' as const, id: 'a1' }, text: 'Te mandei duas decisões.', at: 1, run: { status: 'done' as const, steps: [], questions: decisions, ...run } })
+  const answer = { id: 'ans', conversationId: 'ch', author: { kind: 'person' as const, id: 'bia' }, text: '- Paginação no menu? → Busca remota\n\nE mais uma coisa', at: 2 }
+  const other = { id: 'x', conversationId: 'ch', author: { kind: 'person' as const, id: 'bia' }, text: '- Paginação no menu? → Busca remota', at: 3 }
+
+  it("isn't shown again under the card that shows it; one typed by hand (the same text, unlinked) is", () => {
+    const list = [asked({ answerMessage: 'ans' }), answer, other]
+    expect(asShown(list, cardAnswers(list)).map((m) => m.id)).toEqual(['q', 'x'])
+  })
+  it('shows only what was written beyond the answers', () => {
+    const list = [asked({ answerMessage: 'ans', answerTyped: 'E mais uma coisa' }), answer]
+    const shown = asShown(list, cardAnswers(list))
+    expect(shown.map((m) => m.text)).toEqual(['Te mandei duas decisões.', 'E mais uma coisa'])
+    expect(list[1]!.text).toContain('Busca remota') // the message itself is untouched
   })
 })

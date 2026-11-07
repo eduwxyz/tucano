@@ -511,6 +511,9 @@ describe('ask_user through the gateway', () => {
     expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
     expect(db.message(asked.id)?.run?.status).toBe('done')
     expect(db.message(asked.id)?.run?.answeredInText).toBeUndefined()
+    // The card knows which message carried its answers: the conversation shows them once, on the card.
+    expect(db.message(asked.id)?.run).toMatchObject({ answerMessage: mine().at(-1)?.id })
+    expect(db.message(asked.id)?.run?.answerTyped).toBeUndefined()
     expect(claude.turns[1]?.prompt).toContain('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
   })
 
@@ -520,7 +523,15 @@ describe('ask_user through the gateway', () => {
     await r.send('c1', 'o resto eu explico: depois do deploy', [], asked.threadId)
     await r.idle()
     expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Busca remota\n\no resto eu explico: depois do deploy')
-    expect(db.message(asked.id)?.run).toMatchObject({ status: 'done', answeredInText: true })
+    expect(db.message(asked.id)?.run).toMatchObject({ status: 'done', answeredInText: true, answerMessage: mine().at(-1)?.id, answerTyped: 'o resto eu explico: depois do deploy' })
+  })
+
+  it('an answer typed with nothing picked on the card is not linked to it: it shows as the message it is', async () => {
+    const { r, asked } = await askDecisions()
+    await r.send('c1', 'busca remota, até sexta', [], asked.threadId)
+    await r.idle()
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(db.message(asked.id)?.run?.answerMessage).toBeUndefined()
   })
 
   it('ignores answers to a question already sent, out of range, or to an unknown option', async () => {

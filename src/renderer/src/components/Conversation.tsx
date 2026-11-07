@@ -13,6 +13,7 @@ import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import { canEditChannel,
   agentById,
   askerIn,
+  messagesIn,
   attachedTo,
   conversationIndex,
   initials,
@@ -86,7 +87,7 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { AgentProposal, ProposalCard } from './Tuca'
 import { FoldToggle } from './Fold'
-import { AnswersSummary, AskCard } from './Decisions'
+import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
@@ -242,7 +243,10 @@ const NO_REPLIES: Message[] = []
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
-export function MessageList({ messages, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+  // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
+  const answers = useStore((s) => cardAnswers(messagesIn(s, conversationId)))
+  const messages = useMemo(() => asShown(all, answers), [all, answers])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
