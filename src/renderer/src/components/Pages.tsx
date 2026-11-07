@@ -71,6 +71,7 @@ import {
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
 import { voiceRefusal } from '../../../shared/voice'
+import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
@@ -252,6 +253,9 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const channels = useStore((s) => s.conversations.filter((c) => c.kind === 'channel'))
   const handles = useStore((s) => s.agents.map((a) => [a.id, a.handle] as const))
   const notes = useStore((s) => (id ? s.memories.filter((m) => m.scope === id && m.state === 'active').length : 0))
+  const globalRules = useStore((s) => s.settings.actionRules)
+  const globalAutonomy = useStore((s) => s.settings.autonomy)
+  const globalGuard = useStore((s) => s.settings.outsideGuard)
 
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
   const [chosen, setChosen] = useState<string[]>(() => (id ? channels.filter((c) => c.members.includes(id)).map((c) => c.id) : []))
@@ -531,6 +535,24 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   })}
                 </div>
               )}
+            </Card>
+          )}
+
+          {pane('ferramentas') && (
+            <Card
+              title={L('Autonomia', 'Autonomy')}
+              lead={`${L(
+                `Até onde ${draft.name || 'o agente'} vai sozinho e o que pede sua aprovação antes, com um botão na conversa. Ler e investigar nunca pede.`,
+                `How far ${draft.name || 'the agent'} goes on its own and what asks for your approval first, with a button in the conversation. Reading and looking into things never asks.`
+              )}${isNew || !admin ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
+            >
+              <AutonomyControls
+                own={{ autonomy: draft.autonomy, actionRules: draft.actionRules, outsideGuard: draft.outsideGuard }}
+                inherited={{ autonomy: globalAutonomy, actionRules: globalRules, outsideGuard: globalGuard }}
+                perAgent
+                readOnly={!admin}
+                onChange={(p) => (isNew ? patch(p) : (setDraft((d) => ({ ...d, ...p })), patchAgent(draft.id, p)))}
+              />
             </Card>
           )}
 
@@ -1014,6 +1036,111 @@ function LentFolders({ agentId }: { agentId: string }): ReactNode {
   )
 }
 
+// How far an agent goes on its own (in Settings, every agent): a level, the outside-content guard, and a rule
+// per kind of action for whoever wants it finer. On an agent's page, `inherited` is Settings and "Padrão"
+// follows them. `readOnly`: someone who only looks at the agent.
+type Autonomous = { autonomy?: Autonomy; actionRules?: ActionRules; outsideGuard?: boolean }
+
+function AutonomyControls({ own, inherited, perAgent, readOnly, onChange }: { own: Autonomous; inherited?: Autonomous; perAgent?: boolean; readOnly?: boolean; onChange: (patch: Autonomous) => void }): ReactNode {
+  const level = own.autonomy
+  const effective: Autonomy = level ?? inherited?.autonomy ?? 'normal'
+  const guard = own.outsideGuard ?? inherited?.outsideGuard ?? true
+  const pick = async (next: Autonomy | undefined): Promise<void> => {
+    if ((next ?? inherited?.autonomy) === 'free' && effective !== 'free') {
+      const ok = await confirmDialog({
+        title: L('Deixar agir sem travas?', 'Let it act with no guardrails?'),
+        body: L(
+          'Envia, apaga, publica, paga e clica sem te perguntar. Continua pedindo o que você marcou como alto risco e, com a proteção ligada, o que vai pra fora depois de ler algo de fora. Tudo fica nos passos de cada resposta.',
+          'It sends, deletes, publishes, pays and clicks without asking you. It still asks for what you marked high risk and, with the guard on, for what goes out after reading something from outside. Everything stays in each reply’s steps.'
+        ),
+        confirm: L('Sem travas', 'No guardrails'),
+        danger: true
+      })
+      if (!ok) return
+    }
+    onChange({ autonomy: next })
+  }
+  const options: (Autonomy | 'default')[] = perAgent ? ['default', ...AUTONOMY_LEVELS] : [...AUTONOMY_LEVELS]
+  const value = perAgent ? (level ?? 'default') : effective
+  // What a kind does when its own row says nothing: the level (the agent's or Settings'), then Settings' rule.
+  const base: Policy = perAgent ? { agentLevel: level, globalRules: inherited?.actionRules, globalLevel: inherited?.autonomy } : { globalLevel: own.autonomy }
+  return (
+    <div className="autonomy">
+      <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Autonomia', 'Autonomy')}>
+        {options.map((o) => (
+          <button key={o} role="radio" aria-checked={value === o} className={value === o ? 'is-active' : ''} disabled={readOnly} onClick={() => value !== o && void pick(o === 'default' ? undefined : o)}>
+            {o === 'default' ? L('Padrão', 'Default') : autonomyLabel(o)}
+          </button>
+        ))}
+      </div>
+      <p className="muted small">
+        {autonomyHint(effective)}
+        {effective === 'free' && guard ? ` ${L('Com a proteção abaixo ligada, o que não tem volta depois de ler algo de fora também pede.', 'With the guard below on, what can’t be undone after reading something from outside asks too.')}` : ''}
+        {perAgent && !level ? ` ${L(`“Padrão” segue Configurações › Agentes: ${autonomyLabel(effective).toLowerCase()}.`, `“Default” follows Settings › Agents: ${autonomyLabel(effective).toLowerCase()}.`)}` : ''}
+      </p>
+      <div className="key-row">
+        <Icon name="shield" />
+        <div className="grow">
+          <strong>{L('Depois de ler algo de fora, pedir antes do que não tem volta', 'After reading something from outside, ask before what can’t be undone')}</strong>
+          <p className="muted small">
+            {L(
+              'Um e-mail, uma página ou uma issue podem trazer instruções escritas por outra pessoa. Com isso ligado, depois de ler algo assim, enviar, publicar, pagar, apagar e clicar no que é arriscado pedem sua aprovação, mesmo onde uma regra deixa fazer sozinho.',
+              'An email, a page or an issue can carry instructions someone else wrote. With this on, after reading something like that, sending, publishing, paying, deleting and risky clicks ask for your approval, even where a rule lets it do them alone.'
+            )}
+          </p>
+        </div>
+        <Toggle on={guard} onChange={(v) => !readOnly && onChange({ outsideGuard: v })} />
+      </div>
+      <details className="autonomy__rules">
+        <summary>{L('Ajustar ação por ação', 'Fine-tune action by action')}</summary>
+        <ActionRulesList rules={own.actionRules ?? {}} fallback={(k) => actionMode(k, base)} readOnly={readOnly} onChange={(actionRules) => onChange({ actionRules })} />
+      </details>
+    </div>
+  )
+}
+
+// One row per action that matters, each with what the agent does about it. "Pelo nível" clears the row's own
+// rule: then the level decides, and where it says nothing (normal), the tool's class, as always.
+function ActionRulesList({ rules, fallback, readOnly, onChange }: { rules: ActionRules; fallback: (k: ActionKind) => ActionMode | undefined; readOnly?: boolean; onChange: (r: ActionRules) => void }): ReactNode {
+  const set = (k: ActionKind, m: ActionMode | undefined): void => {
+    const next: ActionRules = { ...rules }
+    if (m) next[k] = m
+    else delete next[k]
+    onChange(next)
+  }
+  return (
+    <div className="grants rules">
+      {ACTION_KINDS.map((k) => {
+        const own = rules[k]
+        const by = fallback(k)
+        const value: ActionMode | 'default' = own ?? 'default'
+        const options: (ActionMode | 'default')[] = ['default', 'ask', 'auto', 'off']
+        return (
+          <div key={k} className="grant">
+            <div className="grant__name">
+              <Icon name="shield" size={15} />
+              <div>
+                <strong>{kindLabel(k)}</strong>
+                <span className="muted small">
+                  {actionHint(k)}
+                  {!own ? ` · ${L('pelo nível', 'by the level')}: ${by ? modeLabel(by).toLowerCase() : k === 'browser' || k === 'apps' ? modeLabel('ask').toLowerCase() : L('pede só se a ferramenta for sensível', 'asks only if the tool is sensitive')}` : ''}
+                </span>
+              </div>
+            </div>
+            <div className="segmented" role="radiogroup" aria-label={kindLabel(k)}>
+              {options.map((o) => (
+                <button key={o} role="radio" aria-checked={value === o} className={value === o ? 'is-active' : ''} disabled={readOnly} onClick={() => set(k, o === 'default' ? undefined : o)}>
+                  {o === 'default' ? L('Pelo nível', 'By level') : modeLabel(o)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function Card({ title, lead, action, children }: { title: string; lead?: string; action?: ReactNode; children: ReactNode }): ReactNode {
   return (
     <div className="card">
@@ -1232,7 +1359,7 @@ export function HistoryRow({ id }: { id: string }): ReactNode {
     <div className="table__row history-row">
       {agent && <AgentAvatar agent={agent} size={22} />}
       <span className="history-row__what">
-        {toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
+        {a.connectorId === COMPUTADOR ? shellActions(String(a.args['command'] ?? '')).map(kindLabel).join(', ') || toolWords(a.tool) : toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
       </span>
       {a.outcome && <span className="muted small history-row__outcome" title={a.outcome}>{a.outcome}</span>}
       <span className={`tag ${a.state === 'approved' ? 'tag--ok' : a.state === 'refused' ? 'tag--danger' : ''}`}>{a.state === 'approved' ? L('aprovado', 'approved') : a.state === 'refused' ? L('recusado', 'refused') : L('expirado', 'expired')}</span>
@@ -2214,6 +2341,18 @@ export function SettingsPage(): ReactNode {
             </Field>
             {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
             {settings.routerModel === 'jev' && work && <OutsideGateway what={L('cada mensagem sem @menção vai pra TypeSafe escolher quem responde.', 'every message without an @mention goes to TypeSafe to pick who replies.')} />}
+          </Card>
+        )}
+
+        {pane('agentes') && (
+          <Card
+            title={L('Autonomia', 'Autonomy')}
+            lead={L(
+              'Pra todos os agentes: até onde eles vão sozinhos e o que pede sua aprovação antes, com um botão na conversa. Na página de cada agente dá pra mudar só pra ele. Ler e investigar nunca pede.',
+              'For every agent: how far they go on their own and what asks for your approval first, with a button in the conversation. On each agent’s page you can change it for that agent only. Reading and looking into things never asks.'
+            )}
+          >
+            <AutonomyControls own={{ autonomy: settings.autonomy, actionRules: settings.actionRules, outsideGuard: settings.outsideGuard }} onChange={(p) => updateSettings(p)} />
           </Card>
         )}
 
