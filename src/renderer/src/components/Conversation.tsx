@@ -4,6 +4,7 @@ import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
+import { asSaid, saidAt } from '../../../shared/types'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -203,15 +204,16 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
   const stick = useRef(true)
   const [farFromBottom, setFarFromBottom] = useState(false)
   const { messages, replies } = useMemo(() => {
-    if (!threads) return { messages: all, replies: undefined }
+    const said = asSaid(all)
+    if (!threads) return { messages: said, replies: undefined }
     const replies = new Map<string, Message[]>()
-    for (const m of all) {
+    for (const m of said) {
       if (!m.threadId) continue
       const list = replies.get(m.threadId)
       if (list) list.push(m)
       else replies.set(m.threadId, [m])
     }
-    return { messages: all.filter((m) => !m.threadId), replies }
+    return { messages: said.filter((m) => !m.threadId), replies }
   }, [all, threads])
   // In a DM, whose it is (for the empty state).
   const dmName = useStore((s) => {
@@ -458,7 +460,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
                 {L('no seu computador', 'on your computer')}
               </span>
             )}
-            <span className="msg__time">{time(message.at)}</span>
+            <span className="msg__time">{time(saidAt(message))}</span>
           </div>
         )}
         {message.run && <RunSteps message={message} />}
@@ -636,7 +638,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
   const last = done.at(-1)
   // New: what others said after I last had the thread open (while it's open, nothing is).
   const seen = useStore((s) => s.threadSeen[message.id] ?? 0)
-  const fresh = open ? 0 : done.filter((m) => m.author.kind !== 'me' && m.at > seen).length
+  const fresh = open ? 0 : done.filter((m) => m.author.kind !== 'me' && saidAt(m) > seen).length
   const go = (): void => openThread(message.id)
   return (
     <>
@@ -667,7 +669,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
           )}
           {!busy.length && !asks && last && (
             <span className="thread-link__when">
-              <span className="thread-link__ago">{ago(last.at)}</span>
+              <span className="thread-link__ago">{ago(saidAt(last))}</span>
               <span className="thread-link__see">{L('Ver thread', 'View thread')}</span>
             </span>
           )}

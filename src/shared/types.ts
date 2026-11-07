@@ -159,6 +159,7 @@ export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done
 export interface Run {
   status: RunStatus
   steps: Step[]
+  endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string
   steered?: boolean // stopped by "Orientar agora": the reply right after it carries on
@@ -228,6 +229,16 @@ export interface Message {
 
 // `queued` on a message of mine that waits while the router still picks who answers the one before it.
 export const ROUTING = '@router'
+
+// When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
+// started, since that's what decides what it had read: agents read each other in that order.
+export const saidAt = (m: Message): number => m.run?.endedAt ?? m.at
+
+// A conversation as people read it: in the order things were said, and whoever is still working at the end.
+export function asSaid(messages: Message[]): Message[] {
+  const working = (m: Message): boolean => m.run?.status === 'working'
+  return [...messages.filter((m) => !working(m)).sort((a, b) => saidAt(a) - saidAt(b)), ...messages.filter(working).sort((a, b) => a.at - b.at)]
+}
 
 // A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.
 export interface ThreadSummary {
