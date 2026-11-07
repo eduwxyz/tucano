@@ -558,6 +558,13 @@ const effort = (id: Effort, pt: string, en: string): { id: Effort; label: string
 
 export const EFFORTS: { id: Effort; label: string }[] = [effort('low', 'Baixo', 'Low'), effort('medium', 'Médio', 'Medium'), effort('high', 'Alto', 'High'), effort('xhigh', 'Máximo', 'Max')]
 
+// Behind a company gateway, Claude Code may run a model that isn't Anthropic's (DeepSeek, say). It still asks
+// every call to think (adaptive thinking), which puts such a model in its slow reasoning mode, and the
+// reasoning counts as output (a plain "oi" could pass the output cap). At low and medium effort that's
+// turned off for them; high and max keep it. Anthropic's own models are left as they are.
+export const anthropicModel = (name: string): boolean => /claude|sonnet|opus|haiku|fable/i.test(name)
+export const thinkingOff = (name: string, effort: Effort): boolean => !anthropicModel(name) && (effort === 'low' || effort === 'medium')
+
 // A model the app doesn't list, by the name a company gateway gives it: kept as "<engine>:<name>".
 export const customModel = (engine: EngineId, name: string): string => `${engine}:${name.trim()}`
 // A model to run with: a custom one with no name yet falls back to the default.
