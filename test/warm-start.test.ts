@@ -67,6 +67,17 @@ describe('while the person types', () => {
     expect(warmed).toEqual([`rewarm ${turns[0]!.session!.id}`, 'warm haiku'])
   })
 
+  it('opened without typing, starts the kept sessions but not the router', async () => {
+    const r = runner()
+    await r.typing('c1', undefined, true)
+    expect(warmed).toEqual([])
+    await r.send('c1', '@theo oi')
+    await r.idle()
+    warmed.length = 0
+    await r.typing('c1', undefined, true)
+    expect(warmed).toEqual([`rewarm ${turns[0]!.session!.id}`])
+  })
+
   it('starts nothing for a new thread, when paused, or with the router’s harness signed out', async () => {
     const r = runner()
     await r.typing('c2') // answers in threads: a new message opens a new one

@@ -236,7 +236,9 @@ export class Runner {
   // session, if its process closed; in a channel of several, the router. A first reply has no
   // session to start yet, and a mention or a pending question skips the router: then the
   // process started waits a couple of minutes and goes.
-  async typing(conversationId: string, threadId?: string): Promise<void> {
+  // `opened`: the person only opened the conversation. Its kept sessions start again, but not the router: a
+  // channel looked at without a message would hold a process for nothing.
+  async typing(conversationId: string, threadId?: string, opened = false): Promise<void> {
     const { db, engines } = this.deps
     const conv = db.conversation(conversationId)
     if (!conv || this.paused) return
@@ -263,7 +265,7 @@ export class Runner {
       const id = this.sessions.idOf(replyKey(lastAgent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
     }
-    if (settings.routerModel === JEV_MODEL) return
+    if (opened || settings.routerModel === JEV_MODEL) return
     const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
     if (!ready(model.engine)) return
     const cwd = join(this.deps.workDir, '_router')

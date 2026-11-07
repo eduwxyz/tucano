@@ -1568,6 +1568,8 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     window.addEventListener('tucano:reloading', save)
     return () => window.removeEventListener('tucano:reloading', save)
   }, [key])
+  // Opened: the agent that answers here gets its process up while the person reads.
+  useEffect(() => typing(conversationId, threadId, true), [conversationId, threadId])
   useEffect(() => {
     const draft = drafts.get(key)
     setText(draft?.text ?? '')

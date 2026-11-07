@@ -786,13 +786,14 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
 }
 
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
-// nobody needs to hear if it didn't work.
+// nobody needs to hear if it didn't work. `opened`: they only opened it (the agent's kept session
+// starts again, while they read; the router waits for them to type).
 const typed = new Map<string, number>()
-export const typing = (conversationId: string, threadId?: string): void => {
-  const where = `${conversationId}:${threadId ?? ''}`
+export const typing = (conversationId: string, threadId?: string, opened = false): void => {
+  const where = `${conversationId}:${threadId ?? ''}:${opened ? 'o' : 't'}`
   if (Date.now() - (typed.get(where) ?? 0) < 20_000) return
   typed.set(where, Date.now())
-  void call('typing', { conversationId, ...(threadId ? { threadId } : {}) }).catch(() => {})
+  void call('typing', { conversationId, ...(threadId ? { threadId } : {}), ...(opened ? { opened } : {}) }).catch(() => {})
 }
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
