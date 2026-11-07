@@ -301,7 +301,13 @@ export class Browser {
     if (!f.timer)
       f.timer = setTimeout(() => {
         f.timer = undefined
-        if (f.next && this.views.get(agentId)?.url) this.update(agentId, { frame: `data:image/jpeg;base64,${f.next}` })
+        const now = this.views.get(agentId)
+        // Only the picture goes out: the rest of the view is the same, and the page redraws just the screen.
+        if (f.next && now?.url) {
+          const frame = `data:image/jpeg;base64,${f.next}`
+          this.views.set(agentId, { ...now, frame })
+          this.deps.emit({ type: 'browser_frame', agentId, frame })
+        }
         f.next = undefined
       }, 100)
     return true

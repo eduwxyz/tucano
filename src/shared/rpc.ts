@@ -9,7 +9,8 @@ export interface Snapshot {
   settings: Settings
   agents: Agent[]
   conversations: Conversation[]
-  messages: Message[]
+  messages: Message[] // each conversation's latest, with their threads; older ones come with olderMessages
+  since?: Record<string, number> // per conversation with older messages left: from when `messages` has it whole
   connectors: Connector[]
   approvals: Approval[]
   memories: Memory[]
@@ -27,6 +28,8 @@ export interface Snapshot {
 export interface Api {
   markRead(p: { conversationId: string }): void
   snapshot(): Snapshot
+  olderMessages(p: { conversationId: string; before: number; through?: string }): { messages: Message[]; since: number } // a page from before `before` (or back to `through`, a message to show), with their threads; since: from when it's whole now, 0 once all of it is
+  threadMessages(p: { rootId: string }): Message[] // a thread whole: the message that started it and its replies
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
   typing(p: { conversationId: string; threadId?: string }): void // the person is writing there: what will answer gets ready
@@ -173,6 +176,7 @@ export type CoreEvent =
   | { type: 'memory_removed'; id: string }
   | { type: 'computer'; computer: ComputerInfo }
   | { type: 'browser'; view: BrowserView }
+  | { type: 'browser_frame'; agentId: string; frame: string } // the browser's screen as it changes, without the rest of its view
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'routine'; routine: Routine }
   | { type: 'routine_removed'; id: string }

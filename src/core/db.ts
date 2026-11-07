@@ -706,6 +706,49 @@ export class Db {
     return (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND at > ? ORDER BY at').all(conversationId, at) as Row[]).map((r) => this.toMessage(r))
   }
 
+  // What the window opens with: each conversation's latest `n` messages outside threads, the threads
+  // still going wherever they started, and every routine's request with its reply (Routines draws what
+  // ran), each with all its replies. `since`: per conversation with older ones left, from when it's whole.
+  openingMessages(n: number): { messages: Message[]; since: Record<string, number> } {
+    const ranked = 'ranked AS (SELECT id, conversation_id, thread_id, at, ROW_NUMBER() OVER (PARTITION BY conversation_id, thread_id IS NULL ORDER BY at DESC) AS n FROM messages)'
+    const rows = this.db
+      .prepare(
+        `WITH ${ranked},
+         asks AS (SELECT a.id, a.conversation_id, a.at, x.agent_id FROM messages a LEFT JOIN routines x ON x.id = a.author_id WHERE a.author_kind = 'routine'),
+         roots AS (
+           SELECT id FROM ranked WHERE thread_id IS NULL AND n <= ?
+           UNION SELECT thread_id FROM ranked WHERE thread_id IS NOT NULL AND n <= ?
+           UNION SELECT id FROM asks
+           UNION SELECT (SELECT r.id FROM messages r WHERE r.conversation_id = asks.conversation_id AND r.author_kind = 'agent' AND r.at > asks.at AND (asks.agent_id IS NULL OR r.author_id = asks.agent_id) ORDER BY r.at LIMIT 1) FROM asks
+         )
+         SELECT * FROM messages WHERE id IN (SELECT id FROM roots) OR thread_id IN (SELECT id FROM roots) ORDER BY at`
+      )
+      .all(n, n) as Row[]
+    const cut = this.db
+      .prepare(`WITH ${ranked} SELECT conversation_id, at FROM ranked WHERE thread_id IS NULL AND n = ? AND conversation_id IN (SELECT conversation_id FROM ranked WHERE thread_id IS NULL AND n = ?)`)
+      .all(n, n + 1) as Row[]
+    return { messages: rows.map((r) => this.toMessage(r)), since: Object.fromEntries(cut.map((r) => [str(r['conversation_id']), Number(r['at'])])) }
+  }
+
+  // Further back, a page at a time: the `n` messages outside threads before `before` (all of them back
+  // to `from`, when given), with their replies. `since`: from when it's whole now, 0 once all of it is.
+  messagesBefore(conversationId: string, before: number, n: number, from?: number): { messages: Message[]; since: number } {
+    const page = (
+      from === undefined
+        ? this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? ORDER BY at DESC LIMIT ?').all(conversationId, before, n)
+        : this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? AND at >= ? ORDER BY at DESC').all(conversationId, before, from)
+    ) as Row[]
+    const oldest = page.length ? Number(page.at(-1)!['at']) : Math.min(before, from ?? before)
+    const more = !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? LIMIT 1').get(conversationId, oldest)
+    const since = more ? oldest : 0
+    if (!page.length) return { messages: [], since }
+    const ids = JSON.stringify(page.map((r) => str(r['id'])))
+    const rows = this.db
+      .prepare('SELECT * FROM messages WHERE conversation_id = ? AND (id IN (SELECT value FROM json_each(?)) OR thread_id IN (SELECT value FROM json_each(?))) ORDER BY at')
+      .all(conversationId, ids, ids) as Row[]
+    return { messages: rows.map((r) => this.toMessage(r)), since }
+  }
+
   // Where the agent wrote last: while it works, the conversation of its reply.
   lastConversationOf(agentId: string): string | undefined {
     const r = this.db.prepare("SELECT conversation_id FROM messages WHERE author_kind = 'agent' AND author_id = ? ORDER BY at DESC LIMIT 1").get(agentId) as Row | undefined

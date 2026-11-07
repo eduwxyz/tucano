@@ -9,7 +9,18 @@ import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import {
   agentById,
+  askerIn,
+  attachedTo,
+  conversationIndex,
   conversationTitle,
+  lastBrowserIn,
+  loadOlder,
+  loadThread,
+  messageById,
+  repliesOf,
+  timelineOf,
+  useLiveText,
+  workingIds,
   openDialog,
   decideApproval,
   decideMemory,
@@ -41,6 +52,7 @@ import {
   SUMMARY_WINDOW,
   type Agent,
   type Approval,
+  type Artifact,
   type Conversation,
   type ImageUpload,
   type Author,
@@ -116,8 +128,16 @@ export function ConversationView({ id }: { id: string }): ReactNode {
     const all = conv.members.map((m) => agentById(s, m)).filter((a): a is Agent => !!a)
     return conv.kind === 'dm' ? all : all.filter(isTeam)
   })
-  const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
+  const timeline = useStore((s) => timelineOf(s, id))
+  // The index, not its Map: useStore's shallow compare finds no keys in a Map and would keep the first one.
+  const { replies } = useStore((s) => conversationIndex(s, id))
+  const older = useStore((s) => !!s.history[id])
   const focus = useStore((s) => (s.view?.kind === 'conversation' && s.view.id === id ? s.view.message : undefined))
+  // Opened on a message from before what's here (a routine's run, a report): it comes first.
+  const focusHere = !!focus && timeline.some((m) => m.id === focus)
+  useEffect(() => {
+    if (focus && !focusHere) void loadOlder(id, focus)
+  }, [id, focus, focusHere])
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
   const [showSummary, setShowSummary] = useState(false)
   const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
@@ -180,9 +200,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           </div>
         </header>
 
-        {showSummary && <SummaryPanel conv={conv} messages={messages.filter((m) => !m.threadId)} onClose={() => setShowSummary(false)} />}
+        {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
-        <MessageList messages={messages} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} threads />
+        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
         <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
       </section>
       {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
@@ -192,32 +212,25 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 
 const NO_REPLIES: Message[] = []
 
-// `threads`: the timeline shows only what's outside threads, and each message can start one.
-export function MessageList({ messages: all, conversationId, empty, focus, threads, lead }: { messages: Message[]; conversationId: string; empty?: boolean; focus?: string; threads?: boolean; lead?: ReactNode }): ReactNode {
+// `replies`: a timeline with threads, where each message can start one (its replies by its id).
+// `older`: there's more before the first message, loaded as the scroll gets near the top.
+export function MessageList({ messages, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const [farFromBottom, setFarFromBottom] = useState(false)
-  const { messages, replies } = useMemo(() => {
-    if (!threads) return { messages: all, replies: undefined }
-    const replies = new Map<string, Message[]>()
-    for (const m of all) {
-      if (!m.threadId) continue
-      const list = replies.get(m.threadId)
-      if (list) list.push(m)
-      else replies.set(m.threadId, [m])
-    }
-    return { messages: all.filter((m) => !m.threadId), replies }
-  }, [all, threads])
+  const [loading, setLoading] = useState(false)
+  const before = useRef<{ height: number; top: number } | null>(null) // the list as it was, while older messages come
   // In a DM, whose it is (for the empty state).
   const dmName = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return c?.kind === 'dm' && c.members[0] ? agentById(s, c.members[0])?.name : undefined
   })
 
-  // Opened on a message (a routine's run, say): scroll to it and flash it once.
+  // Opened on a message (a routine's run, say): scroll to it and flash it once. It may come a moment
+  // later, from further back.
+  const focusAt = focus ? messages.findIndex((m) => m.id === focus) : -1
   useEffect(() => {
-    const i = focus ? messages.findIndex((m) => m.id === focus) : -1
-    const el = i >= 0 ? (ref.current?.children[i + (lead ? 1 : 0)] as HTMLElement | undefined) : undefined
+    const el = focus && focusAt >= 0 ? ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(focus)}"]`) : null
     if (!el) return
     stick.current = false
     el.scrollIntoView({ block: 'center' })
@@ -225,7 +238,7 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
     const t = setTimeout(() => el.classList.remove('is-flash'), 1800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, conversationId])
+  }, [focus, conversationId, focusAt >= 0])
 
   useEffect(() => {
     if (!lead) stick.current = true
@@ -233,9 +246,48 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
 
+  // To the end when a message arrives or changes there; the rows growing on their own (a reply
+  // streaming, an image loading) are watched below, so a word streamed doesn't lay the list out again.
+  const last = messages.at(-1)
   useLayoutEffect(() => {
     const el = ref.current
     if (el && stick.current) el.scrollTop = el.scrollHeight
+  }, [last, messages.length])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const watch = new ResizeObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight
+    })
+    for (const row of el.children) watch.observe(row)
+    return () => watch.disconnect()
+  })
+
+  // Older messages came in above: what was on screen stays where it was (unless the browser kept it already).
+  const first = messages[0]?.id
+  useLayoutEffect(() => {
+    const el = ref.current
+    const was = before.current
+    before.current = null
+    if (!el || !was) return
+    const grown = el.scrollHeight - was.height
+    if (grown > 0 && Math.abs(el.scrollTop - was.top) < 2) el.scrollTop = was.top + grown
+  }, [first])
+
+  const more = (el: HTMLDivElement): void => {
+    if (!older || loading || el.scrollTop > 800) return
+    setLoading(true)
+    before.current = { height: el.scrollHeight, top: el.scrollTop }
+    void loadOlder(conversationId).finally(() => setLoading(false))
+  }
+  // Too little to scroll: the page before comes without waiting for a scroll (once per page, so a
+  // failure doesn't ask again and again).
+  const tried = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || tried.current === first) return
+    tried.current = first
+    more(el)
   })
 
   // A thread opens at its latest message, like Slack: the message that started it is a scroll up.
@@ -288,8 +340,10 @@ export function MessageList({ messages: all, conversationId, empty, focus, threa
         const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
         stick.current = fromBottom < 60
         setFarFromBottom(fromBottom > el.clientHeight / 2)
+        more(el)
       }}
     >
+      {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
       {lead}
       {messages.map((m, i) => {
         const prev = messages[i - 1]
@@ -319,6 +373,8 @@ const PLAIN_PLUGINS = [remarkGfm, remarkMentions]
 
 // Parsing is by far the most expensive part of drawing a message, so it only runs when the text changes.
 const MessageMarkdown = memo(Markdown)
+const STREAM_MS = 140 // a streaming reply's Markdown, about 7 times a second
+const NO_ATTACHED: Artifact[] = []
 
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
@@ -328,21 +384,25 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
-  const attached = useStore((s) => (message.author.kind === 'me' ? s.artifacts.filter((a) => a.messageId === message.id && a.agentId === '') : []))
+  const attached = useStore((s) => (message.author.kind === 'me' ? attachedTo(s, message.id) : NO_ATTACHED))
   // The browser shows live on the agent's latest message that used it, unless it's open on the side.
   const liveBrowser = useStore(
     (s) =>
       !!message.run?.browser &&
       !(s.panel?.kind === 'browser' && s.panel.agentId === agent?.id) &&
-      s.messages.findLast((m) => m.conversationId === message.conversationId && m.run?.browser && m.author.kind === 'agent' && m.author.id === agent?.id)?.id === message.id
+      !!agent &&
+      lastBrowserIn(s, message.conversationId, agent.id) === message.id
   )
+  // Streamed words wake only this row; while they come, the Markdown is drawn a few times a second,
+  // whole again once the reply ends.
+  const text = useLiveText(message, message.run?.status === 'working' ? STREAM_MS : 0)
 
   // The same object between renders, or every link would start over.
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
 
   if (message.author.kind === 'system') {
     return (
-      <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`}>
+      <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`} data-id={message.id}>
         <Icon name="spark" size={13} />
         <SystemText text={message.text} />
         <span className="muted">{time(message.at)}</span>
@@ -354,7 +414,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
 
   const name = agent ? agent.name : me.name
   return (
-    <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`}>
+    <article className={`msg ${agent ? 'msg--agent' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
         {!grouped && (agent ? <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} /> : <MeAvatar initials={me.initials} size={34} />)}
       </div>
@@ -377,12 +437,12 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </div>
         )}
         {message.run && <RunSteps message={message} />}
-        {message.text ? (
+        {text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
-              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={agentMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={agentMarkdown}>{wikiLinks(text)}</MessageMarkdown>
             ) : (
-              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
+              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(text)}</MessageMarkdown>
             )}
           </div>
         ) : null}
@@ -455,7 +515,7 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
   const exists = useStore((s) => s.routines.some((r) => message.author.kind === 'routine' && r.id === message.author.id))
   const info = message.routine
   return (
-    <article className="msg msg--routine">
+    <article className="msg msg--routine" data-id={message.id}>
       <div className="msg__gutter">
         <span className="avatar avatar--routine" style={{ width: 34, height: 34 }}>
           <Icon name="clock" size={17} />
@@ -591,8 +651,14 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
 function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
-  const root = useStore((s) => s.messages.find((m) => m.id === rootId))
-  const replies = useStore((s) => s.messages.filter((m) => m.threadId === rootId))
+  const root = useStore((s) => messageById(s, rootId, conv.id))
+  const replies = useStore((s) => repliesOf(s, conv.id, rootId))
+  // A thread from before what's here comes from the core; only then is it gone if it isn't there.
+  const [looked, setLooked] = useState<string | null>(null)
+  useEffect(() => {
+    if (!root) void loadThread(rootId).finally(() => setLooked(rootId))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootId, !root])
   const agents = useStore((s) => s.agents)
   const [showSummary, setShowSummary] = useState(false)
   const said = replies.filter((m) => m.author.kind !== 'system' && m.run?.status !== 'working').length
@@ -654,9 +720,9 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
           <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
           <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
-      ) : (
+      ) : looked === rootId || root ? (
         <p className="empty">{L('Essa mensagem não está mais aqui.', 'That message is no longer here.')}</p>
-      )}
+      ) : null}
     </aside>
   )
 }
@@ -1463,6 +1529,8 @@ function RecordingClock({ since }: { since: number }): ReactNode {
   )
 }
 
+// The field sizes itself to its text where CSS can (styles.css: field-sizing).
+const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')
 const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'word-spacing', 'tab-size', 'text-transform', 'text-indent', 'padding']
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
@@ -1483,11 +1551,11 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const agents = useStore((s) => s.agents)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
-  // Replies at work and questions asked here: in this thread, or outside threads.
-  const here = (m: Message): boolean => m.conversationId === conversationId && m.threadId === threadId
-  const working = useStore((s) => s.messages.filter((m) => here(m) && m.author.kind === 'agent' && m.run?.status === 'working'))
+  // Replies at work and questions asked here: in this thread, or outside threads. Ids, not the
+  // messages, so a reply's steps don't redraw the field.
+  const working = useStore((s) => workingIds(s, conversationId, threadId))
   const asker = useStore((s) => {
-    const q = s.messages.findLast((m) => here(m) && m.run?.status === 'waiting_input')
+    const q = askerIn(s, conversationId, threadId)
     return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
   })
 
@@ -1579,23 +1647,28 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     }
   }, [inThread])
 
-  // The field grows with its text, up to a point; on a narrower window the same text takes more lines.
+  // The field grows with its text, up to a point. With CSS field-sizing (Electron has it) that takes no
+  // measuring on each key; elsewhere (a browser, on a server) the height is set from the text.
   const fit = (): void => {
     const el = ref.current
-    if (!el) return
+    if (!el || FIELD_SIZING) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
-    followField()
   }
   useLayoutEffect(fit, [text])
+  // The copy follows the field's size as it changes (a new line, a narrower window), and takes its
+  // type again only when the width changes (a phone's breakpoint): not on every key.
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    let width = el.clientWidth
+    let width = -1
     const watch = new ResizeObserver(() => {
-      if (el.clientWidth === width) return // only a new width changes the lines; fit's own height doesn't
-      width = el.clientWidth
-      fit()
+      if (el.clientWidth !== width) {
+        width = el.clientWidth
+        fit()
+        copyType()
+      }
+      followField()
     })
     watch.observe(el)
     return () => watch.disconnect()
@@ -1605,12 +1678,17 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // on top keeps the caret and the selection. The copy takes the field's type as computed (a phone
   // gets 16 px, and a field doesn't inherit letter spacing), its width (a scrollbar takes some) and
   // its size and its scroll, so both break the lines in the same places and scroll as far.
-  const followField = (): void => {
+  const copyType = (): void => {
     const el = ref.current
     const m = mirror.current
     if (!el || !m) return
     const field = getComputedStyle(el)
     for (const p of TYPE) m.style.setProperty(p, field.getPropertyValue(p))
+  }
+  const followField = (): void => {
+    const el = ref.current
+    const m = mirror.current
+    if (!el || !m) return
     m.style.width = `${el.clientWidth}px`
     m.style.height = `${el.clientHeight}px`
     m.scrollTop = el.scrollTop
@@ -1794,7 +1872,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
             {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
           {working.length > 0 ? (
-            <button className="btn btn--sm" onClick={() => working.forEach((m) => stopRun(m.id))}>
+            <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
             </button>
           ) : null}
