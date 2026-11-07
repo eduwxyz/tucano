@@ -6,7 +6,7 @@
 // with Undo. A message can also be kept on purpose ("Keep in the wiki"), and "guarda isso"
 // said in the conversation makes the curator keep it.
 import { L } from '../shared/lang'
-import type { Agent, Message, Settings, WikiChange, WikiOp } from '../shared/types'
+import { asSaid, saidAt, type Agent, type Message, type Settings, type WikiChange, type WikiOp } from '../shared/types'
 import { ftsQuery } from './wiki'
 import type { Wiki } from './wiki'
 
@@ -18,7 +18,7 @@ const DOC_PART = 30_000 // a long document is read in parts this size, one after
 
 export interface CuratorDeps {
   wiki: Wiki
-  db: { conversation(id: string): { id: string; kind: string; name: string; wikiCapture?: boolean } | undefined; messagesAfter(conversationId: string, at: number): Message[]; message(id: string): Message | undefined; saveMessage(m: Message): void; agents(): Agent[] }
+  db: { conversation(id: string): { id: string; kind: string; name: string; wikiCapture?: boolean } | undefined; messagesAfter(conversationId: string, at: number): Message[]; messagesSaidAfter(conversationId: string, at: number): Message[]; message(id: string): Message | undefined; saveMessage(m: Message): void; agents(): Agent[] }
   settings: () => Settings
   llm: (system: string, prompt: string) => Promise<string> // a cheap model, chosen inside; throws when none is ready
   emitMessage: (m: Message) => void
@@ -151,7 +151,7 @@ export class WikiCurator {
     return this.deps.db.agents().find((a) => a.id === id)?.name ?? L('Agente', 'Agent')
   }
   private excerpt(messages: Message[]): string {
-    return messages.map((m) => `**${this.name(m)}** (${new Date(m.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}): ${m.text.trim()}`).join('\n\n')
+    return messages.map((m) => `**${this.name(m)}** (${new Date(saidAt(m)).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}): ${m.text.trim()}`).join('\n\n')
   }
 
   private async doRead(conversationId: string): Promise<void> {
@@ -161,14 +161,16 @@ export class WikiCurator {
     const since = wiki.mark(conversationId)
     // what was already kept on purpose ("Keep in the wiki") isn't read a second time
     const kept = wiki.readMessages(conversationId)
-    const all = db.messagesAfter(conversationId, since).filter((m) => (m.author.kind === 'me' || m.author.kind === 'agent') && m.text.trim() && m.run?.status !== 'working')
+    // In the order things were said, and the mark goes by that too: a reply still at work when the
+    // conversation was last read comes after what was read then, however early it started.
+    const all = asSaid(db.messagesSaidAfter(conversationId, since)).filter((m) => (m.author.kind === 'me' || m.author.kind === 'agent') && m.text.trim() && m.run?.status !== 'working')
     const fresh = all.filter((m) => !kept.has(m.id))
-    if (!fresh.length) return all.length ? wiki.setMark(conversationId, all.at(-1)!.at) : undefined
+    if (!fresh.length) return all.length ? wiki.setMark(conversationId, saidAt(all.at(-1)!)) : undefined
     const stretch = fresh.slice(-MAX_MESSAGES)
     const last = stretch.at(-1)!
-    if (stretch.reduce((n, m) => n + m.text.length, 0) < MIN_CHARS) return wiki.setMark(conversationId, last.at)
+    if (stretch.reduce((n, m) => n + m.text.length, 0) < MIN_CHARS) return wiki.setMark(conversationId, saidAt(last))
     await this.curate({ messages: stretch, kind: 'conversation', conversationId, force: false })
-    wiki.setMark(conversationId, last.at)
+    wiki.setMark(conversationId, saidAt(last))
   }
 
   // A message kept on purpose: with the one it answers, if it's a reply (in a thread, my last message there).

@@ -706,6 +706,11 @@ export class Db {
     return (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND at > ? ORDER BY at').all(conversationId, at) as Row[]).map((r) => this.toMessage(r))
   }
 
+  // What was said after `at`: a reply counts from when it ended (saidAt), so one that started before `at` is still here.
+  messagesSaidAfter(conversationId: string, at: number): Message[] {
+    return (this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ? AND COALESCE(json_extract(run, '$.endedAt'), at) > ? ORDER BY at`).all(conversationId, at) as Row[]).map((r) => this.toMessage(r))
+  }
+
   // Where the agent wrote last: while it works, the conversation of its reply.
   lastConversationOf(agentId: string): string | undefined {
     const r = this.db.prepare("SELECT conversation_id FROM messages WHERE author_kind = 'agent' AND author_id = ? ORDER BY at DESC LIMIT 1").get(agentId) as Row | undefined
