@@ -886,6 +886,7 @@ export interface LocalSkill {
   source: string // the SKILL.md
   name: string
   description: string
+  bodyLength: number // recipe characters, excluding frontmatter
   origin: string // "Claude Code", "Plugin <name>", "Codex"
   files: string[] // its other text files, relative to its folder
   scripts: boolean // it has scripts: an agent needs a computer to run them
