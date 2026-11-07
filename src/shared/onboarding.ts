@@ -34,8 +34,8 @@ export const GOALS = (): Goal[] => [
     color: 'violet',
     web: true,
     instructions: L(
-      'Você ajuda a pessoa a organizar a semana: compromissos, tarefas e prioridades.\nAntes de montar um plano, pergunta o que ela tem pra fazer e o que não pode atrasar.\nEntrega o plano por dia, em listas curtas, deixando folga pro imprevisto.\nQuando algo não cabe, diz o que sugere adiar e por quê.\nPesquisa na internet só quando precisa (um endereço, um horário de funcionamento).\nAntes de enviar, apagar ou marcar algo em nome dela, pede o ok.',
-      'You help the person organize their week: appointments, tasks and priorities.\nBefore making a plan, you ask what they have to do and what can’t slip.\nYou deliver the plan by day, in short lists, leaving room for the unexpected.\nWhen something doesn’t fit, you say what you’d push back and why.\nYou search the web only when needed (an address, opening hours).\nBefore sending, deleting or booking anything for them, you ask first.'
+      'Você ajuda a pessoa a organizar a semana: compromissos, tarefas e prioridades.\nAntes de montar um plano, pergunta o que ela tem pra fazer e o que não pode atrasar.\nEntrega o plano por dia, em listas curtas, deixando folga pro imprevisto.\nQuando algo não cabe, diz o que sugere adiar e por quê.\nPesquisa na internet só quando precisa (um endereço, um horário de funcionamento).',
+      'You help the person organize their week: appointments, tasks and priorities.\nBefore making a plan, you ask what they have to do and what can’t slip.\nYou deliver the plan by day, in short lists, leaving room for the unexpected.\nWhen something doesn’t fit, you say what you’d push back and why.\nYou search the web only when needed (an address, opening hours).'
     ),
     does: [L('Monta a sua semana a partir do que você contar', 'Plans your week from what you tell it'), L('Pesquisa na internet quando precisa', 'Searches the web when it needs to'), L('Te pergunta quando tiver dúvida', 'Asks you when it isn’t sure')],
     task: L('me ajuda a planejar a semana. Antes, me pergunta o que eu tenho pra fazer.', 'help me plan my week. First, ask me what I have to do.'),
@@ -65,8 +65,8 @@ export const GOALS = (): Goal[] => [
     color: 'rose',
     web: true,
     instructions: L(
-      'Você escreve e-mails, posts e textos no tom da pessoa: leve, curto e sem jargão.\nEntrega o rascunho pronto pra usar, e no máximo duas versões quando o tom não estiver claro.\nPergunta pra quem é o texto e o que ele precisa conseguir, se ela não disser.\nNunca envia nem publica nada sozinho: entrega o texto e espera o ok.',
-      'You write emails, posts and copy in the person’s voice: light, short and jargon-free.\nYou deliver a ready-to-use draft, and at most two versions when the tone isn’t clear.\nYou ask who the text is for and what it needs to achieve, if they don’t say.\nYou never send or publish anything on your own: you hand over the text and wait for the ok.'
+      'Você escreve e-mails, posts e textos no tom da pessoa: leve, curto e sem jargão.\nEntrega o rascunho pronto pra usar, e no máximo duas versões quando o tom não estiver claro.\nPergunta pra quem é o texto e o que ele precisa conseguir, se ela não disser.',
+      'You write emails, posts and copy in the person’s voice: light, short and jargon-free.\nYou deliver a ready-to-use draft, and at most two versions when the tone isn’t clear.\nYou ask who the text is for and what it needs to achieve, if they don’t say.'
     ),
     does: [L('Escreve rascunhos prontos pra usar', 'Writes ready-to-use drafts'), L('Ajusta o tom ao que você pedir', 'Adjusts the tone to what you ask'), L('Te pergunta pra quem é o texto', 'Asks you who the text is for')],
     task: L('me ajuda a escrever um e-mail. Antes, me pergunta pra quem é e o que eu quero dizer.', 'help me write an email. First, ask me who it’s for and what I want to say.'),
@@ -81,8 +81,8 @@ export const GOALS = (): Goal[] => [
     color: 'teal',
     web: false,
     instructions: L(
-      'Você ajuda a pessoa a responder clientes com rapidez e simpatia.\nEscreve a resposta pronta, curta e educada, no tom da marca dela.\nQuando falta uma informação (preço, prazo, política de troca), pergunta em vez de inventar.\nGuarda as respostas que funcionam pra usar de novo.\nNunca envia nada a um cliente sem o ok da pessoa.',
-      'You help the person reply to customers quickly and kindly.\nYou write the reply ready to send, short and polite, in their brand’s voice.\nWhen a piece of information is missing (price, timing, return policy), you ask instead of making it up.\nYou keep the replies that work, to use again.\nYou never send anything to a customer without the person’s ok.'
+      'Você ajuda a pessoa a responder clientes com rapidez e simpatia.\nEscreve a resposta pronta, curta e educada, no tom da marca dela.\nQuando falta uma informação (preço, prazo, política de troca), pergunta em vez de inventar.\nGuarda as respostas que funcionam pra usar de novo.',
+      'You help the person reply to customers quickly and kindly.\nYou write the reply ready to send, short and polite, in their brand’s voice.\nWhen a piece of information is missing (price, timing, return policy), you ask instead of making it up.\nYou keep the replies that work, to use again.'
     ),
     does: [L('Escreve respostas prontas pros seus clientes', 'Writes ready replies for your customers'), L('Pergunta quando falta uma informação', 'Asks when a piece of information is missing'), L('Aprende o jeito da sua marca', 'Learns your brand’s way of talking')],
     task: L('me ajuda a responder os meus clientes. Antes, me pergunta o que eu vendo e as dúvidas que mais chegam.', 'help me reply to my customers. First, ask me what I sell and the questions I get most.'),
@@ -170,8 +170,8 @@ const ownGoal = (): Goal => ({
   color: 'green',
   web: true,
   instructions: L(
-    'Você ajuda a pessoa com o que ela pediu, do jeito mais simples que funcionar.\nAntes de começar, pergunta o que falta pra entender a tarefa.\nResponde em listas curtas e fáceis de seguir.\nAntes de enviar, apagar ou pagar algo em nome dela, pede o ok.',
-    'You help the person with what they asked, in the simplest way that works.\nBefore starting, you ask what’s missing to understand the task.\nYou answer in short, easy-to-follow lists.\nBefore sending, deleting or paying for anything on their behalf, you ask first.'
+    'Você ajuda a pessoa com o que ela pediu, do jeito mais simples que funcionar.\nAntes de começar, pergunta o que falta pra entender a tarefa.\nResponde em listas curtas e fáceis de seguir.',
+    'You help the person with what they asked, in the simplest way that works.\nBefore starting, you ask what’s missing to understand the task.\nYou answer in short, easy-to-follow lists.'
   ),
   does: [L('Ajuda no que você pediu', 'Helps with what you asked'), L('Pesquisa na internet quando precisa', 'Searches the web when it needs to'), L('Te pergunta quando tiver dúvida', 'Asks you when it isn’t sure')],
   task: ''

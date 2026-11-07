@@ -12,6 +12,8 @@ import type { State } from '../src/renderer/src/store'
 const { window, document } = parseHTML('<!doctype html><html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true, matchMedia: () => ({ matches: true }) })
 Object.assign(window, { tucano: {} })
+// The conversation under "Ajustar com o Tuca" watches its size.
+Object.assign(globalThis, { ResizeObserver: class { observe(): void {} unobserve(): void {} disconnect(): void {} } })
 // React reads typing from the input event only where the document says it has one (linkedom doesn't).
 Object.assign(document, { oninput: null })
 
@@ -41,6 +43,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
     setupEngine: vi.fn(async (engine: string) => ({ engine, step: 'install', state: 'running' })),
     engineSetupState: vi.fn(async () => null),
     newChannel: vi.fn(async () => 'ch1'),
+    ensureTuca: vi.fn(async () => ({ conversationId: 't1' })),
     saveAgent: vi.fn(async () => {}),
     updateSettings: vi.fn(),
     navigate: vi.fn(),
@@ -262,6 +265,21 @@ describe('how far the agent goes on its own', () => {
     expect(text()).not.toContain('Nada disso acontece sem o seu ok')
   })
 
+  it('"Ajustar com o Tuca" keeps the answer when his version is used', async () => {
+    const tuca = { id: 'tuca', kind: 'tuca', name: 'Tuca', handle: 'tuca', role: '', color: 'amber', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1, used: 0, grants: {}, memory: 'auto', computer: false, archived: false } as Agent
+    const draft = { name: 'Lia', role: 'Agenda', color: 'violet', instructions: 'Organiza a semana, com mais calma.', modelId: 'sonnet', effort: 'low', web: true, grants: {} }
+    const proposal = { id: 'm1', conversationId: 't1', author: { kind: 'agent', id: 'tuca' }, text: 'Assim?', at: 1, run: { status: 'done', steps: [], agentDraft: draft } } as unknown as State['messages'][string][number]
+    fake = state({ agents: [tuca], conversations: [{ id: 't1', kind: 'dm', name: 'Tuca', members: ['tuca'] } as State['conversations'][number]], messages: { t1: [proposal] }, settings: { engines: engines({ claude: { installed: true, loggedIn: true, route: 'plan' } }) } })
+    await toAgent()
+    await click(rows()[0]!)
+    await click(/Ajustar com o Tuca/)
+    await click(/Usar esse agente/)
+    expect(text()).toContain('O que Lia faz por você')
+    expect(picked()).toContain('Me pergunta antes')
+    const saved = await create()
+    expect(saved).toMatchObject({ instructions: 'Organiza a semana, com mais calma.', autonomy: 'careful' })
+  })
+
   it("the tour's balloon promises only what the level does", () => {
     expect(askTitle('Lia')).toBe('Quando Lia precisar de você, pede aqui.')
     expect(askBody('careful')).toContain('Antes de mudar qualquer coisa')
@@ -286,7 +304,7 @@ describe('someone invited to a team', () => {
     expect(text()).toContain('Eduardo e Rafa já estão aqui')
     expect(text()).toContain('O que você fala direto com um agente só você lê. Nem Eduardo.')
     expect(text()).toContain('Nos canais, o time todo vê.')
-    expect(text()).toContain('Os agentes pedem ok antes de enviar, apagar ou pagar.')
+    expect(text()).toContain('Os agentes pedem o ok de quem decide antes do que o time combinou.')
     await click(/^Atendimento$/)
     await click(/Entrar no time/)
     expect(store.setMyName).toHaveBeenCalledWith('Marina', 'Atendimento')

@@ -9832,6 +9832,7 @@ button.agent-card__now:hover {
 /* 4. The agent. */
 .intro-does .intro-row {
   font-size: 16px;
+  padding: 11px 0;
 }
 .intro-tick {
   width: 30px;
@@ -9846,16 +9847,19 @@ button.agent-card__now:hover {
 .intro-tick .icon {
   stroke-width: 3;
 }
+/* The optional connector: one slim line with a link, under the choice. */
 .intro-offer {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 18px;
-  border-radius: 22px;
-  background: var(--i-quiet);
-  font-size: 15px;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 4px;
+  font-size: 14px;
   line-height: 1.4;
   color: var(--i-ink);
+}
+.intro-offer .intro-link {
+  font-size: 14px;
 }
 .intro-offer > .icon {
   color: var(--i-ink-2);
@@ -9865,7 +9869,7 @@ button.agent-card__now:hover {
 .autonomy-pick {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .autonomy-pick__q {
   font-size: 17px;
@@ -9874,7 +9878,7 @@ button.agent-card__now:hover {
 .autonomy-pick__rows {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
 .autonomy-pick__row {
   display: flex;

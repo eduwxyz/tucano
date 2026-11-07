@@ -10,12 +10,13 @@ import { CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, 
 import type { ToolDef } from './gateway'
 import { describeQuestions, questionsOf } from '../shared/questions'
 import { osOf, shellCommand, systemName } from './platform'
+import { levelOf, policyOf, type Autonomy } from '../shared/actions'
 
 export const HISTORY_LIMIT = 30
 
 export type PromptOpts = {
   agent: Agent
-  settings: Pick<Settings, 'workspaceName' | 'context'>
+  settings: Pick<Settings, 'workspaceName' | 'context' | 'autonomy'>
   conversation: Conversation
   peers: Agent[]
   memories?: { aboutMe: Memory[]; own: Memory[]; searchable?: number }
@@ -131,10 +132,7 @@ export function systemPrompt(opts: PromptOpts): string {
           `- Quando descobrir um jeito de fazer algo que vale repetir (resolveu em vários passos, saiu de um beco sem saída, ${me} corrigiu você), proponha uma skill com propor_skill, ou uma mudança numa sua. Ela só vale depois que ${me} aprovar.`,
           `- When you find a way of doing something worth repeating (you solved it in several steps, got out of a dead end, ${me} corrected you), propose a skill with propor_skill, or a change to one of yours. It only counts once ${me} approves it.`
         ),
-      L(
-        `- Suas outras ferramentas são as que ${me} liberou pra você. Ações sensíveis não rodam na hora: viram um pedido de aprovação, e você recebe o resultado depois da decisão.`,
-        `- Your other tools are the ones ${me} granted you. Sensitive actions don't run right away: they become an approval request, and you get the result after the decision.`
-      ),
+      toolsLine(me, levelOf(policyOf(agent, settings))),
       connectors && readingData(me),
       hasComputer
         ? L('- Não diga que fez algo que nenhuma ferramenta sua fez.', "- Don't say you did something none of your tools did.")
@@ -212,6 +210,17 @@ function peopleSection(people: Person[]): string {
 
 // Reading a channel, a history, logs or a table: only the window the task needs, and no waiting by hand.
 // Without it an agent asked about "the alarm" pages through the whole channel and sleeps on slow queries.
+// What waits for an approval at the agent's autonomy level (src/shared/actions.ts), in one line: the
+// gateway holds the call either way and its result says so; this keeps the agent from promising,
+// or asking in words, what the level already decides.
+export function toolsLine(me: string, level: Autonomy): string {
+  const granted = L(`- Suas outras ferramentas são as que ${me} liberou pra você.`, `- Your other tools are the ones ${me} granted you.`)
+  const after = L('e você recebe o resultado depois da decisão.', 'and you get the result after the decision.')
+  if (level === 'careful') return `${granted} ${L(`${me} quer aprovar tudo que muda algo: escrever, enviar, apagar, commit, push. Essas ações não rodam na hora: viram um pedido de aprovação,`, `${me} wants to approve anything that changes something: writing, sending, deleting, a commit, a push. Those don't run right away: they become an approval request,`)} ${after}`
+  if (level === 'free') return `${granted} ${L(`${me} deixou você agir sem pedir aprovação. Só o que é de alto risco, ou o que vai pra fora depois de você ler algo de fora, vira um pedido de aprovação,`, `${me} lets you act without asking for approval. Only what's high risk, or what goes out after you read something from outside, becomes an approval request,`)} ${after}`
+  return `${granted} ${L('Ações sensíveis (enviar, apagar, publicar, pagar) não rodam na hora: viram um pedido de aprovação,', "Sensitive actions (sending, deleting, publishing, paying) don't run right away: they become an approval request,")} ${after}`
+}
+
 export function readingData(me: string): string {
   return [
     L(

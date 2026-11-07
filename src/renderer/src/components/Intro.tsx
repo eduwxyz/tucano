@@ -1041,14 +1041,12 @@ function Born(p: { agent: Agent; goal: Goal; patch: (a: Partial<Agent>) => void;
           <AutonomyPick name={name} value={autonomyChosen(agent.autonomy, settingsLevel)} guard={guard} onPick={(level) => p.patch({ autonomy: storedAutonomy(level, settingsLevel) })} />
           {goal.connector && (
             <div className="intro-offer">
-              <Icon name="plug" size={22} />
-              <span className="grow">
-                {goal.connector.label}
-                <br />
-                <span className="intro-muted">{connected ? L('Conectado. Só leitura, pra começar.', 'Connected. Read-only, to start.') : L('Opcional. Dá pra ligar depois.', 'Optional. You can turn it on later.')}</span>
+              <Icon name="plug" size={17} />
+              <span>
+                {goal.connector.label} <span className="intro-muted">· {connected ? L('conectado, só leitura pra começar', 'connected, read-only to start') : L('opcional', 'optional')}</span>
               </span>
               {!connected && (
-                <button className="intro-btn intro-btn--sm intro-btn--light" onClick={() => setConnecting(true)}>
+                <button className="intro-link" onClick={() => setConnecting(true)}>
                   {L('Conectar', 'Connect')}
                 </button>
               )}
@@ -1226,7 +1224,7 @@ export function GuestWelcome(): ReactNode {
                 <b>{L('O combinado', 'The deal')}</b>
                 <span>{owner && owner.id !== you ? L(`O que você fala direto com um agente só você lê. Nem ${owner.name}.`, `What you say directly to an agent only you read. Not even ${owner.name}.`) : L('O que você fala direto com um agente só você lê.', 'What you say directly to an agent only you read.')}</span>
                 <span>{L('Nos canais, o time todo vê.', 'In channels, the whole team sees.')}</span>
-                <span>{L('Os agentes pedem ok antes de enviar, apagar ou pagar.', 'Agents ask for an ok before sending, deleting or paying.')}</span>
+                <span>{L('Os agentes pedem o ok de quem decide antes do que o time combinou.', 'Agents ask whoever decides before what the team agreed on.')}</span>
               </div>
               {error && (
                 <p className="intro-note intro-note--bad" role="alert">
