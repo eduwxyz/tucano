@@ -17,7 +17,8 @@ import {
   STALE_DAYS,
   type Agent,
   type Memory,
-  isTeam
+  isTeam,
+  personScope
 } from '../store'
 import { Sheet } from './Pages'
 import { ago, AgentAvatar, Icon } from './ui'
@@ -34,6 +35,8 @@ export function MemoryPage(): ReactNode {
   const memories = useStore((s) => s.memories)
   const agents = useStore((s) => s.agents.filter(isTeam))
   const me = useStore((s) => s.me.name)
+  // "About you": this person's own memories (the core keeps them under their scope).
+  const mine = personScope(useStore((s) => s.you))
   const [tab, setTab] = useState<Tab>('all')
   const [q, setQ] = useState('')
   const [finding, setFinding] = useState(false)
@@ -48,8 +51,8 @@ export function MemoryPage(): ReactNode {
   const forgotten = memories.filter((m) => m.state === 'forgotten')
   const activeIn = (scope: string): Memory[] => memories.filter((m) => m.scope === scope && m.state === 'active' && !isStale(m)).sort((a, b) => b.confirmedAt - a.confirmedAt)
   const withNotes = agents.filter((a) => memories.some((m) => m.scope === a.id && m.state === 'active'))
-  const groups: { scope: string; agent?: Agent }[] = [{ scope: 'me' }, ...withNotes.map((a) => ({ scope: a.id, agent: a }))]
-  const shown = tab === 'all' ? groups : groups.filter((g) => g.scope === tab)
+  const groups: { scope: string; agent?: Agent }[] = [{ scope: mine }, ...withNotes.map((a) => ({ scope: a.id, agent: a }))]
+  const shown = tab === 'all' ? groups : groups.filter((g) => g.scope === (tab === 'me' ? mine : tab))
   const review = pending.length + stale.length
 
   const tabBtn = (id: Tab, label: ReactNode): ReactNode => (
@@ -158,7 +161,7 @@ export function MemoryPage(): ReactNode {
                 }
                 lead={g.agent ? L(`Só ${g.agent.name} vê.`, `Only ${g.agent.name} sees these.`) : undefined}
               >
-                {g.scope === 'me' && !q.trim() && <Add me={me} />}
+                {g.scope === mine && !q.trim() && <Add me={me} />}
                 {list.map((m) => (
                   <EditableLine key={m.id} memory={m} />
                 ))}

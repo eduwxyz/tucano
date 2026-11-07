@@ -69,9 +69,17 @@ describe('Claude Code stream', () => {
     // The address (and its token) comes from the environment: never in the arguments, which other programs can list.
     expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: { tucano: { type: 'http', url: '${TUCANO_MCP_URL}' } } })
     expect(args.join(' ')).not.toContain('/mcp/abc')
-    expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__tucano')
+    expect(args.slice(args.indexOf('--allowedTools') + 1)).toEqual(['mcp__tucano', 'ToolSearch'])
     expect(args).toContain('--strict-mcp-config')
     expect(claudeArgs({ model: 'sonnet', effort: 'low', system: 'x' })).not.toContain('--mcp-config')
+  })
+
+  it('keeps tool search on with the gateway, so connector tools stay out of every call', () => {
+    // Without ToolSearch among the tools, the CLI puts every MCP tool in every model call.
+    const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', mcpUrl: 'http://127.0.0.1:1/mcp/abc' })
+    expect(args[args.indexOf('--tools') + 1]).toBe('ToolSearch')
+    const noGateway = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', web: true })
+    expect(noGateway[noGateway.indexOf('--tools') + 1]).toBe('WebSearch,WebFetch')
   })
 
   it('runs isolated: no built-in tools, no user settings, no session, never --bare', () => {
@@ -152,8 +160,8 @@ describe('Claude Code stream', () => {
 
   it('with web, gets only the web tools, pre-allowed, and reports each search and page read', () => {
     const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', mcpUrl: 'http://127.0.0.1:1/mcp/abc', web: true })
-    expect(args[args.indexOf('--tools') + 1]).toBe('WebSearch,WebFetch')
-    expect(args.slice(args.indexOf('--allowedTools') + 1)).toEqual(['mcp__tucano', 'WebSearch', 'WebFetch'])
+    expect(args[args.indexOf('--tools') + 1]).toBe('ToolSearch,WebSearch,WebFetch')
+    expect(args.slice(args.indexOf('--allowedTools') + 1)).toEqual(['mcp__tucano', 'ToolSearch', 'WebSearch', 'WebFetch'])
     const assistant = JSON.stringify({
       type: 'assistant',
       message: {

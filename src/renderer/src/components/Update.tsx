@@ -6,7 +6,7 @@ import changelog from '../../../../CHANGELOG.md?raw'
 import { L, lang, locale } from '../../../shared/lang'
 import { newsPages, newsSince, type NewsPage } from '../../../shared/release-notes'
 import type { UpdateState } from '../../../shared/types'
-import { updateSettings, useStore } from '../store'
+import { updateSettings, useStore, workingAgents } from '../store'
 import { Modal } from './Modal'
 import { ago, Icon } from './ui'
 
@@ -41,7 +41,7 @@ function useUpdate(): UpdateState | null {
 const notes = (version?: string): string => (version ? `${RELEASES}/tag/v${version}` : RELEASES)
 
 // How many agents are in the middle of a reply: restarting now would cut them off.
-const useWorking = (): number => useStore((s) => new Set(s.messages.filter((m) => m.run?.status === 'working' && m.author.kind === 'agent').map((m) => (m.author.kind === 'agent' ? m.author.id : ''))).size)
+const useWorking = (): number => useStore((s) => workingAgents(s).size)
 
 const workingNote = (n: number): string => (n === 1 ? L('1 agente trabalhando: reinicie quando ele terminar.', '1 agent working: restart once it’s done.') : L(`${n} agentes trabalhando: reinicie quando terminarem.`, `${n} agents working: restart once they’re done.`))
 
