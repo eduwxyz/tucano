@@ -1830,6 +1830,22 @@ const api: Handlers = {
     emit({ type: 'inbox' })
   },
   purgePerson: ({ id }, ctx) => purged([people.purge(ctx.person, id)]),
+  // Leaving on one's own: gone now, with what was theirs alone. Their own line closes a moment after
+  // the answer, so the app hears that it worked.
+  leave: (_, ctx) => {
+    const id = ctx.person.id
+    const { agents, routines: given, purged: gone } = people.leave(ctx.person)
+    purged([gone])
+    for (const a of agents) emit({ type: 'agent', agent: db.agent(a)! })
+    for (const r of given) emit({ type: 'routine', routine: db.routine(r)! })
+    setTimeout(() => {
+      hub.closeFor(id)
+      viewing.delete(id)
+      toMain({ type: 'person-removed', id })
+      emitPeople()
+      emit({ type: 'inbox' })
+    }, 200)
+  },
   activity: ({ personId, kind, before }) => db.activity({ personId, kind, before }),
   inbox: (_, ctx) => people.inbox(ctx.person),
   answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),

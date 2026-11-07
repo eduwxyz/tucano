@@ -626,6 +626,24 @@ export class People {
     })
   }
 
+  // Someone leaves on their own (the phone app's "Sair deste Tucano", the account deletion app
+  // stores ask for): access ends now, and what was theirs alone goes now too, not in 30 days (their
+  // DMs, memories, own routines). What they made for the team (agents, a channel's routines) goes
+  // to the owner, as when someone is removed; what they said in channels stays the channel's. The
+  // owner can't leave their own Tucano.
+  leave(by: Person, now = Date.now()): { agents: string[]; routines: string[]; purged: Purged } {
+    if (by.role === 'owner') throw new Error(L('O dono não sai do próprio Tucano. Pra apagar tudo, desligue o servidor e apague a pasta de dados dele.', "The owner can't leave their own Tucano. To delete everything, stop the server and delete its data folder."))
+    const out = this.db.tx(() => {
+      this.db.removePerson(by.id)
+      const given = this.db.handOver(by.id)
+      const purged = { person: by.id, ...this.db.purgePerson(by.id, now) }
+      this.db.addActivity({ personId: by.id, kind: 'person.left', target: by.id, detail: { name: by.name, agents: given.agents.length, routines: given.routines.length }, at: now })
+      return { ...given, purged }
+    })
+    this.db.scrub()
+    return out
+  }
+
   // Member ⇄ admin. Only the owner touches admins (or makes one); no one, the owner.
   setRole(by: Person, id: string, role: Exclude<Role, 'owner'>): Person {
     const p = this.db.person(id)
