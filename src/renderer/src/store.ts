@@ -1,10 +1,11 @@
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
-import { useRef, useSyncExternalStore } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
+  asSaid,
   type Account,
   type AccountEngine,
   MAX_AGENT_ROUTINES,
@@ -86,7 +87,8 @@ export interface State {
   connectors: Connector[]
   lightbox: { items: { url: string; title: string; video?: boolean }[]; index: number } | null
   conversations: Conversation[]
-  messages: Message[]
+  messages: Record<string, Message[]> // per conversation, oldest first; read through messagesIn and the indexes below
+  history: Record<string, number> // per conversation with older messages still in the core: from when it's here whole
   approvals: Approval[]
   memories: Memory[]
   artifacts: Artifact[]
@@ -168,7 +170,8 @@ let state: State = {
   connectors: [],
   lightbox: null,
   conversations: [],
-  messages: [],
+  messages: {},
+  history: {},
   approvals: [],
   memories: [],
   artifacts: [],
@@ -230,6 +233,261 @@ export const getState = (): State => state
 const upsert = <T extends { id: string }>(list: T[], item: T): T[] =>
   list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item]
 
+// ---------- messages ----------
+// Kept per conversation, oldest first, so a change copies one conversation and not all of them.
+// What the screens ask of them (a thread's replies, who's at work) is worked out once per change,
+// in an index each list gets the first time something reads it.
+
+const NO_MESSAGES: Message[] = []
+export const messagesIn = (s: State, conversationId: string): Message[] => s.messages[conversationId] ?? NO_MESSAGES
+
+const byConversation = (list: Message[]): Record<string, Message[]> => {
+  const out: Record<string, Message[]> = {}
+  for (const m of list) (out[m.conversationId] ??= []).push(m)
+  return out
+}
+
+// A new message almost always goes last; one that changed stays where it was.
+function upsertMessage(list: Message[], m: Message): Message[] {
+  for (let i = list.length - 1; i >= 0; i--)
+    if (list[i]!.id === m.id) {
+      const next = list.slice()
+      next[i] = m
+      return next
+    }
+  let i = list.length
+  while (i > 0 && list[i - 1]!.at > m.at) i--
+  return [...list.slice(0, i), m, ...list.slice(i)]
+}
+
+// What came from further back joins in time order; what's here already stays (events keep it current).
+function mergeMessages(list: Message[], more: Message[]): Message[] {
+  const have = indexOf(list).byId
+  const fresh = more.filter((m) => !have.has(m.id))
+  return fresh.length ? [...list, ...fresh].sort((a, b) => a.at - b.at) : list
+}
+
+interface ConversationIndex {
+  byId: Map<string, Message>
+  timeline: Message[] // what's outside threads
+  replies: Map<string, Message[]> // a thread's first message → its replies
+  working: Message[] // replies at work, and notes still pending
+  waiting: Message[] // questions waiting on me
+  browser: Map<string, string> // an agent → its latest message that used the browser
+  receipts: Message[]
+  agentDone: boolean // some agent finished a reply here
+  shown?: { from: number; list: Message[] }
+}
+
+const indexes = new WeakMap<Message[], ConversationIndex>()
+const lastIndex = new Map<string, ConversationIndex>() // per conversation: the replies that didn't change keep their array
+const sameList = (a: Message[], b: Message[]): boolean => a.length === b.length && a.every((m, i) => m === b[i])
+
+function indexOf(list: Message[]): ConversationIndex {
+  const had = indexes.get(list)
+  if (had) return had
+  const ix: ConversationIndex = { byId: new Map(), timeline: [], replies: new Map(), working: [], waiting: [], browser: new Map(), receipts: [], agentDone: false }
+  // In the order things were said (a reply when it ended), whoever is still working at the end.
+  for (const m of asSaid(list)) {
+    ix.byId.set(m.id, m)
+    if (!m.threadId) ix.timeline.push(m)
+    else {
+      const r = ix.replies.get(m.threadId)
+      if (r) r.push(m)
+      else ix.replies.set(m.threadId, [m])
+    }
+    const status = m.run?.status
+    if (status === 'working') ix.working.push(m)
+    else if (status === 'waiting_input') ix.waiting.push(m)
+    if (m.run?.receipt) ix.receipts.push(m)
+    if (m.author.kind === 'agent') {
+      if (m.run?.browser) ix.browser.set(m.author.id, m.id)
+      if (status === 'done') ix.agentDone = true
+    }
+  }
+  // The same array for a thread that didn't change, so its row doesn't draw again.
+  const prev = list[0] && lastIndex.get(list[0].conversationId)
+  if (prev)
+    for (const [root, r] of ix.replies) {
+      const old = prev.replies.get(root)
+      if (old && sameList(old, r)) ix.replies.set(root, old)
+    }
+  indexes.set(list, ix)
+  if (list[0]) lastIndex.set(list[0].conversationId, ix)
+  return ix
+}
+
+export const conversationIndex = (s: State, conversationId: string): ConversationIndex => indexOf(messagesIn(s, conversationId))
+
+// The timeline as it shows: what's outside threads, from where it's here whole (older messages
+// kept for a routine's run or a thread wait until the scroll gets there).
+export function timelineOf(s: State, conversationId: string): Message[] {
+  const ix = conversationIndex(s, conversationId)
+  const from = s.history[conversationId] ?? 0
+  if (!from) return ix.timeline
+  if (ix.shown?.from !== from) ix.shown = { from, list: ix.timeline.filter((m) => m.at >= from) }
+  return ix.shown.list
+}
+
+export const repliesOf = (s: State, conversationId: string, rootId: string): Message[] => conversationIndex(s, conversationId).replies.get(rootId) ?? NO_MESSAGES
+
+export function messageById(s: State, id: string, conversationId?: string): Message | undefined {
+  if (conversationId) return conversationIndex(s, conversationId).byId.get(id)
+  for (const list of Object.values(s.messages)) {
+    const m = indexOf(list).byId.get(id)
+    if (m) return m
+  }
+  return undefined
+}
+
+export const isWorking = (s: State, conversationId: string): boolean => conversationIndex(s, conversationId).working.length > 0
+// The agents' replies at work in a place: in a thread, or outside threads.
+export const workingIds = (s: State, conversationId: string, threadId?: string): string[] =>
+  conversationIndex(s, conversationId)
+    .working.filter((m) => m.threadId === threadId && m.author.kind === 'agent')
+    .map((m) => m.id)
+export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
+export const lastBrowserIn = (s: State, conversationId: string, agentId: string): string | undefined => conversationIndex(s, conversationId).browser.get(agentId)
+
+// Across conversations, once per change.
+interface Everywhere {
+  workingAgents: Set<string>
+  receipts: Message[]
+  agentDone: boolean
+}
+const everywhere = new WeakMap<Record<string, Message[]>, Everywhere>()
+function across(s: State): Everywhere {
+  const had = everywhere.get(s.messages)
+  if (had) return had
+  const all: Everywhere = { workingAgents: new Set(), receipts: [], agentDone: false }
+  for (const list of Object.values(s.messages)) {
+    const ix = indexOf(list)
+    for (const m of ix.working) if (m.author.kind === 'agent') all.workingAgents.add(m.author.id)
+    all.receipts.push(...ix.receipts)
+    all.agentDone ||= ix.agentDone
+  }
+  everywhere.set(s.messages, all)
+  return all
+}
+export const workingAgents = (s: State): Set<string> => across(s).workingAgents
+export const receipts = (s: State): Message[] => across(s).receipts
+export const anyReplyDone = (s: State): boolean => across(s).agentDone
+
+// What I attached to my own messages, by message, once per change of the artifacts.
+const NO_ARTIFACTS: Artifact[] = []
+const attached = new WeakMap<Artifact[], Map<string, Artifact[]>>()
+export function attachedTo(s: State, messageId: string): Artifact[] {
+  let byMessage = attached.get(s.artifacts)
+  if (!byMessage) {
+    byMessage = new Map()
+    for (const a of s.artifacts) {
+      if (a.agentId !== '' || !a.messageId) continue
+      const list = byMessage.get(a.messageId)
+      if (list) list.push(a)
+      else byMessage.set(a.messageId, [a])
+    }
+    attached.set(s.artifacts, byMessage)
+  }
+  return byMessage.get(messageId) ?? NO_ARTIFACTS
+}
+
+// Older messages, a page at a time as the scroll gets there, or back to `through` (a message to show).
+const loadingOlder = new Map<string, Promise<void>>()
+export function loadOlder(conversationId: string, through?: string): Promise<void> {
+  const busy = loadingOlder.get(conversationId)
+  if (busy) return through ? busy.then(() => loadOlder(conversationId, through)) : busy
+  const before = state.history[conversationId]
+  if (!before) return Promise.resolve()
+  const p = call('olderMessages', { conversationId, before, ...(through ? { through } : {}) })
+    .then(({ messages, since }) =>
+      set((s) => {
+        const { [conversationId]: _was, ...history } = s.history
+        return { ...s, messages: { ...s.messages, [conversationId]: mergeMessages(messagesIn(s, conversationId), messages) }, history: since ? { ...history, [conversationId]: since } : history }
+      })
+    )
+    .catch(() => {}) // the next scroll asks again
+    .finally(() => loadingOlder.delete(conversationId))
+  loadingOlder.set(conversationId, p)
+  return p
+}
+
+// A thread from before what's here (a notification about it, say): the message that started it, and its replies.
+export async function loadThread(rootId: string): Promise<void> {
+  const list = await call('threadMessages', { rootId }).catch((): Message[] => [])
+  const id = list[0]?.conversationId
+  if (id) set((s) => ({ ...s, messages: { ...s.messages, [id]: mergeMessages(messagesIn(s, id), list) } }))
+}
+
+// ---------- streaming ----------
+// A reply's words as they stream, kept out of the state: a delta wakes only the row that shows it.
+
+const live = new Map<string, string>()
+const liveListeners = new Map<string, Set<() => void>>()
+
+function listen(map: Map<string, Set<() => void>>, key: string, l: () => void): () => void {
+  let ls = map.get(key)
+  if (!ls) map.set(key, (ls = new Set()))
+  ls.add(l)
+  return () => {
+    ls.delete(l)
+    if (!ls.size) map.delete(key)
+  }
+}
+const wake = (map: Map<string, Set<() => void>>, key: string): void => map.get(key)?.forEach((l) => l())
+
+function stream(id: string, text: string): void {
+  live.set(id, (live.get(id) ?? messageById(state, id)?.text ?? '') + text)
+  wake(liveListeners, id)
+}
+
+export const liveText = (id: string): string | undefined => live.get(id)
+
+// The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.
+export function useLiveText(m: Message, every = 0): string {
+  const subscribe = useCallback(
+    (l: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let last = 0
+      const off = listen(liveListeners, m.id, () => {
+        if (!every) return l()
+        if (timer) return
+        timer = setTimeout(
+          () => {
+            timer = undefined
+            last = Date.now()
+            l()
+          },
+          Math.max(0, last + every - Date.now())
+        )
+      })
+      return () => {
+        clearTimeout(timer)
+        off()
+      }
+    },
+    [m.id, every]
+  )
+  return useSyncExternalStore(subscribe, () => live.get(m.id) ?? m.text)
+}
+
+// ---------- browser frames ----------
+// An agent's browser sends its screen up to ten times a second: kept apart, like the streamed words.
+
+const frames = new Map<string, string>()
+const frameListeners = new Map<string, Set<() => void>>()
+
+function showFrame(agentId: string, frame: string | undefined): void {
+  if (frames.get(agentId) === frame) return
+  if (frame) frames.set(agentId, frame)
+  else frames.delete(agentId)
+  wake(frameListeners, agentId)
+}
+
+export function useFrame(agentId: string): string | undefined {
+  const subscribe = useCallback((l: () => void) => listen(frameListeners, agentId, l), [agentId])
+  return useSyncExternalStore(subscribe, () => frames.get(agentId))
+}
+
 // ---------- core sync ----------
 
 // My name: the owner's is the settings' (what the agents have always called them); anyone else's, theirs.
@@ -245,13 +503,15 @@ function withSettings(s: State, settings: Settings): State {
 }
 
 function apply(e: CoreEvent): void {
+  // Streamed words and the browser's screen come many times a second: they wake only what shows them.
+  if (e.type === 'delta') return stream(e.id, e.text)
+  if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   set((s) => {
     switch (e.type) {
       case 'message': {
-        return { ...s, messages: upsert(s.messages, e.message) }
+        const id = e.message.conversationId
+        return { ...s, messages: { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) } }
       }
-      case 'delta':
-        return { ...s, messages: s.messages.map((m) => (m.id === e.id ? { ...m, text: m.text + e.text } : m)) }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
       case 'conversation': {
@@ -285,10 +545,13 @@ function apply(e: CoreEvent): void {
         const left = s.conversations.filter((c) => c.id !== e.id)
         const here = s.view?.kind === 'conversation' && s.view.id === e.id
         const first = left.find((c) => c.kind === 'channel') ?? left[0]
+        const { [e.id]: _gone, ...messages } = s.messages
+        const { [e.id]: _from, ...history } = s.history
         return {
           ...s,
           conversations: left,
-          messages: s.messages.filter((m) => m.conversationId !== e.id),
+          messages,
+          history,
           view: here ? (first ? { kind: 'conversation', id: first.id } : { kind: 'new-agent' }) : s.view,
           panel: here ? null : s.panel
         }
@@ -309,6 +572,9 @@ function apply(e: CoreEvent): void {
         return { ...s, inbox: e.inbox ?? s.inbox }
     }
   })
+  // A full message carries all its text so far: what streamed before it is in there.
+  if (e.type === 'message' && live.delete(e.message.id)) wake(liveListeners, e.message.id)
+  if (e.type === 'browser') showFrame(e.view.agentId, e.view.frame)
 }
 
 export async function start(): Promise<void> {
@@ -331,6 +597,7 @@ export async function start(): Promise<void> {
   })
   await connect(apply)
   const snap = await call('snapshot')
+  for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
     const view = s.view ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
@@ -343,7 +610,8 @@ export async function start(): Promise<void> {
       view,
       agents: snap.agents,
       conversations: snap.conversations,
-      messages: snap.messages,
+      messages: byConversation(snap.messages),
+      history: snap.since ?? {},
       connectors: snap.connectors,
       approvals: snap.approvals,
       memories: snap.memories,
@@ -586,13 +854,14 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
 }
 
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
-// nobody needs to hear if it didn't work.
+// nobody needs to hear if it didn't work. `opened`: they only opened it (the agent's kept session
+// starts again, while they read; the router waits for them to type).
 const typed = new Map<string, number>()
-export const typing = (conversationId: string, threadId?: string): void => {
-  const where = `${conversationId}:${threadId ?? ''}`
+export const typing = (conversationId: string, threadId?: string, opened = false): void => {
+  const where = `${conversationId}:${threadId ?? ''}:${opened ? 'o' : 't'}`
   if (Date.now() - (typed.get(where) ?? 0) < 20_000) return
   typed.set(where, Date.now())
-  void call('typing', { conversationId, ...(threadId ? { threadId } : {}) }).catch(() => {})
+  void call('typing', { conversationId, ...(threadId ? { threadId } : {}), ...(opened ? { opened } : {}) }).catch(() => {})
 }
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })

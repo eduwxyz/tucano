@@ -48,7 +48,7 @@ describe('the Tuca in a conversation', () => {
     await gateway.start()
     systems.length = 0
     const base = fakeEngine('claude', { delayMs: 1 })
-    const claude: Engine = { id: 'claude', run: (t) => (systems.push(t.system), base.run(t)) }
+    const claude: Engine = { id: 'claude', run: (t) => (systems.push(`${t.system}\n\n${t.prompt}`), base.run(t)) }
     const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [] }) } })
   })

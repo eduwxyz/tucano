@@ -72,7 +72,7 @@ describe('1. a memory learned in a DM', () => {
       async *run(t: Turn) {
         if (t.system === memorySystem()) memoryPrompts.push(t.prompt)
         else if (t.system !== routerSystem() && t.system !== handoffSystem()) {
-          systems.push(t.system)
+          systems.push(`${t.system}\n${t.prompt}`) // memories come in the live context, at the top of the prompt
           if (t.mcpUrl && /SEGREDO/.test(t.prompt)) await callTool(t.mcpUrl, 'lembrar', { texto: 'Ana está em tratamento SEGREDO-MÉDICO', sobre: 'usuario' })
         }
         yield* base.run(t)

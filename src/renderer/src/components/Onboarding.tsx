@@ -30,6 +30,8 @@ import {
   ensureTuca,
   settleDraft,
   updateSettings,
+  anyReplyDone,
+  messagesIn,
   useStore,
   type Agent,
   type AgentColor,
@@ -726,7 +728,7 @@ function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: str
   }, [build, model, tuca?.modelId])
   useEffect(() => () => clearTimeout(typed.current), [])
   const error = session.error ?? ''
-  const messages = useStore((s) => (conv ? s.messages.filter((m) => m.conversationId === conv) : []))
+  const messages = useStore((s) => (conv ? messagesIn(s, conv) : []))
   const latest = [...messages].reverse().find((m) => m.run?.agentDraft && !m.run.agentDraft.state)?.run?.agentDraft
 
   async function start(value: string): Promise<void> {
@@ -1134,7 +1136,7 @@ const ITEMS = (): Item[] => [
     id: 'reply',
     title: L('Ver um agente trabalhando', 'Watch an agent work'),
     how: L('Mande uma tarefa e acompanhe cada passo na conversa.', 'Send a task and follow every step in the conversation.'),
-    done: (s) => s.messages.some((m) => m.author.kind === 'agent' && m.run?.status === 'done'),
+    done: anyReplyDone,
     go: firstChannel,
     action: L('Abrir canal', 'Open channel')
   },

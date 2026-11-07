@@ -43,7 +43,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
-      } else if (turn.mcpUrl && (turn.system.includes('## Pra montar agentes') || turn.system.includes('## For building agents'))) {
+      } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
         // The Tuca: asks once, then proposes a support agent.
         if (/suporte|ticket|cliente|support|customer/i.test(last)) {
           const r = await callTool(turn.mcpUrl, 'propor_agente', {

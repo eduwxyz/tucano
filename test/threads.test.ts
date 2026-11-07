@@ -408,10 +408,10 @@ describe('what a thread message sets off stays in the thread', () => {
 describe('the database', () => {
   it('an existing database gains thread_id, thread_summary and threads, and round-trips them', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'old.db')
-    // A database from before threads: the schema five migrations back (unread and people came after), with a message in it.
+    // A database from before threads: the schema six migrations back (unread, people and the indexes came after), with a message in it.
     const raw = new DatabaseSync(file)
-    for (const m of MIGRATIONS.slice(0, MIGRATIONS.length - 5)) raw.exec(m)
-    raw.exec(`PRAGMA user_version = ${MIGRATIONS.length - 5};`)
+    for (const m of MIGRATIONS.slice(0, MIGRATIONS.length - 6)) raw.exec(m)
+    raw.exec(`PRAGMA user_version = ${MIGRATIONS.length - 6};`)
     raw.exec("INSERT INTO conversations (id, kind, name, created_at) VALUES ('c1', 'channel', 'geral', 1)")
     raw.exec("INSERT INTO messages (id, conversation_id, author_kind, text, at) VALUES ('old', 'c1', 'me', 'antes das threads', 1)")
     raw.close()

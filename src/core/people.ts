@@ -258,6 +258,12 @@ export class People {
     return Number(this.db.meta('heritageAt') ?? 0)
   }
   // Where a member's view of a channel starts: one line, in place of what came before.
+  // A page of one conversation's messages (scrolling back, a thread) as this person reads it.
+  pageFor(person: Pick<Person, 'id' | 'role'>, messages: Message[]): Message[] {
+    const shown = messages.filter((m) => this.visibleAt(person, m))
+    return shown.length < messages.length ? [this.boundaryLine(messages[0]!.conversationId), ...shown] : shown
+  }
+
   private boundaryLine(conversationId: string): Message {
     return { id: `heritage:${conversationId}`, conversationId, author: { kind: 'system' }, text: L('Histórico anterior visível só pro dono', 'Earlier history visible to the owner only'), at: this.heritageAt() }
   }
@@ -316,6 +322,9 @@ export class People {
         return this.canSeeMemory(person, event.memory) ? event : undefined
       case 'browser':
         return { type: 'browser', view: this.browserFor(person, event.view) }
+      // The screen of a browser working for a conversation this person doesn't see: not theirs.
+      case 'browser_frame':
+        return !event.conversationId || this.canSeeConversation(person, this.conversationOf(event.conversationId)) ? event : undefined
       case 'computer':
         return { type: 'computer', computer: this.computerFor(person, event.computer) }
       case 'inbox':
@@ -482,6 +491,7 @@ export class People {
       ...(person.role === 'owner' && demoServer ? { demoServer } : {}),
       settings: this.settingsFor(person, base.settings),
       conversations,
+      ...(base.since ? { since: Object.fromEntries(Object.entries(base.since).filter(([id]) => seen.has(id) && !cut.has(id))) } : {}),
       messages: cut.size ? [...[...cut].map((id) => this.boundaryLine(id)), ...messages] : messages,
       connectors: base.connectors.map((c) => this.connectorFor(person, c)),
       artifacts: base.artifacts.filter((a) => seen.has(a.conversationId) && this.artifactVisible(person, a)),

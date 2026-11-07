@@ -704,7 +704,8 @@ describe('what the owner alone sees (23, 24)', () => {
     expect(pages).toContain("...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])")
     expect(pages).toContain('const tabs = SETTINGS_TABS(team, admin, owner)')
     const sidebar = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'components', 'Sidebar.tsx'), 'utf8')
-    expect(sidebar).toMatch(/\{amOwner\(s\) && s\.settings\.onboarding\?\.done && !s\.settings\.onboarding\.checklistHidden && <GettingStarted \/>\}/)
+    expect(sidebar).toMatch(/const owner = amOwner\(/)
+    expect(sidebar).toMatch(/\{owner && settings\.onboarding\?\.done && !settings\.onboarding\.checklistHidden && <GettingStarted \/>\}/)
   })
 
   it('a locked channel routine says "Me avise" is all a member changes there', () => {

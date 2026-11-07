@@ -47,6 +47,7 @@ export interface EngineStatus {
   gateway?: string // the gateway's host
   off?: boolean // the person didn't pick this harness: no agent runs on it
   soon?: boolean // the app can't run agents on it yet
+  checking?: boolean // not checked yet: the app has just opened for the first time
 }
 
 // The agents of the team: not archived, and not the Tuca, who belongs to the app.

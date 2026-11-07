@@ -145,6 +145,7 @@ describe('G. every event reaches only who may see what it is about', () => {
       memory_removed: { event: { type: 'memory_removed', id: 'k1', for: ana.id }, is: 'hidden' },
       computer: { event: { type: 'computer', computer: { agentId: 'a1', state: 'running', services: [{ name: 'segredo', port: 3000, conversationId: 'dm-ana' }] } as unknown as ComputerInfo }, is: 'own' },
       browser: { event: { type: 'browser', view: { agentId: 'a1', url: 'https://segredo', title: 'segredo', shown: true, log: [], at: 1, conversationId: 'dm-ana' } as BrowserView }, is: 'own' },
+      browser_frame: { event: { type: 'browser_frame', agentId: 'a1', frame: 'data:segredo', conversationId: 'dm-ana' }, is: 'hidden' },
       artifact: { event: { type: 'artifact', artifact: { id: 'f1', conversationId: 'dm-ana', messageId: 'm-dm', agentId: 'a1', name: 'segredo.txt', mime: 'text/plain', size: 1, at: 1 } as unknown as Artifact }, is: 'hidden' },
       routine: { event: { type: 'routine', routine }, is: 'hidden' },
       routine_removed: { event: { type: 'routine_removed', id: 'r1', for: ana.id }, is: 'hidden' },

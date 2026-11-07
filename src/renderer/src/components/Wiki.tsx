@@ -93,8 +93,12 @@ export function wikiWho(state: Pick<State, 'you' | 'me' | 'people' | 'former' | 
               : (agentById(state as State, by)?.name ?? (by === state.you || state.people.some((p) => p.id === by) || state.former?.some((p) => p.id === by) ? personName(state, by) : by))
 }
 function useWho(): (by: string) => string {
-  const state = useStore((s) => s)
-  return wikiWho(state)
+  const you = useStore((s) => s.you)
+  const me = useStore((s) => s.me)
+  const people = useStore((s) => s.people)
+  const former = useStore((s) => s.former)
+  const agents = useStore((s) => s.agents)
+  return useMemo(() => wikiWho({ you, me, people, former, agents }), [you, me, people, former, agents])
 }
 function Who({ by, size = 22 }: { by: string; size?: number }): ReactNode {
   const me = useStore((s) => s.me)

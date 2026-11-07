@@ -9,7 +9,8 @@ export interface Snapshot {
   settings: Settings
   agents: Agent[]
   conversations: Conversation[]
-  messages: Message[]
+  messages: Message[] // each conversation's latest, with their threads; older ones come with olderMessages
+  since?: Record<string, number> // per conversation with older messages left: from when `messages` has it whole
   connectors: Connector[]
   approvals: Approval[]
   memories: Memory[]
@@ -32,9 +33,11 @@ export interface Snapshot {
 export interface Api {
   markRead(p: { conversationId: string }): void
   snapshot(): Snapshot
+  olderMessages(p: { conversationId: string; before: number; through?: string }): { messages: Message[]; since: number } // a page from before `before` (or back to `through`, a message to show), with their threads; since: from when it's whole now, 0 once all of it is
+  threadMessages(p: { rootId: string }): Message[] // a thread whole: the message that started it and its replies
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
-  typing(p: { conversationId: string; threadId?: string }): void // the person is writing there: what will answer gets ready
+  typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
@@ -196,6 +199,7 @@ export type CoreEvent =
   | { type: 'memory_removed'; id: string; for?: string } // for: whose it was, when it was someone's own (no one else hears of it)
   | { type: 'computer'; computer: ComputerInfo }
   | { type: 'browser'; view: BrowserView }
+  | { type: 'browser_frame'; agentId: string; frame: string; conversationId?: string } // the browser's screen as it changes, without the rest of its view (conversationId: whom it works for, who may see it)
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'routine'; routine: Routine }
   | { type: 'routine_removed'; id: string; for?: string } // for: a DM's person, the only one who saw it
@@ -207,7 +211,7 @@ export type CoreEvent =
   | { type: 'inbox'; inbox?: Inbox } // what waits on this person changed (each gets their own)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

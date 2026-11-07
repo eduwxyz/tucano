@@ -6,6 +6,7 @@
 // a save made from an older copy of a page is refused instead of overwriting the newer one.
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
+import { readdir, stat } from 'node:fs/promises'
 import { basename, join, relative, resolve, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { L, locale } from '../shared/lang'
@@ -104,6 +105,32 @@ function walk(root: string, keep: (rel: string) => boolean = () => true): string
   }
   if (existsSync(root)) go('')
   return out
+}
+// The same, with each file's mtime, read without blocking: a big vault has thousands of files.
+async function walkTimes(root: string, keep: (rel: string) => boolean): Promise<[string, number][]> {
+  const out: [string, number][] = []
+  const go = async (rel: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(rel ? join(root, rel) : root, { withFileTypes: true })
+    } catch {
+      return // gone since it was listed
+    }
+    await Promise.all(
+      entries.map(async (e) => {
+        if (e.name.startsWith('.') || SKIP.has(e.name)) return
+        const r = rel ? `${rel}/${e.name}` : e.name
+        if (e.isDirectory()) {
+          if (keep(`${r}/`)) await go(r)
+        } else if (keep(r)) {
+          const at = await stat(join(root, r)).then((st) => Math.round(st.mtimeMs), () => undefined)
+          if (at !== undefined) out.push([r, at])
+        }
+      })
+    )
+  }
+  if (existsSync(root)) await go('')
+  return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
 }
 const pageText = (meta: Record<string, string>, body: string): string => {
   const keys = Object.entries(meta).filter(([, v]) => v !== '')
@@ -233,6 +260,16 @@ export class Wiki {
   // vault the person pointed it to (notes at its root, in folders of its own).
   private root = ''
   private importing = false
+  // Bumped when the index closes: a scan still reading the old folder drops what it found.
+  private gen = 0
+  private scanning = false
+  private rescanAfter = false
+  // The map and the log, as last read: the wiki screen asks for both on every change.
+  private indexed = 0
+  private graphKept?: { at: number; graph: ReturnType<Wiki['graph']> }
+  private logKept?: { key: string; lines: string[] }
+  // The folder's first read, when it runs behind (init with `background`).
+  loaded: Promise<void> = Promise.resolve()
   private get pagesDir(): string {
     return this.root
   }
@@ -245,7 +282,8 @@ export class Wiki {
   // A file under the root that's a page: Markdown, and not one of Tucano's own files.
   private isPage = (rel: string): boolean => (rel.endsWith('/') ? !(this.root === this.dir && rel === `${SOURCES}/`) : rel.endsWith('.md') && !(this.root === this.dir && [SCHEMA, INDEX, LOG].includes(rel)))
 
-  init(watchFolder = true): void {
+  // `background`: the folder is read without blocking (a big vault takes a while); `loaded` says when.
+  init(watchFolder = true, background = false): void {
     this.root = this.pickRoot()
     mkdirSync(this.pagesDir, { recursive: true })
     mkdirSync(join(this.dir, SOURCES), { recursive: true })
@@ -306,17 +344,34 @@ export class Wiki {
     this.db.exec('INSERT OR IGNORE INTO held_log (title, person) SELECT title, person FROM held; INSERT OR IGNORE INTO held_log (title, person) SELECT DISTINCT key, held_for FROM versions WHERE held_for IS NOT NULL')
     // A source deleted before its changes went with it: they go now.
     this.dropOrphans()
-    this.scan()
-    // Links kept by the target's lowercase title before: by its key now (see pageKey), once.
-    if (!this.getMeta('linksByKey')) {
-      for (const r of this.db.prepare('SELECT file FROM pages').all() as { file: string }[]) {
-        const path = join(this.pagesDir, r.file)
-        if (existsSync(path)) this.indexLinks(r.file, parsePage(readFileSync(path, 'utf8')))
-      }
-      this.setMeta('linksByKey', '1')
+    this.indexed++
+    if (!background) {
+      this.scan()
+      this.linksByKey()
+      this.writeIndex()
+      if (watchFolder) this.watchFolder()
+      return
     }
-    this.writeIndex()
-    if (watchFolder) this.watchFolder()
+    const gen = this.gen
+    this.loaded = this.scanAsync()
+      .then((changed) => {
+        if (gen !== this.gen) return
+        this.linksByKey()
+        this.writeIndex()
+        if (watchFolder) this.watchFolder()
+        if (changed) this.onChange()
+      })
+      .catch((e: unknown) => console.error('[wiki]', e))
+  }
+
+  // Links kept by the target's lowercase title before: by its key now (see pageKey), once. After a scan.
+  private linksByKey(): void {
+    if (this.getMeta('linksByKey')) return
+    for (const r of this.db.prepare('SELECT file FROM pages').all() as { file: string }[]) {
+      const path = join(this.pagesDir, r.file)
+      if (existsSync(path)) this.indexLinks(r.file, parsePage(readFileSync(path, 'utf8')))
+    }
+    this.setMeta('linksByKey', '1')
   }
 
   // Another folder: the index is that folder's own; what was in the old one stays there.
@@ -329,6 +384,7 @@ export class Wiki {
   }
 
   close(): void {
+    this.gen++
     this.watcher?.close()
     if (this.timer) clearTimeout(this.timer)
     this.db?.close()
@@ -340,25 +396,74 @@ export class Wiki {
       this.watcher = watch(this.pagesDir, { recursive: true }, () => {
         if (this.importing) return
         if (this.timer) clearTimeout(this.timer)
-        this.timer = setTimeout(() => {
-          if (this.scan()) (this.writeIndex(), this.onChange())
-        }, 250)
+        this.timer = setTimeout(() => this.rescan(), 250)
       })
     } catch {
       // Some file systems can't be watched: pages written by the app still index right away.
     }
   }
 
+  // A change seen in the folder: read again behind, one read at a time.
+  private rescan(): void {
+    if (this.scanning) return void (this.rescanAfter = true)
+    this.scanning = true
+    const gen = this.gen
+    void this.scanAsync()
+      .then((changed) => {
+        if (changed && gen === this.gen) (this.writeIndex(), this.onChange())
+      })
+      .catch((e: unknown) => console.error('[wiki]', e))
+      .finally(() => {
+        this.scanning = false
+        if (this.rescanAfter && gen === this.gen) (this.rescanAfter = false), this.rescan()
+      })
+  }
+
   // Brings the index in line with the folder. True when something changed.
   scan(): boolean {
-    const files = walk(this.pagesDir, this.isPage)
-    const known = new Map((this.db.prepare('SELECT file, hash, mtime FROM pages').all() as { file: string; hash: string; mtime: number }[]).map((r) => [r.file, r]))
+    const found: [string, number][] = walk(this.pagesDir, this.isPage).map((file) => [file, Math.round(statSync(join(this.pagesDir, file)).mtimeMs)])
+    const logs: string[] = []
+    const changed = this.tx(() => this.applyFiles(found, false, logs))
+    const left = this.tx(() => this.removeMissing(found, new Set(), false, logs))
+    this.appendLog(...logs)
+    return changed || left
+  }
+
+  // The same without blocking: the folder is read in the background, and the index brought in line
+  // a few hundred files at a time (each batch one transaction), with a turn for the rest between.
+  async scanAsync(): Promise<boolean> {
+    const gen = this.gen
+    const found = await walkTimes(this.pagesDir, this.isPage)
+    const logs: string[] = []
+    const gone = new Set<string>()
     let changed = false
-    for (const file of files) {
+    for (let i = 0; i < found.length; i += 200) {
+      if (gen !== this.gen) return false
+      if (this.tx(() => this.applyFiles(found.slice(i, i + 200), true, logs, gone))) changed = true
+      await new Promise((r) => setImmediate(r))
+    }
+    if (gen !== this.gen) return false
+    if (this.tx(() => this.removeMissing(found, gone, true, logs))) changed = true
+    this.appendLog(...logs)
+    return changed
+  }
+
+  // `late`: the files were listed a moment ago, so what the app wrote since is checked again
+  // instead of taken for a change made outside (or for a page that left the folder).
+  private applyFiles(found: [string, number][], late: boolean, logs: string[], gone = new Set<string>()): boolean {
+    let changed = false
+    for (const [file, seen] of found) {
       const path = join(this.pagesDir, file)
-      const mtime = Math.round(statSync(path).mtimeMs)
-      const k = known.get(file)
-      known.delete(file)
+      const k = this.db.prepare('SELECT hash, mtime FROM pages WHERE file = ?').get(file) as { hash: string; mtime: number } | undefined
+      let mtime = seen
+      if (late && k?.mtime !== mtime) {
+        try {
+          mtime = Math.round(statSync(path).mtimeMs)
+        } catch {
+          gone.add(file) // deleted since: it leaves the index below
+          continue
+        }
+      }
       if (k && k.mtime === mtime) continue
       const text = readFileSync(path, 'utf8')
       if (k && k.hash === sha(text)) {
@@ -368,18 +473,40 @@ export class Wiki {
       const before = k ? this.bodyOf(file) : null
       this.indexFile(file, text, mtime, 'outside')
       this.version(this.titleOf(file, text), 'outside', k ? 'edit' : 'create', before, parsePage(text).body)
-      this.appendLog(k ? L(`[[${this.titleOf(file, text)}]] mudou fora do Tucano`, `[[${this.titleOf(file, text)}]] changed outside Tucano`) : L(`[[${this.titleOf(file, text)}]] apareceu na pasta`, `[[${this.titleOf(file, text)}]] showed up in the folder`))
+      logs.push(k ? L(`[[${this.titleOf(file, text)}]] mudou fora do Tucano`, `[[${this.titleOf(file, text)}]] changed outside Tucano`) : L(`[[${this.titleOf(file, text)}]] apareceu na pasta`, `[[${this.titleOf(file, text)}]] showed up in the folder`))
       changed = true
     }
-    for (const file of known.keys()) {
+    return changed
+  }
+
+  // The pages indexed but no longer in the folder.
+  private removeMissing(found: [string, number][], gone: Set<string>, late: boolean, logs: string[]): boolean {
+    const listed = new Set(found.map(([f]) => f))
+    let changed = false
+    for (const { file } of this.db.prepare('SELECT file FROM pages').all() as { file: string }[]) {
+      if (listed.has(file) && !gone.has(file)) continue
+      if (late && existsSync(join(this.pagesDir, file))) continue // written by the app after the listing
       const title = (this.db.prepare('SELECT title FROM pages WHERE file = ?').get(file) as { title: string } | undefined)?.title ?? file
       this.version(title, 'outside', 'delete', this.bodyOf(file), null)
-      this.appendLog(L(`${title} saiu da pasta`, `${title} left the folder`))
+      logs.push(L(`${title} saiu da pasta`, `${title} left the folder`))
       this.unindex(file)
       this.release(title, true)
       changed = true
     }
     return changed
+  }
+
+  private tx<T>(fn: () => T): T {
+    if (this.db.isTransaction) return fn()
+    this.db.exec('BEGIN')
+    try {
+      const r = fn()
+      this.db.exec('COMMIT')
+      return r
+    } catch (e) {
+      this.db.exec('ROLLBACK')
+      throw e
+    }
   }
 
   // A page is called by its file's name, as in Obsidian (that's what [[links]] point to).
@@ -400,6 +527,7 @@ export class Wiki {
   }
 
   private indexFile(file: string, text: string, mtime: number, by: string): void {
+    this.indexed++
     const { meta, body } = parsePage(text)
     const title = this.titleOf(file, text)
     this.unindex(file)
@@ -414,6 +542,7 @@ export class Wiki {
     for (const target of new Set([...linksIn(body), ...linksIn(Object.values(meta).join('\n'))].map(pageKey))) this.db.prepare('INSERT INTO links (src, target) VALUES (?, ?)').run(file, target)
   }
   private unindex(file: string): void {
+    this.indexed++
     this.db.prepare('DELETE FROM pages WHERE file = ?').run(file)
     this.db.prepare('DELETE FROM links WHERE src = ?').run(file)
     this.db.prepare('DELETE FROM fts WHERE file = ?').run(file)
@@ -663,18 +792,30 @@ export class Wiki {
     return existsSync(p) ? readFileSync(p, 'utf8') : ''
   }
 
-  // The latest lines of the log, newest first.
+  // The latest lines of the log, newest first. Read again only when the file changed: it only grows.
   log(limit = 30): string[] {
-    return this.logLines().slice(-limit).reverse()
+    const lines = this.logLines()
+    if (this.logShown?.from !== lines || this.logShown.limit !== limit) this.logShown = { from: lines, limit, list: lines.slice(-limit).reverse() }
+    return this.logShown.list
   }
+  private logShown?: { from: string[]; limit: number; list: string[] }
   // All of the log's lines, oldest first.
   private logLines(): string[] {
     const p = join(this.dir, LOG)
-    if (!existsSync(p)) return []
-    return readFileSync(p, 'utf8')
+    let key: string
+    try {
+      const st = statSync(p)
+      key = `${p}|${st.mtimeMs}|${st.size}`
+    } catch {
+      return []
+    }
+    if (this.logKept?.key === key) return this.logKept.lines
+    const lines = readFileSync(p, 'utf8')
       .split(/\r?\n/)
       .filter((l) => l.startsWith('- '))
       .map((l) => l.slice(2))
+    this.logKept = { key, lines }
+    return lines
   }
 
   // ---------- writing ----------
@@ -827,9 +968,11 @@ export class Wiki {
     return { ...saved, reheld: true }
   }
 
-  private appendLog(line: string): void {
+  // Several lines at once, as a scan has them: the file is rewritten once, not once per page.
+  private appendLog(...lines: string[]): void {
+    if (!lines.length) return
     const when = new Date().toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' })
-    writeFileSync(join(this.dir, LOG), `${existsSync(join(this.dir, LOG)) ? readFileSync(join(this.dir, LOG), 'utf8').replace(/\n*$/, '\n') : ''}- ${when} · ${line}\n`)
+    writeFileSync(join(this.dir, LOG), `${existsSync(join(this.dir, LOG)) ? readFileSync(join(this.dir, LOG), 'utf8').replace(/\n*$/, '\n') : ''}${lines.map((l) => `- ${when} · ${l}\n`).join('')}`)
   }
 
   // índice.md: every page by kind, with its first line. Kept by Tucano, read by the agents.
@@ -946,7 +1089,14 @@ export class Wiki {
   }
 
   // The pages and their links, for the map; a link to a page not written yet is a node too.
+  // Made again only after the index changed.
   graph(): { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] } {
+    if (this.graphKept?.at === this.indexed) return this.graphKept.graph
+    const graph = this.makeGraph()
+    this.graphKept = { at: this.indexed, graph }
+    return graph
+  }
+  private makeGraph(): ReturnType<Wiki['graph']> {
     const pages = this.db.prepare('SELECT file, title, kind FROM pages').all() as { file: string; title: string; kind: string }[]
     const byFile = new Map(pages.map((p) => [p.file, p.title]))
     const byName = new Map(pages.map((p) => [pageKey(p.title), p.title]))

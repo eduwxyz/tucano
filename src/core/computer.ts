@@ -418,19 +418,19 @@ export class Computers {
 
   // Before a turn: when Docker was last seen off, whether it still is (what the person has to do), read
   // again now. A quick `docker inspect`, which fails at once with the daemon down; nothing when it was fine,
-  // so a turn never waits on Docker for nothing.
+  // so a turn never waits on Docker for nothing. A daemon still starting doesn't hold the reply past 3 s.
   async unavailable(agent: Agent): Promise<string | undefined> {
     if (agent.computerKind === 'mac' || this.infos.get(agent.id)?.state !== 'no_docker') return undefined
-    await this.refresh(agent)
+    await this.refresh(agent, 3_000)
     const info = this.infos.get(agent.id)
     return info?.state === 'no_docker' ? info.detail : undefined
   }
 
   // Reads the container's real state, for the agent page.
-  async refresh(agent: Agent): Promise<void> {
+  async refresh(agent: Agent, timeoutMs = 10_000): Promise<void> {
     if (agent.computerKind === 'mac') return this.mac.refresh(agent)
     if (!agent.computer) return this.set(agent.id, { state: 'off', services: [] })
-    const r = await docker(['inspect', '-f', '{{.State.Running}}', this.name(agent.id)], { timeoutMs: 10_000 })
+    const r = await docker(['inspect', '-f', '{{.State.Running}}', this.name(agent.id)], { timeoutMs })
     if (r.code !== 0) {
       const problem = dockerProblem(r.stderr, r.late)
       return this.set(agent.id, { state: problem ? 'no_docker' : 'stopped', detail: problem, services: [] })

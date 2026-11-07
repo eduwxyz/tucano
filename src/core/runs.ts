@@ -6,7 +6,7 @@ import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
-import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, mentioned, snip, systemPrompt, transcript, transcriptBlocks } from './context'
+import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
@@ -14,14 +14,14 @@ import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './app
 import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
+import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { LER_GUIA, readGuide } from './guide'
 import { proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
-import { textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { JEV_MODEL, routeJev } from './jev'
@@ -38,6 +38,14 @@ const GITHUB = 'github'
 const ABRIR_PR = 'abrir_pr'
 
 const MAX_CONCURRENT = 4
+// Connector tools wait behind tool search, and loading one costs a model call (1.5–2 s). The ones an
+// agent called lately are listed loaded, so its usual lookups don't pay that: at most this many.
+export const PRELOAD_TOOLS = 12
+export const PRELOAD_DAYS = 14
+// Replies to something the person just did (a message, an approval, a retry) go ahead of routines,
+// hand-offs and follow-ups, and may run past MAX_CONCURRENT up to this: four routines running
+// mustn't keep a reply to the person waiting for minutes.
+export const MAX_CONCURRENT_URGENT = 6
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
@@ -193,7 +201,7 @@ export function routedHistory(db: Pick<Db, 'message'>, windowed: Message[], anch
 }
 
 export class Runner {
-  private queue: (() => Promise<unknown>)[] = []
+  private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
@@ -276,7 +284,9 @@ export class Runner {
   // session, if its process closed; in a channel of several, the router. A first reply has no
   // session to start yet, and a mention or a pending question skips the router: then the
   // process started waits a couple of minutes and goes.
-  async typing(conversationId: string, threadId?: string): Promise<void> {
+  // `opened`: the person only opened the conversation. Its kept sessions start again, but not the router: a
+  // channel looked at without a message would hold a process for nothing.
+  async typing(conversationId: string, threadId?: string, opened = false): Promise<void> {
     const { db, engines } = this.deps
     const conv = db.conversation(conversationId)
     if (!conv || this.paused) return
@@ -292,7 +302,18 @@ export class Runner {
       if (id && ready(engine)) engines[engine].rewarm?.(id)
       return
     }
-    if (members.length < 2 || settings.routerModel === JEV_MODEL) return
+    if (members.length < 2) return
+    // In a channel, whoever answered last here is the likeliest to answer again: its session too.
+    const lastAgent = db
+      .recentMessages(conv.id, 20, conv.threads ? (threadId ?? null) : undefined)
+      .reverse()
+      .flatMap(({ author }) => (author.kind === 'agent' ? members.filter((a) => a.id === author.id) : []))[0]
+    if (lastAgent) {
+      const engine = modelInfo(lastAgent.modelId)?.engine ?? 'claude'
+      const id = this.sessions.idOf(replyKey(lastAgent.id, conv.id, threadId))
+      if (id && ready(engine)) engines[engine].rewarm?.(id)
+    }
+    if (opened || settings.routerModel === JEV_MODEL) return
     const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
     if (!ready(model.engine)) return
     const cwd = join(this.deps.workDir, '_router')
@@ -393,7 +414,7 @@ export class Runner {
         return
       }
     }
-    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }))
+    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }), true)
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -428,7 +449,7 @@ export class Runner {
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }))
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }), true)
   }
 
   // A reply paused at its budget goes on in a new reply that knows what it did:
@@ -458,7 +479,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }))
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }), true)
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -655,7 +676,7 @@ export class Runner {
           this.enqueue(() => {
             if (this.waiting.get(key) === slot) this.waiting.delete(key)
             return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger })
-          })
+          }, true)
         }
       }
       this.waiting.set(key, slot)
@@ -668,15 +689,19 @@ export class Runner {
     if (!this.followups.busy(key)) this.waiting.get(key)?.start()
   }
 
-  private enqueue(job: () => Promise<unknown>): void {
-    this.queue.push(job)
+  // `urgent`: it answers something the person just did (see MAX_CONCURRENT_URGENT).
+  private enqueue(job: () => Promise<unknown>, urgent = false): void {
+    this.queue.push({ job, urgent })
     this.pump()
   }
 
   private pump(): void {
-    while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
+    for (;;) {
       if (this.paused) return // paused: nothing new starts, queued work waits
-      const job = this.queue.shift()!
+      const urgent = this.queue.findIndex((q) => q.urgent)
+      const at = this.active < MAX_CONCURRENT ? (urgent >= 0 ? urgent : this.queue.length > 0 ? 0 : -1) : this.active < MAX_CONCURRENT_URGENT ? urgent : -1
+      if (at < 0) return
+      const { job } = this.queue.splice(at, 1)[0]!
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
         .catch((e: unknown) => console.error('[runner]', e))
@@ -980,8 +1005,9 @@ export class Runner {
             }
           }
         : undefined
+    // The app's own tools stay in the prompt; the connectors' wait behind tool search (ALWAYS_LOAD).
     const others = db.people()
-    const toolDefs: ToolDef[] = [
+    const ownTools: ToolDef[] = [
       askUserFor(others.map((p) => (p.id === db.ownerId() ? ownerName || p.name : p.name))),
       ...(accessTool ? [accessTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
@@ -994,7 +1020,18 @@ export class Runner {
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
-      ...(wiki ? WIKI_TOOLS : []),
+      ...(wiki ? WIKI_TOOLS : [])
+    ]
+    // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
+    const byStep = new Map([...exposed].map(([name, { connector, tool }]) => [`${connector.name} · ${tool.name}`, name]))
+    const preload = new Set(
+      db
+        .toolsUsedBy(agent.id, Date.now() - PRELOAD_DAYS * 86_400_000)
+        .flatMap((u) => (byStep.has(u.detail) ? [byStep.get(u.detail)!] : []))
+        .slice(0, PRELOAD_TOOLS)
+    )
+    const toolDefs: ToolDef[] = [
+      ...ownTools.map((t) => ({ ...t, _meta: { ...t._meta, ...ALWAYS_LOAD } })),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
@@ -1011,6 +1048,7 @@ export class Runner {
           }
         }
       })
+        .map((t) => (preload.has(t.name) ? { ...t, _meta: { ...ALWAYS_LOAD } } : t))
     ]
 
     const addSteps = (...steps: Step[]): void => {
@@ -1599,11 +1637,7 @@ export class Runner {
     const names = new Map<string, string[]>()
     for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
     const thread = msg.threadId ? db.message(msg.threadId) : undefined
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
-    const images: TurnImage[] = attached
-      .slice(-MAX_TURN_IMAGES)
-      .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
-    const system = systemPrompt({
+    const promptOpts: PromptOpts = {
       agent,
       settings,
       conversation: conv,
@@ -1623,27 +1657,36 @@ export class Runner {
       connectors: exposed.size > 0,
       people,
       builder: proposes
-        ? [builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId, tuca: helps, me: settings.workspaceName }), helps && helperSection()].filter(Boolean).join('\n\n')
-        : undefined
-    })
+        ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })
+        : undefined,
+      builderGuide: proposes ? [builderGuide({ tuca: helps, me: settings.workspaceName }), helps && helperSection()].filter(Boolean).join('\n\n') : undefined
+    }
+    const system = systemPrompt(promptOpts)
+    const live = liveContext(promptOpts)
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
+    const images: TurnImage[] = attached
+      .slice(-MAX_TURN_IMAGES)
+      .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
 
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
     // thread) with only what's new since. Not while another agent is still writing a message this
     // reply would see half of: that one goes the usual way, and the session takes it all next time.
     const sessionKey = replyKey(agent.id, conv.id, msg.threadId)
-    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs, gateway: !!this.deps.gateway })
+    // Which tools come loaded (_meta) stays out: a tool used for the first time in this reply mustn't end the session.
+    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs.map(({ _meta: _m, ...t }) => t), gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
-    let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, restart: !!opts.existing, task: !!task }) : undefined
+    let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
     let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
     const session = this.deps.gateway?.open(tools, plan?.token)
     const whole = { prompt: blocks.join('\n\n'), blocks, images }
-    // Resumed: the new messages' blocks, then the task's, with their images.
+    // Resumed: the live context if it changed, the new messages' blocks, then the task's, with their images.
     const since = (p: SessionPlan): typeof whole => {
       const at = p.send.map((id) => blockOf.get(id)!)
       if (task) at.push(blocks.length - 1)
-      const pos = new Map(at.map((b, i) => [b, i]))
-      const sent = at.map((i) => blocks[i]!)
+      const lead = p.live ? [live || NO_LIVE()] : []
+      const pos = new Map(at.map((b, i) => [b, lead.length + i]))
+      const sent = [...lead, ...at.map((i) => blocks[i]!)]
       return { prompt: sent.join('\n\n'), blocks: sent, images: images.flatMap((img) => (pos.has(img.block) ? [{ ...img, block: pos.get(img.block)! }] : [])) }
     }
     let input = plan?.resume ? since(plan) : whole
@@ -1721,8 +1764,8 @@ export class Runner {
       clearInterval(stall)
       flush()
       session?.close()
-      if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown })
-      if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, reply: msg.id, context: result?.context })
+      if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown, live })
+      if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, live, reply: msg.id, context: result?.context })
       this.controllers.delete(msg.id)
     }
 
@@ -1987,7 +2030,7 @@ export class Runner {
         }
       })
     }
-    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }))
+    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }), true)
   }
 
   // ---------- questions to people ----------
@@ -2052,7 +2095,8 @@ export class Runner {
         work: asked?.run?.work,
         threadId: q.threadId,
         task: L(`${by.name} não autorizou perguntar a ${who}. Siga sem essa resposta ou pergunte a ${by.name} o que fazer.`, `${by.name} didn't allow asking ${who}. Go on without that answer or ask ${by.name} what to do.`)
-      })
+      }),
+      true
     )
   }
 
@@ -2133,7 +2177,8 @@ export class Runner {
         work: asked.run?.work,
         threadId: asked.threadId,
         task: L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
-      })
+      }),
+      true
     )
   }
 

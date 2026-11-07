@@ -85,6 +85,8 @@ export const NEEDS: Record<Method, Need> = {
   artifactText: 'anyone',
   sendMessage: 'anyone',
   typing: 'anyone',
+  olderMessages: 'anyone',
+  threadMessages: 'anyone',
   stopRun: 'anyone',
   retryRun: 'anyone',
   continueRun: 'anyone',

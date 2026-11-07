@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
@@ -474,6 +474,13 @@ export const MIGRATIONS = [
   // second person, say.
   `
   CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `,
+  // What reads by thread (the quiet-thread sweep, every minute), by author (where an agent wrote
+  // last) and a reply's receipts used to scan the whole table.
+  `
+  CREATE INDEX IF NOT EXISTS messages_by_thread_id ON messages (thread_id, at);
+  CREATE INDEX IF NOT EXISTS messages_by_author ON messages (author_id, at);
+  CREATE INDEX IF NOT EXISTS receipts_by_message ON receipts (message_id);
   `
 ]
 
@@ -493,6 +500,7 @@ export class Db {
 
   constructor(private file: string) {
     this.db = new DatabaseSync(file)
+    this.keepStatements()
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
     try { this.migrate(file) }
     catch (error) { this.db.close(); throw error }
@@ -500,6 +508,19 @@ export class Db {
 
   close(): void {
     this.db.close()
+  }
+
+  // Each query is compiled once and kept: the same few dozen run many times a turn. node:sqlite
+  // resets a statement after every get/all/run, so a kept one holds no lock between uses.
+  private keepStatements(): void {
+    const prepare = this.db.prepare.bind(this.db)
+    const kept = new Map<string, StatementSync>()
+    this.db.prepare = (sql, options) => {
+      if (options) return prepare(sql, options)
+      let stmt = kept.get(sql)
+      if (!stmt) kept.set(sql, (stmt = prepare(sql)))
+      return stmt
+    }
   }
 
   // A consistent copy of the whole database, while it's in use.
@@ -740,12 +761,16 @@ export class Db {
       )
       .all(personId) as Row[]
     const members = this.db.prepare('SELECT conversation_id, agent_id FROM members').all() as { conversation_id: string; agent_id: string }[]
-    return rows.map((r) => ({
+    return rows.map((r) => this.toConversation(r, members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id)))
+  }
+
+  private toConversation(r: Row, members: string[]): Conversation {
+    return {
       id: str(r['id']),
       kind: str(r['kind']) as Conversation['kind'],
       name: str(r['name']),
       topic: r['topic'] ? str(r['topic']) : undefined,
-      members: members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id),
+      members,
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
@@ -754,7 +779,7 @@ export class Db {
       ...(r['owner'] ? { owner: str(r['owner']) } : {}),
       ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
       unread: Number(r['unread'])
-    }))
+    }
   }
 
   // `until` is the `at` of the last message the summary covers; leave it out to keep it (a hand edit).
@@ -763,8 +788,17 @@ export class Db {
     else this.db.prepare('UPDATE conversations SET summary = ?, summary_until = ?, summary_at = ? WHERE id = ?').run(summary, until, Date.now(), conversationId)
   }
 
-  conversation(id: string, personId?: string): Conversation | undefined {
-    return this.conversations(personId).find((c) => c.id === id)
+  // Just that one: it's read several times a turn, and the full list grows with every DM.
+  conversation(id: string, personId = this.ownerId()): Conversation | undefined {
+    const r = this.db
+      .prepare(
+        `SELECT c.*, (SELECT COUNT(*) FROM unread x JOIN messages m ON m.id = x.message_id WHERE x.person_id = ? AND m.conversation_id = c.id) AS unread
+         FROM conversations c WHERE c.id = ?`
+      )
+      .get(personId, id) as Row | undefined
+    if (!r) return undefined
+    const members = (this.db.prepare('SELECT agent_id FROM members WHERE conversation_id = ? ORDER BY rowid').all(id) as { agent_id: string }[]).map((m) => m.agent_id)
+    return this.toConversation(r, members)
   }
 
   // Only whose a conversation is, for checks on every event (no counts, no members).
@@ -940,13 +974,14 @@ export class Db {
   }
 
   // Threads quiet since `before`, active after `since`, with something said after their summary.
+  // From the replies (the thread index), then each one's first message: not every message, every minute.
   quietThreads(before: number, since: number): { id: string; conversationId: string; last: number }[] {
     const rows = this.db
       .prepare(
-        `SELECT r.id, r.conversation_id, MAX(m.at) AS last, COALESCE(json_extract(r.thread_summary, '$.until'), 0) AS until
-         FROM messages r JOIN messages m ON m.thread_id = r.id
-         WHERE r.thread_id IS NULL AND m.author_kind != 'system'
-         GROUP BY r.id HAVING last < ? AND last > ? AND last > until ORDER BY last`
+        `SELECT r.id, r.conversation_id, t.last, COALESCE(json_extract(r.thread_summary, '$.until'), 0) AS until
+         FROM (SELECT thread_id, MAX(at) AS last FROM messages WHERE thread_id IS NOT NULL AND author_kind != 'system' GROUP BY thread_id) t
+         CROSS JOIN messages r ON r.id = t.thread_id
+         WHERE r.thread_id IS NULL AND t.last < ? AND t.last > ? AND t.last > until ORDER BY t.last`
       )
       .all(before, since) as Row[]
     return rows.map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']), last: Number(r['last']) }))
@@ -955,6 +990,61 @@ export class Db {
   // Oldest first.
   messagesAfter(conversationId: string, at: number): Message[] {
     return (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND at > ? ORDER BY at').all(conversationId, at) as Row[]).map((r) => this.toMessage(r))
+  }
+
+  // What the window opens with: each conversation's latest `n` messages outside threads, the threads
+  // still going wherever they started, and every routine's request with its reply (Routines draws what
+  // ran), each with all its replies. `since`: per conversation with older ones left, from when it's whole.
+  openingMessages(n: number): { messages: Message[]; since: Record<string, number> } {
+    const ranked = 'ranked AS (SELECT id, conversation_id, thread_id, at, ROW_NUMBER() OVER (PARTITION BY conversation_id, thread_id IS NULL ORDER BY at DESC) AS n FROM messages)'
+    const rows = this.db
+      .prepare(
+        `WITH ${ranked},
+         asks AS (SELECT a.id, a.conversation_id, a.at, x.agent_id FROM messages a LEFT JOIN routines x ON x.id = a.author_id WHERE a.author_kind = 'routine'),
+         roots AS (
+           SELECT id FROM ranked WHERE thread_id IS NULL AND n <= ?
+           UNION SELECT thread_id FROM ranked WHERE thread_id IS NOT NULL AND n <= ?
+           UNION SELECT id FROM asks
+           UNION SELECT (SELECT r.id FROM messages r WHERE r.conversation_id = asks.conversation_id AND r.author_kind = 'agent' AND r.at > asks.at AND (asks.agent_id IS NULL OR r.author_id = asks.agent_id) ORDER BY r.at LIMIT 1) FROM asks
+         )
+         SELECT * FROM messages WHERE id IN (SELECT id FROM roots) OR thread_id IN (SELECT id FROM roots) ORDER BY at`
+      )
+      .all(n, n) as Row[]
+    const cut = this.db
+      .prepare(`WITH ${ranked} SELECT conversation_id, at FROM ranked WHERE thread_id IS NULL AND n = ? AND conversation_id IN (SELECT conversation_id FROM ranked WHERE thread_id IS NULL AND n = ?)`)
+      .all(n, n + 1) as Row[]
+    return { messages: rows.map((r) => this.toMessage(r)), since: Object.fromEntries(cut.map((r) => [str(r['conversation_id']), Number(r['at'])])) }
+  }
+
+  // Further back, a page at a time: the `n` messages outside threads before `before` (all of them back
+  // to `from`, when given), with their replies. `since`: from when it's whole now, 0 once all of it is.
+  messagesBefore(conversationId: string, before: number, n: number, from?: number): { messages: Message[]; since: number } {
+    const page = (
+      from === undefined
+        ? this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? ORDER BY at DESC LIMIT ?').all(conversationId, before, n)
+        : this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? AND at >= ? ORDER BY at DESC').all(conversationId, before, from)
+    ) as Row[]
+    const oldest = page.length ? Number(page.at(-1)!['at']) : Math.min(before, from ?? before)
+    const more = !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? LIMIT 1').get(conversationId, oldest)
+    const since = more ? oldest : 0
+    if (!page.length) return { messages: [], since }
+    const ids = JSON.stringify(page.map((r) => str(r['id'])))
+    const rows = this.db
+      .prepare('SELECT * FROM messages WHERE conversation_id = ? AND (id IN (SELECT value FROM json_each(?)) OR thread_id IN (SELECT value FROM json_each(?))) ORDER BY at')
+      .all(conversationId, ids, ids) as Row[]
+    return { messages: rows.map((r) => this.toMessage(r)), since }
+  }
+
+  // The connector tools an agent called in its replies since `since`, most used first, as each step
+  // names them ("Linear · list_issues"), with how many times.
+  toolsUsedBy(agentId: string, since: number, replies = 200): { detail: string; count: number }[] {
+    const rows = this.db.prepare("SELECT run FROM messages WHERE author_kind = 'agent' AND author_id = ? AND at > ? AND run IS NOT NULL ORDER BY at DESC LIMIT ?").all(agentId, since, replies) as Row[]
+    const counts = new Map<string, number>()
+    for (const r of rows) {
+      const steps = (JSON.parse(str(r['run'])) as { steps?: { detail?: unknown }[] }).steps ?? []
+      for (const s of steps) if (typeof s.detail === 'string' && s.detail.includes(' · ')) counts.set(s.detail, (counts.get(s.detail) ?? 0) + 1)
+    }
+    return [...counts].map(([detail, count]) => ({ detail, count })).sort((a, b) => b.count - a.count)
   }
 
   // Where the agent wrote last: while it works, the conversation of its reply.
@@ -987,10 +1077,20 @@ export class Db {
       )
   }
 
+  // The replies whose run is in one of these states, oldest first. Found in SQL: the rest of
+  // the messages are never parsed.
+  messagesWithRun(statuses: Run['status'][]): Message[] {
+    if (!statuses.length) return []
+    const rows = this.db
+      .prepare(`SELECT * FROM messages WHERE run IS NOT NULL AND json_extract(run, '$.status') IN (${statuses.map(() => '?').join(', ')}) ORDER BY at`)
+      .all(...statuses) as Row[]
+    return rows.map((r) => this.toMessage(r))
+  }
+
   // Runs that were working when the app closed can't continue: their CLI process is gone.
   interruptStaleRuns(): number {
     let n = 0
-    for (const m of this.messages()) {
+    for (const m of this.messagesWithRun(['working'])) {
       if (m.run?.status !== 'working') continue
       n++
       this.saveMessage({
@@ -1183,6 +1283,11 @@ export class Db {
     return (this.db.prepare('SELECT * FROM approvals ORDER BY created_at').all() as Row[]).map((r) => this.toApproval(r))
   }
 
+  // What the workspace switcher counts, often: only the pending ones, from their index.
+  pendingApprovals(): number {
+    return Number((this.db.prepare("SELECT COUNT(*) AS n FROM approvals WHERE state = 'pending'").get() as { n: number }).n)
+  }
+
   approval(id: string): Approval | undefined {
     const r = this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(id) as Row | undefined
     return r && this.toApproval(r)
@@ -1275,7 +1380,16 @@ export class Db {
   // ---------- artifacts ----------
 
   artifacts(): Artifact[] {
-    return (this.db.prepare('SELECT * FROM artifacts ORDER BY created_at').all() as Row[]).map((r) => ({
+    return (this.db.prepare('SELECT * FROM artifacts ORDER BY created_at').all() as Row[]).map((r) => this.toArtifact(r))
+  }
+
+  artifact(id: string): Artifact | undefined {
+    const r = this.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as Row | undefined
+    return r && this.toArtifact(r)
+  }
+
+  private toArtifact(r: Row): Artifact {
+    return {
       id: str(r['id']),
       agentId: str(r['agent_id']),
       conversationId: str(r['conversation_id']),
@@ -1286,7 +1400,7 @@ export class Db {
       source: str(r['source']),
       size: Number(r['size']),
       createdAt: Number(r['created_at'])
-    }))
+    }
   }
 
   saveArtifact(a: Artifact): void {

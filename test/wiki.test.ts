@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -102,5 +102,74 @@ describe('the agents and the wiki', () => {
     expect(linksIn('[[A]] e [[B|bê]] e [[C#seção]] ```[[D]]```')).toEqual(['A', 'B', 'C'])
     expect(summaryOf('# Título\n\n- **Cliente** de [[Marcos Lima|Marcos]].')).toBe('Cliente de Marcos.')
     expect(fileOf('a/b: c?')).toBe('a-b- c-.md')
+  })
+})
+
+describe('reading the folder behind the window', () => {
+  it('a start indexes the folder without blocking, then watches it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tucano-wiki-'))
+    const dir = join(root, 'vault')
+    mkdirSync(join(dir, '.obsidian'), { recursive: true })
+    mkdirSync(join(dir, 'Clientes'))
+    for (let i = 0; i < 40; i++) writeFileSync(join(dir, 'Clientes', `Cliente ${i}.md`), `Cliente número ${i}, ligado a [[Cliente ${(i + 1) % 40}]].\n`)
+    let changes = 0
+    const w = new Wiki({ dir, indexPath: join(root, 'wiki.db'), onChange: () => changes++ })
+    w.init(true, true)
+    expect(w.list()).toEqual([]) // nothing read yet: init returned at once
+    await w.loaded
+    expect(w.list()).toHaveLength(40)
+    expect(w.page('Cliente 3')?.kind).toBe('Clientes')
+    expect(changes).toBe(1) // the screen hears that the pages came in
+    w.close()
+
+    // Opened again with nothing changed: no change to tell.
+    const again = new Wiki({ dir, indexPath: join(root, 'wiki.db'), onChange: () => changes++ })
+    again.init(false, true)
+    await again.loaded
+    expect(again.list()).toHaveLength(40)
+    expect(changes).toBe(1)
+    again.close()
+  })
+
+  it('what the app wrote after the folder was listed is not taken for a change from outside', () => {
+    const w = fresh()
+    w.save({ title: 'Antiga', body: 'v1', ...by })
+    const listed: [string, number][] = [['Antiga.md', 1]] // as the folder was a moment ago
+    w.save({ title: 'Antiga', body: 'v2', ...by, expectedHash: w.page('Antiga')!.hash })
+    w.save({ title: 'Nova', body: 'escrita agora', ...by })
+    const inner = w as unknown as { applyFiles: (found: [string, number][], late: boolean, logs: string[]) => boolean; removeMissing: (found: [string, number][], gone: Set<string>, late: boolean, logs: string[]) => boolean }
+    expect(inner.applyFiles(listed, true, [])).toBe(false)
+    expect(inner.removeMissing(listed, new Set(), true, [])).toBe(false)
+    expect(w.page('Nova')?.body).toContain('escrita agora') // not dropped as gone from the folder
+    expect(w.history('Antiga').every((v) => v.by !== 'outside')).toBe(true)
+  })
+
+  it('a page deleted after the folder was listed leaves the index', () => {
+    const w = fresh()
+    w.save({ title: 'Some', body: 'logo some', ...by })
+    const listed: [string, number][] = [['Some.md', 1]]
+    rmSync(join(w.dir, 'pages', 'Some.md'))
+    const inner = w as unknown as { applyFiles: (found: [string, number][], late: boolean, logs: string[], gone: Set<string>) => boolean; removeMissing: (found: [string, number][], gone: Set<string>, late: boolean, logs: string[]) => boolean }
+    const gone = new Set<string>()
+    const logs: string[] = []
+    inner.applyFiles(listed, true, logs, gone)
+    expect(inner.removeMissing(listed, gone, true, logs)).toBe(true)
+    expect(w.page('Some')).toBeUndefined()
+    expect(logs).toEqual(['Some saiu da pasta'])
+  })
+
+  it('the map and the log are read again only after something changed', () => {
+    const w = fresh()
+    w.save({ title: 'A', body: 'liga a [[B]]', ...by })
+    const g1 = w.graph()
+    expect(w.graph()).toBe(g1)
+    const log1 = w.log()
+    expect(w.log()).toBe(log1)
+    w.save({ title: 'B', body: 'agora existe', ...by })
+    const g2 = w.graph()
+    expect(g2).not.toBe(g1)
+    expect(g2.nodes.find((n) => n.title === 'B')?.missing).toBeUndefined()
+    expect(w.log()).not.toBe(log1)
+    expect(w.log()[0]).toContain('B')
   })
 })

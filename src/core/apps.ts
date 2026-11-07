@@ -102,19 +102,40 @@ export async function macApps(): Promise<{ name: string; bundleId?: string; path
       return []
     }
   })]
-  // One app at a time (a broken one can't throw the others off), several at once.
-  const meta = (path: string): Promise<{ name: string; bundleId?: string; path: string }> =>
-    new Promise((resolve) =>
-      execFile('mdls', ['-name', 'kMDItemCFBundleIdentifier', '-name', 'kMDItemDisplayName', '-raw', path], { timeout: 5_000 }, (_e, stdout) => {
-        const [id = '', name = ''] = String(stdout ?? '').split('\0').map((v) => clean(v))
-        const shown = name.normalize('NFC').replace(/\.app$/, '')
-        resolve({ name: shown && shown !== '(null)' ? shown : basename(path, '.app'), ...(id && id !== '(null)' ? { bundleId: id } : {}), path })
-      })
-    )
-  const out: { name: string; bundleId?: string; path: string }[] = []
-  for (let i = 0; i < paths.length; i += 32) out.push(...(await Promise.all(paths.slice(i, i + 32).map(meta))))
+  type MacApp = { name: string; bundleId?: string; path: string }
+  const mdls = (batch: string[]): Promise<string> =>
+    new Promise((resolve) => execFile('mdls', ['-name', 'kMDItemCFBundleIdentifier', '-name', 'kMDItemDisplayName', '-raw', ...batch], { timeout: 10_000 }, (_e, stdout) => resolve(String(stdout ?? ''))))
+  // Many apps per mdls (one process each took seconds). It stops at an app Spotlight can't
+  // read: that one goes by its file's name, and the rest are asked again.
+  const read = async (batch: string[]): Promise<MacApp[]> => {
+    if (!batch.length) return []
+    const apps = parseMdls(await mdls(batch), batch)
+    if (apps?.length === batch.length) return apps
+    if (!apps) return (await Promise.all(batch.map((p) => (batch.length > 1 ? read([p]) : [{ name: basename(p, '.app'), path: p }])))).flat()
+    const stuck = batch[apps.length]!
+    return [...apps, { name: basename(stuck, '.app'), path: stuck }, ...(await read(batch.slice(apps.length + 1)))]
+  }
+  const batches: string[][] = []
+  for (let i = 0; i < paths.length; i += 40) batches.push(paths.slice(i, i + 40))
+  const out = (await Promise.all(batches.map(read))).flat()
   // The same app in two places (~/Applications and /Applications): once.
   return out.filter((a, i) => !a.bundleId || out.findIndex((b) => b.bundleId === a.bundleId) === i)
+}
+
+// What `mdls -raw` prints for several apps: two values each (bundle id, then name), split by NULs.
+// Fewer apps than asked when it stopped at one it couldn't read; undefined when the values don't
+// pair up, so one app's answer can't be told from the next one's.
+export function parseMdls(stdout: string, paths: string[]): { name: string; bundleId?: string; path: string }[] | undefined {
+  // Its complaint comes on stdout too, glued to the last value: "<first path>: could not find <path>."
+  const complaint = stdout.lastIndexOf(`${paths[0]}: could not find `)
+  const text = complaint >= 0 ? stdout.slice(0, complaint) : stdout
+  const values = text === '' ? [] : text.split('\0').map((v) => clean(v))
+  if (values.length % 2 || values.length > paths.length * 2) return undefined
+  return paths.slice(0, values.length / 2).map((path, i) => {
+    const id = values[i * 2] ?? ''
+    const shown = (values[i * 2 + 1] ?? '').normalize('NFC').replace(/\.app$/, '')
+    return { name: shown && shown !== '(null)' ? shown : basename(path, '.app'), ...(id && id !== '(null)' ? { bundleId: id } : {}), path }
+  })
 }
 
 export function agentDesktop(bin: () => string | undefined = desktopBin): Cli {
