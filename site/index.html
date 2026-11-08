@@ -115,11 +115,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 header.top { position: fixed; inset: 0 0 auto 0; z-index: 50; transition: background .3s, box-shadow .3s; }
 header.top.scrolled { background: rgba(243, 239, 230, .84); backdrop-filter: saturate(1.4) blur(16px); -webkit-backdrop-filter: saturate(1.4) blur(16px); box-shadow: 0 1px 0 var(--line); }
 header.top .wrap { display: flex; align-items: center; height: 72px; gap: min(34px, 3vw); }
-/* with no room left the word drops to a second line, which the fixed height hides: what fits decides, in any language */
+/* with no room left the word drops to a second line, which the fixed height hides: what fits decides, in any language. nav.links only takes what the brand and the buttons leave, so the word stays while the links are on screen */
 .brand { --mark: 34px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; height: var(--mark); min-width: var(--mark); overflow: hidden; text-decoration: none; }
 .brand svg { flex: none; width: var(--mark); height: var(--mark); }
 .brand span { font: 800 25px/1 var(--display); letter-spacing: -.05em; }
-nav.links { display: flex; gap: 26px; }
+nav.links { flex: 1 1 0; min-width: 0; display: flex; gap: 26px; }
 nav.links a { text-decoration: none; color: var(--ink-2); font-size: 15px; font-weight: 500; }
 nav.links a:hover { color: var(--ink); }
 header .right { flex: none; margin-left: auto; display: flex; align-items: center; gap: 10px; }
@@ -332,7 +332,7 @@ header .btn--icon { width: 40px; padding: 0; justify-content: center; }
 .tools { margin-top: 20px; display: grid; gap: 8px; }
 .tool { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border-radius: 14px; background: rgba(255,255,255,.035); }
 .tool img { width: 20px; height: 20px; filter: invert(1) brightness(.92); }
-.tool span { font-weight: 600; font-size: 15px; }
+.tool > span { font-weight: 600; font-size: 15px; }
 .seg { display: flex; padding: 3px; border-radius: 11px; background: rgba(255,255,255,.06); }
 .seg button { height: 30px; padding: 0 11px; border: 0; border-radius: 8px; background: none; color: #A39A8E; font-size: 12.5px; font-weight: 600; transition: all .2s; }
 .seg button.on { background: #EDE7DA; color: var(--ink); }
@@ -352,7 +352,7 @@ header .btn--icon { width: 40px; padding: 0; justify-content: center; }
 .always { margin-top: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .always div { padding: 22px; border-radius: 22px; background: rgba(255,255,255,.035); }
 .always b { display: block; font-size: 16px; color: #fff; }
-.always span { display: block; margin-top: 6px; color: #A39A8E; font-size: 14px; line-height: 1.5; }
+.always div > span { display: block; margin-top: 6px; color: #A39A8E; font-size: 14px; line-height: 1.5; }
 
 /* ---------- engines ---------- */
 .engines { padding: 150px 0 140px; }
@@ -392,7 +392,7 @@ header .btn--icon { width: 40px; padding: 0; justify-content: center; }
 .draft .hd .tag { margin-left: auto; padding: 4px 10px; border-radius: 99px; background: var(--cream); font-size: 12px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .draft p { margin-top: 14px; font-size: 14.5px; color: var(--ink-2); }
 .draft .facts { margin-top: 14px; display: grid; gap: 7px; font-size: 13.5px; }
-.draft .facts span { display: flex; align-items: center; gap: 8px; }
+.draft .facts > span { display: flex; align-items: center; gap: 8px; }
 .draft .facts i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--beak); }
 .draft .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .draft .row > span { height: 36px; padding: 0 14px; border-radius: 10px; display: grid; place-items: center; font-size: 13.5px; font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
@@ -405,7 +405,7 @@ header .btn--icon { width: 40px; padding: 0; justify-content: center; }
 .install li { display: flex; gap: 16px; counter-increment: s; }
 .install li::before { content: counter(s); flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--ink); color: var(--cream); font: 700 15px var(--display); }
 .install li b { display: block; font-size: 17px; }
-.install li span { color: var(--ink-2); font-size: 15.5px; }
+.install li div > span { color: var(--ink-2); font-size: 15.5px; }
 .tty { border-radius: 22px; background: #161412; color: #E7E0D2; overflow: hidden; box-shadow: 0 60px 100px -50px rgba(40,25,5,.6); }
 .tty .tb { display: flex; gap: 8px; padding: 15px 17px; background: #201D1A; }
 .tty .tb i { width: 12px; height: 12px; border-radius: 50%; background: #3A3631; }
@@ -461,7 +461,6 @@ footer a:hover { color: #EDE7DA; }
 }
 @media (max-width: 640px) {
   .wrap { width: calc(100% - 32px); }
-  header .btn { white-space: nowrap; }
   header .btn--ghost { display: none; }
   .hero { padding: 110px 0 70px; }
   .hero__art { max-width: min(280px, 72vw); }
