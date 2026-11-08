@@ -28,6 +28,7 @@ Variáveis: `TUCANO_DATA` (a pasta de dados, `~/.tucano-server` por padrão), `T
 - Notificações: só pelo Telegram (o navegador não avisa).
 - Conector com OAuth: a autorização abre no seu navegador; ao terminar, você cola o endereço em que a página parou.
 - Escolher uma pasta pede o caminho dela no servidor.
+- A wiki pode usar o seu cofre do Obsidian guardado num repositório git: **Ajustes da wiki** › **Sincronizar com git**. Veja **wiki-git**.
 - Apps do computador não existem no servidor (não há tela).
 - Um Tucano por pasta de dados: não rode o app e o servidor na mesma pasta ao mesmo tempo.
 - Um servidor é um workspace só (o da pasta de dados).

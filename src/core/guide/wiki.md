@@ -23,6 +23,8 @@ A wiki é Markdown puro numa pasta: abre no Obsidian, vai pro iCloud ou pro git.
 - **Trocar pasta…** passa a usar outra pasta, que pode ser o seu cofre do Obsidian. As páginas da pasta atual continuam lá.
 - **Voltar pra pasta do Tucano** volta pra pasta de dentro do app.
 
+- **Sincronizar com git** faz da pasta um clone de um repositório (o seu cofre do Obsidian no GitHub, por exemplo): o que muda lá aparece aqui, e o daqui vai pra lá. Veja **wiki-git**.
+
 **Importar do Obsidian** (ou **Importar um cofre do Obsidian**) copia um cofre com pastas, links e anexos. O cofre original não muda.
 
 **Esquema da wiki** é a página com os tipos de página e como escrever; os agentes e o curador seguem ela. Dá pra editar.

@@ -147,6 +147,12 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   setWikiCapture: { conversationId: 's', on: 'b' },
   setThreads: { conversationId: 's', on: 'b' },
   setWikiDir: { dir: 's|null' },
+  wikiGitStatus: {},
+  wikiGitSetup: { url: 's' },
+  wikiGitTest: {},
+  wikiGitConnect: { how: '[repo,merge]' },
+  wikiGitSync: { write: 'b?' },
+  wikiGitDisconnect: {},
   setMyName: { name: 's', about: 's?' },
   setDelegation: { to: 's|null', until: 'n?' },
   createInvite: { role: 's', about: 's?', restore: 's?' },
@@ -225,6 +231,7 @@ export const LIMITS: Partial<Record<Method, Record<string, number>>> = {
   wikiSaveSchema: { text: MB },
   wikiSearch: { q: 1_000 },
   wikiRelease: { title: 200 },
+  wikiGitSetup: { url: 1_000 },
   loginInput: { text: 4_000 }, // a code or an API key, typed into a sign-in
   setPush: { handle: 2_000, tag: 200 }
 }

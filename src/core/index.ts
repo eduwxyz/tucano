@@ -5,7 +5,7 @@ import { voiceRefusal } from '../shared/voice'
 import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
 import { basename, join, resolve, sep } from 'node:path'
@@ -50,6 +50,7 @@ import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
 import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
+import { COPY_SUFFIX, WikiGit } from './wiki-git'
 import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
@@ -781,10 +782,95 @@ const dmOf = (conversationId: string): string | null | undefined => {
   const c = db.conversationOwner(conversationId)
   return c ? (dmOwner(c, db.ownerId()) ?? null) : undefined
 }
-const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }), dmOf })
+// The git sync (wiki-git.ts) hears of every page written here, and says when the wiki takes no writes.
+let wikiGit: WikiGit | undefined
+const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }), dmOf, onWrite: (w) => wikiGit?.wrote(w.title, w.byName), readOnly: () => wikiGit?.readOnlyReason() })
 // The folder is read behind the window: a big Obsidian vault takes a while.
 wiki.init(true, true)
 toMain({ type: 'wiki_dir', path: wiki.dir })
+// What never goes to the wiki's repository: the pages held for someone, the sources that came from a
+// DM (or may have: a conversation gone), and Tucano's own index and log, which name every page.
+const gitPrivate = (): Set<string> => {
+  const out = new Set<string>(['índice.md', 'registro.md'])
+  for (const f of wiki.heldFiles()) out.add(f)
+  for (const s of wiki.sources(100_000)) {
+    const conv = s.origin.conversationId
+    if (!conv || dmOf(conv) === null) continue
+    out.add(`${s.file}.md`)
+    if (s.origin.original) out.add(s.origin.original)
+  }
+  return out
+}
+wikiGit = new WikiGit({
+  dataDir,
+  secrets,
+  load: () => db.meta('wikiGit') || undefined,
+  store: (json) => db.setMeta('wikiGit', json ?? ''),
+  privatePaths: gitPrivate,
+  // a held page git moved aside (the repository brought a file by its name): its copy stays held
+  movedPrivate: (from, to) => {
+    const key = pageKey(from.split('/').pop()!.replace(/\.md$/i, ''))
+    const h = wiki.heldKeys().find((x) => x.key === key)
+    if (h && to.endsWith('.md')) wiki.holdKey(pageKey(to.split('/').pop()!.replace(/\.md$/i, '')), h.person)
+  },
+  quiet: (on) => wiki.quiet(on),
+  refresh: () => wiki.refresh(),
+  notice: (n) => wiki.addNotice(n),
+  changed: () => emit({ type: 'wiki' }),
+  currentPages: () => wiki.count(),
+  ...(process.env['TUCANO_GIT_SSH'] ? { ssh: process.env['TUCANO_GIT_SSH'] } : {}),
+  local: fake || process.env['TUCANO_GIT_LOCAL'] === '1',
+  log: (line) => console.error(line)
+})
+const gitSync = wikiGit
+// Connected: a round once the folder's first read is done, then every 2 minutes.
+void wiki.loaded.then(async () => {
+  await gitSync.loadKey()
+  if (gitSync.connected) gitSync.start()
+})
+
+// "Juntar": the pages the wiki had, copied into the clone it now is. Nothing there is overwritten: a
+// file by the same name with something else in it comes in as "(versão do Tucano)". Held pages stay held.
+function mergeWiki(from: { root: string; dir: string; held: { key: string; person: string }[] }): { copied: number; copies: string[] } {
+  const to = wiki.pagesRoot
+  const held = new Map(from.held.map((h) => [h.key, h.person]))
+  const own = new Set(['esquema.md', 'índice.md', 'registro.md'])
+  let copied = 0
+  const copies: string[] = []
+  const pagesThere = new Map(wiki.list().flatMap((p) => { const f = wiki.page(p.title)?.file; return f ? [[pageKey(p.title), join(wiki.dir, f)] as const] : [] }))
+  const go = (rel: string): void => {
+    for (const e of readdirSync(rel ? join(from.root, rel) : from.root, { withFileTypes: true })) {
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (!rel && from.root === from.dir && (own.has(e.name) || e.name === 'fontes')) continue
+      if (e.isDirectory()) {
+        go(r)
+        continue
+      }
+      const src = join(from.root, r)
+      let dest = r
+      // the same path, or (a page) the same title in another folder: Obsidian would see one page
+      const same = existsSync(join(to, dest)) ? join(to, dest) : r.endsWith('.md') ? pagesThere.get(pageKey(r.split('/').pop()!.replace(/\.md$/i, ''))) : undefined
+      if (same) {
+        if (readFileSync(same).equals(readFileSync(src))) continue
+        const dot = r.lastIndexOf('.')
+        const [base, ext] = dot > r.lastIndexOf('/') ? [r.slice(0, dot), r.slice(dot)] : [r, '']
+        dest = `${base}${COPY_SUFFIX()}${ext}`
+        for (let k = 2; existsSync(join(to, dest)); k++) dest = `${base}${COPY_SUFFIX().replace(/\)$/, ` ${k})`)}${ext}`
+        copies.push(dest)
+      }
+      mkdirSync(join(to, dest, '..'), { recursive: true })
+      copyFileSync(src, join(to, dest))
+      copied++
+      const title = (s: string): string => s.split('/').pop()!.replace(/\.md$/i, '')
+      const person = r.endsWith('.md') ? held.get(pageKey(title(r))) : undefined
+      if (person) wiki.holdKey(pageKey(title(dest)), person)
+    }
+  }
+  if (existsSync(from.root)) go('')
+  wiki.scan()
+  return { copied, copies }
+}
 // The curator reads the conversations with the memory's cheap model, and keeps what lasts.
 const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   await enginesReady
@@ -806,7 +892,7 @@ const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   return text
 }
 // A curation from someone's DM may read the pages held for them; any other, none that's held.
-const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm, hidden: (id) => wiki.heldTitles(id ? (dmOf(id) ?? undefined) : undefined) })
+const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm, hidden: (id) => wiki.heldTitles(id ? (dmOf(id) ?? undefined) : undefined), beforeWrite: () => gitSync.pull() })
 // The review: by hand, or once a week when asked (checked every hour).
 const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
 setInterval(() => {
@@ -1747,7 +1833,8 @@ const api: Handlers = {
       sources: wikiSourcesFor(ctx, 100_000).length,
       // The owner's, after the heritage: the pages still held for them, and the notice until they've read it.
       ...(owner ? { held: wiki.held(ctx.person.id) } : {}),
-      ...(owner && !db.meta('heritageSeen') ? { heritage: { at: heritageAt() } } : {})
+      ...(owner && !db.meta('heritageSeen') ? { heritage: { at: heritageAt() } } : {}),
+      ...(gitSync.connected ? { git: (({ readOnly, state, lastSync }) => ({ readOnly, state, ...(lastSync ? { lastSync } : {}) }))(gitSync.status()) } : {})
     }
   },
   wikiPage: ({ title }, ctx) => wikiFor(ctx).page(title) ?? null,
@@ -1898,6 +1985,7 @@ const api: Handlers = {
     if (c) emit({ type: 'conversation', conversation: c })
   },
   setWikiDir: async ({ dir }) => {
+    if (gitSync.connected) throw new Error(L('A pasta da wiki é a do repositório git. Desconecte o git antes de trocar de pasta.', "The wiki's folder is the git repository's. Disconnect git before changing folders."))
     const next = dir?.trim() || wikiHome
     if (!existsSync(next)) throw new Error(L('Essa pasta não existe.', "That folder doesn't exist."))
     db.setSettings({ wikiDir: next === wikiHome ? undefined : next })
@@ -1907,6 +1995,38 @@ const api: Handlers = {
     return next
   },
   openWikiFolder: () => (serverMode ? undefined : toMain({ type: 'open_path', path: wiki.dir })),
+  wikiGitStatus: () => gitSync.status(),
+  wikiGitSetup: ({ url }) => gitSync.setup(url),
+  wikiGitTest: () => gitSync.test(),
+  // The tested clone becomes the wiki's folder; the folder it had stays as it was (the backup).
+  wikiGitConnect: async ({ how }, ctx) => {
+    if (process.env['TUCANO_WIKI']) throw new Error(L('A pasta da wiki vem de TUCANO_WIKI: tire a variável pra sincronizar com git.', "The wiki's folder comes from TUCANO_WIKI: unset it to sync with git."))
+    if (how !== 'repo' && how !== 'merge') throw new Error(L('Escolha como conectar.', 'Choose how to connect.'))
+    const before = { root: wiki.pagesRoot, dir: wiki.dir, held: wiki.heldKeys(), pages: wiki.count() }
+    const dir = await gitSync.adopt()
+    if (wiki.dir !== dir) {
+      db.setSettings({ wikiDir: dir })
+      wiki.relocate(dir, wikiIndex(dir))
+      toMain({ type: 'wiki_dir', path: dir })
+      emit({ type: 'settings', settings: settings() })
+    }
+    let message: string | undefined
+    if (how === 'merge' && before.pages) {
+      const m = mergeWiki(before)
+      if (m.copies.length) wiki.addNotice({ key: `git-merge:${Date.now()}`, pages: m.copies.filter((c) => c.endsWith('.md')).map((c) => c.split('/').pop()!.replace(/\.md$/i, '')), text: L(`Ao juntar, ${m.copies.length === 1 ? 'um arquivo da wiki antiga tinha' : `${m.copies.length} arquivos da wiki antiga tinham`} o mesmo nome de um do repositório, com outro conteúdo. O do repositório ficou; o da wiki antiga entrou como "(versão do Tucano)".`, `While merging, ${m.copies.length === 1 ? 'a file from the old wiki had' : `${m.copies.length} files from the old wiki had`} the name of one in the repository, with something else in it. The repository's stayed; the old wiki's came in as "(Tucano’s version)".`) })
+      message = L(`Tucano: juntou ${m.copied} ${m.copied === 1 ? 'arquivo' : 'arquivos'} da wiki anterior (${nameOf(ctx)})`, `Tucano: merged ${m.copied} ${m.copied === 1 ? 'file' : 'files'} from the previous wiki (${nameOf(ctx)})`)
+    }
+    record(ctx, 'wiki.git_connected', undefined, { how })
+    const st = await gitSync.sync(message ? { message, who: nameOf(ctx) } : {})
+    gitSync.start(false)
+    return st
+  },
+  wikiGitSync: ({ write }) => gitSync.sync({ write: !!write }),
+  wikiGitDisconnect: async (_, ctx) => {
+    await gitSync.disconnect()
+    record(ctx, 'wiki.git_disconnected')
+    return gitSync.status()
+  },
 
   // The owner's name is also the settings' (what the agents have always called them).
   setMyName: ({ name, about }, ctx) => {

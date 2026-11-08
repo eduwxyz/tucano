@@ -160,6 +160,12 @@ export const NEEDS: Record<Method, Need> = {
   wikiImport: 'admin',
   wikiImportZip: 'admin',
   setWikiDir: 'admin',
+  wikiGitStatus: 'admin', // the wiki's git sync: its key, its repository, its folder
+  wikiGitSetup: 'admin',
+  wikiGitTest: 'admin',
+  wikiGitConnect: 'admin',
+  wikiGitSync: 'admin',
+  wikiGitDisconnect: 'admin',
   // one's own
   setMyName: 'anyone',
   setDelegation: 'anyone',

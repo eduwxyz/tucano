@@ -1104,7 +1104,7 @@ export interface WikiChange {
 export interface WikiFinding {
   id: string
   at: number
-  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' // log: a page that reads like a record of what was done
+  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' | 'git' // log: a page that reads like a record of what was done; git: what the sync with the repository ran into (a conflict, a file too big, read-only)
   pages: string[] // the pages it is about
   text: string // what's wrong, in a sentence (Markdown, with [[links]])
   name?: string // broken, missing: the page it would take
@@ -1119,6 +1119,37 @@ export interface WikiImport {
   links: number // links between pages, in the whole wiki now
   missing: number // links to pages nobody wrote yet
   kinds: [string, number][] // the kinds the new pages got (their tipo, folder or first tag)
+}
+// The wiki's folder kept in a git repository (src/core/wiki-git.ts), as Wiki settings show it.
+export type WikiGitHost = 'github' | 'gitlab' | 'bitbucket' | 'gitea'
+export interface WikiGitSetup {
+  sshUrl: string // what Tucano clones and pushes (git@host:owner/repo.git)
+  converted?: boolean // an https address was given: this is its SSH one
+  host: string
+  provider?: WikiGitHost
+  publicKey: string // the deploy key to add to the repository
+  deployKeyUrl?: string // the page that adds it, when the host is known
+}
+export interface WikiGitTest {
+  branch: string
+  empty: boolean // a repository with nothing in it yet
+  pages: number // Markdown notes in it
+  pdfs: number
+  docx: number
+  currentPages: number // pages the wiki has now: with some, connecting asks how
+}
+export type WikiGitError = { kind: 'auth' | 'network' | 'notfound' | 'hostkey' | 'nogit' | 'other'; message: string }
+export interface WikiGitStatus {
+  state: 'off' | 'setup' | 'ok' | 'syncing' | 'error' // setup: a key made, not connected yet
+  setup?: WikiGitSetup
+  test?: WikiGitTest // the last test, until it's connected
+  branch?: string
+  readOnly: boolean // the key can't push: the wiki shows the repository and takes no writes
+  lastSync?: number
+  nextTry?: number // after a failure, when it tries again on its own
+  error?: WikiGitError
+  skipped: { path: string; mb: number }[] // files over 50 MB, kept out of the repository
+  git: boolean // git was found on this computer
 }
 export interface WikiReview {
   at?: number // the last review
