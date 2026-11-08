@@ -94,6 +94,8 @@ export function skillMeta(text: string): { category?: string; version?: string; 
     tags = flow ? flow[1]!.split(',') : tagsAt.body.map((l) => /^\s*-\s+(.*)$/.exec(l)?.[1] ?? '')
     tags = tags.map(unquote).filter(Boolean)
   }
+  // Without metadata.hermes.tags, a top-level "tags:" (a list in either form) stands in.
+  if (!tags.length) tags = list(section(lines, 'tags')) ?? []
   return {
     category: scalar(section(lines, 'category')),
     version: scalar(section(lines, 'version')) ?? scalar(meta && meta.body.length ? section(meta.body, 'version') : undefined),
@@ -160,17 +162,18 @@ const visible = (d: string): string[] => dirs(d).filter((p) => !basename(p).star
 // A skills folder with category folders, like Hermes keeps it: <name>/SKILL.md or
 // <category>/<name>/SKILL.md. A folder with its own SKILL.md is a skill, so its scripts/ and
 // references/ never count as categories. Folders that start with a dot (.archive, .git) are skipped.
+// The folder names the skill: when the frontmatter name differs, the folder wins.
 export function findHermesSkills(root: string, origin: string): LocalSkill[] {
   const found: LocalSkill[] = []
   for (const d of visible(root)) {
     const own = skill(join(d, 'SKILL.md'), origin)
     if (own) {
-      found.push(own)
+      found.push({ ...own, name: basename(d) })
       continue
     }
     for (const c of visible(d)) {
       const s = skill(join(c, 'SKILL.md'), origin)
-      if (s) found.push({ ...s, category: s.category ?? basename(d) })
+      if (s) found.push({ ...s, name: basename(c), category: s.category ?? basename(d) })
     }
   }
   return found

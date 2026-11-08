@@ -48,6 +48,15 @@ describe('skillMeta', () => {
     expect(m.tags).toEqual(['risk:high', 'locale:pt-BR'])
   })
 
+  it('falls back to a top-level tags list when metadata.hermes.tags is absent', () => {
+    expect(skillMeta('---\nname: a\ntags: [family:ops, env:prod]\n---\n').tags).toEqual(['family:ops', 'env:prod'])
+    expect(skillMeta('---\nname: a\ntags:\n  - family:ops\n---\n').tags).toEqual(['family:ops'])
+  })
+
+  it('prefers metadata.hermes.tags over the top-level tags', () => {
+    expect(skillMeta('---\nname: a\ntags: [x]\nmetadata:\n  hermes:\n    tags: [family:ops]\n---\n').tags).toEqual(['family:ops'])
+  })
+
   it('has no tags when metadata has no hermes', () => {
     expect(skillMeta('---\nmetadata:\n  version: 1\n  other:\n    tags: [x]\n---\n').tags).toEqual([])
   })
@@ -68,9 +77,10 @@ describe('findHermesSkills', () => {
     expect(found.find((s) => s.name === 'flat')!.category).toBeUndefined()
   })
 
-  it('uses the frontmatter name when it differs from the folder', () => {
+  it('names the skill by its folder when the frontmatter name differs', () => {
     put(join(root, 'ops/folder-name/SKILL.md'), '---\nname: other-name\n---\n')
-    expect(findHermesSkills(root, 'H').map((s) => s.name)).toEqual(['other-name'])
+    put(join(root, 'flat-folder/SKILL.md'), '---\nname: flat-other\n---\n')
+    expect(findHermesSkills(root, 'H').map((s) => s.name).sort()).toEqual(['flat-folder', 'folder-name'])
   })
 
   it('lets a declared category win over the folder', () => {
