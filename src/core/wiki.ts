@@ -239,6 +239,11 @@ export interface WikiDeps {
   // Whose DM a conversation is: a person's id, null for one that isn't a DM, undefined when it's
   // not known (gone). Where each version of a page came from is kept with it (see `inherit`).
   dmOf?: (conversationId: string) => string | null | undefined
+  // A page written, renamed or deleted here (by a person, the curator, an import): the git sync
+  // commits it a few seconds later (see wiki-git.ts). Not called for changes seen in the folder.
+  onWrite?: (w: { title: string; byName: string }) => void
+  // Why the wiki takes no writes now (a repository whose key can only read), or undefined.
+  readOnly?: () => string | undefined
 }
 
 // What someone may read of the wiki: everything but the pages held for someone else (see `inherit`).
@@ -272,6 +277,38 @@ export class Wiki {
   loaded: Promise<void> = Promise.resolve()
   private get pagesDir(): string {
     return this.root
+  }
+  // Where the pages are (the folder itself, or its pages/), for whoever copies pages in.
+  get pagesRoot(): string {
+    return this.root
+  }
+  // While git changes the folder (a pull, a rebase), what the watcher sees waits: a file half
+  // written by a rebase isn't a change. Once it's done, the folder is read again, once.
+  private quietDepth = 0
+  quiet(on: boolean): void {
+    this.quietDepth = Math.max(0, this.quietDepth + (on ? 1 : -1))
+    if (!on && !this.quietDepth && this.rescanAfter && !this.scanning) (this.rescanAfter = false), this.rescan()
+  }
+  // The folder read again now (after a pull), and what changed shown: after any read under way, never two at once.
+  async refresh(): Promise<void> {
+    while (this.scanning) await new Promise((r) => setTimeout(r, 20))
+    const gen = this.gen
+    this.scanning = true
+    this.rescanAfter = false
+    try {
+      if ((await this.scanAsync()) && gen === this.gen) (this.writeIndex(), this.onChange())
+    } finally {
+      this.scanning = false
+      if (this.rescanAfter && gen === this.gen && !this.quietDepth) (this.rescanAfter = false), this.rescan()
+    }
+  }
+  // Refused when the wiki takes no writes (see WikiDeps.readOnly).
+  private writable(): void {
+    const why = this.deps.readOnly?.()
+    if (why) throw new UserError(why)
+  }
+  readOnly(): string | undefined {
+    return this.deps.readOnly?.()
   }
   private pickRoot(): string {
     const pages = join(this.dir, PAGES)
@@ -393,8 +430,11 @@ export class Wiki {
   // Changes made outside Tucano: indexed again, and kept in the history as such.
   private watchFolder(): void {
     try {
-      this.watcher = watch(this.pagesDir, { recursive: true }, () => {
+      this.watcher = watch(this.pagesDir, { recursive: true }, (_e, name) => {
         if (this.importing) return
+        // git's own files (a fetch writes many): not pages
+        if (typeof name === 'string' && /^\.git([\\/]|$)/.test(name)) return
+        if (this.quietDepth) return void (this.rescanAfter = true)
         if (this.timer) clearTimeout(this.timer)
         this.timer = setTimeout(() => this.rescan(), 250)
       })
@@ -405,7 +445,7 @@ export class Wiki {
 
   // A change seen in the folder: read again behind, one read at a time.
   private rescan(): void {
-    if (this.scanning) return void (this.rescanAfter = true)
+    if (this.scanning || this.quietDepth) return void (this.rescanAfter = true)
     this.scanning = true
     const gen = this.gen
     void this.scanAsync()
@@ -415,7 +455,7 @@ export class Wiki {
       .catch((e: unknown) => console.error('[wiki]', e))
       .finally(() => {
         this.scanning = false
-        if (this.rescanAfter && gen === this.gen) (this.rescanAfter = false), this.rescan()
+        if (this.rescanAfter && gen === this.gen && !this.quietDepth) (this.rescanAfter = false), this.rescan()
       })
   }
 
@@ -617,6 +657,19 @@ export class Wiki {
     return new Set(rows.filter((r) => r.person !== person).map((r) => r.title))
   }
 
+  // Every page held, by its key, with whom for (to carry the holds into another folder's index).
+  heldKeys(): { key: string; person: string }[] {
+    return (this.db.prepare('SELECT title, person FROM held').all() as { title: string; person: string }[]).map((r) => ({ key: r.title, person: r.person }))
+  }
+  holdKey(key: string, person: string): void {
+    this.hold(key, person)
+  }
+  // The files (relative to the wiki's folder, with /) of the pages held for anyone: never committed to git.
+  heldFiles(): string[] {
+    const held = new Set(this.heldKeys().map((h) => h.key))
+    return (this.db.prepare('SELECT file, key FROM pages').all() as { file: string; key: string }[]).filter((r) => held.has(r.key)).map((r) => relative(this.dir, join(this.pagesDir, r.file)).split(sep).join('/'))
+  }
+
   // The pages held, that still exist (`person`: only the ones held for them), by their titles.
   held(person?: string): { title: string; at: number }[] {
     const rows = new Map((this.db.prepare('SELECT title, person, at FROM held').all() as { title: string; person: string; at: number }[]).filter((r) => person === undefined || r.person === person).map((r) => [r.title, Number(r.at)]))
@@ -783,7 +836,9 @@ export class Wiki {
     return existsSync(p) ? readFileSync(p, 'utf8') : ''
   }
   saveSchema(text: string): void {
+    this.writable()
     writeFileSync(join(this.dir, SCHEMA), text)
+    this.deps.onWrite?.({ title: SCHEMA.replace(/\.md$/, ''), byName: '' })
     this.onChange()
   }
 
@@ -822,6 +877,7 @@ export class Wiki {
 
   // Creates or changes a page. expectedHash: the copy the change was made on; a page that moved on since is refused.
   save(p: { title: string; body: string; kind?: string; by: string; byName: string; expectedHash?: string; rename?: string; reason?: string; sourceId?: string }): WikiPage {
+    this.writable()
     const title = cleanTitle(p.title)
     if (!title) throw new Error(L('A página precisa de um título.', 'The page needs a title.'))
     if (p.rename !== undefined) p = { ...p, rename: cleanTitle(p.rename) }
@@ -872,6 +928,7 @@ export class Wiki {
     this.version(title, p.by, existing === undefined ? 'create' : 'edit', before, parsePage(text).body, p.reason, p.sourceId)
     this.appendLog(existing === undefined ? L(`**${p.byName}** criou [[${title}]]`, `**${p.byName}** created [[${title}]]`) : p.rename && p.rename !== title ? L(`**${p.byName}** renomeou [[${p.rename}]] pra [[${title}]]`, `**${p.byName}** renamed [[${p.rename}]] to [[${title}]]`) : L(`**${p.byName}** editou [[${title}]]`, `**${p.byName}** edited [[${title}]]`))
     this.writeIndex()
+    this.deps.onWrite?.({ title, byName: p.byName })
     this.onChange()
     return this.page(title)!
   }
@@ -880,6 +937,7 @@ export class Wiki {
     const title = cleanTitle(raw) // as save and rename keep it: what the history and the log say
     const file = this.fileFor(title)
     if (!file) return
+    this.writable()
     const path = join(this.pagesDir, file)
     const before = existsSync(path) ? parsePage(readFileSync(path, 'utf8')).body : this.bodyOf(file)
     if (existsSync(path)) rmSync(path)
@@ -888,6 +946,7 @@ export class Wiki {
     this.release(title, true)
     this.appendLog(L(`**${byName}** apagou ${title}`, `**${byName}** deleted ${title}`))
     this.writeIndex()
+    this.deps.onWrite?.({ title, byName })
     this.onChange()
   }
 
@@ -895,6 +954,7 @@ export class Wiki {
   // attachments copied under the pages, untouched; the vault itself stays where it was. A file
   // already here isn't overwritten. The agents read it all from then on.
   importVault(src: string, byName: string): WikiImport {
+    this.writable()
     const from = resolve(src)
     if (!existsSync(from) || !statSync(from).isDirectory()) throw new Error(L('Essa pasta não existe.', "That folder doesn't exist."))
     if (from === resolve(this.dir) || resolve(this.pagesDir).startsWith(from + sep) || from.startsWith(resolve(this.dir) + sep)) throw new Error(L('Essa pasta é a própria wiki, ou está dentro dela.', "That folder is the wiki itself, or inside it."))
@@ -933,6 +993,7 @@ export class Wiki {
     const name = basename(from)
     this.appendLog(L(`**${byName}** importou ${pages.length} ${pages.length === 1 ? 'nota' : 'notas'} de ${name}`, `**${byName}** imported ${pages.length} ${pages.length === 1 ? 'note' : 'notes'} from ${name}`))
     this.writeIndex()
+    this.deps.onWrite?.({ title: L(`${pages.length} notas de ${name}`, `${pages.length} notes from ${name}`), byName })
     this.onChange()
     return {
       from: name ?? from,
@@ -1179,7 +1240,7 @@ export class Wiki {
     // a fix refused counts as "leave it"
     const keep = new Set((this.db.prepare("SELECT key FROM findings WHERE state = 'dismissed' OR change_id IN (SELECT id FROM changes WHERE state = 'refused')").all() as { key: string }[]).map((r) => r.key))
     for (const f of this.findings()) if (f.change) keep.add((this.db.prepare('SELECT key FROM findings WHERE id = ?').get(f.id) as { key: string }).key)
-    this.db.prepare("DELETE FROM findings WHERE state = 'open' AND (change_id IS NULL OR change_id NOT IN (SELECT id FROM changes WHERE state IN ('pending', 'conflict')))").run()
+    this.db.prepare("DELETE FROM findings WHERE state = 'open' AND kind != 'git' AND (change_id IS NULL OR change_id NOT IN (SELECT id FROM changes WHERE state IN ('pending', 'conflict')))").run()
     const at = Date.now()
     for (const f of list) {
       if (keep.has(f.key)) continue
@@ -1187,6 +1248,14 @@ export class Wiki {
       const change = f.ops?.length ? this.addChange({ ops: f.ops, by: 'review', ...(f.reason ? { reason: f.reason } : {}) }) : undefined
       this.db.prepare("INSERT INTO findings (id, key, at, kind, pages, text, name, change_id, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')").run(sha(f.key + at + Math.random()), f.key, at, f.kind, JSON.stringify(f.pages), f.text, f.name ?? null, change?.id ?? null)
     }
+    this.onChange()
+  }
+
+  // What the git sync ran into (a conflict, a file too big, read-only), in Cuidados next to the
+  // review's findings; a review doesn't replace it. Once per key while it's open.
+  addNotice(n: { key: string; pages: string[]; text: string }): void {
+    if (this.db.prepare("SELECT 1 FROM findings WHERE key = ? AND state = 'open'").get(n.key)) return
+    this.db.prepare("INSERT INTO findings (id, key, at, kind, pages, text, name, change_id, state) VALUES (?, ?, ?, 'git', ?, ?, NULL, NULL, 'open')").run(sha(n.key + Date.now() + Math.random()), n.key, Date.now(), JSON.stringify(n.pages), n.text)
     this.onChange()
   }
 
@@ -1235,6 +1304,7 @@ export class Wiki {
     const r = this.db.prepare('SELECT * FROM changes WHERE id = ?').get(id) as Record<string, unknown> | undefined
     if (!r) throw new Error(L('Essa mudança não existe mais.', 'That change no longer exists.'))
     if (r['state'] !== 'pending' && r['state'] !== 'conflict') return this.toChange(r)
+    this.writable()
     // One whose source went (taken back, purged) is gone with it: nothing of it gets written.
     if (r['source_id'] && !this.source(String(r['source_id']))) {
       this.dropOrphans()

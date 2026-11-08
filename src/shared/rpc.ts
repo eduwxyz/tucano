@@ -1,6 +1,6 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
-import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
+import type { WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
@@ -140,7 +140,7 @@ export interface Api {
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
   // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.
-  wiki(): { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number; held?: { title: string; at: number }[]; heritage?: { at: number } } // pending: the curator's changes; the review's are in findings
+  wiki(): { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number; held?: { title: string; at: number }[]; heritage?: { at: number }; git?: { readOnly: boolean; state: WikiGitStatus['state']; lastSync?: number } } // pending: the curator's changes; the review's are in findings
   wikiPage(p: { title: string }): WikiPage | null
   wikiSearch(p: { q: string }): WikiHit[]
   wikiSave(p: { title: string; body: string; kind?: string; expectedHash?: string; rename?: string }): WikiPage // throws on a conflict or a taken title
@@ -176,6 +176,13 @@ export interface Api {
   setWikiCapture(p: { conversationId: string; on: boolean }): void
   setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now
+  // The wiki's folder kept in a git repository (owner and admins): a deploy key, a test, then the folder becomes the clone.
+  wikiGitStatus(): WikiGitStatus
+  wikiGitSetup(p: { url: string }): Promise<WikiGitSetup> // an SSH address (an https one is turned into it); makes the key once
+  wikiGitTest(): Promise<WikiGitTest> // ls-remote with the key, then a clone apart; the wiki doesn't change yet
+  wikiGitConnect(p: { how: 'repo' | 'merge' }): Promise<WikiGitStatus> // repo: the wiki becomes the clone, the old folder stays as it was; merge: the pages there are copied in too
+  wikiGitSync(p: { write?: boolean }): Promise<WikiGitStatus> // now; write: try pushing again after read-only
+  wikiGitDisconnect(): Promise<WikiGitStatus> // stops syncing and drops the key; the folder stays as it is
   // People: who I am, and (admins) who comes in. The link is the page's origin with ?invite=<code>.
   setMyName(p: { name: string; about?: string }): void // about: what I do, for the agents
   setDelegation(p: { to: string | null; until?: number }): void // someone answers and approves for me until then; null ends it

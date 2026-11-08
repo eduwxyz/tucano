@@ -10710,3 +10710,32 @@ button.agent-card__now:hover {
 .login-term__type { gap: 8px; margin-bottom: 8px; }
 .login-term__type input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .login-term__keys { display: flex; gap: 6px; margin-bottom: 4px; }
+
+/* The wiki's folder in a git repository (Ajustes da wiki › A pasta) */
+.wk-git { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2, var(--panel)); }
+.wk-git.wk-setting { display: flex; }
+.wk-git > b { font-size: 13.5px; font-weight: 600; }
+.wk-git__step { display: grid; gap: 6px; }
+.wk-git__step > span { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.wk-git__step .wk-row .input { flex: 1; min-width: 200px; font: 12.5px var(--mono); }
+.wk-git__key { display: block; padding: 10px 12px; border-radius: 9px; background: var(--code-bg); font: 11.5px/1.5 var(--mono); color: var(--text); word-break: break-all; user-select: all; }
+.wk-git__steps { margin: 2px 0 0; padding-left: 18px; display: grid; gap: 3px; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.wk-git__ok { margin: 0; font-size: 12.5px; color: var(--text); display: flex; gap: 6px; align-items: baseline; }
+.wk-git__ok svg { color: var(--ok, #2f9e5b); flex: none; }
+.wk-git__note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.wk-git__error { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--danger); }
+.wk-git__choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.wk-git__choice { display: grid; gap: 4px; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); cursor: pointer; color: var(--text); }
+.wk-git__choice:hover:not(:disabled) { border-color: var(--accent); }
+.wk-git__choice b { font-size: 13px; }
+.wk-git__choice small { font-size: 12px; line-height: 1.4; color: var(--text-2); }
+.wk-git__status { display: flex; gap: 10px; align-items: center; }
+.wk-git__status > span:not(.wk-ro) { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.wk-git__status b { font-size: 13.5px; font-weight: 600; }
+.wk-git__status small { font: 11.5px var(--mono); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-git__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ok, #2f9e5b); }
+.wk-git__dot--bad { background: var(--danger); }
+.wk-git__dot--busy { background: var(--warn); animation: wk-git-pulse 1.2s ease-in-out infinite; }
+@keyframes wk-git-pulse { 50% { opacity: .35; } }
+.wk-ro { display: inline-flex; gap: 4px; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); white-space: nowrap; flex: none; }
+@media (max-width: 520px) { .wk-git__choices { grid-template-columns: 1fr; } }
