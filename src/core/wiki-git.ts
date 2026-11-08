@@ -649,12 +649,17 @@ export class WikiGit {
   }
 
   // "Tucano: <page title> (<who>)": the pages written here since the last commit, or the files.
+  // Only what's in this commit: a page written in the same round but kept out (held, a DM source)
+  // isn't named, nor whoever wrote only that.
   private message(paths: string[], o: { message?: string; who?: string }): { message: string; who?: string } {
     if (o.message) return { message: o.message, ...(o.who ? { who: o.who } : {}) }
-    const titles = this.queued.size ? [...this.queued.keys()] : [...new Set(paths.filter((p) => p.endsWith('.md')).map(titleOfPath))]
-    const people = [...new Set([...this.queued.values()].flatMap((s) => [...s]))]
+    const key = (t: string): string => t.normalize('NFC').toLowerCase()
+    const inCommit = new Set(paths.filter((p) => p.toLowerCase().endsWith('.md')).map((p) => key(titleOfPath(p))))
+    const queued = [...this.queued].filter(([t]) => inCommit.has(key(t)))
+    const titles = queued.length ? queued.map(([t]) => t) : [...new Set(paths.filter((p) => p.endsWith('.md')).map(titleOfPath))]
+    const people = [...new Set(queued.flatMap(([, s]) => [...s]))]
     const what = titles.length === 0 ? (paths.length === 1 ? titleOfPath(paths[0]!) : L(`${paths.length} arquivos`, `${paths.length} files`)) : titles.length <= 3 ? titles.join(', ') : L(`${titles.slice(0, 2).join(', ')} e mais ${titles.length - 2}`, `${titles.slice(0, 2).join(', ')} and ${titles.length - 2} more`)
-    const who = (this.queued.size && people.join(', ')) || AUTHOR.name
+    const who = (queued.length && people.join(', ')) || AUTHOR.name
     return { message: `Tucano: ${what} (${who})`, ...(people.length === 1 ? { who: people[0]! } : {}) }
   }
 

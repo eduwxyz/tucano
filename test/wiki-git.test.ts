@@ -227,6 +227,9 @@ describe('the loop', () => {
     expect(files).toContain(`${ch.file}.md`)
     expect(files).not.toContain(`${dm.file}.md`)
     expect(git(r.bare, 'log', '--all', '-p').includes('Só da Ana')).toBe(false)
+    // nor its title in a commit message (it was written in the same round as "Do time")
+    expect(git(r.bare, 'log', '--all', '--format=%s').includes('Plano secreto')).toBe(false)
+    expect(git(r.bare, 'log', '-1', '--format=%s').trim()).toBe('Tucano: Do time (Ana)')
     expect(readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf8')).toContain('/Plano secreto.md')
     // released: it's the team's now, and goes
     wiki.release('Plano secreto')
