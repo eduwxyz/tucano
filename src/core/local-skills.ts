@@ -157,6 +157,9 @@ const inDirs = (root: string, origin: string): LocalSkill[] =>
     .map((d) => skill(join(d, 'SKILL.md'), origin))
     .filter((s): s is LocalSkill => !!s)
 
+// Folders a skill keeps its own files in: under a category with no SKILL.md they are not skills.
+const RESOURCE = new Set(['scripts', 'references', 'assets', 'templates'])
+
 const visible = (d: string): string[] => dirs(d).filter((p) => !basename(p).startsWith('.') && basename(p) !== 'node_modules')
 
 // A skills folder with category folders, like Hermes keeps it: <name>/SKILL.md or
@@ -171,7 +174,7 @@ export function findHermesSkills(root: string, origin: string): LocalSkill[] {
       found.push({ ...own, name: basename(d) })
       continue
     }
-    for (const c of visible(d)) {
+    for (const c of visible(d).filter((c) => !RESOURCE.has(basename(c)))) {
       const s = skill(join(c, 'SKILL.md'), origin)
       if (s) found.push({ ...s, name: basename(c), category: s.category ?? basename(d) })
     }

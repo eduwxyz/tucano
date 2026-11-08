@@ -110,6 +110,13 @@ describe('findHermesSkills', () => {
     expect(findHermesSkills(root, 'H').map((s) => s.name).sort()).toEqual(['solo', 'x'])
   })
 
+  it('does not take scripts/ or references/ of a category folder without a SKILL.md for skills', () => {
+    put(join(root, 'cat/scripts/SKILL.md'), '---\nname: vendored\n---\n')
+    put(join(root, 'cat/references/SKILL.md'), '---\nname: ref\n---\n')
+    put(join(root, 'cat/real/SKILL.md'), '---\nname: real\n---\n')
+    expect(findHermesSkills(root, 'H').map((s) => s.name)).toEqual(['real'])
+  })
+
   it('works on a SKILL.md without metadata.hermes', () => {
     put(join(root, 'ops/x/SKILL.md'), '---\nname: x\ndescription: d\nallowed-tools: Read\n---\n')
     expect(findHermesSkills(root, 'H')[0]!.tags ?? []).toEqual([])
