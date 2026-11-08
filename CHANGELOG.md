@@ -4,11 +4,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.22] - 2026-11-08
+
 > **Em português:**
->
-> **Mudou:** o harness do Gemini CLI virou o do **Antigravity CLI** (`agy`), o CLI de agente do Google, com os modelos Gemini 4 e 3.8 e também Claude e GPT-OSS pela mesma conta Google. Quem usava o Gemini passa pro Antigravity sem refazer nada: os agentes, os modelos e os recibos vêm junto. Cada resposta roda isolada, sem acesso ao terminal, aos seus arquivos nem às suas configurações do `agy`, e só com as ferramentas do Tucano. Obrigado, @Vialc!
->
-> **Correções:** um print anexado não vai mais pro modelo a cada resposta: ele vai só na mensagem em que você mandou (depois o agente sabe o nome e, se precisar, olha de novo), o que acaba com o agente comentando um "print novo" e gastando tokens à toa; e um conector do Google sem login válido mostra **Autorizar** em vez de "conectado", e uma chamada recusada diz o motivo (falta login, e-mail fora dos usuários de teste, permissão faltando, API não ativada ou Developer Preview).
+> - **Mudou:** o harness do Gemini CLI virou o do **Antigravity CLI** (`agy`), o CLI de agente do Google, com os modelos Gemini 4 e 3.8 e também Claude e GPT-OSS pela mesma conta Google. Quem usava o Gemini passa pro Antigravity sem refazer nada: os agentes, os modelos e os recibos vêm junto. Cada resposta roda isolada, sem acesso ao terminal, aos seus arquivos nem às suas configurações do `agy`, e só com as ferramentas do Tucano. Obrigado, @Vialc!
+> - **Correções:** um print anexado não vai mais pro modelo a cada resposta: ele vai só na mensagem em que você mandou (depois o agente sabe o nome e, se precisar, olha de novo), o que acaba com o agente comentando um "print novo" e gastando tokens à toa; e um conector do Google sem login válido mostra **Autorizar** em vez de "conectado", e uma chamada recusada diz o motivo (falta login, e-mail fora dos usuários de teste, permissão faltando, API não ativada ou Developer Preview).
 
 ### Changed
 
@@ -510,6 +510,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.22]: https://github.com/eduwxyz/tucano/compare/v0.2.21...v0.2.22
 [0.2.21]: https://github.com/eduwxyz/tucano/compare/v0.2.20...v0.2.21
 [0.2.20]: https://github.com/eduwxyz/tucano/compare/v0.2.19...v0.2.20
 [0.2.19]: https://github.com/eduwxyz/tucano/compare/v0.2.18...v0.2.19
