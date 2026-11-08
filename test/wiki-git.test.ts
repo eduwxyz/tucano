@@ -13,7 +13,8 @@ import type { Message, Settings } from '../src/shared/types'
 
 vi.setConfig({ testTimeout: 30_000 })
 
-const git = (cwd: string, ...args: string[]): string => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Eduardo', GIT_AUTHOR_EMAIL: 'e@x', GIT_COMMITTER_NAME: 'Eduardo', GIT_COMMITTER_EMAIL: 'e@x' } })
+// names byte for byte (an NFD name stays NFD, on a Mac too), and no identity of the machine's needed
+const git = (cwd: string, ...args: string[]): string => execFileSync('git', ['-c', 'core.precomposeunicode=false', '-c', 'core.quotepath=false', ...args], { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Eduardo', GIT_AUTHOR_EMAIL: 'e@x', GIT_COMMITTER_NAME: 'Eduardo', GIT_COMMITTER_EMAIL: 'e@x' } })
 
 // A bare repository (the "GitHub") and a clone of it (the person's Obsidian vault on the Mac).
 function remote(files: Record<string, string | Buffer> = {}, hook?: string): { bare: string; url: string; mac: string; root: string } {
@@ -21,7 +22,8 @@ function remote(files: Record<string, string | Buffer> = {}, hook?: string): { b
   const bare = join(root, 'vault.git')
   execFileSync('git', ['init', '--quiet', '--bare', '-b', 'main', bare])
   const mac = join(root, 'mac')
-  execFileSync('git', ['clone', '--quiet', bare, mac], { stdio: 'ignore' })
+  execFileSync('git', ['-c', 'core.precomposeunicode=false', 'clone', '--quiet', bare, mac], { stdio: 'ignore' })
+  git(mac, 'config', 'core.precomposeunicode', 'false')
   git(mac, 'checkout', '--quiet', '-B', 'main')
   if (Object.keys(files).length) {
     for (const [f, text] of Object.entries(files)) (mkdirSync(join(mac, f, '..'), { recursive: true }), writeFileSync(join(mac, f), text))
@@ -40,7 +42,7 @@ function macEdit(mac: string, file: string, text: string): void {
   git(mac, 'commit', '--quiet', '-m', `edit ${file}`)
   git(mac, 'push', '--quiet', 'origin', 'main')
 }
-const inRemote = (bare: string): string[] => git(bare, '-c', 'core.quotepath=false', 'ls-tree', '-r', '--name-only', 'main').split('\n').filter(Boolean)
+const inRemote = (bare: string): string[] => git(bare, 'ls-tree', '-r', '--name-only', 'main').split('\n').filter(Boolean)
 
 const memSecrets = (): { get(k: string): Promise<string | undefined>; set(k: string, v: string | undefined): Promise<void>; store: Map<string, string> } => {
   const store = new Map<string, string>()
@@ -169,7 +171,7 @@ describe('the loop', () => {
     const r = remote({ 'Marcos Lima.md': 'Cliente da reforma.\n' })
     const { g, wiki } = await connected(r.url)
     macEdit(r.mac, 'Marcos Lima.md', 'Cliente da reforma. Telefone novo: 41 9999-0000.\n')
-    await g.sync()
+    expect((await g.sync()).error).toBeUndefined()
     expect(wiki.page('Marcos Lima')!.body).toContain('Telefone novo')
     expect(wiki.history('Marcos Lima')[0]).toMatchObject({ by: 'outside', action: 'edit' })
   })
@@ -249,6 +251,68 @@ describe('the loop', () => {
     expect(inRemote(r.bare)).not.toContain('anexos/video.mp4')
     expect(st.skipped).toEqual([{ path: 'anexos/video.mp4', mb: 51 }])
     expect(wiki.findings().find((f) => f.kind === 'git')!.text).toContain('50 MB')
+  })
+})
+
+describe('a machine with no git identity (a fresh server, CI)', () => {
+  it('still rebases and settles a conflict: Tucano commits as itself', async () => {
+    const r = remote({ 'Marcos Lima.md': 'Cliente.\n' })
+    const { g, wiki, dir } = await connected(r.url)
+    expect((await g.sync()).error).toBeUndefined()
+    macEdit(r.mac, 'Marcos Lima.md', 'Cliente (do Mac).\n')
+    wiki.save({ title: 'Marcos Lima', body: 'Cliente (do Tucano).', by: 'ana', byName: 'Ana', expectedHash: wiki.page('Marcos Lima')!.hash })
+    const saved = { ...process.env }
+    // no ~/.gitconfig, no system config, and no guessing a name from the machine
+    Object.assign(process.env, { HOME: mkdtempSync(join(tmpdir(), 'tucano-home-')), USERPROFILE: mkdtempSync(join(tmpdir(), 'tucano-home-')), XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), 'tucano-xdg-')), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.useConfigOnly', GIT_CONFIG_VALUE_0: 'true' })
+    for (const k of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'EMAIL']) delete process.env[k]
+    try {
+      expect((await g.sync()).error).toBeUndefined()
+    } finally {
+      for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k]
+      Object.assign(process.env, saved)
+    }
+    expect(readFileSync(join(dir, 'Marcos Lima.md'), 'utf8')).toBe('Cliente (do Mac).\n')
+    expect(readFileSync(join(dir, 'Marcos Lima (versão do Tucano).md'), 'utf8')).toContain('do Tucano')
+    expect(git(r.bare, 'log', '-1', '--format=%cn')).toContain('Tucano')
+  })
+})
+
+describe('names in NFD', () => {
+  // "Reunião" with the ã as a + combining tilde, as a Mac (or a tool on one) may write it. On Linux it's
+  // another name than the NFC one; the page stays one file, under the name the repository has.
+  const NFD = 'Reunia\u0303o'
+  const nfc = (xs: string[]): string[] => xs.map((x) => x.normalize('NFC'))
+
+  it('a page named in NFD is pulled, edited, pushed under its own name, and a conflict on it makes one NFC copy', async () => {
+    const r = remote({ [`${NFD}.md`]: 'Pauta.\n' })
+    expect(inRemote(r.bare)).toContain(`${NFD}.md`)
+    const { g, wiki } = await connected(r.url)
+    expect(wiki.page('Reunião')!.body).toContain('Pauta.')
+    wiki.save({ title: 'Reunião', body: 'Pauta nova.', by: 'ana', byName: 'Ana', expectedHash: wiki.page('Reunião')!.hash })
+    const st = await g.sync()
+    expect(st.error).toBeUndefined()
+    expect(nfc(inRemote(r.bare)).filter((f) => f === 'Reunião.md')).toHaveLength(1) // not doubled, not renamed
+    expect(inRemote(r.bare)).toContain(`${NFD}.md`)
+    expect(git(r.bare, 'show', `main:${NFD}.md`)).toContain('Pauta nova')
+    expect(git(r.bare, 'log', '-1', '--format=%s')).toContain('Tucano: Reunião (Ana)')
+    macEdit(r.mac, `${NFD}.md`, 'Pauta do Mac.\n')
+    wiki.save({ title: 'Reunião', body: 'Pauta do Tucano.', by: 'ana', byName: 'Ana', expectedHash: wiki.page('Reunião')!.hash })
+    expect((await g.sync()).error).toBeUndefined()
+    expect(git(r.bare, 'show', `main:${NFD}.md`)).toContain('Pauta do Mac')
+    expect(nfc(inRemote(r.bare))).toContain('Reunião (versão do Tucano).md')
+    expect(wiki.findings().find((f) => f.kind === 'git')!.pages).toEqual(['Reunião', 'Reunião (versão do Tucano)'])
+  })
+
+  it('a held page named in NFD is never committed', async () => {
+    const r = remote({ 'Marcos Lima.md': 'Cliente.\n' })
+    const { g, wiki, dir } = await connected(r.url)
+    writeFileSync(join(dir, 'Negociac\u0327a\u0303o.md'), 'Só da Ana.\n')
+    await wiki.refresh()
+    wiki.holdKey(pageKey('Negociação'), 'ana')
+    expect(wiki.heldFiles()).toHaveLength(1)
+    expect((await g.sync()).error).toBeUndefined()
+    expect(nfc(inRemote(r.bare))).not.toContain('Negociação.md')
+    expect(git(r.bare, 'log', '--all', '-p').includes('Só da Ana')).toBe(false)
   })
 })
 

@@ -886,7 +886,9 @@ export class Wiki {
     const oldFile = this.fileFor(p.rename ?? title)
     // a page in a folder stays in it, renamed or not
     const folder = oldFile?.includes('/') ? oldFile.slice(0, oldFile.lastIndexOf('/') + 1) : ''
-    const file = folder + fileOf(title)
+    // the same title in another spelling of its letters (a file named in NFD, as a Mac may write it):
+    // the file keeps its own name, so the folder (and a git repository) sees an edit, not a rename
+    const file = oldFile && this.titleOf(oldFile).normalize('NFC') === title ? oldFile : folder + fileOf(title)
     const existing = oldFile ? readFileSync(join(this.pagesDir, oldFile), 'utf8') : undefined
     if (existing !== undefined && p.expectedHash !== undefined && sha(existing) !== p.expectedHash) throw new WikiConflict()
     if (existing === undefined && p.expectedHash) throw new WikiConflict()

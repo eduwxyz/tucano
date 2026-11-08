@@ -201,7 +201,9 @@ export interface WikiGitDeps {
 
 type Run = { code: number; out: string; err: string; buf?: Buffer }
 
-const titleOfPath = (p: string): string => p.split('/').pop()!.replace(/\.md$/i, '')
+const nfc = (s: string): string => s.normalize('NFC')
+// a page's title from its path, in the one spelling titles have (NFC)
+const titleOfPath = (p: string): string => nfc(p.split('/').pop()!.replace(/\.md$/i, ''))
 const COUNT_SKIP = new Set(['.git', '.obsidian', '.trash', 'node_modules'])
 
 export class WikiGit {
@@ -306,10 +308,13 @@ export class WikiGit {
     return new Promise((resolve) => {
       const child = execFile(
         this.gitBin(),
-        args,
+        // paths as they are (no "\303\243" quoting) in whatever git prints
+        ['-c', 'core.quotepath=false', ...args],
         {
           cwd: o.cwd,
-          env: { ...process.env, LC_ALL: 'C', LANG: 'C', GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no', ...o.env },
+          // An identity of its own: a server (or CI) often has none, and a rebase can't make its commits
+          // without one (a commit's author is kept; the committer is Tucano).
+          env: { ...process.env, LC_ALL: 'C', LANG: 'C', GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no', GIT_AUTHOR_NAME: AUTHOR.name, GIT_AUTHOR_EMAIL: AUTHOR.email, GIT_COMMITTER_NAME: AUTHOR.name, GIT_COMMITTER_EMAIL: AUTHOR.email, ...o.env },
           encoding: o.buffer ? 'buffer' : 'utf8',
           maxBuffer: 200 * 1024 * 1024,
           timeout: o.timeout ?? 120_000,
@@ -430,7 +435,9 @@ export class WikiGit {
       renameSync(c.incoming, dir)
       delete c.incoming
       const branch = c.branch ?? 'main'
-      for (const [k, v] of [['core.autocrlf', 'false'], ['core.quotepath', 'false'], ['core.precomposeunicode', 'true'], ['commit.gpgsign', 'false'], ['pull.rebase', 'true']] as const) await this.must(['config', k, v], { cwd: dir })
+      // names byte for byte as the repository has them: a Mac's git would otherwise read an NFD name as
+      // another (NFC) file, and commit a rename nobody made
+      for (const [k, v] of [['core.autocrlf', 'false'], ['core.quotepath', 'false'], ['core.precomposeunicode', 'false'], ['commit.gpgsign', 'false'], ['pull.rebase', 'true']] as const) await this.must(['config', k, v], { cwd: dir })
       // an empty repository: the first commit goes on its default branch
       if ((await this.exec(['rev-parse', '--verify', 'HEAD'], { cwd: dir })).code !== 0) await this.must(['symbolic-ref', 'HEAD', `refs/heads/${branch}`], { cwd: dir })
       c.dir = dir
@@ -603,29 +610,34 @@ export class WikiGit {
     if (!existsSync(file) || readFileSync(file, 'utf8') !== text) writeFileSync(file, text)
   }
 
-  // What changed in the folder, as git sees it (paths with /, NFC).
+  // What changed in the folder, as git sees it: paths with /, spelled as on disk (a name may be NFD,
+  // as a Mac or another tool wrote it; git and the file system need it as is). Compare with `nfc`.
   private async changes(dir: string): Promise<string[]> {
     const out = await this.must(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'], { cwd: dir })
     const paths: string[] = []
-    for (const entry of out.split('\0')) if (entry.length > 3) paths.push(entry.slice(3).normalize('NFC'))
+    for (const entry of out.split('\0')) if (entry.length > 3) paths.push(entry.slice(3))
     return paths
+  }
+  // The private paths, one spelling (NFC) for comparing.
+  private privateSet(): Set<string> {
+    return new Set([...this.deps.privatePaths()].map(nfc))
   }
 
   // Commits what changed here and may go: never a private path, never a file over 50 MB.
   private async commitLocal(dir: string, o: { message?: string; who?: string }): Promise<boolean> {
-    const priv = new Set([...this.deps.privatePaths()].map((p) => p.normalize('NFC')))
+    const priv = this.privateSet()
     const all = await this.changes(dir)
     const skipped: { path: string; mb: number }[] = []
     const go: string[] = []
     for (const p of all) {
-      if (priv.has(p)) continue
+      if (priv.has(nfc(p))) continue
       let size = 0
       try {
         size = statSync(join(dir, p)).size
       } catch {
         // deleted: goes as a deletion
       }
-      if (size > MAX_GIT_FILE) skipped.push({ path: p, mb: Math.round(size / 1024 / 1024) })
+      if (size > MAX_GIT_FILE) skipped.push({ path: nfc(p), mb: Math.round(size / 1024 / 1024) })
       else go.push(p)
     }
     const c = this.cfg!
@@ -668,7 +680,7 @@ export class WikiGit {
   // "<name> (versão do Tucano).md", or with a number when that's taken too.
   private copyName(dir: string, path: string): string {
     const ext = extname(path)
-    const base = path.slice(0, path.length - ext.length)
+    const base = nfc(path.slice(0, path.length - ext.length))
     let out = `${base}${COPY_SUFFIX()}${ext}`
     for (let k = 2; existsSync(join(dir, out)); k++) out = `${base}${COPY_SUFFIX().replace(/\)$/, ` ${k})`)}${ext}`
     return out
@@ -683,7 +695,7 @@ export class WikiGit {
   private moveAside(dir: string, path: string): void {
     const to = this.copyName(dir, path)
     renameSync(join(dir, path), join(dir, to))
-    if (this.deps.privatePaths().has(path)) this.deps.movedPrivate?.(path, to)
+    if (this.privateSet().has(nfc(path))) this.deps.movedPrivate?.(nfc(path), to)
   }
 
   private async rebase(dir: string, branch: string): Promise<void> {
@@ -712,8 +724,9 @@ export class WikiGit {
         }
         if (!this.rebasing(dir)) throw this.failure(r)
         const files = (await this.must(['diff', '--name-only', '--diff-filter=U', '-z'], { cwd: dir })).split('\0').filter(Boolean)
-        if (!files.length && /nothing to commit|no changes|empty/i.test(r.out + r.err)) {
-          // the commit being replayed has nothing left once settled: it goes
+        // The commit being replayed has nothing left once settled: it goes. Only when that's so (nothing
+        // staged), never on the words of an error: a skip on anything else would drop Tucano's commit.
+        if (!files.length && (await this.exec(['diff', '--cached', '--quiet'], { cwd: dir })).code === 0 && /nothing to commit|no changes|now empty|is empty/i.test(r.out + r.err)) {
           r = await this.exec(['rebase', '--skip'], { cwd: dir })
           continue
         }
