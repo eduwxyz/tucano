@@ -114,14 +114,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* ---------- header ---------- */
 header.top { position: fixed; inset: 0 0 auto 0; z-index: 50; transition: background .3s, box-shadow .3s; }
 header.top.scrolled { background: rgba(243, 239, 230, .84); backdrop-filter: saturate(1.4) blur(16px); -webkit-backdrop-filter: saturate(1.4) blur(16px); box-shadow: 0 1px 0 var(--line); }
-header.top .wrap { display: flex; align-items: center; height: 72px; gap: 34px; }
-.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-.brand svg { width: 34px; height: 34px; }
+header.top .wrap { display: flex; align-items: center; height: 72px; gap: min(34px, 3vw); }
+/* with no room left the word drops to a second line, which the fixed height hides: what fits decides, in any language */
+.brand { --mark: 34px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; height: var(--mark); min-width: var(--mark); overflow: hidden; text-decoration: none; }
+.brand svg { flex: none; width: var(--mark); height: var(--mark); }
 .brand span { font: 800 25px/1 var(--display); letter-spacing: -.05em; }
 nav.links { display: flex; gap: 26px; }
 nav.links a { text-decoration: none; color: var(--ink-2); font-size: 15px; font-weight: 500; }
 nav.links a:hover { color: var(--ink); }
-header .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+header .right { flex: none; margin-left: auto; display: flex; align-items: center; gap: 10px; }
 /* one language at a time: every text is written in both, side by side. Those spans sit inside whatever is being styled, so style a label with ">": a plain "span" hits them too and draws it twice */
 html[lang="en"] [lang="pt-BR"], html[lang="pt-BR"] [lang="en"] { display: none !important; }
 .lang { display: flex; align-items: center; height: 36px; padding: 3px; border-radius: 99px; box-shadow: inset 0 0 0 1.5px var(--line); }
@@ -445,7 +446,6 @@ footer a:hover { color: #EDE7DA; }
 .rv.in { opacity: 1; transform: none; }
 .still .rv { opacity: 1; transform: none; transition: none; }
 
-@media (max-width: 1260px) { .hero__art { margin-right: 24px; } }
 @media (max-width: 1080px) {
   nav.links { display: none; }
   .hero__grid { grid-template-columns: minmax(0, 1fr); gap: 70px; }
@@ -461,11 +461,10 @@ footer a:hover { color: #EDE7DA; }
 }
 @media (max-width: 640px) {
   .wrap { width: calc(100% - 32px); }
-  header.top .wrap { gap: 12px; }
   header .btn { white-space: nowrap; }
   header .btn--ghost { display: none; }
   .hero { padding: 110px 0 70px; }
-  .hero__art { max-width: 280px; }
+  .hero__art { max-width: min(280px, 72vw); }
   .mate { transform: scale(.85); }
   .cmd { font-size: 12px; }
   .app { height: 560px; }
@@ -573,7 +572,6 @@ nav.links a .beta, .beta { display: inline-grid; place-items: center; height: 18
 .hero-join .join-fine { margin-top: 10px; }
 @media (max-width: 640px) { .news { padding: 0 16px 0 5px; font-size: 13.5px; } .news .go { display: none; } .news::after { content: "→"; } }
 .join .ts { position: absolute; left: 0; top: calc(100% + 10px); z-index: 3; }
-@media (max-width: 360px) { .brand span { display: none; } .hero__art { max-width: 230px; } }
 </style>
 <!-- Analytics (PostHog), only on tucano.sh. Nothing is stored in the visitor's browser
      (persistence: memory): no cookies, so no cookie banner. -->
@@ -680,7 +678,7 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
       </div>
       <div class="mate" style="left:-14%;top:12%"><span class="agent violet"><span class="eyes"><i></i><i></i></span></span><div><b>Leo</b><small>Claude Code</small></div></div>
       <div class="mate" style="right:-6%;top:-2%"><span class="agent sky"><span class="eyes"><i></i><i></i></span></span><div><b>Bia</b><small>Pi</small></div></div>
-      <div class="mate" style="right:-10%;top:66%"><span class="agent teal"><span class="eyes"><i></i><i></i></span></span><div><b>Nico</b><small>Codex</small></div></div>
+      <div class="mate" style="right:-5%;top:66%"><span class="agent teal"><span class="eyes"><i></i><i></i></span></span><div><b>Nico</b><small>Codex</small></div></div>
       <div class="mate" style="left:-6%;top:84%"><span class="agent rose"><span class="eyes"><i></i><i></i></span></span><div><b>Pia</b><small>OpenCode</small></div></div>
     </div>
   </div>
