@@ -296,7 +296,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
         } catch (e) {
           // Saved under another key (the system's changed, or the data came from another computer).
           console.error('[main] decrypt', e)
-          throw new Error(L('Não consegui abrir as credenciais salvas (a chave do sistema mudou). Conecte de novo.', "I couldn't open the saved credentials (the system's key changed). Connect again."))
+          throw new Error(L('Não consegui abrir as credenciais salvas: a chave do sistema mudou ou não foi liberada. Elas continuam guardadas.', "I couldn't open the saved credentials: the system's key changed or wasn't released. They're still saved."))
         }
       }
       child.postMessage({ type: 'secret-result', id: msg.id, data })
