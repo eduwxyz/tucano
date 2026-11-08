@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **The iPhone connects to the computer's Tucano on a real home network.** The QR code in Settings › Phone › Your iPhone named the Mac by its Bonjour name (`name.local`), which the iPhone app couldn't reach on a real Wi-Fi: it waited and gave up with "Couldn't reach your Tucano", while the same QR code with the address connected. It now carries the computer's address on the home network, read each time a QR code is made, as on Windows and Linux.
+
 ## [0.2.18] - 2026-11-07
 
 > **Em português:**
