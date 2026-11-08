@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
@@ -118,7 +118,7 @@ describe('an attached image, only in its turn', () => {
     await r.send('d1', 'segundo', [{ name: 'b.png', mime: 'image/png', data: png(1_000) }])
     await r.idle()
     const [, second] = agentTurns()
-    expect(second!.images!.map((i) => i.path.split('/').pop())).toEqual(['b.png'])
+    expect(second!.images!.map((i) => basename(i.path))).toEqual(['b.png'])
     expect(second!.blocks![second!.images![0]!.block]).toContain('segundo')
   })
 
