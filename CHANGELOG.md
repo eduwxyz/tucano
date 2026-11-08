@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-11-08
+
 > **Em português:**
 > - **A wiki sincronizada com um repositório git.** Em Ajustes da wiki › A pasta › Sincronizar com git, cole o endereço do repositório (o seu cofre do Obsidian no GitHub, por exemplo), adicione a chave que o Tucano gera como chave de deploy, e teste. A wiki vira um clone dele: traz o que mudou a cada 2 minutos e envia cada página salva uns segundos depois. Num conflito, fica a versão do repositório e a do Tucano vira "(versão do Tucano)", com um aviso em Cuidados. Uma chave sem escrita deixa a wiki só leitura. Páginas guardadas pra uma pessoa e fontes de DM nunca vão pro repositório.
 
@@ -484,6 +486,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.20]: https://github.com/eduwxyz/tucano/compare/v0.2.19...v0.2.20
 [0.2.19]: https://github.com/eduwxyz/tucano/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/eduwxyz/tucano/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/eduwxyz/tucano/compare/v0.2.16...v0.2.17
