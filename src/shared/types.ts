@@ -389,6 +389,7 @@ export interface Settings {
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
   voice?: VoiceSettings
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
+  sidebarOrder?: { dms?: ChannelLayout; agents?: ChannelLayout } // the person's order of their DMs and of the agents, apart from the channels'
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
