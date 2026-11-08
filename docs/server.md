@@ -54,7 +54,7 @@ npm run server -- pair          # tucano://connect?url=…&code=…   and   http
 npm run server -- pair 1440     # good for a day instead of 10 minutes (up to a week: 10080)
 ```
 
-Open the first line on the phone (or show it as a QR code and point the Camera at it). The app trades the code for a key of its own, and the code stops working. The second line does the same for a browser. Once you're signed in, **Settings › People › Connect a phone** makes a code too, as a QR code, for whoever is signed in: each person connects their own phone, as themselves. Each phone has its own key; removing someone ends all of theirs. The app needs the server on HTTPS (a reverse proxy, below), or on `127.0.0.1` while testing.
+Open the first line on the phone (or show it as a QR code and point the Camera at it). The app trades the code for a key of its own, and the code stops working. The second line does the same for a browser. The same link opens it in the desktop app, in **Settings › Servers › Connect to a server**, which trades the code for a key of that computer's own. Once you're signed in, **Settings › People › Connect a phone** makes a code too, as a QR code, for whoever is signed in: each person connects their own phone, as themselves. Each phone has its own key; removing someone ends all of theirs. The app needs the server on HTTPS (a reverse proxy, below), or on `127.0.0.1` while testing.
 
 Someone you invite can also open the invite link in the app: it asks their name, and they're in.
 

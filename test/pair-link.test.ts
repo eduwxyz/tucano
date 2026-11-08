@@ -14,6 +14,7 @@ import { Doors, MAX_FAILS } from '../src/server/guard'
 import { PairCodes } from '../src/server/pair-codes'
 import { pairLinkPage, pairPost, prefetching, type PairDoor } from '../src/server/pair-http'
 import { parsePairing } from '../src/shared/servers'
+import { redeemCode, thisDevice } from '../src/main/redeem'
 
 const hashOf = (key: string): string => createHash('sha256').update(key).digest('base64url')
 
@@ -163,9 +164,21 @@ describe('the other ways a code is spent', () => {
     expect((await fetch(`${base}/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' })).status).toBe(400)
   })
 
-  it('the desktop app pairs by the server token, never a code (nothing it opens spends one)', () => {
+  it('the desktop app trades a code like the phone, once, and its link alone spends nothing', async () => {
+    const { base, codes, db, people } = await start()
+    const { code } = codes.make(null)
+    // Reading the link (as the app does before asking "Conectar?") spends nothing.
+    const p = parsePairing(`tucano://connect?url=${encodeURIComponent('https://ana.example.com')}&code=${code}`)
+    expect(p).toEqual({ origin: 'https://ana.example.com', code })
+    expect(parsePairing(`https://ana.example.com/?code=${code}`)).toEqual({ origin: 'https://ana.example.com', code })
+    // The click: a key of the computer's own, named after it.
+    const got = await redeemCode(base, code, thisDevice('MacBook-de-Ana.local', 'darwin'))
+    expect('key' in got && people.authenticate(got.key)?.id).toBe(db.ownerId())
+    expect(db.personKeys(db.ownerId()).map((k) => k.label)).toContain('MacBook-de-Ana · macos')
+    expect(await redeemCode(base, code, thisDevice('MacBook-de-Ana', 'darwin'))).toEqual({ error: 'used' })
+    expect(await redeemCode('http://127.0.0.1:1', code, thisDevice('x', 'linux'))).toEqual({ error: 'unreachable' })
+    // The server's token still pairs as it always did.
     expect(parsePairing(`tucano://connect?url=https%3A%2F%2Fana.example.com&token=${'t'.repeat(32)}`)).toEqual({ origin: 'https://ana.example.com', token: 't'.repeat(32) })
-    expect(parsePairing(`tucano://connect?url=https%3A%2F%2Fana.example.com&code=${'c'.repeat(24)}`)).toBeNull()
   })
 })
 
