@@ -5,6 +5,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Entrar na IA pelo navegador ou pelo iPhone, num Tucano em servidor.** O botão Entrar roda o login da própria IA no servidor e mostra a tela dele numa janela: a página pra abrir, o código pra digitar e um campo pra colar o código de volta. Sem SSH.
 >
 > **Correções:** um agente com o GitHub em **Ler e escrever** volta a subir a branch e abrir a PR em vez de dizer que "a sessão é só leitura" (e, se algo pede aprovação ou está desligado, diz exatamente o quê); e o cartão **Computador** mostra o que vale pra cada escolha, sem misturar a confirmação de **Este computador** com o painel do Linux.
 
