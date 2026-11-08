@@ -4,6 +4,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-11-08
+
+> **Em português:**
+> - **Abrir o Tucano de um servidor no app do computador com um link de uso único.** Em Configurações › Servidores › Conectar a um servidor, cole o link de entrada que o servidor deu (o do Tucano Pro, o de `server.js pair` ou o de Conectar um celular): o app troca por uma chave só deste computador, depois do clique em Conectar.
+
 ### Added
 
 - **The desktop app opens a Tucano on a server with a one-time link.** Settings › Servers › Connect to a server, and a `tucano://connect` link opened from outside, now take the one-time link a server makes (`server.js pair`, or Settings › People › Connect a phone in the browser), in its app form (`tucano://connect?…&code=`) or its browser form (`https://…/?code=`), not only the server's own token link. The code is spent only after the click on Connect, never by reading the link: the app trades it at the server's `/pair`, as the iPhone does, for a key of this computer's own, named after it in the person's devices ("MacBook-de-Ana · macos"), and keeps that key in the system's keychain like a token. So someone on Tucano Pro, or invited to someone's server, can open it in the desktop app as themselves. A spent or expired link says how to make another; a server that doesn't answer leaves the link unspent.
@@ -490,6 +495,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.21]: https://github.com/eduwxyz/tucano/compare/v0.2.20...v0.2.21
 [0.2.20]: https://github.com/eduwxyz/tucano/compare/v0.2.19...v0.2.20
 [0.2.19]: https://github.com/eduwxyz/tucano/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/eduwxyz/tucano/compare/v0.2.17...v0.2.18
