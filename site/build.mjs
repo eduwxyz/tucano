@@ -61,10 +61,17 @@ const links = (lang, urls) => `<meta property="og:url" content="${urls[lang]}">
 const out = {} // dist path → html
 const sitemap = [] // [{ urls }]
 
+// The waitlist's anti-robot check (Cloudflare Turnstile): its public site key, for tucano.sh. The
+// secret that goes with it is the worker's (`npx wrangler secret put TURNSTILE_SECRET`). To try the
+// form on localhost, build with Cloudflare's test key, which lets everyone through:
+//   TURNSTILE_SITE_KEY=1x00000000000000000000AA node build.mjs
+const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || '0x4AAAAAAF4S07mYq5opawzS'
+if (TURNSTILE_SITE_KEY.startsWith('1x0000')) console.warn('build.mjs: the waitlist uses Turnstile\'s test key: not for tucano.sh')
+
 // ---------- the home page: Portuguese in its head, English in its script's META.en ----------
 {
   const file = 'index.html'
-  const src = read(file)
+  const src = read(file).replaceAll('__TURNSTILE_SITE_KEY__', TURNSTILE_SITE_KEY)
   const en = src.match(/en: \{\s*title: '([^']+)',\s*desc: '([^']+)',\s*og: '([^']+)'/)
   if (!en) throw new Error('build.mjs: META.en not found in index.html')
   const META = {
@@ -117,9 +124,16 @@ const PAGES = [
   { file: 'alternativa-openclaw.html', 'pt-BR': 'alternativa-openclaw/', en: 'en/openclaw-alternative/' },
   { file: 'suporte.html', 'pt-BR': 'suporte/', en: 'en/support/' },
   { file: 'privacidade.html', 'pt-BR': 'privacidade/', en: 'en/privacy/', faq: false }, // no questions: no FAQPage
+  { file: 'pro.html', 'pt-BR': 'pro/', en: 'en/pro/' },
 ]
+
+// The home page's look and its Tucano Pro script, for the pages that ask for them (pro.html):
+// one source for the styles and the waitlist form, so the two pages can't drift apart.
+const home = read('index.html')
+const HOME_STYLE = home.slice(home.indexOf('<style>'), home.indexOf('</style>') + '</style>'.length)
+const PRO_SCRIPT = home.slice(home.lastIndexOf('<script src="https://challenges.cloudflare.com'), home.lastIndexOf('</script>') + '</script>'.length)
 for (const page of PAGES) {
-  const src = read(page.file)
+  const src = read(page.file).replaceAll('<!-- STYLE:home -->', HOME_STYLE).replaceAll('<!-- SCRIPT:pro -->', PRO_SCRIPT).replaceAll('__TURNSTILE_SITE_KEY__', TURNSTILE_SITE_KEY)
   const urls = { 'pt-BR': `${SITE}/${page['pt-BR']}`, en: `${SITE}/${page.en}` }
   const faq = page.faq === false ? null : faqOf(src, page.file)
   const title = (lang) => lang === 'en' ? src.match(/<title data-en="([^"]+)">/)[1] : src.match(/<title[^>]*>([^<]+)<\/title>/)[1]

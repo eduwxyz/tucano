@@ -1,11 +1,15 @@
-// The site is served by Cloudflare as static files (no Worker code runs):
+// The site: the pages in dist/ (made by build.mjs) served as static files, plus worker.js for one
+// route of code, /api/lista (the Tucano Pro waitlist). Everything else never reaches the worker.
 //   cd site && npx wrangler deploy
-// which first runs build.mjs to make dist/ (the Portuguese and English pages, the sitemap).
+// which first runs build.mjs. The worker's secrets: SUPABASE_SECRET_KEY and TURNSTILE_SECRET
+// (`npx wrangler secret put <name>`).
 {
   "name": "tucano-site",
   "compatibility_date": "2026-10-01",
+  "main": "worker.js",
   "build": { "command": "node build.mjs" },
-  "assets": { "directory": "dist" },
+  "assets": { "directory": "dist", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
+  "vars": { "SUPABASE_URL": "https://ykfspxqsoahrwrneqovc.supabase.co" },
   "routes": [
     { "pattern": "tucano.sh", "custom_domain": true }
   ]
