@@ -3,16 +3,21 @@
 import { execFileSync } from 'node:child_process'
 import { hostname, networkInterfaces } from 'node:os'
 
-// How the phone finds this computer on the Wi-Fi: its Bonjour name (eduardos-macbook.local), which
-// stays when the router hands out another address; elsewhere, its address on the home network.
-export function homeHost(): string {
+// How the phone finds this computer on the Wi-Fi: its address on the home network (192.168.0.12).
+// Not the Mac's Bonjour name (eduardos-macbook.local): the iPhone app couldn't reach it by that name
+// on a real network, while the address worked. The QR code is made
+// when it's shown, so a new address from the router means only a new QR code.
+// No home network address (a cable-less, Wi-Fi-less machine): the Bonjour name, then the hostname.
+export function homeHost(nets: Parameters<typeof lanAddress>[0] = networkInterfaces()): string {
+  const lan = lanAddress(nets)
+  if (lan) return lan
   if (process.platform === 'darwin') {
     try {
       const name = execFileSync('/usr/sbin/scutil', ['--get', 'LocalHostName'], { encoding: 'utf8', timeout: 2000 }).trim()
       if (/^[A-Za-z0-9-]{1,63}$/.test(name)) return `${name}.local`.toLowerCase()
     } catch {}
   }
-  return lanAddress(networkInterfaces()) ?? hostname()
+  return hostname()
 }
 
 // The address of the Wi-Fi or the cable, not of a virtual network the computer also has (Docker,

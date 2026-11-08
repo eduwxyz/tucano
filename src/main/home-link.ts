@@ -123,6 +123,11 @@ export class HomeLink {
     if (server) await new Promise<void>((done) => server.close(() => done()).closeAllConnections())
   }
 
+  // Where the phone reaches this computer, for the next QR code (the address can change while the app runs).
+  setHost(host: string): void {
+    if (this.server) this.origin = `https://${host.includes(':') ? `[${host}]` : host}:${this.port}`
+  }
+
   // A one-time code for the owner's phone, as the link the QR code holds.
   makeCode(): { link: string; expiresAt: number } {
     const { code, expiresAt } = this.codes.make(null)
