@@ -4,9 +4,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-11-08
+
 > **Em português:**
-> - **A loja de conectores no iPhone.** Gmail, Agenda, Notion, Linear e os outros 44, com busca e login de um toque, como no computador.
-> - **Avisos no iPhone com o app fechado.** Aprovações, perguntas e respostas prontas chegam como notificação mesmo com o app fechado, e tocar abre a conversa.
+> - **A loja de conectores no iPhone.** Gmail, Agenda, Notion, Linear e os outros 44, com busca e login de um toque, como no computador (na próxima versão do app).
+> - **Avisos no iPhone com o app fechado.** Aprovações, perguntas e respostas prontas chegam como notificação mesmo com o app fechado, e tocar abre a conversa (na próxima versão do app).
 > - **Entrar na IA pelo navegador ou pelo iPhone, num Tucano em servidor.** O botão Entrar roda o login da própria IA no servidor e mostra a tela dele numa janela: a página pra abrir, o código pra digitar e um campo pra colar o código de volta. Sem SSH.
 >
 > **Correções:** um agente com o GitHub em **Ler e escrever** volta a subir a branch e abrir a PR em vez de dizer que "a sessão é só leitura" (e, se algo pede aprovação ou está desligado, diz exatamente o quê); o cartão **Computador** mostra o que vale pra cada escolha, sem misturar a confirmação de **Este computador** com o painel do Linux; e um conector com login OAuth não pede pra autorizar de novo depois de uma atualização ou de horas aberto: duas renovações ao mesmo tempo não apagam mais o login, um servidor de login fora do ar só adia a reconexão, e **Autorizar no navegador** renova o login salvo antes de abrir o navegador.
@@ -475,6 +477,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.19]: https://github.com/eduwxyz/tucano/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/eduwxyz/tucano/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/eduwxyz/tucano/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/eduwxyz/tucano/compare/v0.2.15...v0.2.16
