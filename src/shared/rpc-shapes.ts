@@ -148,6 +148,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   listInvites: {},
   removedPeople: {},
   myDevices: {},
+  setPush: { handle: 's|null', tag: 's?' },
   removeDevice: { id: 's' },
   removePerson: { id: 's' },
   setRole: { id: 's', role: 's' },
@@ -217,7 +218,8 @@ export const LIMITS: Partial<Record<Method, Record<string, number>>> = {
   wikiAddLink: { url: 4_000 },
   wikiSaveSchema: { text: MB },
   wikiSearch: { q: 1_000 },
-  wikiRelease: { title: 200 }
+  wikiRelease: { title: 200 },
+  setPush: { handle: 2_000, tag: 200 }
 }
 
 export function limitError(method: Method, params: unknown): string | undefined {

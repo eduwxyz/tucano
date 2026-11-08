@@ -1,7 +1,9 @@
-// The site: the pages in dist/ (made by build.mjs) served as static files, plus worker.js for one
-// route of code, /api/lista (the Tucano Pro waitlist). Everything else never reaches the worker.
+// The site: the pages in dist/ (made by build.mjs) served as static files, plus worker.js for the
+// routes of code: /api/lista (the Tucano Pro waitlist) and /api/push/* (the iPhone app's push relay,
+// push.js). Everything else never reaches the worker.
 //   cd site && npx wrangler deploy
-// which first runs build.mjs. The worker's secrets: SUPABASE_SECRET_KEY and TURNSTILE_SECRET
+// which first runs build.mjs. The worker's secrets: SUPABASE_SECRET_KEY, TURNSTILE_SECRET, and for the
+// push relay APNS_KEY, APNS_KEY_ID, APNS_TEAM_ID, PUSH_SEAL
 // (`npx wrangler secret put <name>`).
 {
   "name": "tucano-site",
@@ -9,6 +11,8 @@
   "main": "worker.js",
   "build": { "command": "node build.mjs" },
   "assets": { "directory": "dist", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
+  // At most 60 notifications a minute per phone (push.js).
+  "ratelimits": [{ "name": "PUSH_LIMIT", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }],
   "vars": { "SUPABASE_URL": "https://ykfspxqsoahrwrneqovc.supabase.co" },
   "routes": [
     { "pattern": "tucano.sh", "custom_domain": true }

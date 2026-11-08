@@ -498,7 +498,9 @@ export const MIGRATIONS = [
 const COLUMNS: [string, string, string][] = [
   ['agents', 'action_rules', "TEXT NOT NULL DEFAULT '{}'"],
   ['agents', 'autonomy', 'TEXT'],
-  ['agents', 'outside_guard', 'INTEGER']
+  ['agents', 'outside_guard', 'INTEGER'],
+  // A phone's push handle (src/core/push.ts), on its device key: {"handle", "tag"} as JSON.
+  ['person_keys', 'push', 'TEXT']
 ]
 
 
@@ -1721,6 +1723,31 @@ export class Db {
       createdAt: Number(r['created_at']),
       ...(r['last_seen'] ? { seenAt: Number(r['last_seen']) } : {})
     }))
+  }
+
+  // A device's push handle (a phone's), or none. False: no such key of this person's.
+  setKeyPush(personId: string, hash: string, push: { handle: string; tag?: string } | null): boolean {
+    return this.db.prepare('UPDATE person_keys SET push = ? WHERE hash = ? AND person_id = ?').run(push ? JSON.stringify(push) : null, hash, personId).changes > 0
+  }
+
+  // The phones that take pushes: of these people (unset: everyone still here).
+  pushTargets(people?: string[]): { hash: string; personId: string; handle: string; tag?: string }[] {
+    const rows = this.db.prepare('SELECT k.hash, k.person_id, k.push FROM person_keys k JOIN people p ON p.id = k.person_id WHERE k.push IS NOT NULL AND p.removed_at IS NULL').all() as Row[]
+    const out: { hash: string; personId: string; handle: string; tag?: string }[] = []
+    for (const r of rows) {
+      if (people && !people.includes(str(r['person_id']))) continue
+      try {
+        const p = JSON.parse(str(r['push'])) as { handle?: unknown; tag?: unknown }
+        if (typeof p.handle === 'string') out.push({ hash: str(r['hash']), personId: str(r['person_id']), handle: p.handle, ...(typeof p.tag === 'string' ? { tag: p.tag } : {}) })
+      } catch {
+        // a broken one is skipped
+      }
+    }
+    return out
+  }
+
+  dropKeyPush(hash: string): void {
+    this.db.prepare('UPDATE person_keys SET push = NULL WHERE hash = ?').run(hash)
   }
 
   // One of a person's keys goes; its browser reads "no access" (removed_keys) instead of counting a guess.

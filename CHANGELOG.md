@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Notifications on the iPhone with the app closed.** Approvals, questions and finished replies used to reach the Tucano app only while it was open. Now a phone that allows notifications gives its Tucano (a server, or the computer at home) a handle, and the Tucano asks a relay at tucano.sh to deliver through Apple. The handle is the phone's Apple token sealed by the relay, which alone holds the app's push key: a Tucano can reach only the phones that connected to it, and a disconnected device stops getting them. The relay passes on the title and the line, as the desktop's notification shows them, and stores nothing. `TUCANO_PUSH_URL` points at another relay, or `off`. Tapping a notification opens its conversation, on the right Tucano (in the next version of the app).
+
 ## [0.2.18] - 2026-11-07
 
 > **Em português:**
