@@ -87,15 +87,32 @@ export const CODEX_DISABLED_FEATURES = [
 // took that for the agent's computer: it answered "this session has read-only filesystem access"
 // without trying write_file, or tried Codex's own apply_patch and gave up. Said plainly, it writes
 // (GPT-6-Astra: 0 of 6 without it, 6 of 6 with it); hedged ("if you have a computer"), 1 of 3.
-// So only an agent whose instructions give it write_file gets it.
-const sandboxNote = (): string =>
-  L(
-    'O sandbox do próprio Codex aqui é só leitura e vazio de propósito: não é o seu computador, e o apply_patch e o shell dele não chegam lá. Os seus arquivos estão no seu computador: crie e mude com write_file e edit_file, que funcionam.',
-    "Codex's own sandbox here is read-only and empty on purpose: it isn't your computer, and its apply_patch and shell don't reach it. Your files are on your computer: create and change them with write_file and edit_file, which do work."
-  )
+// So only an agent whose instructions give it write_file gets the part about files.
+// The same block also says "Network access is restricted" and "Approval policy is never", and a model
+// read that as "this session is read-only" for a push or a PR it had every grant for (0.2.18, an agent
+// on "Este computador" with GitHub "Ler e escrever"). Codex's own sandbox has no say over the gateway's
+// tools, so that block is left out (include_permissions_instructions=false), and the note says what
+// does decide: each tool's result.
+const sandboxNote = (computer: boolean): string =>
+  [
+    L(
+      'O sandbox do próprio Codex aqui é vazio de propósito e não limita as suas ferramentas. Nunca diga que a sessão é só leitura: o que cada ferramenta pode fazer, e o que pede aprovação, vem do resultado dela; se algo for recusado ou pedir aprovação, diga exatamente o quê e por quê, com as palavras do resultado.',
+      "Codex's own sandbox here is empty on purpose and doesn't limit your tools. Never say the session is read-only: what each tool can do, and what asks for approval, comes from its result; if something is refused or asks for approval, say exactly what and why, in the result's words."
+    ),
+    computer &&
+      L(
+        'Ele não é o seu computador, e o apply_patch e o shell dele não chegam lá. Os seus arquivos estão no seu computador: crie e mude com write_file e edit_file, que funcionam; comandos (git, instalar, rede) rodam com bash.',
+        "It isn't your computer, and its apply_patch and shell don't reach it. Your files are on your computer: create and change them with write_file and edit_file, which do work; commands (git, installs, network) run with bash."
+      )
+  ]
+    .filter(Boolean)
+    .join(' ')
 
-// The agent's instructions, with the sandbox note when it has a computer.
-export const codexInstructions = (turn: Pick<Turn, 'system' | 'mcpUrl'>): string => (turn.mcpUrl && turn.system.includes('write_file') ? `${turn.system}\n\n${sandboxNote()}` : turn.system)
+// The agent's instructions, with the sandbox note when it has the app's tools (and its part about files when it has a computer).
+export const codexInstructions = (turn: Pick<Turn, 'system' | 'mcpUrl'>): string => (turn.mcpUrl ? `${turn.system}\n\n${sandboxNote(turn.system.includes('write_file'))}` : turn.system)
+
+// What Codex says about its own sandbox and approvals: left out (see sandboxNote).
+const NO_PERMISSIONS_TEXT = 'include_permissions_instructions=false'
 
 export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl' | 'web' | 'images'>, provider: string[] = []): string[] {
   const gateway = turn.mcpUrl
@@ -123,6 +140,7 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
     '-c', 'skills.bundled.enabled=false',
     '-c', `web_search=${turn.web ? '"live"' : '"disabled"'}`,
     '-c', 'project_doc_max_bytes=0',
+    '-c', NO_PERMISSIONS_TEXT,
     ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
     ...provider,
     ...gateway,
@@ -191,6 +209,7 @@ export function codexAppArgs(provider: string[] = []): string[] {
     ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
     '-c', 'sandbox_mode="read-only"',
     '-c', 'approval_policy="never"',
+    '-c', NO_PERMISSIONS_TEXT,
     '-c', 'skills.include_instructions=false',
     '-c', 'skills.bundled.enabled=false',
     '-c', 'project_doc_max_bytes=0',

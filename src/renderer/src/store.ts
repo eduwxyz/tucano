@@ -41,6 +41,8 @@ import {
   type Settings,
   type SetupEngine,
   type SetupState,
+  type LoginKey,
+  type LoginScreen,
   type Skill,
   type SkillInput,
   type SkillVersion,
@@ -757,10 +759,35 @@ export const voiceCancelDownload = (): Promise<void> => call('voiceCancelDownloa
 export const voiceRemoveModel = (model: VoiceModelId): Promise<void> => call('voiceRemoveModel', { model })
 export const transcribe = async (id: string, audio: string): Promise<string> => (await call('transcribe', { id, audio })).text
 export const cancelTranscribe = (id: string): Promise<void> => call('cancelTranscribe', { id })
-export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
+// On a server, the sign-in runs in its own terminal and shows here (LoginTerminal.tsx): screen comes
+// back, and the window opens. Elsewhere, a terminal of the computer's opens, as before.
+export const loginEngine = async (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => {
+  const r = await call('loginEngine', { engine, screen: true })
+  if (r.screen) showLogin(r.screen)
+  return r
+}
 // More logins of Claude Code and Codex, each signed into in a terminal.
 export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })
-export const loginAccount = (id: string): Promise<{ opened: boolean; command: string }> => call('loginAccount', { id })
+export const loginAccount = async (id: string): Promise<{ opened: boolean; command: string }> => {
+  const r = await call('loginAccount', { id, screen: true })
+  if (r.screen) showLogin(r.screen)
+  return r
+}
+// The sign-in on the server's terminal being shown, if any; the window asks the core how it goes.
+let loginShown: LoginScreen | null = null
+const loginListeners = new Set<() => void>()
+export function showLogin(s: LoginScreen | null): void {
+  loginShown = s
+  loginListeners.forEach((l) => l())
+}
+export const useLoginShown = (): LoginScreen | null =>
+  useSyncExternalStore(
+    (l) => (loginListeners.add(l), () => void loginListeners.delete(l)),
+    () => loginShown
+  )
+export const loginScreen = (): Promise<LoginScreen | null> => call('loginScreen')
+export const loginInput = (id: string, input: { text?: string; key?: LoginKey; enter?: boolean }): Promise<LoginScreen | null> => call('loginInput', { id, ...input })
+export const stopLogin = (id: string): void => void call('stopLogin', { id }).catch(() => {})
 export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
 // Codex or Claude Code with no terminal (the introduction): the CLI downloaded, then its own sign-in in the browser.
