@@ -827,7 +827,12 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
   const [confirmErase, setConfirmErase] = useState(false)
   const [confirmMac, setConfirmMac] = useState(false)
   useEffect(() => computerAction(agentId, 'refresh'), [agentId])
-  const on = kind === 'linux'
+  // "Este computador" picked but not let yet: the choice shows picked, and only its confirmation
+  // shows under it. Before, the card kept the last kind's panel (Linux's Docker, folders, erase)
+  // under the confirmation, with Linux still picked, and that mix read as this computer's full card.
+  const confirming = confirmMac && kind !== 'mac'
+  const shown: ComputerChoice = confirming ? 'mac' : kind
+  const on = kind === 'linux' && !confirming
   const state = on ? (info && info.state !== 'off' ? info.state : 'stopped') : 'off'
   const st = COMPUTER_STATE()[state]!
   const isolated = useStore((s) => s.isolatedComputers)
@@ -847,10 +852,10 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
             <button
               key={c.value}
               role="radio"
-              aria-checked={kind === c.value}
-              className={kind === c.value ? 'is-active' : ''}
+              aria-checked={shown === c.value}
+              className={shown === c.value ? 'is-active' : ''}
               onClick={() => {
-                if (kind === c.value) return
+                if (kind === c.value) return setConfirmMac(false)
                 if (c.value === 'mac') return setConfirmMac(true)
                 setConfirmMac(false)
                 onChange(c.value)
@@ -860,7 +865,7 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
             </button>
           ))}
       </div>
-      {confirmMac && kind !== 'mac' && (
+      {confirming && (
         <div className="mac-confirm">
           <p>
             <strong>{L('Os comandos dele vão rodar direto no seu computador, como você.', 'Its commands will run right on your computer, as you.')}</strong>{' '}
@@ -889,7 +894,12 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
         <>
           <div className="computer">
             <span className="tag tag--warn">{L('no seu computador', 'on your computer')}</span>
-            <span className="muted small grow">{L('Os comandos começam na pasta dele.', 'Commands start in its folder.')}</span>
+            <span className="muted small grow">
+              {L(
+                'Liberado: os comandos rodam direto no seu computador, como você, e começam na pasta dele. Ele alcança as suas pastas sem emprestar e não precisa do Docker.',
+                'Allowed: its commands run right on your computer, as you, and start in its folder. It reaches your folders without lending them and needs no Docker.'
+              )}
+            </span>
           </div>
           <Services agentId={agentId} />
           {admin && (

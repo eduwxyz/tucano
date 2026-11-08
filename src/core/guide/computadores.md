@@ -5,7 +5,7 @@
 Na página do agente, aba **Ferramentas** › **Computador**:
 - **Nenhum**: só conversa, web e navegador.
 - **Linux isolado**: um computador só dele, separado do seu, num contêiner do Docker. Instala e roda o que precisar sem pedir. A pasta de trabalho é `/work`. Precisa do Docker aberto (Docker Desktop no Mac e no Windows). Liga sozinho quando ele precisar; há **Ligar agora**, **Reiniciar** e **Apagar computador** (apaga tudo, inclusive `/work`).
-- **Este computador**: os comandos rodam direto no seu computador, como você. É preciso confirmar em **Liberar o computador pra ele**. Os comandos começam na pasta dele (**Abrir pasta dele**). Na barra lateral, o agente ganha a marca "no seu computador".
+- **Este computador**: os comandos rodam direto no seu computador, como você. É preciso confirmar em **Liberar o computador pra ele**. Os comandos começam na pasta dele (**Abrir pasta dele**). Não precisa do Docker nem de pastas emprestadas: ele alcança as suas pastas direto. Na barra lateral, o agente ganha a marca "no seu computador".
 
 Com computador, o agente cria arquivos, roda comandos e sobe sites e apps pra você ver.
 
@@ -16,7 +16,7 @@ Um site ou app que o agente sobe aparece com a **porta** e o estado (**no ar** o
 Em **Pastas do seu computador**, **Emprestar pasta…** dá ao agente a pasta de um projeto. Pra cada uma: **Só ler** ou **Pode mudar**, e **Devolver**. Ele mexe nos arquivos de verdade, então use git pra poder desfazer. Emprestar ou devolver reinicia o computador do agente: os serviços param, o que ele instalou fica.
 
 ## GitHub
-O computador do agente não tem credenciais: `git push` não funciona nele. Pra publicar no GitHub (criar uma branch, mandar arquivos, abrir uma PR), o agente usa o **conector do GitHub** (em **Conectores**), com as permissões e aprovações de qualquer conector.
+Pra publicar no GitHub (criar uma branch, mandar arquivos, abrir uma PR), o agente usa o **conector do GitHub** (em **Conectores**) com **Ler e escrever**, com as permissões e aprovações de qualquer conector. No **Linux isolado** não há credenciais: `git push` não funciona nele. Em **Este computador**, `git push` roda com as credenciais do git que você já tem. Se um agente disser que "a sessão é só leitura", confira se ele tem **Ler e escrever** no GitHub e se **Subir commits (push)** ou **Abrir pull request** não estão em **Nunca**.
 
 ## O navegador do agente
 Na aba **Ferramentas**, **Navegador**: um Chrome só dele, com logins separados dos seus. Ele abre páginas, clica, preenche e lê como uma pessoa. Um clique que compra, publica, envia ou apaga pede sua aprovação.
