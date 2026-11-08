@@ -10701,3 +10701,12 @@ button.agent-card__now:hover {
 .autonomy > p { margin: 0; }
 .autonomy__rules > summary { cursor: pointer; font-weight: 500; padding: 4px 0; }
 .autonomy__rules[open] > summary { margin-bottom: 8px; }
+
+/* A harness's sign-in in the server's terminal (LoginTerminal.tsx) */
+.modal__card.login-term { width: min(620px, calc(100vw - 32px)); }
+.login-term__go { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.login-term__code { display: inline-flex; gap: 6px; align-items: center; padding: 5px 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg-2, var(--bg)); color: inherit; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; cursor: pointer; }
+.login-term__screen { margin: 0 0 10px; padding: 10px 12px; max-height: 44vh; overflow: auto; border-radius: 8px; background: #16150f; color: #e9e6dc; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.login-term__type { gap: 8px; margin-bottom: 8px; }
+.login-term__type input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.login-term__keys { display: flex; gap: 6px; margin-bottom: 4px; }

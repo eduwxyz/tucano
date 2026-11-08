@@ -40,9 +40,12 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   voiceRemoveModel: { model: 's' },
   localPath: { messageId: 's', path: 's' },
   openLocal: { messageId: 's', path: 's', how: '[open,reveal]' },
-  loginEngine: { engine: 's' },
+  loginEngine: { engine: 's', screen: 'b?' },
+  loginScreen: {},
+  loginInput: { id: 's', text: 's?', key: '[enter,up,down,left,right,esc,tab,backspace,space]?', enter: 'b?' },
+  stopLogin: { id: 's' },
   addAccount: { engine: 's', name: 's' },
-  loginAccount: { id: 's' },
+  loginAccount: { id: 's', screen: 'b?' },
   removeAccount: { id: 's' },
   installEngine: { engine: 's' },
   setupEngine: { engine: 's' },
@@ -219,6 +222,7 @@ export const LIMITS: Partial<Record<Method, Record<string, number>>> = {
   wikiSaveSchema: { text: MB },
   wikiSearch: { q: 1_000 },
   wikiRelease: { title: 200 },
+  loginInput: { text: 4_000 }, // a code or an API key, typed into a sign-in
   setPush: { handle: 2_000, tag: 200 }
 }
 

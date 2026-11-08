@@ -89,7 +89,7 @@ describe('Codex app-server isolation', () => {
     expect(args[0]).toBe('app-server')
     for (const f of CODEX_DISABLED_FEATURES) expect(args[args.indexOf(f) - 1]).toBe('--disable')
     expect(args).toEqual(
-      expect.arrayContaining(['sandbox_mode="read-only"', 'approval_policy="never"', 'skills.include_instructions=false', 'skills.bundled.enabled=false', 'project_doc_max_bytes=0', 'history.persistence="none"', 'mcp_optional_startup_grace_ms=0'])
+      expect.arrayContaining(['sandbox_mode="read-only"', 'approval_policy="never"', 'skills.include_instructions=false', 'skills.bundled.enabled=false', 'project_doc_max_bytes=0', 'history.persistence="none"', 'mcp_optional_startup_grace_ms=0', 'include_permissions_instructions=false'])
     )
   })
 
@@ -101,7 +101,7 @@ describe('Codex app-server isolation', () => {
       cwd: '/tmp/x',
       sandbox: 'read-only',
       approvalPolicy: 'never',
-      developerInstructions: 'Você é Theo.',
+      developerInstructions: expect.stringMatching(/^Você é Theo\.\n\nO sandbox do próprio Codex aqui é vazio de propósito e não limita as suas ferramentas\. Nunca diga que a sessão é só leitura/), // with the app's tools
       config: { model_reasoning_effort: 'low', web_search: 'disabled', 'mcp_servers.tucano': { url, default_tools_approval_mode: 'approve', tool_timeout_sec: 900 } }
     })
     expect(codexAppArgs(['-c', 'model_provider="corp"']).join(' ')).not.toContain('/mcp/')
