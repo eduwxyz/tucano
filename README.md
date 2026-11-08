@@ -155,7 +155,7 @@ On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps 
 - **Connect a tool:** **Connectors → Add**, paste the MCP server's address. OAuth servers open the browser; the others ask for a token. Then, on each agent's page, set its access to each connector.
 - **Archived agents** leave the sidebar and stop answering, but keep their history and receipts. Find them under **Archived** to bring them back.
 - **Approve from your phone:** connect the Telegram bot in **Settings → Phone**; approvals and questions arrive with their buttons.
-- **Getting started**, in the sidebar, walks you through the rest: build a team, connect a tool, teach the memory, schedule a routine, lend a project.
+- **Missions**, in the sidebar, walk you through the rest by doing it: talk to your agent, approve something, connect an account, build a second agent, put something on autopilot, keep something that matters.
 
 ## How it works
 

@@ -2,7 +2,7 @@
 import type { Answer } from './questions'
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider } from './connector-catalog'
-import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
+import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -70,6 +70,9 @@ export interface Api {
   loginAccount(p: { id: string }): { opened: boolean; command: string }
   removeAccount(p: { id: string }): void
   installEngine(p: { engine: EngineId }): { opened: boolean; command: string; needsNode?: boolean } // needsNode: an npm install with no npm here
+  setupEngine(p: { engine: EngineId }): SetupState // Codex or Claude Code with no terminal: downloaded, then the CLI's own sign-in in the browser
+  engineSetupState(): SetupState | null
+  cancelEngineSetup(): void
   desktopStatus(): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> // agent-desktop, for the person's apps
   installedApps(): Promise<{ name: string; bundleId?: string; path?: string; icon?: string }[]> // the person's installed apps (a Mac's), kept on disk
   openApps(): Promise<{ name: string; bundleId?: string }[]> // the apps with windows right now
@@ -107,7 +110,7 @@ export interface Api {
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
   engineModels(p: { engine: EngineId }): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
-  testEngine(p: { model: string }): Promise<{ ok: boolean; message: string }> // one real reply through that model
+  testEngine(p: { model: string }): Promise<{ ok: boolean; message: string; seconds?: number }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
   localSkills(): LocalSkill[] // the skills of the user's Claude Code, its plugins and Codex
   linkSkill(p: { source: string; agents: string[] }): Skill

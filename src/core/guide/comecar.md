@@ -6,9 +6,11 @@ O Tucano é um time de agentes de IA que roda no seu computador. Você conversa 
 Os agentes rodam nos programas que você já usa (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Cursor CLI ou Grok), do jeito que você configurou cada um. Veja a página **motores**.
 
 ## A introdução
-Na primeira vez, o app mostra uma introdução em passos: onde os agentes rodam, os dois modelos pequenos (quem escolhe quem responde e quem cuida da memória), um pouco sobre você, conectores e skills (opcionais), e o primeiro agente. Dá pra pular com **Pular introdução** (Skip the introduction) e rever depois em **Configurações › Geral** (Settings › General) › **Rever a introdução**.
+Na primeira vez, o app guia em poucos passos: o seu nome; conectar a IA (o que já está pronto aparece testado; quem não tem nada escolhe ChatGPT ou Claude e o Tucano instala o programa oficial e abre o login no navegador, sem terminal); a pergunta do Tuca sobre o que tirar das suas costas; e o primeiro agente, que entra no **#geral** com a primeira mensagem escrita, esperando você apertar enviar. Chave de API, gateway da empresa ou outro programa: **Uso chave de API, gateway da empresa ou outro programa**. Os modelos dos bastidores são escolhidos sozinhos (**Trocar** muda). Rever: **Configurações › Geral** (Settings › General) › **Rever a introdução**.
 
-Depois dela aparece a lista **Primeiros passos** (Getting started), que se marca sozinha conforme você usa. Escondida, ela volta em **Configurações › Geral** › **Mostrar os primeiros passos**.
+Depois, balões mostram o app enquanto você usa; **Pular tour** encerra. Na barra lateral ficam as **Missões** (Missions), que se marcam sozinhas. Numa instalação nova, a barra começa curta e cada missão libera uma parte (Conectores, Canais, Rotinas, Memória e Wiki); **Mostrar tudo de uma vez** mostra tudo. Escondidas, voltam em **Configurações › Geral** › **Mostrar as missões**.
+
+Quem entra num time por convite vê uma boas-vindas curta: quem convidou, os agentes, o nome e o combinado (o que se fala direto com um agente só a pessoa lê; nos canais, o time todo vê).
 
 ## O Tuca
 O Tuca fica no topo da barra lateral. Ele monta agentes: você conta uma tarefa, ele faz poucas perguntas e propõe um agente num card. Nada é criado sem você clicar em **Criar** (ou **Editar antes**, ou **Descartar**).

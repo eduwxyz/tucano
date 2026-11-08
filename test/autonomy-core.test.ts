@@ -59,6 +59,20 @@ describe("an agent's autonomy, saved from its page", () => {
   })
 })
 
+describe("the introduction's agent", () => {
+  it('is created with the level its answer gave, and left on "Padrão" for Normal', async () => {
+    const { autonomy: _a, ...plain } = lia
+    const make = async (handle: string, autonomy?: 'careful' | 'free'): Promise<Agent | undefined> => {
+      // What the introduction sends: a new agent, its answer as the agent's own level (Normal: none).
+      await ana.call('saveAgent', { agent: { ...plain, id: `intro-${handle}`, name: handle, handle, ...(autonomy ? { autonomy } : {}) }, channelIds: [] })
+      return (await ana.call<Snap>('snapshot')).agents.find((a) => a.id === `intro-${handle}`)
+    }
+    expect((await make('cuidadosa', 'careful'))?.autonomy).toBe('careful')
+    expect((await make('livre', 'free'))?.autonomy).toBe('free')
+    expect((await make('normal'))?.autonomy).toBeUndefined()
+  })
+})
+
 describe('autonomy for every agent, in Settings', () => {
   it('takes a level, rules and the guard', async () => {
     expect(await err(ana.call('updateSettings', { patch: { autonomy: 'careful', outsideGuard: false, actionRules: { delete: 'off' } } }))).toBe('ok')

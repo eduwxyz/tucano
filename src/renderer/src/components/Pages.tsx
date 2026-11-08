@@ -1037,6 +1037,18 @@ function LentFolders({ agentId }: { agentId: string }): ReactNode {
   )
 }
 
+// Before an agent (or every agent) goes with no guardrails: here, in Settings and in the introduction.
+export const confirmNoGuardrails = (): Promise<boolean> =>
+  confirmDialog({
+    title: L('Deixar agir sem travas?', 'Let it act with no guardrails?'),
+    body: L(
+      'Envia, apaga, publica, paga e clica sem te perguntar. Continua pedindo o que você marcou como alto risco e, com a proteção ligada, o que vai pra fora depois de ler algo de fora. Tudo fica nos passos de cada resposta.',
+      'It sends, deletes, publishes, pays and clicks without asking you. It still asks for what you marked high risk and, with the guard on, for what goes out after reading something from outside. Everything stays in each reply’s steps.'
+    ),
+    confirm: L('Sem travas', 'No guardrails'),
+    danger: true
+  })
+
 // How far an agent goes on its own (in Settings, every agent): a level, the outside-content guard, and a rule
 // per kind of action for whoever wants it finer. On an agent's page, `inherited` is Settings and "Padrão"
 // follows them. `readOnly`: someone who only looks at the agent.
@@ -1048,16 +1060,7 @@ function AutonomyControls({ own, inherited, perAgent, readOnly, onChange }: { ow
   const guard = own.outsideGuard ?? inherited?.outsideGuard ?? true
   const pick = async (next: Autonomy | undefined): Promise<void> => {
     if ((next ?? inherited?.autonomy) === 'free' && effective !== 'free') {
-      const ok = await confirmDialog({
-        title: L('Deixar agir sem travas?', 'Let it act with no guardrails?'),
-        body: L(
-          'Envia, apaga, publica, paga e clica sem te perguntar. Continua pedindo o que você marcou como alto risco e, com a proteção ligada, o que vai pra fora depois de ler algo de fora. Tudo fica nos passos de cada resposta.',
-          'It sends, deletes, publishes, pays and clicks without asking you. It still asks for what you marked high risk and, with the guard on, for what goes out after reading something from outside. Everything stays in each reply’s steps.'
-        ),
-        confirm: L('Sem travas', 'No guardrails'),
-        danger: true
-      })
-      if (!ok) return
+      if (!(await confirmNoGuardrails())) return
     }
     onChange({ autonomy: next })
   }
@@ -1373,7 +1376,7 @@ export function HistoryRow({ id }: { id: string }): ReactNode {
 
 const CLASS_LABEL = (): Record<ToolClass, string> => ({ read: L('leitura', 'read'), write: L('escrita', 'write'), sensitive: L('sensível', 'sensitive') })
 
-const STATUS = (): Record<Connector['status'], { label: string; tone: string }> => ({
+export const STATUS = (): Record<Connector['status'], { label: string; tone: string }> => ({
   connected: { label: L('conectado', 'connected'), tone: 'tag--ok' },
   connecting: { label: L('conectando…', 'connecting…'), tone: '' },
   needs_auth: { label: L('precisa autorizar', 'needs authorization'), tone: 'tag--warn' },
@@ -2273,12 +2276,18 @@ export function SettingsPage(): ReactNode {
               <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
             </Field>
             <div className="row">
-              <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: false } })}>
+              {/* What the person already set (the short sidebar, the tour) stays as it was. */}
+              <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { ...settings.onboarding, done: false } })}>
                 {L('Rever a introdução', 'See the introduction again')}
               </button>
               {settings.onboarding?.checklistHidden && (
-                <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: true } })}>
-                  {L('Mostrar os primeiros passos', 'Show getting started')}
+                <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { ...settings.onboarding, done: true, checklistHidden: false } })}>
+                  {L('Mostrar as missões', 'Show the missions')}
+                </button>
+              )}
+              {settings.onboarding?.fresh && !settings.onboarding.showAll && (
+                <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { ...settings.onboarding!, showAll: true } })}>
+                  {L('Mostrar a barra lateral inteira', 'Show the whole sidebar')}
                 </button>
               )}
             </div>

@@ -62,11 +62,15 @@ describe('display preferences per person', () => {
 
   it("someone else starts with the Tucano's theme and language, no sidebar or sounds of the owner's, and never the setup introduction", () => {
     const { people, bia } = team()
-    expect(people.settingsFor(bia, { ...base, onboarding: { done: false } }).onboarding).toEqual({ done: true })
+    // Someone who joins gets their own short welcome (who invited them), never the setup introduction.
+    expect(people.settingsFor(bia, { ...base, onboarding: { done: false } }).onboarding).toEqual({ done: true, guest: { by: 'Ana' } })
     const s = people.settingsFor(bia, base)
     expect(s.theme).toBe('dark')
     expect(s.language).toBe('pt')
-    expect(s.onboarding).toEqual({ done: true })
+    expect(s.onboarding).toEqual({ done: true, guest: { by: 'Ana' } })
+    // Once they're in, it's the plain done.
+    people.takePrefs(bia, { onboarding: { done: true } })
+    expect(people.settingsFor(bia, base).onboarding).toEqual({ done: true })
     expect(s.seenVersion).toBe('0.2.10')
     expect(s.sounds).toBeUndefined()
     expect(s.folded).toBeUndefined()
@@ -85,7 +89,8 @@ describe('display preferences per person', () => {
     expect(people.settingsFor(dani, base).theme).toBe('dark')
     // An admin's mixed change: the theme is theirs, the context the Tucano's.
     expect(people.takePrefs(dani, { theme: 'light', context: 'novo' })).toEqual({ context: 'novo' })
-    expect(db.prefs(dani.id)).toEqual({ theme: 'light' })
+    const { onboarding: _welcome, ...prefs } = db.prefs(dani.id)
+    expect(prefs).toEqual({ theme: 'light' })
     // Kept across changes: one key at a time.
     people.takePrefs(bia, { theme: 'system' })
     expect(people.settingsFor(bia, base)).toMatchObject({ theme: 'system', language: 'en' })

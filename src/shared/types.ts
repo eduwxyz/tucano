@@ -415,7 +415,18 @@ export interface Settings {
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
-  onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean; carried?: boolean } // carried: the general settings came from another workspace
+  onboarding?: {
+    done: boolean
+    checklistHidden?: boolean // the missions, hidden from the sidebar
+    workspaceManagerSeen?: boolean
+    carried?: boolean // the general settings came from another workspace
+    fresh?: boolean // a new install: the sidebar starts short and grows with the missions
+    showAll?: boolean // "Mostrar tudo de uma vez": the whole sidebar, missions or not
+    seen?: string[] // the sidebar parts a mission brought that the person already opened (no "new" tag)
+    channel?: string // the channel the introduction made, where the first message waits
+    tour?: { done?: string[]; skipped?: boolean } // the marks over the real screens, once each
+    guest?: { by?: string } // someone just invited: their own short welcome first (who invited them)
+  }
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
@@ -555,6 +566,18 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
+
+// Codex or Claude Code being set up from the introduction, with no terminal (src/core/engine-setup.ts):
+// getting the CLI, then the CLI's own sign-in (the screen does the test reply after).
+export type SetupEngine = 'claude' | 'codex'
+export interface SetupState {
+  engine: SetupEngine
+  step: 'install' | 'login'
+  state: 'running' | 'done' | 'error' | 'cancelled'
+  progress?: number // 0..1, while downloading
+  url?: string // the sign-in page, in case the browser didn't open
+  error?: string
+}
 
 // A harness starts picked only when it can actually run: one not installed or not
 // signed in yet starts off.

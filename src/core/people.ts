@@ -567,6 +567,8 @@ export class People {
       if (!this.db.useInvite(invite.id, id, now)) return { error: L('Esse convite não vale mais. Peça um novo a quem te convidou.', 'That invite is no longer valid. Ask whoever invited you for a new one.') }
       const routines = back ? this.db.restorePerson(id, { name: clean, role: invite.role, about: invite.about }) : undefined
       if (!back) this.db.addPerson({ id, name: clean, role: invite.role, about: invite.about })
+      // Someone new gets their own short welcome first (who invited them, the team, the deal).
+      if (!back) this.db.setPrefs(id, { onboarding: { done: true, guest: { by: this.db.person(invite.createdBy)?.name } } })
       const key = newKey()
       this.db.addPersonKey(hashSecret(key), id, 'convite')
       this.db.addActivity({ personId: id, kind: back ? 'person.restored' : 'person.joined', target: id, detail: { role: invite.role, invitedBy: invite.createdBy }, at: now })
