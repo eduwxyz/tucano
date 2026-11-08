@@ -149,7 +149,7 @@ export function HomePhoneCard(): ReactNode {
       )}
       {on && (
         <p className="muted small">
-          {L('Fora de casa, o iPhone não alcança este computador. Pra levar o time junto, use o Tucano Pro.', "Away from home, the iPhone can't reach this computer. To take your team along, use Tucano Pro.")}
+          {L('Fora de casa, o iPhone não alcança este computador. Pra usar de qualquer lugar, rode o Tucano num servidor.', "Away from home, the iPhone can't reach this computer. To use it from anywhere, run Tucano on a server.")}
         </p>
       )}
       {(error || state?.error) && (
