@@ -4,6 +4,15 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+>
+> **Correções:** um agente com o GitHub em **Ler e escrever** volta a subir a branch e abrir a PR em vez de dizer que "a sessão é só leitura" (e, se algo pede aprovação ou está desligado, diz exatamente o quê); e o cartão **Computador** mostra o que vale pra cada escolha, sem misturar a confirmação de **Este computador** com o painel do Linux.
+
+### Fixed
+
+- **An agent with GitHub on "Ler e escrever" pushes and opens the PR instead of saying the session is read-only.** On Codex, the CLI's own text about its sandbox ("`sandbox_mode` is `read-only`... Network access is restricted", "Approval policy is never") reached the model, and it answered "Estou bloqueado porque esta sessão permite apenas leitura" for a push or a PR it had every grant for. That text is left out now (in `codex exec` and the app-server), and the note an agent with the app's tools gets says Codex's sandbox doesn't limit them, that git and other commands on its computer run with `bash`, and to say exactly what was refused or waits for approval, never "read-only". On every harness, an agent with a GitHub connector gets a **GitHub** section in its instructions, made from what it really has: the tools it publishes with (`create_branch`, `push_files`, `create_or_update_file`, `create_pull_request`, by the names it sees); on **Este computador**, that `git push` also runs with your own git credentials; on **Linux isolado**, that there are none there; what your autonomy level or rules make ask first or turn off; and, with read-only access, to ask for read and write with `pedir_acesso`. Before, an agent on this computer was told only "git push only when asked", with no word about the connector.
+- **The agent page's Computador card shows what each choice means, from the first look.** Clicking **Este computador** after **Linux isolado** showed the confirmation on top of the Linux panel (the Docker state, **Pastas do seu computador**, **Apagar computador**), with Linux still picked and already saved, and that mix read as this computer's full card, while the real one looked cut short. Now the confirmation shows alone, with **Este computador** picked, and **Cancelar** (or clicking the saved choice) goes back to it; once allowed, the card says the commands run on your computer as you, starting in its folder, and that it reaches your folders without lending them and needs no Docker.
+
 ## [0.2.18] - 2026-11-07
 
 > **Em português:**
