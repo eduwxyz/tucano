@@ -10739,3 +10739,15 @@ button.agent-card__now:hover {
 @keyframes wk-git-pulse { 50% { opacity: .35; } }
 .wk-ro { display: inline-flex; gap: 4px; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); white-space: nowrap; flex: none; }
 @media (max-width: 520px) { .wk-git__choices { grid-template-columns: 1fr; } }
+
+/* The workspace's bots, with individual model edits and a shared batch picker. */
+.bot-models__controls { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
+.bot-models__bulk { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.bot-models__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.bot-models__filters > input { flex: 1; min-width: 180px; }
+.bot-models input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
+.bot-models__list { display: grid; }
+.bot-models__row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
+.bot-models__identity { display: flex; align-items: center; gap: 10px; flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.bot-models__choice { display: grid; gap: 6px; flex: 2 1 300px; min-width: 0; }
+.bot-models [role="status"]:not(:empty) { margin-top: 12px; }

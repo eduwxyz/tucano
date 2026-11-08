@@ -75,6 +75,7 @@ import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, au
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
+import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
 import { perCallTool } from '../../../shared/composio'
@@ -2324,6 +2325,8 @@ export function SettingsPage(): ReactNode {
             <UpdateSettings />
           </Card>
         )}
+
+        {pane('modelos') && admin && <AgentModelsPanel />}
 
         {pane('modelos') && (
           <Card

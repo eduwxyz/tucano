@@ -1307,6 +1307,30 @@ const api: Handlers = {
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), bg(runner.continue(messageId), 'continueRun')),
 
+  setAgentModels: ({ agentIds, modelId }, ctx) => {
+    const value = modelId.trim()
+    const model = modelInfo(value)
+    if (!model?.id) throw new Error(L('Escolha um modelo válido.', 'Choose a valid model.'))
+    const agents = [...new Set(agentIds)].map((id) => {
+      const agent = db.agent(id)
+      if (!agent) throw new Error(L('Um dos agentes não existe mais. Atualize a lista.', 'An agent no longer exists. Refresh the list.'))
+      return agent
+    })
+    const changed = agents.filter((a) => a.modelId !== value).map((a): Agent => ({
+      ...a,
+      modelId: value,
+      ...(modelInfo(a.modelId)?.engine !== model.engine ? { accountId: undefined } : {})
+    }))
+    db.tx(() => {
+      for (const agent of changed) {
+        db.saveAgent(agent)
+        record(ctx, 'agent.updated', agent.id, { name: agent.name, modelId: value })
+      }
+    })
+    for (const agent of changed) emit({ type: 'agent', agent: db.agent(agent.id)! })
+    return changed.length
+  },
+
   saveAgent: ({ agent, channelIds }, ctx) => {
     const before = db.agent(agent.id)
     // Archived changes only through archiveAgent, which also stops what the agent was doing.
