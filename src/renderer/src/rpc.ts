@@ -40,7 +40,7 @@ declare global {
       servers?: {
         // desktop only: Tucanos on servers, shown in this window over the app; open: the one on screen
         list: () => Promise<{ id: string; name: string; origin: string; open: boolean }[]>
-        pair: (link: string) => Promise<'paired' | 'cancelled' | 'invalid' | 'unsafe'>
+        pair: (link: string) => Promise<'paired' | 'cancelled' | 'invalid' | 'unsafe' | 'used' | 'unreachable'>
         open: (id: string) => void
         local: () => void // back to this computer's Tucano
         forget: (id: string) => Promise<boolean>

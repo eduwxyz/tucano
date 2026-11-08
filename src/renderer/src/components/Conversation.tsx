@@ -1832,6 +1832,17 @@ function RecordingClock({ since }: { since: number }): ReactNode {
 const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')
 const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'word-spacing', 'tab-size', 'text-transform', 'text-indent', 'padding']
 
+// What a paste attaches. Copying text from a spreadsheet, a page or a document often brings a
+// picture of it too: that pastes as the text, not as an image the person never meant to send.
+// A file copied in Finder or Explorer comes with its name as the text, and still attaches.
+export function pastedFiles(files: File[], text: string, server: boolean): File[] {
+  const usable = files.filter((f) => server || f.type.startsWith('image/'))
+  const typed = text.trim()
+  if (!usable.length || !typed) return usable
+  const names = new Set(files.map((f) => f.name))
+  return typed.split(/\r?\n/).every((line) => names.has(line.trim().split('/').pop() ?? '')) ? usable : []
+}
+
 // `threadId`: it answers in the thread that message started, not in the conversation.
 export function Composer({ conversationId, threadId, members, placeholder }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string }): ReactNode {
   const key = threadId ?? conversationId // the draft's
@@ -2062,6 +2073,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       threadId
     )
     drafts.delete(key)
+    live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
     setText('')
     setImages([])
     setNote('')
@@ -2136,7 +2148,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               if (e.target.value.trim()) typing(conversationId, threadId)
             }}
             onPaste={(e) => {
-              const files = [...e.clipboardData.files].filter((f) => window.tucano.upload || f.type.startsWith('image/'))
+              const files = pastedFiles([...e.clipboardData.files], e.clipboardData.getData('text/plain'), !!window.tucano.upload)
               if (!files.length) return
               e.preventDefault()
               void addFiles(files)

@@ -3,7 +3,7 @@
 // directly, so every call passes the grant and approval checks first.
 import { randomBytes, randomUUID } from 'node:crypto'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
+import { auth, UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
@@ -79,6 +79,78 @@ export function googlePreviewHint(url: string | undefined, text: string): string
     `[Isto é um passo de configuração do Google, que só a pessoa pode fazer: os servidores MCP do Google estão em Developer Preview, e o projeto dela no Google Cloud precisa estar inscrito no Google Workspace Developer Preview Program, em ${GOOGLE_PREVIEW_URL} (o formulário pede o número do projeto). A aprovação costuma levar alguns dias, e até lá as ferramentas do Google falham. Nem você nem o Tuca conseguem resolver isso: explique o passo e não tente de novo. Enquanto isso, a Composio, na loja de conectores, conecta o Google sem esse passo, mas os dados passam pelos servidores dela.]`,
     `[This is a Google setup step only the person can do: Google's MCP servers are in Developer Preview, and their Google Cloud project must be enrolled in the Google Workspace Developer Preview Program, at ${GOOGLE_PREVIEW_URL} (the form asks for the project number). Approval usually takes a few days, and until then Google's tools fail. Neither you nor the Tuca can fix this: explain the step and don't retry. Meanwhile, Composio, in the connector store, connects Google without this step, but the data goes through its servers.]`
   )
+}
+
+// Google's other answers that a sign-in won't fix, or that only a new sign-in will, in words the agent can
+// pass on. Its MCP servers answer a missing or bad token on each tool call (the handshake and the tool list
+// need none), so these show up on a call, not when connecting.
+export function googleHint(url: string | undefined, text: string): string | undefined {
+  const preview = googlePreviewHint(url, text)
+  if (preview) return preview
+  let host = ''
+  try {
+    host = new URL(url ?? '').hostname
+  } catch {
+    return undefined
+  }
+  if (!/(^|\.)googleapis\.com$/i.test(host)) return undefined
+  if (/SERVICE_DISABLED|accessNotConfigured|has not been used in project|API has not been used|is disabled\b/i.test(text)) {
+    const api = /\b([a-z][a-z0-9-]*\.googleapis\.com)\b/i.exec(text.replace(/https?:\/\/\S+/g, ''))?.[1]
+    const project = /project[ =:]+(\d{4,})/i.exec(text)?.[1]
+    const link =
+      /https:\/\/console\.(?:developers|cloud)\.google\.com\/[^\s"'\\)]+/.exec(text)?.[0] ??
+      `https://console.cloud.google.com/apis/library/${api ?? ''}${project ? `?project=${project}` : ''}`
+    const which = api ? ` (${api})` : ''
+    return L(
+      `[Isto é um passo de configuração do Google, que só a pessoa pode fazer: uma API${which} não está ativada no projeto dela no Google Cloud${project ? ` (${project})` : ''}. Ela precisa ativá-la em ${link}, no mesmo projeto do cliente OAuth (cada serviço tem duas: a dele e a MCP), esperar uns minutos e tentar de novo. Não é falta de login: autorizar de novo não resolve.]`,
+      `[This is a Google setup step only the person can do: an API${which} isn't turned on in their Google Cloud project${project ? ` (${project})` : ''}. They need to turn it on at ${link}, in the same project as the OAuth client (each service has two: its own and the MCP one), wait a few minutes and try again. It isn't the sign-in: authorizing again won't fix it.]`
+    )
+  }
+  if (/insufficient.{0,30}scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(text)) return GOOGLE_SCOPE_HINT()
+  if (/invalid authentication credentials|missing required authentication credential|invalid_token/i.test(text)) return GOOGLE_SIGN_IN_HINT()
+  return undefined
+}
+
+const GOOGLE_SCOPE_HINT = (): string =>
+  L(
+    '[O login do Google deste conector não tem todas as permissões: alguma caixa ficou desmarcada na tela de permissões do Google. Só a pessoa resolve: em Conectores, clicar em Autorizar no conector e marcar todas as caixas. Não tente de novo antes disso.]',
+    "[This connector's Google sign-in lacks some permissions: a box was left unticked on Google's permission screen. Only the person can fix it: in Connectors, click Authorize on the connector and tick every box. Don't retry before that.]"
+  )
+const GOOGLE_SIGN_IN_HINT = (): string =>
+  L(
+    '[O Google recusou o login deste conector. Só a pessoa resolve: em Conectores, clicar em Autorizar no conector. Se o Google barrar o login, confira no Google Cloud (Google Auth Platform): o e-mail dela em Público-alvo › Usuários de teste, enquanto o app estiver em teste, e o cliente do tipo App para computador com “Usar este cliente para um agente com IA” marcado. Não tente de novo antes disso.]',
+    "[Google refused this connector's sign-in. Only the person can fix it: in Connectors, click Authorize on the connector. If Google blocks the sign-in, check in Google Cloud (Google Auth Platform): their email under Audience › Test users, while the app is in testing, and a Desktop app client with “Use this client for an AI-powered agent” ticked. Don't retry before that.]"
+  )
+
+// A call the server turned away for the sign-in: none or one it refused to renew ('missing'), a token refused
+// even right after renewing ('refused'), or one without the permissions the tool needs ('scope').
+export type SignInRefusal = 'missing' | 'refused' | 'scope'
+export function signInRefusal(e: unknown): SignInRefusal | undefined {
+  if (e instanceof UnauthorizedError) return 'missing'
+  if (e instanceof StreamableHTTPError && e.code === 403 && /upscoping|insufficient.{0,30}scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(e.message)) return 'scope'
+  if (e instanceof StreamableHTTPError && e.code === 401) return 'refused'
+  return undefined
+}
+
+// What the person reads on the connector (and in the step) when a call was turned away for the sign-in.
+export function signInMessage(name: string, why: SignInRefusal, google: boolean): string {
+  if (why === 'scope')
+    return L(
+      `Falta permissão no login do ${name}: alguma caixa ficou desmarcada na tela de permissões. Em Conectores, clique em Autorizar no ${name} e marque todas.`,
+      `The ${name} sign-in is missing a permission: a box was left unticked on the permission screen. In Connectors, click Authorize on ${name} and tick them all.`
+    )
+  if (why === 'missing')
+    return L(`Falta autorizar o ${name}: em Conectores, clique em Autorizar no ${name}.`, `${name} needs authorization: in Connectors, click Authorize on ${name}.`)
+  const base = L(
+    `O servidor recusou o login do ${name}, mesmo renovado. Em Conectores, clique em Autorizar no ${name} pra entrar de novo.`,
+    `The server refused the ${name} sign-in, even renewed. In Connectors, click Authorize on ${name} to sign in again.`
+  )
+  return google
+    ? `${base} ${L(
+        'Se o Google barrar o login, confira no Google Cloud se o seu e-mail está em Usuários de teste e se o cliente tem “Usar este cliente para um agente com IA” marcado.',
+        'If Google blocks the sign-in, check in Google Cloud that your email is under Test users and that the client has “Use this client for an AI-powered agent” ticked.'
+      )}`
+    : base
 }
 
 // Why a tool call threw, in words: a timeout says how long it waited, an MCP error keeps the code and the
@@ -217,6 +289,9 @@ export class ConnectorManager {
   // one refusal, and the refusal made the SDK delete the sign-in the other had just saved.
   private renewals = new Map<string, Promise<Answer>>()
   private refused = new Set<string>() // refresh tokens a server refused
+  // Connectors whose saved sign-in a server turned away even renewed, or that lacks a permission a tool needs:
+  // renewing it again gets the same answer, so the next Authorize goes to the browser. The value says why.
+  private freshSignIn = new Map<string, string>()
 
   constructor(private deps: ConnectorDeps) {}
 
@@ -391,12 +466,29 @@ export class ConnectorManager {
           const token = await this.deps.secrets.get(key(id, 'token'))
           if (token) headers['Authorization'] = `Bearer ${await resolveOp(token, this.deps.readOp)}`
         }
+        const provider = c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own) : undefined
+        const fetchFn = c.auth === 'oauth' ? this.renewingFetch(renewal) : undefined
         const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
           requestInit: { headers },
-          authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own) : undefined,
-          ...(c.auth === 'oauth' ? { fetch: this.renewingFetch(renewal) } : {})
+          authProvider: provider,
+          ...(fetchFn ? { fetch: fetchFn } : {})
         })
         transport = http
+        // Google's servers open and list their tools for anyone, and ask for the sign-in only on a call: without
+        // a saved one the connector would look connected while every call fails with "Unauthorized". So a
+        // server that signs in with the person's app asks for the sign-in here, before connecting.
+        if (own && provider && fetchFn && (await this.needsSignIn(id, interactive))) {
+          if (!interactive) {
+            this.setStatus(id, 'needs_auth', this.freshSignIn.get(id) ?? L('Precisa autorizar.', 'Needs authorization.'))
+            return
+          }
+          if ((await auth(provider, { serverUrl: new URL(c.url!), fetchFn })) === 'AUTHORIZED') {
+            this.freshSignIn.delete(id)
+          } else {
+            this.setStatus(id, 'needs_auth', L('Conclua a autorização no navegador.', 'Finish the authorization in the browser.'))
+            return
+          }
+        }
       } else {
         const env = await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp)
         transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
@@ -432,6 +524,13 @@ export class ConnectorManager {
         // Added with no sign-in at all, and the server asks for one.
         await client.close().catch(() => {})
         this.setStatus(id, 'error', L('O servidor pede autorização. Adicione de novo com OAuth ou token.', 'The server asks for authorization. Add it again with OAuth or a token.'))
+      } else if (c.auth === 'oauth' && !interactive && (signInRefusal(e) === 'refused' || signInRefusal(e) === 'scope')) {
+        // Turned away right after renewing, or short of a permission: renewing again gets the same answer, so
+        // Authorize goes to the browser for a new sign-in.
+        await client.close().catch(() => {})
+        const message = signInMessage(c.name, signInRefusal(e)!, this.appOf(c.url)?.provider === 'google')
+        this.freshSignIn.set(id, message)
+        this.setStatus(id, 'needs_auth', message)
       } else if (refused) {
         this.setStatus(id, 'needs_auth', interactive ? L('Conclua a autorização no navegador.', 'Finish the authorization in the browser.') : L('Precisa autorizar.', 'Needs authorization.'))
       } else if (e instanceof Error && /dynamic client registration/i.test(e.message)) {
@@ -546,15 +645,47 @@ export class ConnectorManager {
       }
       const c = this.deps.db.connector(id)
       if (c?.kind === 'stdio' && ++l.failures >= MAX_STDIO_FAILURES) this.setStatus(id, 'error', L(`Falhou ${l.failures} vezes seguidas.`, `Failed ${l.failures} times in a row.`))
+      const refusal = c?.auth === 'oauth' ? signInRefusal(failure) : undefined
+      if (c && refusal) throw new Error(await this.turnedAway(c, refusal), { cause: failure })
       const why = callError(failure, timeout)
-      const hint = googlePreviewHint(c?.url, why)
+      const hint = googleHint(c?.url, why)
       throw new Error(hint ? `${hint} ${why}` : why, { cause: failure })
+    }
+  }
+
+  // A call turned away for the sign-in: the connector asks for it (Authorize shows up), and the step says what
+  // to do. A renewal that failed for a passing reason (no network) keeps the sign-in: the next call renews it.
+  private async turnedAway(c: Omit<Connector, 'status' | 'error'>, why: SignInRefusal): Promise<string> {
+    const google = this.appOf(c.url)?.provider === 'google'
+    if (why === 'missing' && !this.freshSignIn.has(c.id) && (await this.renewable(c.id)))
+      return L(
+        `Não consegui renovar o login do ${c.name} agora: o servidor de autorização não respondeu. Tente de novo daqui a pouco.`,
+        `I couldn't renew the ${c.name} sign-in just now: the authorization server didn't answer. Try again in a moment.`
+      )
+    const message = signInMessage(c.name, why, google)
+    if (why !== 'missing') this.freshSignIn.set(c.id, message)
+    clearTimeout(this.live.get(c.id)?.retry)
+    await this.disconnect(c.id)
+    this.setStatus(c.id, 'needs_auth', message)
+    const hint = google ? (why === 'scope' ? GOOGLE_SCOPE_HINT() : why === 'refused' ? GOOGLE_SIGN_IN_HINT() : undefined) : undefined
+    return hint ? `${hint} ${message}` : message
+  }
+
+  // Whether a connector that signs in with the person's app has to sign in (in the browser) before connecting:
+  // no sign-in saved, or one the server turned away. A saved one the system's key won't open is left to the
+  // connection, which says so (and, from Authorize, signs in again in its place).
+  private async needsSignIn(id: string, interactive: boolean): Promise<boolean> {
+    if (this.freshSignIn.has(id)) return true
+    try {
+      return !(await this.deps.secrets.getJson<OAuthTokens>(key(id, 'oauth_tokens')))
+    } catch (e) {
+      return interactive && !!unreadable(e)
     }
   }
 
   // A failed result with a known cause gets that cause first, in words the agent can pass on.
   private explained(id: string, r: CallToolResult): CallToolResult {
-    const hint = r.isError ? googlePreviewHint(this.deps.db.connector(id)?.url, errorReason(r)) : undefined
+    const hint = r.isError ? googleHint(this.deps.db.connector(id)?.url, errorReason(r)) : undefined
     return hint ? { ...r, content: [{ type: 'text', text: hint }, ...(r.content ?? [])] } : r
   }
 
@@ -576,6 +707,7 @@ export class ConnectorManager {
   }
 
   private async renewable(id: string): Promise<boolean> {
+    if (this.freshSignIn.has(id)) return false
     const tokens = await this.deps.secrets.getJson<OAuthTokens>(key(id, 'oauth_tokens')).catch(() => undefined)
     return !!tokens?.refresh_token && !this.refused.has(tokens.refresh_token)
   }
@@ -638,6 +770,7 @@ export class ConnectorManager {
     this.oauthStates.delete(state)
     this.doneStates.add(state)
     await pending.transport.finishAuth(code)
+    this.freshSignIn.delete(pending.connectorId)
     await this.connect(pending.connectorId)
     return true
   }
@@ -688,7 +821,9 @@ export class ConnectorManager {
         return info && (!info.redirect_uris || info.redirect_uris.some(fits)) ? info : undefined
       },
       saveClientInformation: (info) => (own ? undefined : secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] })),
-      tokens: () => read<OAuthTokens>(key(id, 'oauth_tokens')),
+      // A sign-in the server turned away even renewed isn't offered when signing in again: the SDK would renew it
+      // once more instead of going to the browser.
+      tokens: () => (interactive && this.freshSignIn.has(id) ? Promise.resolve(undefined) : read<OAuthTokens>(key(id, 'oauth_tokens'))),
       saveTokens: (t) => secrets.setJson(key(id, 'oauth_tokens'), t),
       saveCodeVerifier: (v) => secrets.set(key(id, 'oauth_verifier'), v),
       codeVerifier: async () => (await secrets.get(key(id, 'oauth_verifier'))) ?? '',

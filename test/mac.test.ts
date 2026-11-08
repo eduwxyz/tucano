@@ -162,6 +162,8 @@ describe('an agent whose computer is this Mac', () => {
     if (win) expect(prompt).not.toMatch(/\bMac\b/)
     if (win) expect(prompt).toMatch(/Git Bash|cmd\.exe/)
     expect(prompt).toContain(`Eles começam em ${work} (sua pasta de trabalho)`)
+    // The person's own things (a screenshot just taken on the Desktop) aren't the agent's to look through unasked.
+    expect(prompt).toContain('não abra nem liste por conta própria o que é pessoal dele (Mesa, Downloads, Documentos, prints de tela, fotos)')
     expect(prompt).not.toContain('A pasta de trabalho é /work')
     const off = liveContext({ settings: { workspaceName: 'Edu', context: '' }, offline: ['Linear'] })
     expect(off).toContain('Você tem acesso a Linear, mas ele está desconectado agora')

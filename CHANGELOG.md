@@ -4,6 +4,24 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+>
+> **Correções:** um print anexado não vai mais pro modelo a cada resposta: ele vai só na mensagem em que você mandou (depois o agente sabe o nome e, se precisar, olha de novo), o que acaba com o agente comentando um "print novo" e gastando tokens à toa; e um conector do Google sem login válido mostra **Autorizar** em vez de "conectado", e uma chamada recusada diz o motivo (falta login, e-mail fora dos usuários de teste, permissão faltando, API não ativada ou Developer Preview).
+
+### Fixed
+
+- **An attached image goes to the model only in its own turn.** Every turn that sent the whole conversation (every turn on engines without kept sessions, and on Claude Code whenever its session starts over) also sent the newest six images in it, after they were already answered, so the model kept "seeing" a screenshot the person hadn't just sent, commented on it again and spent about 1.5k input tokens per image per turn. Now an image goes as an image only until this agent has answered it; later turns keep `[imagem anexada: name]`, and a new `ver_imagem` tool lets the agent look at an earlier attachment again when it needs to. An agent on this computer is also told not to open or list the person's Desktop, Downloads, screenshots or photos unless asked. Pasting text that comes with a picture of itself (a spreadsheet cell, a page) pastes the text instead of attaching the picture.
+- **A Google connector without a working sign-in asks to authorize.** Google's MCP servers answer `initialize` and `tools/list` without a token and refuse only `tools/call`, so a connector with no usable sign-in showed as connected, its first tool call failed with a bare "Unauthorized", and reconnecting didn't help. A connector that signs in with the person's own app (Google, Slack) and has no usable sign-in now shows **Authorize**, which opens the provider's sign-in. A call turned away says why: missing sign-in, refused even after renewing (check Test users and the AI-agent client), a missing permission, an API not enabled (with the link to enable it) or the Developer Preview. A token Google refused is not renewed again on the next Authorize; it signs in from scratch. The guide's Google troubleshooting covers each message.
+
+## [0.2.21] - 2026-11-08
+
+> **Em português:**
+> - **Abrir o Tucano de um servidor no app do computador com um link de uso único.** Em Configurações › Servidores › Conectar a um servidor, cole o link de entrada que o servidor deu (o do Tucano Pro, o de `server.js pair` ou o de Conectar um celular): o app troca por uma chave só deste computador, depois do clique em Conectar.
+
+### Added
+
+- **The desktop app opens a Tucano on a server with a one-time link.** Settings › Servers › Connect to a server, and a `tucano://connect` link opened from outside, now take the one-time link a server makes (`server.js pair`, or Settings › People › Connect a phone in the browser), in its app form (`tucano://connect?…&code=`) or its browser form (`https://…/?code=`), not only the server's own token link. The code is spent only after the click on Connect, never by reading the link: the app trades it at the server's `/pair`, as the iPhone does, for a key of this computer's own, named after it in the person's devices ("MacBook-de-Ana · macos"), and keeps that key in the system's keychain like a token. So someone on Tucano Pro, or invited to someone's server, can open it in the desktop app as themselves. A spent or expired link says how to make another; a server that doesn't answer leaves the link unspent.
+
 ## [0.2.20] - 2026-11-08
 
 > **Em português:**
@@ -488,6 +506,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.21]: https://github.com/eduwxyz/tucano/compare/v0.2.20...v0.2.21
 [0.2.20]: https://github.com/eduwxyz/tucano/compare/v0.2.19...v0.2.20
 [0.2.19]: https://github.com/eduwxyz/tucano/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/eduwxyz/tucano/compare/v0.2.17...v0.2.18
