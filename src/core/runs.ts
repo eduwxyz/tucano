@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
@@ -66,6 +66,24 @@ const NARRATION_MAX = 600 // longer text before a tool call is an answer, and st
 const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
 const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
 const THOUGHT = (): string => L('Pensou', 'Thought') // the thinking step, closed
+
+// An image I attached to an earlier message: it went to the model as an image in the turn it was
+// sent; later turns only name it, and the agent looks again with this when it needs to.
+export const VER_IMAGEM: ToolDef = {
+  name: 'ver_imagem',
+  get description() {
+    return L(
+      'Mostra de novo uma imagem anexada numa mensagem anterior desta conversa. Cada imagem anexada vai pra você como imagem só na resposta à mensagem que a trouxe; depois ela aparece só pelo nome, como [imagem anexada: nome]. Uma mensagem sem essa marca não tem imagem: não comente uma imagem antiga como se tivesse chegado agora. Use só quando precisar olhar a imagem de novo pra responder.',
+      "Shows again an image attached to an earlier message of this conversation. Each attached image goes to you as an image only in the reply to the message that brought it; after that it shows only by name, as [attached image: name]. A message without that mark has no image: don't comment on an old image as if it just arrived. Use it only when you need to look at the image again to answer."
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: { nome: { type: 'string', description: L('O nome, como aparece em [imagem anexada: nome]. Sem nome: a mais recente.', 'The name, as in [attached image: name]. No name: the newest.') } }
+    }
+  }
+}
 
 export const ASK_USER: ToolDef = {
   name: 'ask_user',
@@ -1050,7 +1068,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1111,6 +1129,18 @@ ${note}`,
         inputSchema: { ...t.inputSchema, properties: { ...(t.inputSchema.properties ?? {}), [REASON_PARAM]: { type: 'string', description: L(`Se o comando pede aprovação: por que, em uma frase. Aparece pra ${settings.workspaceName} no pedido.`, `If the command asks for approval: why, in one sentence. ${settings.workspaceName} sees it in the request.`) } } }
       }
     }
+    // Images I attached: every message in the transcript says which it had (by name). They go in as
+    // images only until this agent has answered them (a reply that ended well after their message):
+    // sent again with every reply, the model took an old screenshot for a new one, and paid for it each
+    // time. Past that, it looks again with ver_imagem.
+    const ids = new Set(history.map((m) => m.id))
+    const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
+    const names = new Map<string, string[]>()
+    for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
+    const answered = history.reduce((at, m, i) => (m.id !== msg.id && m.author.kind === 'agent' && m.author.id === agent.id && m.run?.status === 'done' ? i : at), -1)
+    const unanswered = new Set(history.slice(answered + 1).map((m) => m.id))
+    const fresh = attached.filter((a) => unanswered.has(a.messageId))
+    const canSeeImages = !!this.deps.gateway && attached.length > 0
     // The app's own tools stay in the prompt; the connectors' wait behind tool search (ALWAYS_LOAD).
     const others = db.people()
     const ownTools: ToolDef[] = [
@@ -1119,6 +1149,7 @@ ${note}`,
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
+      ...(canSeeImages ? [VER_IMAGEM] : []),
       ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
       ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
@@ -1313,6 +1344,20 @@ ${note}`,
           if (!found.length) return textResult(L(`Nenhuma memória com "${busca}". Tente outras palavras; se não achar, o fato não foi guardado.`, `No memory with "${busca}". Try other words; if nothing turns up, the fact wasn't saved.`))
           const about = (m: (typeof found)[number]): string => (m.scope !== agent.id ? L(`sobre ${settings.workspaceName || 'o usuário'}`, `about ${settings.workspaceName || 'the user'}`) : L('sua nota', 'your note'))
           return textResult(found.map((m) => `- [${m.id}] ${m.text} (${about(m)}, ${new Date(m.confirmedAt).toLocaleDateString(locale())})`).join('\n'))
+        }
+
+        if (name === VER_IMAGEM.name && canSeeImages) {
+          const nome = typeof args['nome'] === 'string' ? args['nome'].trim().replace(/^\[?(?:imagem anexada|attached image):\s*/i, '').replace(/\]$/, '') : ''
+          const found = nome ? (attached.findLast((a) => a.name === nome) ?? attached.findLast((a) => a.name.toLowerCase() === nome.toLowerCase())) : attached.at(-1)
+          let data: Buffer | undefined
+          try {
+            data = found && readFileSync(join(this.deps.dataDir!, 'artifacts', found.id, found.name))
+          } catch {
+            data = undefined
+          }
+          if (!found || !data) return textResult(L(`Não achei a imagem "${nome}" nesta conversa. Use o nome como aparece em [imagem anexada: nome]: ${attached.map((a) => a.name).join(', ')}.`, `I couldn't find the image "${nome}" in this conversation. Use the name as in [attached image: name]: ${attached.map((a) => a.name).join(', ')}.`), true)
+          addSteps({ id: randomUUID(), label: L('Viu uma imagem anexada', 'Looked at an attached image'), detail: found.name, status: 'done' })
+          return { content: [{ type: 'image', data: data.toString('base64'), mimeType: mimeOf(found.name) }, { type: 'text', text: L(`${found.name}, anexada antes nesta conversa.`, `${found.name}, attached earlier in this conversation.`) }] }
         }
 
         if (name === BUSCAR_THREADS.name && canSeekThreads) {
@@ -1881,11 +1926,6 @@ ${note}`,
     let error: string | null = null
     let thrown: unknown // what the engine threw, if it did: a bug reads differently from a CLI's own words
 
-    // Images I attached: every message says which it had; the newest go in as images.
-    const ids = new Set(history.map((m) => m.id))
-    const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
-    const names = new Map<string, string[]>()
-    for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
     const thread = msg.threadId ? db.message(msg.threadId) : undefined
     const promptOpts: PromptOpts = {
       agent,
@@ -1915,7 +1955,7 @@ ${note}`,
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
     const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
-    const images: TurnImage[] = attached
+    const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
 
