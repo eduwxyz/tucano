@@ -6,7 +6,7 @@ import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
-import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type PromptOpts } from './context'
+import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
@@ -194,6 +194,20 @@ function exposedName(connector: Connector, tool: string, taken: Set<string>): st
   for (let i = 2; taken.has(name); i++) name = `${slug}${i}__${tool}`.slice(0, 48)
   taken.add(name)
   return name
+}
+
+// A GitHub connector this agent has access to (the first, if there are several): its grant, the
+// tools it publishes with (a branch, files, a PR) by the names this turn exposes, and what a rule
+// makes ask first or turns off. A tool turned off by a rule isn't exposed, so it shows only as "off".
+const IS_GITHUB = /github/i
+const MAKES = /^create_?(a_)?branch$|^create_or_update_file$/i // GitHub's MCP; push and PR tools go by their kind
+const publishes = (name: string): boolean => MAKES.test(name) || toolActions(name).some((k) => k === 'push' || k === 'pr' || k === 'commit')
+export function githubAccess(connectors: Connector[], agent: Pick<Agent, 'grants'>, exposed: Map<string, Exposed>, policy: Policy): GitHubAccess | undefined {
+  const c = connectors.find((x) => (IS_GITHUB.test(x.url ?? '') || IS_GITHUB.test(x.name)) && (agent.grants[x.id] === 'read' || agent.grants[x.id] === 'read_write'))
+  if (!c) return undefined
+  const tools = [...exposed].filter(([, e]) => e.connector.id === c.id && e.tool.cls !== 'read' && publishes(e.tool.name) && !toolActions(e.tool.name).some((k) => k === 'merge' || k === 'delete')).map(([name]) => name)
+  const kinds: ActionKind[] = ['push', 'pr']
+  return { connector: c.name, level: agent.grants[c.id] as 'read' | 'read_write', tools, ask: kinds.filter((k) => actionMode(k, policy) === 'ask'), off: kinds.filter((k) => actionMode(k, policy) === 'off') }
 }
 
 // "2,4 mi", "850 mil"
@@ -1050,6 +1064,8 @@ export class Runner {
       if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id], perCallTool(c.url, t.name)) && gate(kindsOf(t), policy).mode !== 'off') exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
+    // GitHub through its connector, as this turn has it: the prompt says how to publish and what waits (context.ts).
+    const github = githubAccess(this.deps.connectors?.list() ?? [], agent, exposed, policy)
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
     const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write')
     const accessTool: ToolDef | undefined =
@@ -1889,6 +1905,7 @@ ${note}`,
       skills: skills && mySkills,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
       connectors: exposed.size > 0,
+      github,
       people,
       builder: proposes
         ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })
