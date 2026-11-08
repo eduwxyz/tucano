@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **The desktop app opens a Tucano on a server with a one-time link.** Settings › Servers › Connect to a server, and a `tucano://connect` link opened from outside, now take the one-time link a server makes (`server.js pair`, or Settings › People › Connect a phone in the browser), in its app form (`tucano://connect?…&code=`) or its browser form (`https://…/?code=`), not only the server's own token link. The code is spent only after the click on Connect, never by reading the link: the app trades it at the server's `/pair`, as the iPhone does, for a key of this computer's own, named after it in the person's devices ("MacBook-de-Ana · macos"), and keeps that key in the system's keychain like a token. So someone on Tucano Pro, or invited to someone's server, can open it in the desktop app as themselves. A spent or expired link says how to make another; a server that doesn't answer leaves the link unspent.
+
 ## [0.2.20] - 2026-11-08
 
 > **Em português:**

@@ -6,10 +6,12 @@
 import { BrowserWindow, dialog, session, shell, WebContentsView, type MenuItemConstructorOptions, type Session } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../shared/lang'
 import { isOutsideLink } from '../shared/links'
-import { isPreviewOf, onServer, parsePairing, serverName } from '../shared/servers'
+import { isPreviewOf, onServer, pairProblem, parsePairing, serverName } from '../shared/servers'
+import { redeemCode, thisDevice } from './redeem'
 
 interface Saved {
   id: string
@@ -29,8 +31,9 @@ export interface ServerInfo {
   open: boolean // on screen now, in the app's window
 }
 
-// paired; cancelled (the person said no); invalid (not a pairing link); unsafe (nowhere safe to keep it)
-export type PairResult = 'paired' | 'cancelled' | 'invalid' | 'unsafe'
+// paired; cancelled (the person said no); invalid (not a pairing link); unsafe (nowhere safe to keep it);
+// used (a one-time code already spent or past its time); unreachable (the server didn't answer)
+export type PairResult = 'paired' | 'cancelled' | 'invalid' | 'unsafe' | 'used' | 'unreachable'
 
 export interface ServersDeps {
   dataDir: () => string
@@ -89,13 +92,12 @@ export class Servers {
 
   // A pairing link from outside the app (the system, the menu's clipboard): it says so when it isn't one.
   async pairFromOutside(link: string): Promise<void> {
-    if ((await this.pair(link, true)) !== 'invalid') return
-    await dialog.showMessageBox({
-      type: 'warning',
-      message: L('Esse não é um link de conexão do Tucano', "That's not a Tucano connection link"),
-      detail: L('O link de conexão começa com tucano://connect e sai do servidor (node out/main/server.js link).', 'A connection link starts with tucano://connect and comes from the server (node out/main/server.js link).')
-    })
+    const r = await this.pair(link, true)
+    if (r !== 'invalid' && r !== 'used' && r !== 'unreachable') return
+    const { title, detail } = pairProblem(r)
+    await dialog.showMessageBox({ type: 'warning', message: title, detail })
   }
+
 
   // A pairing link. One from outside the app may come from any web page (it can make the system
   // hand one over), so the person is asked first, with the address in plain sight. One pasted in
@@ -116,7 +118,15 @@ export class Servers {
       )
     })
     if (response !== 0) return 'cancelled'
-    const sealed = this.deps.seal(p.token)
+    // A one-time code is spent here, after the click, never by opening the link: a key of this
+    // computer's own comes back, and it signs in the way the server's token would.
+    let token: string
+    if ('code' in p) {
+      const r = await redeemCode(p.origin, p.code, thisDevice(hostname(), process.platform))
+      if ('error' in r) return r.error
+      token = r.key
+    } else token = p.token
+    const sealed = this.deps.seal(token)
     if (!sealed) {
       await dialog.showMessageBox({
         type: 'error',
