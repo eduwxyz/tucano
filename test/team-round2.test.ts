@@ -475,7 +475,8 @@ describe('12. unread right after upgrading from main', () => {
     const rnd = (n: number): number => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed % n)
     const mismatches: string[] = []
     // Each round builds a database on disk: Windows' disk is slow enough that fewer rounds keep it in time.
-    const rounds = process.platform === 'win32' ? 20 : 150
+    // A pull request's CI runs a few (TUCANO_QUICK_TESTS); main runs them all.
+    const rounds = process.env['TUCANO_QUICK_TESTS'] ? 5 : process.platform === 'win32' ? 20 : 150
     for (let round = 0; round < rounds; round++) {
       const file = join(dir(), 'tucano.db')
       const raw = new DatabaseSync(file)

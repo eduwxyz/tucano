@@ -120,6 +120,21 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         await new Promise((r) => setTimeout(r, Number(/pergunte em (\d+) ?s/i.exec(last)![1]) * 1000))
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'
+      } else if (/decis(õ|o)es demais/i.test(last) && turn.mcpUrl) {
+        await callTool(turn.mcpUrl, 'ask_user', { questions: Array.from({ length: 5 }, (_, i) => ({ question: `Decisão ${i + 1}?`, kind: 'text' })) })
+        reply = 'Tentei perguntar demais.'
+      } else if (/ajuda a decidir|decida com/i.test(last) && turn.mcpUrl) {
+        // "me ajuda a decidir": decisions with options. "decida com a Bia": the same, to someone in
+        // particular (a Tucano with people). Not any "decidimos", which other tests say as a fact.
+        const para = /decida com (?:a |o )?(\p{L}+)/iu.exec(last)?.[1]
+        const r = await callTool(turn.mcpUrl, 'ask_user', {
+          questions: [
+            { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] },
+            { question: 'Pra quando?', kind: 'text' }
+          ],
+          ...(para ? { para } : {})
+        })
+        reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Te mandei duas decisões.'
       } else if (turn.mcpUrl && /pergunte (?:a|à|pra|para) (\p{L}+)/iu.test(last)) {
         // "pergunte a Bia": a question to someone in particular (a Tucano with people).
         const r = await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?', para: /pergunte (?:a|à|pra|para) (\p{L}+)/iu.exec(last)![1]! })

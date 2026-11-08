@@ -1,4 +1,5 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
+import { cleanRules, isAutonomy } from '../shared/actions'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
@@ -500,6 +501,19 @@ export const MIGRATIONS = [
   `
 ]
 
+// Columns checked by name on every start, after MIGRATIONS ([table, column, type]): one a build of
+// another branch already added (approvals by rule did) is left as it is instead of failing the start.
+// How far each agent goes on its own: a rule per kind of action, its level, the outside-content guard
+// (src/shared/actions.ts). Empty: Settings decide, which out of the box is how Tucano always worked.
+const COLUMNS: [string, string, string][] = [
+  ['agents', 'action_rules', "TEXT NOT NULL DEFAULT '{}'"],
+  ['agents', 'autonomy', 'TEXT'],
+  ['agents', 'outside_guard', 'INTEGER'],
+  // A phone's push handle (src/core/push.ts), on its device key: {"handle", "tag"} as JSON.
+  ['person_keys', 'push', 'TEXT']
+]
+
+
 type Row = Record<string, unknown>
 
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
@@ -648,6 +662,10 @@ export class Db {
         this.db.exec(`PRAGMA user_version = ${v + 1}`)
       })
     }
+    for (const [table, column, type] of COLUMNS) {
+      const has = (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column)
+      if (!has) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+    }
   }
 
   // Nested calls join the outer transaction.
@@ -720,6 +738,9 @@ export class Db {
       ...(r['avatar'] ? { avatar: JSON.parse(str(r['avatar'])) as Agent['avatar'] } : {}),
       ...(r['wiki'] === 'none' || r['wiki'] === 'read' ? { wiki: r['wiki'] } : {}),
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
+      ...(str(r['action_rules']) && str(r['action_rules']) !== '{}' ? { actionRules: cleanRules(JSON.parse(str(r['action_rules']))) } : {}),
+      ...(isAutonomy(r['autonomy']) ? { autonomy: r['autonomy'] } : {}),
+      ...(r['outside_guard'] === 0 || r['outside_guard'] === 1 ? { outsideGuard: r['outside_guard'] === 1 } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
@@ -740,14 +761,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, archived, kind, custom_color, picture, avatar, wiki, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, action_rules, autonomy, outside_guard, archived, kind, custom_color, picture, avatar, wiki, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
            limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, autonomy = excluded.autonomy, outside_guard = excluded.outside_guard, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
   }
@@ -962,6 +983,14 @@ export class Db {
 
   messages(): Message[] {
     return (this.db.prepare('SELECT * FROM messages ORDER BY at').all() as Row[]).map((r) => this.toMessage(r))
+  }
+
+  // The latest question waiting for me, however much was said after it. `threadId`: in that thread; null: outside threads.
+  waitingQuestion(conversationId: string, threadId: string | null): Message | undefined {
+    const where = threadId === null ? 'thread_id IS NULL' : 'thread_id = ?'
+    const args = threadId === null ? [conversationId] : [conversationId, threadId]
+    const row = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ? AND ${where} AND json_extract(run, '$.status') = 'waiting_input' ORDER BY at DESC LIMIT 1`).get(...args) as Row | undefined
+    return row ? this.toMessage(row) : undefined
   }
 
   // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
@@ -1694,6 +1723,51 @@ export class Db {
   // Keys are kept only as their hash.
   addPersonKey(hash: string, personId: string, label?: string): void {
     this.db.prepare('INSERT INTO person_keys (hash, person_id, label, created_at) VALUES (?, ?, ?, ?)').run(hash, personId, label ?? null, Date.now())
+  }
+
+  // A person's own keys, newest first: what each device said it is, and when it was last seen.
+  personKeys(personId: string): { hash: string; label: string; createdAt: number; seenAt?: number }[] {
+    return (this.db.prepare('SELECT hash, label, created_at, last_seen FROM person_keys WHERE person_id = ? ORDER BY created_at DESC').all(personId) as Row[]).map((r) => ({
+      hash: str(r['hash']),
+      label: str(r['label']),
+      createdAt: Number(r['created_at']),
+      ...(r['last_seen'] ? { seenAt: Number(r['last_seen']) } : {})
+    }))
+  }
+
+  // A device's push handle (a phone's), or none. False: no such key of this person's.
+  setKeyPush(personId: string, hash: string, push: { handle: string; tag?: string } | null): boolean {
+    return this.db.prepare('UPDATE person_keys SET push = ? WHERE hash = ? AND person_id = ?').run(push ? JSON.stringify(push) : null, hash, personId).changes > 0
+  }
+
+  // The phones that take pushes: of these people (unset: everyone still here).
+  pushTargets(people?: string[]): { hash: string; personId: string; handle: string; tag?: string }[] {
+    const rows = this.db.prepare('SELECT k.hash, k.person_id, k.push FROM person_keys k JOIN people p ON p.id = k.person_id WHERE k.push IS NOT NULL AND p.removed_at IS NULL').all() as Row[]
+    const out: { hash: string; personId: string; handle: string; tag?: string }[] = []
+    for (const r of rows) {
+      if (people && !people.includes(str(r['person_id']))) continue
+      try {
+        const p = JSON.parse(str(r['push'])) as { handle?: unknown; tag?: unknown }
+        if (typeof p.handle === 'string') out.push({ hash: str(r['hash']), personId: str(r['person_id']), handle: p.handle, ...(typeof p.tag === 'string' ? { tag: p.tag } : {}) })
+      } catch {
+        // a broken one is skipped
+      }
+    }
+    return out
+  }
+
+  dropKeyPush(hash: string): void {
+    this.db.prepare('UPDATE person_keys SET push = NULL WHERE hash = ?').run(hash)
+  }
+
+  // One of a person's keys goes; its browser reads "no access" (removed_keys) instead of counting a guess.
+  removePersonKey(personId: string, hash: string): boolean {
+    return this.tx(() => {
+      if (!this.db.prepare('SELECT 1 FROM person_keys WHERE hash = ? AND person_id = ?').get(hash, personId)) return false
+      this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE hash = ?').run(Date.now(), hash)
+      this.db.prepare('DELETE FROM person_keys WHERE hash = ?').run(hash)
+      return true
+    })
   }
 
   // The person a key opens, if they still have access; seen now.

@@ -93,9 +93,10 @@ describe("a member's read-only pages", () => {
       if (name && method) helpers.set(name, method)
     }
     expect(helpers.get('loadReport')).toBe('report')
-    // Screens only an admin reaches: the connectors' admin view, the introduction and the agent
-    // builder (admins'), the activity log, adding a skill from the terminal and a skill's history.
-    const ADMIN_SCREENS = new Set(['ConnectorStore.tsx:ownApp', 'Harness.tsx:harnessMcps', 'Onboarding.tsx:refreshEngines', 'Onboarding.tsx:localSkills', 'People.tsx:activity', 'People.tsx:removedPeople', 'Skills.tsx:localSkills', 'Skills.tsx:skillVersions'])
+    // Screens only an admin reaches: the connectors' admin view, the introduction (the owner's; someone
+    // invited gets GuestWelcome) and the agent builder (admins'), the activity log, adding a skill from
+    // the terminal, a skill's history, and a harness's sign-in on the server's terminal (opened by an admin's Sign in).
+    const ADMIN_SCREENS = new Set(['LoginTerminal.tsx:loginScreen', 'LoginTerminal.tsx:refreshEngines', 'ConnectorStore.tsx:ownApp', 'Harness.tsx:harnessMcps', 'Intro.tsx:testEngine', 'Intro.tsx:refreshEngines', 'Intro.tsx:harnessMcps', 'Intro.tsx:localSkills', 'People.tsx:activity', 'People.tsx:removedPeople', 'Skills.tsx:localSkills', 'Skills.tsx:skillVersions'])
     const found: string[] = []
     for (const file of readdirSync(join(root, 'components')).filter((f) => f.endsWith('.tsx'))) {
       const src = readFileSync(join(root, 'components', file), 'utf8')

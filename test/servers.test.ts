@@ -27,6 +27,22 @@ describe('pairing with a Tucano on a server', () => {
       expect(parsePairing(bad), bad).toBeNull()
   })
 
+  it('reads a one-time code, in the app\'s link or the browser\'s, and nothing else in its place', () => {
+    const code = 'abcDEF123_-abcDEF123_-ab'
+    expect(parsePairing(`tucano://connect?url=https://ana.example.com&code=${code}`)).toEqual({ origin: 'https://ana.example.com', code })
+    expect(parsePairing(`https://ana.example.com/?code=${code}`)).toEqual({ origin: 'https://ana.example.com', code })
+    for (const bad of [
+      'tucano://connect?url=https://ana.example.com&code=short',
+      `tucano://connect?url=http://ana.example.com&code=${code}`, // plain http on the internet
+      `http://ana.example.com/?code=${code}`,
+      `https://ana.example.com/elsewhere?code=${code}`,
+      `https://u:p@ana.example.com/?code=${code}`,
+      'https://ana.example.com/?code=<script>'
+    ])
+      expect(parsePairing(bad), bad).toBeNull()
+    expect(parsePairing(pairingLink({ origin: 'https://ana.example.com', code }))).toEqual({ origin: 'https://ana.example.com', code })
+  })
+
   it('makes the same link again', () => {
     const p = { origin: 'https://ana.example.com', token }
     expect(parsePairing(pairingLink(p))).toEqual(p)

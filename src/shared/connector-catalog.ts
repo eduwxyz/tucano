@@ -282,3 +282,110 @@ export const ownAppOf = (url: string | undefined): CatalogEntry['app'] => CATALO
 
 // What the person turns on in their Google Cloud project, in one page: each service's API and its MCP API.
 export const GOOGLE_APIS = ['gmail', 'calendar-json', 'drive', 'docs', 'sheets'].flatMap((a) => [`${a}.googleapis.com`, `${a === 'calendar-json' ? 'calendar' : a}mcp.googleapis.com`])
+
+// ---------- the catalog as data, for a screen that doesn't have this file (the iPhone app) ----------
+
+export interface CatalogView {
+  id: string
+  name: string
+  category: CatalogCategory
+  about: string
+  auth: CatalogEntry['auth']
+  fields?: { id: string; label: string; placeholder: string; hint?: string; secret?: boolean }[]
+  app?: AppProvider // signs in with the person's own app (ownAppGuide)
+  warning?: string
+  runs?: string // a server of the service's that runs on the Tucano's machine: its command
+}
+
+export function catalogView(entries: CatalogEntry[] = CATALOG): CatalogView[] {
+  return entries.map((c) => ({
+    id: c.id,
+    name: c.name,
+    category: c.category,
+    about: c.about(),
+    auth: c.auth,
+    ...(c.fields?.length ? { fields: c.fields.map((f) => ({ id: f.id, label: f.label(), placeholder: f.placeholder, ...(f.hint ? { hint: f.hint() } : {}), ...(f.secret ? { secret: true } : {}) })) } : {}),
+    ...(c.app ? { app: c.app.provider } : {}),
+    ...(c.warning ? { warning: c.warning() } : {}),
+    ...(c.local ? { runs: [c.local.command, ...c.local.args.filter((a) => !a.includes('{'))].join(' ') } : {})
+  }))
+}
+
+// The person's own app, step by step (Google and Slack sign in only apps registered with them; see
+// OwnAppSetup): what the desktop's window and the phone's sheet both say.
+export interface OwnAppGuide {
+  title: string
+  lead: string
+  steps: { text: string; link?: string; linkText?: string }[] // linkText opens link, then text follows
+  idLabel: string
+  idPlaceholder: string
+  secretLabel: string
+  secretPlaceholder: string
+  notes: string[]
+}
+
+const cloud = (path: string): string => `https://console.cloud.google.com/${path}`
+
+export function ownAppGuide(provider: AppProvider, redirectUrl: string): OwnAppGuide {
+  if (provider === 'slack')
+    return {
+      title: L('Seu app do Slack', 'Your Slack app'),
+      lead: L(
+        'O Slack só deixa usar o servidor MCP dele apps do diretório ou apps internos de um workspace. Você cria o seu, interno, em uns 2 minutos: o link já traz tudo preenchido. Os dados vão do Slack direto pro seu Tucano.',
+        "Slack lets only directory apps or a workspace's internal apps use its MCP server. You make yours, internal, in about 2 minutes: the link brings it all filled in. The data goes from Slack straight to your Tucano."
+      ),
+      steps: [
+        { link: slackAppLink(redirectUrl), linkText: L('Crie o app no Slack', 'Create the app in Slack'), text: L(': escolha o seu workspace, clique em Próximo e em Criar. O nome, as permissões, o endereço de volta e o MCP já vêm preenchidos.', ': choose your workspace, click Next and Create. The name, the permissions, the return address and MCP come filled in.') },
+        { text: L('Em Basic Information › App Credentials, copie o Client ID e o Client Secret (Show) e cole aqui:', 'Under Basic Information › App Credentials, copy the Client ID and the Client Secret (Show) and paste them here:') }
+      ],
+      idLabel: 'Client ID',
+      idPlaceholder: '1234567890.1234567890123',
+      secretLabel: 'Client Secret',
+      secretPlaceholder: '',
+      notes: [L('Num workspace de empresa, o admin pode precisar aprovar o app antes: o Slack avisa no login, e o pedido vai pra ele.', 'In a company workspace, an admin may need to approve the app first: Slack says so at sign-in, and the request goes to them.')]
+    }
+  return {
+    title: L('Seu app do Google', 'Your Google app'),
+    lead: L(
+      'O Google só deixa entrar apps cadastrados nele. Você cria o seu uma vez, em uns 10 minutos, e o Gmail, o Drive, o Calendar, o Docs e o Sheets entram com ele. Fica tudo na sua conta: os dados vão do Google direto pro seu Tucano.',
+      'Google only lets in apps registered with it. You make yours once, in about 10 minutes, and Gmail, Drive, Calendar, Docs and Sheets sign in with it. It all stays in your account: the data goes from Google straight to your Tucano.'
+    ),
+    steps: [
+      { link: cloud('projectcreate'), linkText: L('Crie um projeto no Google Cloud', 'Create a project in Google Cloud'), text: L(', com o nome que quiser (Tucano, por exemplo).', ', named as you like (Tucano, say).') },
+      { link: cloud(`flows/enableapi?apiid=${GOOGLE_APIS.join(',')}`), linkText: L('Ative as APIs', 'Turn on the APIs'), text: L(': com o projeto escolhido no topo, clique em Próxima e em Ativar. São as do Gmail, Drive, Calendar, Docs e Sheets e a MCP de cada um.', ': with the project chosen at the top, click Next and Enable. They are Gmail, Drive, Calendar, Docs and Sheets, and the MCP one of each.') },
+      {
+        link: 'https://developers.google.com/workspace/preview',
+        linkText: L('Inscreva o projeto no Developer Preview', 'Enroll the project in the Developer Preview'),
+        text: L(
+          ': os servidores MCP do Google ainda estão em prévia e só atendem projetos inscritos no Google Workspace Developer Preview Program. O formulário pede o número do projeto (no painel do projeto). A aprovação costuma levar uns dias: siga os passos e salve, mas até lá os conectores do Google falham.',
+          ": Google's MCP servers are still in preview and only serve projects enrolled in the Google Workspace Developer Preview Program. The form asks for the project number (on the project's dashboard). Approval usually takes a couple of days: go on with the steps and save, but until then the Google connectors fail."
+        )
+      },
+      {
+        link: cloud('auth/overview'),
+        linkText: L('Configure a tela de login', 'Set up the sign-in screen'),
+        text: L(
+          ' (Google Auth Platform › Começar): o nome do app e o seu e-mail; em Público-alvo, Externo (ou Interno, numa conta Google Workspace de empresa). Depois, em Público-alvo › Usuários de teste, adicione o seu e-mail.',
+          ' (Google Auth Platform › Get started): the app name and your email; under Audience, External (or Internal, in a company Google Workspace account). Then, under Audience › Test users, add your email.'
+        )
+      },
+      {
+        link: cloud('auth/clients/create'),
+        linkText: L('Crie o cliente', 'Create the client'),
+        text: L(': em Tipo de aplicativo, App para computador; marque “Usar este cliente para um agente com IA” (sem isso o Google recusa os conectores) e clique em Criar.', ': under Application type, Desktop app; tick “Use this client for an AI-powered agent” (without it Google turns the connectors away) and click Create.')
+      },
+      { text: L('Copie o ID do cliente e a chave secreta do cliente que aparecem e cole aqui:', 'Copy the client ID and the client secret it shows and paste them here:') }
+    ],
+    idLabel: L('ID do cliente', 'Client ID'),
+    idPlaceholder: '1234567890-abc….apps.googleusercontent.com',
+    secretLabel: L('Chave secreta do cliente', 'Client secret'),
+    secretPlaceholder: 'GOCSPX-…',
+    notes: [
+      L(
+        'Com o app em teste, o Google pede pra entrar de novo a cada 7 dias. Pra não pedir, em Público-alvo clique em Publicar app: no login vai aparecer “O Google não verificou este app”. É o seu próprio app: clique em Avançado e continue.',
+        'While the app is in testing, Google asks you to sign in again every 7 days. To stop that, click Publish app under Audience: the sign-in will say “Google hasn’t verified this app”. It’s your own app: click Advanced and go on.'
+      ),
+      L('Prefere não configurar? A Composio, na loja, conecta o Google sem isso, mas seus dados passam pelos servidores dela.', "Rather not set this up? Composio, in the store, connects Google without it, but your data goes through its servers.")
+    ]
+  }
+}

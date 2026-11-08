@@ -37,6 +37,7 @@ import {
   type Settings
 } from '../store'
 import { Icon } from './ui'
+import { EngineProblem } from './EngineProblem'
 import { Select } from './Select'
 
 // The harnesses agents may run on now: picked (or all, if never picked), ready, and runnable.
@@ -312,11 +313,14 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
               {L('Mandar teste', 'Send a test')}
             </button>
           </div>
-          {result && (
-            <p className={`note ${result.ok ? 'note--ok' : 'note--error'}`}>
-              <Icon name={result.ok ? 'check' : 'x'} size={14} /> {result.ok ? `${L('Funcionando.', 'Working.')} ${result.message}` : result.message}
-            </p>
-          )}
+          {result &&
+            (result.ok ? (
+              <p className="note note--ok">
+                <Icon name="check" size={14} /> {`${L('Funcionando.', 'Working.')} ${result.message}`}
+              </p>
+            ) : (
+              <EngineProblem engine={engine} message={result.message} onSignIn={() => void loginEngine(engine).then((r) => setManual(r.opened ? null : r.command))} onRetry={() => void test()} />
+            ))}
         </div>
       )}
     </div>

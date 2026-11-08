@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
@@ -6,7 +6,7 @@ import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
-import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type PromptOpts } from './context'
+import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
@@ -24,12 +24,14 @@ import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
-import { perCallTool } from '../shared/composio'
+import { innerActions, perCallTool } from '../shared/composio'
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
+import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
@@ -65,19 +67,65 @@ const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
 const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
 const THOUGHT = (): string => L('Pensou', 'Thought') // the thinking step, closed
 
-export const ASK_USER: ToolDef = {
-  name: 'ask_user',
+// An image I attached to an earlier message: it went to the model as an image in the turn it was
+// sent; later turns only name it, and the agent looks again with this when it needs to.
+export const VER_IMAGEM: ToolDef = {
+  name: 'ver_imagem',
   get description() {
     return L(
-      'Faz uma pergunta curta ao usuário quando falta uma informação pra continuar. Depois de chamar, encerre a resposta: a resposta do usuário chega na próxima mensagem.',
-      "Asks the user a short question when a piece of information is missing to go on. After calling it, end your reply: the user's answer comes in the next message."
+      'Mostra de novo uma imagem anexada numa mensagem anterior desta conversa. Cada imagem anexada vai pra você como imagem só na resposta à mensagem que a trouxe; depois ela aparece só pelo nome, como [imagem anexada: nome]. Uma mensagem sem essa marca não tem imagem: não comente uma imagem antiga como se tivesse chegado agora. Use só quando precisar olhar a imagem de novo pra responder.',
+      "Shows again an image attached to an earlier message of this conversation. Each attached image goes to you as an image only in the reply to the message that brought it; after that it shows only by name, as [attached image: name]. A message without that mark has no image: don't comment on an old image as if it just arrived. Use it only when you need to look at the image again to answer."
     )
   },
   get inputSchema() {
     return {
       type: 'object' as const,
-      properties: { question: { type: 'string', description: L('A pergunta, curta e direta.', 'The question, short and direct.') } },
-      required: ['question']
+      properties: { nome: { type: 'string', description: L('O nome, como aparece em [imagem anexada: nome]. Sem nome: a mais recente.', 'The name, as in [attached image: name]. No name: the newest.') } }
+    }
+  }
+}
+
+export const ASK_USER: ToolDef = {
+  name: 'ask_user',
+  get description() {
+    return L(
+      'Pede ao usuário as decisões que faltam pra continuar. Escreva a análise e a proposta no texto da sua resposta, antes de chamar; aqui vão só as decisões, cada uma com uma pergunta curta e, quando der, opções curtas (detalhe em description). Tipos: single (uma opção), multiple (várias), text (resposta livre). De 1 a 4 decisões; de 1 a 3 opções por decisão, as mais prováveis: o app sempre acrescenta "Outra coisa", com resposta livre, então não inclua essa opção. Depois de chamar, encerre a resposta: as respostas chegam na próxima mensagem.',
+      "Asks the user for the decisions missing to go on. Write your analysis and proposal in your reply's text, before calling; here go only the decisions, each with a short question and, when possible, short options (detail in description). Kinds: single (one option), multiple (several), text (free answer). 1 to 4 decisions; 1 to 3 options per decision, the likeliest ones: the app always adds \"Something else\", with a free answer, so don't include that option. After calling it, end your reply: the answers come in the next message."
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        questions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_QUESTIONS,
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', maxLength: MAX_QUESTION_LENGTH, description: L('A pergunta, curta e direta.', 'The question, short and direct.') },
+              kind: { type: 'string', enum: ['single', 'multiple', 'text'] },
+              options: {
+                type: 'array',
+                minItems: MIN_OPTIONS,
+                maxItems: MAX_OPTIONS,
+                description: L('Pra single e multiple.', 'For single and multiple.'),
+                items: {
+                  type: 'object',
+                  properties: {
+                    label: { type: 'string', maxLength: MAX_LABEL_LENGTH, description: L('Curto: o que aparece no botão.', 'Short: what shows on the button.') },
+                    description: { type: 'string', maxLength: MAX_DESCRIPTION_LENGTH, description: L('Opcional: o que essa opção implica.', 'Optional: what this option implies.') }
+                  },
+                  required: ['label']
+                }
+              }
+            },
+            required: ['question', 'kind']
+          }
+        },
+        question: { type: 'string', description: L('Forma antiga: uma pergunta de texto. Prefira questions.', 'Old form: one text question. Prefer questions.') }
+      }
     }
   }
 }
@@ -94,13 +142,32 @@ export const askUserFor = (names: string[]): ToolDef =>
         ),
         inputSchema: {
           type: 'object' as const,
-          properties: { ...ASK_USER.inputSchema.properties, para: { type: 'string', description: L('O nome da pessoa a quem perguntar (opcional).', 'The name of the person to ask (optional).') } },
-          required: ['question']
+          // Every decision of the call goes to that one person.
+          properties: { ...ASK_USER.inputSchema.properties, para: { type: 'string', description: L('O nome da pessoa a quem perguntar (opcional): todas as decisões vão pra ela.', 'The name of the person to ask (optional): every decision goes to them.') } }
         }
       }
 
 // A DM's person saying the agent may ask someone else ("sim", "pode", "yes"); anything else is a no.
 const YES = /^\s*(sim|s|pode( sim)?|ok(ay)?|claro|autorizo|yes|y|sure|go ahead)\b/i
+
+// What the card sent for one decision, as kept: only what that kind of decision takes, options that
+// exist, text cut short. Anything else (not an answer at all): undefined.
+const ANSWER_TEXT_MAX = 10_000
+function cleanAnswer(question: Decision, raw: Answer): Answer | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  if (raw.skipped === true) return { skipped: true }
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim().slice(0, ANSWER_TEXT_MAX) : '')
+  if (question.kind === 'text') {
+    const text = str(raw.text)
+    return text ? { text } : undefined
+  }
+  const count = question.options?.length ?? 0
+  const chosen = Array.isArray(raw.chosen) ? [...new Set(raw.chosen)] : []
+  if (chosen.some((i) => !Number.isInteger(i) || i < 0 || i >= count) || (question.kind === 'single' && chosen.length > 1)) return undefined
+  const other = str(raw.other)
+  if (!chosen.length && !other) return undefined
+  return { ...(chosen.length ? { chosen: chosen.sort((a, b) => a - b) } : {}), ...(other ? { other } : {}) }
+}
 
 // How long a question to someone else waits before the requester is told (settings may say otherwise).
 export const QUESTION_DEADLINE_HOURS = 4
@@ -145,6 +212,20 @@ function exposedName(connector: Connector, tool: string, taken: Set<string>): st
   for (let i = 2; taken.has(name); i++) name = `${slug}${i}__${tool}`.slice(0, 48)
   taken.add(name)
   return name
+}
+
+// A GitHub connector this agent has access to (the first, if there are several): its grant, the
+// tools it publishes with (a branch, files, a PR) by the names this turn exposes, and what a rule
+// makes ask first or turns off. A tool turned off by a rule isn't exposed, so it shows only as "off".
+const IS_GITHUB = /github/i
+const MAKES = /^create_?(a_)?branch$|^create_or_update_file$/i // GitHub's MCP; push and PR tools go by their kind
+const publishes = (name: string): boolean => MAKES.test(name) || toolActions(name).some((k) => k === 'push' || k === 'pr' || k === 'commit')
+export function githubAccess(connectors: Connector[], agent: Pick<Agent, 'grants'>, exposed: Map<string, Exposed>, policy: Policy): GitHubAccess | undefined {
+  const c = connectors.find((x) => (IS_GITHUB.test(x.url ?? '') || IS_GITHUB.test(x.name)) && (agent.grants[x.id] === 'read' || agent.grants[x.id] === 'read_write'))
+  if (!c) return undefined
+  const tools = [...exposed].filter(([, e]) => e.connector.id === c.id && e.tool.cls !== 'read' && publishes(e.tool.name) && !toolActions(e.tool.name).some((k) => k === 'merge' || k === 'delete')).map(([name]) => name)
+  const kinds: ActionKind[] = ['push', 'pr']
+  return { connector: c.name, level: agent.grants[c.id] as 'read' | 'read_write', tools, ask: kinds.filter((k) => actionMode(k, policy) === 'ask'), off: kinds.filter((k) => actionMode(k, policy) === 'off') }
 }
 
 // "2,4 mi", "850 mil"
@@ -327,13 +408,14 @@ export class Runner {
   // everything else it sets off, go in its thread (`threadId`, or its own when
   // the conversation answers in threads) or else in the conversation.
   // `by`: the person writing (the Tucano's owner when left out: the phone, older callers).
-  // `answers`: the question this answers, from the inbox (its asker answers, wherever the person writes from).
+  // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
+  // wherever the person writes from). The caller checked that they may answer it.
   async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
-    const body = text.trim()
+    const typed = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
-    if (!conv || (!body && pictures.length === 0)) return
+    if (!conv) return
     const writer = (by ? db.person(by) : undefined) ?? db.owner()
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
     // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
@@ -343,17 +425,22 @@ export class Runner {
     // write outside threads stays outside: it only answers a question that is outside too.
     // A question to someone answers only with their message (or an admin's, or whoever covers
     // for them; past its deadline, the requester's). One waiting on a DM's yes takes a yes or a no.
-    const named = opts.answers ? db.question(opts.answers) : undefined
-    let asked = named ? db.message(named.id) : this.pendingQuestion(conv.id, thread)
+    const named = opts.answers ? db.message(opts.answers) : undefined
+    let asked = opts.answers ? (named?.conversationId === conv.id ? named : undefined) : this.pendingQuestion(conv.id, thread)
     if (asked?.run?.status !== 'waiting_input') asked = undefined
     const q = asked ? db.question(asked.id) : undefined
     let confirmed: boolean | undefined
     if (q && !named) {
       if (q.state === 'open' && q.confirm === 'pending') {
-        if (writer.id === q.requestedBy) confirmed = YES.test(body)
+        if (writer.id === q.requestedBy) confirmed = YES.test(typed)
         asked = undefined
       } else if (q.state === 'open' && !new People(db).canAnswer(writer, q)) asked = undefined
     }
+    // The decisions answered on the card go first, whether they're sent from it or with a reply
+    // written in the field. Only by whoever answers the question: anyone else's message is just theirs.
+    const fromCard = asked ? formatAnswers(questionsOf(asked.run), asked.run?.answers) : ''
+    const body = [fromCard, typed].filter(Boolean).join('\n\n')
+    if (!body && pictures.length === 0) return
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
@@ -362,11 +449,11 @@ export class Runner {
     for (const img of pictures) this.keepImage(mine, img)
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
-    const calledPeople = this.callPeople(conv, mine, writer.name, writer.id)
+    const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
     const members = this.members(conv)
-    let responders = mentioned(body, members).slice(0, MAX_MENTIONS)
+    let responders = mentioned(typed, members).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
     // the deadline): the agent is told so in so many words.
@@ -376,7 +463,10 @@ export class Runner {
         db.saveQuestion({ ...q, state: 'answered', answeredBy: writer.id, answeredAt: Date.now() })
         emit({ type: 'inbox' })
       }
-      this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}) } })
+      // The message keeps the answers for the agent; the card, which shows them, says which one it is (and
+      // what it had beyond them), so the conversation shows them once. With images, it shows whole.
+      const link = fromCard && pictures.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
+      this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
       if (asker && responders.length === 0) responders = [asker]
       const target = q && q.askedTo !== writer.id ? db.people({ removed: true }).find((p) => p.id === q.askedTo) : undefined
@@ -400,7 +490,7 @@ export class Runner {
     }
     // Written to a person (@Ana) and to no agent: it's for them, not the agents. No router, no
     // reply; a line says who heard about it. So with one who left, or yourself: no one to tell.
-    const toPeople = calledPeople.length > 0 || (db.people().length > 1 && toPeopleOnly(body, db.people({ removed: true }), db.agents()))
+    const toPeople = calledPeople.length > 0 || (db.people().length > 1 && toPeopleOnly(typed, db.people({ removed: true }), db.agents()))
     if (responders.length === 0 && toPeople && conv.kind !== 'dm') {
       const names = calledPeople.map((p) => `**${p.name}**`).join(L(' e ', ' and '))
       // Someone who left, yourself, or a name two people share: whoever wrote it learns no one heard.
@@ -583,10 +673,7 @@ export class Runner {
 
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
   private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
-    return this.deps.db
-      .recentMessages(conversationId, 50, threadId ?? null)
-      .reverse()
-      .find((m) => m.run?.status === 'waiting_input')
+    return this.deps.db.waitingQuestion(conversationId, threadId ?? null)
   }
 
   private post(conversationId: string, threadId: string | undefined, text: string, run?: Run): Message {
@@ -870,6 +957,9 @@ export class Runner {
     const routineAsk = opts.routine ? [...history].reverse().find((m) => m.author.kind === 'routine') : undefined
     const routineOf = routineAsk?.author.kind === 'routine' ? db.routine(routineAsk.author.id) : undefined
     const behalf = routineOf ? routineBehalf(db, routineOf, { workspaceName: ownerName }) : undefined
+    // Something from outside read before what goes out (OUTBOUND in src/shared/actions.ts): a trigger's event, or an
+    // earlier reply of this agent here that read some (a kept session still holds it), or what this reply reads.
+    let outside = !!routineAsk?.routine?.event || history.some((m) => m.author.kind === 'agent' && m.author.id === agent.id && !!m.run?.outside)
     // Who scheduled each routine in the transcript: its person (the owner by the workspace's name); the team's, none.
     const scheduledBy = (id: string): string | undefined => {
       const r = db.routine(id)
@@ -968,7 +1058,8 @@ export class Runner {
 
     // Tools for this turn, served by the gateway under a URL only this turn knows:
     // ask_user plus the connector tools this agent's grants allow.
-    let question: string | undefined
+    let question: string | undefined // what ask_user asked, as text (every decision)
+    let questions: Decision[] | undefined // the same, structured
     let askedTo: Person = requester // whom the question is for
     let confirming = false // in a DM, a question to someone else waits for the DM's person's yes first
     let approval: Approval | undefined
@@ -977,13 +1068,22 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
+    const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
+    const policy: Policy = policyOf(agent, settings)
+    const policyNow = async (): Promise<Policy> => policyOf(db.agent(agent.id), await this.deps.settings())
+    // What a connector tool does when the turn starts, for its description (nothing from outside read yet).
+    const judged = (t: ConnectorTool, connectorId: string, outside = false): Verdict =>
+      verdict({ cls: t.cls, kinds: kindsOf(t), p: policy, highRisk: t.highRisk, alwaysAllowed: t.cls === 'sensitive' && !!agent.autoApprove?.includes(`${connectorId}:${t.name}`), outside })
     for (const c of this.deps.connectors?.list() ?? []) {
       // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
       // (a refused token, a sign-in to finish) takes them away.
       if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
-      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id], perCallTool(c.url, t.name))) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
+      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id], perCallTool(c.url, t.name)) && gate(kindsOf(t), policy).mode !== 'off') exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
+    // GitHub through its connector, as this turn has it: the prompt says how to publish and what waits (context.ts).
+    const github = githubAccess(this.deps.connectors?.list() ?? [], agent, exposed, policy)
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
     const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write')
     const accessTool: ToolDef | undefined =
@@ -1005,6 +1105,42 @@ export class Runner {
             }
           }
         : undefined
+    // bash, told which commands wait for me and which never run, so the agent plans around them.
+    const SHELL_KINDS: ActionKind[] = ['commit', 'push', 'pr', 'merge', 'delete', 'publish']
+    const withRules = (t: ToolDef): ToolDef => {
+      const by = (m: 'ask' | 'off'): string => SHELL_KINDS.filter((k) => actionMode(k, policy) === m).map((k) => kindLabel(k).toLowerCase()).join(', ')
+      const asks = by('ask')
+      const never = by('off')
+      if (!asks && !never) return t
+      const note = [
+        asks &&
+          L(
+            `Comandos que fazem isto pedem aprovação de ${settings.workspaceName} antes de rodar: ${asks}. Eles não rodam na hora: viram um pedido com o comando exato; aprovado, o app roda esse comando e você recebe a saída numa nova mensagem. Junte num só comando o que precisa ir junto (ex.: git add -A && git commit -m "…" && git push).`,
+            `Commands that do this ask ${settings.workspaceName} for approval before running: ${asks}. They don't run right away: they become a request with the exact command; once approved, the app runs that command and you get the output in a new message. Put what must go together in one command (e.g. git add -A && git commit -m "…" && git push).`
+          ),
+        never && L(`Nunca rodam pra você: ${never}.`, `Never run for you: ${never}.`)
+      ]
+        .filter(Boolean)
+        .join(' ')
+      return {
+        ...t,
+        description: `${t.description}
+${note}`,
+        inputSchema: { ...t.inputSchema, properties: { ...(t.inputSchema.properties ?? {}), [REASON_PARAM]: { type: 'string', description: L(`Se o comando pede aprovação: por que, em uma frase. Aparece pra ${settings.workspaceName} no pedido.`, `If the command asks for approval: why, in one sentence. ${settings.workspaceName} sees it in the request.`) } } }
+      }
+    }
+    // Images I attached: every message in the transcript says which it had (by name). They go in as
+    // images only until this agent has answered them (a reply that ended well after their message):
+    // sent again with every reply, the model took an old screenshot for a new one, and paid for it each
+    // time. Past that, it looks again with ver_imagem.
+    const ids = new Set(history.map((m) => m.id))
+    const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
+    const names = new Map<string, string[]>()
+    for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
+    const answered = history.reduce((at, m, i) => (m.id !== msg.id && m.author.kind === 'agent' && m.author.id === agent.id && m.run?.status === 'done' ? i : at), -1)
+    const unanswered = new Set(history.slice(answered + 1).map((m) => m.id))
+    const fresh = attached.filter((a) => unanswered.has(a.messageId))
+    const canSeeImages = !!this.deps.gateway && attached.length > 0
     // The app's own tools stay in the prompt; the connectors' wait behind tool search (ALWAYS_LOAD).
     const others = db.people()
     const ownTools: ToolDef[] = [
@@ -1013,9 +1149,10 @@ export class Runner {
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
+      ...(canSeeImages ? [VER_IMAGEM] : []),
       ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
       ...(helps ? [LER_GUIA, VER_ESTADO] : []),
-      ...(computers ? computerTools(agent) : []),
+      ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
@@ -1035,7 +1172,18 @@ export class Runner {
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         const perCall = perCallTool(connector.url, tool.name)
-        if (tool.cls !== 'sensitive' && !perCall) return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
+        const plain = { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
+        if (!perCall && judged(tool, connector.id).run) {
+          // Runs on its own, unless something from outside was read first: then it asks, and the agent knows.
+          if (judged(tool, connector.id, true).why !== 'guard') return plain
+          return {
+            ...plain,
+            description: `${plain.description}\n${L(
+              `Roda sem pedir, mas se nesta resposta você já leu algo de fora (a resposta de um conector, uma página, a web), vira um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
+              `Runs without asking, but if in this reply you've already read something from outside (a connector's answer, a page, the web), it becomes an approval request for ${settings.workspaceName}, with exactly these arguments.`
+            )}`
+          }
+        }
         return {
           name,
           description: `[${connector.name}] ${tool.description}\n${
@@ -1044,10 +1192,15 @@ export class Runner {
                   `Cada chamada vale pelo que ela roda: só leituras rodam na hora; escritas precisam de acesso de leitura e escrita; ações sensíveis (enviar, apagar, rodar código) e qualquer chamada fora do formato documentado viram um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
                   `Each call counts as what it runs: reads alone run right away; writes need read-and-write access; sensitive actions (send, delete, run code) and any call outside the documented shape become an approval request for ${settings.workspaceName}, with exactly these arguments.`
                 )
-              : L(
-                  `Ação sensível: não roda na hora. Vira um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
-                  `Sensitive action: it doesn't run right away. It becomes an approval request for ${settings.workspaceName}, with exactly these arguments.`
-                )
+              : tool.cls === 'sensitive'
+                ? L(
+                    `Ação sensível: não roda na hora. Vira um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
+                    `Sensitive action: it doesn't run right away. It becomes an approval request for ${settings.workspaceName}, with exactly these arguments.`
+                  )
+                : L(
+                    `Pede aprovação: não roda na hora. Vira um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
+                    `Asks first: it doesn't run right away. It becomes an approval request for ${settings.workspaceName}, with exactly these arguments.`
+                  )
           }`,
           inputSchema: {
             ...schema,
@@ -1065,16 +1218,29 @@ export class Runner {
       stepStarted = Date.now()
       save()
     }
+    // It read something from outside: kept on the reply too, so its next one here knows.
+    const sawOutside = (): void => {
+      outside = true
+      if (!msg.run?.outside) msg.run = { ...msg.run!, outside: true }
+    }
+    const guardNote = (): string => L('Pediu porque leu algo de fora antes, nesta resposta', 'Asked because it read something from outside first, in this reply')
+    // Why something waits for me, for the agent: a rule, the level, or the guard (it read something from outside).
+    const askedBecause = (v: Verdict): string =>
+      v.why === 'guard'
+        ? L(' Pediu porque, nesta resposta, você leu algo de fora antes (um conector, uma página, a web): o que vai pra fora depois disso pede aprovação.', " It asks because in this reply you read something from outside first (a connector, a page, the web): what goes out after that asks first.")
+        : ''
 
     const runTool = async (name: string, args: Record<string, unknown>): Promise<CallToolResult> => {
         if (name === ASK_USER.name) {
-          const q = typeof args['question'] === 'string' ? args['question'].trim() : ''
-          if (!q) return textResult(L('Faltou a pergunta.', 'Missing the question.'), true)
+          const parsed = parseQuestions(args)
+          if ('error' in parsed) return textResult(parsed.error, true)
           if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
           const para = typeof args['para'] === 'string' ? args['para'].trim() : ''
           const target = para ? personNamed(para, others) : requester
           if (!target) return textResult(L(`Não há ninguém chamado "${para}" no Tucano. As pessoas: ${others.map((p) => p.name).join(', ')}.`, `There's no one called "${para}" in this Tucano. The people: ${others.map((p) => p.name).join(', ')}.`), true)
-          question = q
+          questions = parsed.questions
+          question = questionsAsText(questions)
+          const q = questionHeadline(questions)
           askedTo = target
           if (target.id !== requester.id) {
             // Someone else: in a DM, its person says yes first; then only the question reaches them.
@@ -1180,6 +1346,20 @@ export class Runner {
           return textResult(found.map((m) => `- [${m.id}] ${m.text} (${about(m)}, ${new Date(m.confirmedAt).toLocaleDateString(locale())})`).join('\n'))
         }
 
+        if (name === VER_IMAGEM.name && canSeeImages) {
+          const nome = typeof args['nome'] === 'string' ? args['nome'].trim().replace(/^\[?(?:imagem anexada|attached image):\s*/i, '').replace(/\]$/, '') : ''
+          const found = nome ? (attached.findLast((a) => a.name === nome) ?? attached.findLast((a) => a.name.toLowerCase() === nome.toLowerCase())) : attached.at(-1)
+          let data: Buffer | undefined
+          try {
+            data = found && readFileSync(join(this.deps.dataDir!, 'artifacts', found.id, found.name))
+          } catch {
+            data = undefined
+          }
+          if (!found || !data) return textResult(L(`Não achei a imagem "${nome}" nesta conversa. Use o nome como aparece em [imagem anexada: nome]: ${attached.map((a) => a.name).join(', ')}.`, `I couldn't find the image "${nome}" in this conversation. Use the name as in [attached image: name]: ${attached.map((a) => a.name).join(', ')}.`), true)
+          addSteps({ id: randomUUID(), label: L('Viu uma imagem anexada', 'Looked at an attached image'), detail: found.name, status: 'done' })
+          return { content: [{ type: 'image', data: data.toString('base64'), mimeType: mimeOf(found.name) }, { type: 'text', text: L(`${found.name}, anexada antes nesta conversa.`, `${found.name}, attached earlier in this conversation.`) }] }
+        }
+
         if (name === BUSCAR_THREADS.name && canSeekThreads) {
           const busca = typeof args['busca'] === 'string' ? args['busca'].trim() : ''
           if (!busca) return textResult(L('Faltou o que buscar.', 'Missing what to search for.'), true)
@@ -1260,6 +1440,57 @@ export class Runner {
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
+          // A command that commits, pushes, deletes…: by the rules, it runs, waits for me, or never runs.
+          if (name === 'bash' || name === 'start_service') {
+            const command = typeof args['command'] === 'string' ? args['command'] : ''
+            const kinds = shellActions(command)
+            // Only a command that does something that matters is judged; any other runs, as always.
+            const rules: Verdict = kinds.length ? verdict({ cls: 'write', kinds, p: await policyNow(), outside }) : { run: true, why: 'class', kinds: [] }
+            const words = (rules.kinds.length ? rules.kinds : kinds).map((k) => kindLabel(k).toLowerCase()).join(', ')
+            if (rules.off) {
+              addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`${words}: desligado pra este agente`, `${words}: turned off for this agent`), status: 'error' })
+              return textResult(
+                L(
+                  `Não rodei: ${words} está desligado pra você (${settings.workspaceName} decide isso em Configurações ou na sua página). Siga sem isso, ou diga a ${settings.workspaceName} o que falta.`,
+                  `I didn't run it: ${words} is turned off for you (${settings.workspaceName} decides that in Settings or on your page). Go on without it, or tell ${settings.workspaceName} what's missing.`
+                ),
+                true
+              )
+            }
+            if (!rules.run) {
+              if (name === 'start_service') return textResult(L(`Esse comando faz ${words}, que pede aprovação: rode com bash, não como serviço.`, `That command does ${words}, which asks for approval: run it with bash, not as a service.`), true)
+              if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+              const { [REASON_PARAM]: why, ...callArgs } = args
+              approval = {
+                id: randomUUID(),
+                hash: approvalHash(COMPUTADOR, 'bash', callArgs),
+                agentId: agent.id,
+                conversationId: conv.id,
+                messageId: msg.id,
+                connectorId: COMPUTADOR,
+                connectorName: L('Computador', 'Computer'),
+                tool: 'bash',
+                args: callArgs,
+                why: typeof why === 'string' ? why.trim() : '',
+                // Deleting is held to approve, like any high-risk action, and never allowed for good from the card.
+                highRisk: kinds.includes('delete'),
+                state: 'pending',
+                createdAt: Date.now(),
+                expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+              }
+              db.createApproval(approval)
+              emit({ type: 'approval', approval })
+              msg.run = { ...msg.run!, approvalId: approval.id }
+              addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail: `${words} · ${command.length > 120 ? `${command.slice(0, 120)}…` : command}`, ...(rules.why === 'guard' ? { note: guardNote() } : {}), status: 'done' })
+              this.deps.notify?.(L(`${agent.name} quer ${rules.kinds.map(actionVerb).join(' e ')}`, `${agent.name} wants to ${rules.kinds.map(actionVerb).join(' and ')}`), approval.why || command.slice(0, 120), conv.id, 'approval')
+              return textResult(
+                L(
+                  `Pedido de aprovação criado, com o comando exato. O comando ainda NÃO rodou. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe a saída numa nova mensagem.`,
+                  `Approval request created, with the exact command. The command has NOT run yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the output in a new message.`
+                ) + askedBecause(rules)
+              )
+            }
+          }
           // An agent with connectors sleeping with nothing checked after it is waiting for something outside
           // (a query, a job): that holds the reply a minute at a time and makes nothing come sooner. The first
           // runs; the next ones don't. A sleep before checking something here (a server, a build) always runs.
@@ -1323,10 +1554,25 @@ export class Runner {
           msg.run = { ...msg.run!, browser: true, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
           const out = await browser.call(current, name, args, { conversationId: conv.id, messageId: msg.id })
+          sawOutside() // a page is someone else's text
           if (out.artifact) artifactIds.push(out.artifact.id)
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
+          // A risky click or key: by how far this agent goes on its own, it waits for me, runs now, or never.
+          const risky = out.approval ? verdict({ cls: 'write', kinds: ['browser'], p: await policyNow(), outside, askByDefault: true }) : undefined
+          if (out.approval && risky?.off) {
+            msg.run = { ...msg.run!, steps: [...close('error', { detail: out.approval.detail }), thinking()] }
+            save()
+            return textResult(L(`Não fiz: cliques arriscados no navegador estão desligados pra você (${settings.workspaceName} decide isso). Siga sem isso, ou diga a ${settings.workspaceName} o que falta.`, `I didn't: risky clicks in the browser are turned off for you (${settings.workspaceName} decides that). Go on without it, or tell ${settings.workspaceName} what's missing.`), true)
+          }
+          if (out.approval && risky?.run) {
+            const done = await browser.approved(current, out.approval.args)
+            msg.run = { ...msg.run!, artifactIds: artifactIds.length ? [...artifactIds] : undefined, steps: [...close(done.ok ? 'done' : 'error', { label: L('Clicou (sem pedir: autonomia)', 'Clicked (no ask: autonomy)'), detail: out.approval.detail }), thinking()] }
+            stepStarted = Date.now()
+            save()
+            return textResult(done.text, !done.ok)
+          }
           if (out.approval) {
-            if (question || approval) {
+            if (questions || approval) {
               msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
               save()
               return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -1387,10 +1633,30 @@ export class Runner {
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
-          const out = await apps.call(current, name, args)
+          let out = await apps.call(current, name, args)
+          sawOutside() // what an app shows (a mail, a chat) is someone else's text
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
+          // A click or key that sends, pays or deletes: by how far this agent goes on its own, it waits, runs now, or never.
+          const risky = out.approval ? verdict({ cls: 'write', kinds: ['apps'], p: await policyNow(), outside, askByDefault: true }) : undefined
+          if (out.approval && risky?.off) {
+            msg.run = { ...msg.run!, steps: [...close('error', { detail: out.approval.detail }), thinking()] }
+            save()
+            return textResult(L(`Não fiz: ações arriscadas nos apps estão desligadas pra você (${settings.workspaceName} decide isso). Siga sem isso, ou diga a ${settings.workspaceName} o que falta.`, `I didn't: risky actions in apps are turned off for you (${settings.workspaceName} decides that). Go on without it, or tell ${settings.workspaceName} what's missing.`), true)
+          }
+          if (out.approval && risky?.run) {
+            // The same way an approval lets it through: once, that exact element, then the action again.
+            const detail = out.approval.detail
+            const let_ = await apps.approved(current, out.approval.args)
+            if (let_.ok) out = await apps.call(current, name, args)
+            if (!out.approval) {
+              msg.run = { ...msg.run!, steps: [...close(!let_.ok || out.result.isError ? 'error' : 'done', { label: L('Fez (sem pedir: autonomia)', 'Did it (no ask: autonomy)'), detail }), thinking()] }
+              stepStarted = Date.now()
+              save()
+              return let_.ok ? clip(out.result) : textResult(let_.text, true)
+            }
+          }
           if (out.approval) {
-            if (question || approval) {
+            if (questions || approval) {
               msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
               save()
               return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -1436,7 +1702,7 @@ export class Runner {
           const c = this.deps.connectors?.list().find((x) => x.name === args['conector'])
           const nivel = args['nivel'] === 'read_write' ? 'read_write' : 'read'
           if (!c) return textResult(L('Esse conector não existe. Use um da lista.', "That connector doesn't exist. Use one from the list."), true)
-          if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+          if (questions || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           const why = typeof args['motivo'] === 'string' ? args['motivo'].trim() : ''
           approval = {
             id: randomUUID(),
@@ -1494,7 +1760,14 @@ export class Runner {
         // A runner's call, only when every inner tool that would ask is allowed for good on its own.
         const rules = db.agent(agent.id)?.autoApprove ?? []
         const always = cls === 'sensitive' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : rules.includes(`${hit.connector.id}:${current.name}`))
-        if (cls === 'sensitive' && !always) {
+        // A runner's call counts as the actions it runs; one that can't be placed (raw requests, code) asks at every level.
+        const inner = perCall ? innerActions(current.name, callArgs) : undefined
+        const kinds = inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : kindsOf({ cls, name: current.name })
+        const unplaced = perCall && cls === 'sensitive' && !runnerRules(hit.connector.id, current.name, callArgs)
+        // How far it goes on its own, read now: the rules may have changed since the turn started.
+        const judgedNow = verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced, alwaysAllowed: always, outside })
+        if (judgedNow.off) return textResult(L(`Não rodei: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} está desligado pra você agora.`, `I didn't run it: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} is turned off for you now.`), true)
+        if (!judgedNow.run) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
           approval = {
             id: randomUUID(),
@@ -1517,18 +1790,18 @@ export class Runner {
           db.createApproval(approval)
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
-          addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail, status: 'done' })
+          addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail, ...(judgedNow.why === 'guard' ? { note: guardNote() } : {}), status: 'done' })
           notifyApproval(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${toolLabel(current.name)} · ${hit.connector.name}${approval.why ? `: ${approval.why}` : ''}`)
           return textResult(
             L(
               `Pedido de aprovação criado. A ação ainda NÃO foi executada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
               `Approval request created. The action has NOT run yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
-            )
+            ) + askedBecause(judgedNow)
           )
         }
 
         const t0 = Date.now()
-        const step: Step = { id: randomUUID(), label: cls === 'read' ? L('Consultou', 'Looked up') : always ? L('Executou (sempre permitido)', 'Ran (always allowed)') : L('Executou', 'Ran'), detail, status: 'running' }
+        const step: Step = { id: randomUUID(), label: cls === 'read' ? L('Consultou', 'Looked up') : judgedNow.why === 'always' ? L('Executou (sempre permitido)', 'Ran (always allowed)') : cls === 'sensitive' || judgedNow.why === 'rule' ? L('Executou (sem pedir: autonomia)', 'Ran (no ask: autonomy)') : L('Executou', 'Ran'), detail, status: 'running' }
         // What it asked (the SQL, the path) shows while it runs; what came back, when it's done.
         const input = keyArg(callArgs)
         if (input) step.input = input
@@ -1546,6 +1819,7 @@ export class Runner {
         }
         try {
           const first = await this.deps.connectors!.call(hit.connector.id, current.name, callArgs)
+          sawOutside() // what a connector answers is someone else's text: an email, an issue, a page
           // A query still running: the app waits for it here, with the connector's own status tool, instead
           // of the agent sleeping and asking again. Not a status tool the agent called itself (asking whether a
           // deploy finished wants the answer now), nor a write (starting a job doesn't mean waiting for it).
@@ -1652,11 +1926,6 @@ export class Runner {
     let error: string | null = null
     let thrown: unknown // what the engine threw, if it did: a bug reads differently from a CLI's own words
 
-    // Images I attached: every message says which it had; the newest go in as images.
-    const ids = new Set(history.map((m) => m.id))
-    const attached = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind === 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
-    const names = new Map<string, string[]>()
-    for (const a of attached) names.set(a.messageId, [...(names.get(a.messageId) ?? []), a.name])
     const thread = msg.threadId ? db.message(msg.threadId) : undefined
     const promptOpts: PromptOpts = {
       agent,
@@ -1676,6 +1945,7 @@ export class Runner {
       skills: skills && mySkills,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
       connectors: exposed.size > 0,
+      github,
       people,
       builder: proposes
         ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })
@@ -1685,7 +1955,7 @@ export class Runner {
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
     const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
-    const images: TurnImage[] = attached
+    const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
 
@@ -1746,6 +2016,7 @@ export class Runner {
             } else if (ev.type === 'web') {
               // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
               acted = true
+              sawOutside() // a search or a page is someone else's text
               addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })
               if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
             } else if (ev.type === 'done') {
@@ -1760,7 +2031,7 @@ export class Runner {
         }
         // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
         // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
-        const reserve = !onReserve && !result && error && !control.reason && !acted && !question && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
+        const reserve = !onReserve && !result && error && !control.reason && !acted && !questions && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
         if (!reserve) break
         const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
         flush()
@@ -1818,7 +2089,7 @@ export class Runner {
       )
     }
 
-    const base = { endedAt, depth: opts.depth, work, receipt, question, ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, ...(replyTo ? { replyTo } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -1862,8 +2133,10 @@ export class Runner {
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: question ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        run: { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       })
+      // The inbox shows a question's decisions from its message, which has them only now.
+      if (question) emit({ type: 'inbox' })
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (!question && !approval) {
         const finished = (): void => {
@@ -1908,7 +2181,13 @@ export class Runner {
     const runner = perCallTool(this.deps.connectors?.list().find((c) => c.id === ap.connectorId)?.url, ap.tool)
     const rules = runner ? (runnerRules(ap.connectorId, ap.tool, ap.args) ?? []) : [`${ap.connectorId}:${ap.tool}`]
     const fresh = rules.filter((r) => !owner?.autoApprove?.includes(r))
-    if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS) {
+    // For a command or a PR, "sempre permitir" turns that kind of action to "does it alone" on the agent's page.
+    const kinds: ActionKind[] = ap.connectorId === COMPUTADOR ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []
+    if (always && decision === 'approved' && owner && !ap.highRisk && kinds.length) {
+      db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
+      emit({ type: 'agent', agent: db.agent(owner.id)! })
+      db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: kinds.join(', ') } })
+    } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), ...fresh] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
       db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: fresh.map((r) => r.slice(r.indexOf(':') + 1)).join(', ') } })
@@ -1934,6 +2213,28 @@ export class Runner {
         `${me} ${decision === 'approved' ? 'aprovou' : decision === 'refused' ? 'recusou' : 'não respondeu a'} um pedido de PR antigo, mas abrir PR pelo computador saiu do Tucano e nada foi aberto. Se você tem o conector do GitHub, abra a PR por ele; senão, diga a ${me} que ele precisa dar a você o conector do GitHub.`,
         `${me} ${decision === 'approved' ? 'approved' : decision === 'refused' ? 'turned down' : "didn't answer"} an old PR request, but opening a PR from the computer left Tucano and nothing was opened. If you have the GitHub connector, open the PR with it; otherwise, tell ${me} you need the GitHub connector.`
       )
+    } else if (ap.connectorId === COMPUTADOR) {
+      // A command on the agent's computer: the app runs exactly the one approved, and the agent gets its output.
+      const command = String(ap.args['command'] ?? '')
+      const what = L(`rodar \`${command}\``, `running \`${command}\``)
+      if (decision === 'approved' && agent?.computer && this.deps.computers) {
+        const out = await this.deps.computers.call(agent, 'bash', ap.args, { conversationId: ap.conversationId, messageId: ap.messageId })
+        ok = !out.result.isError
+        outcome = ok ? ran : L('Rodou, com erro.', 'Ran, with an error.')
+        task = L(
+          `${me} aprovou ${what}. O app rodou exatamente esse comando${ok ? '' : ' e ele terminou com erro'}. Saída:\n${resultText(out.result)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
+          `${me} approved ${what}. The app ran exactly that command${ok ? '' : ' and it ended with an error'}. Output:\n${resultText(out.result)}\n\nGo on from here and tell ${me} the result.`
+        )
+      } else if (decision === 'approved') {
+        outcome = L('Não executou: o computador desse agente está desligado.', "Didn't run: this agent's computer is off.")
+        task = L(`${me} aprovou ${what}, mas o seu computador está desligado agora. Avise ${me} em uma frase.`, `${me} approved ${what}, but your computer is off right now. Tell ${me} in one sentence.`)
+      } else {
+        outcome = decision === 'refused' ? L('Nada foi rodado.', 'Nothing was run.') : expired
+        task = L(
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi rodado. Responda considerando isso; se fizer sentido, proponha outro caminho.`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was run. Reply with that in mind; if it makes sense, suggest another way.`
+        )
+      }
     } else if (ap.connectorId === APPS) {
       // A click or key in one of the person's apps: made on the same app, on the same element.
       const onde = typeof ap.args['onde'] === 'string' ? ap.args['onde'] : ''
@@ -2159,17 +2460,52 @@ export class Runner {
 
   // People a message calls with @name hear about it: whoever can see it, not who wrote it.
   // Returns who was called.
-  private callPeople(conv: Conversation, msg: Message, authorName: string, except?: string): Person[] {
+  // `text`: what calls them, when it isn't the whole message (the decisions answered on a card don't).
+  private callPeople(conv: Conversation, msg: Message, authorName: string, except?: string, text = msg.text): Person[] {
     const { db } = this.deps
     if (db.people().length < 2) return [] // alone, no one to call: a desktop hears only what it always did
     const people = new People(db)
-    const called = mentionedPeople(msg.text, db.people(), db.agents()).filter((p) => p.id !== except && people.canSeeConversation(p, conv))
+    const called = mentionedPeople(text, db.people(), db.agents()).filter((p) => p.id !== except && people.canSeeConversation(p, conv))
     if (called.length) this.deps.notify?.(L(`${authorName} te mencionou`, `${authorName} mentioned you`), snip(msg.text, 140), conv.id, undefined, msg.threadId, called.map((p) => p.id))
     return called
   }
 
   async expireApprovals(): Promise<void> {
     for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
+  }
+
+  // A question whose decisions `by` may answer on the card now: theirs (or one they may answer for
+  // someone, as a typed reply would: an admin, whoever covers, the requester past the deadline), never
+  // one still waiting on a DM's yes. One from before questions to people: whoever sees the conversation.
+  private decidable(messageId: string, by: Person): Message {
+    const { db } = this.deps
+    const asked = db.message(messageId)
+    const q = db.question(messageId)
+    if (q && q.state !== 'open') throw new Error(L('Essa pergunta já foi respondida.', 'That question was already answered.'))
+    const mayAnswer = q ? q.confirm !== 'pending' && new People(db).canAnswer(by, q) : !!asked && !new People(db).conversationError(by, asked.conversationId)
+    if (!asked || !mayAnswer) throw new Error(L('Essa pergunta não é pra você.', "That question isn't for you."))
+    if (asked.author.kind !== 'agent' || asked.run?.status !== 'waiting_input') throw new Error(L('Essa pergunta já foi respondida.', 'That question was already answered.'))
+    return asked
+  }
+
+  // One decision answered on the card (null clears it): kept on the question until it's sent.
+  answerDecision(messageId: string, index: number, answer: Answer | null, by: Person): void {
+    const asked = this.decidable(messageId, by)
+    const questions = questionsOf(asked.run)
+    const question = questions[index]
+    if (!question) return
+    const clean = answer === null ? null : cleanAnswer(question, answer)
+    if (clean === undefined) return
+    const answers = Array.from({ length: questions.length }, (_, i) => asked.run!.answers?.[i] ?? null)
+    answers[index] = clean
+    this.update(asked, { run: { ...asked.run!, answers } })
+    if (this.deps.db.question(messageId)) this.deps.emit({ type: 'inbox' }) // the card in For you, on another device
+  }
+
+  // Sends the decisions answered on the card as the person's message, as if they wrote them.
+  async submitDecisions(messageId: string, by: Person): Promise<void> {
+    const asked = this.decidable(messageId, by)
+    await this.send(asked.conversationId, '', [], asked.threadId, by.id, { answers: asked.id })
   }
 
   // The user took over the agent's browser ("Assumir") and handed it back

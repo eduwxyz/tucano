@@ -46,6 +46,17 @@ contextBridge.exposeInMainWorld('tucano', {
   },
   checkUpdates: (): void => ipcRenderer.send('update:check'),
   installUpdate: (): void => ipcRenderer.send('update:install'),
+  // Seu iPhone: the app on the phone, over the home Wi-Fi (src/main/home-phone.ts).
+  phone: {
+    state: (): Promise<unknown> => ipcRenderer.invoke('home-phone:state'),
+    set: (on: boolean): Promise<unknown> => ipcRenderer.invoke('home-phone:set', on),
+    code: (): Promise<unknown> => ipcRenderer.invoke('home-phone:code'),
+    onChanged: (cb: (state: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('home-phone', listener)
+      return () => ipcRenderer.removeListener('home-phone', listener)
+    }
+  },
   // Tucanos on servers, shown in this window over the app (Settings › Servers, the workspace list).
   servers: {
     list: (): Promise<unknown> => ipcRenderer.invoke('servers:list'),

@@ -134,3 +134,18 @@ export function decodedPath(raw: string): string | undefined {
     return undefined
   }
 }
+
+// A request's body, up to `max` bytes (past it: an error).
+export function body(req: IncomingMessage, max = 64 * 1024 * 1024): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    req.on('data', (c: Buffer) => {
+      size += c.length
+      if (size > max) return reject(new Error('too large'))
+      chunks.push(c)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+}
