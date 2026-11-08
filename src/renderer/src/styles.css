@@ -9626,6 +9626,24 @@ button.agent-card__now:hover {
   font-size: 14px;
   color: var(--i-bad);
 }
+/* What was found: rows a little tighter, so a failing one still leaves "Continuar" on screen at 1280×800. */
+.intro-found .intro-row {
+  padding: 9px 0;
+}
+.intro__center--found {
+  gap: 11px;
+}
+/* Beside the button, in two short lines, rather than a line of its own under it. */
+.intro-actions__note {
+  flex: 1 1 0;
+  min-width: 180px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.intro-panel--tight {
+  gap: 6px;
+  padding: 12px 20px;
+}
 .intro-panel {
   display: flex;
   flex-direction: column;
@@ -9986,6 +10004,11 @@ button.agent-card__now:hover {
 }
 .engine-problem--intro .engine-problem__line {
   color: var(--i-ink-2);
+}
+/* In the introduction's list, under the harness's name: as tight as its account line was. */
+.engine-problem--intro {
+  margin-top: 1px;
+  gap: 2px;
 }
 .engine-problem__actions {
   display: flex;

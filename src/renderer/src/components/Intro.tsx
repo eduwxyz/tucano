@@ -752,11 +752,11 @@ function Found(p: {
   }
 
   return (
-    <div className="intro__center intro__center--tight">
-      <h1 className="intro-h2">{ready.length === 1 ? L('Achei 1 pronto pra usar', 'Found 1 ready to use') : L(`Achei ${ready.length} prontos pra usar`, `Found ${ready.length} ready to use`)}</h1>
-      <div className="intro-card intro-card--list">
+    <div className="intro__center intro__center--tight intro__center--found">
+      <h1 className="intro-h2">{foundTitle(working.length, ready.length - working.length - failing.length)}</h1>
+      <div className="intro-card intro-card--list intro-found">
         {ready.map((e) => (
-          <FoundRow key={e} engine={e} account={p.engines[e].account} listed={p.listed} onResult={onResult} onSignIn={() => (e === 'claude' || e === 'codex' ? p.onSignIn(e) : void loginEngine(e))} />
+          <FoundRow key={e} engine={e} account={p.engines[e].account} gateway={p.engines[e].route === 'gateway'} listed={p.listed} onResult={onResult} onSignIn={() => (e === 'claude' || e === 'codex' ? p.onSignIn(e) : void loginEngine(e))} />
         ))}
         {signIn.map((e) => (
           <div key={e} className="intro-row">
@@ -772,7 +772,7 @@ function Found(p: {
         ))}
       </div>
       {(mcps.length > 0 || skills.length > 0 || p.models || change) && (
-        <div className="intro-panel">
+        <div className="intro-panel intro-panel--tight">
           {(mcps.length > 0 || skills.length > 0) && <b>{fromClaude ? L('Também achei no Claude Code', 'I also found in Claude Code') : L('Também achei nos seus programas', 'I also found in your programs')}</b>}
           {mcps.length > 0 && (
             <label className="intro-checkbox">
@@ -804,11 +804,11 @@ function Found(p: {
       )}
       <div className="intro-actions">
         <button className="intro-btn" disabled={!p.models || busy} onClick={() => void next()}>
-          {failing.length && working.length ? L(`Continuar com ${list(working.map((e) => ENGINES[e].label))}`, `Continue with ${list(working.map((e) => ENGINES[e].label))}`) : L('Continuar', 'Continue')}
+          {continueLabel(failing.length > 0 ? working : [])}
         </button>
-        <span className="intro-muted">
+        <span className={`intro-muted ${failing.length && working.length ? 'intro-actions__note' : ''}`}>
           {failing.length && working.length
-            ? L(`${list(failing.map((e) => ENGINES[e].label))} fica de fora por agora. Dá pra arrumar depois em Configurações.`, `${list(failing.map((e) => ENGINES[e].label))} stays out for now. You can fix it later in Settings.`)
+            ? leftOut(failing)
             : L('Clique 2 de 3', 'Click 2 of 3')}
         </span>
       </div>
@@ -816,25 +816,55 @@ function Found(p: {
   )
 }
 
+// The title counts only what answered; while tests still run, it says so instead of a number that may drop.
+export function foundTitle(working: number, testing: number): string {
+  if (testing > 0) return L('Testando o que achei…', 'Testing what I found…')
+  if (working === 0) return L('Nenhum respondeu ao teste', 'None of them answered the test')
+  return working === 1 ? L('Achei 1 pronto pra usar', 'Found 1 ready to use') : L(`Achei ${working} prontos pra usar`, `Found ${working} ready to use`)
+}
+
+// With one that failed: who goes on, by name when it's one, by count when several (the rows name them).
+export function continueLabel(working: EngineId[]): string {
+  if (working.length === 1) return L(`Continuar com ${ENGINES[working[0]!].label}`, `Continue with ${ENGINES[working[0]!].label}`)
+  if (working.length > 1) return L(`Continuar com os ${working.length}`, `Continue with these ${working.length}`)
+  return L('Continuar', 'Continue')
+}
+
+// Who stays out, by name: "Pi fica de fora…", "OpenCode e Pi ficam de fora…".
+export function leftOut(failing: EngineId[]): string {
+  const names = failing.map((e) => ENGINES[e].label)
+  const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} ${L('e', 'and')} ${names.at(-1)}` : (names[0] ?? '')
+  return names.length > 1 ? L(`${who} ficam de fora por agora; dá pra arrumar em Configurações.`, `${who} stay out for now; you can fix them in Settings.`) : L(`${who} fica de fora por agora; dá pra arrumar em Configurações.`, `${who} stays out for now; you can fix it in Settings.`)
+}
+
 const list = (names: string[]): string => (names.length > 4 ? `${names.slice(0, 4).join(', ')}${L(` e mais ${names.length - 4}`, ` and ${names.length - 4} more`)}` : names.join(', '))
 
-function FoundRow({ engine, account, listed, onResult, onSignIn }: { engine: EngineId; account?: string; listed: Partial<Record<EngineId, string[]>>; onResult: (e: EngineId, ok: boolean | undefined) => void; onSignIn: () => void }): ReactNode {
+function FoundRow({ engine, account, gateway, listed, onResult, onSignIn }: { engine: EngineId; account?: string; gateway: boolean; listed: Partial<Record<EngineId, string[]>>; onResult: (e: EngineId, ok: boolean | undefined) => void; onSignIn: () => void }): ReactNode {
   const [test, retry] = useTest(quickModel(engine, listed))
   const done = test && test !== 'running'
   const failed = !!done && !test.ok
-  useEffect(() => onResult(engine, done ? test.ok : undefined), [engine, done, test, onResult])
+  // A gateway names its own models, so there's nothing to test here: it counts as found.
+  useEffect(() => onResult(engine, gateway ? true : done ? test.ok : undefined), [engine, gateway, done, test, onResult])
   return (
     <div className={`intro-row ${failed ? 'is-failed' : ''}`}>
       <EngineMark engine={engine} />
       <span className="intro-card__text">
         <b>{ENGINES[engine].label}</b>
-        <span>
-          {account ?? L('Pronto', 'Ready')}
-          {done && test.ok && test.seconds !== undefined && L(` · respondeu em ${secs(test.seconds)} s`, ` · answered in ${secs(test.seconds)} s`)}
-        </span>
-        {failed && <EngineProblem look="intro" engine={engine} message={test.message} onSignIn={onSignIn} onRetry={retry} />}
+        {/* Failed: the problem's line takes the account's place (it names the provider when it can). */}
+        {failed ? (
+          <EngineProblem look="intro" engine={engine} message={test.message} onSignIn={onSignIn} onRetry={retry} />
+        ) : (
+          <span>
+            {account ?? L('Pronto', 'Ready')}
+            {done && test.ok && test.seconds !== undefined && L(` · respondeu em ${secs(test.seconds)} s`, ` · answered in ${secs(test.seconds)} s`)}
+          </span>
+        )}
       </span>
-      {!test || test === 'running' ? (
+      {gateway ? (
+        <span role="img" aria-label={L('Pronto', 'Ready')}>
+          <Check size={26} />
+        </span>
+      ) : !test || test === 'running' ? (
         <span role="img" aria-label={L('Testando', 'Testing')}>
           <Spinner />
         </span>

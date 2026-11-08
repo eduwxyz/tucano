@@ -6,6 +6,7 @@ import { parseHTML } from 'linkedom'
 import { act, useEffect } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { setLang } from '../src/shared/lang'
 import type { Agent, EngineId, EngineStatus, Person, Settings } from '../src/shared/types'
 import type { State } from '../src/renderer/src/store'
 
@@ -55,7 +56,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 })
 const store = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
-const { Intro, GuestWelcome } = await import('../src/renderer/src/components/Intro')
+const { Intro, GuestWelcome, foundTitle, continueLabel, leftOut } = await import('../src/renderer/src/components/Intro')
 const { Sidebar } = await import('../src/renderer/src/components/Sidebar')
 const { MissionsPage } = await import('../src/renderer/src/components/Missions')
 const { Dialogs } = await import('../src/renderer/src/components/Dialogs')
@@ -176,6 +177,8 @@ describe('the first run', () => {
     expect(document.querySelector('.engine-problem__more pre')!.textContent).toContain('at postJson')
     expect(document.querySelector('.intro-row.is-failed')).not.toBeNull()
     expect(text()).toContain('Pi fica de fora por agora')
+    // Only what answered counts: Claude Code, not the Pi that failed.
+    expect(text()).toContain('Achei 1 pronto pra usar')
     await click(/^Entrar de novo$/)
     expect(store.loginEngine).toHaveBeenCalledWith('pi')
     const before = vi.mocked(store.testEngine).mock.calls.length
@@ -184,6 +187,23 @@ describe('the first run', () => {
     expect(button(/^Continuar com Claude Code$/)).toBeTruthy()
     vi.mocked(store.engineModels).mockImplementation(async () => ({ models: [] }))
     vi.mocked(store.testEngine).mockImplementation(async () => ({ ok: true, seconds: 1.2, message: 'ok' }))
+  })
+
+  it('counts only what answered, says so while testing, and names who goes on', () => {
+    expect(foundTitle(0, 2)).toBe('Testando o que achei…')
+    expect(foundTitle(3, 0)).toBe('Achei 3 prontos pra usar')
+    expect(foundTitle(1, 0)).toBe('Achei 1 pronto pra usar')
+    expect(foundTitle(0, 0)).toBe('Nenhum respondeu ao teste')
+    expect(continueLabel(['claude'])).toBe('Continuar com Claude Code')
+    expect(continueLabel(['claude', 'codex', 'opencode'])).toBe('Continuar com os 3')
+    expect(continueLabel([])).toBe('Continuar')
+    expect(leftOut(['pi'])).toBe('Pi fica de fora por agora; dá pra arrumar em Configurações.')
+    expect(leftOut(['opencode', 'pi'])).toBe('OpenCode e Pi ficam de fora por agora; dá pra arrumar em Configurações.')
+    setLang('en')
+    expect(foundTitle(1, 0)).toBe('Found 1 ready to use')
+    expect(foundTitle(2, 0)).toBe('Found 2 ready to use')
+    expect(continueLabel(['claude', 'codex'])).toBe('Continue with these 2')
+    setLang('pt')
   })
 
   it("makes the agent from the person's own words", async () => {
