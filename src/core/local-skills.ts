@@ -37,7 +37,7 @@ const dirs = (d: string): string[] => {
 
 // name and description from the YAML frontmatter, including "description: |" blocks.
 export function frontmatter(text: string): { name?: string; description?: string; body: string } {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text)
+  const m = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text)
   if (!m) return { body: text }
   const lines = m[1]!.split(/\r?\n/)
   const field = (key: string): string | undefined => {
@@ -74,7 +74,7 @@ function section(lines: string[], key: string): { inline: string; body: string[]
 // category, version, tags and allowed-tools from the frontmatter. Hermes keeps them nested:
 // "metadata: { version, hermes: { tags } }"; a plain name/description frontmatter has none.
 export function skillMeta(text: string): { category?: string; version?: string; allowedTools?: string; tags: string[] } {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
+  const m = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/.exec(text)
   if (!m) return { tags: [] }
   const lines = m[1]!.split(/\r?\n/)
   const scalar = (s: { inline: string } | undefined): string | undefined => (s && unquote(s.inline) ? unquote(s.inline) : undefined)

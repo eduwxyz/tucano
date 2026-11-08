@@ -61,8 +61,20 @@ describe('skillMeta', () => {
     expect(skillMeta('---\nmetadata:\n  version: 1\n  other:\n    tags: [x]\n---\n').tags).toEqual([])
   })
 
+  it('reads the frontmatter of a file that starts with a UTF-8 byte order mark', () => {
+    const m = skillMeta('\uFEFF---\ncategory: ops\nversion: 2\ntags: [family:ops]\n---\nx')
+    expect(m).toMatchObject({ category: 'ops', version: '2', tags: ['family:ops'] })
+  })
+
   it('has no tags when there is no frontmatter', () => {
     expect(skillMeta('# just text')).toEqual({ tags: [] })
+  })
+})
+
+describe('findHermesSkills (byte order mark)', () => {
+  it('keeps name, description and category of a SKILL.md saved with a BOM', () => {
+    put(join(root, 'ops/b/SKILL.md'), '\uFEFF---\nname: b\ndescription: With BOM\ncategory: media\n---\nbody')
+    expect(findHermesSkills(root, 'H')[0]).toMatchObject({ name: 'b', description: 'With BOM', category: 'media' })
   })
 })
 
