@@ -33,6 +33,7 @@ import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from '.
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
 import { codexEnv } from './engines/codex'
+import { LoginTerminal, type LoginKey } from './login-terminal'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
 import { DesktopApps, macApps, SELF } from './apps'
@@ -204,6 +205,44 @@ const engineSetup = new EngineSetup({
   recheck: async (e) => (await engineCheck.recheck(e)).engines[e],
   env: (e) => (e === 'codex' ? codexEnv(codexHome) : { ...process.env, DISABLE_AUTOUPDATER: '1' }),
   changed: () => {}
+})
+
+// A harness's sign-in from the page or the phone, on a server: its login command in a terminal of the
+// server's, the screen shown where the person is (login-terminal.ts). Linux only, through `script`;
+// elsewhere the command is shown, to run in a terminal as before.
+const loginTerminal = new LoginTerminal({
+  spawn: (bin, args, env, size) => {
+    if (!serverMode || osOf() !== 'linux' || !onPath('script')) return undefined
+    const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
+    const line = `stty cols ${size.cols} rows ${size.rows} 2>/dev/null; exec ${[bin, ...args].map(q).join(' ')}`
+    const p = spawn('script', ['-qfec', line, '/dev/null'], { env: { ...env, TERM: 'xterm-256color', COLUMNS: String(size.cols), LINES: String(size.rows) }, stdio: ['pipe', 'pipe', 'pipe'] })
+    const exit = new Promise<number>((done) => {
+      p.on('error', () => done(1))
+      p.on('exit', (code) => done(code ?? 1))
+    })
+    p.stdin.on('error', () => {})
+    return {
+      write: (data) => void p.stdin.write(data),
+      output: (on) => (p.stdout.on('data', (b: Buffer) => on(b.toString())), p.stderr.on('data', (b: Buffer) => on(b.toString()))),
+      exit,
+      kill: () => void p.kill()
+    }
+  },
+  bin: (e) => engines[e].path ?? ENGINES[e].cli,
+  env: (e, account) => {
+    if (account) {
+      const dir = accountDir(dataDir, account)
+      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir)
+    }
+    return e === 'codex' ? codexEnv(codexHome) : { ...process.env, DISABLE_AUTOUPDATER: '1' }
+  },
+  signedIn: async (e, account) => {
+    if (!account) return (await engineCheck.recheck(e)).engines[e].loggedIn
+    await checkAccounts(account)
+    engineCheck.setAccounts(Object.fromEntries(accountLogins))
+    emit({ type: 'settings', settings: settings() })
+    return accountLogins.get(account)?.loggedIn === true
+  }
 })
 
 // The same steps with the test engines: no network, no CLI; the harness is "signed in" at the end.
@@ -1936,7 +1975,10 @@ const api: Handlers = {
 
   // Login always happens in the CLI's own flow; the app never sees credentials.
   // Codex logs into the app's own home (see codexEnv), separate from the user's.
-  loginEngine: ({ engine }) => {
+  loginEngine: ({ engine, screen }) => {
+    // On a server, for a page or a phone that can show it: the sign-in in a terminal of the server's.
+    const shown = screen && engines[engine].installed ? loginTerminal.start(engine) : undefined
+    if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
     // The sign-in happens in a terminal: check again until it lands, wherever the person is.
     watchEngine(engine, (s) => s.loggedIn)
     return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {})
@@ -1949,6 +1991,10 @@ const api: Handlers = {
     if (serverMode) throw new Error(L('Num servidor, o login é feito no terminal dele.', "On a server, the sign-in happens in its terminal."))
     return fake ? fakeSetup(engine as SetupEngine) : engineSetup.start(engine as SetupEngine)
   },
+  // The sign-in on the server's terminal (loginEngine with screen): how it looks now, keys to it, its end.
+  loginScreen: () => loginTerminal.current(),
+  loginInput: ({ id, text, key, enter }) => loginTerminal.send(id, { ...(text ? { text } : {}), ...(key ? { key: key as LoginKey } : {}), ...(enter ? { enter } : {}) }),
+  stopLogin: ({ id }) => loginTerminal.stop(id),
   engineSetupState: () => (fake ? fakeSetupState : engineSetup.current),
   cancelEngineSetup: () => {
     if (fake) return void (fakeSetupState = fakeSetupState && { ...fakeSetupState, state: 'cancelled' })
@@ -1971,9 +2017,11 @@ const api: Handlers = {
     emit({ type: 'settings', settings: settings() })
     return account
   },
-  loginAccount: ({ id }) => {
+  loginAccount: ({ id, screen }) => {
     const a = savedAccounts().find((x) => x.id === id)
     if (!a) return { opened: false, command: '' }
+    const shown = screen && engines[a.engine].installed ? loginTerminal.start(a.engine, a.id) : undefined
+    if (shown) return { opened: true, command: ENGINES[a.engine].login, screen: shown }
     const dir = accountDir(dataDir, a.id)
     watchAccount(a.id)
     return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex') })

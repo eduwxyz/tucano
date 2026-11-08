@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Sign a harness in on a server from the browser or the phone, with no SSH.** On Tucano as a server, **Sign in** (Settings › Models and the accounts) used to show a command to run in the server's terminal. Now the server runs the harness's own login in a terminal of its own (through `script`, on Linux) and the browser shows it in a window: the screen as text, **Open the sign-in page**, the code to type there with a copy button, a field to paste a code back, and arrows, Enter and Esc for a menu. Each harness signs in the way that works with no browser on the server: Codex and Grok with a device code, Claude Code by pasting the code its page shows, Cursor by approving its page, OpenCode and Gemini in their own menus, Pi with `/login`. The window closes the login once the harness checks as signed in, and a login left open ends after 15 minutes. Tucano passes keys and shows the screen; the harness saves the login where it always does. The iPhone app shows the same window (in its next version). On a desktop, **Sign in** opens a terminal as before.
+
 ## [0.2.18] - 2026-11-07
 
 > **Em português:**
