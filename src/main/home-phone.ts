@@ -125,6 +125,7 @@ export function homePhone(deps: {
     async code(): Promise<{ link: string; expiresAt: number }> {
       if (!link?.running) await this.set(true)
       if (!link?.running) throw new Error(error ?? 'not running')
+      link.setHost(homeHost())
       return link.makeCode()
     },
     // The core's answers to the questions above; true when the message was one.
