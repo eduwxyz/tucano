@@ -1,11 +1,11 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { applyForeignTeam, hueColor, IMPORT_CAPS, openBotSchedule, readForeignZip, tucanoSchedule } from '../src/core/agent-import'
-import { zipFromBuffer, zipFromFile } from '../src/core/zip'
+import { extractZip, zipFromBuffer, zipFromFile } from '../src/core/zip'
 
 const fresh = (): Db => new Db(join(mkdtempSync(join(tmpdir(), 'ad-import-')), 'test.db'))
 
@@ -263,6 +263,17 @@ describe('importing agents from Grok Bot, through our skill', () => {
     'agents/ledger/skills/reconcile/template.txt': 'x'
   })
 
+  it('imports long skills whole and reports how far they exceed the recommendation', () => {
+    const source = files()
+    const body = 'x'.repeat(32_345)
+    source['agents/ledger/skills/reconcile/SKILL.md'] = `---\nname: reconcile\ndescription: When reconciling\n---\n${body}`
+    const db = fresh()
+    const team = readForeignZip(zipFromBuffer(zip(source)))
+    const r = applyForeignTeam(db, team, opts)
+    expect(db.skills()[0]?.body).toHaveLength(32_345)
+    expect(r.summary).toContain('22.345 acima do recomendado de 10.000')
+  })
+
   it('brings agents, skills, routines off, memories to confirm and group chats as channels', () => {
     const db = fresh()
     db.createConversation({ id: 'g', kind: 'channel', name: 'geral', members: [] })
@@ -375,5 +386,25 @@ describe('importing agents from Grok Bot, through our skill', () => {
     expect(tucanoSchedule({ days: ['someday'], time: '09:15' })).toBeUndefined()
     expect(tucanoSchedule({ days: ['mon'], time: '25:00' })).toBeUndefined()
     expect(tucanoSchedule({ days: [], time: '09:00' })).toBeUndefined()
+  })
+})
+
+describe('a vault sent to a server as a .zip', () => {
+  it('unpacks it, the zipped folder as the root, without the Mac’s extras', () => {
+    const to = mkdtempSync(join(tmpdir(), 'tucano-unzip-'))
+    const z = zipFromBuffer(zip({ 'Cofre/Pessoas/Ana.md': '# Ana', 'Cofre/img/foto.png': Buffer.from([1, 2, 3]), '__MACOSX/Cofre/._Ana.md': 'x', 'Cofre/.DS_Store': 'x' }, { deflate: true }))
+    const root = extractZip(z, to)
+    expect(root).toBe(join(to, 'Cofre'))
+    expect(readFileSync(join(root, 'Pessoas', 'Ana.md'), 'utf8')).toBe('# Ana')
+    expect(readFileSync(join(root, 'img', 'foto.png'))).toEqual(Buffer.from([1, 2, 3]))
+    expect(existsSync(join(to, '__MACOSX'))).toBe(false)
+    expect(existsSync(join(root, '.DS_Store'))).toBe(false)
+  })
+
+  it('refuses a path that would land outside, and one too big', () => {
+    for (const name of ['../fora.md', 'a/../../fora.md', '/etc/x.md', 'C:/x.md'])
+      expect(() => extractZip(zipFromBuffer(zip({ [name]: 'x' })), mkdtempSync(join(tmpdir(), 'tucano-unzip-'))), name).toThrow()
+    expect(() => extractZip(zipFromBuffer(zip({ 'a.md': 'x'.repeat(100) })), mkdtempSync(join(tmpdir(), 'tucano-unzip-')), { file: 10, total: 1000 })).toThrow()
+    expect(() => extractZip(zipFromBuffer(zip({ 'a.md': 'x'.repeat(60), 'b.md': 'x'.repeat(60) })), mkdtempSync(join(tmpdir(), 'tucano-unzip-')), { file: 100, total: 100 })).toThrow()
   })
 })

@@ -102,19 +102,40 @@ export async function macApps(): Promise<{ name: string; bundleId?: string; path
       return []
     }
   })]
-  // One app at a time (a broken one can't throw the others off), several at once.
-  const meta = (path: string): Promise<{ name: string; bundleId?: string; path: string }> =>
-    new Promise((resolve) =>
-      execFile('mdls', ['-name', 'kMDItemCFBundleIdentifier', '-name', 'kMDItemDisplayName', '-raw', path], { timeout: 5_000 }, (_e, stdout) => {
-        const [id = '', name = ''] = String(stdout ?? '').split('\0').map((v) => clean(v))
-        const shown = name.normalize('NFC').replace(/\.app$/, '')
-        resolve({ name: shown && shown !== '(null)' ? shown : basename(path, '.app'), ...(id && id !== '(null)' ? { bundleId: id } : {}), path })
-      })
-    )
-  const out: { name: string; bundleId?: string; path: string }[] = []
-  for (let i = 0; i < paths.length; i += 32) out.push(...(await Promise.all(paths.slice(i, i + 32).map(meta))))
+  type MacApp = { name: string; bundleId?: string; path: string }
+  const mdls = (batch: string[]): Promise<string> =>
+    new Promise((resolve) => execFile('mdls', ['-name', 'kMDItemCFBundleIdentifier', '-name', 'kMDItemDisplayName', '-raw', ...batch], { timeout: 10_000 }, (_e, stdout) => resolve(String(stdout ?? ''))))
+  // Many apps per mdls (one process each took seconds). It stops at an app Spotlight can't
+  // read: that one goes by its file's name, and the rest are asked again.
+  const read = async (batch: string[]): Promise<MacApp[]> => {
+    if (!batch.length) return []
+    const apps = parseMdls(await mdls(batch), batch)
+    if (apps?.length === batch.length) return apps
+    if (!apps) return (await Promise.all(batch.map((p) => (batch.length > 1 ? read([p]) : [{ name: basename(p, '.app'), path: p }])))).flat()
+    const stuck = batch[apps.length]!
+    return [...apps, { name: basename(stuck, '.app'), path: stuck }, ...(await read(batch.slice(apps.length + 1)))]
+  }
+  const batches: string[][] = []
+  for (let i = 0; i < paths.length; i += 40) batches.push(paths.slice(i, i + 40))
+  const out = (await Promise.all(batches.map(read))).flat()
   // The same app in two places (~/Applications and /Applications): once.
   return out.filter((a, i) => !a.bundleId || out.findIndex((b) => b.bundleId === a.bundleId) === i)
+}
+
+// What `mdls -raw` prints for several apps: two values each (bundle id, then name), split by NULs.
+// Fewer apps than asked when it stopped at one it couldn't read; undefined when the values don't
+// pair up, so one app's answer can't be told from the next one's.
+export function parseMdls(stdout: string, paths: string[]): { name: string; bundleId?: string; path: string }[] | undefined {
+  // Its complaint comes on stdout too, glued to the last value: "<first path>: could not find <path>."
+  const complaint = stdout.lastIndexOf(`${paths[0]}: could not find `)
+  const text = complaint >= 0 ? stdout.slice(0, complaint) : stdout
+  const values = text === '' ? [] : text.split('\0').map((v) => clean(v))
+  if (values.length % 2 || values.length > paths.length * 2) return undefined
+  return paths.slice(0, values.length / 2).map((path, i) => {
+    const id = values[i * 2] ?? ''
+    const shown = (values[i * 2 + 1] ?? '').normalize('NFC').replace(/\.app$/, '')
+    return { name: shown && shown !== '(null)' ? shown : basename(path, '.app'), ...(id && id !== '(null)' ? { bundleId: id } : {}), path }
+  })
 }
 
 export function agentDesktop(bin: () => string | undefined = desktopBin): Cli {
@@ -298,6 +319,10 @@ export function pick(target: string, items: Item[]): Item | { error: string } {
   }
 }
 
+// Tucano itself (or Electron, while developing) is never an app an agent drives: it could
+// click its own approval.
+export const isTucano = (a: { name: string; bundleId?: string }): boolean => /^(tucano|tucano dev|electron)(\.exe)?$/i.test(a.name.trim()) || /^dev\.tucano\./i.test(a.bundleId ?? '') || /^com\.github\.electron/i.test(a.bundleId ?? '')
+
 // The app the agent named, among those it was given (by name, ignoring case and accents).
 export function grantOf(agent: Pick<Agent, 'apps'>, app: string): AgentApp | undefined {
   const want = norm(app)
@@ -308,7 +333,8 @@ export function grantOf(agent: Pick<Agent, 'apps'>, app: string): AgentApp | und
 // A key that can send (Return in a chat, ⌘↩ in Mail) or delete in bulk (⌘⌫) asks first.
 // Desktop apps name the act of scheduling by what it makes ("Novo Evento"), not by a verb.
 const CREATES = /\b(nov[oa]|criar|crie|new|create)\s+(evento|event|reuniao|meeting|compromisso|appointment)\b/
-export const riskyClick = (name: string): boolean => risky(name) || CREATES.test(norm(name))
+// One with no name can't be judged by it, so it asks too.
+export const riskyClick = (name: string): boolean => !norm(name).trim() || risky(name) || CREATES.test(norm(name))
 
 // A shortcut as the system takes it: off a Mac, ⌘ is Ctrl (agent-desktop reads "cmd" as the
 // Windows or Super key) and ⌥ is Alt.
@@ -317,9 +343,16 @@ export const keyFor = (combo: string, platform: NodeJS.Platform = process.platfo
   return platform === 'darwin' ? c : c.replace(/\b(cmd|command|meta)\+/g, 'ctrl+').replace(/\boption\+/g, 'alt+')
 }
 
+// The modifiers count in any order: shift+cmd+d is cmd+shift+d.
 export const riskyKey = (combo: string): boolean => {
-  const c = combo.replace(/\s+/g, '').toLowerCase()
-  return /^(return|enter)$/.test(c) || /(cmd|command|ctrl|control)\+.*(return|enter|shift\+d)$/.test(c) || /(cmd|command|ctrl|control|alt|option)\+.*(backspace|delete)$/.test(c)
+  const parts = combo.replace(/\s+/g, '').toLowerCase().split('+')
+  const key = parts.pop() ?? ''
+  const mods = new Set(parts.map((m) => ({ command: 'cmd', meta: 'cmd', control: 'ctrl', option: 'alt' })[m] ?? m))
+  const cmd = mods.has('cmd') || mods.has('ctrl')
+  if (key === 'return' || key === 'enter') return mods.size === 0 || cmd
+  if (key === 'd') return cmd && mods.has('shift')
+  if (key === 'backspace' || key === 'delete') return cmd || mods.has('alt')
+  return false
 }
 
 // ---------- the tools ----------
@@ -550,11 +583,11 @@ export class DesktopApps {
   // On a Mac the system answers at once (lsappinfo); agent-desktop's inventory can take seconds.
   async foreground(): Promise<{ name: string; bundleId?: string }[]> {
     if (this.platform === 'darwin') {
-      const mac = await macOpenApps().catch(() => [])
+      const mac = (await macOpenApps().catch(() => [])).filter((a) => !isTucano(a))
       if (mac.length) return mac
     }
     const all = await this.installed().catch(() => [])
-    const mine = (n: string): boolean => /^(tucano|electron)(\.exe)?$/i.test(n)
+    const mine = (n: string): boolean => isTucano({ name: n })
     const once = (list: { name: string; bundleId?: string }[]): { name: string; bundleId?: string }[] => list.filter((a, i) => a.name && !mine(a.name) && list.findIndex((b) => b.name === a.name) === i)
     // Windows: the system's own list of windows answers at once; each by the name in the Start menu.
     if (this.platform === 'win32') {
@@ -634,6 +667,10 @@ export class DesktopApps {
       }
     }
     const app = grant.name
+    if (isTucano({ name: app }))
+      return {
+        result: textResult(L('O Tucano não pode ser usado como app por um agente.', "Tucano can't be used as an app by an agent."), true)
+      }
     if (WRITE.has(name) && grant.level !== 'read_write')
       return {
         result: textResult(L(`Você só pode ler o ${app}.`, `You may only read ${app}.`), true)
@@ -804,15 +841,9 @@ export class DesktopApps {
   // Spends a permit for this action, if there is one.
   private permitted(agentId: string, app: string, args: Record<string, unknown>): boolean {
     const list = (this.permits.get(agentId) ?? []).filter((p) => p.until > Date.now())
-    // The same action under a slightly different name ("Apagar" in one menu, "Apagar Nota" in another) counts.
+    // Only the exact element that was approved: approving "Apagar" never lets "Apagar Tudo" through.
     const key = permitKey(app, args)
-    const same = (k: string): boolean => {
-      if (k === key) return true
-      const [a, x] = k.split('|') as [string, string]
-      const [b, y] = key.split('|') as [string, string]
-      return a === b && !x.startsWith('key:') && !y.startsWith('key:') && x.length > 2 && y.length > 2 && (x.startsWith(y) || y.startsWith(x))
-    }
-    const i = list.findIndex((p) => same(p.key))
+    const i = list.findIndex((p) => p.key === key)
     if (i < 0) return false
     list.splice(i, 1)
     this.permits.set(agentId, list)

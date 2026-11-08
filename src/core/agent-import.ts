@@ -17,6 +17,7 @@ import { channelName, codexValue, customModel, MAX_AGENT_ROUTINES, type Agent, t
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
 import { frontmatter } from './local-skills'
+import { overlongSkillNote } from '../shared/skills'
 import { skillName } from './skills'
 import type { Zip } from './zip'
 
@@ -55,7 +56,6 @@ const MAX_TEXT = 1_000_000
 const MAX_INSTRUCTIONS = 32_000
 const MAX_PICTURE_BYTES = 145_000 // as a data URL it stays under cleanLook's cap
 const MAX_MEMORY = 300
-const MAX_SKILL_BODY = 20_000
 // What one file brings at most; the rest is counted in the summary.
 export const IMPORT_CAPS = { agents: 40, channels: 30, skills: 20, routines: 20, memories: 40 }
 const SUMMARY_LINES = 40
@@ -119,10 +119,6 @@ function readSkills(zip: Zip, paths: unknown, prefix: string, notes: string[]): 
     const nm = skillName(fm.name || folder.split('/').pop()!)
     const body = fm.body.trim()
     if (!nm || !body) return []
-    if (body.length > MAX_SKILL_BODY) {
-      notes.push(L(`a skill ${nm} (receita longa demais)`, `the ${nm} skill (recipe too long)`))
-      return []
-    }
     const extraFiles = [...zip.entries.keys()].filter((f) => f.startsWith(`${folder}/`) && f !== `${folder}/SKILL.md`).length
     return [{ name: nm, description: str(fm.description, 1_000) || nm, body, extraFiles }]
   })
@@ -467,6 +463,8 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
         left.push(L(`@${handle}: a skill ${k.name} (já existe uma com esse nome)`, `@${handle}: the ${k.name} skill (one with that name already exists)`))
         continue
       }
+      const note = overlongSkillNote(k.name, k.body.length)
+      if (note) left.push(`@${handle}: ${note}`)
       const at = Date.now()
       const id = randomUUID()
       db.saveSkill({ id, name: nm, description: k.description, body: k.body, agents: [agent.id], state: 'active', createdAt: at, updatedAt: at })

@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, Message, Settings } from '../src/shared/types'
-import { callError, ConnectorManager, errorReason } from '../src/core/connectors'
+import { callError, ConnectorManager, errorReason, GOOGLE_PREVIEW_URL, googlePreviewHint } from '../src/core/connectors'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
@@ -187,6 +187,27 @@ describe('callError and errorReason', () => {
     expect(callError(new Error('fetch failed'))).toBe('fetch failed')
     expect(errorReason({ content: [{ type: 'text', text: 'bad SQL' }] })).toBe('bad SQL')
     expect(errorReason({ content: [] })).toMatch(/no message/)
+  })
+})
+
+describe("Google's Developer Preview error", () => {
+  const raw = 'Access to this tool requires that your Google Cloud project (123456789012) is enrolled in the Google Workspace Developer Preview Program.'
+  it('says it is a step in the person’s own Google Cloud project, not something to retry or ask the Tuca for', () => {
+    setLang('en')
+    const hint = googlePreviewHint('https://gmailmcp.googleapis.com/mcp/v1', raw)!
+    expect(hint).toContain(GOOGLE_PREVIEW_URL)
+    expect(hint).toMatch(/only the person can do/)
+    expect(hint).toMatch(/few days/)
+    expect(hint).toMatch(/Neither you nor the Tuca can fix this/)
+    setLang('pt')
+    expect(googlePreviewHint('https://sheetsmcp.googleapis.com/mcp/v1', raw)).toMatch(/só a pessoa pode fazer/)
+  })
+
+  it("leaves other servers' errors, and Google's other errors, as they are", () => {
+    expect(googlePreviewHint('https://mcp.linear.app/mcp', raw)).toBeUndefined()
+    expect(googlePreviewHint('https://evil.example/googleapis.com', raw)).toBeUndefined()
+    expect(googlePreviewHint('https://gmailmcp.googleapis.com/mcp/v1', 'Requested entity was not found.')).toBeUndefined()
+    expect(googlePreviewHint(undefined, raw)).toBeUndefined()
   })
 })
 

@@ -1,11 +1,12 @@
 // The site is served by Cloudflare as static files (no Worker code runs):
 //   cd site && npx wrangler deploy
+// which first runs build.mjs to make dist/ (the Portuguese and English pages, the sitemap).
 {
   "name": "tucano-site",
   "compatibility_date": "2026-10-01",
-  "assets": { "directory": "." },
+  "build": { "command": "node build.mjs" },
+  "assets": { "directory": "dist" },
   "routes": [
-    { "pattern": "tucano.sh", "custom_domain": true },
-    { "pattern": "www.tucano.sh", "custom_domain": true }
+    { "pattern": "tucano.sh", "custom_domain": true }
   ]
 }

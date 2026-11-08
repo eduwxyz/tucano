@@ -6,7 +6,8 @@
 // protocol; the page scripts are the same as in the Electron fallback. The
 // screen streams to the app while it changes, so the panel is a live view.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs'
+import type { Readable, Writable } from 'node:stream'
+import { existsSync, mkdirSync, readlinkSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { L } from '../shared/lang'
 import { chromeKeyringFlags, findChrome, userAgentPlatform } from './platform'
@@ -61,9 +62,11 @@ type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Erro
 // A new frame of the screen; says whether the app wants frames at full speed now.
 export type OnFrame = (agentId: string, jpeg: string) => boolean
 
-// One Chrome process and its DevTools connection, following one tab.
+// One Chrome process and its DevTools connection, following one tab. The connection is a
+// pipe to that process (--remote-debugging-pipe): no port another program on the computer
+// (a command an agent runs) could find and drive this profile through.
 class Tab {
-  private ws!: WebSocket
+  private closed = false
   private n = 0
   private pending = new Map<number, Pending>()
   session = '' // the tab we drive
@@ -79,18 +82,28 @@ class Tab {
     private onFrame?: (jpeg: string) => boolean
   ) {}
 
-  async connect(port: string): Promise<void> {
-    const { webSocketDebuggerUrl } = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()) as { webSocketDebuggerUrl: string }
-    this.ws = new WebSocket(webSocketDebuggerUrl)
-    await new Promise<void>((resolve, reject) => {
-      this.ws.addEventListener('open', () => resolve(), { once: true })
-      this.ws.addEventListener('error', () => reject(new Error(L('o Chrome não aceitou a conexão', "Chrome didn't accept the connection"))), { once: true })
+  // Chrome reads commands on its fd 3 and writes on fd 4, each message ending in a NUL.
+  private get input(): Writable {
+    return this.proc.stdio[3] as Writable
+  }
+
+  async connect(): Promise<void> {
+    const output = this.proc.stdio[4] as Readable
+    let buffered = ''
+    output.setEncoding('utf8')
+    output.on('data', (chunk: string) => {
+      const parts = (buffered + chunk).split('\0')
+      buffered = parts.pop() ?? ''
+      for (const m of parts) if (m) this.onMessage(JSON.parse(m) as Record<string, unknown>)
     })
-    this.ws.addEventListener('message', (e) => this.onMessage(JSON.parse(String(e.data)) as Record<string, unknown>))
-    this.ws.addEventListener('close', () => {
+    const gone = (): void => {
+      this.closed = true
       for (const p of this.pending.values()) p.reject(new Error(L('o Chrome fechou', 'Chrome closed')))
       this.pending.clear()
-    })
+    }
+    output.on('close', gone)
+    output.on('error', gone)
+    this.input.on('error', gone)
     await this.send('Target.setDiscoverTargets', { discover: true })
     const { targetInfos } = (await this.send('Target.getTargets')) as { targetInfos: { targetId: string; type: string; url: string }[] }
     const page = targetInfos.find((t) => t.type === 'page')
@@ -100,8 +113,9 @@ class Tab {
   send(method: string, params: Record<string, unknown> = {}, session = ''): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const id = ++this.n
+      if (this.closed) return reject(new Error(L('o Chrome fechou', 'Chrome closed')))
       this.pending.set(id, { resolve, reject })
-      this.ws.send(JSON.stringify({ id, method, params, ...(session ? { sessionId: session } : {}) }))
+      this.input.write(JSON.stringify({ id, method, params, ...(session ? { sessionId: session } : {}) }) + '\0')
       setTimeout(() => this.pending.get(id) && (this.pending.delete(id), reject(new Error(L(`o Chrome não respondeu (${method})`, `Chrome didn't answer (${method})`)))), 30_000).unref()
     })
   }
@@ -191,8 +205,9 @@ class Tab {
   }
 
   close(): void {
+    this.closed = true
     try {
-      this.ws.close()
+      this.input.end()
     } catch {}
   }
 }
@@ -201,6 +216,10 @@ export class ChromeBrowsers {
   private tabs = new Map<string, Tab>()
   private starting = new Map<string, Promise<Tab>>()
   private handingBack = new Set<string>()
+  private used = new Map<string, number>() // when each agent last asked its Chrome for something
+  private busy = new Map<string, number>() // what it's doing right now
+  private resumeAt = new Map<string, string>() // the page a Chrome closed for idling was on
+  private closing = new Map<string, Promise<void>>() // a Chrome closed for idling, still writing its cookies
 
   constructor(
     private dir: string, // profiles live in <dir>/<agentId>
@@ -209,9 +228,35 @@ export class ChromeBrowsers {
     private onFrame?: OnFrame,
     // No screen to open a window on (Tucano as a server): taking over keeps it
     // headless and I drive it from the panel, through 'input'.
-    private windowless = false
+    private windowless = false,
+    // A Chrome nobody asked anything of for this long is closed (cookies kept) and reopens on the
+    // same page when next needed: on a server several people share, each costs hundreds of MB.
+    private idleMs?: number
   ) {
     process.on('exit', () => this.quit())
+    if (idleMs) setInterval(() => void this.closeIdle(), Math.min(60_000, Math.max(100, idleMs / 2))).unref()
+  }
+
+  running(agentId: string): boolean {
+    return this.tabs.has(agentId)
+  }
+
+  // Not one taken over (the person is on it), nor one handing back or in the middle of something.
+  private async closeIdle(): Promise<void> {
+    const now = Date.now()
+    for (const [agentId, t] of this.tabs) {
+      if (t.headed || this.handingBack.has(agentId) || this.starting.has(agentId) || (this.busy.get(agentId) ?? 0) > 0) continue
+      if (now - (this.used.get(agentId) ?? now) < this.idleMs!) continue
+      this.tabs.delete(agentId)
+      if (/^https?:/.test(t.url)) this.resumeAt.set(agentId, t.url)
+      // Until it's gone, a new one for this agent waits: started on the same profile, it would
+      // take it over from the one still writing its cookies, and the login would be lost.
+      const done = this.shutDown(t)
+        .catch(() => {})
+        .finally(() => this.closing.get(agentId) === done && this.closing.delete(agentId))
+      this.closing.set(agentId, done)
+      await done
+    }
   }
 
   quit(): void {
@@ -234,10 +279,9 @@ export class ChromeBrowsers {
         for (let i = 0; i < 50 && alive(pid); i++) await wait(200)
       }
     } catch {}
-    rmSync(join(profile, 'DevToolsActivePort'), { force: true })
     const args = [
       `--user-data-dir=${profile}`,
-      '--remote-debugging-port=0',
+      '--remote-debugging-pipe',
       '--disable-blink-features=AutomationControlled', // navigator.webdriver stays false, as in any Chrome
       '--no-first-run',
       '--no-default-browser-check',
@@ -248,22 +292,23 @@ export class ChromeBrowsers {
       ...(headed ? ['--new-window'] : ['--headless=new', '--mute-audio']),
       url && /^https?:/.test(url) ? url : 'about:blank'
     ]
-    const proc = spawn(this.bin, args, { stdio: 'ignore' })
-    let port = ''
-    for (let i = 0; i < 75 && !port; i++) {
-      await wait(200)
-      if (proc.exitCode !== null) throw new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))
-      try {
-        port = readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0] ?? ''
-      } catch {}
-    }
-    if (!port) {
-      proc.kill()
-      throw new Error(L('o Chrome não abriu em 15 s', "Chrome didn't open in 15 s"))
-    }
+    const proc = spawn(this.bin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
     const onFrame = this.onFrame
     const tab = new Tab(proc, headed, onFrame && ((jpeg) => onFrame(agentId, jpeg)))
-    await tab.connect(port)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const failed = new Promise<never>((_, reject) => {
+      proc.once('exit', () => reject(new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))))
+      // The first open on a computer can be slow, with nothing of Chrome in memory yet. As long as any other answer gets (see send).
+      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 30 s', "Chrome didn't open in 30 s"))), 30_000)
+    })
+    try {
+      await Promise.race([tab.connect(), failed])
+    } catch (e) {
+      proc.kill()
+      throw e
+    } finally {
+      clearTimeout(timer)
+    }
     proc.once('exit', () => {
       if (this.tabs.get(agentId) !== tab) return
       this.tabs.delete(agentId)
@@ -280,7 +325,8 @@ export class ChromeBrowsers {
   private async shutDown(t: Tab): Promise<void> {
     t.closedAll = undefined // this is the app closing it, not the person handing it back
     await Promise.race([t.send('Browser.close').catch(() => {}), wait(2000)])
-    await exited(t.proc, 5000)
+    // Usually under a second; a loaded machine (a server, CI) can take several to write them.
+    await exited(t.proc, 15_000)
     t.close()
     await gone(t.proc)
   }
@@ -291,7 +337,15 @@ export class ChromeBrowsers {
     if (t) return t
     const going = this.starting.get(agentId)
     if (going) return going
-    const p = this.launch(agentId, false).finally(() => this.starting.delete(agentId))
+    const back = this.resumeAt.get(agentId)
+    this.resumeAt.delete(agentId)
+    const closing = this.closing.get(agentId)
+    const p = (closing ? closing.then(() => this.launch(agentId, false, back)) : this.launch(agentId, false, back))
+      .then(async (tab) => {
+        if (back) await this.settle(tab)
+        return tab
+      })
+      .finally(() => this.starting.delete(agentId))
     this.starting.set(agentId, p)
     return p
   }
@@ -318,7 +372,19 @@ export class ChromeBrowsers {
   }
 
   async run(agentId: string, op: BrowserOp, args: Record<string, unknown> = {}): Promise<BrowserReply> {
+    this.used.set(agentId, Date.now())
+    this.busy.set(agentId, (this.busy.get(agentId) ?? 0) + 1)
+    try {
+      return await this.runOp(agentId, op, args)
+    } finally {
+      this.busy.set(agentId, (this.busy.get(agentId) ?? 1) - 1)
+      this.used.set(agentId, Date.now())
+    }
+  }
+
+  private async runOp(agentId: string, op: BrowserOp, args: Record<string, unknown>): Promise<BrowserReply> {
     if (op === 'close' || op === 'clear') {
+      this.resumeAt.delete(agentId)
       const t = this.tabs.get(agentId)
       this.tabs.delete(agentId)
       if (t && op === 'close') await this.shutDown(t)

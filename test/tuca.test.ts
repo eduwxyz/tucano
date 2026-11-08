@@ -48,7 +48,7 @@ describe('the Tuca in a conversation', () => {
     await gateway.start()
     systems.length = 0
     const base = fakeEngine('claude', { delayMs: 1 })
-    const claude: Engine = { id: 'claude', run: (t) => (systems.push(t.system), base.run(t)) }
+    const claude: Engine = { id: 'claude', run: (t) => (systems.push(`${t.system}\n\n${t.prompt}`), base.run(t)) }
     const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [] }) } })
   })
@@ -71,12 +71,14 @@ describe('the Tuca in a conversation', () => {
     expect(db.agents().map((a) => a.name)).toEqual(['Tuca'])
   })
 
-  it('is the only one who can propose', async () => {
+  it("any other agent can propose too, told when to, but isn't the one who explains Tucano", async () => {
     db.saveAgent({ ...tucaAgent('sonnet', [], 1000), id: 'a2', name: 'Lia', handle: 'lia', kind: undefined })
     db.createConversation({ id: 'd2', kind: 'dm', name: 'a2', members: ['a2'] })
-    await runner.send('d2', 'quero alguém pra responder tickets de suporte')
+    await runner.send('d2', 'oi')
     await runner.idle()
     expect(systems[0]).not.toContain('## Pra montar agentes')
-    expect(db.messages().find((m) => m.author.kind === 'agent')!.run?.agentDraft).toBeUndefined()
+    expect(systems[0]).toContain('## Pra propor agentes, times, rotinas e canais')
+    expect(systems[0]).toContain('Proponha quando Edu pedir')
+    expect(systems[0]).not.toContain('## O guia do Tucano')
   })
 })

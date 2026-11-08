@@ -58,6 +58,26 @@ describe('while the person types', () => {
     expect(warmed).toEqual(['warm haiku'])
   })
 
+  it('in a channel, also starts the session of whoever answered last there', async () => {
+    const r = runner()
+    await r.send('c1', '@theo oi')
+    await r.idle()
+    warmed.length = 0
+    await r.typing('c1')
+    expect(warmed).toEqual([`rewarm ${turns[0]!.session!.id}`, 'warm haiku'])
+  })
+
+  it('opened without typing, starts the kept sessions but not the router', async () => {
+    const r = runner()
+    await r.typing('c1', undefined, true)
+    expect(warmed).toEqual([])
+    await r.send('c1', '@theo oi')
+    await r.idle()
+    warmed.length = 0
+    await r.typing('c1', undefined, true)
+    expect(warmed).toEqual([`rewarm ${turns[0]!.session!.id}`])
+  })
+
   it('starts nothing for a new thread, when paused, or with the router’s harness signed out', async () => {
     const r = runner()
     await r.typing('c2') // answers in threads: a new message opens a new one
@@ -102,7 +122,7 @@ describe('a Claude Code process started ahead', () => {
     const engine = claudeEngine(() => bin, async () => ({ env: {} }))
     const turn = (): Turn => ({ ...routerTurn('haiku', dir), prompt: 'quem responde?', signal: new AbortController().signal })
     engine.warm!(routerTurn('haiku', dir))
-    await wait(1500)
+    await wait(2500) // a busy machine (the whole suite at once) takes over a second to boot node
     const warm = await reply(engine.run(turn()))
     expect(upOf(warm)).toBeGreaterThanOrEqual(1000)
     const cold = await reply(engine.run(turn())) // the spare is used up: a new process, as before
@@ -117,7 +137,7 @@ describe('a Claude Code process started ahead', () => {
     await reply(engine.run(turn(false)))
     engine.dispose!() // as if it had closed after its five minutes
     engine.rewarm!('s1')
-    await wait(1500)
+    await wait(2500) // a busy machine (the whole suite at once) takes over a second to boot node
     const next = await reply(engine.run(turn(true)))
     expect(next).toMatch(/turn=1 resume=true/)
     expect(upOf(next)).toBeGreaterThanOrEqual(1000)

@@ -3,6 +3,7 @@ import { L } from '../../../shared/lang'
 import { sortWorkspaces, workspaceLabel, type WorkspaceList } from '../../../shared/workspaces'
 import { openDialog, useStore } from '../store'
 import { Icon } from './ui'
+import { useServers } from './Servers'
 
 export function useWorkspaceList(): { list: WorkspaceList | null; error: string } {
   const [list, setList] = useState<WorkspaceList | null>(null)
@@ -23,6 +24,7 @@ export function WorkspaceSelector(): ReactNode {
   const { list, error: loadError } = useWorkspaceList()
   const selectedId = list?.selected
   const workspaces = sortWorkspaces(list?.workspaces)
+  const servers = useServers()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -72,6 +74,13 @@ export function WorkspaceSelector(): ReactNode {
             {!!w.unread && <span className="badge badge--soft" title={L('Não lidas', 'Unread')}>{w.unread}</span>}
           </>}
         </button>)}
+        {servers.length > 0 && <>
+          <div className="workspace-picker__head workspace-picker__head--servers"><span className="muted small">{L('Servidores', 'Servers')}</span></div>
+          {servers.map((s) => <button key={s.id} className="menu__item" role="menuitemradio" aria-checked={s.open} disabled={busy} onClick={() => { setOpen(false); window.tucano.servers!.open(s.id) }}>
+            <span className="workspace-picker__check" aria-hidden="true"><Icon name="globe" size={14} /></span>
+            <span className="grow">{s.name}</span>
+          </button>)}
+        </>}
         {(error || loadError) && <p className="field__error" role="alert">{error || loadError}</p>}
       </div>}
     </div>

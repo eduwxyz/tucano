@@ -6,6 +6,7 @@
 // the person lands in a channel watching it work. Then "Primeiros passos" in the sidebar
 // walks through the rest, checking itself off as each feature gets used.
 import { L, lang } from '../../../shared/lang'
+import { RECOMMENDED_SKILL_BODY_LENGTH, skillLengthNote } from '../../../shared/skills'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ENGINES,
@@ -30,6 +31,8 @@ import {
   ensureTuca,
   settleDraft,
   updateSettings,
+  anyReplyDone,
+  messagesIn,
   useStore,
   type Agent,
   type AgentColor,
@@ -183,6 +186,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   const [computer, setComputer] = useState<Computer>('none')
   const [task, setTask] = useState(() => TEMPLATES()[0]!.tasks[0]!)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('') // why the agent wasn't created (a person's name, a taken @)
   // A new install picks both models; seeing the introduction again, or a workspace that brought
   // another's settings, starts from what's set.
   const keep = hasAgents || !!settings.onboarding?.carried
@@ -210,7 +214,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   }
   const next = (): void => go(steps[at + 1]!)
   const back = (): void => go(steps[at - 1]!)
-  const patch = (p: Partial<Agent>): void => setAgent((a) => ({ ...a, ...p }))
+  const patch = (p: Partial<Agent>): void => (setAgent((a) => ({ ...a, ...p })), setError(''))
   const leave = (): void => {
     const channel = getState().conversations.find((c) => c.kind === 'channel')
     navigate(from ?? (channel ? { kind: 'conversation', id: channel.id } : { kind: 'approvals' }))
@@ -263,6 +267,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
   async function finish(): Promise<void> {
     if (busy) return
     setBusy(true)
+    setError('')
     try {
       const a: Agent = { ...agent, name: agent.name.trim(), role: agent.role.trim(), handle, computer: computer !== 'none', computerKind: computer === 'mac' ? 'mac' : 'linux', grants: Object.fromEntries(connectors.map((c) => [c.id, grants[c.id] ?? 'read'])) }
       if (build) {
@@ -286,6 +291,8 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
       updateSettings({ workspaceName: name.trim() || settings.workspaceName, context: context.trim(), routerModel, memoryModel, onboarding: { done: true } })
       navigate({ kind: 'conversation', id: channelId })
       sendMessage(channelId, `@${a.handle} ${task.trim()}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
@@ -323,7 +330,7 @@ export function Onboarding({ build = false, from }: { build?: boolean; from?: Vi
               <MeetTuca conv={tucaConv} onUse={useDraft} onManual={() => setManual(true)} onBack={build ? undefined : back} />
             ))}
           {step === 'powers' && <Powers agent={agent} handle={handle} patch={patch} computer={computer} setComputer={setComputer} grants={grants} setGrants={setGrants} onBack={back} onNext={next} />}
-          {step === 'first' && <FirstTask agent={agent} handle={handle} computer={computer} channel={unique(L('geral', 'general'), channels)} tasks={tasks} task={task} setTask={setTask} busy={busy} onBack={back} onFinish={() => void finish()} />}
+          {step === 'first' && <FirstTask agent={agent} handle={handle} computer={computer} channel={unique(L('geral', 'general'), channels)} tasks={tasks} task={task} setTask={setTask} busy={busy} error={error} onBack={back} onFinish={() => void finish()} />}
         </div>
         </BuildMode.Provider>
       </div>
@@ -661,6 +668,7 @@ function SkillsStep({ picked, setPicked, onBack, onNext }: { picked: string[]; s
                 <strong>{k.name}</strong> <span className="tag">{k.origin}</span>
                 <span className="onb-skill__desc">{k.description}</span>
                 {k.scripts && <span className="small warn-text">{L('Tem scripts: precisa de um agente com computador.', 'It has scripts: needs an agent with a computer.')}</span>}
+                {k.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <span className="small warn-text" role="status">{skillLengthNote(k.bodyLength)}</span>}
               </span>
             </button>
           ))}
@@ -722,7 +730,7 @@ function MeetTuca({ conv: session, onUse, onManual, onBack }: { conv: { id?: str
   }, [build, model, tuca?.modelId])
   useEffect(() => () => clearTimeout(typed.current), [])
   const error = session.error ?? ''
-  const messages = useStore((s) => (conv ? s.messages.filter((m) => m.conversationId === conv) : []))
+  const messages = useStore((s) => (conv ? messagesIn(s, conv) : []))
   const latest = [...messages].reverse().find((m) => m.run?.agentDraft && !m.run.agentDraft.state)?.run?.agentDraft
 
   async function start(value: string): Promise<void> {
@@ -935,6 +943,7 @@ function Powers(p: {
   const { agent, patch, computer } = p
   const name = agent.name.trim() || L('Ele', 'It')
   const connectors = useStore((s) => s.connectors)
+  const isolated = useStore((s) => s.isolatedComputers)
   return (
     <div className="onb__split">
       <section className="onb__main">
@@ -976,7 +985,9 @@ function Powers(p: {
                     ['linux', L('Linux isolado', 'Isolated Linux')],
                     ['mac', L('Este computador', 'This computer')]
                   ] as const
-                ).map(([k, label]) => (
+                )
+                  .filter(([k]) => k !== 'linux' || isolated)
+                  .map(([k, label]) => (
                   <button key={k} className={computer === k ? 'is-active' : ''} onClick={() => p.setComputer(k)}>
                     {label}
                   </button>
@@ -1049,6 +1060,7 @@ function FirstTask(p: {
   task: string
   setTask: (t: string) => void
   busy: boolean
+  error?: string
   onBack: () => void
   onFinish: () => void
 }): ReactNode {
@@ -1080,6 +1092,11 @@ function FirstTask(p: {
           <span className="onb-composer__at">@{p.handle}</span>
           <textarea rows={3} value={p.task} onChange={(e) => p.setTask(e.target.value)} />
         </div>
+        {p.error && (
+          <p className="note note--error" role="alert">
+            {p.error}
+          </p>
+        )}
         <Nav
           onBack={p.onBack}
           onNext={p.onFinish}
@@ -1121,7 +1138,7 @@ const ITEMS = (): Item[] => [
     id: 'reply',
     title: L('Ver um agente trabalhando', 'Watch an agent work'),
     how: L('Mande uma tarefa e acompanhe cada passo na conversa.', 'Send a task and follow every step in the conversation.'),
-    done: (s) => s.messages.some((m) => m.author.kind === 'agent' && m.run?.status === 'done'),
+    done: anyReplyDone,
     go: firstChannel,
     action: L('Abrir canal', 'Open channel')
   },

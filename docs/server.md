@@ -26,13 +26,13 @@ npm run build
 npm run server
 ```
 
-It prints the address to open:
+Then, in another terminal, get the link that signs a browser in:
 
-```
-Tucano server: http://127.0.0.1:7337/?token=…
+```bash
+npm run server -- link     # http://127.0.0.1:7337/?token=…
 ```
 
-Open that link once. The token signs the browser in, and a cookie keeps it signed in. The token lives in `~/.tucano-server/server-token`. To sign every browser out, delete that file and restart Tucano.
+Open that link once. The token signs the browser in, and a cookie keeps it signed in. The token lives in `~/.tucano-server/server-token`, and `link` is the only thing that prints it: the log never does. To sign every browser out, delete that file and restart Tucano.
 
 ### Signing the harnesses in
 
@@ -45,13 +45,26 @@ npm install -g @openai/codex
 
 Codex is signed in from Tucano's **Settings › Models**, like on a desktop. On a server, the **Sign in** button can't open a terminal, so it shows the command to run in your SSH session.
 
+### On a phone
+
+The Tucano app for iPhone signs in with a one-time code, not the token. On the server, run:
+
+```bash
+npm run server -- pair          # tucano://connect?url=…&code=…   and   https://…/?code=…
+npm run server -- pair 1440     # good for a day instead of 10 minutes (up to a week: 10080)
+```
+
+Open the first line on the phone (or show it as a QR code and point the Camera at it). The app trades the code for a key of its own, and the code stops working. The second line does the same for a browser. Once you're signed in, **Settings › People › Connect a phone** makes a code too, as a QR code, for whoever is signed in: each person connects their own phone, as themselves. Each phone has its own key; removing someone ends all of theirs. The app needs the server on HTTPS (a reverse proxy, below), or on `127.0.0.1` while testing.
+
+Someone you invite can also open the invite link in the app: it asks their name, and they're in.
+
 ## Reaching it
 
 By default the server only listens on the server itself (`127.0.0.1`), because anyone who has the token controls your agents. Pick one of these ways to reach it:
 
 - **SSH tunnel**, the simplest: run `ssh -L 7337:127.0.0.1:7337 you@your-server`, then open the printed link on your computer.
 - **Tailscale** (or another private network): set `TUCANO_HOST` to the server's Tailscale address, then open `http://<that address>:7337/?token=…` from any of your devices, including your phone.
-- **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Turn off response buffering for `/events`, which is a live event stream. For example, with Caddy:
+- **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Set `TUCANO_URL` to the address people open, so `link` prints it, and `TUCANO_TRUST_PROXY=1`, so wrong tokens are counted per visitor rather than all as the proxy. Turn off response buffering for `/events`, which is a live event stream, and keep the proxy's access log off or without query strings, since the first link carries the token. For example, with Caddy:
 
   ```
   tucano.example.com {
@@ -83,7 +96,7 @@ Environment=TUCANO_PORT=7337
 WantedBy=multi-user.target
 ```
 
-Then run `sudo systemctl enable --now tucano`. The logs, including the address with the token, are in `journalctl -u tucano`.
+Then run `sudo systemctl enable --now tucano`. The logs are in `journalctl -u tucano`; the link to sign in comes from `npm run server -- link`, run as the same user in the same folder.
 
 To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl restart tucano`.
 
@@ -95,14 +108,18 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 | `TUCANO_HOST` | `127.0.0.1` | The address to listen on |
 | `TUCANO_PORT` | `7337` | |
 | `TUCANO_TOKEN` | a random token, kept in `server-token` | Set it to use a token of your own |
+| `TUCANO_URL` | where it listens | The address people open, behind a proxy (`https://tucano.example.com`): what `link` prints |
+| `TUCANO_TRUST_PROXY` | off | `1` behind a reverse proxy: each visitor's address comes from `X-Forwarded-For` |
+
+Once a browser has the cookie, the server answers only its own page: a page of another site (a sibling subdomain included) can't call it, and no site can show it inside a frame. Twenty wrong tokens from one address in ten minutes lock that address out for ten minutes.
 
 ## How it differs from the desktop app
 
 - **Connectors that sign in with OAuth** (an **Authorize in the browser** button): Tucano opens the authorization page in your browser. When you allow access, the page ends on an address starting with `http://127.0.0.1` that doesn't load, because that address is the server's own. Copy the whole address from the address bar and paste it into Tucano.
 - **Secrets** (connector keys, Telegram, GitHub) are encrypted with AES-256-GCM. The key is in `server.key` in the data folder, and only your user can read that file. A desktop app keeps that key in the system's keychain instead. Back the key up together with the data folder: the secrets can't be read without it.
-- **Notifications:** connect Telegram (**Settings › Phone and GitHub**) to get approvals, questions and results on your phone. The browser doesn't pop up notifications.
+- **Notifications:** connect Telegram (**Settings › Phone**) to get approvals, questions and results on your phone. The browser doesn't pop up notifications.
 - **Agents' browsers** need Chromium or Chrome on the server, and run without a window. **Take over** doesn't open a window there: the live picture of the browser in the panel becomes the browser. Click on it, type, paste and scroll, then click **Hand back**. This is how you sign in to a site for an agent.
-- **Pages agents serve** (a dashboard, an API) listen on the server's own `127.0.0.1`. Agents take their screenshots with the server's Chrome. When Tucano listens on a private address (Tailscale or a home network), it also passes each running page through on the same port at that address, so the preview panel and **Open** work from your computer. That doesn't happen on a public address, because those pages have no token. Over an SSH tunnel, forward the page's port too (`-L 5173:127.0.0.1:5173`).
+- **Pages agents serve** (a dashboard, an API), behind a reverse proxy with HTTPS (`TUCANO_URL`): each opens at `https://<port>-<your address>`, with a sign-in of its own that Tucano hands the panel. The proxy has to send those names to Tucano too (`*.tucano.example.com`, with a certificate for each name: Caddy's on-demand TLS does it). Otherwise, they listen on the server's own `127.0.0.1`. Agents take their screenshots with the server's Chrome. When Tucano listens on a private address (Tailscale or a home network), it also passes each running page through on the same port at that address, so the preview panel and **Open** work from your computer. That doesn't happen on a public address, because those pages have no token. Over an SSH tunnel, forward the page's port too (`-L 5173:127.0.0.1:5173`).
 - **Choosing a folder** asks for its path on the server, since the browser can't browse the server's disk.
 - **No self-update.** Update with `git pull` (see above).
 - **One Tucano per data folder.** Don't run the desktop app and the server on the same data folder at the same time.

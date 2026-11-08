@@ -25,7 +25,7 @@ const ready = { installed: true, loggedIn: true }
 type Plan = { tool: string; args: Record<string, unknown> } | null
 
 // A "model" that, on each turn, lists its tools and makes at most one call.
-function scripted(plan: (turn: Turn, tools: string[]) => Plan, seen: { turns: Turn[]; tools: string[][]; results: unknown[] }): Engine {
+function scripted(plan: (turn: Turn, tools: string[]) => Plan, seen: { turns: Turn[]; tools: string[][]; results: unknown[]; alwaysLoad: string[][] }): Engine {
   return {
     id: 'claude',
     async *run(turn) {
@@ -34,8 +34,10 @@ function scripted(plan: (turn: Turn, tools: string[]) => Plan, seen: { turns: Tu
       if (turn.mcpUrl) {
         const client = new Client({ name: 'scripted', version: '0' })
         await client.connect(new StreamableHTTPClientTransport(new URL(turn.mcpUrl)))
-        const tools = (await client.listTools()).tools.map((t) => t.name)
+        const listed = (await client.listTools()).tools
+        const tools = listed.map((t) => t.name)
         seen.tools.push(tools)
+        seen.alwaysLoad.push(listed.filter((t) => t._meta?.['anthropic/alwaysLoad'] === true).map((t) => t.name))
         const p = plan(turn, tools)
         if (p) {
           const r = await client.callTool({ name: p.tool, arguments: p.args })
@@ -58,7 +60,7 @@ let connectors: ConnectorManager
 let events: CoreEvent[]
 let settings: Settings
 let connectorId: string
-let seen: { turns: Turn[]; tools: string[][]; results: unknown[] }
+let seen: { turns: Turn[]; tools: string[][]; results: unknown[]; alwaysLoad: string[][] }
 let runnerRef = { current: undefined as Runner | undefined }
 
 const agent = (grant: GrantLevel): Agent => ({
@@ -100,7 +102,7 @@ beforeEach(async () => {
   tasksFile = join(dir, 'tasks.json')
   db = new Db(join(dir, 'test.db'))
   events = []
-  seen = { turns: [], tools: [], results: [] }
+  seen = { turns: [], tools: [], results: [], alwaysLoad: [] }
   settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   gateway = new Gateway()
   await gateway.start()
@@ -140,12 +142,26 @@ describe('connectors', () => {
 })
 
 describe('grants', () => {
+  it('lists the connector tools the agent called lately as loaded, the others behind tool search', async () => {
+    db.saveAgent(agent('read'))
+    let first = true
+    const r = runner((_, tools) => (first ? ((first = false), { tool: tools.find((t) => t.endsWith('__list_tasks'))!, args: {} }) : null))
+    await r.send('d1', 'quais tarefas?')
+    await r.idle()
+    expect(seen.alwaysLoad[0]).not.toContain('tarefas__list_tasks') // never called yet
+    await r.send('d1', 'e agora?')
+    await r.idle()
+    expect(seen.alwaysLoad[1]).toContain('tarefas__list_tasks')
+  })
+
   it('read: the agent sees only read tools, and a forced call to another is refused without running', async () => {
     db.saveAgent(agent('read'))
     const r = runner((_, tools) => ({ tool: tools.find((t) => t.endsWith('__create_task')) ?? 'tarefas__create_task', args: { title: 'invasora' } }))
     await r.send('d1', 'oi')
     await r.idle()
-    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'agendar_rotina', 'cancelar_rotina', 'tarefas__list_tasks']) // it can ask for more, not take it
+    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'propor_agente', 'propor_time', 'propor_ajuste', 'propor_rotina', 'propor_canal', 'agendar_rotina', 'cancelar_rotina', 'tarefas__list_tasks']) // it can ask for more, not take it
+    // Claude Code keeps the app's own tools in the prompt; the connector's wait behind tool search.
+    expect(seen.alwaysLoad[0]).toEqual(seen.tools[0]!.filter((t) => !t.startsWith('tarefas__')))
     expect(seen.results[0]).toMatchObject({ isError: true })
     expect(textOf(seen.results[0])).toContain('não permitida')
     expect(tasks().some((t) => t.title === 'invasora')).toBe(false)
@@ -333,7 +349,7 @@ describe('pause and resume', () => {
         else yield { type: 'done', text: 'feito', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, gemini: failing, cursor: failing, grok: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
+    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, antigravity: failing, cursor: failing, grok: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
     runnerRef.current = r
     await r.send('d1', 'oi')
     await r.idle()

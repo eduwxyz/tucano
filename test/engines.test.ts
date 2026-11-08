@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { detectAntigravityCliModels, antigravityArgs, antigravityEnv, antigravityHome, antigravityInput, antigravityModels, antigravityParser } from '../src/core/engines/antigravity'
+import { antigravityArgs, antigravityHomeEnv, antigravityInput, antigravityModel, antigravityParser, antigravityPrompt, antigravitySettings, antigravityTurnDirs, parseAntigravityModels, RULES_MAX } from '../src/core/engines/antigravity'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { grokArgs, grokCleanup, grokConfig, grokEngine, grokLogin, grokParser, grokPrompt, grokTurnDirs, grokTurnEnv, parseGrokModels, userGrokHome } from '../src/core/engines/grok'
 import { customModel, modelInfo, usable } from '../src/shared/types'
@@ -66,10 +66,20 @@ describe('Claude Code stream', () => {
 
   it('gets the gateway as its only MCP server, with its tools pre-allowed', () => {
     const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', mcpUrl: 'http://127.0.0.1:1/mcp/abc' })
-    expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: { tucano: { type: 'http', url: 'http://127.0.0.1:1/mcp/abc' } } })
-    expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__tucano')
+    // The address (and its token) comes from the environment: never in the arguments, which other programs can list.
+    expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: { tucano: { type: 'http', url: '${TUCANO_MCP_URL}' } } })
+    expect(args.join(' ')).not.toContain('/mcp/abc')
+    expect(args.slice(args.indexOf('--allowedTools') + 1)).toEqual(['mcp__tucano', 'ToolSearch'])
     expect(args).toContain('--strict-mcp-config')
     expect(claudeArgs({ model: 'sonnet', effort: 'low', system: 'x' })).not.toContain('--mcp-config')
+  })
+
+  it('keeps tool search on with the gateway, so connector tools stay out of every call', () => {
+    // Without ToolSearch among the tools, the CLI puts every MCP tool in every model call.
+    const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', mcpUrl: 'http://127.0.0.1:1/mcp/abc' })
+    expect(args[args.indexOf('--tools') + 1]).toBe('ToolSearch')
+    const noGateway = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', web: true })
+    expect(noGateway[noGateway.indexOf('--tools') + 1]).toBe('WebSearch,WebFetch')
   })
 
   it('runs isolated: no built-in tools, no user settings, no session, never --bare', () => {
@@ -150,8 +160,8 @@ describe('Claude Code stream', () => {
 
   it('with web, gets only the web tools, pre-allowed, and reports each search and page read', () => {
     const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', mcpUrl: 'http://127.0.0.1:1/mcp/abc', web: true })
-    expect(args[args.indexOf('--tools') + 1]).toBe('WebSearch,WebFetch')
-    expect(args.slice(args.indexOf('--allowedTools') + 1)).toEqual(['mcp__tucano', 'WebSearch', 'WebFetch'])
+    expect(args[args.indexOf('--tools') + 1]).toBe('ToolSearch,WebSearch,WebFetch')
+    expect(args.slice(args.indexOf('--allowedTools') + 1)).toEqual(['mcp__tucano', 'ToolSearch', 'WebSearch', 'WebFetch'])
     const assistant = JSON.stringify({
       type: 'assistant',
       message: {
@@ -196,6 +206,17 @@ describe('Codex exec stream', () => {
     expect(args.at(-1)).toBe('-')
   })
 
+  it("tells an agent with a computer that Codex's read-only sandbox isn't it", () => {
+    const instructions = (system: string, mcpUrl?: string): string => {
+      const args = codexArgs({ model: 'gpt-6-astra', effort: 'low', system, cwd: '/tmp/x', ...(mcpUrl ? { mcpUrl } : {}) })
+      return args.find((a) => a.startsWith('developer_instructions='))!
+    }
+    const computer = 'Use bash, read_file, write_file and edit_file on /work.'
+    expect(instructions(computer, 'http://127.0.0.1:1/mcp/t')).toMatch(/apply_patch.*write_file e edit_file|apply_patch.*write_file and edit_file/)
+    expect(instructions('Você é Theo.', 'http://127.0.0.1:1/mcp/t')).not.toMatch(/apply_patch/) // no computer: nothing to point to
+    expect(instructions(computer)).not.toMatch(/apply_patch/) // no gateway, no tools
+  })
+
   it('turns off skills, web search, project docs and every built-in tool', () => {
     const args = codexArgs({ model: 'gpt-5.6-luna', effort: 'low', system: 'x', cwd: '/tmp/x' })
     expect(args).toEqual(expect.arrayContaining(['skills.include_instructions=false', 'skills.bundled.enabled=false', 'web_search="disabled"', 'project_doc_max_bytes=0']))
@@ -234,108 +255,129 @@ describe('Codex exec stream', () => {
 })
 
 
-describe('Gemini stream', () => {
-  it('streams the assistant deltas as the answer and reports the usage from the result', () => {
-    const events = feed(antigravityParser(), fixture('gemini-stream.jsonl'))
-    expect(text(events)).toBe('Deixa eu buscar. O dólar está R$ 5,10.')
-    const done = events.find((e) => e.type === 'done')
-    expect(done).toMatchObject({ type: 'done', text: 'Deixa eu buscar. O dólar está R$ 5,10.', usage: { inputTokens: 1000, cacheReadTokens: 34, outputTokens: 200 } })
+describe('Antigravity stream', () => {
+  // Real agy 1.5.3 output: a gateway tool, a denied shell command and file read, the
+  // reply, and a web search (from another real run) before the result.
+  const lines = fixture('antigravity-stream.jsonl').filter((l) => l.trim())
+  const result = JSON.parse(lines.at(-1)!) as { result: { response: string } }
+
+  it('streams the reply and reports the usage from the result, thinking as output', () => {
+    const events = feed(antigravityParser(), lines)
+    expect(text(events)).toBe(result.result.response)
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ type: 'done', text: result.result.response, usage: { inputTokens: 38055, cacheReadTokens: 4036, outputTokens: 336 } })
   })
 
-  it("reports the model's web search, and only that built-in", () => {
-    const web = feed(antigravityParser(), fixture('gemini-stream.jsonl')).filter((e) => e.type === 'web')
-    expect(web).toEqual([{ type: 'web', action: 'search', detail: 'preço do dólar hoje' }])
+  it('gives a running total after each model call, for the limits', () => {
+    const progress = feed(antigravityParser(), lines).filter((e) => e.type === 'progress')
+    expect(progress.length).toBe(5)
+    expect(progress[0]).toEqual({ type: 'progress', tokens: 8068, cacheRead: 0 })
+    expect(progress.at(-1)).toMatchObject({ tokens: 38391, cacheRead: 4036 })
   })
 
-  it('turns an error result into an error event, and a warning is not fatal', () => {
-    const warn = '{"type":"error","severity":"warning","message":"a slow tool"}'
-    const bad = '{"type":"result","status":"error","error":{"type":"AuthError","message":"not signed in"}}'
-    const events = feed(antigravityParser(), [warn, bad])
-    expect(events).toEqual([{ type: 'error', message: 'not signed in' }])
+  it('reports the web search it ran, and nothing for the denied tools', () => {
+    const web = feed(antigravityParser(), lines).filter((e) => e.type === 'web')
+    expect(web).toEqual([{ type: 'web', action: 'search', detail: 'antigravity cli' }])
   })
 
-  it('reports an error when the process exits without a result', () => {
-    const events = feed(antigravityParser(), ['{"type":"init","session_id":"s","model":"gemini-2.5-pro"}'], 1, 'boom\nquota exceeded')
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ type: 'error' })
-    expect((events[0] as { message: string }).message).toContain('quota exceeded')
+  it('keeps text from separate model calls as paragraphs', () => {
+    const step = (i: number, delta: string): string => JSON.stringify({ event: 'step_update', step_update: { step_index: i, state: 'DONE', step_type: 'agent_response', text_delta: delta } })
+    const done = JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'Pronto.', usage: {} } })
+    expect(text(feed(antigravityParser(), [step(1, 'Vou ver.'), step(3, 'Pronto.'), done]))).toBe('Vou ver.\n\nPronto.')
   })
 
-  it('ignores the user echo and unknown lines', () => {
-    const echo = '{"type":"message","role":"user","content":"oi"}'
-    const unknown = '{"type":"something_new"}'
-    expect(feed(antigravityParser(), [echo, unknown, 'not json'], 0)).toHaveLength(1) // only the "no result" error
+  it('turns a result that is not a success into an error', () => {
+    const bad = JSON.stringify({ event: 'result', result: { status: 'ERROR', error: 'quota exceeded' } })
+    expect(feed(antigravityParser(), [bad])).toEqual([{ type: 'error', message: 'quota exceeded' }])
+    const canceled = JSON.stringify({ event: 'result', result: { status: 'CANCELED' } })
+    expect((feed(antigravityParser(), [canceled])[0] as { message: string }).message).toMatch(/CANCELED/)
+  })
+
+  it('reports an exit without a result, and says to sign in when that was it', () => {
+    const quota = feed(antigravityParser(), [lines[0]!], 1, 'boom\nquota exceeded')
+    expect(quota).toHaveLength(1)
+    expect((quota[0] as { message: string }).message).toContain('quota exceeded')
+    const signedOut = feed(antigravityParser(), [], 1, 'Error: authentication required')
+    expect((signedOut[0] as { message: string }).message).toMatch(/agy/)
+  })
+
+  it('ignores unknown lines', () => {
+    expect(feed(antigravityParser(), ['{"event":"something_new"}', 'not json'], 0)).toHaveLength(1) // only the "no result" error
   })
 })
 
-describe('Gemini config', () => {
-  it('runs headless with stream-json, auto-approving tools (the gateway decides), the model alone', () => {
-    const args = antigravityArgs({ model: 'gemini-2.5-pro' })
-    expect(args).toEqual(['--output-format', 'stream-json', '--input-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'gemini-2.5-pro'])
-    expect(antigravityInput('oi')).toBe('{"event":"user","message":{"role":"user","content":"oi"}}\n')
+describe('Antigravity config', () => {
+  it('runs headless with stream-json both ways and slash commands off, never skipping permissions', () => {
+    const args = antigravityArgs('gemini-4-argon-medium')
+    expect(args).toEqual(['--output-format', 'stream-json', '--input-format', 'stream-json', '--disable-slash-commands', '--model', 'gemini-4-argon-medium'])
+    expect(args).not.toContain('--dangerously-skip-permissions')
+    expect(antigravityInput('oi\n"x"')).toBe('{"event":"user","message":{"content":"oi\\n\\"x\\""}}\n')
   })
 
-  it('gives each turn a fresh home with the gateway as its only MCP server and no built-in tools', () => {
-    const userHome = mkdtempSync(join(tmpdir(), 'gu-'))
-    writeFileSync(join(userHome, 'oauth_creds.json'), '{}')
-    const appDir = mkdtempSync(join(tmpdir(), 'gh-'))
-    const home = antigravityHome(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }, userHome)
-    expect(home.startsWith(appDir)).toBe(true)
-    // the CLI reads $GEMINI_CLI_HOME/.gemini/, so nothing goes at the root
-    const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
-    expect(existsSync(join(home, 'settings.json'))).toBe(false)
-    expect(s['mcpServers']).toEqual({ tucano: { url: 'http://127.0.0.1:1/mcp/x', type: 'http', trust: true } })
-    expect(existsSync(join(home, '.gemini', 'oauth_creds.json'))).toBe(true)
-    expect(existsSync(join(home, 'oauth_creds.json'))).toBe(false)
-    // keys as the CLI reads them: tools.core, not the old flat coreTools
-    expect(s['tools']).toEqual({ core: [], discoveryCommand: '', callCommand: '' }) // no built-in tools, no web, no discovered tools
-    expect(s['coreTools']).toBeUndefined()
-    expect(s['mcp']).toEqual({ allowed: ['tucano'] })
-    expect(s['skills']).toEqual({ enabled: false })
-    expect(s['agents']).toEqual({ overrides: { codebase_investigator: { enabled: false }, cli_help: { enabled: false } } })
-    expect((s['privacy'] as Record<string, unknown>)['usageStatisticsEnabled']).toBe(false)
-    // nothing a working folder could turn into a command or a request: hooks, telemetry
-    expect(s['hooksConfig']).toEqual({ enabled: false })
-    expect(s['telemetry']).toEqual({ enabled: false, logPrompts: false })
-    // the agent's instructions are the system prompt, and the login is brought in
-    expect(readFileSync(join(home, 'system.md'), 'utf8')).toBe('You are Iris.')
-    // the turn's settings are also the system settings, applied over the working folder's
-    expect(antigravityEnv(home, { PATH: '/x' })).toEqual({ PATH: '/x', GEMINI_CLI_HOME: home, GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, '.gemini', 'settings.json'), GEMINI_SYSTEM_MD: join(home, 'system.md') })
+  it("denies the CLI's own shell, files and browser, and allows the gateway's tools", () => {
+    const s = antigravitySettings({ mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }) as { permissions: { allow: string[]; deny: string[] } }
+    expect(s.permissions.allow).toEqual(['mcp(tucano/*)'])
+    expect(s.permissions.deny).toEqual(['command(*)', 'unsandboxed(*)', 'read_file(*)', 'write_file(*)', 'execute_url(*)', 'read_url(*)'])
+    expect(s).not.toHaveProperty('toolPermission') // strict ends the turn with no reply at the first denied tool
   })
 
-  it('turns on only the web search when the agent has the web', () => {
-    const home = antigravityHome(mkdtempSync(join(tmpdir(), 'gh2-')), { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'gu2-')))
-    const s = JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8')) as Record<string, unknown>
-    expect(s['tools']).toEqual({ core: ['google_web_search'], discoveryCommand: '', callCommand: '' })
-    expect(s['mcpServers']).toBeUndefined()
+  it('lets it read pages only when the agent has the web', () => {
+    const s = antigravitySettings({ mcpUrl: undefined, web: true }) as { permissions: { allow: string[]; deny: string[] } }
+    expect(s.permissions.allow).toEqual(['read_url(*)'])
+    expect(s.permissions.deny).not.toContain('read_url(*)')
+    expect(s.permissions.deny).toContain('execute_url(*)') // the browser is Tucano's own
   })
 
-  it('gives a different home each turn', () => {
-    const appDir = mkdtempSync(join(tmpdir(), 'gh3-'))
-    const userHome = mkdtempSync(join(tmpdir(), 'gu3-'))
-    const a = antigravityHome(appDir, { system: 'a', mcpUrl: undefined, web: false }, userHome)
-    const b = antigravityHome(appDir, { system: 'b', mcpUrl: undefined, web: false }, userHome)
-    expect(a).not.toBe(b)
+  it("gives each turn its own home and workspace: the gateway, the instructions and, on a Mac, only the keychain", () => {
+    const real = mkdtempSync(join(tmpdir(), 'ag-real-'))
+    mkdirSync(join(real, 'Library', 'Keychains'), { recursive: true })
+    writeFileSync(join(real, 'Library', 'Keychains', 'login.keychain-db'), 'secret')
+    mkdirSync(join(real, '.gemini', 'config'), { recursive: true })
+    writeFileSync(join(real, '.gemini', 'config', 'mcp_config.json'), '{"mcpServers":{"mine":{"command":"rm"}}}')
+    const appDir = mkdtempSync(join(tmpdir(), 'ag-app-'))
+    const dirs = antigravityTurnDirs(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }, 'mac', real)
+    expect(dirs.root.startsWith(appDir)).toBe(true)
+    expect(JSON.parse(readFileSync(join(dirs.home, '.gemini', 'config', 'mcp_config.json'), 'utf8'))).toEqual({ mcpServers: { tucano: { url: 'http://127.0.0.1:1/mcp/x' } } })
+    expect(JSON.parse(readFileSync(join(dirs.home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8'))).toEqual(antigravitySettings({ mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }))
+    expect(readFileSync(join(dirs.workspace, 'GEMINI.md'), 'utf8')).toBe('You are Iris.')
+    expect(readFileSync(join(dirs.home, 'Library', 'Keychains', 'login.keychain-db'), 'utf8')).toBe('secret')
+    expect(readdirSync(join(dirs.home, 'Library'))).toEqual(['Keychains'])
+    const linux = antigravityTurnDirs(appDir, { system: 'x', mcpUrl: undefined, web: false }, 'linux', real)
+    expect(existsSync(join(linux.home, 'Library'))).toBe(false)
+    expect(JSON.parse(readFileSync(join(linux.home, '.gemini', 'config', 'mcp_config.json'), 'utf8'))).toEqual({ mcpServers: {} })
+    expect(linux.root).not.toBe(dirs.root)
   })
 
-  it('lists default models when no bin path is provided', () => {
-    const list = antigravityModels()
-    expect(list).toContain('antigravity/gemini-3.8-flash-medium')
-    expect(list).toContain('antigravity/gemini-4-argon-medium')
+  it('puts instructions too long for a rules file at the top of the prompt instead', () => {
+    const long = 'x'.repeat(RULES_MAX + 1)
+    const dirs = antigravityTurnDirs(mkdtempSync(join(tmpdir(), 'ag-long-')), { system: long, mcpUrl: undefined, web: false }, 'linux')
+    expect(existsSync(join(dirs.workspace, 'GEMINI.md'))).toBe(false)
+    expect(antigravityPrompt({ system: long, prompt: 'oi' })).toBe(`<instructions>\n${long}\n</instructions>\n\noi`)
+    expect(antigravityPrompt({ system: 'curto', prompt: 'oi' })).toBe('oi')
   })
 
-  it('dynamically extracts models from an installed @google/gemini-cli package', () => {
-    const root = mkdtempSync(join(tmpdir(), 'gemini-pkg-'))
-    const bundle = join(root, 'node_modules', '@google', 'gemini-cli', 'bundle')
-    mkdirSync(bundle, { recursive: true })
-    writeFileSync(
-      join(bundle, 'chunk-models.js'),
-      'var defs = { "gemini-3.9-flash": { isVisible: true }, "gemini-4-pro": { isVisible: true }, "internal-hidden": { isVisible: false } };'
-    )
-    const bin = join(root, 'gemini.cmd')
-    writeFileSync(bin, '@ECHO off')
-    expect(detectAntigravityCliModels(bin)).toEqual(['antigravity/gemini-3.9-flash', 'antigravity/gemini-4-pro'])
-    expect(antigravityModels(bin)).toEqual(['antigravity/gemini-3.9-flash', 'antigravity/gemini-4-pro'])
+  it('tells the agent when images could not go along', () => {
+    const img = join(mkdtempSync(join(tmpdir(), 'ag-img-')), 'a.png')
+    writeFileSync(img, 'png')
+    expect(antigravityPrompt({ system: 's', prompt: 'oi', images: [{ block: 0, path: img, mime: 'image/png' }] })).toMatch(/^oi\n\n\(.*(imagens|images)/s)
+  })
+
+  it('moves the home on Linux and Windows but keeps their app-data folders', () => {
+    expect(antigravityHomeEnv('/t/h', 'mac', '/Users/e', {})).toEqual({ HOME: '/t/h' })
+    expect(antigravityHomeEnv('/t/h', 'linux', '/home/e', {})).toEqual({ HOME: '/t/h', XDG_CONFIG_HOME: join('/home/e', '.config') })
+    const win = antigravityHomeEnv('/t/h', 'windows', 'C:/Users/e', { APPDATA: 'C:/R' })
+    expect(win).toMatchObject({ HOME: '/t/h', USERPROFILE: '/t/h', APPDATA: 'C:/R', LOCALAPPDATA: join('C:/Users/e', 'AppData', 'Local') })
+  })
+
+  it("takes the model id alone, and an old Gemini CLI id as the Antigravity one it became", () => {
+    expect(antigravityModel('antigravity/gemini-4-argon-high')).toBe('gemini-4-argon-high')
+    expect(antigravityModel('gemini/gemini-2.5-pro')).toBe('gemini-4-argon-medium')
+    expect(antigravityModel('gemini-3.8-flash')).toBe('gemini-3.8-flash-medium')
+  })
+
+  it('lists the models from agy models, and none when signed out', () => {
+    const out = 'Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-opus-5-5-high\tClaude Opus 5.5 (High)\n'
+    expect(parseAntigravityModels(out)).toEqual(['antigravity/gemini-4-argon-medium', 'antigravity/claude-opus-5-5-high'])
+    expect(parseAntigravityModels('Fetching available models...\nError: Please sign in to view available models.')).toEqual([])
   })
 })
 

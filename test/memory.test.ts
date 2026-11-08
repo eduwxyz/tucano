@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
-import type { Agent, Author, EngineId, Message, Settings } from '../src/shared/types'
+import { personScope, type Agent, type Author, type EngineId, type Message, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
@@ -24,9 +24,9 @@ let turns: Turn[]
 let memory: Memories
 let runner: Runner
 
-function setup(): void {
-  const base = fakeEngine('claude', { delayMs: 1 })
-  const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }
+function setup(sessions = false): void {
+  const base = fakeEngine('claude', { delayMs: 1, sessions })
+  const claude: Engine = { ...base, run: (t) => (turns.push(t), base.run(t)) }
   const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   const emit = (_: CoreEvent): void => {}
   const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
@@ -47,7 +47,7 @@ function put(conversationId: string, author: Author, text: string, threadId?: st
 }
 
 const agentTurns = (handle: string): Turn[] => turns.filter((t) => t.system.startsWith(`Você é ${handle[0]!.toUpperCase()}${handle.slice(1)} (@${handle})`))
-const active = (scope = 'me'): string[] => db.memories({ scope, state: 'active' }).map((m) => m.text)
+const active = (scope = personScope(db.ownerId())): string[] => db.memories({ scope, state: 'active' }).map((m) => m.text)
 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
@@ -82,8 +82,8 @@ describe('parseConsolidation', () => {
 
 describe('summary (short term)', () => {
   it('folds what leaves the window into the summary, which a reply outside threads reads with every newer message', async () => {
-    put('c1', { kind: 'me' }, 'ZEBRA é o cupom da campanha')
-    for (let i = 1; i < MAX_AFTER + 10; i++) put('c1', i % 2 ? { kind: 'agent', id: 'a1' } : { kind: 'me' }, `mensagem ${i}`)
+    put('c1', { kind: 'person', id: db.ownerId() }, 'ZEBRA é o cupom da campanha')
+    for (let i = 1; i < MAX_AFTER + 10; i++) put('c1', i % 2 ? { kind: 'agent', id: 'a1' } : { kind: 'person', id: db.ownerId() }, `mensagem ${i}`)
     const all = db.messagesAfter('c1', 0)
 
     await memory.consolidate('c1')
@@ -107,7 +107,7 @@ describe('summary (short term)', () => {
   })
 
   it('consolidates on its own once more than MAX_AFTER messages follow the summary', async () => {
-    for (let i = 0; i < MAX_AFTER; i++) put('d1', { kind: 'me' }, `mensagem ${i}`)
+    for (let i = 0; i < MAX_AFTER; i++) put('d1', { kind: 'person', id: db.ownerId() }, `mensagem ${i}`)
     await runner.send('d1', 'oi')
     await settle()
     expect(db.conversation('d1')!.summary).toContain('Resumo de teste')
@@ -124,12 +124,12 @@ describe('summary (short term)', () => {
 
 describe('a thread\'s own summary', () => {
   it('a quiet thread gets its summary and the memories in it, once; a busy one waits', async () => {
-    const root = put('c1', { kind: 'me' }, 'qual café a gente compra?')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'qual café a gente compra?')
     put('c1', { kind: 'agent', id: 'a1' }, 'tem o de sempre e um novo', root.id)
-    const last = put('c1', { kind: 'me' }, 'eu prefiro café sem açúcar', root.id)
-    const busy = put('c1', { kind: 'me' }, 'faz o relatório')
+    const last = put('c1', { kind: 'person', id: db.ownerId() }, 'eu prefiro café sem açúcar', root.id)
+    const busy = put('c1', { kind: 'person', id: db.ownerId() }, 'faz o relatório')
     db.saveMessage({ ...put('c1', { kind: 'agent', id: 'a2' }, 'metade', busy.id), run: { status: 'working', depth: 1, steps: [] } })
-    for (let i = 0; i < WINDOW; i++) put('c1', { kind: 'me' }, `solta ${i}`) // outside threads, after both
+    for (let i = 0; i < WINDOW; i++) put('c1', { kind: 'person', id: db.ownerId() }, `solta ${i}`) // outside threads, after both
 
     const later = clock + THREAD_QUIET_MS
     await memory.sweep(later)
@@ -149,11 +149,11 @@ describe('a thread\'s own summary', () => {
   })
 
   it("not before it's quiet, nor for a question and its answer alone", async () => {
-    const root = put('c1', { kind: 'me' }, 'oi')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'oi')
     put('c1', { kind: 'agent', id: 'a1' }, 'oi!', root.id)
-    const busy = put('c1', { kind: 'me' }, 'pergunta longa')
+    const busy = put('c1', { kind: 'person', id: db.ownerId() }, 'pergunta longa')
     put('c1', { kind: 'agent', id: 'a1' }, 'resposta', busy.id)
-    put('c1', { kind: 'me' }, 'e mais uma coisa', busy.id)
+    put('c1', { kind: 'person', id: db.ownerId() }, 'e mais uma coisa', busy.id)
     await memory.sweep(clock + 60_000) // a minute later: not quiet yet
     await memory.sweep(clock + THREAD_QUIET_MS) // quiet: only the one with three messages
     await memory.idle()
@@ -162,8 +162,8 @@ describe('a thread\'s own summary', () => {
   })
 
   it("past MAX_AFTER replies, a reply reads the thread's summary, the message that opened it and the newest replies", async () => {
-    const root = put('c1', { kind: 'me' }, 'RAIZ: ZEBRA é o cupom')
-    for (let i = 0; i < MAX_AFTER + 5; i++) put('c1', i % 2 ? { kind: 'agent', id: 'a1' } : { kind: 'me' }, `resposta ${i}`, root.id)
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'RAIZ: ZEBRA é o cupom')
+    for (let i = 0; i < MAX_AFTER + 5; i++) put('c1', i % 2 ? { kind: 'agent', id: 'a1' } : { kind: 'person', id: db.ownerId() }, `resposta ${i}`, root.id)
     await runner.send('c1', '@lia qual era o cupom?', [], root.id)
     await settle() // the thread grew past MAX_AFTER: it gets its summary
     expect(db.message(root.id)?.threadSummary?.text).toContain('ZEBRA')
@@ -178,7 +178,7 @@ describe('a thread\'s own summary', () => {
   })
 
   it('a hand edit keeps what the summary covers, and the thread shows it', () => {
-    const root = put('c1', { kind: 'me' }, 'raiz')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'raiz')
     db.setThreadSummary(root.id, 'feito pelo modelo', root.at)
     memory.editThreadSummary(root.id, '  corrigido à mão  ')
     expect(db.message(root.id)?.threadSummary).toMatchObject({ text: 'corrigido à mão', until: root.at })
@@ -196,9 +196,32 @@ describe('lembrar (long term)', () => {
 
     await runner.send('c1', '@theo oi')
     await settle()
-    const system = agentTurns('theo')[0]!.system
+    const system = agentTurns('theo')[0]!.prompt
     expect(system).toContain('Sobre Edu (todos os agentes veem):')
     expect(system).toContain('eu prefiro PR pequeno')
+  })
+
+  it('a new memory goes on the kept session with only the new context, instead of starting over', async () => {
+    setup(true)
+    await runner.send('c1', '@theo oi')
+    await settle()
+    const before = agentTurns('theo')
+    expect(before[0]!.session).toMatchObject({ resume: false })
+    expect(before[0]!.prompt).not.toContain('PR pequeno')
+
+    db.saveMemory({ id: 'mem1', scope: 'me', text: 'eu prefiro PR pequeno', state: 'active', origin: 'me', messageIds: [], createdAt: clock, confirmedAt: clock })
+    await runner.send('c1', '@theo e agora?')
+    await settle()
+    const [first, second] = agentTurns('theo')
+    expect(second!.system).toBe(first!.system) // the system prompt holds: the session and its cache go on
+    expect(second!.session).toEqual({ id: first!.session!.id, resume: true, keep: true })
+    expect(second!.blocks![0]).toMatch(/^# Contexto de agora/)
+    expect(second!.blocks![0]).toContain('eu prefiro PR pequeno')
+    expect(second!.blocks!.at(-1)).toContain('e agora?')
+
+    await runner.send('c1', '@theo e mais?')
+    await settle()
+    expect(agentTurns('theo')[2]!.blocks!.some((b) => b.includes('# Contexto de agora'))).toBe(false) // unchanged: not again
   })
 
   it('with "pede aprovação" nothing reaches a prompt until I accept it', async () => {
@@ -210,12 +233,12 @@ describe('lembrar (long term)', () => {
 
     await runner.send('c1', '@theo oi')
     await settle()
-    expect(agentTurns('theo')[0]!.system).not.toContain('PR pequeno')
+    expect(agentTurns('theo')[0]!.prompt).not.toContain('PR pequeno')
 
     memory.decide(pending!.id, true)
     await runner.send('c1', '@theo e agora?')
     await settle()
-    expect(agentTurns('theo')[1]!.system).toContain('PR pequeno')
+    expect(agentTurns('theo')[1]!.prompt).toContain('PR pequeno')
   })
 
   it('an agent set to "só lê" does not get the tool', async () => {
@@ -239,8 +262,8 @@ describe('lembrar (long term)', () => {
 describe('extraction', () => {
   function chat(): void {
     put('c1', { kind: 'agent', id: 'a1' }, 'eu prefiro tabs, aliás')
-    put('c1', { kind: 'me' }, 'eu prefiro café sem açúcar')
-    for (let i = 0; i < WINDOW; i++) put('c1', { kind: 'me' }, `mensagem ${i}`)
+    put('c1', { kind: 'person', id: db.ownerId() }, 'eu prefiro café sem açúcar')
+    for (let i = 0; i < WINDOW; i++) put('c1', { kind: 'person', id: db.ownerId() }, `mensagem ${i}`)
   }
 
   it('only learns about me from what I said, and suggests by default', async () => {
@@ -284,6 +307,6 @@ describe('extraction', () => {
     memory.forget(db.memories()[0]!.id)
     await runner.send('c1', '@theo oi')
     await settle()
-    expect(agentTurns('theo')[0]!.system).not.toContain('PR pequeno')
+    expect(agentTurns('theo')[0]!.prompt).not.toContain('PR pequeno')
   })
 })

@@ -81,8 +81,8 @@ describe('buscar_memorias', () => {
     db.saveMemory(mem('z', 'O cupom da campanha é ZEBRA', 5))
     await runner.send('d1', 'qual o cupom?')
     await runner.idle()
-    expect(turns[0]!.system).toContain('ZEBRA')
-    expect(turns[0]!.system).not.toContain('buscar_memorias')
+    expect(turns[0]!.prompt).toContain('ZEBRA')
+    expect(turns[0]!.prompt).not.toContain('buscar_memorias')
     expect(JSON.stringify(results[0])).not.toContain('ZEBRA') // no such tool
   })
 
@@ -91,7 +91,7 @@ describe('buscar_memorias', () => {
     for (let i = 0; i < 60; i++) db.saveMemory(filler(i))
     await runner.send('d1', 'qual o cupom?')
     await runner.idle()
-    const system = turns[0]!.system
+    const system = turns[0]!.prompt
     expect(system).not.toContain('ZEBRA')
     expect(system).toContain('procure com buscar_memorias')
     expect(JSON.stringify(results[0])).toContain('ZEBRA')

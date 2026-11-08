@@ -4,6 +4,121 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **An agent's profile card, from its face or name.** A click on an agent's face or name (on its message, in a thread, an `@mention`, the faces at the top of a channel, the top of its DM) opens a small card next to it, as Slack does; resting the mouse there for half a second opens it too, and it goes when the mouse leaves. The card shows its picture, name, `@handle` and role; what it's doing now (working, and on which step, with a link to the conversation; waiting for an answer or an approval, and whose, when there's a team; at its monthly limit; archived; or when it last spoke); its model and harness; its computer; the channels it's in; and buttons to message it or open its full page. The faces at the top of a channel and the name at the top of a DM open the card instead of the agent's page, and the DM's **See profile** button is now a gear for the conversation's settings. People's faces stay as they were. Esc gives the focus back to what opened it. Thanks [@rjgdias](https://github.com/rjgdias)! ([#134](https://github.com/eduwxyz/tucano/pull/134))
+
+## [0.2.17] - 2026-11-07
+
+> **Em português:**
+> - **Composio na loja de conectores.** Centenas de apps (Google, Notion, HubSpot…) sem configurar nada: entra pelo navegador. Os dados passam pelos servidores da Composio, e o cartão diz isso com clareza. Cada ação conta pelo que faz: ler roda na hora, escrever pede acesso de escrita, e enviar pede aprovação.
+> - **Enviar algo pra outras pessoas pede antes, por padrão.** Postar, responder, encaminhar, compartilhar, convidar, comentar ou mandar email agora é sensível, como enviar e apagar já eram. Pra deixar um agente postar sem perguntar, use "Aprovar e sempre permitir". Uma classe que você mudou à mão fica.
+> - **Respostas encadeadas entre agentes viram configuração.** Em Configurações › Agentes › Limites, de 1 a 10 (continua 3 se você não mexer).
+> - **Listas de escolha com a cara do app,** com filtro na lista de modelos e modelos agrupados por provedor.
+> - **Receitas de skill longas ficam inteiras:** 10 mil caracteres vira uma recomendação, não um limite.
+>
+> **Correções:** a wiki não perde mais uma resposta longa que terminou depois de outra; os conectores do Google explicam o passo do Developer Preview que faltava.
+
+### Added
+
+- **How many replies agents give in a row is a setting.** Agents mentioning each other stopped after 3 replies from one message, which cut flows like planner → developer → reviewer → developer halfway. **Settings › Agents › Limits** now has **Agent replies in a row**, from 1 to 10; left alone, it stays 3.
+- **Composio in the connector store, with a warning.** [Composio Connect](https://docs.composio.dev/docs/composio-connect) reaches hundreds of apps (Google, Notion, HubSpot…) with nothing to set up: no Google Cloud app, no token; it signs in through the browser. Unlike every other connector, the data goes through Composio's servers and the access to each account is kept by Composio, which logs each call; the card, the window before connecting and the connector's page say so plainly, and point to the direct connectors. Composio offers a few tools that find and run the apps' actions instead of one tool per action, so each call to one of its runners counts as what it runs: a batch in `COMPOSIO_MULTI_EXECUTE_TOOL` takes the strictest of its actions, judged by their names (`GMAIL_FETCH_EMAILS` reads, `GMAIL_CREATE_EMAIL_DRAFT` writes, `GMAIL_SEND_EMAIL` is sensitive), and a raw `COMPOSIO_PROXY_EXECUTE` request by its method. Reads alone run right away, even with read-only access; writes need read-and-write access; sensitive actions ask for approval, and the card lists each action. A call outside Composio's documented shape, an action it can't place, or its remote code tools always ask. "Approve and always allow" on a batch allows each inner action that asked (say, `GMAIL_REPLY_TO_THREAD`) for that agent, never the runner itself: a later batch runs without asking only when every action that would ask is allowed. Raw requests, code and calls outside the shape are never allowed for good, and the rules show and can be removed on the agent's page like any other. Google's setup window mentions it as the way around making a Google Cloud app.
+
+### Changed
+
+- **Long skill recipes are kept whole.** A recipe over 20,000 characters was refused when written or proposed, cut when linked from Claude Code or Codex, and left out of an imported team. Now 10,000 characters is a recommendation: past it, Tucano says by how much and keeps the whole recipe, up to a million characters.
+- **The pick lists look like the rest of the app.** Effort, model, a tool's class, the routine's agent and where it posts, and the other settings pick lists open a menu of the app's own instead of the system's, with the keyboard working as before. The model list has a filter, and on a harness with models from several providers (OpenCode, Pi), they come grouped by provider.
+- **Sending something to other people asks first, by default.** A connector tool whose verb puts something in front of others (post, reply, forward, share, invite, comment, email, message), or that creates a comment, a reply or a post, is now sensitive, like send and delete already were: Slack's post-message, Linear's `save_comment`, GitHub's `add_issue_comment`, Notion's comment tool. The words count only as the verb, so `list_messages`, `get_message` and `search_emails` still read, and a draft (`create_email_draft`) is still a write. To have an agent post without asking, use "Approve and always allow" on its request, or set the tool's class to "write" on the connector's page. A class you chose by hand now stays when the tools are refreshed and when the rules change: on the first connection after updating, a tool whose class was still the automatic one takes the new default, and one you changed keeps yours.
+
+### Fixed
+
+- **The wiki no longer misses a long reply.** A reply that started before another and ended well after it never reached the wiki, because the wiki's curator had already read past where it started. It now goes by when each reply ended, the same order the conversation shows.
+- **Google's connectors say what their preview needs.** Google's MCP servers are in Developer Preview and only serve Cloud projects enrolled in the [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview), which the setup didn't say: the connectors failed with "Access to this tool requires that your Google Cloud project (…) is enrolled in the Google Workspace Developer Preview Program". The Google setup window and the guide now have that step (the form asks for the project number; approval usually takes a couple of days), and when a Google tool still answers with that error, the agent is told it's a step only the person can do in their own Cloud project, not something to retry or ask the Tuca for, and that Composio connects Google meanwhile, through its servers.
+
+## [0.2.16] - 2026-11-07
+
+> **Em português:**
+> - **O celular entra como você.** Num Tucano em servidor, Configurações › Pessoas › Conectar um celular mostra um QR code que vale uma vez, por 10 minutos: o app do Tucano pro iPhone (chegando na App Store) lê o código e entra como você, com suas DMs, aprovações e perguntas. No servidor, `npm run server -- pair` gera um pro dono. Um link de convite também funciona no app: ele pede o nome e a pessoa entra.
+> - **Sair de um Tucano por conta própria.** Quem foi convidado pode sair pelo app: o acesso acaba na hora, em todos os aparelhos, e as DMs, memórias e rotinas da pessoa são apagadas. O que ela disse nos canais fica com o time.
+
+### Added
+
+- **Phones sign in to a Tucano on a server, as their person.** **Settings › People › Connect a phone** shows a QR code that's good once, for 10 minutes: the Tucano app for iPhone (coming to the App Store) reads it and gets a key of its own, signed in as whoever made the code, with their DMs, approvals and questions. On the server, `npm run server -- pair [minutes]` makes one for the owner (the same link opens a browser too, with `/?code=`). An invite link also works in the app: it asks the name and the person is in.
+- **Leaving a Tucano on your own.** Someone invited (not the owner) can leave from the iPhone app: their access ends at once on every device, and their direct messages, memories and own routines are deleted right away instead of after 30 days. What they said in channels stays the channel's, and the agents they made go to the owner.
+
+## [0.2.15] - 2026-11-07
+
+> **Em português:**
+> - **Respostas mais rápidas no Claude Code.** As ferramentas dos conectores ficam atrás da busca de ferramentas, em vez de irem todas em cada chamada: um agente com 198 ferramentas mandava 239 mil tokens por chamada e agora manda 11 mil, cerca de 7% do que ia antes. As que o agente usou nos últimos 14 dias já vêm carregadas. Uma memória nova, uma página na wiki ou uma rotina não reiniciam mais a conversa do agente. Suas mensagens passam na frente de rotinas e repasses.
+> - **O Codex escreve na hora.** O texto aparece enquanto é escrito, e uma conversa continua do ponto em que estava, sem reenviar tudo.
+> - **O app abre em menos de 1 segundo** (eram 4 a 9) e não trava mais enquanto a resposta chega, nem com conversas longas.
+> - **Times: várias pessoas no mesmo Tucano.** Num Tucano em servidor, Configurações › Pessoas convida alguém por link. Cada pessoa tem suas DMs com os agentes (privadas, nem o dono lê), sua memória e o que espera por ela em **Pra você**.
+> - **Mofi na loja de conectores:** contas, cartões, faturas e gastos dos seus bancos, pelo Open Finance, sem movimentar dinheiro.
+> - **O GitHub passa pelo conector.** Os agentes publicam no GitHub (branch, arquivos, PR) com as ferramentas do conector do GitHub; o push pelo computador do agente saiu.
+>
+> **Correções:** um pedido a alguém no fim de uma resposta longa chega a essa pessoa; as respostas aparecem na ordem em que terminaram; o Chrome de um agente tem 30 s pra abrir; o botão da nota de atualização fica embaixo do texto.
+
+### Added
+
+- **Mofi in the connector store.** Your bank accounts, cards, invoices and spending from Brazilian banks (through Open Finance), from [Mofi](https://omofi.com.br/docs/mcp)'s official server. It signs in through the browser, and its tools only read: none moves money; the most they do is set a transaction's category or ask the banks for an update.
+- **Teams: several people on the same Tucano.** On a Tucano on a server, **Settings › People** invites someone with a one-time link (good for 7 days), as owner, admin or member. Each person has their own name, their own direct messages with the agents (private, even from the owner), their own memory, display preferences and unread counts; every message and approval carries who wrote, asked and decided it. An agent's approvals go to its owner (or admins), and **For you** gathers what waits on each person. A `@name` calls a person; an agent can ask a specific person and wait for that one task, with a deadline and someone covering for whoever is away. Routines are "just for me" or the channel's. **Activity** shows the owner and admins who joined, left, approved and changed what, never what was said in a DM. Removing someone ends their access at once and keeps their private things 30 days before they're deleted. On the first invite, channel summaries are rebuilt without anything from the owner's DMs, older channel messages and wiki history stay the owner's, and wiki pages that came from the owner's DMs wait for the owner to release them. A Tucano used by one person, on the desktop, works exactly as before.
+
+### Changed
+
+- **Faster replies on Claude Code.** Connector tools now wait behind the CLI's tool search instead of going into every model call: for one agent with 198 tools, a call went from 239k input tokens to 11k, and on 30 scenarios a reply sends 6–7% of what it did, with the same answers. The app's own tools stay loaded, and so do the connector tools the agent used in the last 14 days (up to 12), so a familiar tool doesn't cost a search. Memories, the wiki, skills, routines and disconnected connectors moved out of the system prompt, so a change to them no longer starts every agent's session over: a kept session gets them again only when they changed. Multi-step tasks and conversations got about 20–25% faster; turns after the first in a 6-turn conversation took 3.8 s instead of 5.9 s.
+- **Your replies go first.** A message, an approval, a retry or a browser handed back goes ahead of routines, hand-offs and follow-ups, and may run past the usual 4 at once, up to 6. Up to 4 Claude Code processes stay ready 10 minutes after a reply (was 2 for 5), typing in a channel readies whoever answered last there, and opening a conversation readies its session.
+- **Codex streams as it writes.** Agents on Codex run on one long-lived `codex app-server` per login: threads are kept and resumed, so only what's new is sent, and the text shows as it's written (the second turn's first text came in 1.0 s, was 2.4 s). Every isolation setting stays as it was; an older Codex, a Codex home with its own `config.toml` or rules, or `TUCANO_CODEX_EXEC=1` still use `codex exec`.
+- **The app opens sooner and stays light.** The core is ready in under a second (was 4.5–9.4 s); finding the CLIs happens after, and what was found is kept for the next launch. Installed apps are rescanned at most once a day, a big Obsidian vault is indexed without blocking, and the workspace on screen starts first. While a reply streams, only its own message redraws. A conversation opens with its last 100 messages, and older ones load as you scroll back.
+- **GitHub goes through its connector.** Agents publish to GitHub (a branch, files, a pull request) with the GitHub connector's tools, with the permissions and approvals of any connector. Pushing from the agent's computer and the `abrir_pr` tool are gone, and Settings' "Phone and GitHub" tab is just **Phone**. A computer that pushed through Tucano's proxy before gets its git settings put back when it starts.
+
+### Fixed
+
+- **An agent's Chrome gets more time to open.** The first open on a slow computer could pass the 15 s it had, and the agent got an error instead of the page. It now gets 30 s.
+- **Replies show in the order they ended.** With several agents answering at once, a reply that took longer stayed above one that was already done. Now it takes its place when it ends, with that time on it, and whoever is still working stays at the end of the conversation. Agents still read each other in the order they started, so what each one saw doesn't change.
+- **An ask at the end of a long reply reaches its person.** The hand-off check read only the first 3,000 characters of a reply, so a `@name` asked at the end of a long plan was missed. It now reads the start and the lines around each mention.
+- **The update note's button goes under its text.** With an agent working, a long "Restart anyway" squeezed the note's text into a narrow column.
+
+## [0.2.14] - 2026-11-06
+
+> **Em português:**
+> - **Google e Slack nos conectores.** Gmail, Calendar, Drive, Docs e Sheets, pelos servidores oficiais do Google, e o Slack, pelo dele. Os dois só aceitam apps cadastrados neles, então o primeiro Conectar mostra como criar o seu, uma vez: 5 passos no Google, 2 no Slack (o link já traz tudo preenchido). Depois, é um clique.
+> - **Mais seis conectores, e segredos no 1Password.** GitHub, Dynatrace, Snowflake, Metabase, Azure DevOps e AWS CloudWatch: a loja pede o endereço ou o token numa janela. No lugar de um token, dá pra pôr uma referência do 1Password (op://…), lida a cada conexão.
+> - **O Tucano num servidor, pronto pra outras pessoas.** Entrar por link, as páginas que os agentes servem abrindo pelo servidor, arquivos que sobem e descem, o login dos conectores terminando sozinho e as notificações no navegador.
+> - **O app abre os seus Tucanos em servidores.** Um link tucano://connect pareia o app com um Tucano num servidor, que aparece na mesma janela, com uma barra pra voltar; ficam em Configurações › Servidores.
+>
+> **Correção:** um agente no Codex volta a salvar arquivos no computador dele, em vez de dizer que a sessão é só leitura. Acontecia quando um agente caía no modelo reserva do Codex.
+
+### Added
+
+- **Tucano as a server, ready for other people to use.** Sign in by a link (`server.js link` prints it; `TUCANO_URL` behind a proxy), and twenty wrong tokens from one address lock it out for ten minutes. Pages agents serve open at `https://<port>-<address>`, through the server, with a sign-in of their own, WebSockets included. A file sent with a message goes up to the server, a cited one comes down, an Obsidian vault comes in as a .zip, and folders are picked on the server. OAuth connectors finish on the server's own address, with nothing to paste; notifications reach the browser, and a connection that goes quiet comes back with the drafts kept. An idle agent's Chrome closes after ten minutes and reopens on the same page.
+- **The desktop app opens your Tucanos on servers.** A `tucano://connect` link (`server.js link` prints it, next to the browser's) pairs the app with a Tucano on a server: its page shows over the app in the same window, in a view with no bridge to this computer, under a bar to go back, signed in with a token the system's keychain keeps. **Settings › Servers** lists them, pairs a pasted link and forgets one; the workspace list, the Window menu and the tray open them, and the server on screen when the app quit comes back at launch.
+- **Six more connectors in the store, for services that ask a few things first:** GitHub (a personal access token), Dynatrace and Snowflake (your instance and a token), Metabase (your address, then the browser sign-in), and Azure DevOps and AWS CloudWatch, which run the service's official server on this computer (with npx and uv). The store asks for what each needs in a window and adds the connector as the custom form would.
+- **A connector's secrets can stay in 1Password.** In place of a token or a variable of a local connector's command, an `op://Vault/Item/field` reference: Tucano keeps only the reference and reads the value with the 1Password CLI on each connection, and says what to do when the CLI is missing, signed out or locked, or the item isn't there.
+- **Gmail, Google Calendar, Google Drive, Google Docs and Google Sheets in the connector store**, through Google's own MCP servers. Google signs in only apps registered with it, so the first one walks you through making yours in Google Cloud, once, in five steps with a link for each; the other four then sign in with one click. Each asks only for what its tools need: Gmail searches, reads, drafts and labels but never sends nor deletes for good, and Drive writes only the files it made or opened. The Tuca's guide explains the steps and what to check when Google turns a sign-in away.
+- **Slack in the connector store**, through Slack's own MCP server. Slack takes only directory apps or a workspace's internal apps, so the first Connect makes yours from a link that fills it all in (permissions, MCP on, the address to come back to): pick the workspace, create, paste its Client ID and Secret. Agents act as you, with a user token, through the same classes and approvals. The sign-in comes back through the workspace's fixed webhook port, since Slack takes only the address registered in the app. Google's or Slack's app can be changed from the connector's page.
+
+### Fixed
+
+- **An agent on Codex writes files on its computer again, instead of saying the session is read-only.** Codex runs in a read-only, empty sandbox on purpose, and tells the model so; newer models (GPT-6-Astra) took that for the agent's computer and answered "this session has read-only filesystem access" without trying `write_file`, or tried Codex's own `apply_patch` and gave up. It showed when an agent fell back to a Codex reserve model. An agent with a computer is now told that sandbox isn't its computer. Agents also no longer send you to the Tuca to get access back: he can't change it.
+
+
+## [0.2.13] - 2026-11-06
+
+> **Em português:**
+> - **Segurança: duas correções.** Um link na resposta de um agente não abre mais um arquivo local como se fosse o app ([GHSA-6pvc-g4mm-34rq](https://github.com/eduwxyz/tucano/security/advisories/GHSA-6pvc-g4mm-34rq)), e Enter, Espaço ou um clique num botão sem nome no navegador de um agente não passam mais sem a sua aprovação quando publicam, enviam ou apagam ([GHSA-4q39-94jc-xhq8](https://github.com/eduwxyz/tucano/security/advisories/GHSA-4q39-94jc-xhq8)). Atualize.
+> - **Qualquer agente cria por você.** Peça a um agente um agente novo, um time de agentes com um canal, uma rotina, um canal ou uma mudança num agente, e ele propõe num card com Aplicar e Descartar: nada muda até você aplicar.
+> - **O Tuca te ajuda com o Tucano.** Ele faz o que dá em vez de ensinar o passo a passo, explica o resto lendo um guia do app, e descobre por que algo não está dando certo olhando o workspace: motores, conectores, limites, rotinas e os erros das respostas, nunca o que foi dito nas conversas. Quando cita uma tela, manda um botão que leva até ela.
+
+### Security
+
+- **A link in an agent's reply can't open a local file as the app anymore.** The window only ever shows the app, only the app's own page talks to its main process, and message links keep only http, https and mailto ([GHSA-6pvc-g4mm-34rq](https://github.com/eduwxyz/tucano/security/advisories/GHSA-6pvc-g4mm-34rq)). Thanks to @rayanneblima.
+- **Enter, Space or a click on a nameless button in an agent's browser ask for your approval** when they publish, send or delete, as a click on a risky button did; clicks are judged by the page's own words, not the agent's ([GHSA-4q39-94jc-xhq8](https://github.com/eduwxyz/tucano/security/advisories/GHSA-4q39-94jc-xhq8)). Thanks to @marcossimo.
+
+### Added
+
+- **Any agent makes things for you, as cards you apply.** Ask an agent for a new agent, a team, a routine, a channel or a change to an agent, and it proposes it: a new agent as before; a team of 2 to 8 agents with a channel for them, created at once with **Create team**; a scheduled routine for any agent (an agent's own still go through scheduling it itself); a channel with its agents; or a change to an agent that exists, shown as before and after. Each is a card with **Apply** and **Discard**, applied the way the screens do it, and nothing changes until you apply it. Agents are told to propose when you ask or when it clearly solves what you asked, not in the middle of other work.
+- **The Tuca helps you with Tucano.** He does what he can instead of explaining how, asking only for what's missing, even when you ask "how do I…?". The rest he explains from a guide of the app (17 pages, from agents and connectors to workspaces and troubleshooting) he reads before answering, so he doesn't make up screens; other agents send those questions to him. Asked why something isn't working, he looks at the workspace first: harnesses and sign-ins, connectors and their errors, each agent's model, access and limit, routines and how their last run ended, and the replies that failed in the last week with their error, never what was said in conversations. When he mentions a screen, the message shows a button that opens it. A Tuca made before is brought up to date when the app starts, unless his instructions were rewritten by hand.
+
 ## [0.2.12] - 2026-11-05
 
 > **Em português:**
@@ -310,6 +425,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.17]: https://github.com/eduwxyz/tucano/compare/v0.2.16...v0.2.17
+[0.2.16]: https://github.com/eduwxyz/tucano/compare/v0.2.15...v0.2.16
+[0.2.15]: https://github.com/eduwxyz/tucano/compare/v0.2.14...v0.2.15
+[0.2.14]: https://github.com/eduwxyz/tucano/compare/v0.2.13...v0.2.14
+[0.2.13]: https://github.com/eduwxyz/tucano/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/eduwxyz/tucano/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/eduwxyz/tucano/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/eduwxyz/tucano/compare/v0.2.9...v0.2.10

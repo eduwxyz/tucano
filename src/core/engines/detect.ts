@@ -9,7 +9,7 @@ import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '..
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
-import { antigravityModels } from './antigravity'
+import { parseAntigravityModels } from './antigravity'
 import { cursorSignedIn, parseCursorModels } from './cursor'
 import { grokLogin, parseGrokModels } from './grok'
 
@@ -226,30 +226,14 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
   return { status: listedStatus(path, v.stdout, models, 'pi (e /login)'), models }
 }
 
-// Antigravity CLI (replaces Gemini CLI). Its model list isn't offered by an offline command, so the known
-// current models are used; "signed in" is whether a login is in place — the
-// OAuth credentials in the home, or an API key / Vertex in the environment.
-function antigravityLoginDir(): string {
-  const candidates = [
-    join(process.env['ANTIGRAVITY_CLI_HOME'] || process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
-  ]
-  if (process.env['LOCALAPPDATA']) {
-    candidates.push(join(process.env['LOCALAPPDATA'], 'agy', '.gemini'))
-    candidates.push(join(process.env['LOCALAPPDATA'], 'agy'))
-  }
-  for (const c of candidates) {
-    if (existsSync(join(c, 'oauth_creds.json'))) return c
-  }
-  return candidates[0]!
-}
-
+// Antigravity's CLI. `agy models` lists the models the signed-in account can run, and
+// says to sign in when there's no login (it lives in the keychain, not in a file).
 export async function detectAntigravity(): Promise<{ status: EngineStatus; models: string[] }> {
   const path = await which('agy')
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
-  const v = await run(path, ['--version'])
-  const home = antigravityLoginDir()
-  const signedIn = existsSync(join(home, 'oauth_creds.json')) || existsSync(join(home, 'google_accounts.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
-  const models = antigravityModels(path)
+  const [v, list] = await Promise.all([run(path, ['--version']), run(path, ['models'], 30_000)])
+  const models = parseAntigravityModels(list.stdout)
+  const signedIn = models.length > 0
   return {
     status: {
       installed: true,
@@ -258,7 +242,7 @@ export async function detectAntigravity(): Promise<{ status: EngineStatus; model
       loggedIn: signedIn,
       ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com agy', 'Not signed in: sign in with agy') })
     },
-    models: signedIn ? models : []
+    models
   }
 }
 
