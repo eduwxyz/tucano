@@ -4,6 +4,18 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.18] - 2026-11-07
+
+> **Em português:**
+> - **Uma introdução que qualquer pessoa segue, e que leva 3 cliques quando tudo já está pronto.** O Tucano acha o Claude Code, o Codex e os outros que você já usa e testa cada um. Se não tiver nenhum, ele baixa o Codex ou o Claude Code oficial e abre o login no navegador, sem terminal. O Tuca pergunta o que você quer tirar das costas, monta o agente e explica o que ele faz em português de gente. Depois, balões mostram o app de verdade, e os Primeiros passos viram **Missões**.
+> - **Quanto cada agente faz por conta própria.** Em Configurações › Agentes › Autonomia, e na página de cada agente: **Cuidadoso** pede antes de qualquer mudança, **Normal** é como sempre foi, **Sem travas** envia, apaga e paga sem perguntar (com confirmação). Dá pra ajustar ação por ação, e a introdução já pergunta isso.
+> - **Proteção contra texto que manda no agente.** Depois de ler algo de fora (um email, uma página, uma issue), enviar, publicar, pagar e apagar pedem antes, mesmo onde rodariam sozinhos.
+> - **Seu iPhone no Tucano do computador,** pelo Wi-Fi de casa: Configurações › Celular › Seu iPhone mostra um QR code.
+> - **As decisões de um agente, uma por vez, com opções pra escolher,** num cartão embaixo da resposta.
+> - **O cartão de perfil do agente,** ao clicar no rosto ou no nome.
+>
+> **Correções:** um programa que falha diz o motivo numa linha, sem erro técnico na tela; o link de conexão de um servidor só conta quando você clica em Entrar (a prévia de link do Discord ou do WhatsApp gastava o código); e os aparelhos conectados aparecem numa lista, com Desconectar.
+
 ### Added
 
 - **A first run anyone can follow, and that takes three clicks when everything's ready.** The introduction was nine steps (where agents run, the models, you, tools, skills, the agent, its powers, the first task) and told people to sign in "in the terminal that opened". Now it's one guided path in the look of the phone app: your name; the AI; the Tuca asking **"Qual é a primeira coisa que você queria tirar das suas costas?"**; the agent. If Claude Code, Codex or another one is already signed in, it shows up tested with a real reply (and how long it took), with switches to bring the tools and skills it found along (**ver quais** names them), and the two small models behind the scenes picked on their own (**Trocar** shows them as two cards, who replies and the memory, each opening one menu with every ready harness's models). If nothing is, **ChatGPT** or **Claude** sets it up with no terminal (below), and **Não assino nenhuma** explains which plan to get, with the official links; **Uso chave de API, gateway da empresa ou outro programa** opens the harnesses as before. The Tuca offers six goals (organize my week, research and summarize, write emails and posts, reply to customers, handle spreadsheets, code) or takes your own words, dictation included, and the agent is born from a built-in template at once, no wait on a model: its face, a name you can change, a color, what it does in plain words, and **"Quanto {nome} faz por conta própria?"**: **Me pergunta antes de mudar qualquer coisa** (Careful), **Faz o dia a dia por conta própria e pergunta antes do que importa** (Normal, recommended and picked) or **Faz tudo por conta própria, até enviar e pagar** (No guardrails, after the same confirmation as Settings), with a line under it saying what still asks. The answer is the agent's own autonomy level (Normal stays on Default, following Settings); the rules by kind and the outside-content guard stay on the agent's page. The detailed form asks the same, and **Ajustar com o Tuca** keeps the answer. It starts safe: no computer, connectors read-only, the web only where the goal needs it; a connector that fits the goal and signs in with one click in the browser is offered as optional (Todoist for the week, Notion for writing, Linear for code; none for the others, and nothing that needs an app, a token or an address of your own). **Ajustar com o Tuca** talks it over with him and brings his card back; **Prefiro configurar do zero** opens the detailed form. **Chamar … pro time** lands in #geral with the first message written and not sent, and a balloon over the field says to press send.
@@ -443,6 +455,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.18]: https://github.com/eduwxyz/tucano/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/eduwxyz/tucano/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/eduwxyz/tucano/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/eduwxyz/tucano/compare/v0.2.14...v0.2.15
