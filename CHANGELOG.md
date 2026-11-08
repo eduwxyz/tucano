@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **The connector store on the iPhone.** The phone app could only add a connector by its MCP address. Now it gets the same store as the computer (48 services, by category, found by name or by what they do) from the Tucano itself, so the list is always the one that Tucano can connect: a tap connects, and a service that signs in with its account opens its page right there; one that asks something first (a token, your own instance's address) or warns that the data goes through a third party shows a short form; Google's and Slack's connectors walk through making your own app, with a link per step. New core calls: `connectorCatalog`, `addCatalogConnector` (the core fills the entry in, as the desktop's form does) and `ownAppGuide`. The computer's own-app window now reads the same steps (in the iPhone app's next version).
+
 > **Em português:**
 >
 > **Correções:** um agente com o GitHub em **Ler e escrever** volta a subir a branch e abrir a PR em vez de dizer que "a sessão é só leitura" (e, se algo pede aprovação ou está desligado, diz exatamente o quê); e o cartão **Computador** mostra o que vale pra cada escolha, sem misturar a confirmação de **Este computador** com o painel do Linux.

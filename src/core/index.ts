@@ -33,6 +33,7 @@ import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from '.
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
 import { codexEnv } from './engines/codex'
+import { CATALOG, CATEGORIES, catalogInput, catalogView, entryOf, ownAppGuide } from '../shared/connector-catalog'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
 import { DesktopApps, macApps, SELF } from './apps'
@@ -1547,6 +1548,21 @@ const api: Handlers = {
     bg(connectors.connect(id), 'reconnectConnector')
   },
   setConnectorToken: ({ id, token }) => connectors.setToken(id, token),
+  // The store for a screen without the catalog's file (the iPhone app): its entries as data, in the
+  // person's language; a connector added by its entry and the values asked, filled in here.
+  connectorCatalog: () => ({ categories: CATEGORIES(), entries: catalogView(), added: connectors.list().map((c) => entryOf(c)?.id).filter((id): id is string => !!id) }),
+  addCatalogConnector: async ({ id, values }, ctx) => {
+    const entry = CATALOG.find((c) => c.id === id)
+    if (!entry) throw new Error(L('Esse conector não está mais na loja.', 'That connector is no longer in the store.'))
+    const input = catalogInput(entry, Object.fromEntries(Object.entries(values ?? {}).filter((v): v is [string, string] => typeof v[1] === 'string')))
+    const added = await connectors.add(input, !serverMode)
+    record(ctx, 'connector.created', added, { name: input.name })
+    return added
+  },
+  ownAppGuide: async ({ provider }) => {
+    const app = await connectors.ownApp(provider)
+    return { guide: ownAppGuide(provider, app.redirectUrl), ...(app.clientId ? { clientId: app.clientId } : {}) }
+  },
   ownApp: ({ provider }) => connectors.ownApp(provider),
   setOwnApp: ({ provider, clientId, clientSecret }) => connectors.setOwnApp(provider, { clientId, clientSecret }),
   authorizeConnector: async ({ id }) => {

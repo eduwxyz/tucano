@@ -4,7 +4,7 @@
 // Google's and Slack's sign in with an app the person makes once, which the first Connect walks them through.
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { catalogInput, CATEGORIES, entryOf, GOOGLE_APIS, searchCatalog, slackAppLink, type AppProvider, type CatalogEntry } from '../../../shared/connector-catalog'
+import { catalogInput, CATEGORIES, entryOf, ownAppGuide, searchCatalog, type AppProvider, type CatalogEntry } from '../../../shared/connector-catalog'
 import { LOGOS } from '../connector-logos'
 import { addConnector, authorizeConnector, openExternal, ownApp, setOwnApp, useStore, type Connector } from '../store'
 import { Modal } from './Modal'
@@ -282,8 +282,6 @@ function ConnectorSetup({ entry, onClose, onAdded }: { entry: CatalogEntry; onCl
   )
 }
 
-const cloud = (path: string): string => `https://console.cloud.google.com/${path}`
-
 // The person's own app, step by step: Google and Slack sign in only apps registered with them, and
 // Tucano's own isn't (Google's verification, Slack's directory). Made once, it serves all of that
 // provider's connectors. Also opened from a connector's page, to change it.
@@ -310,84 +308,31 @@ export function OwnAppSetup({ provider, connecting = false, onClose, onSaved }: 
       .finally(() => setBusy(false))
   }
   const google = provider === 'google'
+  const guide = ownAppGuide(provider, current?.redirectUrl ?? '')
   return (
-    <Modal title={google ? L('Seu app do Google', 'Your Google app') : L('Seu app do Slack', 'Your Slack app')} onClose={onClose} className="google-setup">
-      <p className="muted small modal__lead">
-        {google
-          ? L(
-              'O Google só deixa entrar apps cadastrados nele. Você cria o seu uma vez, em uns 10 minutos, e o Gmail, o Drive, o Calendar, o Docs e o Sheets entram com ele. Fica tudo na sua conta: os dados vão do Google direto pro seu computador.',
-              'Google only lets in apps registered with it. You make yours once, in about 10 minutes, and Gmail, Drive, Calendar, Docs and Sheets sign in with it. It all stays in your account: the data goes from Google straight to your computer.'
-            )
-          : L(
-              'O Slack só deixa usar o servidor MCP dele apps do diretório ou apps internos de um workspace. Você cria o seu, interno, em uns 2 minutos: o link já traz tudo preenchido. Os dados vão do Slack direto pro seu computador.',
-              "Slack lets only directory apps or a workspace's internal apps use its MCP server. You make yours, internal, in about 2 minutes: the link brings it all filled in. The data goes from Slack straight to your computer."
-            )}
-      </p>
-      {google ? (
-        <ol className="google-setup__steps">
-          <li>
-            {link(cloud('projectcreate'), L('Crie um projeto no Google Cloud', 'Create a project in Google Cloud'))}
-            {L(', com o nome que quiser (Tucano, por exemplo).', ', named as you like (Tucano, say).')}
+    <Modal title={guide.title} onClose={onClose} className="google-setup">
+      <p className="muted small modal__lead">{guide.lead}</p>
+      <ol className="google-setup__steps">
+        {guide.steps.map((st, i) => (
+          <li key={i}>
+            {st.link && st.linkText && (google || current ? link(st.link, st.linkText) : st.linkText)}
+            {st.text}
           </li>
-          <li>
-            {link(cloud(`flows/enableapi?apiid=${GOOGLE_APIS.join(',')}`), L('Ative as APIs', 'Turn on the APIs'))}
-            {L(': com o projeto escolhido no topo, clique em Próxima e em Ativar. São as do Gmail, Drive, Calendar, Docs e Sheets e a MCP de cada um.', ': with the project chosen at the top, click Next and Enable. They are Gmail, Drive, Calendar, Docs and Sheets, and the MCP one of each.')}
-          </li>
-          <li>
-            {link('https://developers.google.com/workspace/preview', L('Inscreva o projeto no Developer Preview', 'Enroll the project in the Developer Preview'))}
-            {L(
-              ': os servidores MCP do Google ainda estão em prévia e só atendem projetos inscritos no Google Workspace Developer Preview Program. O formulário pede o número do projeto (no painel do projeto). A aprovação costuma levar uns dias: siga os passos e salve, mas até lá os conectores do Google falham.',
-              ": Google's MCP servers are still in preview and only serve projects enrolled in the Google Workspace Developer Preview Program. The form asks for the project number (on the project's dashboard). Approval usually takes a couple of days: go on with the steps and save, but until then the Google connectors fail."
-            )}
-          </li>
-          <li>
-            {link(cloud('auth/overview'), L('Configure a tela de login', 'Set up the sign-in screen'))}
-            {L(
-              ' (Google Auth Platform › Começar): o nome do app e o seu e-mail; em Público-alvo, Externo (ou Interno, numa conta Google Workspace de empresa). Depois, em Público-alvo › Usuários de teste, adicione o seu e-mail.',
-              ' (Google Auth Platform › Get started): the app name and your email; under Audience, External (or Internal, in a company Google Workspace account). Then, under Audience › Test users, add your email.'
-            )}
-          </li>
-          <li>
-            {link(cloud('auth/clients/create'), L('Crie o cliente', 'Create the client'))}
-            {L(': em Tipo de aplicativo, App para computador; marque ', ': under Application type, Desktop app; tick ')}
-            <b>{L('Usar este cliente para um agente com IA', 'Use this client for an AI-powered agent')}</b>
-            {L(' (sem isso o Google recusa os conectores) e clique em Criar.', ' (without it Google turns the connectors away) and click Create.')}
-          </li>
-          <li>{L('Copie o ID do cliente e a chave secreta do cliente que aparecem e cole aqui:', 'Copy the client ID and the client secret it shows and paste them here:')}</li>
-        </ol>
-      ) : (
-        <ol className="google-setup__steps">
-          <li>
-            {current ? link(slackAppLink(current.redirectUrl), L('Crie o app no Slack', 'Create the app in Slack')) : L('Crie o app no Slack', 'Create the app in Slack')}
-            {L(': escolha o seu workspace, clique em Próximo e em Criar. O nome, as permissões, o endereço de volta e o MCP já vêm preenchidos.', ': choose your workspace, click Next and Create. The name, the permissions, the return address and MCP come filled in.')}
-          </li>
-          <li>{L('Em Basic Information › App Credentials, copie o Client ID e o Client Secret (Show) e cole aqui:', 'Under Basic Information › App Credentials, copy the Client ID and the Client Secret (Show) and paste them here:')}</li>
-        </ol>
-      )}
+        ))}
+      </ol>
       <label className="field">
-        <span className="field__label">{google ? L('ID do cliente', 'Client ID') : 'Client ID'}</span>
-        <input autoFocus spellCheck={false} disabled={busy} value={clientId} placeholder={google ? '1234567890-abc….apps.googleusercontent.com' : '1234567890.1234567890123'} onChange={(e) => setClientId(e.target.value)} />
+        <span className="field__label">{guide.idLabel}</span>
+        <input autoFocus spellCheck={false} disabled={busy} value={clientId} placeholder={guide.idPlaceholder} onChange={(e) => setClientId(e.target.value)} />
       </label>
       <label className="field">
-        <span className="field__label">{google ? L('Chave secreta do cliente', 'Client secret') : 'Client Secret'}</span>
-        <input type="password" spellCheck={false} disabled={busy} value={secret} placeholder={current?.clientId ? L('A mesma, ou uma nova', 'The same, or a new one') : google ? 'GOCSPX-…' : ''} onChange={(e) => setSecret(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && (e.preventDefault(), save())} />
+        <span className="field__label">{guide.secretLabel}</span>
+        <input type="password" spellCheck={false} disabled={busy} value={secret} placeholder={current?.clientId ? L('A mesma, ou uma nova', 'The same, or a new one') : guide.secretPlaceholder} onChange={(e) => setSecret(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && (e.preventDefault(), save())} />
       </label>
-      <p className="muted small">
-        {google
-          ? L(
-              'Com o app em teste, o Google pede pra entrar de novo a cada 7 dias. Pra não pedir, em Público-alvo clique em Publicar app: no login vai aparecer “O Google não verificou este app”. É o seu próprio app: clique em Avançado e continue.',
-              'While the app is in testing, Google asks you to sign in again every 7 days. To stop that, click Publish app under Audience: the sign-in will say “Google hasn’t verified this app”. It’s your own app: click Advanced and go on.'
-            )
-          : L(
-              'Num workspace de empresa, o admin pode precisar aprovar o app antes: o Slack avisa no login, e o pedido vai pra ele.',
-              'In a company workspace, an admin may need to approve the app first: Slack says so at sign-in, and the request goes to them.'
-            )}
-      </p>
-      {google && (
-        <p className="muted small">
-          {L('Prefere não configurar? A Composio, na loja, conecta o Google sem isso, mas seus dados passam pelos servidores dela.', "Rather not set this up? Composio, in the store, connects Google without it, but your data goes through its servers.")}
+      {guide.notes.map((n, i) => (
+        <p key={i} className="muted small">
+          {n}
         </p>
-      )}
+      ))}
       {error && <p className="catalog__error small">{error}</p>}
       <div className="modal__foot">
         <button className="btn btn--ghost" onClick={onClose}>
