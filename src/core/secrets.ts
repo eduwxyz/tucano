@@ -37,6 +37,23 @@ export function mainCipher(port: Electron.ParentPort): Cipher {
   return { encrypt: (s) => ask('encrypt', s), decrypt: (s) => ask('decrypt', s) }
 }
 
+// A saved value that's there but can't be opened: the system's key changed or wasn't given (the Keychain
+// said no). It stays as it was, encrypted: a later launch with the key back opens it again.
+export class UnreadableSecret extends Error {
+  constructor(
+    readonly key: string,
+    cause: unknown
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'UnreadableSecret'
+  }
+}
+
+export const unreadable = (e: unknown): UnreadableSecret | undefined => {
+  for (let x = e, i = 0; x && i < 5; x = (x as { cause?: unknown }).cause, i++) if (x instanceof UnreadableSecret) return x
+  return undefined
+}
+
 export class Secrets {
   constructor(
     private db: Db,
@@ -45,7 +62,13 @@ export class Secrets {
 
   async get(key: string): Promise<string | undefined> {
     const sealed = this.db.getSecret(key)
-    return sealed === undefined ? undefined : this.cipher.decrypt(sealed)
+    if (sealed === undefined) return undefined
+    try {
+      return await this.cipher.decrypt(sealed)
+    } catch (e) {
+      console.error(`[secrets] couldn't open ${key}; it stays saved`) // the key only: never the value
+      throw new UnreadableSecret(key, e)
+    }
   }
 
   async getJson<T>(key: string): Promise<T | undefined> {
