@@ -4,7 +4,7 @@
 // whoever asks while one runs shares it instead of starting another.
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { EngineId, EngineStatus } from '../shared/types'
-import { codexModels, detectClaude, detectCodex, detectCursor, detectGemini, detectGrok, detectOpenCode, detectPi, type CodexModel } from './engines/detect'
+import { codexModels, detectClaude, detectCodex, detectCursor, detectAntigravity, detectGrok, detectOpenCode, detectPi, type CodexModel } from './engines/detect'
 import { withInstallDirs } from './platform'
 
 export interface AccountLogin {
@@ -26,7 +26,7 @@ export interface OneFinding {
   codexCatalog?: CodexModel[]
 }
 
-const IDS: EngineId[] = ['claude', 'codex', 'opencode', 'pi', 'gemini', 'cursor', 'grok']
+const IDS: EngineId[] = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'cursor', 'grok']
 
 // Before the first check ever: nothing known yet, and the screens can say so.
 export const checkingFindings = (): EngineFindings => ({
@@ -136,8 +136,8 @@ export async function detectEngine(engine: EngineId, codexHome: string): Promise
       return found(await detectOpenCode())
     case 'pi':
       return found(await detectPi())
-    case 'gemini':
-      return found(await detectGemini())
+    case 'antigravity':
+      return found(await detectAntigravity())
     case 'cursor':
       return found(await detectCursor())
     case 'grok':

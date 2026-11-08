@@ -26,7 +26,7 @@ import { claudeEngine, userProvider } from './engines/claude'
 import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
-import { geminiAppDir, geminiEngine } from './engines/gemini'
+import { antigravityAppDir, antigravityEngine } from './engines/antigravity'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
@@ -129,7 +129,7 @@ const fakeBrokenOpencode = fake && process.env['TUCANO_FAKE_BROKEN_OPENCODE'] ==
 const OPENCODE_CRASH = "TypeError: Cannot read properties of undefined (reading 'providers')\n    at loadConfig (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/config.js:212:30)\n    at async main (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/index.js:18:3)"
 const PI_EXPIRED = 'OAuth refresh failed for anthropic: 400 {"type":"error","error":{"type":"invalid_grant","message":"Refresh token expired"}}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/oauth.js:88:11)\n    at async refreshAnthropic (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/anthropic.js:41:5)\n    at async getAuth (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/index.js:23:12)'
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
   listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'], ...(fakeBrokenPi ? { pi: ['anthropic/claude-haiku-4-5'] } : {}) },
   codexCatalog: []
 })
@@ -317,13 +317,13 @@ function moved(id: EngineId): Parameters<typeof relocating>[1] {
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
       opencode: relocating(opencodeEngine(() => engines.opencode.path, join(dataDir, 'opencode-home'), loginEnv, () => engines.opencode.version), moved('opencode')),
       pi: relocating(piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv), moved('pi')),
-      gemini: relocating(geminiEngine(() => engines.gemini.path, geminiAppDir(dataDir), loginEnv), moved('gemini')),
+      antigravity: relocating(antigravityEngine(() => engines.antigravity.path, antigravityAppDir(dataDir), loginEnv), moved('antigravity')),
       cursor: relocating(cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv), moved('cursor')),
       grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok'))
     }

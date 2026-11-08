@@ -179,13 +179,13 @@ describe('importing agents from OpenBot', () => {
   })
 
   it('keeps a Gemini agent on Gemini, and moves a model whose CLI is not ready to one that is', () => {
-    const gem = { ...gil, key: 'gem', name: 'Gem', provider: 'gemini', model: 'gemini-3-pro', skills: [] }
+    const gem = { ...gil, key: 'gem', name: 'Gem', provider: 'antigravity', model: 'gemini-3-pro', skills: [] }
     const cur = { ...gil, key: 'cur', name: 'Cur', provider: 'cursor', model: 'composer-2', skills: [] }
     const db = fresh()
-    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': transfer([gem, cur]) }))), { ...opts, defaultModel: 'gemini:gemini-3-pro', works: (id) => id.startsWith('gemini:') })
-    expect(db.agents().map((a) => [a.name, a.modelId])).toEqual([['Gem', 'gemini:gemini-3-pro'], ['Cur', 'gemini:gemini-3-pro']])
+    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': transfer([gem, cur]) }))), { ...opts, defaultModel: 'antigravity:gemini-3-pro', works: (id) => id.startsWith('antigravity:') })
+    expect(db.agents().map((a) => [a.name, a.modelId])).toEqual([['Gem', 'antigravity:gemini-3-pro'], ['Cur', 'antigravity:gemini-3-pro']])
     expect(r.summary).not.toContain('não roda no Tucano')
-    expect(r.summary).toContain('@cur: o modelo cursor:composer-2 (o CLI dele não está pronto aqui: ficou gemini:gemini-3-pro)')
+    expect(r.summary).toContain('@cur: o modelo cursor:composer-2 (o CLI dele não está pronto aqui: ficou antigravity:gemini-3-pro)')
   })
 
   it('brings at most so many agents, memories and routines, and says how many stayed out', () => {

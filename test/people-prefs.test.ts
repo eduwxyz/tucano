@@ -15,7 +15,7 @@ const ready = { installed: true, loggedIn: true }
 const base: Settings = {
   workspaceName: 'Ana',
   context: '',
-  engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready },
+  engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready },
   routerModel: 'haiku',
   memoryModel: 'haiku',
   memoryLearning: 'auto',

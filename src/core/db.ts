@@ -488,6 +488,16 @@ export const MIGRATIONS = [
   // sync after this, which tells the two apart with the rules from before.
   `
   ALTER TABLE connector_tools ADD COLUMN cls_auto TEXT;
+  `,
+  // Gemini CLI was replaced by the Antigravity CLI: what ran on the "gemini" harness now runs on
+  // "antigravity", the same login and models (its own engine maps the old model names).
+  `
+  UPDATE settings SET value = REPLACE(value, '"gemini"', '"antigravity"') WHERE key = 'harnesses';
+  UPDATE settings SET value = REPLACE(value, '"gemini:', '"antigravity:') WHERE value LIKE '%"gemini:%';
+  UPDATE agents SET model = 'antigravity:' || substr(model, 8) WHERE model LIKE 'gemini:%';
+  UPDATE agents SET fallback_model = 'antigravity:' || substr(fallback_model, 8) WHERE fallback_model LIKE 'gemini:%';
+  UPDATE receipts SET engine = 'antigravity' WHERE engine = 'gemini';
+  UPDATE receipts SET model = 'antigravity:' || substr(model, 8) WHERE model LIKE 'gemini:%';
   `
 ]
 

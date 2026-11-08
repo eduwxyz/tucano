@@ -6,7 +6,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 > **Em português:**
 >
+> **Mudou:** o harness do Gemini CLI virou o do **Antigravity CLI** (`agy`), o CLI de agente do Google, com os modelos Gemini 4 e 3.8 e também Claude e GPT-OSS pela mesma conta Google. Quem usava o Gemini passa pro Antigravity sem refazer nada: os agentes, os modelos e os recibos vêm junto. Cada resposta roda isolada, sem acesso ao terminal, aos seus arquivos nem às suas configurações do `agy`, e só com as ferramentas do Tucano. Obrigado, @Vialc!
+>
 > **Correções:** um print anexado não vai mais pro modelo a cada resposta: ele vai só na mensagem em que você mandou (depois o agente sabe o nome e, se precisar, olha de novo), o que acaba com o agente comentando um "print novo" e gastando tokens à toa; e um conector do Google sem login válido mostra **Autorizar** em vez de "conectado", e uma chamada recusada diz o motivo (falta login, e-mail fora dos usuários de teste, permissão faltando, API não ativada ou Developer Preview).
+
+### Changed
+
+- **The Gemini CLI harness is now the Antigravity CLI (`agy`).** Google's agent CLI runs Gemini 4 and 3.8, and Claude and GPT-OSS too, on the same Google account; it's detected by `agy models`, which also says whether it's signed in (the login is in the keychain, not a file). What ran on the "gemini" harness moves over by itself: the harness switched on, agents' models and fallbacks, and receipts; an old Gemini CLI model name runs as the Antigravity one it became. Each turn runs in a folder of its own with a home of its own, so none of the person's `agy` settings, MCP servers, rules, skills, plugins or hooks come in: its settings deny the CLI's own shell, file reads and writes, page reads (unless the agent has the web) and browser, and allow only the gateway's tools. A denied tool comes back to the model as an error and the reply goes on. The agent's instructions are the workspace's rules file, or the top of the prompt when they're over its 24 KB limit. On macOS the turn's home links in only the keychain. `search_web` has no permission of its own and stays on; it shows as a web search, so what it brings in counts as content from outside. Images can't go along (the CLI takes text only), and the agent is told. Thanks, @Vialc ([#158](https://github.com/eduwxyz/tucano/pull/158)).
 
 ### Fixed
 
