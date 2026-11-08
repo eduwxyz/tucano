@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- build.mjs publishes this page twice: as is at /pro/, and with the data-en texts at /en/pro/.
+     Its look is the home page's: build.mjs puts index.html's <style> where STYLE:home is. -->
+<title data-en="Tucano Pro · Your AI team in the cloud">Tucano Pro · Seu time de IA na nuvem</title>
+<meta name="description" content="O Tucano Pro hospeda o seu Tucano: seus agentes trabalham 24 horas, com a assinatura de IA que você já tem ou com a IA inclusa, e você usa no navegador ou no iPhone. Entre na lista do beta." data-en="Tucano Pro hosts your Tucano: your agents work around the clock, with the AI subscription you already have or with the AI included, and you use it in the browser or on your iPhone. Join the beta waitlist.">
+<meta property="og:title" content="Tucano Pro · Seu time de IA na nuvem" data-en="Tucano Pro · Your AI team in the cloud">
+<meta property="og:description" content="Feche o notebook. O time continua. Entre na lista do beta." data-en="Close the laptop. The team keeps going. Join the beta waitlist.">
+<meta property="og:image" content="https://tucano.sh/assets/brand/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://tucano.sh/assets/brand/og.png">
+<meta name="twitter:site" content="@tucanosh">
+<meta name="theme-color" content="#F3EFE6">
+<link rel="icon" type="image/png" href="/assets/brand/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/brand/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<!-- STYLE:home -->
+<style>
+header .lang a { display: grid; place-items: center; height: 30px; min-width: 38px; padding: 0 10px; border-radius: 99px; font: 600 13px/1 var(--sans); letter-spacing: .03em; color: var(--ink-3); text-decoration: none; }
+html[lang="pt-BR"] .lang a[hreflang="pt-BR"], html[lang="en"] .lang a[hreflang="en"] { background: var(--ink); color: var(--cream); }
+.prohero { position: relative; padding: 150px 0 90px; overflow: hidden; }
+.prohero h1 { font-size: clamp(54px, 7vw, 108px); margin-top: 26px; max-width: 980px; }
+.prohero .lead { margin-top: 30px; max-width: 600px; }
+.prohero .join { margin-top: 38px; }
+.prohero .halo { position: absolute; right: -200px; top: -160px; width: 640px; height: 640px; border-radius: 50%; background: radial-gradient(circle, #FFE3C4 0%, rgba(255, 227, 196, 0) 68%); pointer-events: none; }
+.plans { padding: 150px 0 120px; }
+.plans .cards { margin-top: 56px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+.plan { position: relative; padding: 32px; border-radius: 30px; background: var(--paper); box-shadow: 0 0 0 1px rgba(20, 15, 5, .05), 0 30px 60px -40px rgba(40, 25, 5, .35); display: flex; flex-direction: column; overflow: hidden; }
+.plan .tag { align-self: flex-start; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 99px; background: var(--cream); font: 600 12.5px/1 var(--sans); color: var(--ink-2); }
+.plan h3 { margin-top: 18px; font: 720 34px/1.02 var(--display); letter-spacing: -.045em; }
+.plan > p { margin-top: 12px; color: var(--ink-2); font-size: 16px; }
+.plan ul { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 11px; }
+.plan li { display: flex; gap: 12px; font-size: 15px; line-height: 1.45; }
+.plan li::before { content: '✓'; flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: rgba(31, 157, 85, .12); color: var(--ok); font: 800 11.5px/1 var(--sans); margin-top: 1px; }
+.plan > .price { color: var(--ink); }
+.plan.ink > .price { color: #fff; }
+.plan .price { margin-top: 22px; font: 750 44px/1 var(--display); letter-spacing: -.045em; }
+.plan .price small { font: 500 15px/1 var(--sans); letter-spacing: 0; color: var(--ink-3); margin-left: 4px; }
+.plan.beak .price small { color: rgba(20, 15, 5, .6); }
+.plan.ink .price small { color: #8C8478; }
+.plan .foot { margin-top: auto; padding-top: 30px; font-size: 14px; color: var(--ink-3); }
+.plan .foot a { color: var(--ink-2); font-weight: 600; }
+.plan .logos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
+.plan .logos span { height: 30px; padding: 0 11px; border-radius: 99px; display: inline-flex; align-items: center; background: var(--cream); font: 600 12.5px/1 var(--sans); color: var(--ink-2); }
+.plan.beak { background: var(--beak); }
+.plan.beak .tag { background: rgba(20,15,5,.1); color: var(--ink); }
+.plan.beak > p { color: rgba(20, 15, 5, .72); }
+.plan.beak .logos span { background: rgba(255,253,248,.55); }
+.plan.beak li::before { background: rgba(20,15,5,.1); color: var(--ink); }
+.plan.beak .foot { color: rgba(20, 15, 5, .62); }
+.plan.ink { background: var(--ink); color: #EDE7DA; }
+.plan.ink .tag { background: var(--beak); color: var(--ink); }
+.plan.ink > p { color: #A39A8E; }
+.plan.ink li::before { background: rgba(255, 140, 36, .18); color: var(--beak); }
+.plan.ink .foot { color: #8C8478; }
+.plans .note { margin-top: 22px; font-size: 14.5px; color: var(--ink-3); }
+.terms { padding: 20px 0 120px; }
+.terms .grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 70px; }
+.terms ul { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.terms li { padding: 20px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 16px; }
+.terms li b { display: block; color: var(--ink); font: 650 19px/1.3 var(--display); letter-spacing: -.02em; margin-bottom: 4px; }
+.end .join { margin-top: 0; }
+.end .join-fine { color: #8C8478; }
+.end .join-msg.ok { color: #EDE7DA; }
+@media (max-width: 1080px) { .plans .cards, .terms .grid { grid-template-columns: minmax(0, 1fr); } .terms .grid { gap: 30px; } }
+@media (max-width: 640px) { .prohero { padding: 110px 0 60px; } .plan { padding: 26px; border-radius: 26px; } }
+</style>
+</head>
+<body>
+<script>
+// A visitor who picked the other language on tucano.sh goes to this page in that language.
+;(() => {
+  let l
+  try { l = localStorage.getItem('tucano-lang') } catch {}
+  const other = (l === 'en' || l === 'pt-BR') && l !== document.documentElement.lang && document.querySelector(`link[rel="alternate"][hreflang="${l}"]`)
+  if (other) location.replace(other.href)
+})()
+</script>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <clipPath id="mark-clip"><rect width="100" height="100" rx="28"/></clipPath>
+    <symbol id="mark" viewBox="0 0 100 100">
+      <g clip-path="url(#mark-clip)">
+        <rect width="100" height="100" fill="#F1ECE2"/>
+        <circle cx="27" cy="73" r="48" fill="#121212"/>
+        <circle cx="38" cy="47" r="14" fill="#fff"/>
+        <circle cx="43" cy="47" r="5.5" fill="#121212"/>
+        <path d="M53 24 Q84 25 93 44 L96 57 L53 57 Z" fill="#FF8C24"/>
+        <path d="M53 57 L95 57 Q86 70 53 71 Z" fill="#E5531F"/>
+        <path d="M83 57 A9 12 0 0 1 97 47 L97 57 Z" fill="#121212"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="/" data-en-href="/en/"><svg><use href="#mark"/></svg><span>tucano</span></a>
+    <nav class="links">
+      <a href="#pro"><span lang="pt-BR">Na nuvem</span><span lang="en">In the cloud</span></a>
+      <a href="#planos"><span lang="pt-BR">Planos</span><span lang="en">Plans</span></a>
+      <a href="#termos"><span lang="pt-BR">Termos do beta</span><span lang="en">Beta terms</span></a>
+      <a href="#perguntas"><span lang="pt-BR">Perguntas</span><span lang="en">FAQ</span></a>
+    </nav>
+    <div class="right">
+      <div class="lang" role="group" aria-label="Idioma / Language"><a class="langlink" href="/pro/" hreflang="pt-BR">PT</a><a class="langlink" href="/en/pro/" hreflang="en">EN</a></div>
+      <a class="btn btn--ghost" href="/" data-en-href="/en/"><span lang="pt-BR">Baixar o Tucano</span><span lang="en">Get Tucano</span></a>
+      <a class="btn btn--beak" href="#lista"><span lang="pt-BR">Entrar na lista</span><span lang="en">Join the waitlist</span></a>
+    </div>
+  </div>
+</header>
+
+<main>
+<section class="hero prohero" id="lista">
+  <div class="halo" aria-hidden="true"></div>
+  <div class="wrap" style="position:relative">
+    <div class="eyebrow rv"><span lang="pt-BR">Tucano Pro · beta</span><span lang="en">Tucano Pro · beta</span></div>
+    <h1 class="display rv"><span lang="pt-BR">Seu time de IA, </span><span lang="en">Your AI team, </span><span class="swoosh"><span lang="pt-BR">sempre ligado.</span><span lang="en">always on.</span><svg viewBox="0 0 300 30" preserveAspectRatio="none"><path pathLength="1" d="M4 22 C 80 6, 200 4, 296 14" stroke="#FF8C24" stroke-width="9" stroke-linecap="round" fill="none"/></svg></span></h1>
+    <p class="lead rv"><span lang="pt-BR">A gente hospeda o seu Tucano. Seus agentes trabalham 24 horas, com a assinatura de IA que você já tem ou com a IA inclusa, e você usa no navegador ou no iPhone, de qualquer lugar. Sem instalar nada.</span><span lang="en">We host your Tucano. Your agents work around the clock, with the AI subscription you already have or with the AI included, and you use it in the browser or on your iPhone, from anywhere. Nothing to install.</span></p>
+    <div class="rv"><form class="join" novalidate>
+  <input type="email" name="email" autocomplete="email" aria-label="E-mail" required>
+  <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px">
+  <button type="submit"><span lang="pt-BR">Entrar na lista</span><span lang="en">Join the waitlist</span></button>
+  <div class="ts"></div>
+</form>
+<p class="join-msg" hidden></p>
+<p class="join-fine"><span lang="pt-BR">Acesso antecipado, pago e com vagas limitadas: quando chegar a sua vez, o convite traz o link pra assinar. 7 dias pra desistir com reembolso. Ao entrar, você concorda com os <a href="#termos">termos do beta</a> e a <a href="/privacidade/">privacidade</a>.</span><span lang="en">Paid early access, with limited spots: when it's your turn, the invite comes with the link to subscribe. 7 days to cancel for a full refund. By joining, you agree to the <a href="#termos">beta terms</a> and the <a href="/en/privacy/">privacy policy</a>.</span></p>
+</div>
+  </div>
+</section>
+
+<!-- ============ Tucano Pro (beta) ============ -->
+<section class="pro" id="pro">
+  <div class="glow" aria-hidden="true"></div>
+  <div class="stars" id="proStars" aria-hidden="true"></div>
+  <div class="wrap grid">
+    <div class="rv">
+      <div class="eyebrow"><span lang="pt-BR">Tucano Pro · beta</span><span lang="en">Tucano Pro · beta</span></div>
+      <h2 class="h2" style="margin-top:18px"><span lang="pt-BR">Feche o notebook. <em>O time continua.</em></span><span lang="en">Close the laptop. <em>The team keeps going.</em></span></h2>
+      <p class="lead"><span lang="pt-BR">No Tucano Pro, o seu Tucano roda na nuvem, 24 horas. Use a assinatura de IA que você já tem, ou deixe a IA com a gente. Sem instalar nada: você usa no navegador ou no iPhone, de qualquer lugar.</span><span lang="en">With Tucano Pro, your Tucano runs in the cloud, around the clock. Use the AI subscription you already have, or leave the AI to us. Nothing to install: use it in the browser or on your iPhone, from anywhere.</span></p>
+      <div class="profacts">
+        <div><b><span lang="pt-BR">Sua IA ou a nossa</span><span lang="en">Your AI or ours</span></b><span lang="pt-BR">Claude Code, Codex, Gemini e os outros, ou a IA inclusa.</span><span lang="en">Claude Code, Codex, Gemini and the rest, or the AI included.</span></div>
+        <div><b><span lang="pt-BR">Sempre ligado</span><span lang="en">Always on</span></b><span lang="pt-BR">Rotinas e gatilhos rodam de madrugada.</span><span lang="en">Routines and triggers run overnight.</span></div>
+        <div><b><span lang="pt-BR">Só seu</span><span lang="en">Yours alone</span></b><span lang="pt-BR">Um Tucano isolado, com os seus dados.</span><span lang="en">An isolated Tucano, with your data.</span></div>
+      </div>
+    </div>
+    <div class="stage rv" aria-hidden="true">
+      <div class="phone"><div class="scr"><div class="isl"></div><div class="clock"><small><span lang="pt-BR">quarta-feira, 12 de novembro</span><span lang="en">Wednesday, November 12</span></small><b id="proClock">3:12</b></div><div class="notes" id="proNotes"></div></div></div>
+      <div class="laptop" style="left:-12%;top:-3%"><svg viewBox="0 0 34 24"><rect x="4" y="16" width="26" height="3" rx="1.5" fill="#141210"/><rect x="6" y="13" width="22" height="3" rx="1" fill="#8C8478"/></svg><div><b><span lang="pt-BR">Seu notebook</span><span lang="en">Your laptop</span></b><small><span lang="pt-BR">fechado desde 23:40</span><span lang="en">closed since 11:40 p.m.</span></small></div></div>
+    </div>
+  </div>
+</section>
+
+
+<section class="plans" id="planos">
+  <div class="wrap">
+    <div class="rv" style="max-width:760px">
+      <div class="eyebrow"><span lang="pt-BR">Planos</span><span lang="en">Plans</span></div>
+      <h2 class="h2" style="margin-top:18px"><span lang="pt-BR">Do seu computador <em>à nuvem.</em></span><span lang="en">From your computer <em>to the cloud.</em></span></h2>
+    </div>
+    <div class="cards">
+      <article class="plan rv">
+        <span class="tag"><span lang="pt-BR">Grátis · open source</span><span lang="en">Free · open source</span></span>
+        <h3><span lang="pt-BR">No seu computador</span><span lang="en">On your computer</span></h3>
+        <p><span lang="pt-BR">O Tucano de sempre: roda na sua máquina, com a sua assinatura de IA.</span><span lang="en">The Tucano you know: it runs on your machine, with your AI subscription.</span></p>
+        <p class="price"><span lang="pt-BR">R$ 0<small>/mês</small></span><span lang="en">US$0<small>/mo</small></span></p>
+        <ul>
+          <li><span lang="pt-BR">Tudo fica no seu computador</span><span lang="en">Everything stays on your computer</span></li>
+          <li><span lang="pt-BR">Funciona enquanto o computador está ligado</span><span lang="en">Works while your computer is on</span></li>
+          <li><span lang="pt-BR">No iPhone, pelo Wi-Fi de casa</span><span lang="en">On the iPhone, over your home Wi-Fi</span></li>
+        </ul>
+        <p class="foot"><a href="/" data-en-href="/en/"><span lang="pt-BR">Baixar pro Mac, Windows ou Linux →</span><span lang="en">Download for Mac, Windows or Linux →</span></a></p>
+      </article>
+      <article class="plan beak rv">
+        <span class="tag"><span lang="pt-BR">Acesso antecipado</span><span lang="en">Early access</span></span>
+        <h3><span lang="pt-BR">Na nuvem, com a sua IA</span><span lang="en">In the cloud, with your AI</span></h3>
+        <p><span lang="pt-BR">A gente hospeda; você conecta a assinatura que já paga.</span><span lang="en">We host it; you connect the subscription you already pay for.</span></p>
+        <p class="price"><span lang="pt-BR">R$ 79<small>/mês</small></span><span lang="en">US$15<small>/mo</small></span></p>
+        <div class="logos"><span>Claude Code</span><span>Codex</span><span>Gemini</span><span>Cursor</span><span>OpenCode</span><span>Pi</span><span>Grok</span></div>
+        <ul>
+          <li><span lang="pt-BR">Rotinas e gatilhos 24 horas, com o computador desligado</span><span lang="en">Routines and triggers around the clock, with your computer off</span></li>
+          <li><span lang="pt-BR">No iPhone, de qualquer lugar</span><span lang="en">On the iPhone, from anywhere</span></li>
+          <li><span lang="pt-BR">Você entra na sua conta de IA pelo próprio Tucano</span><span lang="en">You sign in to your AI account from within Tucano</span></li>
+        </ul>
+        <p class="foot"><span lang="pt-BR">Pra quem já tem Claude, ChatGPT ou outro plano.</span><span lang="en">For people who already have Claude, ChatGPT or another plan.</span></p>
+      </article>
+      <article class="plan ink rv">
+        <span class="tag"><span lang="pt-BR">Acesso antecipado</span><span lang="en">Early access</span></span>
+        <h3><span lang="pt-BR">Na nuvem, com a IA inclusa</span><span lang="en">In the cloud, AI included</span></h3>
+        <p><span lang="pt-BR">Nada pra configurar: abre e usa.</span><span lang="en">Nothing to set up: open it and go.</span></p>
+        <p class="price"><span lang="pt-BR">R$ 169<small>/mês</small></span><span lang="en">US$32<small>/mo</small></span></p>
+        <ul>
+          <li><span lang="pt-BR">Sem conta na Anthropic ou na OpenAI, sem chave</span><span lang="en">No Anthropic or OpenAI account, no key</span></li>
+          <li><span lang="pt-BR">Rotinas e gatilhos 24 horas</span><span lang="en">Routines and triggers around the clock</span></li>
+          <li><span lang="pt-BR">No iPhone, de qualquer lugar</span><span lang="en">On the iPhone, from anywhere</span></li>
+          <li><span lang="pt-BR">Um limite mensal de uso de IA</span><span lang="en">A monthly AI usage limit</span></li>
+        </ul>
+        <p class="foot"><span lang="pt-BR">Pra quem não quer saber de assinatura de IA.</span><span lang="en">For people who'd rather skip AI subscriptions.</span></p>
+      </article>
+    </div>
+    <p class="note rv"><span lang="pt-BR">Preço de acesso antecipado: quem entra agora mantém esse valor. As vagas abrem aos poucos; o convite chega por e-mail com o link pra assinar o plano que você escolher.</span><span lang="en">Early-access price: whoever joins now keeps it. Spots open a few at a time; the invite arrives by email with the link to subscribe to the plan you choose.</span></p>
+  </div>
+</section>
+
+<section class="terms" id="termos">
+  <div class="wrap grid">
+    <div class="rv"><div class="eyebrow"><span lang="pt-BR">Termos do beta</span><span lang="en">Beta terms</span></div><h2 class="h2" style="margin-top:18px"><span lang="pt-BR">O combinado, <em>em cinco linhas.</em></span><span lang="en">The deal, <em>in five lines.</em></span></h2></div>
+    <ul class="rv">
+      <li><b><span lang="pt-BR">Pago, com 7 dias de garantia</span><span lang="en">Paid, with a 7-day guarantee</span></b><span lang="pt-BR">R$ 79/mês com a sua IA, ou R$ 169/mês com a IA inclusa, no cartão, todo mês. Se desistir em até 7 dias, devolvemos tudo; depois, cancele quando quiser, sem multa, e o acesso vai até o fim do mês pago.</span><span lang="en">US$15/mo with your AI, or US$32/mo with the AI included, by card, monthly. Cancel within 7 days for a full refund; after that, cancel anytime, with no fee, and access lasts until the end of the paid month.</span></li>
+      <li><b><span lang="pt-BR">Limite de uso de IA</span><span lang="en">An AI usage limit</span></b><span lang="pt-BR">No plano com a IA inclusa, cada Tucano tem um limite por mês e um por dia. Quando acaba, os agentes param de responder até renovar; o resto continua lá.</span><span lang="en">On the plan with the AI included, each Tucano has a monthly and a daily limit. When it runs out, the agents stop answering until it renews; everything else stays there.</span></li>
+      <li><b><span lang="pt-BR">É um beta</span><span lang="en">It's a beta</span></b><span lang="pt-BR">Pode cair, mudar ou ter problemas. A gente faz backup, mas guarde em outro lugar o que for crítico.</span><span lang="en">It may go down, change or have problems. We keep backups, but keep anything critical somewhere else too.</span></li>
+      <li><b><span lang="pt-BR">Uso justo</span><span lang="en">Fair use</span></b><span lang="pt-BR">Spam, abuso, conteúdo ilegal ou tentativa de burlar o limite encerram o acesso.</span><span lang="en">Spam, abuse, illegal content or trying to get around the limit ends the access.</span></li>
+      <li><b><span lang="pt-BR">Seus dados são seus</span><span lang="en">Your data is yours</span></b><span lang="pt-BR">Se você sair, ou se o beta acabar, a gente avisa antes e você pode pedir uma cópia. Depois, o seu Tucano é apagado.</span><span lang="en">If you leave, or the beta ends, we'll tell you first and you can ask for a copy. Then your Tucano is deleted.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="faq" id="perguntas">
+  <div class="wrap grid">
+    <div class="rv"><div class="eyebrow"><span lang="pt-BR">Perguntas</span><span lang="en">FAQ</span></div><h2 class="h2" style="margin-top:18px"><span lang="pt-BR">Antes de <em>entrar na lista.</em></span><span lang="en">Before you <em>join.</em></span></h2></div>
+    <div class="qa rv" data-faq>
+      <details open><summary><span lang="pt-BR">Qual a diferença pro Tucano grátis?</span><span lang="en">How is it different from the free Tucano?</span></summary><p><span lang="pt-BR">O Tucano grátis roda no seu computador e funciona enquanto ele está ligado; no iPhone, só no Wi-Fi de casa. No Tucano Pro, ele roda num servidor nosso, 24 horas, e você usa de qualquer lugar.</span><span lang="en">The free Tucano runs on your computer and works while it's on; on the iPhone, only on your home Wi-Fi. With Tucano Pro, it runs on our server, around the clock, and you use it from anywhere.</span></p></details>
+      <details><summary><span lang="pt-BR">Posso usar a minha assinatura do Claude ou do ChatGPT?</span><span lang="en">Can I use my Claude or ChatGPT subscription?</span></summary><p><span lang="pt-BR">Pode. No plano "com a sua IA", você entra na sua conta pelo próprio Tucano: Claude Code, Codex, Gemini, Cursor, OpenCode, Pi ou Grok. O Tucano não vê a sua senha, e a assinatura é usada só no seu Tucano.</span><span lang="en">Yes. On the "with your AI" plan, you sign in to your account from within Tucano: Claude Code, Codex, Gemini, Cursor, OpenCode, Pi or Grok. Tucano never sees your password, and the subscription is used only in your Tucano.</span></p></details>
+      <details><summary><span lang="pt-BR">Quanto custa?</span><span lang="en">How much does it cost?</span></summary><p><span lang="pt-BR">R$ 79/mês na nuvem com a sua IA, e R$ 169/mês com a IA inclusa. É o preço de acesso antecipado: quem entra agora mantém esse valor. Você tem 7 dias pra desistir com reembolso, e cancela quando quiser.</span><span lang="en">US$15/mo in the cloud with your AI, and US$32/mo with the AI included. It's the early-access price: whoever joins now keeps it. You have 7 days to cancel for a full refund, and you can cancel anytime.</span></p></details>
+      <details><summary><span lang="pt-BR">Onde ficam os meus dados?</span><span lang="en">Where does my data live?</span></summary><p><span lang="pt-BR">Num servidor na Alemanha, num Tucano só seu, separado dos outros. O que você pede aos agentes vai pro provedor de IA pra gerar a resposta. Os detalhes estão na <a href="/privacidade/" data-en-href="/en/privacy/">política de privacidade</a>.</span><span lang="en">On a server in Germany, in a Tucano of your own, kept apart from the others. What you ask the agents goes to the AI provider to make the answer. The details are in the <a href="/privacidade/" data-en-href="/en/privacy/">privacy policy</a>.</span></p></details>
+      <details><summary><span lang="pt-BR">Quando eu entro?</span><span lang="en">When do I get in?</span></summary><p><span lang="pt-BR">As vagas abrem aos poucos, na ordem da lista. Quando chegar a sua vez, o convite vai pro seu e-mail, de contato@tucano.sh, com o link pra assinar. Pagou, o seu Tucano fica pronto em até 24 horas.</span><span lang="en">Spots open a few at a time, in waitlist order. When it's your turn, the invite goes to your email, from contato@tucano.sh, with the link to subscribe. Once you pay, your Tucano is ready within 24 hours.</span></p></details>
+    </div>
+  </div>
+</section>
+</main>
+
+<section class="end">
+  <div class="wrap">
+    <div class="top2">
+      <h2 class="h2 rv"><span lang="pt-BR">Feche o notebook. <em>O time continua.</em></span><span lang="en">Close the laptop. <em>The team keeps going.</em></span></h2>
+      <div class="acts rv" style="flex:1;max-width:520px"><form class="join" novalidate>
+  <input type="email" name="email" autocomplete="email" aria-label="E-mail" required>
+  <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px">
+  <button type="submit"><span lang="pt-BR">Entrar na lista</span><span lang="en">Join the waitlist</span></button>
+  <div class="ts"></div>
+</form>
+<p class="join-msg" hidden></p>
+<p class="join-fine"><span lang="pt-BR">Acesso antecipado, pago e com vagas limitadas: quando chegar a sua vez, o convite traz o link pra assinar. 7 dias pra desistir com reembolso. Ao entrar, você concorda com os <a href="#termos">termos do beta</a> e a <a href="/privacidade/">privacidade</a>.</span><span lang="en">Paid early access, with limited spots: when it's your turn, the invite comes with the link to subscribe. 7 days to cancel for a full refund. By joining, you agree to the <a href="#termos">beta terms</a> and the <a href="/en/privacy/">privacy policy</a>.</span></p>
+</div>
+    </div>
+    <div class="word" aria-hidden="true"><span class="big">tucano</span></div>
+    <footer>
+      <span><span lang="pt-BR">Feito no Brasil.</span><span lang="en">Made in Brazil.</span></span>
+      <nav><a href="/" data-en-href="/en/">tucano.sh</a><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://discord.gg/uQp4x7wUgT">Discord</a><a href="/suporte/" data-en-href="/en/support/"><span lang="pt-BR">Suporte</span><span lang="en">Support</span></a><a href="/privacidade/" data-en-href="/en/privacy/"><span lang="pt-BR">Privacidade</span><span lang="en">Privacy</span></a></nav>
+    </footer>
+  </div>
+</section>
+
+<script>
+// The header shades once the page scrolls; sections rise into view; PT | EN remembers the choice.
+;(() => {
+  if (/[?&]shot/.test(location.search)) document.documentElement.classList.add('still')
+  const hdr = document.getElementById('top')
+  const onScroll = () => hdr.classList.toggle('scrolled', scrollY > 10)
+  addEventListener('scroll', onScroll, { passive: true })
+  onScroll()
+  const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && (e.target.classList.add('in'), io.unobserve(e.target))), { threshold: .12 })
+  document.querySelectorAll('.rv').forEach((e) => io.observe(e))
+  document.querySelectorAll('.lang a').forEach((a) => a.addEventListener('click', () => { try { localStorage.setItem('tucano-lang', a.hreflang) } catch {} }))
+})()
+</script>
+<!-- SCRIPT:pro -->
+</body>
+</html>

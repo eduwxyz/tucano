@@ -7,6 +7,7 @@ import { agentById, amAdmin, archiveAgent, canEditChannel, isTeam, openTuca, cre
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
+import { LoginHost } from './LoginTerminal'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
 
@@ -15,6 +16,7 @@ export function Dialogs(): ReactNode {
     <>
       <DialogBody />
       <ConfirmHost />
+      <LoginHost />
     </>
   )
 }

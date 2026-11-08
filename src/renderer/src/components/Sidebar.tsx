@@ -1,9 +1,11 @@
 import { L } from '../../../shared/lang'
-import { memo, useCallback, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { isWaiting, mineIn, waitingIn, waitingTitle, type Waiting } from './waiting'
+import { memo, useCallback, useId, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
   archiveAgent,
   isWorking,
+  messagesIn,
   openTuca,
   isTeam,
   deleteConversation,
@@ -27,13 +29,15 @@ import {
   teamMode,
   youPerson,
   type Agent,
+  type State,
   type View
 } from '../store'
+import type { SidebarPart } from '../../../shared/onboarding'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { call } from '../rpc'
 import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
-import { GettingStarted } from './Onboarding'
+import { MissionsCard, useSidebarParts } from './Missions'
 import { UpdateNote } from './Update'
 import { WorkspaceSelector } from './Workspaces'
 import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } from './ui'
@@ -41,16 +45,19 @@ import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } fr
 // The wiki stays lit on any of its pages.
 const same = (a: View | null, b: View): boolean => (b.kind === 'wiki' ? a?.kind === 'wiki' : JSON.stringify(a) === JSON.stringify(b))
 
-function NavItem({ view, icon, label, badge }: { view: View; icon: IconName; label: string; badge?: number }): ReactNode {
+// `fresh`: a mission just brought it (a new install's short sidebar): tagged until it's opened.
+function NavItem({ view, icon, label, badge, fresh }: { view: View; icon: IconName; label: string; badge?: number; fresh?: () => void }): ReactNode {
   const active = useStore((s) => same(s.view, view))
   return (
-    <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate(view)}>
+    <button className={`nav-item ${active ? 'is-active' : ''} ${fresh ? 'is-fresh' : ''}`} onClick={() => (fresh?.(), navigate(view))}>
       <Icon name={icon} />
       <span className="nav-item__label">{label}</span>
       {badge ? (
         <span key={badge} className="badge">
           {badge}
         </span>
+      ) : fresh ? (
+        <span className="nav-item__new">{L('NOVO', 'NEW')}</span>
       ) : null}
     </button>
   )
@@ -59,7 +66,7 @@ function NavItem({ view, icon, label, badge }: { view: View; icon: IconName; lab
 // The Tuca is a screen, not one of the agents: here at the top, and behind the "+" for a new agent.
 function TucaItem(): ReactNode {
   return (
-    <button className="nav-item" onClick={openTuca} title={L('Monte um agente conversando com o Tuca', 'Build an agent by chatting with Tuca')}>
+    <button className="nav-item" data-coach="tuca" onClick={openTuca} title={L('Monte um agente conversando com o Tuca', 'Build an agent by chatting with Tuca')}>
       <TucaMark size={18} />
       <span className="nav-item__label">Tuca</span>
       <span className="nav-item__meta">{L('te ajuda', 'helps you')}</span>
@@ -67,7 +74,7 @@ function TucaItem(): ReactNode {
   )
 }
 
-function Section({ id, label, unread = 0, action, children }: { id: string; label: string; unread?: number; action?: ReactNode; children: ReactNode }): ReactNode {
+function Section({ id, label, unread = 0, waiting, action, children }: { id: string; label: string; unread?: number; waiting?: boolean; action?: ReactNode; children: ReactNode }): ReactNode {
   const { open, toggle } = useFold(`section:${id}`)
   return (
     <div className={`section ${open ? '' : 'is-folded'}`}>
@@ -76,6 +83,7 @@ function Section({ id, label, unread = 0, action, children }: { id: string; labe
           {label}
         </FoldToggle>
         {/* A closed section still says when something in it is waiting. */}
+        {!open && waiting && <WaitingMark title={L('Um agente está esperando você aqui', 'An agent is waiting for you in here')} />}
         {!open && unread > 0 && (
           <span key={unread} className="badge badge--soft">
             {unread}
@@ -89,7 +97,7 @@ function Section({ id, label, unread = 0, action, children }: { id: string; labe
 }
 
 // A group folds like the sections, in the same list (Fold.tsx), and keeps showing the channel you're in.
-function GroupFold({ id, label, unread, head, naming, children }: { id: string; label: string; unread: number; head: HTMLAttributes<HTMLDivElement>; naming?: ReactNode; children: ReactNode }): ReactNode {
+function GroupFold({ id, label, unread, waiting, head, naming, children }: { id: string; label: string; unread: number; waiting?: boolean; head: HTMLAttributes<HTMLDivElement>; naming?: ReactNode; children: ReactNode }): ReactNode {
   const { open, toggle } = useFold(`group:${id}`)
   return (
     <div className={`channel-group ${open ? '' : 'is-folded'}`}>
@@ -98,6 +106,7 @@ function GroupFold({ id, label, unread, head, naming, children }: { id: string; 
           <FoldToggle open={open} onToggle={toggle}>
             {label}
           </FoldToggle>
+          {!open && waiting && <WaitingMark title={L('Um agente está esperando você aqui', 'An agent is waiting for you in here')} />}
           {!open && unread > 0 && <span className="badge badge--soft">{unread}</span>}
         </div>
       )}
@@ -107,6 +116,31 @@ function GroupFold({ id, label, unread, head, naming, children }: { id: string; 
 }
 
 const unreadIn = (conversations: { unread?: number }[]): number => conversations.reduce((sum, c) => sum + (c.unread ?? 0), 0)
+
+// An agent waits on me there (a question, an approval): it shows instead of the working dot, since it's my turn.
+// A solid speech bubble with the "?" cut out of it, so it reads on any row (hovered, active).
+function WaitingMark({ title }: { title: string }): ReactNode {
+  const mask = `waiting-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
+  return (
+    <span className="waiting-mark" title={title} aria-label={title}>
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        <mask id={mask}>
+          <rect width="24" height="24" fill="white" />
+          <path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.7" fill="none" stroke="black" strokeWidth="2.1" strokeLinecap="round" />
+          <circle cx="12" cy="16.3" r="1.2" fill="black" />
+        </mask>
+        <path mask={`url(#${mask})`} fill="currentColor" d="M12 2.5c5.5 0 9.5 3.9 9.5 8.8s-4 8.8-9.5 8.8c-1.2 0-2.4-.2-3.5-.5L3.5 21.5l1.4-4.3C3.4 15.7 2.5 13.6 2.5 11.3 2.5 6.4 6.5 2.5 12 2.5Z" />
+      </svg>
+    </span>
+  )
+}
+
+// Who waits on me in a conversation, as the hint says it: a string, so the sidebar redraws only when it changes.
+// With a team, only what waits on me (my inbox), not a question to someone else or an approval for them.
+const waitsIn = (s: State, conversationId: string): Waiting => waitingIn(messagesIn(s, conversationId), conversationId, teamMode(s) ? { key: s.inbox, test: mineIn(s.inbox) } : undefined)
+const anyWaiting = (s: State, ids: string[]): boolean => ids.some((id) => isWaiting(waitsIn(s, id)))
+const useWaitingTitle = (conversationId: string): string =>
+  useStore((s) => waitingTitle(waitsIn(s, conversationId), (agentId) => agentById(s, agentId)?.name ?? L('Um agente', 'An agent')))
 
 export function Sidebar(): ReactNode {
   // Only what it draws: the whole state changes with every step an agent takes.
@@ -121,6 +155,9 @@ export function Sidebar(): ReactNode {
   const admin = amAdmin({ people, you })
   const owner = amOwner({ people, you })
   const me = youPerson({ people, you })
+  // A new install's sidebar starts short and grows with the missions (Missions.tsx).
+  const parts = useSidebarParts()
+  const fresh = (p: SidebarPart): (() => void) | undefined => (parts.fresh(p) ? () => parts.seen(p) : undefined)
   const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
   const suggestions = useStore((s) => pendingMemories(s).length)
   const proposals = useStore((s) => s.skills.filter((k) => k.state === 'pending').length)
@@ -136,6 +173,10 @@ export function Sidebar(): ReactNode {
   // The order and groups are the person's: the core only keeps them.
   const layout = settings.channelLayout
   const arranged = arrange(channels, layout)
+  // Folded, a section or group still says an agent waits on me in it: values, so only a change redraws.
+  const channelsWaiting = useStore((s) => anyWaiting(s, channels.map((c) => c.id)))
+  const waitingGroups = useStore((s) => arranged.groups.filter((g) => anyWaiting(s, g.channels.map((c) => c.id))).map((g) => g.id).join(' ')).split(' ')
+  const dmsWaiting = useStore((s) => anyWaiting(s, dms.map((c) => c.id)))
   const whole: ChannelLayout = { loose: arranged.loose.map((c) => c.id), groups: arranged.groups.map((g) => ({ ...g, channels: g.channels.map((c) => c.id) })) }
   const saveLayout = (next: ChannelLayout): void => updateSettings({ channelLayout: next })
   const [naming, setNaming] = useState<string | null>(null)
@@ -298,20 +339,23 @@ export function Sidebar(): ReactNode {
       <nav className="sidebar__scroll">
         <TucaItem />
         <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />
-        <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} />
-        <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" />
-        <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} />
-        <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} />
-        {admin && <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} />}
+        {(parts.shows('memory') || suggestions > 0) && <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} fresh={fresh('memory')} />}
+        {parts.shows('wiki') && <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} />}
+        {parts.shows('routines') && <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} fresh={fresh('routines')} />}
+        {(parts.shows('skills') || proposals > 0) && <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} fresh={fresh('skills')} />}
+        {admin && parts.shows('report') && <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} fresh={fresh('report')} />}
 
         <Section
           id="channels"
           label={L('Canais', 'Channels')}
           unread={unreadIn(channels)}
+          waiting={channelsWaiting}
           action={
-            <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(platform, 'N')})`, `New channel (${shortcut(platform, 'N')})`)} onClick={() => openDialog({ kind: 'new-channel' })}>
-              <Icon name="plus" size={14} />
-            </button>
+            parts.shows('channels') ? (
+              <button className="icon-btn icon-btn--sm" title={L(`Novo canal (${shortcut(platform, 'N')})`, `New channel (${shortcut(platform, 'N')})`)} onClick={() => (parts.seen('channels'), openDialog({ kind: 'new-channel' }))}>
+                <Icon name="plus" size={14} />
+              </button>
+            ) : undefined
           }
         >
           {arranged.loose.map((c) => channelRow(c))}
@@ -323,6 +367,7 @@ export function Sidebar(): ReactNode {
               id={g.id}
               label={g.name}
               unread={g.channels.reduce((n, c) => n + (c.unread ?? 0), 0)}
+              waiting={waitingGroups.includes(g.id)}
               head={{
                 ...dropOn({ group: g.id }),
                 onContextMenu: (e) =>
@@ -357,7 +402,7 @@ export function Sidebar(): ReactNode {
         </Section>
 
         {dms.length > 0 && (
-        <Section id="dms" label={team ? L('Suas mensagens diretas', 'Your direct messages') : L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)}>
+        <Section id="dms" label={team ? L('Suas mensagens diretas', 'Your direct messages') : L('Mensagens diretas', 'Direct messages')} unread={unreadIn(dms)} waiting={dmsWaiting}>
           {dms.map((c) => {
             const agent = agentOf(c.name)
             if (!agent) return null
@@ -398,13 +443,13 @@ export function Sidebar(): ReactNode {
         </Section>
       </nav>
 
-      {/* The introduction's checklist sets the Tucano up (and its phone): the owner's. */}
-      {owner && settings.onboarding?.done && !settings.onboarding.checklistHidden && <GettingStarted />}
+      {/* The missions set the Tucano up and walk through it: the owner's. */}
+      {owner && settings.onboarding?.done && !settings.onboarding.checklistHidden && <MissionsCard />}
       <ContextMenu menu={menu} onClose={closeMenu} />
       <div className="sidebar__foot">
         <UpdateNote />
-        {admin && <NavItem view={{ kind: 'usage' }} icon="chart" label={L('Uso e limites', 'Usage and limits')} />}
-        <NavItem view={{ kind: 'connectors' }} icon="plug" label={L('Conectores', 'Connectors')} />
+        {admin && parts.shows('usage') && <NavItem view={{ kind: 'usage' }} icon="chart" label={L('Uso e limites', 'Usage and limits')} fresh={fresh('usage')} />}
+        {parts.shows('connectors') && <NavItem view={{ kind: 'connectors' }} icon="plug" label={L('Conectores', 'Connectors')} fresh={fresh('connectors')} />}
         <NavItem view={{ kind: 'settings' }} icon="gear" label={L('Configurações', 'Settings')} />
       </div>
     </aside>
@@ -414,11 +459,12 @@ export function Sidebar(): ReactNode {
 const ChannelItem = memo(function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: number }): ReactNode {
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
+  const waiting = useWaitingTitle(id)
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
       <span className="nav-item__label">{name}</span>
-      <LiveDot working={working} />
+      {waiting ? <WaitingMark title={waiting} /> : <LiveDot working={working} />}
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )
@@ -435,11 +481,12 @@ const DmItem = memo(function DmItem({ id, agent, unread }: { id: string; agent: 
   const name = agent.name
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
+  const waiting = useWaitingTitle(id)
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
-      <LiveDot working={working} />
+      {waiting ? <WaitingMark title={waiting} /> : <LiveDot working={working} />}
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
   )

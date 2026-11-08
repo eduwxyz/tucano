@@ -12,10 +12,12 @@ import {
   initials,
   inviteLink,
   listInvites,
+  myDevices,
   loadActivity,
   personById,
   purgePerson,
   removedPeople,
+  removeDevice,
   removePerson,
   revokeInvite,
   roleLabel,
@@ -27,6 +29,7 @@ import {
   windowless,
   youPerson,
   type ActivityEntry,
+  type Device,
   type Invite,
   type Person,
   type State
@@ -336,7 +339,7 @@ function InviteCard({ onClose, owner }: { onClose: () => void; owner: boolean })
 type PairCode = { code: string; link: string; browser: string; expiresAt: number }
 
 // The link as a QR code, drawn here: nothing about it leaves the page.
-function Qr({ text }: { text: string }): ReactNode {
+export function Qr({ text }: { text: string }): ReactNode {
   const q = qrcode(0, 'M')
   q.addData(text)
   q.make()
@@ -420,9 +423,54 @@ function PhoneCard(): ReactNode {
             </div>
           </div>
         ))}
-      {!code && devices > 0 && <p className="muted small">{L(`Você está conectado em ${devices} aparelho${devices > 1 ? 's' : ''}.`, `You're signed in on ${devices} device${devices > 1 ? 's' : ''}.`)}</p>}
+      {!code && devices > 0 && <MyDevices count={devices} />}
       {error && <p className="note note--error">{error}</p>}
     </Card>
+  )
+}
+
+// The browsers and phones signed in as me, each one disconnectable: on a server, under Conectar um
+// celular; on a desktop, the iPhones paired over the home Wi-Fi, under Seu iPhone (HomePhone.tsx).
+// One that never signed in was made by something that opened a pairing link before its person did
+// (a chat's preview, say). `lead`: the line above the list; `refresh`: fetch again when it changes.
+export function MyDevices({ count, lead, refresh }: { count: number; lead?: string; refresh?: unknown }): ReactNode {
+  const [list, setList] = useState<Device[]>([])
+  const reload = (): void => void myDevices().then(setList, () => {})
+  useEffect(reload, [count, refresh])
+  const disconnect = (d: Device): void => {
+    const go = (): void => void removeDevice(d.id).then(reload, (e: unknown) => toast(message(e)))
+    if (!d.current) return go()
+    void confirmDialog({
+      title: L('Desconectar este navegador?', 'Disconnect this browser?'),
+      body: L('Ele sai da sua conta agora. Pra voltar, gere um código em outro aparelho conectado ou peça um novo convite.', "It signs out of your account now. To come back, make a code on another connected device or ask for a new invite."),
+      confirm: L('Desconectar', 'Disconnect'),
+      danger: true
+    }).then((ok) => ok && go())
+  }
+  return (
+    <>
+      <p className="muted small">{lead ?? L(`Você está conectado em ${count} aparelho${count > 1 ? 's' : ''}.`, `You're signed in on ${count} device${count > 1 ? 's' : ''}.`)}</p>
+      {list.length > 0 && (
+        <div className="table">
+          {list.map((d) => (
+            <div key={d.id} className="table__row">
+              <div className="grow person-row__who">
+                <span>
+                  <strong>{d.label === 'convite' ? L('Navegador do convite', 'Browser from the invite') : d.label}</strong>
+                  {d.current && <span className="muted"> {L('(este)', '(this one)')}</span>}
+                </span>
+                <span className="muted small">
+                  {[L(`adicionado ${ago(d.createdAt)}`, `added ${ago(d.createdAt)}`), d.seenAt ? L(`visto ${ago(d.seenAt)}`, `seen ${ago(d.seenAt)}`) : L('nunca usado', 'never used')].join(' · ')}
+                </span>
+              </div>
+              <button className="btn btn--ghost btn--sm" onClick={() => disconnect(d)}>
+                {L('Desconectar', 'Disconnect')}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 

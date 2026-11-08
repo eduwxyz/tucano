@@ -163,12 +163,20 @@ export const NEEDS: Record<Method, Need> = {
   wikiImport: 'admin',
   wikiImportZip: 'admin',
   setWikiDir: 'admin',
+  wikiGitStatus: 'admin', // the wiki's git sync: its key, its repository, its folder
+  wikiGitSetup: 'admin',
+  wikiGitTest: 'admin',
+  wikiGitConnect: 'admin',
+  wikiGitSync: 'admin',
+  wikiGitDisconnect: 'admin',
   // one's own
   setMyName: 'anyone',
   setDelegation: 'anyone',
   inbox: 'anyone',
   answerQuestion: 'target',
   confirmQuestion: 'target',
+  answerDecision: 'target', // who may answer the question (Runner.decidable)
+  submitDecisions: 'target',
   // agents, skills and the team
   saveAgent: 'admin',
   archiveAgent: 'admin',
@@ -193,6 +201,9 @@ export const NEEDS: Record<Method, Need> = {
   removeConnector: 'admin',
   reconnectConnector: 'admin',
   setConnectorToken: 'admin',
+  connectorCatalog: 'admin',
+  addCatalogConnector: 'admin',
+  ownAppGuide: 'admin',
   ownApp: 'admin',
   setOwnApp: 'admin',
   authorizeConnector: 'admin',
@@ -203,10 +214,16 @@ export const NEEDS: Record<Method, Need> = {
   checkTrigger: 'admin',
   refreshEngines: 'admin',
   loginEngine: 'admin',
+  loginScreen: 'admin',
+  loginInput: 'admin',
+  stopLogin: 'admin',
   addAccount: 'admin',
   loginAccount: 'admin',
   removeAccount: 'admin',
   installEngine: 'admin',
+  setupEngine: 'admin',
+  engineSetupState: 'admin',
+  cancelEngineSetup: 'admin',
   engineModels: 'anyone', // the models a harness lists: an agent's page names its model with them
   testEngine: 'admin',
   setJevKey: 'admin',
@@ -228,6 +245,9 @@ export const NEEDS: Record<Method, Need> = {
   revokeInvite: 'admin',
   listInvites: 'admin',
   removedPeople: 'admin',
+  myDevices: 'anyone', // one's own
+  setPush: 'anyone', // one's own device's (ctx.device)
+  removeDevice: 'anyone', // one's own (the core looks only among theirs)
   removePerson: 'target',
   setRole: 'target',
   activity: 'admin',

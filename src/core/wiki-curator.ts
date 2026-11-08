@@ -25,6 +25,8 @@ export interface CuratorDeps {
   // The pages (lowercase titles) a curation from this conversation may not read: the ones held for
   // someone other than whose DM it is (see Wiki.inherit). What it writes is read by others.
   hidden?: (conversationId: string) => Set<string>
+  // Before it writes: the wiki brought up to date with its git repository, if it has one.
+  beforeWrite?: () => Promise<void>
 }
 
 export const curatorSystem = (): string =>
@@ -248,6 +250,9 @@ export class WikiCurator {
 
   private async curate(p: { messages: Message[]; kind: 'conversation' | 'message' | 'document'; conversationId: string; force: boolean; text?: string; plain?: string; source?: { id: string; file: string; title: string } }): Promise<WikiChange[]> {
     const wiki = this.deps.wiki
+    // A wiki that takes no writes (a read-only repository): nothing is read to be written.
+    const ro = wiki.readOnly()
+    if (ro) throw new Error(ro)
     const shown = wiki.view(this.deps.hidden?.(p.conversationId) ?? new Set())
     const text = p.text ?? this.excerpt(p.messages)
     const plain = p.plain ?? p.messages.map((m) => m.text).join(' ')
@@ -287,6 +292,10 @@ export class WikiCurator {
       return []
     }
     if (!out || (!out.worth && !p.force) || !out.ops.length) return []
+    // What the repository has now, before writing on top of it (a failed pull doesn't stop it: the
+    // sync deals with it later, conflicts included).
+    await this.deps.beforeWrite?.().catch(() => {})
+    if (wiki.readOnly()) throw new Error(wiki.readOnly())
     const source = p.source ?? wiki.addSource({ title: out.title, text, kind: p.kind === 'document' ? 'file' : p.kind, origin: { conversationId: p.conversationId, messageIds: p.messages.map((m) => m.id) }, by: 'auto' })
     const cite = ` ([[${source.file}|${L('fonte', 'source')}]])`
     // A swap whose passage isn't on that page: on the one page that has it, it goes there; on none, it

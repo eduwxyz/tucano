@@ -453,7 +453,10 @@ export class People {
         q.confirm === 'pending'
           ? q.requestedBy === person.id
           : q.askedTo === person.id || delegating(this.db.person(q.askedTo), person.id, now) || (now >= q.deadlineAt && q.requestedBy === person.id)
-      return waiting ? [shown(q)] : []
+      if (!waiting) return []
+      // Its decisions, to answer them on the card from here too (the question only, as its text is).
+      const run = this.db.message(q.id)?.run
+      return [{ ...shown(q), ...(run?.questions?.length ? { decisions: run.questions, ...(run.answers ? { answers: run.answers } : {}) } : {}) }]
     })
     // Asked to them and answered a moment ago by someone else (an admin, whoever covers for them).
     const answered = this.db.answeredQuestions(now - ANSWERED_SHOWN_MS).filter((q) => q.askedTo === person.id && q.answeredBy !== person.id).map(shown)
@@ -567,6 +570,8 @@ export class People {
       if (!this.db.useInvite(invite.id, id, now)) return { error: L('Esse convite não vale mais. Peça um novo a quem te convidou.', 'That invite is no longer valid. Ask whoever invited you for a new one.') }
       const routines = back ? this.db.restorePerson(id, { name: clean, role: invite.role, about: invite.about }) : undefined
       if (!back) this.db.addPerson({ id, name: clean, role: invite.role, about: invite.about })
+      // Someone new gets their own short welcome first (who invited them, the team, the deal).
+      if (!back) this.db.setPrefs(id, { onboarding: { done: true, guest: { by: this.db.person(invite.createdBy)?.name } } })
       const key = newKey()
       this.db.addPersonKey(hashSecret(key), id, 'convite')
       this.db.addActivity({ personId: id, kind: back ? 'person.restored' : 'person.joined', target: id, detail: { role: invite.role, invitedBy: invite.createdBy }, at: now })
@@ -735,6 +740,7 @@ export interface PortLike {
 
 export class Hub<P extends PortLike> {
   private ports = new Map<P, string>() // port → person id
+  private devices = new Map<P, string>() // port → the hash of the key it signed in with (a server's browser)
 
   constructor(private people: People, private db: Db) {}
 
@@ -746,11 +752,27 @@ export class Hub<P extends PortLike> {
       return undefined
     }
     this.ports.set(port, person.id)
+    const device = (data as { device?: unknown } | null | undefined)?.device
+    if (typeof device === 'string') this.devices.set(port, device)
     return person
   }
 
   delete(port: P): void {
     this.ports.delete(port)
+    this.devices.delete(port)
+  }
+
+  deviceOf(port: P): string | undefined {
+    return this.devices.get(port)
+  }
+
+  // A device disconnected: the connections it opened end at once.
+  closeDevice(hash: string): void {
+    for (const [port, h] of [...this.devices]) {
+      if (h !== hash) continue
+      this.delete(port)
+      port.close()
+    }
   }
 
   personOf(port: P): Person | undefined {
@@ -772,7 +794,7 @@ export class Hub<P extends PortLike> {
   closeFor(personId: string): void {
     for (const [port, id] of [...this.ports]) {
       if (id !== personId) continue
-      this.ports.delete(port)
+      this.delete(port)
       port.close()
     }
   }

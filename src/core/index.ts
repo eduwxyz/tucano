@@ -5,7 +5,7 @@ import { voiceRefusal } from '../shared/voice'
 import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
 import { basename, join, resolve, sep } from 'node:path'
@@ -18,6 +18,7 @@ import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { admit, admitComputer, can, isAdmin, must } from './policy-people'
+import { cleanRules, isAutonomy } from '../shared/actions'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db } from './db'
@@ -30,6 +31,11 @@ import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
+import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
+import { codexEnv } from './engines/codex'
+import { CATALOG, CATEGORIES, catalogInput, catalogView, entryOf, ownAppGuide } from '../shared/connector-catalog'
+import { LoginTerminal, type LoginKey } from './login-terminal'
+import { Push, pushUrl } from './push'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
 import { DesktopApps, macApps, SELF } from './apps'
@@ -44,6 +50,7 @@ import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
 import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
+import { COPY_SUFFIX, WikiGit } from './wiki-git'
 import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
@@ -69,6 +76,7 @@ import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } f
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
+import { isNewQuestion } from '../shared/questions'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
@@ -113,9 +121,19 @@ const people = new People(db)
 if (!db.owner().name) db.renamePerson(db.ownerId(), db.getSettings(DEFAULTS).workspaceName, false)
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
+// TUCANO_FAKE_NO_AI: a computer with nothing set up yet, until the introduction's setup "signs in" (no network).
+const fakeNoAi = fake && process.env['TUCANO_FAKE_NO_AI'] === '1'
+const fakeSignedIn = new Set<EngineId>()
+const fakeOne = (e: EngineId, s: EngineStatus): EngineStatus => (fakeNoAi && !fakeSignedIn.has(e) ? { installed: false, loggedIn: false } : s)
+// TUCANO_FAKE_BROKEN_PI: Pi found signed in to Anthropic, whose login then fails every reply (an expired refresh token).
+// TUCANO_FAKE_BROKEN_OPENCODE: OpenCode, found, fails every reply with an error nobody wrote for people.
+const fakeBrokenPi = fake && process.env['TUCANO_FAKE_BROKEN_PI'] === '1'
+const fakeBrokenOpencode = fake && process.env['TUCANO_FAKE_BROKEN_OPENCODE'] === '1'
+const OPENCODE_CRASH = "TypeError: Cannot read properties of undefined (reading 'providers')\n    at loadConfig (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/config.js:212:30)\n    at async main (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/index.js:18:3)"
+const PI_EXPIRED = 'OAuth refresh failed for anthropic: 400 {"type":"error","error":{"type":"invalid_grant","message":"Refresh token expired"}}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/oauth.js:88:11)\n    at async refreshAnthropic (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/anthropic.js:41:5)\n    at async getAuth (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/index.js:23:12)'
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0'), opencode: { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
-  listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'] },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
+  listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'], ...(fakeBrokenPi ? { pi: ['anthropic/claude-haiku-4-5'] } : {}) },
   codexCatalog: []
 })
 // The harnesses' last check, kept in the data folder: the window opens on it while the next runs.
@@ -172,9 +190,87 @@ function watchEngine(engine: EngineId, done: (s: EngineStatus) => boolean): void
   watching.unref()
 }
 
+// Codex and Claude Code set up from the introduction, with no terminal (engine-setup.ts).
+const engineSetup = new EngineSetup({
+  dir: join(dataDir, 'engines'),
+  os: osOf(),
+  arch: process.arch,
+  musl: () => existsSync('/lib/ld-musl-x86_64.so.1') || existsSync('/lib/ld-musl-aarch64.so.1'),
+  fetch: (...a) => fetch(...a),
+  untar: (archive, into) => new Promise((done, fail) => execFile('tar', ['-xzf', archive, '-C', into], { windowsHide: true }, (e) => (e ? fail(e) : done()))),
+  spawn: (bin, args, env) => {
+    // stdin stays open and unused: the sign-in finishes on the CLI's own callback, never on a pasted code.
+    const p = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    const exit = new Promise<number>((done) => {
+      p.on('error', () => done(1))
+      p.on('exit', (code) => done(code ?? 1))
+    })
+    return { output: (on) => (p.stdout.on('data', (b: Buffer) => on(b.toString())), p.stderr.on('data', (b: Buffer) => on(b.toString()))), exit, kill: () => p.kill() }
+  },
+  status: (e) => engines[e],
+  recheck: async (e) => (await engineCheck.recheck(e)).engines[e],
+  env: (e) => (e === 'codex' ? codexEnv(codexHome) : { ...process.env, DISABLE_AUTOUPDATER: '1' }),
+  changed: () => {}
+})
+
+// A harness's sign-in from the page or the phone, on a server: its login command in a terminal of the
+// server's, the screen shown where the person is (login-terminal.ts). Linux only, through `script`;
+// elsewhere the command is shown, to run in a terminal as before.
+const loginTerminal = new LoginTerminal({
+  spawn: (bin, args, env, size) => {
+    if (!serverMode || osOf() !== 'linux' || !onPath('script')) return undefined
+    const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
+    const line = `stty cols ${size.cols} rows ${size.rows} 2>/dev/null; exec ${[bin, ...args].map(q).join(' ')}`
+    const p = spawn('script', ['-qfec', line, '/dev/null'], { env: { ...env, TERM: 'xterm-256color', COLUMNS: String(size.cols), LINES: String(size.rows) }, stdio: ['pipe', 'pipe', 'pipe'] })
+    const exit = new Promise<number>((done) => {
+      p.on('error', () => done(1))
+      p.on('exit', (code) => done(code ?? 1))
+    })
+    p.stdin.on('error', () => {})
+    return {
+      write: (data) => void p.stdin.write(data),
+      output: (on) => (p.stdout.on('data', (b: Buffer) => on(b.toString())), p.stderr.on('data', (b: Buffer) => on(b.toString()))),
+      exit,
+      kill: () => void p.kill()
+    }
+  },
+  bin: (e) => engines[e].path ?? ENGINES[e].cli,
+  env: (e, account) => {
+    if (account) {
+      const dir = accountDir(dataDir, account)
+      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir)
+    }
+    return e === 'codex' ? codexEnv(codexHome) : { ...process.env, DISABLE_AUTOUPDATER: '1' }
+  },
+  signedIn: async (e, account) => {
+    if (!account) return (await engineCheck.recheck(e)).engines[e].loggedIn
+    await checkAccounts(account)
+    engineCheck.setAccounts(Object.fromEntries(accountLogins))
+    emit({ type: 'settings', settings: settings() })
+    return accountLogins.get(account)?.loggedIn === true
+  }
+})
+
+// The same steps with the test engines: no network, no CLI; the harness is "signed in" at the end.
+function fakeSetup(engine: SetupEngine): SetupState {
+  if (fakeSetupState?.state === 'running') return fakeSetupState
+  const at = (s: SetupState, ms: number): void => void setTimeout(() => fakeSetupState?.state === 'running' && (fakeSetupState = s), ms)
+  fakeSetupState = { engine, step: 'install', state: 'running', progress: 0 }
+  at({ engine, step: 'install', state: 'running', progress: 0.45 }, 700)
+  at({ engine, step: 'login', state: 'running', url: 'https://example.invalid/login' }, 1500)
+  setTimeout(() => {
+    if (fakeSetupState?.state !== 'running') return
+    fakeSignedIn.add(engine)
+    void engineCheck.recheck(engine).then(() => (fakeSetupState = { engine, step: 'login', state: 'done' }))
+  }, 3200)
+  return fakeSetupState
+}
+let fakeSetupState: SetupState | null = null
+
 const gateway = new Gateway()
 // The login shell's PATH comes before any CLI starts: harnesses, connectors and Docker are found on it.
-const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e))
+// Then the CLIs the introduction installed, after the person's own.
+const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e)).then(() => void (process.env['PATH'] = engineSetup.withDirs(process.env['PATH'] ?? '')))
 // The harnesses are checked behind the window (it opens on the last check). What truly needs
 // them (a reply, the memory, routines, a connection test) waits for this.
 const enginesReady = pathReady.then(detect)
@@ -224,7 +320,7 @@ function moved(id: EngineId): Parameters<typeof relocating>[1] {
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
@@ -272,7 +368,7 @@ const hub = new Hub<MessagePortMain>(people, db)
 // The conversation each person has open: what arrives there is read already.
 const viewing = new Map<string, string | null>()
 let closing = false
-type Ctx = { person: Person }
+type Ctx = { person: Person; device?: string } // device: the hash of the key a server's page signed in with
 const ownerCtx = (): Ctx => ({ person: db.owner() })
 // What the workspace switcher shows of this workspace: its name, whether it's paused, and two
 // counts. Coalesced: a reply streaming updates its message many times a second.
@@ -313,7 +409,7 @@ function toPhone(e: CoreEvent): void {
   if (e.type === 'approval' && e.approval.state === 'pending' && !sentToPhone.has(e.approval.id)) {
     sentToPhone.add(e.approval.id)
     void telegram.approvalAsked(e.approval, name(e.approval.agentId))
-  } else if (e.type === 'message' && e.message.run?.status === 'waiting_input' && e.message.run.question && e.message.author.kind === 'agent' && !sentToPhone.has(e.message.id) && forOwner(e.message.id)) {
+  } else if (e.type === 'message' && e.message.author.kind === 'agent' && isNewQuestion(e.message) && !sentToPhone.has(e.message.id) && forOwner(e.message.id)) {
     sentToPhone.add(e.message.id)
     const conv = db.conversation(e.message.conversationId)
     void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : L('na DM', 'in the DM'))
@@ -326,12 +422,21 @@ const forOwner = (messageId: string): boolean => {
   return !q || (q.confirm === 'pending' ? q.requestedBy : q.askedTo) === db.ownerId()
 }
 
+// The phones that gave this Tucano a push handle get the same notification while the app is closed.
+// The test engines never reach the relay.
+const push = new Push({
+  url: fake ? undefined : pushUrl(),
+  targets: (to) => db.pushTargets(to),
+  gone: (hash) => db.dropKeyPush(hash)
+})
+
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
 // `to`: the people it's for; unset, everyone (but a DM's news only ever reaches its person).
 const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string; to?: string[] } = {}): void => {
   const to = notifyTo(conversationId, more.to)
   toMain({ type: 'notify', title, body: shortText, conversationId, ...more, ...(to ? { to } : {}), sound: settings().sounds !== false })
+  void push.send({ title, body: shortText, ...(conversationId ? { conversationId } : {}), ...(more.threadId ? { threadId: more.threadId } : {}), ...(more.kind ? { kind: more.kind } : {}) }, to)
   if (!to || to.includes(db.ownerId())) void telegram?.notice(title, fullText ?? shortText)
 }
 function notifyTo(conversationId: string | undefined, to: string[] | undefined): string[] | undefined {
@@ -702,10 +807,95 @@ const dmOf = (conversationId: string): string | null | undefined => {
   const c = db.conversationOwner(conversationId)
   return c ? (dmOwner(c, db.ownerId()) ?? null) : undefined
 }
-const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }), dmOf })
+// The git sync (wiki-git.ts) hears of every page written here, and says when the wiki takes no writes.
+let wikiGit: WikiGit | undefined
+const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChange: () => emit({ type: 'wiki' }), dmOf, onWrite: (w) => wikiGit?.wrote(w.title, w.byName), readOnly: () => wikiGit?.readOnlyReason() })
 // The folder is read behind the window: a big Obsidian vault takes a while.
 wiki.init(true, true)
 toMain({ type: 'wiki_dir', path: wiki.dir })
+// What never goes to the wiki's repository: the pages held for someone, the sources that came from a
+// DM (or may have: a conversation gone), and Tucano's own index and log, which name every page.
+const gitPrivate = (): Set<string> => {
+  const out = new Set<string>(['índice.md', 'registro.md'])
+  for (const f of wiki.heldFiles()) out.add(f)
+  for (const s of wiki.sources(100_000)) {
+    const conv = s.origin.conversationId
+    if (!conv || dmOf(conv) === null) continue
+    out.add(`${s.file}.md`)
+    if (s.origin.original) out.add(s.origin.original)
+  }
+  return out
+}
+wikiGit = new WikiGit({
+  dataDir,
+  secrets,
+  load: () => db.meta('wikiGit') || undefined,
+  store: (json) => db.setMeta('wikiGit', json ?? ''),
+  privatePaths: gitPrivate,
+  // a held page git moved aside (the repository brought a file by its name): its copy stays held
+  movedPrivate: (from, to) => {
+    const key = pageKey(from.split('/').pop()!.replace(/\.md$/i, ''))
+    const h = wiki.heldKeys().find((x) => x.key === key)
+    if (h && to.endsWith('.md')) wiki.holdKey(pageKey(to.split('/').pop()!.replace(/\.md$/i, '')), h.person)
+  },
+  quiet: (on) => wiki.quiet(on),
+  refresh: () => wiki.refresh(),
+  notice: (n) => wiki.addNotice(n),
+  changed: () => emit({ type: 'wiki' }),
+  currentPages: () => wiki.count(),
+  ...(process.env['TUCANO_GIT_SSH'] ? { ssh: process.env['TUCANO_GIT_SSH'] } : {}),
+  local: fake || process.env['TUCANO_GIT_LOCAL'] === '1',
+  log: (line) => console.error(line)
+})
+const gitSync = wikiGit
+// Connected: a round once the folder's first read is done, then every 2 minutes.
+void wiki.loaded.then(async () => {
+  await gitSync.loadKey()
+  if (gitSync.connected) gitSync.start()
+})
+
+// "Juntar": the pages the wiki had, copied into the clone it now is. Nothing there is overwritten: a
+// file by the same name with something else in it comes in as "(versão do Tucano)". Held pages stay held.
+function mergeWiki(from: { root: string; dir: string; held: { key: string; person: string }[] }): { copied: number; copies: string[] } {
+  const to = wiki.pagesRoot
+  const held = new Map(from.held.map((h) => [h.key, h.person]))
+  const own = new Set(['esquema.md', 'índice.md', 'registro.md'])
+  let copied = 0
+  const copies: string[] = []
+  const pagesThere = new Map(wiki.list().flatMap((p) => { const f = wiki.page(p.title)?.file; return f ? [[pageKey(p.title), join(wiki.dir, f)] as const] : [] }))
+  const go = (rel: string): void => {
+    for (const e of readdirSync(rel ? join(from.root, rel) : from.root, { withFileTypes: true })) {
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (!rel && from.root === from.dir && (own.has(e.name) || e.name === 'fontes')) continue
+      if (e.isDirectory()) {
+        go(r)
+        continue
+      }
+      const src = join(from.root, r)
+      let dest = r
+      // the same path, or (a page) the same title in another folder: Obsidian would see one page
+      const same = existsSync(join(to, dest)) ? join(to, dest) : r.endsWith('.md') ? pagesThere.get(pageKey(r.split('/').pop()!.replace(/\.md$/i, ''))) : undefined
+      if (same) {
+        if (readFileSync(same).equals(readFileSync(src))) continue
+        const dot = r.lastIndexOf('.')
+        const [base, ext] = dot > r.lastIndexOf('/') ? [r.slice(0, dot), r.slice(dot)] : [r, '']
+        dest = `${base}${COPY_SUFFIX()}${ext}`
+        for (let k = 2; existsSync(join(to, dest)); k++) dest = `${base}${COPY_SUFFIX().replace(/\)$/, ` ${k})`)}${ext}`
+        copies.push(dest)
+      }
+      mkdirSync(join(to, dest, '..'), { recursive: true })
+      copyFileSync(src, join(to, dest))
+      copied++
+      const title = (s: string): string => s.split('/').pop()!.replace(/\.md$/i, '')
+      const person = r.endsWith('.md') ? held.get(pageKey(title(r))) : undefined
+      if (person) wiki.holdKey(pageKey(title(dest)), person)
+    }
+  }
+  if (existsSync(from.root)) go('')
+  wiki.scan()
+  return { copied, copies }
+}
 // The curator reads the conversations with the memory's cheap model, and keeps what lasts.
 const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   await enginesReady
@@ -727,7 +917,7 @@ const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   return text
 }
 // A curation from someone's DM may read the pages held for them; any other, none that's held.
-const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm, hidden: (id) => wiki.heldTitles(id ? (dmOf(id) ?? undefined) : undefined) })
+const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm, hidden: (id) => wiki.heldTitles(id ? (dmOf(id) ?? undefined) : undefined), beforeWrite: () => gitSync.pull() })
 // The review: by hand, or once a week when asked (checked every hour).
 const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
 setInterval(() => {
@@ -759,6 +949,7 @@ const runner: Runner = new Runner({
     if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}) })
     const who = notifyTo(conversationId, to)
     toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
+    void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
   jev: { key: () => secrets.get(JEV_SECRET) },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
@@ -1155,6 +1346,10 @@ const api: Handlers = {
     // One handle per agent (archived ones keep theirs), and none that reads as a person's (People.agentNameError).
     const taken = people.agentNameError({ id: clean.id, name: clean.name, handle: clean.handle })
     if (taken) throw new Error(taken)
+    // How far it goes on its own: only known rules and levels (saving an agent is an admin's, policy-people.ts).
+    clean.actionRules = cleanRules(clean.actionRules)
+    if (!isAutonomy(clean.autonomy)) delete clean.autonomy
+    if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -1453,7 +1648,7 @@ const api: Handlers = {
     }
     if (error || !text.trim()) return { ok: false, message: error ?? L('O modelo não respondeu.', "The model didn't answer.") }
     const secs = ((Date.now() - started) / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-    return { ok: true, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
+    return { ok: true, seconds: (Date.now() - started) / 1000, message: L(`${m.id} respondeu em ${secs} s: “${text.trim().slice(0, 60)}”`, `${m.id} answered in ${secs} s: “${text.trim().slice(0, 60)}”`) }
   },
 
   voiceStatus: () => dictation(),
@@ -1492,6 +1687,7 @@ const api: Handlers = {
     if (Object.keys(patch).length === 0) return void emit({ type: 'settings', settings: settings() })
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
+    if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
     db.setSettings(patch)
     // The settings' name is the owner's: what the agents call them.
     if (patch.workspaceName && cleanName(patch.workspaceName)) {
@@ -1519,6 +1715,21 @@ const api: Handlers = {
     bg(connectors.connect(id), 'reconnectConnector')
   },
   setConnectorToken: ({ id, token }) => connectors.setToken(id, token),
+  // The store for a screen without the catalog's file (the iPhone app): its entries as data, in the
+  // person's language; a connector added by its entry and the values asked, filled in here.
+  connectorCatalog: () => ({ categories: CATEGORIES(), entries: catalogView(), added: connectors.list().map((c) => entryOf(c)?.id).filter((id): id is string => !!id) }),
+  addCatalogConnector: async ({ id, values }, ctx) => {
+    const entry = CATALOG.find((c) => c.id === id)
+    if (!entry) throw new Error(L('Esse conector não está mais na loja.', 'That connector is no longer in the store.'))
+    const input = catalogInput(entry, Object.fromEntries(Object.entries(values ?? {}).filter((v): v is [string, string] => typeof v[1] === 'string')))
+    const added = await connectors.add(input, !serverMode)
+    record(ctx, 'connector.created', added, { name: input.name })
+    return added
+  },
+  ownAppGuide: async ({ provider }) => {
+    const app = await connectors.ownApp(provider)
+    return { guide: ownAppGuide(provider, app.redirectUrl), ...(app.clientId ? { clientId: app.clientId } : {}) }
+  },
   ownApp: ({ provider }) => connectors.ownApp(provider),
   setOwnApp: ({ provider, clientId, clientSecret }) => connectors.setOwnApp(provider, { clientId, clientSecret }),
   authorizeConnector: async ({ id }) => {
@@ -1653,7 +1864,8 @@ const api: Handlers = {
       sources: wikiSourcesFor(ctx, 100_000).length,
       // The owner's, after the heritage: the pages still held for them, and the notice until they've read it.
       ...(owner ? { held: wiki.held(ctx.person.id) } : {}),
-      ...(owner && !db.meta('heritageSeen') ? { heritage: { at: heritageAt() } } : {})
+      ...(owner && !db.meta('heritageSeen') ? { heritage: { at: heritageAt() } } : {}),
+      ...(gitSync.connected ? { git: (({ readOnly, state, lastSync }) => ({ readOnly, state, ...(lastSync ? { lastSync } : {}) }))(gitSync.status()) } : {})
     }
   },
   wikiPage: ({ title }, ctx) => wikiFor(ctx).page(title) ?? null,
@@ -1804,6 +2016,7 @@ const api: Handlers = {
     if (c) emit({ type: 'conversation', conversation: c })
   },
   setWikiDir: async ({ dir }) => {
+    if (gitSync.connected) throw new Error(L('A pasta da wiki é a do repositório git. Desconecte o git antes de trocar de pasta.', "The wiki's folder is the git repository's. Disconnect git before changing folders."))
     const next = dir?.trim() || wikiHome
     if (!existsSync(next)) throw new Error(L('Essa pasta não existe.', "That folder doesn't exist."))
     db.setSettings({ wikiDir: next === wikiHome ? undefined : next })
@@ -1829,6 +2042,38 @@ const api: Handlers = {
   checkDatabricks: (_, ctx) => {
     if (!isAdmin(ctx.person)) throw new Error(L('Só quem administra o Tucano vê isso.', 'Only those who run the Tucano see this.'))
     return databricks.check()
+  },
+  wikiGitStatus: () => gitSync.status(),
+  wikiGitSetup: ({ url }) => gitSync.setup(url),
+  wikiGitTest: () => gitSync.test(),
+  // The tested clone becomes the wiki's folder; the folder it had stays as it was (the backup).
+  wikiGitConnect: async ({ how }, ctx) => {
+    if (process.env['TUCANO_WIKI']) throw new Error(L('A pasta da wiki vem de TUCANO_WIKI: tire a variável pra sincronizar com git.', "The wiki's folder comes from TUCANO_WIKI: unset it to sync with git."))
+    if (how !== 'repo' && how !== 'merge') throw new Error(L('Escolha como conectar.', 'Choose how to connect.'))
+    const before = { root: wiki.pagesRoot, dir: wiki.dir, held: wiki.heldKeys(), pages: wiki.count() }
+    const dir = await gitSync.adopt()
+    if (wiki.dir !== dir) {
+      db.setSettings({ wikiDir: dir })
+      wiki.relocate(dir, wikiIndex(dir))
+      toMain({ type: 'wiki_dir', path: dir })
+      emit({ type: 'settings', settings: settings() })
+    }
+    let message: string | undefined
+    if (how === 'merge' && before.pages) {
+      const m = mergeWiki(before)
+      if (m.copies.length) wiki.addNotice({ key: `git-merge:${Date.now()}`, pages: m.copies.filter((c) => c.endsWith('.md')).map((c) => c.split('/').pop()!.replace(/\.md$/i, '')), text: L(`Ao juntar, ${m.copies.length === 1 ? 'um arquivo da wiki antiga tinha' : `${m.copies.length} arquivos da wiki antiga tinham`} o mesmo nome de um do repositório, com outro conteúdo. O do repositório ficou; o da wiki antiga entrou como "(versão do Tucano)".`, `While merging, ${m.copies.length === 1 ? 'a file from the old wiki had' : `${m.copies.length} files from the old wiki had`} the name of one in the repository, with something else in it. The repository's stayed; the old wiki's came in as "(Tucano’s version)".`) })
+      message = L(`Tucano: juntou ${m.copied} ${m.copied === 1 ? 'arquivo' : 'arquivos'} da wiki anterior (${nameOf(ctx)})`, `Tucano: merged ${m.copied} ${m.copied === 1 ? 'file' : 'files'} from the previous wiki (${nameOf(ctx)})`)
+    }
+    record(ctx, 'wiki.git_connected', undefined, { how })
+    const st = await gitSync.sync(message ? { message, who: nameOf(ctx) } : {})
+    gitSync.start(false)
+    return st
+  },
+  wikiGitSync: ({ write }) => gitSync.sync({ write: !!write }),
+  wikiGitDisconnect: async (_, ctx) => {
+    await gitSync.disconnect()
+    record(ctx, 'wiki.git_disconnected')
+    return gitSync.status()
   },
 
   // The owner's name is also the settings' (what the agents have always called them).
@@ -1858,6 +2103,21 @@ const api: Handlers = {
   revokeInvite: ({ id }, ctx) => people.revokeInvite(ctx.person, id),
   listInvites: () => db.invites(),
   removedPeople: () => db.removedPeople(),
+  myDevices: (_, ctx) => db.personKeys(ctx.person.id).map((k) => ({ id: k.hash, label: k.label, createdAt: k.createdAt, ...(k.seenAt ? { seenAt: k.seenAt } : {}), ...(k.hash === ctx.device ? { current: true } : {}) })),
+  // One of my devices signs out: its open pages lose the line (a moment after the answer, which may
+  // be going down that very line: this page's own device), and the server asks again for my keys.
+  // This phone's push handle (from the relay, src/core/push.ts), or none: kept on its device key.
+  setPush: ({ handle, tag }, ctx) => {
+    if (!ctx.device) throw new Error(L('Só um aparelho conectado com a própria chave recebe avisos.', 'Only a device signed in with its own key gets notifications.'))
+    db.setKeyPush(ctx.person.id, ctx.device, handle ? { handle, ...(tag ? { tag } : {}) } : null)
+    return { on: push.on }
+  },
+  removeDevice: ({ id }, ctx) => {
+    if (!db.removePersonKey(ctx.person.id, id)) throw new Error(L('Esse aparelho já foi desconectado.', 'That device was already disconnected.'))
+    toMain({ type: 'person-changed', id: ctx.person.id })
+    emitPeople()
+    setTimeout(() => hub.closeDevice(id), 200)
+  },
   // Access ends now: keys, open connections, the server's remembered sign-ins. Their agents and
   // routines go to the owner; their DMs and memories wait 30 days for a re-invite (the daily sweep).
   removePerson: ({ id }, ctx) => {
@@ -1898,6 +2158,9 @@ const api: Handlers = {
   inbox: (_, ctx) => people.inbox(ctx.person),
   answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),
   confirmQuestion: ({ id, ok }, ctx) => runner.confirm(id, ok, ctx.person),
+  // A question's decisions, answered on the card one at a time and then sent: by whoever may answer it (Runner.decidable).
+  answerDecision: ({ messageId, index, answer }, ctx) => runner.answerDecision(messageId, index, answer, ctx.person),
+  submitDecisions: ({ messageId }, ctx) => runner.submitDecisions(messageId, ctx.person),
   runRoutine: ({ id }, ctx) => {
     const r = db.routine(id)
     if (!r) throw new Error(L('Essa rotina não existe mais.', 'That routine no longer exists.'))
@@ -1913,10 +2176,30 @@ const api: Handlers = {
 
   // Login always happens in the CLI's own flow; the app never sees credentials.
   // Codex logs into the app's own home (see codexEnv), separate from the user's.
-  loginEngine: ({ engine }) => {
+  loginEngine: ({ engine, screen }) => {
+    // On a server, for a page or a phone that can show it: the sign-in in a terminal of the server's.
+    const shown = screen && engines[engine].installed ? loginTerminal.start(engine) : undefined
+    if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
     // The sign-in happens in a terminal: check again until it lands, wherever the person is.
     watchEngine(engine, (s) => s.loggedIn)
     return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {})
+  },
+
+  // The introduction's setup with no terminal: Codex or Claude Code downloaded into the app's folder,
+  // then the CLI's own sign-in in the browser. The screen asks how it goes every moment.
+  setupEngine: ({ engine }) => {
+    if (!SETUP_ENGINES.includes(engine as SetupEngine)) throw new Error(L('Só dá pra preparar o Codex ou o Claude Code daqui.', 'Only Codex or Claude Code can be set up from here.'))
+    if (serverMode) throw new Error(L('Num servidor, o login é feito no terminal dele.', "On a server, the sign-in happens in its terminal."))
+    return fake ? fakeSetup(engine as SetupEngine) : engineSetup.start(engine as SetupEngine)
+  },
+  // The sign-in on the server's terminal (loginEngine with screen): how it looks now, keys to it, its end.
+  loginScreen: () => loginTerminal.current(),
+  loginInput: ({ id, text, key, enter }) => loginTerminal.send(id, { ...(text ? { text } : {}), ...(key ? { key: key as LoginKey } : {}), ...(enter ? { enter } : {}) }),
+  stopLogin: ({ id }) => loginTerminal.stop(id),
+  engineSetupState: () => (fake ? fakeSetupState : engineSetup.current),
+  cancelEngineSetup: () => {
+    if (fake) return void (fakeSetupState = fakeSetupState && { ...fakeSetupState, state: 'cancelled' })
+    engineSetup.cancel()
   },
 
   // Another login of Claude Code or Codex: a folder of its own, signed into in a terminal like the first.
@@ -1935,9 +2218,11 @@ const api: Handlers = {
     emit({ type: 'settings', settings: settings() })
     return account
   },
-  loginAccount: ({ id }) => {
+  loginAccount: ({ id, screen }) => {
     const a = savedAccounts().find((x) => x.id === id)
     if (!a) return { opened: false, command: '' }
+    const shown = screen && engines[a.engine].installed ? loginTerminal.start(a.engine, a.id) : undefined
+    if (shown) return { opened: true, command: ENGINES[a.engine].login, screen: shown }
     const dir = accountDir(dataDir, a.id)
     watchAccount(a.id)
     return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex') })
@@ -2016,7 +2301,7 @@ function handle(port: MessagePortMain, req: Request): void {
   const wrong = paramsError(req.method as Method, req.params) ?? limitError(req.method as Method, req.params)
   if (wrong) return reply({ error: wrong })
   Promise.resolve()
-    .then(() => (admit(person, req.method as Method), fn(req.params ?? {}, { person })))
+    .then(() => (admit(person, req.method as Method), fn(req.params ?? {}, { person, device: hub.deviceOf(port) })))
     .then(
       (result) => reply({ result }),
       (e: unknown) => {

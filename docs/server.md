@@ -36,14 +36,14 @@ Open that link once. The token signs the browser in, and a cookie keeps it signe
 
 ### Signing the harnesses in
 
-Sign each harness in on the server, in a terminal over SSH:
+Install the harnesses on the server, in a terminal over SSH, as the user that runs Tucano:
 
 ```bash
-curl -fsSL https://claude.ai/install.sh | bash && claude auth login   # prints a link and asks for the code
+curl -fsSL https://claude.ai/install.sh | bash
 npm install -g @openai/codex
 ```
 
-Codex is signed in from Tucano's **Settings › Models**, like on a desktop. On a server, the **Sign in** button can't open a terminal, so it shows the command to run in your SSH session.
+Then sign them in from Tucano's **Settings › Models**, in the browser or the iPhone app: **Sign in** runs the harness's own login in a terminal of the server's and shows its screen in a window, with **Open the sign-in page**, the code to type there, a field to paste a code back and the arrow keys for a menu. Each harness signs in the way that works with no browser on the server: Codex and Grok with a device code (`codex login --device-auth`, `grok login --device-auth`), Claude Code with a code you paste back, Cursor on its own once you approve the page, OpenCode and Gemini in their own menus, and Pi with `/login` on its screen. Tucano passes keys and shows the screen; the login is saved where the harness always keeps it. This needs Linux (it uses `script`, from util-linux); elsewhere **Sign in** shows the command to run over SSH.
 
 ### On a phone
 
@@ -109,6 +109,7 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 | `TUCANO_PORT` | `7337` | |
 | `TUCANO_TOKEN` | a random token, kept in `server-token` | Set it to use a token of your own |
 | `TUCANO_URL` | where it listens | The address people open, behind a proxy (`https://tucano.example.com`): what `link` prints |
+| `TUCANO_PUSH_URL` | `https://tucano.sh/api/push` | The relay that delivers notifications to the iPhone app while it's closed (`site/push.js`), or `off`. The relay gets each notification's title and line, and the phone's handle, and keeps nothing |
 | `TUCANO_TRUST_PROXY` | off | `1` behind a reverse proxy: each visitor's address comes from `X-Forwarded-For` |
 
 Once a browser has the cookie, the server answers only its own page: a page of another site (a sibling subdomain included) can't call it, and no site can show it inside a frame. Twenty wrong tokens from one address in ten minutes lock that address out for ten minutes.

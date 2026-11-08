@@ -2,6 +2,7 @@
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
+import type { Answer } from '../../shared/questions'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import type { DatabricksStatus, JobWatch } from '../../shared/job-watch'
@@ -32,12 +33,17 @@ import {
   type Model,
   type Person,
   type Inbox,
+  type Device,
   type Invite,
   type ActivityEntry,
   delegating,
   type Routine,
   type RoutineInput,
   type Settings,
+  type SetupEngine,
+  type SetupState,
+  type LoginKey,
+  type LoginScreen,
   type Skill,
   type SkillInput,
   type SkillVersion,
@@ -68,6 +74,7 @@ export type View =
   | { kind: 'skills' }
   | { kind: 'report' }
   | { kind: 'settings' }
+  | { kind: 'missions' } // what to try next, each bringing a part of the sidebar on a new install
 
 export interface State {
   webhookPort: number
@@ -758,12 +765,41 @@ export const voiceCancelDownload = (): Promise<void> => call('voiceCancelDownloa
 export const voiceRemoveModel = (model: VoiceModelId): Promise<void> => call('voiceRemoveModel', { model })
 export const transcribe = async (id: string, audio: string): Promise<string> => (await call('transcribe', { id, audio })).text
 export const cancelTranscribe = (id: string): Promise<void> => call('cancelTranscribe', { id })
-export const loginEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => call('loginEngine', { engine })
+// On a server, the sign-in runs in its own terminal and shows here (LoginTerminal.tsx): screen comes
+// back, and the window opens. Elsewhere, a terminal of the computer's opens, as before.
+export const loginEngine = async (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string }> => {
+  const r = await call('loginEngine', { engine, screen: true })
+  if (r.screen) showLogin(r.screen)
+  return r
+}
 // More logins of Claude Code and Codex, each signed into in a terminal.
 export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })
-export const loginAccount = (id: string): Promise<{ opened: boolean; command: string }> => call('loginAccount', { id })
+export const loginAccount = async (id: string): Promise<{ opened: boolean; command: string }> => {
+  const r = await call('loginAccount', { id, screen: true })
+  if (r.screen) showLogin(r.screen)
+  return r
+}
+// The sign-in on the server's terminal being shown, if any; the window asks the core how it goes.
+let loginShown: LoginScreen | null = null
+const loginListeners = new Set<() => void>()
+export function showLogin(s: LoginScreen | null): void {
+  loginShown = s
+  loginListeners.forEach((l) => l())
+}
+export const useLoginShown = (): LoginScreen | null =>
+  useSyncExternalStore(
+    (l) => (loginListeners.add(l), () => void loginListeners.delete(l)),
+    () => loginShown
+  )
+export const loginScreen = (): Promise<LoginScreen | null> => call('loginScreen')
+export const loginInput = (id: string, input: { text?: string; key?: LoginKey; enter?: boolean }): Promise<LoginScreen | null> => call('loginInput', { id, ...input })
+export const stopLogin = (id: string): void => void call('stopLogin', { id }).catch(() => {})
 export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
+// Codex or Claude Code with no terminal (the introduction): the CLI downloaded, then its own sign-in in the browser.
+export const setupEngine = (engine: SetupEngine): Promise<SetupState> => call('setupEngine', { engine })
+export const engineSetupState = (): Promise<SetupState | null> => call('engineSetupState')
+export const cancelEngineSetup = (): void => void call('cancelEngineSetup').catch(() => {})
 // The person's own apps, through agent-desktop.
 export const desktopStatus = (): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> => call('desktopStatus')
 export type InstalledApp = { name: string; bundleId?: string; path?: string; running?: boolean; icon?: string }
@@ -859,6 +895,10 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
   if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
 }
 
+export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
+  void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })
+export const submitDecisions = (messageId: string): Promise<void> => fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitDecisions', { messageId })
+
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
 // nobody needs to hear if it didn't work. `opened`: they only opened it (the agent's kept session
 // starts again, while they read; the router waits for them to type).
@@ -941,7 +981,7 @@ export const openExternal = (url: string): void =>
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
 export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
-export const testEngine = (model: string): Promise<{ ok: boolean; message: string }> => call('testEngine', { model })
+export const testEngine = (model: string): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
 export const localSkills = (): Promise<LocalSkill[]> => call('localSkills')
 export const linkSkill = (source: string, agents: string[] = []): Promise<Skill> => call('linkSkill', { source, agents })
@@ -975,6 +1015,8 @@ export const revokeInvite = (id: string): Promise<void> => call('revokeInvite', 
 export const listInvites = (): Promise<Invite[]> => call('listInvites')
 export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => call('removedPeople')
 export const removePerson = (id: string): Promise<void> => call('removePerson', { id })
+export const myDevices = (): Promise<Device[]> => call('myDevices')
+export const removeDevice = (id: string): Promise<void> => call('removeDevice', { id })
 export const setRole = (id: string, role: 'admin' | 'member'): Promise<void> => call('setRole', { id, role })
 export const purgePerson = (id: string): Promise<void> => call('purgePerson', { id })
 export const loadActivity = (f: { personId?: string; kind?: string; before?: number }): Promise<ActivityEntry[]> => call('activity', f)

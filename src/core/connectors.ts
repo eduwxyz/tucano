@@ -16,7 +16,7 @@ import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connect
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify, legacyClassify } from './policy'
-import type { Secrets } from './secrets'
+import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
 const CALL_TIMEOUT_MS = 120_000
@@ -26,6 +26,8 @@ const MAX_STDIO_FAILURES = 3
 // A connection that dropped on its own (the server's process ended, the network went), or an attempt that
 // failed for a passing reason, is tried again after these waits; then it waits for a call or the button.
 const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 60_000, 300_000]
+// How long a renewal's answer is kept for another request that renews with the same refresh token.
+const RENEWAL_KEEP_MS = 60_000
 
 // The authorization page sent the browser back without a code: why, and what to do.
 export function notAuthorized(url: URL): string {
@@ -121,6 +123,36 @@ interface Live {
   passing?: boolean // the last attempt failed for a reason that may go away by itself (network, timeout)
 }
 
+// What happened to the renewals of one connection attempt.
+interface Renewal {
+  failed?: boolean // the token endpoint didn't answer, or answered with a server error: the sign-in may still be good
+}
+
+type Answer = { status: number; statusText: string; headers: [string, string][]; body: string }
+
+// The OAuth error a token endpoint answered with (RFC 6749 §5.2), if it answered with one.
+const oauthError = (a: Answer): string | undefined => {
+  if (a.status < 400 || a.status >= 500 || a.status === 429) return undefined
+  try {
+    const error = (JSON.parse(a.body) as { error?: unknown }).error
+    return typeof error === 'string' ? error : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// The saved sign-in couldn't be opened (the system's key): nothing was deleted, and it isn't the server's doing.
+const unreadableMessage = (auth: Connector['auth']): string =>
+  auth === 'oauth'
+    ? L(
+        'Não consegui abrir o login salvo deste conector: o sistema não liberou a chave do Tucano. Nada foi apagado. Reinicie o Tucano e, se o sistema pedir acesso às chaves, permita; se não resolver, autorize de novo.',
+        "I couldn't open this connector's saved sign-in: the system didn't release Tucano's key. Nothing was deleted. Restart Tucano and, if the system asks for access to the keys, allow it; if that doesn't help, authorize again."
+      )
+    : L(
+        'Não consegui abrir as credenciais salvas deste conector: o sistema não liberou a chave do Tucano. Nada foi apagado. Reinicie o Tucano e, se o sistema pedir acesso às chaves, permita; se não resolver, salve a credencial de novo.',
+        "I couldn't open this connector's saved credentials: the system didn't release Tucano's key. Nothing was deleted. Restart Tucano and, if the system asks for access to the keys, allow it; if that doesn't help, save the credential again."
+      )
+
 // The call never ran, so it can go again on a new connection: the server forgot this session (it expired
 // while idle), or the client had no connection to send it on. Not "Connection closed": the SDK gives that to
 // every call already sent when the connection drops, which the server may have run (a write would go twice).
@@ -180,6 +212,11 @@ export class ConnectorManager {
   private authUrls = new Map<string, string>() // a connector's last authorization page
   private doneStates = new Set<string>() // finished already (the callback got there first): not an expired one
   private closing = false // the app is quitting: nothing reconnects
+  // Renewals under way or just done, by token endpoint and refresh token. A server that rotates refresh tokens
+  // takes each one once: two requests renewing together would get one new sign-in and
+  // one refusal, and the refusal made the SDK delete the sign-in the other had just saved.
+  private renewals = new Map<string, Promise<Answer>>()
+  private refused = new Set<string>() // refresh tokens a server refused
 
   constructor(private deps: ConnectorDeps) {}
 
@@ -340,6 +377,7 @@ export class ConnectorManager {
       { listChanged: { tools: { onChanged: () => void this.refreshTools(id).catch(() => {}) } } }
     )
     let transport: Transport
+    const renewal: Renewal = {}
     const own = c.kind === 'remote' && c.auth === 'oauth' ? this.appOf(c.url) : undefined
     if (own && !(await this.deps.secrets.getJson<OwnApp>(appKey(own.provider)))) {
       const name = PROVIDER[own.provider]
@@ -355,7 +393,8 @@ export class ConnectorManager {
         }
         const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
           requestInit: { headers },
-          authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own) : undefined
+          authProvider: c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own) : undefined,
+          ...(c.auth === 'oauth' ? { fetch: this.renewingFetch(renewal) } : {})
         })
         transport = http
       } else {
@@ -363,8 +402,8 @@ export class ConnectorManager {
         transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
       }
     } catch (e) {
-      // A 1Password secret that wasn't read: it needs you (unlock, install the CLI), so no retries.
-      this.setStatus(id, 'error', e instanceof OpError ? e.message : connectError(e))
+      // A 1Password secret that wasn't read, or a saved one the system's key won't open: it needs you, so no retries.
+      this.setStatus(id, 'error', unreadable(e) ? unreadableMessage(c.auth) : e instanceof OpError ? e.message : connectError(e))
       return
     }
 
@@ -375,7 +414,17 @@ export class ConnectorManager {
       // Linear's), so its status says it, not its text.
       const refused =
         e instanceof UnauthorizedError || (e instanceof StreamableHTTPError && e.code === 401) || (e instanceof Error && /unauthorized|401/i.test(e.message))
-      if (refused && c.auth === 'token') {
+      if (unreadable(e)) {
+        // Not the server: the saved sign-in is there, encrypted, and stays. No retries, no browser.
+        await client.close().catch(() => {})
+        this.setStatus(id, c.auth === 'oauth' ? 'needs_auth' : 'error', unreadableMessage(c.auth))
+      } else if (refused && renewal.failed && !interactive) {
+        // The sign-in is still good: the server that renews it didn't answer. It tries again by itself.
+        await client.close().catch(() => {})
+        this.setStatus(id, 'error', L('Não consegui renovar o login agora: o servidor de autorização não respondeu. Tento de novo sozinho.', "I couldn't renew the sign-in just now: the authorization server didn't answer. I'll try again by myself."))
+        this.live.get(id)!.passing = true
+        this.reconnectLater(id)
+      } else if (refused && c.auth === 'token') {
         // With a token there is no browser to go to: the server refused it, or there is none yet.
         await client.close().catch(() => {})
         this.setStatus(id, 'error', L('O servidor recusou o token. Salve um token válido neste conector.', 'The server refused the token. Save a valid token on this connector.'))
@@ -513,10 +562,58 @@ export class ConnectorManager {
 
   // The authorization page's address comes back too: on a server there's no
   // browser to open it in, so the page the person is using opens it.
+  // A sign-in that can still be renewed (the server was away, the attempt hit a passing error) comes back
+  // without the browser: signing in again would register another app and throw the saved one away.
   async authorize(id: string): Promise<string | undefined> {
     this.authUrls.delete(id)
+    if (this.live.get(id)?.client) return undefined
+    if (await this.renewable(id)) {
+      await this.connect(id).catch(() => {})
+      if (this.live.get(id)?.client) return undefined
+    }
     await this.connect(id, true).catch(() => {})
     return this.authUrls.get(id)
+  }
+
+  private async renewable(id: string): Promise<boolean> {
+    const tokens = await this.deps.secrets.getJson<OAuthTokens>(key(id, 'oauth_tokens')).catch(() => undefined)
+    return !!tokens?.refresh_token && !this.refused.has(tokens.refresh_token)
+  }
+
+  // The fetch an OAuth connection uses. A renewal (grant_type=refresh_token) goes to the server once per refresh
+  // token: a request that renews with the same one meanwhile gets the same answer. It also notes a renewal the
+  // server refused, and one that failed without saying the sign-in is bad (no answer, a server error).
+  private renewingFetch(renewal: Renewal): typeof fetch {
+    return async (input, init) => {
+      const form = init?.body instanceof URLSearchParams ? init.body : undefined
+      const refreshToken = form?.get('grant_type') === 'refresh_token' ? form.get('refresh_token') : null
+      if (!refreshToken) return fetch(input, init)
+      const k = `${input instanceof Request ? input.url : String(input)} ${refreshToken}`
+      let answer = this.renewals.get(k)
+      if (!answer) {
+        answer = fetch(input, init).then(async (r) => ({ status: r.status, statusText: r.statusText, headers: [...r.headers], body: await r.text() }))
+        this.renewals.set(k, answer)
+        // A new sign-in or a refusal holds for whoever asks next; a failure is tried again.
+        answer.then(
+          (a) => (a.status < 300 || oauthError(a) !== undefined ? setTimeout(() => this.renewals.delete(k), RENEWAL_KEEP_MS).unref?.() : this.renewals.delete(k)),
+          () => this.renewals.delete(k)
+        )
+      }
+      let a: Answer
+      try {
+        a = await answer
+      } catch (e) {
+        renewal.failed = true
+        throw e
+      }
+      if (a.status >= 300) {
+        const error = oauthError(a)
+        if (error === 'invalid_grant') this.refused.add(refreshToken)
+        // No word on the sign-in itself: a proxy's page, a server error, too many requests.
+        else if (error === undefined || error === 'server_error' || error === 'temporarily_unavailable') renewal.failed = true
+      }
+      return new Response(a.body, { status: a.status, statusText: a.statusText, headers: a.headers })
+    }
   }
 
   // On a server the authorization page sends the person's browser to the
@@ -549,6 +646,16 @@ export class ConnectorManager {
   private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, own?: CatalogEntry['app']): OAuthClientProvider {
     const { secrets } = this.deps
     const redirectUrl = own ? this.redirectFor(own.provider) : this.deps.oauthCallbackUrl()
+    // Signing in again (someone clicked Authorize) goes on past a saved value the system's key won't open:
+    // the new sign-in takes its place. In the background it stops the attempt, and the value stays.
+    const read = async <T>(k: string): Promise<T | undefined> => {
+      try {
+        return await secrets.getJson<T>(k)
+      } catch (e) {
+        if (interactive && unreadable(e)) return undefined
+        throw e
+      }
+    }
     let state = ''
     return {
       get redirectUrl() {
@@ -576,12 +683,12 @@ export class ConnectorManager {
           const app = await secrets.getJson<OwnApp>(appKey(own.provider))
           return app && { client_id: app.clientId, client_secret: app.clientSecret }
         }
-        const info = await secrets.getJson<OAuthClientInformationMixed & { redirect_uris?: string[] }>(key(id, 'oauth_client'))
+        const info = await read<OAuthClientInformationMixed & { redirect_uris?: string[] }>(key(id, 'oauth_client'))
         const fits = (u: string): boolean => (interactive ? u === redirectUrl : sameLoopbackRedirect(u, redirectUrl))
         return info && (!info.redirect_uris || info.redirect_uris.some(fits)) ? info : undefined
       },
       saveClientInformation: (info) => (own ? undefined : secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] })),
-      tokens: () => secrets.getJson<OAuthTokens>(key(id, 'oauth_tokens')),
+      tokens: () => read<OAuthTokens>(key(id, 'oauth_tokens')),
       saveTokens: (t) => secrets.setJson(key(id, 'oauth_tokens'), t),
       saveCodeVerifier: (v) => secrets.set(key(id, 'oauth_verifier'), v),
       codeVerifier: async () => (await secrets.get(key(id, 'oauth_verifier'))) ?? '',
@@ -594,7 +701,11 @@ export class ConnectorManager {
       },
       invalidateCredentials: async (scope) => {
         if ((scope === 'all' || scope === 'client') && !own) await secrets.set(key(id, 'oauth_client'), undefined) // the app is the person's
-        if (scope === 'all' || scope === 'tokens') await secrets.set(key(id, 'oauth_tokens'), undefined)
+        // Only a sign-in the server refused: one saved meanwhile (by a renewal that got there first) stays.
+        if (scope === 'all' || scope === 'tokens') {
+          const saved = await read<OAuthTokens>(key(id, 'oauth_tokens')).catch((e: unknown) => (unreadable(e) ? 'unreadable' : undefined))
+          if (saved !== 'unreadable' && (scope === 'all' || !saved?.refresh_token || this.refused.has(saved.refresh_token))) await secrets.set(key(id, 'oauth_tokens'), undefined)
+        }
         if (scope === 'all' || scope === 'verifier') await secrets.set(key(id, 'oauth_verifier'), undefined)
       }
     }

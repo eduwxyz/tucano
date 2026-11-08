@@ -1,8 +1,9 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
-import type { AppProvider } from './connector-catalog'
+import type { Answer } from './questions'
+import type { WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
+import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { DatabricksStatus, JobWatch } from './job-watch'
-import type { Os, Account, AccountEngine, ActivityEntry, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
+import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -66,11 +67,19 @@ export interface Api {
   voiceRemoveModel(p: { model: VoiceModelId }): void
   localPath(p: { messageId: string; path: string }): LocalInfo | null // what a path this agent cited can do; null: it stays text
   openLocal(p: { messageId: string; path: string; how: 'open' | 'reveal' }): void
-  loginEngine(p: { engine: EngineId }): { opened: boolean; command: string } // not opened: no terminal to open, the person runs the command
+  // not opened: no terminal to open, the person runs the command. screen: the caller can show the
+  // server's own terminal (a page or a phone on Tucano as a server); then the sign-in runs there, and comes back
+  loginEngine(p: { engine: EngineId; screen?: boolean }): { opened: boolean; command: string; screen?: LoginScreen }
+  loginScreen(): LoginScreen | null
+  loginInput(p: { id: string; text?: string; key?: LoginKey; enter?: boolean }): Promise<LoginScreen | null>
+  stopLogin(p: { id: string }): void
   addAccount(p: { engine: AccountEngine; name: string }): Account
-  loginAccount(p: { id: string }): { opened: boolean; command: string }
+  loginAccount(p: { id: string; screen?: boolean }): { opened: boolean; command: string; screen?: LoginScreen }
   removeAccount(p: { id: string }): void
   installEngine(p: { engine: EngineId }): { opened: boolean; command: string; needsNode?: boolean } // needsNode: an npm install with no npm here
+  setupEngine(p: { engine: EngineId }): SetupState // Codex or Claude Code with no terminal: downloaded, then the CLI's own sign-in in the browser
+  engineSetupState(): SetupState | null
+  cancelEngineSetup(): void
   desktopStatus(): Promise<{ installed: boolean; version?: string; accessibility?: string; suggestion?: string; server?: boolean }> // agent-desktop, for the person's apps
   installedApps(): Promise<{ name: string; bundleId?: string; path?: string; icon?: string }[]> // the person's installed apps (a Mac's), kept on disk
   openApps(): Promise<{ name: string; bundleId?: string }[]> // the apps with windows right now
@@ -80,6 +89,9 @@ export interface Api {
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
   setConnectorToken(p: { id: string; token: string }): Promise<void>
+  connectorCatalog(): { categories: { id: CatalogCategory; name: string }[]; entries: CatalogView[]; added: string[] } // the store, as data (the phone); added: the entries already connected
+  addCatalogConnector(p: { id: string; values?: Record<string, string> }): Promise<string> // a store entry, with what it asks, filled in by the core
+  ownAppGuide(p: { provider: AppProvider }): Promise<{ guide: OwnAppGuide; clientId?: string }> // the steps to make one's own Google or Slack app (the phone)
   ownApp(p: { provider: AppProvider }): Promise<{ clientId?: string; redirectUrl: string }> // the person's app (Google's, Slack's) its connectors sign in with; its secret stays in the core
   setOwnApp(p: { provider: AppProvider; clientId: string; clientSecret: string }): Promise<void>
   authorizeConnector(p: { id: string }): Promise<{ url?: string }> // url: on a server, the page to open in the person's browser
@@ -108,7 +120,7 @@ export interface Api {
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
   engineModels(p: { engine: EngineId }): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
-  testEngine(p: { model: string }): Promise<{ ok: boolean; message: string }> // one real reply through that model
+  testEngine(p: { model: string }): Promise<{ ok: boolean; message: string; seconds?: number }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
   localSkills(): LocalSkill[] // the skills of the user's Claude Code, its plugins and Codex
   linkSkill(p: { source: string; agents: string[] }): Skill
@@ -133,7 +145,7 @@ export interface Api {
   cancelJobRun(p: { id: string }): Promise<void> // the run itself, when job actions are on
   checkDatabricks(): Promise<DatabricksStatus> // finds the CLI and the profile again, and tries the login
   // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.
-  wiki(): { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number; held?: { title: string; at: number }[]; heritage?: { at: number } } // pending: the curator's changes; the review's are in findings
+  wiki(): { dir: string; pages: WikiPageInfo[]; kinds: string[]; log: string[]; pending: number; findings: number; server: boolean; graph: { nodes: { title: string; kind: string; links: number; missing?: boolean }[]; edges: [string, string][] }; recent: Omit<WikiVersion, 'before' | 'after'>[]; sources: number; held?: { title: string; at: number }[]; heritage?: { at: number }; git?: { readOnly: boolean; state: WikiGitStatus['state']; lastSync?: number } } // pending: the curator's changes; the review's are in findings
   wikiPage(p: { title: string }): WikiPage | null
   wikiSearch(p: { q: string }): WikiHit[]
   wikiSave(p: { title: string; body: string; kind?: string; expectedHash?: string; rename?: string }): WikiPage // throws on a conflict or a taken title
@@ -169,6 +181,13 @@ export interface Api {
   setWikiCapture(p: { conversationId: string; on: boolean }): void
   setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now
+  // The wiki's folder kept in a git repository (owner and admins): a deploy key, a test, then the folder becomes the clone.
+  wikiGitStatus(): WikiGitStatus
+  wikiGitSetup(p: { url: string }): Promise<WikiGitSetup> // an SSH address (an https one is turned into it); makes the key once
+  wikiGitTest(): Promise<WikiGitTest> // ls-remote with the key, then a clone apart; the wiki doesn't change yet
+  wikiGitConnect(p: { how: 'repo' | 'merge' }): Promise<WikiGitStatus> // repo: the wiki becomes the clone, the old folder stays as it was; merge: the pages there are copied in too
+  wikiGitSync(p: { write?: boolean }): Promise<WikiGitStatus> // now; write: try pushing again after read-only
+  wikiGitDisconnect(): Promise<WikiGitStatus> // stops syncing and drops the key; the folder stays as it is
   // People: who I am, and (admins) who comes in. The link is the page's origin with ?invite=<code>.
   setMyName(p: { name: string; about?: string }): void // about: what I do, for the agents
   setDelegation(p: { to: string | null; until?: number }): void // someone answers and approves for me until then; null ends it
@@ -176,6 +195,9 @@ export interface Api {
   revokeInvite(p: { id: string }): void
   listInvites(): Invite[]
   removedPeople(): (Person & { removedAt: number })[] // admins: who left in the last 30 days (still restorable)
+  myDevices(): Device[] // my own keys: the browsers and phones signed in as me
+  setPush(p: { handle: string | null; tag?: string }): { on: boolean } // this phone's push handle (the relay's), or none; on: this Tucano sends pushes
+  removeDevice(p: { id: string }): void // one of mine signs out now (Device.id)
   removePerson(p: { id: string }): void // their access ends at once: keys gone, open connections closed; what they owned goes to the owner
   setRole(p: { id: string; role: Exclude<Role, 'owner'> }): void
   purgePerson(p: { id: string }): void // the owner, before the 30 days: a removed person's DMs and memories go now
@@ -184,6 +206,8 @@ export interface Api {
   inbox(): Inbox
   answerQuestion(p: { id: string; text: string }): void // a question an agent asked me (or someone I cover for)
   confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?
+  answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
+  submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
 }
 

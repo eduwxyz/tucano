@@ -1,7 +1,9 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
+import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
 import type { JobSkillState, JobWatchSettings } from './job-watch'
+import type { Answer, Decision } from './questions'
 import { L, lang, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -86,6 +88,9 @@ export interface Agent {
   jobWatch?: boolean // follows Databricks runs through the app's own tools; off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
+  actionRules?: ActionRules // what it does about a commit, a push, a PR…: over settings.actionRules, kind by kind; unset kinds follow them
+  autonomy?: Autonomy // how far it goes on its own (src/shared/actions.ts); unset: Settings' level
+  outsideGuard?: boolean // false: what goes out (a send, a post, a payment) runs on its rules even after reading something from outside; unset: Settings'
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
@@ -178,12 +183,18 @@ export interface Run {
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string
+  outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   replyTo?: string // the message (a person's) it answers, when one did
   answeredBy?: string // who answered its question (another person than the one asked, maybe)
-  question?: string // asked with ask_user; answered by the next human message here
+  question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
+  questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
+  answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  answeredInText?: true // the reply had text of its own, beyond the decisions answered
+  answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
+  answerTyped?: string // what that message had beyond them, written in the message box
   askedTo?: string // the person the question is for (unset with one person: whoever asked the agent)
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
@@ -248,6 +259,16 @@ export interface Person {
   devices?: number // how many keys (browsers, apps) they have
 }
 
+// One of my own keys (a browser, the phone, the desktop app), as Settings › Pessoas lists them.
+// `id` is the key's hash, never the key. No `seenAt`: it never signed in (a link preview's, say).
+export interface Device {
+  id: string
+  label: string
+  createdAt: number
+  seenAt?: number
+  current?: boolean // the one this page is signed in with
+}
+
 // Whether `of` has `who` covering for them right now.
 export const delegating = (of: Pick<Person, 'delegateTo' | 'delegateUntil'> | undefined, who: string, now = Date.now()): boolean =>
   !!of && of.delegateTo === who && (of.delegateUntil ?? 0) > now
@@ -275,8 +296,9 @@ export interface Question {
 // A question from someone else's DM comes without where it was asked (they see the question only).
 export interface Inbox {
   approvals: Approval[]
-  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string })[]
-  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
+  // With the decisions asked (ask_user's options) and what was answered on the card so far.
+  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
+  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
 }
 
@@ -390,6 +412,9 @@ export interface Settings {
   defaultLimit: number
   approvalTtlHours: number
   questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)
+  actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
+  autonomy?: Autonomy // every agent's level, unless its page sets its own (default normal)
+  outsideGuard?: boolean // after reading something from outside, what goes out asks first even where rules let it run (default on)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
@@ -403,7 +428,18 @@ export interface Settings {
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
-  onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean; carried?: boolean } // carried: the general settings came from another workspace
+  onboarding?: {
+    done: boolean
+    checklistHidden?: boolean // the missions, hidden from the sidebar
+    workspaceManagerSeen?: boolean
+    carried?: boolean // the general settings came from another workspace
+    fresh?: boolean // a new install: the sidebar starts short and grows with the missions
+    showAll?: boolean // "Mostrar tudo de uma vez": the whole sidebar, missions or not
+    seen?: string[] // the sidebar parts a mission brought that the person already opened (no "new" tag)
+    channel?: string // the channel the introduction made, where the first message waits
+    tour?: { done?: string[]; skipped?: boolean } // the marks over the real screens, once each
+    guest?: { by?: string } // someone just invited: their own short welcome first (who invited them)
+  }
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
@@ -545,6 +581,33 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
+
+// Codex or Claude Code being set up from the introduction, with no terminal (src/core/engine-setup.ts):
+// getting the CLI, then the CLI's own sign-in (the screen does the test reply after).
+export type SetupEngine = 'claude' | 'codex'
+export interface SetupState {
+  engine: SetupEngine
+  step: 'install' | 'login'
+  state: 'running' | 'done' | 'error' | 'cancelled'
+  progress?: number // 0..1, while downloading
+  url?: string // the sign-in page, in case the browser didn't open
+  error?: string
+}
+
+// A harness's sign-in in the server's own terminal (src/core/login-terminal.ts), shown on a page or a phone.
+export interface LoginScreen {
+  id: string
+  engine: EngineId
+  account?: string // another login's id (Settings › Accounts); unset: the harness's usual one
+  lines: string[]
+  url?: string // the page to open, as the CLI shows it
+  code?: string // a code to type on that page
+  hint?: string // what to do first, for a harness whose sign-in starts inside its own screen
+  state: 'running' | 'done' | 'failed' | 'cancelled'
+  error?: string
+}
+export const LOGIN_KEYS = ['enter', 'up', 'down', 'left', 'right', 'esc', 'tab', 'backspace', 'space'] as const
+export type LoginKey = (typeof LOGIN_KEYS)[number]
 
 // A harness starts picked only when it can actually run: one not installed or not
 // signed in yet starts off.
@@ -1056,7 +1119,7 @@ export interface WikiChange {
 export interface WikiFinding {
   id: string
   at: number
-  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' // log: a page that reads like a record of what was done
+  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' | 'git' // log: a page that reads like a record of what was done; git: what the sync with the repository ran into (a conflict, a file too big, read-only)
   pages: string[] // the pages it is about
   text: string // what's wrong, in a sentence (Markdown, with [[links]])
   name?: string // broken, missing: the page it would take
@@ -1071,6 +1134,37 @@ export interface WikiImport {
   links: number // links between pages, in the whole wiki now
   missing: number // links to pages nobody wrote yet
   kinds: [string, number][] // the kinds the new pages got (their tipo, folder or first tag)
+}
+// The wiki's folder kept in a git repository (src/core/wiki-git.ts), as Wiki settings show it.
+export type WikiGitHost = 'github' | 'gitlab' | 'bitbucket' | 'gitea'
+export interface WikiGitSetup {
+  sshUrl: string // what Tucano clones and pushes (git@host:owner/repo.git)
+  converted?: boolean // an https address was given: this is its SSH one
+  host: string
+  provider?: WikiGitHost
+  publicKey: string // the deploy key to add to the repository
+  deployKeyUrl?: string // the page that adds it, when the host is known
+}
+export interface WikiGitTest {
+  branch: string
+  empty: boolean // a repository with nothing in it yet
+  pages: number // Markdown notes in it
+  pdfs: number
+  docx: number
+  currentPages: number // pages the wiki has now: with some, connecting asks how
+}
+export type WikiGitError = { kind: 'auth' | 'network' | 'notfound' | 'hostkey' | 'nogit' | 'other'; message: string }
+export interface WikiGitStatus {
+  state: 'off' | 'setup' | 'ok' | 'syncing' | 'error' // setup: a key made, not connected yet
+  setup?: WikiGitSetup
+  test?: WikiGitTest // the last test, until it's connected
+  branch?: string
+  readOnly: boolean // the key can't push: the wiki shows the repository and takes no writes
+  lastSync?: number
+  nextTry?: number // after a failure, when it tries again on its own
+  error?: WikiGitError
+  skipped: { path: string; mb: number }[] // files over 50 MB, kept out of the repository
+  git: boolean // git was found on this computer
 }
 export interface WikiReview {
   at?: number // the last review

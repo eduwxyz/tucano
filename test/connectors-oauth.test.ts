@@ -20,6 +20,12 @@ let registrations: number
 let refreshes: string[]
 let expireAccessToken: () => void
 let revokeRefreshTokens: () => void
+// How the authorization server behaves: rotating refresh tokens (each works once, like Linear's and
+// Notion's), a slow token endpoint (so two refreshes overlap), and a token endpoint that's down.
+let rotate: boolean
+let tokenDelayMs: number
+let tokenDown: number // the next refreshes answer 503
+let calls: number
 
 const body = async (req: import('node:http').IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = []
@@ -33,6 +39,10 @@ beforeEach(async () => {
   opened = []
   registrations = 0
   refreshes = []
+  rotate = false
+  tokenDelayMs = 0
+  tokenDown = 0
+  calls = 0
   let current = '' // only the newest access token works, as if the older one had expired
   expireAccessToken = () => {
     current = ''
@@ -70,9 +80,19 @@ beforeEach(async () => {
         const refreshToken = form.get('refresh_token')
         if (refreshToken) {
           refreshes.push(`${clientId} (issued to ${owner.get(refreshToken) ?? 'nobody'})`)
+          if (tokenDelayMs) await new Promise((r) => setTimeout(r, tokenDelayMs))
+          if (tokenDown > 0) {
+            tokenDown -= 1
+            res.writeHead(502, { 'content-type': 'text/html' }).end('<html>Bad Gateway</html>')
+            return
+          }
           if (owner.get(refreshToken) !== clientId) return json(400, { error: 'invalid_grant' })
-          current = `at-${owner.size + 1}-${Date.now()}`
-          return json(200, { access_token: current, token_type: 'Bearer', expires_in: 3600, refresh_token: refreshToken })
+          current = `at-${refreshes.length}-${Date.now()}`
+          if (!rotate) return json(200, { access_token: current, token_type: 'Bearer', expires_in: 3600, refresh_token: refreshToken })
+          owner.delete(refreshToken)
+          const next = `rt-r${refreshes.length}`
+          owner.set(next, clientId)
+          return json(200, { access_token: current, token_type: 'Bearer', expires_in: 3600, refresh_token: next })
         }
         current = `at-${owner.size + 1}-${Date.now()}`
         const fresh = `rt-${owner.size + 1}`
@@ -93,7 +113,11 @@ beforeEach(async () => {
       if (call.method === 'initialize') {
         return json(200, { jsonrpc: '2.0', id: call.id, result: { protocolVersion: call.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1' } } })
       }
-      if (call.method === 'tools/list') return json(200, { jsonrpc: '2.0', id: call.id, result: { tools: [] } })
+      if (call.method === 'tools/list') return json(200, { jsonrpc: '2.0', id: call.id, result: { tools: [{ name: 'search', inputSchema: { type: 'object' } }] } })
+      if (call.method === 'tools/call') {
+        calls += 1
+        return json(200, { jsonrpc: '2.0', id: call.id, result: { content: [{ type: 'text', text: 'ok' }] } })
+      }
       res.writeHead(202).end()
     })()
   })
@@ -109,8 +133,17 @@ afterEach(async () => {
 })
 
 // One launch of the app, listening for the OAuth callback on its own port.
-const launch = (callbackPort: number): ConnectorManager =>
-  new ConnectorManager({ db, secrets, emit: () => {}, openUrl: (u) => opened.push(u), oauthCallbackUrl: () => `http://127.0.0.1:${callbackPort}/oauth/callback` })
+const launch = (callbackPort: number, withSecrets: Secrets = secrets): ConnectorManager =>
+  new ConnectorManager({ db, secrets: withSecrets, emit: () => {}, openUrl: (u) => opened.push(u), oauthCallbackUrl: () => `http://127.0.0.1:${callbackPort}/oauth/callback` })
+
+// A launch whose system key won't open what was saved (the Keychain said no, or the key changed).
+const lockedOut = (): Secrets =>
+  new Secrets(db, {
+    encrypt: plainCipher.encrypt,
+    decrypt: async () => {
+      throw new Error("I couldn't open the saved credentials (the system's key changed).")
+    }
+  })
 
 describe('OAuth credentials across launches', () => {
   it('signs in once and refreshes on the next launch, when only the callback port changed', async () => {
@@ -155,6 +188,102 @@ describe('OAuth credentials across launches', () => {
     expect(again.searchParams.get('client_id')).toBe('client-2')
     expect(again.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:51002/oauth/callback')
     await second.closeAll()
+  })
+})
+
+// Signs a new connector in on a first launch, then closes that launch with the access token gone stale.
+const signedIn = async (): Promise<string> => {
+  const first = launch(51001)
+  const id = await first.add({ name: 'Linear', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+  await first.connect(id)
+  const state = new URL((await first.authorize(id))!).searchParams.get('state')!
+  await first.finishOAuth(state, 'code-1')
+  expect(first.get(id)!.status).toBe('connected')
+  await first.closeAll()
+  expireAccessToken()
+  return id
+}
+
+describe('renewing the sign-in', () => {
+  it('renews once when two calls find the access token expired together, and keeps the new refresh token', async () => {
+    rotate = true
+    tokenDelayMs = 50
+    const id = await signedIn()
+    const second = launch(51002)
+    await second.connect(id)
+    expect(second.get(id)!.status).toBe('connected')
+    expireAccessToken() // it grows old again while the app is open
+    const results = await Promise.allSettled([second.call(id, 'search', {}), second.call(id, 'search', {})])
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
+    expect(await secrets.getJson(`connector:${id}:oauth_tokens`)).toMatchObject({ refresh_token: expect.stringMatching(/^rt-r/) })
+    await second.closeAll()
+
+    // And the next launch still renews on its own.
+    expireAccessToken()
+    const third = launch(51003)
+    await third.connect(id)
+    expect(third.get(id)!.status).toBe('connected')
+    expect(opened).toHaveLength(1)
+    await third.closeAll()
+  })
+
+  it("doesn't ask to sign in when the token endpoint is down at launch, and connects when it's back", async () => {
+    const id = await signedIn()
+    tokenDown = 1
+    const second = launch(51002)
+    await second.connect(id)
+    expect(second.get(id)!.status).toBe('error')
+    expect(second.get(id)!.error).toMatch(/renovar/)
+    expect(await secrets.getJson(`connector:${id}:oauth_tokens`)).toMatchObject({ refresh_token: 'rt-1' })
+    await second.connect(id) // the retry
+    expect(second.get(id)!.status).toBe('connected')
+    expect(opened).toHaveLength(1)
+    await second.closeAll()
+  })
+
+  it('renews with the saved sign-in when Authorize is clicked, instead of signing in again', async () => {
+    const id = await signedIn()
+    tokenDown = 1
+    const second = launch(51002)
+    await second.connect(id) // fails for now
+    expect(await second.authorize(id)).toBeUndefined()
+    expect(second.get(id)!.status).toBe('connected')
+    expect(opened).toHaveLength(1)
+    expect(registrations).toBe(1)
+    await second.closeAll()
+  })
+})
+
+describe("a saved sign-in the system key won't open", () => {
+  it('keeps it, says so once per connector without retrying, and works again once the key is back', async () => {
+    const id = await signedIn()
+    const before = db.getSecret(`connector:${id}:oauth_tokens`)
+    const locked = launch(51002, lockedOut())
+    await locked.connect(id)
+    const c = locked.get(id)!
+    expect(c.status).toBe('needs_auth')
+    expect(c.error).toMatch(/Nada foi apagado|Nothing was deleted/)
+    expect(db.getSecret(`connector:${id}:oauth_tokens`)).toBe(before)
+    expect(db.getSecret(`connector:${id}:oauth_client`)).toBeDefined()
+    expect(opened).toHaveLength(1)
+    expect(refreshes).toEqual([]) // nothing went to the server
+    await locked.closeAll()
+
+    const back = launch(51003)
+    await back.connect(id)
+    expect(back.get(id)!.status).toBe('connected')
+    expect(registrations).toBe(1)
+    await back.closeAll()
+  })
+
+  it('signs in again when Authorize is clicked, in place of what it could not open', async () => {
+    const id = await signedIn()
+    const locked = launch(51002, lockedOut())
+    await locked.connect(id)
+    const page = await locked.authorize(id)
+    expect(page).toBeTruthy()
+    expect(opened).toHaveLength(2)
+    await locked.closeAll()
   })
 })
 
