@@ -9540,6 +9540,11 @@ button.agent-card__now:hover {
   place-items: center;
   font-weight: 800;
 }
+/* A black mark (Cursor, OpenCode, Pi) or an initial: a near-black tile that still reads on the dark theme. */
+.intro-mark--ink {
+  background: #211e1b;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
 .intro-pill {
   flex-shrink: 0;
   font-size: 13px;
@@ -9965,6 +9970,74 @@ button.agent-card__now:hover {
 .autonomy-pick--compact .autonomy-pick__hint {
   font-size: 13px;
   color: var(--text-2);
+}
+/* A harness that failed: one plain line, what to do, and the raw text only under "Ver detalhes". */
+.engine-problem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 4px;
+}
+.engine-problem__line {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+.engine-problem--intro .engine-problem__line {
+  color: var(--i-ink-2);
+}
+.engine-problem__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+.engine-problem--intro .engine-problem__actions .intro-link {
+  font-size: 14px;
+}
+.engine-problem__more {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.engine-problem--intro .engine-problem__more {
+  color: var(--i-ink-3);
+}
+.engine-problem__more[open] {
+  flex-basis: 100%;
+}
+.engine-problem__more summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.engine-problem__more pre {
+  margin: 6px 0 0;
+  max-height: 120px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.engine-problem--intro .engine-problem__more pre {
+  background: var(--i-quiet);
+  color: var(--i-ink-2);
+}
+/* A harness whose test failed, beside one that works: muted, so it reads as optional. */
+.intro-row.is-failed > .intro-mark,
+.intro-row.is-failed > svg,
+.intro-row.is-failed > .icon,
+.intro-row.is-failed .intro-card__text > b,
+.intro-row.is-failed .intro-card__text > span:not(.engine-problem) {
+  opacity: 0.55;
+}
+.intro-row.is-failed {
+  align-items: flex-start;
 }
 .intro-connect.modal__card,
 .intro-connect {

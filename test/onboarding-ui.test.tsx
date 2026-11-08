@@ -49,6 +49,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
     navigate: vi.fn(),
     setMyName: vi.fn(async () => {}),
     openExternal: vi.fn(),
+    loginEngine: vi.fn(async () => ({ opened: true, command: 'pi' })),
     voiceStatus: vi.fn(() => new Promise(() => {}))
   }
 })
@@ -158,6 +159,31 @@ describe('the first run', () => {
     // The models picked behind the scenes, the tour started in #geral, and nothing sent.
     expect(store.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ routerModel: 'haiku', memoryModel: 'haiku', onboarding: { fresh: true, done: true, channel: 'ch1', tour: { done: [] } } }))
     expect(store.navigate).toHaveBeenCalledWith({ kind: 'conversation', id: 'ch1' })
+  })
+
+  it('a harness that fails its test says why in one line, and the one that works carries on', async () => {
+    const expired = 'OAuth refresh failed for anthropic: 400 {"error":"invalid_grant","message":"Refresh token expired"}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth.js:1:1)'
+    vi.mocked(store.engineModels).mockImplementation(async (e: string) => ({ models: e === 'pi' ? ['anthropic/claude-haiku-4-5'] : [] }))
+    vi.mocked(store.testEngine).mockImplementation(async (m: string) => (m.startsWith('pi') ? { ok: false, message: expired } : { ok: true, seconds: 1.2, message: 'ok' }))
+    fake = state({ settings: { engines: engines({ claude: { installed: true, loggedIn: true, route: 'plan', account: 'Plano Claude Max' }, pi: { installed: true, loggedIn: true, route: 'providers', account: 'Anthropic' } }) } })
+    await render(<Intro />)
+    await click(/^Começar$/)
+    await tick()
+    await tick()
+    expect(text()).toContain('O login da Anthropic no Pi expirou. Entre de novo no Pi pra usar.')
+    // The raw text only inside "Ver detalhes".
+    expect(document.querySelector('.engine-problem__line')!.textContent).not.toMatch(/file:|node_modules/)
+    expect(document.querySelector('.engine-problem__more pre')!.textContent).toContain('at postJson')
+    expect(document.querySelector('.intro-row.is-failed')).not.toBeNull()
+    expect(text()).toContain('Pi fica de fora por agora')
+    await click(/^Entrar de novo$/)
+    expect(store.loginEngine).toHaveBeenCalledWith('pi')
+    const before = vi.mocked(store.testEngine).mock.calls.length
+    await click(/^Tentar de novo$/)
+    expect(vi.mocked(store.testEngine).mock.calls.length).toBe(before + 1)
+    expect(button(/^Continuar com Claude Code$/)).toBeTruthy()
+    vi.mocked(store.engineModels).mockImplementation(async () => ({ models: [] }))
+    vi.mocked(store.testEngine).mockImplementation(async () => ({ ok: true, seconds: 1.2, message: 'ok' }))
   })
 
   it("makes the agent from the person's own words", async () => {

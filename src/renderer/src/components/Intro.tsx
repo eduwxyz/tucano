@@ -58,6 +58,9 @@ import { Onboarding } from './Onboarding'
 import { ConnectorGrid } from './ConnectorStore'
 import { Modal } from './Modal'
 import { AutonomyPick } from './AutonomyPick'
+import { EngineProblem } from './EngineProblem'
+import { explainEngineError } from '../../../shared/engine-errors'
+import { ENGINE_LOGOS } from '../engine-logos'
 import { AgentAvatar, Icon, MeAvatar, TucaMark } from './ui'
 
 // The opening plays once per run of the app, not again when the language changes.
@@ -377,12 +380,18 @@ function JoinLink(): ReactNode {
 
 // ---------- 2. the AI ----------
 
-const LOOK: Partial<Record<EngineId, { mark: string; bg: string }>> = { claude: { mark: 'C', bg: '#D97757' }, codex: { mark: 'GPT', bg: '#10A37F' } }
+// The harness's own mark on its brand color (engine-logos.ts); its initial where there's no mark (Grok).
 function EngineMark({ engine, size = 44 }: { engine: EngineId; size?: number }): ReactNode {
-  const look = LOOK[engine] ?? { mark: ENGINES[engine].label[0]!, bg: '#5F584E' }
+  const logo = ENGINE_LOGOS[engine]
   return (
-    <span className="intro-mark" style={{ width: size, height: size, background: look.bg, fontSize: look.mark.length > 1 ? 14 : 17 }} aria-hidden>
-      {look.mark}
+    <span className={`intro-mark ${logo?.hex === '211E1B' || !logo ? 'intro-mark--ink' : ''}`} style={{ width: size, height: size, ...(logo ? { background: `#${logo.hex}` } : { fontSize: 17 }) }} aria-hidden>
+      {logo ? (
+        <svg viewBox="0 0 24 24" width={Math.round(size * 0.54)} height={Math.round(size * 0.54)} fill="currentColor">
+          <path d={logo.path} />
+        </svg>
+      ) : (
+        ENGINES[engine].label[0]
+      )}
     </span>
   )
 }
@@ -390,8 +399,9 @@ function EngineMark({ engine, size = 44 }: { engine: EngineId; size?: number }):
 // One real reply per harness, asked once per run: the screen says how long it took.
 type Tested = { ok: boolean; seconds?: number; message: string }
 const tests = new Map<string, Promise<Tested>>()
-function useTest(model: string | undefined): Tested | 'running' | undefined {
+function useTest(model: string | undefined): [Tested | 'running' | undefined, () => void] {
   const [got, setGot] = useState<{ model: string; r: Tested } | null>(null)
+  const [round, setRound] = useState(0)
   useEffect(() => {
     if (!model) return
     if (!tests.has(model)) tests.set(model, testEngine(model).catch((e: unknown) => ({ ok: false, message: e instanceof Error ? e.message : String(e) })))
@@ -400,9 +410,16 @@ function useTest(model: string | undefined): Tested | 'running' | undefined {
     return () => {
       live = false
     }
-  }, [model])
-  if (!model) return undefined
-  return got?.model === model ? got.r : 'running'
+  }, [model, round])
+  // "Tentar de novo": a new test, after the person fixed what was wrong (signed in again, say).
+  const retry = (): void => {
+    if (!model) return
+    tests.delete(model)
+    setGot(null)
+    setRound((n) => n + 1)
+  }
+  if (!model) return [undefined, retry]
+  return [got?.model === model ? got.r : 'running', retry]
 }
 
 const secs = (s: number): string => s.toLocaleString(L('pt-BR', 'en-US'), { minimumFractionDigits: 1, maximumFractionDigits: 1 })
@@ -601,7 +618,7 @@ function SetupCard(p: { engine: SetupEngine; title: string; plans: string; setup
   const st = useStore((s) => s.settings.engines[p.engine])
   const s = p.setup?.engine === p.engine ? p.setup : null
   const signedIn = st.loggedIn || (s?.step === 'login' && s.state === 'done')
-  const test = useTest(signedIn && st.loggedIn ? quickModel(p.engine, p.listed) : undefined)
+  const [test] = useTest(signedIn && st.loggedIn ? quickModel(p.engine, p.listed) : undefined)
   const failed = s?.state === 'error'
   const installDone = st.installed || s?.step === 'login'
   const result = test && test !== 'running' ? test : undefined
@@ -648,12 +665,12 @@ function SetupCard(p: { engine: SetupEngine; title: string; plans: string; setup
         )}
         {label(
           ok ? 'done' : result ? 'error' : signedIn ? 'now' : 'later',
-          result?.ok ? L(`Respondeu em ${secs(result.seconds ?? 0)} s. Tudo certo.`, `Answered in ${secs(result.seconds ?? 0)} s. All set.`) : result ? result.message : L('Testar com uma resposta de verdade', 'Test with a real reply')
+          result?.ok ? L(`Respondeu em ${secs(result.seconds ?? 0)} s. Tudo certo.`, `Answered in ${secs(result.seconds ?? 0)} s. All set.`) : result ? explainEngineError(p.engine, result.message).line : L('Testar com uma resposta de verdade', 'Test with a real reply')
         )}
       </ol>
       {failed && (
         <div className="intro-fail" role="alert">
-          <p>{s?.error}</p>
+          {s?.error && <EngineProblem look="intro" engine={p.engine} message={s.error} />}
           <div className="intro-actions">
             <button className="intro-btn intro-btn--sm" onClick={p.retry}>
               {L('Tentar de novo', 'Try again')}
@@ -713,6 +730,11 @@ function Found(p: {
   const [bring, setBring] = useState({ mcps: true, skills: true })
   const [change, setChange] = useState(!p.models)
   const [busy, setBusy] = useState(false)
+  // How each one's test went: one that failed doesn't hold the others up.
+  const [results, setResults] = useState<Partial<Record<EngineId, boolean>>>({})
+  const onResult = useCallback((e: EngineId, ok: boolean | undefined) => setResults((r) => (r[e] === ok ? r : { ...r, [e]: ok })), [])
+  const working = ready.filter((e) => results[e] === true)
+  const failing = ready.filter((e) => results[e] === false)
   useEffect(() => {
     void harnessMcps().then((f) => setMcps(f.filter((m) => !m.added)), () => {})
     void localSkills().then(setSkills, () => {})
@@ -734,7 +756,7 @@ function Found(p: {
       <h1 className="intro-h2">{ready.length === 1 ? L('Achei 1 pronto pra usar', 'Found 1 ready to use') : L(`Achei ${ready.length} prontos pra usar`, `Found ${ready.length} ready to use`)}</h1>
       <div className="intro-card intro-card--list">
         {ready.map((e) => (
-          <FoundRow key={e} engine={e} account={p.engines[e].account} listed={p.listed} />
+          <FoundRow key={e} engine={e} account={p.engines[e].account} listed={p.listed} onResult={onResult} onSignIn={() => (e === 'claude' || e === 'codex' ? p.onSignIn(e) : void loginEngine(e))} />
         ))}
         {signIn.map((e) => (
           <div key={e} className="intro-row">
@@ -782,9 +804,13 @@ function Found(p: {
       )}
       <div className="intro-actions">
         <button className="intro-btn" disabled={!p.models || busy} onClick={() => void next()}>
-          {L('Continuar', 'Continue')}
+          {failing.length && working.length ? L(`Continuar com ${list(working.map((e) => ENGINES[e].label))}`, `Continue with ${list(working.map((e) => ENGINES[e].label))}`) : L('Continuar', 'Continue')}
         </button>
-        <span className="intro-muted">{L('Clique 2 de 3', 'Click 2 of 3')}</span>
+        <span className="intro-muted">
+          {failing.length && working.length
+            ? L(`${list(failing.map((e) => ENGINES[e].label))} fica de fora por agora. Dá pra arrumar depois em Configurações.`, `${list(failing.map((e) => ENGINES[e].label))} stays out for now. You can fix it later in Settings.`)
+            : L('Clique 2 de 3', 'Click 2 of 3')}
+        </span>
       </div>
     </div>
   )
@@ -792,19 +818,21 @@ function Found(p: {
 
 const list = (names: string[]): string => (names.length > 4 ? `${names.slice(0, 4).join(', ')}${L(` e mais ${names.length - 4}`, ` and ${names.length - 4} more`)}` : names.join(', '))
 
-function FoundRow({ engine, account, listed }: { engine: EngineId; account?: string; listed: Partial<Record<EngineId, string[]>> }): ReactNode {
-  const test = useTest(quickModel(engine, listed))
+function FoundRow({ engine, account, listed, onResult, onSignIn }: { engine: EngineId; account?: string; listed: Partial<Record<EngineId, string[]>>; onResult: (e: EngineId, ok: boolean | undefined) => void; onSignIn: () => void }): ReactNode {
+  const [test, retry] = useTest(quickModel(engine, listed))
   const done = test && test !== 'running'
+  const failed = !!done && !test.ok
+  useEffect(() => onResult(engine, done ? test.ok : undefined), [engine, done, test, onResult])
   return (
-    <div className="intro-row">
+    <div className={`intro-row ${failed ? 'is-failed' : ''}`}>
       <EngineMark engine={engine} />
       <span className="intro-card__text">
         <b>{ENGINES[engine].label}</b>
         <span>
           {account ?? L('Pronto', 'Ready')}
           {done && test.ok && test.seconds !== undefined && L(` · respondeu em ${secs(test.seconds)} s`, ` · answered in ${secs(test.seconds)} s`)}
-          {done && !test.ok && <span className="intro-warn"> · {test.message}</span>}
         </span>
+        {failed && <EngineProblem look="intro" engine={engine} message={test.message} onSignIn={onSignIn} onRetry={retry} />}
       </span>
       {!test || test === 'running' ? (
         <span role="img" aria-label={L('Testando', 'Testing')}>
