@@ -228,11 +228,15 @@ export function findLocalSkills(home = homedir()): LocalSkill[] {
   return [...inDirs(join(claude, 'skills'), 'Claude Code'), ...pluginSkills(claude), ...inDirs(join(codex, 'skills'), 'Codex')]
 }
 
+// "~" and "~/x" are the user's home: the Settings placeholder is ~/.hermes/skills, and a shell
+// never expands it inside TUCANO_SKILLS_DIR or a typed field.
+const expandHome = (p: string, home: string): string => (p === '~' ? home : /^~[/\\]/.test(p) ? join(home, p.slice(2)) : p)
+
 // Every skill on this Mac, plus the ones in an extra directory (TUCANO_SKILLS_DIR or Settings,
 // empty by default; <category>/<name>/SKILL.md or flat). A skill reached twice, say a link from
 // ~/.codex/skills into that directory, is listed once, by the real path of its SKILL.md.
 export function findSkills(home = homedir(), extraDir?: string): LocalSkill[] {
-  const extra = extraDir?.trim() ? findHermesSkills(extraDir.trim(), 'Hermes') : []
+  const extra = extraDir?.trim() ? findHermesSkills(expandHome(extraDir.trim(), home), 'Hermes') : []
   const seen = new Set<string>()
   return [...findLocalSkills(home), ...extra].filter((s) => {
     let key = s.source

@@ -206,3 +206,12 @@ describe('allowed-tools forms', () => {
     expect(skillMeta('---\nname: a\nallowed-tools:\nversion: 1\n---\nx').allowedTools).toBeUndefined()
   })
 })
+
+describe('findSkills (~ in the extra directory)', () => {
+  it('expands a leading ~ to the home folder', () => {
+    put(join(home, 'mine/ops/tilde-skill/SKILL.md'), '---\n' + 'name: tilde-skill' + '\n---\n')
+    expect(findSkills(home, '~/mine').map((s) => s.name)).toContain('tilde-skill')
+    expect(findSkills(home, '~\\mine').map((s) => s.name)).toContain('tilde-skill')
+    expect(findSkills(home, '  ~/mine  ').map((s) => s.name)).toContain('tilde-skill')
+  })
+})
