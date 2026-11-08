@@ -1,4 +1,5 @@
-// tucano.sh: the static pages (dist/, served as assets) and one route of code, /api/lista, where
+// tucano.sh: the static pages (dist/, served as assets), the push relay for the iPhone app (push.js,
+// /api/push/*) and /api/lista, where
 // the Tucano Pro beta's waitlist form (pro.html) lands. It checks the anti-robot token (Cloudflare
 // Turnstile), then saves the sign-up in Supabase (supabase/migrations/0001_waitlist.sql) with the
 // project's secret key, which only this worker holds:
@@ -6,6 +7,8 @@
 //   npx wrangler secret put TURNSTILE_SECRET
 // The same email twice is saved once, and both answers are the same "you're on the list": the
 // form never tells anyone whether an address was already there.
+
+import { register as pushRegister, send as pushSend } from './push.js'
 
 const MAX_BODY = 8 * 1024
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
@@ -89,6 +92,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url)
     if (url.pathname === '/api/lista') return lista(request, env)
+    // The push relay for the iPhone app (push.js).
+    if (url.pathname === '/api/push/register') return pushRegister(request, env)
+    if (url.pathname === '/api/push/send') return pushSend(request, env)
     return env.ASSETS.fetch(request)
   },
 }

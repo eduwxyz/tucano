@@ -34,6 +34,7 @@ import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
 import { codexEnv } from './engines/codex'
 import { LoginTerminal, type LoginKey } from './login-terminal'
+import { Push, pushUrl } from './push'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
 import { DesktopApps, macApps, SELF } from './apps'
@@ -416,12 +417,21 @@ const forOwner = (messageId: string): boolean => {
   return !q || (q.confirm === 'pending' ? q.requestedBy : q.askedTo) === db.ownerId()
 }
 
+// The phones that gave this Tucano a push handle get the same notification while the app is closed.
+// The test engines never reach the relay.
+const push = new Push({
+  url: fake ? undefined : pushUrl(),
+  targets: (to) => db.pushTargets(to),
+  gone: (hash) => db.dropKeyPush(hash)
+})
+
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
 // `to`: the people it's for; unset, everyone (but a DM's news only ever reaches its person).
 const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string; to?: string[] } = {}): void => {
   const to = notifyTo(conversationId, more.to)
   toMain({ type: 'notify', title, body: shortText, conversationId, ...more, ...(to ? { to } : {}), sound: settings().sounds !== false })
+  void push.send({ title, body: shortText, ...(conversationId ? { conversationId } : {}), ...(more.threadId ? { threadId: more.threadId } : {}), ...(more.kind ? { kind: more.kind } : {}) }, to)
   if (!to || to.includes(db.ownerId())) void telegram?.notice(title, fullText ?? shortText)
 }
 function notifyTo(conversationId: string | undefined, to: string[] | undefined): string[] | undefined {
@@ -825,6 +835,7 @@ const runner = new Runner({
     if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}) })
     const who = notifyTo(conversationId, to)
     toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
+    void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
   jev: { key: () => secrets.get(JEV_SECRET) },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
@@ -1911,6 +1922,12 @@ const api: Handlers = {
   myDevices: (_, ctx) => db.personKeys(ctx.person.id).map((k) => ({ id: k.hash, label: k.label, createdAt: k.createdAt, ...(k.seenAt ? { seenAt: k.seenAt } : {}), ...(k.hash === ctx.device ? { current: true } : {}) })),
   // One of my devices signs out: its open pages lose the line (a moment after the answer, which may
   // be going down that very line: this page's own device), and the server asks again for my keys.
+  // This phone's push handle (from the relay, src/core/push.ts), or none: kept on its device key.
+  setPush: ({ handle, tag }, ctx) => {
+    if (!ctx.device) throw new Error(L('Só um aparelho conectado com a própria chave recebe avisos.', 'Only a device signed in with its own key gets notifications.'))
+    db.setKeyPush(ctx.person.id, ctx.device, handle ? { handle, ...(tag ? { tag } : {}) } : null)
+    return { on: push.on }
+  },
   removeDevice: ({ id }, ctx) => {
     if (!db.removePersonKey(ctx.person.id, id)) throw new Error(L('Esse aparelho já foi desconectado.', 'That device was already disconnected.'))
     toMain({ type: 'person-changed', id: ctx.person.id })

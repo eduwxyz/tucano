@@ -181,6 +181,7 @@ export interface Api {
   listInvites(): Invite[]
   removedPeople(): (Person & { removedAt: number })[] // admins: who left in the last 30 days (still restorable)
   myDevices(): Device[] // my own keys: the browsers and phones signed in as me
+  setPush(p: { handle: string | null; tag?: string }): { on: boolean } // this phone's push handle (the relay's), or none; on: this Tucano sends pushes
   removeDevice(p: { id: string }): void // one of mine signs out now (Device.id)
   removePerson(p: { id: string }): void // their access ends at once: keys gone, open connections closed; what they owned goes to the owner
   setRole(p: { id: string; role: Exclude<Role, 'owner'> }): void
