@@ -1,0 +1,22 @@
+# The site's own tests (the waitlist worker), with Node's test runner, when the site changes.
+name: Site
+
+on:
+  pull_request:
+    paths: ['site/**', '.github/workflows/site.yml']
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/site.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node --test site/
