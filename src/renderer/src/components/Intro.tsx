@@ -5,8 +5,8 @@
 // lands in #geral with the first message written and not sent (Coach.tsx points at it). Someone
 // invited to a team gets their own short welcome instead (GuestWelcome).
 import { L } from '../../../shared/lang'
-import { entryOf } from '../../../shared/connector-catalog'
-import { agentModel, aiState, autonomyChosen, backgroundModel, FIRST_AUTONOMY, GOALS, goalForText, needsSignIn, storedAutonomy, type Goal } from '../../../shared/onboarding'
+import { CATALOG, entryOf } from '../../../shared/connector-catalog'
+import { agentModel, aiState, autonomyChosen, isFastModel, backgroundModel, FIRST_AUTONOMY, GOALS, goalForText, needsSignIn, storedAutonomy, type Goal } from '../../../shared/onboarding'
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   ENGINES,
@@ -50,12 +50,14 @@ import {
   type SetupState
 } from '../store'
 import { HarnessList } from './Harness'
-import { ModelSelect, STATUS } from './Pages'
+import { STATUS, Toggle } from './Pages'
+import { Select } from './Select'
+import { useEngineModels } from './Harness'
 import { Splash } from './Splash'
 import { Composer, MessageList, setComposerDraft, useDictation, VoiceButton } from './Conversation'
 import { draftAgent, UseDraft } from './Tuca'
 import { Onboarding } from './Onboarding'
-import { ConnectorGrid } from './ConnectorStore'
+import { CatalogLogo, ConnectorGrid } from './ConnectorStore'
 import { Modal } from './Modal'
 import { AutonomyPick } from './AutonomyPick'
 import { EngineProblem } from './EngineProblem'
@@ -773,18 +775,30 @@ function Found(p: {
       </div>
       {(mcps.length > 0 || skills.length > 0 || p.models || change) && (
         <div className="intro-panel intro-panel--tight">
-          {(mcps.length > 0 || skills.length > 0) && <b>{fromClaude ? L('Também achei no Claude Code', 'I also found in Claude Code') : L('Também achei nos seus programas', 'I also found in your programs')}</b>}
+          {(mcps.length > 0 || skills.length > 0) && <b className="intro-panel__title">{L('Também achei', 'I also found')}</b>}
           {mcps.length > 0 && (
-            <label className="intro-checkbox">
-              <input type="checkbox" checked={bring.mcps} onChange={(e) => setBring({ ...bring, mcps: e.target.checked })} />
-              {mcps.length === 1 ? L(`Trazer 1 ferramenta: ${mcps[0]!.name}`, `Bring 1 tool: ${mcps[0]!.name}`) : L(`Trazer ${mcps.length} ferramentas: ${list(mcps.map((m) => m.name))}`, `Bring ${mcps.length} tools: ${list(mcps.map((m) => m.name))}`)}
-            </label>
+            <BringRow
+              from={fromClaude ? 'claude' : undefined}
+              icon="plug"
+              on={bring.mcps}
+              onChange={(v) => setBring({ ...bring, mcps: v })}
+              title={
+                fromClaude
+                  ? mcps.length === 1 ? L('Trazer 1 ferramenta do Claude Code', 'Bring 1 tool from Claude Code') : L(`Trazer ${mcps.length} ferramentas do Claude Code`, `Bring ${mcps.length} tools from Claude Code`)
+                  : mcps.length === 1 ? L('Trazer 1 ferramenta', 'Bring 1 tool') : L(`Trazer ${mcps.length} ferramentas`, `Bring ${mcps.length} tools`)
+              }
+              names={mcps.map((m) => m.name)}
+            />
           )}
           {skills.length > 0 && (
-            <label className="intro-checkbox">
-              <input type="checkbox" checked={bring.skills} onChange={(e) => setBring({ ...bring, skills: e.target.checked })} />
-              {skills.length === 1 ? L('Trazer 1 skill', 'Bring 1 skill') : L(`Trazer ${skills.length} skills`, `Bring ${skills.length} skills`)}
-            </label>
+            <BringRow
+              from={fromClaude ? 'claude' : undefined}
+              icon="spark"
+              on={bring.skills}
+              onChange={(v) => setBring({ ...bring, skills: v })}
+              title={skills.length === 1 ? L('Trazer 1 skill', 'Bring 1 skill') : L(`Trazer ${skills.length} skills`, `Bring ${skills.length} skills`)}
+              names={skills.map((k) => k.name)}
+            />
           )}
           {change ? (
             <BackgroundPickers models={p.models} setModels={p.setModels} />
@@ -879,20 +893,75 @@ function FoundRow({ engine, account, gateway, listed, onResult, onSignIn }: { en
   )
 }
 
-// The two small jobs behind the scenes, picked by hand (a gateway names its own models).
+// Something found in the person's programs, to bring along: a switch, and the names under "ver quais".
+function BringRow({ from, icon, on, onChange, title, names }: { from?: EngineId; icon: 'plug' | 'spark'; on: boolean; onChange: (v: boolean) => void; title: string; names: string[] }): ReactNode {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={`intro-bring ${on ? '' : 'is-off'}`}>
+      {from ? (
+        <EngineMark engine={from} size={28} />
+      ) : (
+        <span className="intro-bring__dot" aria-hidden>
+          <Icon name={icon} size={15} />
+        </span>
+      )}
+      <span className="intro-bring__text">
+        <span>
+          {title}{' '}
+          <button className="intro-link intro-bring__more" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? L('esconder', 'hide') : names.length === 1 ? L('ver qual', 'see which') : L('ver quais', 'see which')}
+          </button>
+        </span>
+        {open && <span className="intro-bring__names">{names.join(', ')}</span>}
+      </span>
+      <Toggle on={on} onChange={onChange} />
+    </div>
+  )
+}
+
+// The two small jobs behind the scenes, as two cards: the harness's mark, the model and how quick it is.
+// A click opens the app's own menu, every ready harness's models grouped under its name.
 function BackgroundPickers({ models, setModels }: { models: { router: string; memory: string } | null; setModels: (m: { router: string; memory: string }) => void }): ReactNode {
   const m = models ?? { router: '', memory: '' }
+  const groups = useModelGroups()
   return (
-    <div className="intro-pickers">
-      <label className="intro-picker">
-        <span>{L('Quem escolhe o agente que responde num canal', 'Who picks the agent that replies in a channel')}</span>
-        <ModelSelect value={m.router} onChange={(v) => setModels({ ...m, router: v })} />
-      </label>
-      <label className="intro-picker">
-        <span>{L('Quem resume as conversas longas e cuida da memória', 'Who sums up long conversations and keeps the memory')}</span>
-        <ModelSelect value={m.memory} onChange={(v) => setModels({ ...m, memory: v })} />
-      </label>
-      <span className="intro-muted">{L('Escolha um modelo rápido pra cada um. Dá pra trocar depois em Configurações.', 'Pick a quick model for each. You can change them later in Settings.')}</span>
+    <div className="intro-jobs">
+      <JobCard title={L('Escolhe quem responde', 'Picks who replies')} value={m.router} groups={groups} onChange={(v) => setModels({ ...m, router: v })} />
+      <JobCard title={L('Cuida da memória', 'Keeps the memory')} value={m.memory} groups={groups} onChange={(v) => setModels({ ...m, memory: v })} />
+      <span className="intro-muted intro-jobs__hint">{L('Quem responde decide, num canal, qual agente fala; a memória resume conversas longas. Um modelo rápido basta. Dá pra trocar depois em Configurações.', 'Who replies decides which agent speaks in a channel; the memory sums up long talks. A quick model is enough. You can change them later in Settings.')}</span>
+    </div>
+  )
+}
+
+// Every ready harness's models, by harness, for one menu (a hook per harness, in a fixed order).
+function useModelGroups(): Record<string, Record<string, string>> {
+  const engines = useStore((s) => s.settings.engines)
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- ENGINE_IDS is fixed, so the hooks keep their order
+  const lists = ENGINE_IDS.map((e) => [e, useEngineModels(engines[e].loggedIn && !engines[e].soon && !engines[e].off ? e : undefined)] as const)
+  const groups: Record<string, Record<string, string>> = {}
+  for (const [e, l] of lists) {
+    if (!l.options.length) continue
+    groups[ENGINES[e].label] = Object.fromEntries(l.options.map((o) => [o.value, o.hint ? `${o.label} · ${o.hint}` : o.label]))
+  }
+  return groups
+}
+
+function JobCard({ title, value, groups, onChange }: { title: string; value: string; groups: Record<string, Record<string, string>>; onChange: (v: string) => void }): ReactNode {
+  const info = modelInfo(value)
+  const name = info?.label ?? (value.includes(':') ? value.slice(value.indexOf(':') + 1) : value)
+  return (
+    <div className="intro-job">
+      {info ? <EngineMark engine={info.engine} size={36} /> : <span className="intro-bring__dot" aria-hidden />}
+      <span className="intro-job__text">
+        <span className="intro-job__title">{title}</span>
+        <span className="intro-job__model">
+          <b>{value ? name : L('Escolher', 'Choose')}</b>
+          {value && <span className={`intro-job__tag ${isFastModel(value) ? 'is-fast' : ''}`}>{isFastModel(value) ? L('rápido', 'fast') : L('forte', 'strong')}</span>}
+        </span>
+      </span>
+      <Icon name="caret" size={14} />
+      {/* The whole card is the menu's trigger: the app's Select, laid over it. */}
+      <Select className="intro-job__select" aria-label={title} value={value || null} groups={groups} searchable onChange={(v) => v && onChange(v)} />
     </div>
   )
 }
@@ -1041,6 +1110,7 @@ function Born(p: { agent: Agent; goal: Goal; patch: (a: Partial<Agent>) => void;
   const [connecting, setConnecting] = useState(false)
   const connected = useStore((s) => !!goal.connector && s.connectors.some((c) => entryOf(c)?.id === goal.connector!.id))
   const name = agent.name.trim() || L('seu agente', 'your agent')
+  const offered = goal.connector && CATALOG.find((e) => e.id === goal.connector!.id)
   const settingsLevel = useStore((s) => s.settings.autonomy)
   const guard = useStore((s) => s.settings.outsideGuard ?? true)
   return (
@@ -1099,7 +1169,7 @@ function Born(p: { agent: Agent; goal: Goal; patch: (a: Partial<Agent>) => void;
           <AutonomyPick name={name} value={autonomyChosen(agent.autonomy, settingsLevel)} guard={guard} onPick={(level) => p.patch({ autonomy: storedAutonomy(level, settingsLevel) })} />
           {goal.connector && (
             <div className="intro-offer">
-              <Icon name="plug" size={17} />
+              {offered ? <CatalogLogo entry={offered} size={22} /> : <Icon name="plug" size={17} />}
               <span>
                 {goal.connector.label} <span className="intro-muted">· {connected ? L('conectado, só leitura pra começar', 'connected, read-only to start') : L('opcional', 'optional')}</span>
               </span>

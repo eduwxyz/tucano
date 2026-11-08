@@ -9680,6 +9680,148 @@ button.agent-card__now:hover {
   accent-color: var(--i-accent);
   flex-shrink: 0;
 }
+/* "Também achei": what comes along, as quiet switch rows. */
+.intro-panel__title {
+  font-size: 14px;
+}
+.intro-bring {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14.5px;
+}
+.intro-bring.is-off .intro-bring__text {
+  color: var(--i-ink-3);
+}
+.intro-bring > .intro-mark {
+  border-radius: 9px;
+}
+.intro-bring__dot {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--i-card);
+  color: var(--i-lilac-tick);
+}
+.intro-bring__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.intro-bring__more.intro-link {
+  font-size: 13px;
+  font-weight: 600;
+}
+.intro-bring__names {
+  font-size: 13px;
+  color: var(--i-ink-2);
+  max-height: 60px;
+  overflow: auto;
+}
+.intro-bring .toggle.is-on,
+.intro-panel .toggle.is-on {
+  background: var(--i-lilac-tick);
+}
+/* The two jobs behind the scenes: two cream cards side by side, the whole card opens the menu. */
+.intro-jobs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 2px;
+}
+.intro-jobs__hint {
+  grid-column: 1 / -1;
+  font-size: 13px;
+}
+.intro-job {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 20px;
+  background: var(--i-card);
+  color: var(--i-ink);
+  box-shadow: 0 1px 2px rgba(29, 26, 22, 0.05);
+  transition: var(--transition-ui);
+}
+.intro-job:hover,
+.intro-job:focus-within {
+  background: var(--i-lilac);
+  box-shadow: inset 0 0 0 2px var(--i-lilac-line);
+}
+.intro-job > .intro-mark {
+  border-radius: 11px;
+}
+.intro-job > .icon {
+  flex-shrink: 0;
+  color: var(--i-ink-3);
+}
+.intro-job__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.intro-job__title {
+  font-family: var(--i-display);
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--i-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.intro-job__model {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.intro-job__model b {
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.intro-job__tag {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--i-ink-2);
+  background: var(--i-quiet);
+}
+.intro-job__tag.is-fast {
+  color: var(--i-lilac-ink);
+  background: var(--i-lilac);
+}
+.intro-job:hover .intro-job__tag.is-fast,
+.intro-job:focus-within .intro-job__tag.is-fast {
+  background: var(--i-card);
+}
+/* The app's Select, laid invisibly over the card: its trigger is the card, its menu anchors there. */
+.intro-job__select.select {
+  position: absolute;
+  inset: 0;
+}
+.intro-job__select .select__trigger {
+  height: 100%;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+}
 .intro-pickers {
   display: flex;
   flex-direction: column;

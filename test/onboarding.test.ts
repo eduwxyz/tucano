@@ -3,6 +3,7 @@
 // tour's marks, and someone invited getting their own welcome.
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
+import { CATALOG } from '../src/shared/connector-catalog'
 import { agentModel, aiState, AUTONOMY_CHOICES, autonomyChoiceHint, autonomyChosen, backgroundModel, FIRST_AUTONOMY, freshParts, GOAL_IDS, goalById, goalForText, goalFromText, GOALS, MISSIONS, missionsDone, needsSignIn, partShows, shortSidebar, storedAutonomy, tourCount, tourOn, type MissionFacts } from '../src/shared/onboarding'
 import { actionMode, levelOf, policyOf, verdict } from '../src/shared/actions'
 import { ENGINE_IDS, type EngineId, type EngineStatus, type Settings } from '../src/shared/types'
@@ -82,8 +83,19 @@ describe('the goals', () => {
     expect(goalById('research')!.web).toBe(true)
     expect(goalById('customers')!.web).toBe(false)
     expect(goalById('sheets')!.web).toBe(false)
-    expect(goalById('week')!.connector?.id).toBe('google-calendar')
     expect(goalById('research')!.connector).toBeUndefined()
+  })
+
+  it('offers only a connector that signs in with one click, and only where it helps', () => {
+    expect(Object.fromEntries(GOALS().map((g) => [g.id, g.connector?.id]))).toEqual({ week: 'todoist', research: undefined, write: 'notion', customers: undefined, sheets: undefined, code: 'linear' })
+    for (const g of GOALS()) {
+      if (!g.connector) continue
+      const entry = CATALOG.find((e) => e.id === g.connector!.id)!
+      // Browser OAuth with no app of the person's own, no token, nothing to fill in, nobody else's servers.
+      expect(entry).toMatchObject({ auth: 'oauth' })
+      expect(entry.app ?? entry.fields ?? entry.local ?? entry.warning).toBeUndefined()
+      expect(entry.id).not.toMatch(/^google-|^gmail$|composio/)
+    }
   })
 
   it("matches the person's own words to a goal, accents and all", () => {

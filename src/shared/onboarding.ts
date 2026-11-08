@@ -21,7 +21,7 @@ export interface Goal {
   instructions: string
   does: string[] // what it does, in plain words, one line each (how far it goes alone is chosen apart)
   task: string // the first message, after its @
-  connector?: { id: string; label: string } // a catalog entry worth offering, optional
+  connector?: { id: string; label: string } // a catalog entry worth offering, optional: only one that signs in with one click in the browser (no app, token or address of the person's own)
 }
 
 export const GOALS = (): Goal[] => [
@@ -39,7 +39,7 @@ export const GOALS = (): Goal[] => [
     ),
     does: [L('Monta a sua semana a partir do que você contar', 'Plans your week from what you tell it'), L('Pesquisa na internet quando precisa', 'Searches the web when it needs to'), L('Te pergunta quando tiver dúvida', 'Asks you when it isn’t sure')],
     task: L('me ajuda a planejar a semana. Antes, me pergunta o que eu tenho pra fazer.', 'help me plan my week. First, ask me what I have to do.'),
-    connector: { id: 'google-calendar', label: L('Ver a sua agenda do Google', 'See your Google Calendar') }
+    connector: { id: 'todoist', label: L('Ver as suas tarefas no Todoist', 'See your Todoist tasks') }
   },
   {
     id: 'research',
@@ -70,7 +70,7 @@ export const GOALS = (): Goal[] => [
     ),
     does: [L('Escreve rascunhos prontos pra usar', 'Writes ready-to-use drafts'), L('Ajusta o tom ao que você pedir', 'Adjusts the tone to what you ask'), L('Te pergunta pra quem é o texto', 'Asks you who the text is for')],
     task: L('me ajuda a escrever um e-mail. Antes, me pergunta pra quem é e o que eu quero dizer.', 'help me write an email. First, ask me who it’s for and what I want to say.'),
-    connector: { id: 'gmail', label: L('Ler e rascunhar no seu Gmail', 'Read and draft in your Gmail') }
+    connector: { id: 'notion', label: L('Ler as suas páginas do Notion', 'Read your Notion pages') }
   },
   {
     id: 'customers',
@@ -85,8 +85,7 @@ export const GOALS = (): Goal[] => [
       'You help the person reply to customers quickly and kindly.\nYou write the reply ready to send, short and polite, in their brand’s voice.\nWhen a piece of information is missing (price, timing, return policy), you ask instead of making it up.\nYou keep the replies that work, to use again.'
     ),
     does: [L('Escreve respostas prontas pros seus clientes', 'Writes ready replies for your customers'), L('Pergunta quando falta uma informação', 'Asks when a piece of information is missing'), L('Aprende o jeito da sua marca', 'Learns your brand’s way of talking')],
-    task: L('me ajuda a responder os meus clientes. Antes, me pergunta o que eu vendo e as dúvidas que mais chegam.', 'help me reply to my customers. First, ask me what I sell and the questions I get most.'),
-    connector: { id: 'gmail', label: L('Ler os e-mails dos clientes no Gmail', 'Read customer emails in Gmail') }
+    task: L('me ajuda a responder os meus clientes. Antes, me pergunta o que eu vendo e as dúvidas que mais chegam.', 'help me reply to my customers. First, ask me what I sell and the questions I get most.')
   },
   {
     id: 'sheets',
@@ -101,8 +100,7 @@ export const GOALS = (): Goal[] => [
       'You help with spreadsheets: organizing data, doing the math, building formulas and summing up what the numbers say.\nYou show the calculation or formula you used, so the person can check it.\nWhen the data looks wrong or incomplete, you say so before going on.\nYou explain in plain words, without spreadsheet jargon.'
     ),
     does: [L('Monta fórmulas e faz as contas', 'Builds formulas and does the math'), L('Mostra como chegou em cada número', 'Shows how it got each number'), L('Avisa quando os dados parecem errados', 'Warns you when the data looks wrong')],
-    task: L('me ajuda com uma planilha. Antes, me pergunta o que ela tem e o que eu quero descobrir.', 'help me with a spreadsheet. First, ask me what’s in it and what I want to find out.'),
-    connector: { id: 'google-sheets', label: L('Abrir as suas planilhas do Google', 'Open your Google Sheets') }
+    task: L('me ajuda com uma planilha. Antes, me pergunta o que ela tem e o que eu quero descobrir.', 'help me with a spreadsheet. First, ask me what’s in it and what I want to find out.')
   },
   {
     id: 'code',
@@ -118,7 +116,7 @@ export const GOALS = (): Goal[] => [
     ),
     does: [L('Explica, escreve e revisa código', 'Explains, writes and reviews code'), L('Descreve o plano antes de algo grande', 'Describes the plan before anything big'), L('Pesquisa a documentação quando precisa', 'Looks up the docs when it needs to')],
     task: L('me ajuda num projeto. Antes, me pergunta em que linguagem ele é e o que eu quero fazer.', 'help me with a project. First, ask me what language it’s in and what I want to do.'),
-    connector: { id: 'github', label: L('Ver os seus repositórios no GitHub', 'See your GitHub repositories') }
+    connector: { id: 'linear', label: L('Ver as suas issues no Linear', 'See your Linear issues') }
   }
 ]
 
@@ -202,6 +200,7 @@ export const needsSignIn = (engines: Record<EngineId, EngineStatus>): EngineId[]
 // picked for the person: the fastest one of a ready harness. A gateway names its own models,
 // so there the person picks (undefined).
 const FAST = /haiku|mini|flash|lite|fast|luna|spark|small/i
+export const isFastModel = (id: string): boolean => FAST.test(id)
 
 export function backgroundModel(engines: Record<EngineId, EngineStatus>, listed: Partial<Record<EngineId, string[]>> = {}): string | undefined {
   const ready = (e: EngineId): boolean => engines[e].loggedIn && !engines[e].soon && !engines[e].off && engines[e].route !== 'gateway'
