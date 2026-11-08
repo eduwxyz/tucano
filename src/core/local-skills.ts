@@ -248,6 +248,7 @@ export function findSkills(home = homedir(), extraDir?: string): LocalSkill[] {
     } catch {
       // keep the path as it is
     }
+    if (process.platform === 'win32') key = key.toLowerCase() // C:\Skills and c:\skills are one folder there
     return !seen.has(key) && !!seen.add(key)
   })
 }

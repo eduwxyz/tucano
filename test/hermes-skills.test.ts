@@ -176,6 +176,20 @@ describe('findSkills (extra directory)', () => {
   })
 })
 
+describe('findSkills (same folder, different case)', () => {
+  it.skipIf(process.platform !== 'win32')('lists a skill once when Windows reaches it by paths that differ only in case', () => {
+    const saved = process.env['CODEX_HOME']
+    delete process.env['CODEX_HOME']
+    try {
+      put(join(home, '.codex/skills/casey/SKILL.md'), '---\nname: casey\n---\nx')
+      const found = findSkills(home, join(home, '.codex', 'skills').toUpperCase())
+      expect(found.filter((s) => s.name === 'casey')).toHaveLength(1)
+    } finally {
+      if (saved !== undefined) process.env['CODEX_HOME'] = saved
+    }
+  })
+})
+
 describe('tagFacets', () => {
   it('groups family:/env:/tool: tags by facet, in a fixed order, keeping the values', () => {
     expect(tagFacets(['tool:git', 'family:ops', 'env:wsl', 'family:seo'])).toEqual([
