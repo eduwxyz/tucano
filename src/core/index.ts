@@ -34,6 +34,8 @@ import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
 import { codexEnv } from './engines/codex'
 import { CATALOG, CATEGORIES, catalogInput, catalogView, entryOf, ownAppGuide } from '../shared/connector-catalog'
+import { LoginTerminal, type LoginKey } from './login-terminal'
+import { Push, pushUrl } from './push'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
 import { DesktopApps, macApps, SELF } from './apps'
@@ -207,6 +209,44 @@ const engineSetup = new EngineSetup({
   changed: () => {}
 })
 
+// A harness's sign-in from the page or the phone, on a server: its login command in a terminal of the
+// server's, the screen shown where the person is (login-terminal.ts). Linux only, through `script`;
+// elsewhere the command is shown, to run in a terminal as before.
+const loginTerminal = new LoginTerminal({
+  spawn: (bin, args, env, size) => {
+    if (!serverMode || osOf() !== 'linux' || !onPath('script')) return undefined
+    const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
+    const line = `stty cols ${size.cols} rows ${size.rows} 2>/dev/null; exec ${[bin, ...args].map(q).join(' ')}`
+    const p = spawn('script', ['-qfec', line, '/dev/null'], { env: { ...env, TERM: 'xterm-256color', COLUMNS: String(size.cols), LINES: String(size.rows) }, stdio: ['pipe', 'pipe', 'pipe'] })
+    const exit = new Promise<number>((done) => {
+      p.on('error', () => done(1))
+      p.on('exit', (code) => done(code ?? 1))
+    })
+    p.stdin.on('error', () => {})
+    return {
+      write: (data) => void p.stdin.write(data),
+      output: (on) => (p.stdout.on('data', (b: Buffer) => on(b.toString())), p.stderr.on('data', (b: Buffer) => on(b.toString()))),
+      exit,
+      kill: () => void p.kill()
+    }
+  },
+  bin: (e) => engines[e].path ?? ENGINES[e].cli,
+  env: (e, account) => {
+    if (account) {
+      const dir = accountDir(dataDir, account)
+      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir)
+    }
+    return e === 'codex' ? codexEnv(codexHome) : { ...process.env, DISABLE_AUTOUPDATER: '1' }
+  },
+  signedIn: async (e, account) => {
+    if (!account) return (await engineCheck.recheck(e)).engines[e].loggedIn
+    await checkAccounts(account)
+    engineCheck.setAccounts(Object.fromEntries(accountLogins))
+    emit({ type: 'settings', settings: settings() })
+    return accountLogins.get(account)?.loggedIn === true
+  }
+})
+
 // The same steps with the test engines: no network, no CLI; the harness is "signed in" at the end.
 function fakeSetup(engine: SetupEngine): SetupState {
   if (fakeSetupState?.state === 'running') return fakeSetupState
@@ -378,12 +418,21 @@ const forOwner = (messageId: string): boolean => {
   return !q || (q.confirm === 'pending' ? q.requestedBy : q.askedTo) === db.ownerId()
 }
 
+// The phones that gave this Tucano a push handle get the same notification while the app is closed.
+// The test engines never reach the relay.
+const push = new Push({
+  url: fake ? undefined : pushUrl(),
+  targets: (to) => db.pushTargets(to),
+  gone: (hash) => db.dropKeyPush(hash)
+})
+
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
 // `to`: the people it's for; unset, everyone (but a DM's news only ever reaches its person).
 const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string; to?: string[] } = {}): void => {
   const to = notifyTo(conversationId, more.to)
   toMain({ type: 'notify', title, body: shortText, conversationId, ...more, ...(to ? { to } : {}), sound: settings().sounds !== false })
+  void push.send({ title, body: shortText, ...(conversationId ? { conversationId } : {}), ...(more.threadId ? { threadId: more.threadId } : {}), ...(more.kind ? { kind: more.kind } : {}) }, to)
   if (!to || to.includes(db.ownerId())) void telegram?.notice(title, fullText ?? shortText)
 }
 function notifyTo(conversationId: string | undefined, to: string[] | undefined): string[] | undefined {
@@ -787,6 +836,7 @@ const runner = new Runner({
     if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}) })
     const who = notifyTo(conversationId, to)
     toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
+    void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
   jev: { key: () => secrets.get(JEV_SECRET) },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
@@ -1888,6 +1938,12 @@ const api: Handlers = {
   myDevices: (_, ctx) => db.personKeys(ctx.person.id).map((k) => ({ id: k.hash, label: k.label, createdAt: k.createdAt, ...(k.seenAt ? { seenAt: k.seenAt } : {}), ...(k.hash === ctx.device ? { current: true } : {}) })),
   // One of my devices signs out: its open pages lose the line (a moment after the answer, which may
   // be going down that very line: this page's own device), and the server asks again for my keys.
+  // This phone's push handle (from the relay, src/core/push.ts), or none: kept on its device key.
+  setPush: ({ handle, tag }, ctx) => {
+    if (!ctx.device) throw new Error(L('Só um aparelho conectado com a própria chave recebe avisos.', 'Only a device signed in with its own key gets notifications.'))
+    db.setKeyPush(ctx.person.id, ctx.device, handle ? { handle, ...(tag ? { tag } : {}) } : null)
+    return { on: push.on }
+  },
   removeDevice: ({ id }, ctx) => {
     if (!db.removePersonKey(ctx.person.id, id)) throw new Error(L('Esse aparelho já foi desconectado.', 'That device was already disconnected.'))
     toMain({ type: 'person-changed', id: ctx.person.id })
@@ -1952,7 +2008,10 @@ const api: Handlers = {
 
   // Login always happens in the CLI's own flow; the app never sees credentials.
   // Codex logs into the app's own home (see codexEnv), separate from the user's.
-  loginEngine: ({ engine }) => {
+  loginEngine: ({ engine, screen }) => {
+    // On a server, for a page or a phone that can show it: the sign-in in a terminal of the server's.
+    const shown = screen && engines[engine].installed ? loginTerminal.start(engine) : undefined
+    if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
     // The sign-in happens in a terminal: check again until it lands, wherever the person is.
     watchEngine(engine, (s) => s.loggedIn)
     return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {})
@@ -1965,6 +2024,10 @@ const api: Handlers = {
     if (serverMode) throw new Error(L('Num servidor, o login é feito no terminal dele.', "On a server, the sign-in happens in its terminal."))
     return fake ? fakeSetup(engine as SetupEngine) : engineSetup.start(engine as SetupEngine)
   },
+  // The sign-in on the server's terminal (loginEngine with screen): how it looks now, keys to it, its end.
+  loginScreen: () => loginTerminal.current(),
+  loginInput: ({ id, text, key, enter }) => loginTerminal.send(id, { ...(text ? { text } : {}), ...(key ? { key: key as LoginKey } : {}), ...(enter ? { enter } : {}) }),
+  stopLogin: ({ id }) => loginTerminal.stop(id),
   engineSetupState: () => (fake ? fakeSetupState : engineSetup.current),
   cancelEngineSetup: () => {
     if (fake) return void (fakeSetupState = fakeSetupState && { ...fakeSetupState, state: 'cancelled' })
@@ -1987,9 +2050,11 @@ const api: Handlers = {
     emit({ type: 'settings', settings: settings() })
     return account
   },
-  loginAccount: ({ id }) => {
+  loginAccount: ({ id, screen }) => {
     const a = savedAccounts().find((x) => x.id === id)
     if (!a) return { opened: false, command: '' }
+    const shown = screen && engines[a.engine].installed ? loginTerminal.start(a.engine, a.id) : undefined
+    if (shown) return { opened: true, command: ENGINES[a.engine].login, screen: shown }
     const dir = accountDir(dataDir, a.id)
     watchAccount(a.id)
     return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex') })

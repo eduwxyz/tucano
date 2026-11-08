@@ -242,3 +242,24 @@ describe('lanAddress', () => {
     expect(lanAddress({ eth0: [{ family: 'IPv4', address: '8.8.8.8', internal: false }] })).toBeUndefined()
   })
 })
+
+describe('homeHost', () => {
+  it('puts the home network address in the QR code, not the .local name', async () => {
+    const { homeHost } = await import('../src/main/home-phone-net')
+    expect(homeHost({ en0: [{ family: 'IPv4', address: '192.168.3.112', internal: false }], utun4: [{ family: 'IPv4', address: '100.101.1.2', internal: false }] })).toBe('192.168.3.112')
+  })
+
+  it('makes each QR code with the address it has now', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'home-host-'))
+    const link = new HomeLink({ tls: makeCertificate('Tucano', []), codesFile: join(dir, 'codes.json'), core: () => undefined })
+    try {
+      const port = await link.start(47390, '192.168.0.10')
+      expect(new URL(link.makeCode().link).searchParams.get('url')).toBe(`https://192.168.0.10:${port}`)
+      link.setHost('192.168.0.77')
+      expect(new URL(link.makeCode().link).searchParams.get('url')).toBe(`https://192.168.0.77:${port}`)
+    } finally {
+      await link.stop()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

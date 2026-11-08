@@ -2,7 +2,7 @@
 import type { Answer } from './questions'
 import type { WikiChange, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
+import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -65,9 +65,14 @@ export interface Api {
   voiceRemoveModel(p: { model: VoiceModelId }): void
   localPath(p: { messageId: string; path: string }): LocalInfo | null // what a path this agent cited can do; null: it stays text
   openLocal(p: { messageId: string; path: string; how: 'open' | 'reveal' }): void
-  loginEngine(p: { engine: EngineId }): { opened: boolean; command: string } // not opened: no terminal to open, the person runs the command
+  // not opened: no terminal to open, the person runs the command. screen: the caller can show the
+  // server's own terminal (a page or a phone on Tucano as a server); then the sign-in runs there, and comes back
+  loginEngine(p: { engine: EngineId; screen?: boolean }): { opened: boolean; command: string; screen?: LoginScreen }
+  loginScreen(): LoginScreen | null
+  loginInput(p: { id: string; text?: string; key?: LoginKey; enter?: boolean }): Promise<LoginScreen | null>
+  stopLogin(p: { id: string }): void
   addAccount(p: { engine: AccountEngine; name: string }): Account
-  loginAccount(p: { id: string }): { opened: boolean; command: string }
+  loginAccount(p: { id: string; screen?: boolean }): { opened: boolean; command: string; screen?: LoginScreen }
   removeAccount(p: { id: string }): void
   installEngine(p: { engine: EngineId }): { opened: boolean; command: string; needsNode?: boolean } // needsNode: an npm install with no npm here
   setupEngine(p: { engine: EngineId }): SetupState // Codex or Claude Code with no terminal: downloaded, then the CLI's own sign-in in the browser
@@ -179,6 +184,7 @@ export interface Api {
   listInvites(): Invite[]
   removedPeople(): (Person & { removedAt: number })[] // admins: who left in the last 30 days (still restorable)
   myDevices(): Device[] // my own keys: the browsers and phones signed in as me
+  setPush(p: { handle: string | null; tag?: string }): { on: boolean } // this phone's push handle (the relay's), or none; on: this Tucano sends pushes
   removeDevice(p: { id: string }): void // one of mine signs out now (Device.id)
   removePerson(p: { id: string }): void // their access ends at once: keys gone, open connections closed; what they owned goes to the owner
   setRole(p: { id: string; role: Exclude<Role, 'owner'> }): void

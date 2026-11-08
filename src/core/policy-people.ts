@@ -205,6 +205,9 @@ export const NEEDS: Record<Method, Need> = {
   checkTrigger: 'admin',
   refreshEngines: 'admin',
   loginEngine: 'admin',
+  loginScreen: 'admin',
+  loginInput: 'admin',
+  stopLogin: 'admin',
   addAccount: 'admin',
   loginAccount: 'admin',
   removeAccount: 'admin',
@@ -234,6 +237,7 @@ export const NEEDS: Record<Method, Need> = {
   listInvites: 'admin',
   removedPeople: 'admin',
   myDevices: 'anyone', // one's own
+  setPush: 'anyone', // one's own device's (ctx.device)
   removeDevice: 'anyone', // one's own (the core looks only among theirs)
   removePerson: 'target',
   setRole: 'target',

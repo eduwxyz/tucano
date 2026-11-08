@@ -579,6 +579,21 @@ export interface SetupState {
   error?: string
 }
 
+// A harness's sign-in in the server's own terminal (src/core/login-terminal.ts), shown on a page or a phone.
+export interface LoginScreen {
+  id: string
+  engine: EngineId
+  account?: string // another login's id (Settings › Accounts); unset: the harness's usual one
+  lines: string[]
+  url?: string // the page to open, as the CLI shows it
+  code?: string // a code to type on that page
+  hint?: string // what to do first, for a harness whose sign-in starts inside its own screen
+  state: 'running' | 'done' | 'failed' | 'cancelled'
+  error?: string
+}
+export const LOGIN_KEYS = ['enter', 'up', 'down', 'left', 'right', 'esc', 'tab', 'backspace', 'space'] as const
+export type LoginKey = (typeof LOGIN_KEYS)[number]
+
 // A harness starts picked only when it can actually run: one not installed or not
 // signed in yet starts off.
 export const startsPicked = (st: EngineStatus): boolean => !st.soon && st.loggedIn
