@@ -25,7 +25,7 @@ import { vault } from './vault'
 import { verifyLocal } from '../core/local-paths'
 import { pairingLink } from '../shared/servers'
 import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from './web-shim'
-import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
+import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, notifyNote, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
 import type { Person } from '../shared/types'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
@@ -120,8 +120,7 @@ function fromCore(msg: CoreRequest): void {
   if (personNotice(msg, { signins, grants, viewers, streams })) return
   // Only to the pages of the people it's for.
   if (msg.type === 'notify') {
-    const note = { notify: { title: String(msg.title ?? ''), body: String(msg.body ?? ''), conversationId: msg.conversationId, page: msg.page } }
-    streams.deliver(note, Array.isArray(msg.to) ? msg.to : undefined, ownerId)
+    streams.deliver(notifyNote(msg as unknown as Record<string, unknown>), Array.isArray(msg.to) ? msg.to : undefined, ownerId)
     return
   }
   if (msg.type === 'secret') {
@@ -616,19 +615,39 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       })
     }
   }
-  // A notification of the system, as the desktop app shows, while the person isn't on this page.
-  // The browser asks for permission once, on the first click (it won't ask without one).
+  // A notification of the system, as the desktop app shows, unless the person is reading that
+  // conversation here. Inside the Tucano app (Settings › Servers) the app shows it as its own
+  // (src/preload/server.ts), and a click brings that server and conversation back on screen.
+  // A browser asks for permission once, on the first click (it won't ask without one), and shows
+  // none over plain HTTP outside this machine (Tailscale, a home network): it only does on HTTPS.
   let toConversation = () => {}
   let toPage = () => {}
+  const desktop = window.tucanoDesktop
+  if (desktop) desktop.onOpen((n) => (n.conversationId ? toConversation(n.conversationId, n.threadId) : n.page === 'skills' && toPage('skills')))
+  const notifyState = () =>
+    desktop ? 'on' : !('Notification' in window) ? 'unsupported' : !window.isSecureContext ? 'insecure' : Notification.permission === 'granted' ? 'on' : Notification.permission === 'denied' ? 'blocked' : 'ask'
   const notify = (n) => {
-    if (!('Notification' in window) || Notification.permission !== 'granted' || document.hasFocus()) return
+    if (document.hasFocus() && n.conversationId && n.conversationId === looking) return
+    if (desktop) return desktop.notify(n)
+    if (notifyState() !== 'on') return
     const shown = new Notification(n.title, { body: n.body, tag: n.conversationId || undefined })
     shown.onclick = () => {
       window.focus()
-      if (n.conversationId) toConversation(n.conversationId)
+      if (n.conversationId) toConversation(n.conversationId, n.threadId)
       else if (n.page === 'skills') toPage('skills')
       shown.close()
     }
+  }
+  // Settings › General › Notifications: one sent now, or why none can come here.
+  const testNotify = async () => {
+    if (!desktop && notifyState() === 'ask') await Notification.requestPermission().catch(() => {})
+    const state = notifyState()
+    if (state !== 'on') return state
+    const title = 'Tucano'
+    const body = document.documentElement.lang !== 'en' ? 'As notificações estão chegando.' : 'Notifications are coming through.'
+    if (desktop) desktop.notify({ title, body })
+    else new Notification(title, { body })
+    return 'shown'
   }
   // The server's folders, in the app's own dialog look: a browser can't show the server's disk.
   const pickFolder = () =>
@@ -691,7 +710,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       go('')
       choose.focus()
     })
-  if ('Notification' in window && Notification.permission === 'default')
+  if (!desktop && notifyState() === 'ask')
     document.addEventListener('pointerdown', () => void Notification.requestPermission().catch(() => {}), { once: true })
   window.tucano = {
     connect,
@@ -707,6 +726,8 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       looking = typeof id === 'string' ? id : null
       tellViewing()
     },
+    notifyState,
+    testNotify,
     updateState: async () => ({ version: '', status: 'off' }),
     onUpdate: () => {},
     checkUpdates: () => {},

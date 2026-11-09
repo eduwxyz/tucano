@@ -24,7 +24,13 @@ describe('a failing harness, in plain words', () => {
     expect(explainEngineError('claude', 'API Error: 401 {"error":"authentication_error"}').line).toBe('O login do Claude Code não está valendo. Entre de novo no Claude Code pra usar.')
     expect(explainEngineError('codex', 'Not logged in. Run codex login.').kind).toBe('login')
     expect(explainEngineError('opencode', 'Invalid API key for openai').line).toBe('O login da OpenAI no OpenCode não está valendo. Entre de novo no OpenCode pra usar.')
-    expect(explainEngineError('gemini', 'Please sign in again').kind).toBe('login')
+    expect(explainEngineError('antigravity', 'Please sign in again').kind).toBe('login')
+  })
+
+  it("Cline signs in to providers: names the one that failed, but not Cline twice", () => {
+    expect(explainEngineError('cline', 'invalid x-api-key for anthropic').line).toBe('O login da Anthropic no Cline CLI não está valendo. Entre de novo no Cline CLI pra usar.')
+    const own = explainEngineError('cline', "Unauthorized: Please make sure you're using the latest version of Cline and re-authenticate your Cline account. (Request ID: x)")
+    expect(own).toMatchObject({ kind: 'login', line: 'O login do Cline CLI não está valendo. Entre de novo no Cline CLI pra usar.' })
   })
 
   it('a limit and a timeout get their own line', () => {

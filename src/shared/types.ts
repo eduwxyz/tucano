@@ -3,12 +3,12 @@ import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
-import { L, lang, type Lang } from './lang'
+import { L, lang, locale, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor' | 'grok'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -194,7 +194,8 @@ export interface Run {
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
-  proposal?: Proposal // what an agent proposed (a change to an agent, a routine, a channel, a team), shown as a card
+  proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
+  proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
@@ -220,12 +221,43 @@ export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,
 // routine or channel it made or changed; `error`: why applying it didn't work.
+// A reply may hold several (a group under it, each applied on its own or all at once). `needs`: agents
+// proposed in the same reply (by name: propor_agente's card or a team's) that must exist first; a
+// routine for one has no agentId until then, and a channel adds them to `members`.
 export type Proposal = (
   | { kind: 'agent'; agentId: string; changes: AgentChanges; before?: AgentChanges } // before: those fields as they were
   | { kind: 'routine'; routine: RoutineInput }
   | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
-  | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean } } // several agents at once, and a channel with them
-) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string }
+  | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean }; agentIds?: string[] } // several agents at once, and a channel with them; agentIds: the ones it made, in order
+) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; needs?: string[] }
+
+// What "apply all" did, card by card: applied, failed (with why), sent to the admins (a member's
+// agents and teams); `draft`: the reply's new-agent card, when it went too.
+export interface ProposalsResult {
+  applied: { index: number; id: string }[]
+  failed: { index: number; error: string }[]
+  forwarded: number[]
+  draft?: { agentId?: string; error?: string }
+}
+
+// The most proposals one reply holds.
+export const MAX_PROPOSALS = 20
+
+// A reply's proposals: the list, or the one a reply from before had.
+export const proposalsOf = (run: { proposal?: Proposal; proposals?: Proposal[] } | undefined): Proposal[] => run?.proposals ?? (run?.proposal ? [run.proposal] : [])
+
+// What a proposal is about: a newer one about the same thing replaces it (in the reply, or a later one).
+export function proposalKey(p: Proposal): string {
+  if (p.kind === 'agent') return `agent:${p.agentId}`
+  if (p.kind === 'routine') return `routine:${p.routine.agentId || p.needs?.[0] || ''}:${p.routine.name.toLowerCase()}`
+  if (p.kind === 'channel') return `channel:${p.name}`
+  return `team:${p.channel?.name ?? p.agents.map((a) => a.name.toLowerCase()).sort().join(',')}`
+}
+
+// The order "apply all" goes in: what makes agents first (a team), then changes to agents, then
+// channels and routines, which may need an agent made just before. Same kind: as proposed.
+const RANK: Record<Proposal['kind'], number> = { team: 0, agent: 1, channel: 2, routine: 3 }
+export const applyOrder = (ps: Proposal[]): number[] => ps.map((_, i) => i).sort((a, b) => RANK[ps[a]!.kind] - RANK[ps[b]!.kind] || a - b)
 
 export type Author = { kind: 'person'; id: string } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
 
@@ -292,6 +324,7 @@ export interface Inbox {
 // A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
 export interface InboxProposal {
   id: string // the card's message
+  index?: number // which of its proposals (unset: the first)
   agentId: string // who proposed it (the Tuca)
   proposal: Proposal
   by: string // the member who asked
@@ -561,9 +594,10 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
-  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
+  antigravity: { label: 'Antigravity CLI', cli: 'agy', login: 'agy', install: 'curl -fsSL https://antigravity.google/cli/install.sh | bash', windows: 'irm https://antigravity.google/cli/install.ps1 | iex', site: 'https://antigravity.google/docs/cli/overview' },
   cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
-  grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' }
+  grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' },
+  cline: { label: 'Cline CLI', cli: 'cline', login: 'cline auth', install: 'npm install -g cline', site: 'https://docs.cline.bot/cli/cli-reference' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 
@@ -828,6 +862,8 @@ export interface Schedule {
   days: number[] // 0 = Sunday … 6 = Saturday
   time: string // "HH:MM", Mac local time
   once?: boolean // runs at the next matching time, then turns itself off
+  date?: string // "YYYY-MM-DD": that day only, at `time` (always once; `days` is its weekday)
+  monthDay?: number // 1–31: every month on that day (a shorter month's last day), at `time`
 }
 
 // What starts a routine other than the clock (spec §17). The app is local, so
@@ -890,10 +926,47 @@ const EVERY_DAY = (): string[] =>
 
 export const validTime = (t: string): boolean => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)
 
+// "2026-11-17", a day that exists.
+export const validDate = (d: string): boolean => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d)
+  if (!m) return false
+  const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return at.getFullYear() === Number(m[1]) && at.getMonth() === Number(m[2]) - 1 && at.getDate() === Number(m[3])
+}
+
+// A date's local time on this computer ("2026-11-17", "09:00").
+export const dateAt = (date: string, time: string): number => {
+  const [y, mo, d] = date.split('-').map(Number) as [number, number, number]
+  const [h, m] = time.split(':').map(Number) as [number, number]
+  return new Date(y, mo - 1, d, h, m).getTime()
+}
+
+// "2026-11-17" of a local time.
+export const isoDay = (at: number): string => {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // The first time after `after` that matches the schedule.
 export function nextRun(s: Schedule, after: number): number | undefined {
-  if (!validTime(s.time) || s.days.length === 0) return undefined
+  if (!validTime(s.time)) return undefined
+  if (s.date !== undefined) {
+    if (!validDate(s.date)) return undefined
+    const at = dateAt(s.date, s.time)
+    return at > after ? at : undefined
+  }
   const [h, m] = s.time.split(':').map(Number) as [number, number]
+  if (s.monthDay !== undefined) {
+    if (!Number.isInteger(s.monthDay) || s.monthDay < 1 || s.monthDay > 31) return undefined
+    const d = new Date(after)
+    for (let i = 0; i <= 12; i++) {
+      const last = new Date(d.getFullYear(), d.getMonth() + i + 1, 0).getDate()
+      const at = new Date(d.getFullYear(), d.getMonth() + i, Math.min(s.monthDay, last), h, m).getTime()
+      if (at > after) return at
+    }
+    return undefined
+  }
+  if (s.days.length === 0) return undefined
   const d = new Date(after)
   for (let i = 0; i <= 7; i++) {
     const at = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, h, m).getTime()
@@ -901,6 +974,8 @@ export function nextRun(s: Schedule, after: number): number | undefined {
   }
   return undefined
 }
+
+const ordinal = (n: number): string => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`
 
 export function describeSchedule(s: Schedule): string {
   const days = [...new Set(s.days)].sort()
@@ -920,6 +995,11 @@ export function describeSchedule(s: Schedule): string {
                 .join(', ')
                 .replace(/, ([^,]+)$/, `${and}$1`)
                 .replace(/^./, (c) => c.toUpperCase())
+  if (s.date !== undefined && validDate(s.date)) {
+    const day = new Date(dateAt(s.date, '12:00')).toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', ...(Number(s.date.slice(0, 4)) !== new Date().getFullYear() ? { year: 'numeric' } : {}) }).replace(/\./g, '')
+    return L(`Uma vez, ${day} às ${hour}`, `Once, ${day} at ${hour}`)
+  }
+  if (s.monthDay !== undefined) return L(`Todo dia ${s.monthDay} do mês às ${hour}`, `Every month on the ${ordinal(s.monthDay)} at ${hour}`)
   if (s.once) return days.length === 7 ? L(`Uma vez, às ${hour}`, `Once, at ${hour}`) : L(`Uma vez, ${days.map((d) => DAY_LONG()[d]).join(' ou ')} às ${hour}`, `Once, ${days.map((d) => DAY_LONG()[d]).join(' or ')} at ${hour}`)
   return L(`${when} às ${hour}`, `${when} at ${hour}`)
 }

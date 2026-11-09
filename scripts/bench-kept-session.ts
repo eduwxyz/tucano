@@ -27,7 +27,7 @@ const seeded = Number(process.argv[3] ?? 20)
 const bin = process.env['CLAUDE_BIN'] || (await detectClaude()).path
 if (!bin) throw new Error('Claude Code not found')
 const ready = { installed: true, loggedIn: true }
-const settings = { workspaceName: 'Gabriel', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
+const settings = { workspaceName: 'Gabriel', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
 const lia: Agent = { id: 'lia', name: 'Lia', handle: 'lia', role: 'Dados', color: 'sky', instructions: 'Você é a Lia, de engenharia de dados. Responda em uma frase curta.', modelId: 'haiku', effort: 'low', limit: 100_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
 const line = (i: number): string => `Mensagem ${i}: a tabela vendas_diarias teve ${1000 + i} linhas hoje, e o job de ingestão rodou em ${30 + i} segundos sem erro. ${'Detalhe do log do job, linha repetida para ocupar espaço. '.repeat(25)}`
 
@@ -42,7 +42,7 @@ async function measure(way: string, sessions: boolean, after?: (engine: Engine) 
 
   const real = claudeEngine(() => bin)
   const claude: Engine = sessions ? real : { id: 'claude', run: (t) => real.run(t) }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor') }
   const gateway = new Gateway()
   await gateway.start()
   const workDir = join(tmpdir(), 'bench-work')

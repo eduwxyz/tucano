@@ -60,6 +60,12 @@ export function onServer(url: string, origin: string): boolean {
   }
 }
 
+// What a server's page already has, asked by the page (Notification.permission). Electron gives
+// the origin with a slash at the end (https://ana.example.com/): compared as an origin, or the page
+// is told no to all of these, notifications included.
+export const serverMayHave = (permission: string, requestingOrigin: string, origin: string): boolean =>
+  onServer(requestingOrigin, origin) && ['notifications', 'clipboard-sanitized-write', 'media', 'fullscreen'].includes(permission)
+
 // One of a server's preview addresses (src/server/preview.ts): https://5173-ana.example.com for https://ana.example.com.
 export function isPreviewOf(url: string, origin: string): boolean {
   try {
@@ -89,5 +95,37 @@ export function pairProblem(r: 'invalid' | 'used' | 'unreachable'): { title: str
   return {
     title: L('Esse não é um link de conexão do Tucano', "That's not a Tucano connection link"),
     detail: L('O link de conexão começa com tucano://connect (ou é o link do navegador com ?code=) e sai do servidor.', 'A connection link starts with tucano://connect (or is the browser link with ?code=) and comes from the server.')
+  }
+}
+
+// A notification a server's page hands the app (src/preload/server.ts), to show as the app's own.
+// The page is the server's, which could be anyone's: only text of a sane size, ids of the shape
+// the core makes, and nothing else comes through.
+export interface ServerNote {
+  title: string
+  body: string
+  conversationId?: string
+  threadId?: string
+  page?: 'skills'
+  kind?: 'approval' | 'question' | 'done'
+  sound?: boolean
+}
+const NOTE_ID = /^[A-Za-z0-9_-]{1,80}$/
+export function serverNote(raw: unknown): ServerNote | null {
+  if (!raw || typeof raw !== 'object') return null
+  const n = raw as Record<string, unknown>
+  if (typeof n.title !== 'string' || !n.title.trim()) return null
+  const id = (v: unknown): string | undefined => (typeof v === 'string' && NOTE_ID.test(v) ? v : undefined)
+  const conversationId = id(n.conversationId)
+  const threadId = conversationId ? id(n.threadId) : undefined
+  const kind = n.kind === 'approval' || n.kind === 'question' || n.kind === 'done' ? n.kind : undefined
+  return {
+    title: n.title.slice(0, 200),
+    body: typeof n.body === 'string' ? n.body.slice(0, 500) : '',
+    ...(conversationId ? { conversationId } : {}),
+    ...(threadId ? { threadId } : {}),
+    ...(n.page === 'skills' ? { page: 'skills' as const } : {}),
+    ...(kind ? { kind } : {}),
+    ...(typeof n.sound === 'boolean' ? { sound: n.sound } : {})
   }
 }

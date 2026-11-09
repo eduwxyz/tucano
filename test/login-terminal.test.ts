@@ -62,7 +62,7 @@ describe('loginCommand', () => {
     expect(loginCommand('codex').args).toEqual(['login', '--device-auth'])
     expect(loginCommand('grok').args).toEqual(['login', '--device-auth'])
     expect(loginCommand('cursor').env).toEqual({ NO_OPEN_BROWSER: '1' })
-    expect(loginCommand('gemini').env).toEqual({ NO_BROWSER: 'true' })
+    expect(loginCommand('antigravity').hint).toMatch(/código|code/)
     expect(loginCommand('pi').hint).toMatch(/\/login/)
   })
 })
@@ -122,7 +122,7 @@ describe('LoginTerminal', () => {
   it('is done once the harness is signed in, and ends the CLI', async () => {
     let yes = false
     const { pty, t } = setup(() => yes)
-    t.start('gemini')
+    t.start('antigravity')
     yes = true
     await new Promise((r) => setTimeout(r, 30))
     expect(t.current()?.state).toBe('done')

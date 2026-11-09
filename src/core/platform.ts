@@ -129,7 +129,7 @@ export const pathDirs = (): string[] => (process.env['PATH'] ?? process.env['Pat
 export function withInstallDirs(path: string, os: Os = osOf(), home = homedir(), env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = existsSync): string {
   // Windows: npm's global folder, and Cursor's installer (%LOCALAPPDATA%\cursor-agent).
   // Grok's installer puts `grok` in ~/.grok/bin and may not add it to PATH.
-  const dirs = [join(home, '.local', 'bin'), join(home, '.grok', 'bin'), ...(os === 'windows' ? [env['APPDATA'] && join(env['APPDATA'], 'npm'), env['LOCALAPPDATA'] && join(env['LOCALAPPDATA'], 'cursor-agent')] : [])].filter((d): d is string => !!d)
+  const dirs = [join(home, '.local', 'bin'), join(home, '.grok', 'bin'), ...(os === 'windows' ? [env['APPDATA'] && join(env['APPDATA'], 'npm'), env['LOCALAPPDATA'] && join(env['LOCALAPPDATA'], 'cursor-agent'), env['LOCALAPPDATA'] && join(env['LOCALAPPDATA'], 'agy', 'bin')] : [])].filter((d): d is string => !!d)
   const have = path.split(delimiter).filter(Boolean)
   const same = (a: string, b: string): boolean => (os === 'windows' ? a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase() : a.replace(/\/+$/, '') === b.replace(/\/+$/, ''))
   const missing = dirs.filter((d) => exists(d) && !have.some((h) => same(h, d)))

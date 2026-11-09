@@ -63,6 +63,23 @@ export class Grants {
   }
 }
 
+// What a page gets of the core's notification: what to show, where a click goes, and how it sounds.
+// Who it reaches is Streams.deliver's (its `to`), never the page's.
+export function notifyNote(msg: Record<string, unknown>): { notify: Record<string, unknown> } {
+  const kind = msg.kind === 'approval' || msg.kind === 'question' || msg.kind === 'done' ? msg.kind : undefined
+  return {
+    notify: {
+      title: String(msg.title ?? ''),
+      body: String(msg.body ?? ''),
+      conversationId: msg.conversationId,
+      ...(msg.threadId ? { threadId: msg.threadId } : {}),
+      page: msg.page,
+      ...(kind ? { kind } : {}),
+      ...(typeof msg.sound === 'boolean' ? { sound: msg.sound } : {})
+    }
+  }
+}
+
 // Who a request is: the owner (by the server's token) or a person (by their key).
 export type Who = { owner: true; person?: undefined; role: 'owner' } | { owner?: undefined; person: string; role: Person['role'] }
 
