@@ -1124,7 +1124,7 @@ export interface Report {
 }
 
 // ---------- the wiki ----------
-export type WikiAccess = 'none' | 'read'
+export type WikiAccess = 'none' | 'read' | 'write' // 'write': reads it and writes pages too, through wiki_escrever
 export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
 export interface WikiPageInfo {
   title: string

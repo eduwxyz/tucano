@@ -7922,7 +7922,9 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-finding__kind { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: color-mix(in srgb, var(--tone) 85%, var(--text)); }
 .wk-finding--calm .wk-finding__kind { color: var(--text-3); }
 .wk-finding__text { font-size: 14px; line-height: 1.55; }
-.wk-finding__actions { display: flex; gap: 8px; }
+.wk-finding__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.wk-finding__actions .wk-handoff__agent { min-width: 172px; max-width: 220px; }
+.wk-finding__actions .wk-handoff__agent .select__trigger { height: 30px; font-size: 13px; }
 .wk-finding .wiki-change { padding: 0; border: 0; box-shadow: none; background: transparent; }
 
 .wk-add { display: grid; gap: 10px; }

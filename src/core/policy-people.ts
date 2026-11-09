@@ -159,6 +159,7 @@ export const NEEDS: Record<Method, Need> = {
   wikiRedoChange: 'admin',
   wikiRunReview: 'admin',
   wikiDismissFinding: 'admin',
+  wikiAsk: 'anyone', // the agent that writes is the one with wiki write access; this only asks it
   wikiImport: 'admin',
   wikiImportZip: 'admin',
   setWikiDir: 'admin',

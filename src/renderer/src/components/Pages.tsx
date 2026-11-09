@@ -679,10 +679,13 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           {pane('memoria') && (
             <Card
               title="Wiki"
-              lead={L('A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas.', 'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages.')}
+              lead={L(
+                'A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas. Com escrita, ele também cria páginas e acrescenta trechos; mexer numa que já existe espera a sua aprovação.',
+                'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages. With writing, it also creates pages and adds stretches; changing one that exists waits for your approval.'
+              )}
             >
               <div className="segmented segmented--wide" role="radiogroup" aria-label="Wiki">
-                {([['read', L('Lê a wiki', 'Reads the wiki')], ['none', L('Sem acesso', 'No access')]] as const).map(([value, label]) => (
+                {([['write', L('Escreve na wiki', 'Writes the wiki')], ['read', L('Lê a wiki', 'Reads the wiki')], ['none', L('Sem acesso', 'No access')]] as const).map(([value, label]) => (
                   <button
                     key={value}
                     role="radio"
