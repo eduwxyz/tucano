@@ -89,6 +89,13 @@ export function parseCuration(text: string): { worth: boolean; reason: string; t
   return { worth: worth && ops.length > 0, reason: str(v['motivo'] ?? v['reason']), title: cleanTitle(str(v['titulo_fonte'] ?? v['source_title'])) || L('Trecho de conversa', 'Conversation excerpt'), ops }
 }
 
+// A swap's new passage. Models often write it under "text" (as for the other ops) or in Portuguese;
+// read as an empty "new", the swap would show nothing in its place and delete the passage on approval.
+const swapIn = (o: Record<string, unknown>): string => {
+  for (const k of ['new', 'novo', 'text', 'texto']) if (typeof o[k] === 'string' && (o[k] as string).trim()) return o[k] as string
+  return ''
+}
+
 // The changes a model wrote, in the JSON both the curator and the review use.
 export function parseOps(list: unknown): WikiOp[] {
   const str = (x: unknown): string => (typeof x === 'string' ? x.trim() : '')
@@ -107,7 +114,7 @@ export function parseOps(list: unknown): WikiOp[] {
       page,
       ...(str(o['tipo'] ?? o['kind']) ? { kind: str(o['tipo'] ?? o['kind']) } : {}),
       ...(str(o['secao'] ?? o['section']) ? { section: str(o['secao'] ?? o['section']) } : {}),
-      ...(op !== 'replace' ? { text: str(o['texto'] ?? o['text']) } : { old: String(o['old']), new: String(o['new'] ?? '') })
+      ...(op !== 'replace' ? { text: str(o['texto'] ?? o['text']) } : { old: String(o['old']), new: swapIn(o) })
     })
   }
   return ops
