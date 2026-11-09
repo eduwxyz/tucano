@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type SendMode, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -303,7 +303,12 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
+type Control = {
+  ctl: AbortController
+  msg: Message
+  reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping'
+  steer?: string[] // what the person wrote while this reply ran, handed over at the next tool call
+}
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
 // it (what was already said, its own earlier one too), and its message last.
@@ -330,6 +335,9 @@ export class Runner {
   // there moves the reply's trigger to its message instead of queueing a second reply. One whose
   // agent is still replying there starts when that reply ends (it reads what that reply said).
   private waiting = new Map<string, { trigger: string; queued: boolean; start: () => void }>()
+  // Prompts a person marked as queued, by conversation: they start when nothing runs there any more.
+  private convRuns = new Map<string, number>()
+  private convWaiting = new Map<string, (() => Promise<unknown>)[]>()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -446,7 +454,7 @@ export class Runner {
   // `by`: the person writing (the Tucano's owner when left out: the phone, older callers).
   // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
   // wherever the person writes from). The caller checked that they may answer it.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[] } = {}): Promise<void> {
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; mode?: SendMode } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const typed = text.trim()
@@ -545,7 +553,69 @@ export class Runner {
         return
       }
     }
-    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }), true)
+    // How it joins a reply already running here: alongside it (the default), after it, handed to it
+    // between tool calls, or in place of it. With nothing running, all four are the same thing.
+    const mode = opts.mode ?? 'parallel'
+    if (mode === 'steer' && this.steerIn(conv.id, L(`${writer.name} escreveu isto enquanto você trabalhava:`, `${writer.name} wrote this while you were working:`), typed)) return
+    if (mode === 'interrupt') this.interruptIn(conv.id)
+    for (const agent of responders)
+      this.runIn(
+        conv.id,
+        () => this.execute(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }),
+        mode === 'queue'
+      )
+  }
+
+  // A prompt marked as queued waits for what is running in that conversation, and there only: what
+  // runs elsewhere, or another agent's reply in another conversation, is none of its business.
+  private runIn(conversationId: string, job: () => Promise<unknown>, after: boolean): void {
+    if (!after || (this.convRuns.get(conversationId) ?? 0) === 0) return this.startIn(conversationId, job)
+    const waiting = this.convWaiting.get(conversationId) ?? []
+    waiting.push(job)
+    this.convWaiting.set(conversationId, waiting)
+  }
+
+  private startIn(conversationId: string, job: () => Promise<unknown>): void {
+    this.convRuns.set(conversationId, (this.convRuns.get(conversationId) ?? 0) + 1)
+    this.enqueue(
+      () =>
+        job().finally(() => {
+          this.settleIn(conversationId)
+        }),
+      true
+    )
+  }
+
+  // A reply ended there: the next queued prompt goes, or the conversation is free again.
+  private settleIn(conversationId: string): void {
+    const left = (this.convRuns.get(conversationId) ?? 1) - 1
+    if (left > 0) return void this.convRuns.set(conversationId, left)
+    this.convRuns.delete(conversationId)
+    const next = this.convWaiting.get(conversationId)?.shift()
+    if (!next) return void this.convWaiting.delete(conversationId)
+    if (this.convWaiting.get(conversationId)?.length === 0) this.convWaiting.delete(conversationId)
+    this.startIn(conversationId, next)
+  }
+
+  // Stopping what runs in one conversation, and only there: what it wrote stays, as the stop button leaves it.
+  private interruptIn(conversationId: string): void {
+    for (const c of this.controllers.values()) {
+      if (c.msg.conversationId !== conversationId || c.reason) continue
+      c.reason = 'stopped'
+      c.ctl.abort()
+    }
+  }
+
+  // A steer goes to the reply running in that conversation, which reads it at its next tool call.
+  // With none running, the message is a prompt like any other (the caller runs it).
+  private steerIn(conversationId: string, from: string, text: string): boolean {
+    let taken = false
+    for (const c of this.controllers.values()) {
+      if (c.msg.conversationId !== conversationId || c.reason) continue
+      ;(c.steer ??= []).push(`${from}\n\n${text}`)
+      taken = true
+    }
+    return taken
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -726,7 +796,7 @@ export class Runner {
   }
 
   private isIdle(): boolean {
-    return this.active === 0 && this.queue.length === 0 && this.routing === 0
+    return this.active === 0 && this.queue.length === 0 && this.routing === 0 && this.convWaiting.size === 0
   }
 
   private checkIdle(): void {
@@ -1987,7 +2057,14 @@ ${note}`,
         acted = true
         sign()
         try {
-          const r = await runTool(name, args)
+          // A steer: what the person wrote while this reply ran, handed over here, between two calls.
+          const withSteers = (r: CallToolResult): CallToolResult => {
+            const handed = control.steer?.splice(0) ?? []
+            if (!handed.length) return r
+            addSteps({ id: randomUUID(), label: L('Recebeu o que você escreveu', 'Took in what you wrote'), detail: handed.join(' · ').replace(/\s+/g, ' ').slice(0, 160), status: 'done' })
+            return { ...r, content: [...r.content, { type: 'text', text: handed.join('\n\n') }] }
+          }
+          const r = withSteers(await runTool(name, args))
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0

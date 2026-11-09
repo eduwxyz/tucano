@@ -38,6 +38,7 @@ import {
   delegating,
   type Routine,
   type RoutineInput,
+  type SendMode,
   type Settings,
   type SetupEngine,
   type SetupState,
@@ -892,8 +893,9 @@ export const deleteConversation = (id: string): Promise<void> => call('deleteCon
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
 // `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
-  if (text.trim() || images.length || files.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: SendMode): void => {
+  if (text.trim() || images.length || files.length)
+    void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(mode ? { mode } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>

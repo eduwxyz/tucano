@@ -425,6 +425,7 @@ export interface Settings {
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
+  sendMode?: SendMode // what Enter does while a reply is running: alongside it (the default), after it, into it, or stopping it
   wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
   wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
   wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
@@ -1122,6 +1123,10 @@ export interface Report {
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
 }
+
+// How a new prompt arrives in a conversation that is already answering (src/core/runs.ts):
+// alongside what's running, after it, handed to it between tool calls, or in place of it.
+export type SendMode = 'parallel' | 'queue' | 'steer' | 'interrupt'
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'
