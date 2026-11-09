@@ -28,6 +28,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   deleteAgent: { id: 's' },
   setTopic: { id: 's', topic: 's' },
   setChannelMembers: { id: 's', agentIds: 'S' },
+  clearConversation: { id: 's' },
   deleteConversation: { id: 's' },
   openDm: { agentId: 's' },
   tasks: {},

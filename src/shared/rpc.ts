@@ -58,6 +58,9 @@ export interface Api {
   deleteAgent(p: { id: string }): void // an archived agent, for good: its messages stay under its name, struck out; the rest goes
   setTopic(p: { id: string; topic: string }): void
   setChannelMembers(p: { id: string; agentIds: string[] }): void
+  // A conversation's history, without deleting the conversation: the screen starts empty and the
+  // next turns stop reading what came before, while the rows and the costs stay.
+  clearConversation(p: { id: string }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
   openDm(p: { agentId: string }): string
   tasks(): Task[] // my to-dos on the board (Quadro), in order
