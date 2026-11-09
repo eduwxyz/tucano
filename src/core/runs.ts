@@ -81,6 +81,8 @@ const GIVE_UP_MS = 10 * 60_000
 // not started out of the blue now; it ends as failed and whoever asked hears it, to ask again if it still matters.
 const STALE_MS = 60 * 60_000
 const DELTA_FLUSH_MS = 40
+// How much thinking is worth one wake-up of the window: it is read, not parsed.
+const THOUGHT_FLUSH = 240
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 // How the reply was cut, in the words the next reply reads: the app closing is not the same news as
 // a failure, and neither is the same as the person stopping it.
@@ -1178,6 +1180,9 @@ export class Runner {
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
+    // What the model is thinking, streamed to the window and never added to the reply: it is shown
+    // as it goes and dropped when the turn ends, since the run column is rewritten whole each step.
+    let thought = ''
     let narration: string | undefined
     const said = (): string | undefined => {
       const text = msg.text.trim()
@@ -1384,6 +1389,10 @@ export class Runner {
     const flush = (): void => {
       if (timer) clearTimeout(timer)
       timer = null
+      if (thought) {
+        emit({ type: 'thinking', id: msg.id, text: thought })
+        thought = ''
+      }
       if (!pending) return
       emit({ type: 'delta', id: msg.id, text: pending })
       pending = ''
@@ -2602,6 +2611,12 @@ ${note}`,
               msg.text += ev.delta
               pending += ev.delta
               timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+            } else if (ev.type === 'thinking') {
+              if (ev.delta) {
+                thought += ev.delta
+                if (thought.length > THOUGHT_FLUSH) flush()
+                else timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+              }
             } else if (ev.type === 'progress') {
               progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
               const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))

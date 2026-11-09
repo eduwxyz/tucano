@@ -26,6 +26,22 @@ describe('pi', () => {
     expect(p.end(0, '')).toEqual([{ type: 'done', text: 'O título é Example Domain.', usage: { inputTokens: 450, cacheReadTokens: 100, outputTokens: 35 } }])
   })
 
+  it('sends what the model is thinking apart from what it says', () => {
+    const p = piParser()
+    const events = [
+      '{"type":"message_start","message":{"role":"assistant","content":[]}}',
+      '{"type":"message_update","assistantMessageEvent":{"type":"thinking_start","contentIndex":0}}',
+      '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"O pedido tem duas partes. "}}',
+      '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"Começo pela conta."}}',
+      '{"type":"message_update","assistantMessageEvent":{"type":"thinking_end","contentIndex":0}}',
+      '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"Feito."}}'
+    ].flatMap((l) => p.line(l))
+    expect(events).toContainEqual({ type: 'thinking', delta: 'O pedido tem duas partes. ' })
+    // Never merged into the reply: the thought is shown, not said.
+    expect(events.filter((e) => e.type === 'text')).toEqual([{ type: 'text', delta: 'Feito.' }])
+    expect(p.end(0, '')).toEqual([{ type: 'done', text: 'Feito.', usage: { inputTokens: 0, cacheReadTokens: 0, outputTokens: 0 } }])
+  })
+
   it('reports a model error', () => {
     const p = piParser()
     p.line('{"type":"message_end","message":{"role":"assistant","content":[],"usage":{},"stopReason":"error","errorMessage":"No API key for provider: anthropic"}}')
