@@ -428,6 +428,7 @@ type TranscriptOpts = {
   task?: string
   summary?: string
   images?: Map<string, string[]>
+  files?: Map<string, string[]> // the names of the files (not images) attached to each message
   thread?: Message
   searchable?: boolean
   unix?: boolean // message times with the year, the offset and the Unix seconds: for an agent whose tools filter by time
@@ -452,7 +453,7 @@ export const snip = (text: string, max: number): string => {
 
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
-  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable, unix, people, live } = opts
+  const { agent, conversation, messages, agents, me, task, summary, images, files, thread, searchable, unix, people, live } = opts
   const scheduler = (id: string): string | undefined => (typeof opts.routineOwner === 'function' ? opts.routineOwner(id) : (opts.routineOwner ?? me))
   const personName = (id: string): string => people?.find((p) => p.id === id)?.name || me
   const name = (m: Message): string | null => {
@@ -472,6 +473,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
     [
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
+      ...(files?.get(m.id) ?? []).map((n) => L(`[arquivo anexado: ${n}]`, `[attached file: ${n}]`)),
       questionsOf(m.run).length > 0 && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`)
     ]
       .filter(Boolean)
