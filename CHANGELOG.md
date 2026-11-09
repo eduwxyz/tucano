@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **A channel no longer stays on "Picking who answers…" forever.** Tucano reads the PATH from a login shell at startup and waits for that before anything runs. In the AppImage, with zsh and mise, the shell opened a second Tucano that never ended, and the command's time limit couldn't stop it: it asked politely, an interactive zsh ignores that, and the limit only answered once the output closed. In a workspace other than the default one, that second Tucano also ran on the same data as the first. The time limit now always answers and ends what the command started, and the AppImage's `ARGV0` no longer reaches what the app starts.
+
 ## [0.2.22] - 2026-11-08
 
 > **Em português:**
