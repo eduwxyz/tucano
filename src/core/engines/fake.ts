@@ -110,9 +110,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (turn.mcpUrl && /print de (\S+)/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'screenshot', { url: /print de (\S+)/i.exec(last)![1]! })
         reply = textOf(r)
-      } else if (turn.mcpUrl && /agend\w* `([^`]+)` às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.test(last)) {
-        const [, nome, horario, once, pedido] = /agend\w* `([^`]+)` às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.exec(last)!
-        const r = await callTool(turn.mcpUrl, 'agendar_rotina', { nome, horario, pedido, uma_vez: !!once })
+      } else if (turn.mcpUrl && /agend\w* `([^`]+)`(?: em (\d{4}-\d{2}-\d{2}))? às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.test(last)) {
+        const [, nome, data, horario, once, pedido] = /agend\w* `([^`]+)`(?: em (\d{4}-\d{2}-\d{2}))? às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.exec(last)!
+        const r = await callTool(turn.mcpUrl, 'agendar_rotina', { nome, horario, pedido, uma_vez: !!once, ...(data ? { data } : {}) })
         reply = textOf(r)
       } else if (turn.mcpUrl && /proponha a skill `([^`]+)` \(quando: ([^)]+)\): (.+)/is.test(last)) {
         const [, nome, quando_usar, receita] = /proponha a skill `([^`]+)` \(quando: ([^)]+)\): (.+)/is.exec(last)!

@@ -3,8 +3,9 @@
 // card with Aplicar and Descartar, like his new agents: nothing changes until the person applies it.
 // He sees settings, statuses and error messages, never what was said in a conversation.
 import { L } from '../shared/lang'
-import { channelName, ENGINES, modelInfo, validTime, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
+import { channelName, dateAt, ENGINES, modelInfo, nextRun, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
 import type { ToolDef } from './gateway'
+import { dateArg } from './routines'
 
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh']
 const DAY = 24 * 3_600_000
@@ -87,7 +88,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
     const lines = x.routines.map((r) => {
       const last = x.lastRun(r)
       const t = r.trigger
-      const kind = t?.kind === 'webhook' ? L('chamada local (webhook)', 'local call (webhook)') : t?.kind === 'poll' ? L(`quando aparece algo em ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, a cada ${t.everyMinutes} min`, `when something new shows in ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, every ${t.everyMinutes} min`) : `${r.schedule.days.join(',')} ${r.schedule.time}${r.schedule.once ? L(' (uma vez)', ' (once)') : ''}`
+      const kind = t?.kind === 'webhook' ? L('chamada local (webhook)', 'local call (webhook)') : t?.kind === 'poll' ? L(`quando aparece algo em ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, a cada ${t.everyMinutes} min`, `when something new shows in ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, every ${t.everyMinutes} min`) : `${r.schedule.date ?? (r.schedule.monthDay !== undefined ? L(`dia ${r.schedule.monthDay} de todo mês`, `day ${r.schedule.monthDay} of every month`) : r.schedule.days.join(','))} ${r.schedule.time}${r.schedule.once ? L(' (uma vez)', ' (once)') : ''}`
       return `- ${r.name} (${agentName(r.agentId)}, ${where(r.conversationId)}): ${r.enabled ? L('ligada', 'on') : L('desligada', 'off')} · ${kind} · ${L('próxima', 'next')} ${r.enabled && r.nextAt ? when(r.nextAt, x.now) : '—'} · ${L('última', 'last')} ${when(r.lastAt, x.now)}${last?.status ? ` (${last.status}${last.error ? `: ${last.error}` : ''})` : ''}${t?.kind === 'poll' && t.error ? L(` · erro ao checar: ${t.error}`, ` · check error: ${t.error}`) : ''}`
     })
     out.push(`## ${L('Rotinas', 'Routines')}\n${lines.join('\n') || L('nenhuma', 'none')}`)
@@ -142,8 +143,8 @@ export const PROPOR_ROTINA: ToolDef = {
   name: 'propor_rotina',
   get description() {
     return L(
-      'Cria uma rotina num horário pra um agente (um pedido que ele faz sozinho nos dias e na hora escolhidos), como um card com Aplicar e Descartar. Use em vez de explicar como criar uma rotina. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
-      'Makes a scheduled routine for an agent (a request it does on its own on the chosen days and time), as a card with Apply and Discard. Use it instead of explaining how to make a routine. Triggers (webhook, connector) the person sets in Routines.'
+      'Cria uma rotina num horário pra um agente (um pedido que ele faz sozinho nos dias e na hora escolhidos, numa data específica ou todo mês num dia), como um card com Aplicar e Descartar. Use em vez de explicar como criar uma rotina. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
+      'Makes a scheduled routine for an agent (a request it does on its own on the chosen days and time, on a specific date, or every month on a day), as a card with Apply and Discard. Use it instead of explaining how to make a routine. Triggers (webhook, connector) the person sets in Routines.'
     )
   },
   get inputSchema() {
@@ -154,12 +155,14 @@ export const PROPOR_ROTINA: ToolDef = {
         nome: { type: 'string', description: L('Curto (ex.: "Resumo do dia").', 'Short (e.g. "Daily summary").') },
         pedido: { type: 'string', description: L('O que o agente faz a cada vez, como um pedido a ele.', 'What the agent does each time, as a request to it.') },
         onde: { type: 'string', description: L('"dm" (a DM com o agente, o padrão) ou o nome de um canal de que ele participa.', '"dm" (the DM with the agent, the default) or the name of a channel it is in.') },
-        dias: { type: 'array', items: { type: 'number' }, description: L('0 = domingo … 6 = sábado.', '0 = Sunday … 6 = Saturday.') },
-        hora: { type: 'string', description: L('"HH:MM", hora deste computador.', '"HH:MM", this computer\'s time.') },
+        dias: { type: 'array', items: { type: 'number' }, description: L('0 = domingo … 6 = sábado. Não precisa com data ou dia_do_mes.', '0 = Sunday … 6 = Saturday. Not needed with data or dia_do_mes.') },
+        hora: { type: 'string', description: L('"HH:MM", hora deste computador. Pode faltar se data já traz a hora.', '"HH:MM", this computer\'s time. May be left out when data has the time.') },
+        data: { type: 'string', description: L('Uma data específica, ISO ("2026-11-17" ou "2026-11-17T09:00"): roda uma vez só, nesse dia. Não pode ter passado.', 'A specific date, ISO ("2026-11-17" or "2026-11-17T09:00"): runs once, on that day. It can\'t be past.') },
+        dia_do_mes: { type: 'number', description: L('1 a 31: todo mês nesse dia (num mês mais curto, no último).', '1 to 31: every month on that day (in a shorter month, on its last).') },
         uma_vez: { type: 'boolean', description: L('Roda na próxima vez e desliga.', 'Runs next time, then turns off.') },
         ...reasonProp()
       },
-      required: ['agente', 'nome', 'pedido', 'dias', 'hora']
+      required: ['agente', 'nome', 'pedido']
     }
   }
 }
@@ -267,11 +270,20 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
     const prompt = text(args, 'pedido', 4000)
     if (!name || !prompt) return { error: L('Faltou nome ou pedido.', 'Missing nome or pedido.') }
     const days = [...new Set(Array.isArray(args['dias']) ? (args['dias'] as unknown[]).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [])].sort()
-    if (!days.length) return { error: L('Escolha pelo menos um dia (0 = domingo … 6 = sábado).', 'Pick at least one day (0 = Sunday … 6 = Saturday).') }
-    const time = text(args, 'hora', 5)
+    const on = text(args, 'data', 40) ? dateArg(text(args, 'data', 40)) : undefined
+    if (on === null) return { error: L('A data vai como "2026-11-17" ou "2026-11-17T09:00".', 'The date goes as "2026-11-17" or "2026-11-17T09:00".') }
+    const monthDay = args['dia_do_mes'] === undefined || args['dia_do_mes'] === '' ? undefined : Number(args['dia_do_mes'])
+    if (monthDay !== undefined && !(Number.isInteger(monthDay) && monthDay >= 1 && monthDay <= 31)) return { error: L('O dia do mês vai de 1 a 31.', 'The day of the month goes from 1 to 31.') }
+    if (!on && monthDay === undefined && !days.length) return { error: L('Escolha pelo menos um dia (0 = domingo … 6 = sábado), uma data ou um dia do mês.', 'Pick at least one day (0 = Sunday … 6 = Saturday), a date or a day of the month.') }
+    const time = (text(args, 'hora', 5) || on?.time || '').padStart(5, '0')
     if (!validTime(time)) return { error: L('A hora vai como "HH:MM".', 'The time goes as "HH:MM".') }
     const where = text(args, 'onde', 80).replace(/^#/, '')
-    const schedule = { days, time, ...(args['uma_vez'] === true ? { once: true } : {}) }
+    const schedule: Schedule = on
+      ? { days: [new Date(dateAt(on.date, '12:00')).getDay()], time, once: true, date: on.date }
+      : monthDay !== undefined
+        ? { days: [0, 1, 2, 3, 4, 5, 6], time, monthDay }
+        : { days, time, ...(args['uma_vez'] === true ? { once: true } : {}) }
+    if (on && nextRun(schedule, Date.now()) === undefined) return { error: L(`Essa data já passou (${on.date} ${time}). Use um dia e horário que ainda vão chegar.`, `That date has already passed (${on.date} ${time}). Use a day and time still to come.`) }
     // For an agent proposed in this reply: in its DM, opened once it's made (it's in no channel yet).
     if (!agent) {
       if (where && where.toLowerCase() !== 'dm') return { error: L(`${pending} ainda não existe, então não está em nenhum canal: use a DM.`, `${pending} doesn't exist yet, so it's in no channel: use the DM.`) }
