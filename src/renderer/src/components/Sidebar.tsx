@@ -11,6 +11,7 @@ import {
   openTuca,
   isTeam,
   deleteConversation,
+  clearHistory,
   markRead,
   navigate,
   openDialog,
@@ -361,6 +362,22 @@ export function Sidebar(): ReactNode {
     icon: 'layers',
     onClick: () => void call('setWikiCapture', { conversationId: id, on: !on })
   })
+  // The history out of sight, the conversation kept: same DM, same channel, same place in the list.
+  const clearItem = (id: string, what: string, whatEn: string): MenuItem => ({
+    label: L('Limpar o histórico…', 'Clear the history…'),
+    icon: 'spark',
+    onClick: () =>
+      void confirmDialog({
+        title: L(`Limpar o histórico ${what}?`, `Clear the history of ${whatEn}?`),
+        body: L(
+          'Some da tela e do que o agente lê, e ele começa do zero na próxima mensagem. As mensagens continuam guardadas: os recibos, os custos e as aprovações que apontam pra elas ficam como estão. Não dá pra desfazer pela tela.',
+          'It leaves the screen and what the agent reads, and it starts from nothing on the next message. The messages stay stored: the receipts, the costs and the approvals that point at them are kept as they are. It cannot be undone from the screen.'
+        ),
+        confirm: L('Limpar o histórico', 'Clear the history')
+      }).then((ok) => {
+        if (ok) void clearHistory(id)
+      })
+  })
   const channelMenu = (c: (typeof channels)[number]): MenuItem[] => [
     ...(canEditChannel({ people, you }, c) ? [{ label: L('Adicionar ou remover agentes…', 'Add or remove agents…'), icon: 'users' as const, onClick: () => openDialog({ kind: 'members', id: c.id }) }] : []),
     { label: L('Configurações do canal…', 'Channel settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id: c.id }) },
@@ -378,6 +395,7 @@ export function Sidebar(): ReactNode {
     ...(admin ? channelDelete(c) : [])
   ]
   const channelDelete = (c: (typeof channels)[number]): MenuItem[] => [
+    clearItem(c.id, `do canal #${c.name}`, `#${c.name}`),
     'separator',
     {
       label: L('Excluir canal…', 'Delete channel…'),
@@ -407,6 +425,7 @@ export function Sidebar(): ReactNode {
     { label: L('Marcar como lido', 'Mark as read'), icon: 'check', onClick: () => markRead(dm.id) },
     { label: L('Configurações da conversa…', 'Conversation settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id: dm.id }) },
     wikiItem(dm.id, dm.wikiCapture !== false),
+    clearItem(dm.id, `da conversa com ${agentName}`, `the conversation with ${agentName}`),
     'separator',
     {
       label: L('Apagar a conversa…', 'Delete the conversation…'),

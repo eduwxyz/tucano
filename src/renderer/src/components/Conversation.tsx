@@ -19,6 +19,7 @@ import { canEditChannel,
   agentById,
   askerIn,
   messagesIn,
+  clearedAt,
   attachedTo,
   conversationIndex,
   initials,
@@ -291,7 +292,11 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
-  const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
+  // A cleared conversation starts at the cut, wherever it is drawn from (the conversation, a thread,
+  // the intro): the rows before it are still there, and none of them is on screen.
+  const cut = useStore((s) => clearedAt(s, conversationId))
+  const here = useMemo(() => (cut ? all.filter((m) => m.at > cut) : all), [all, cut])
+  const messages = useMemo(() => asShown(here, cardAnswers(everything)), [here, everything])
   // A routine's message rides on its reply, and its runs with nothing new fold into one line (routine-runs.ts).
   const routines = useStore((s) => s.routines)
   const shown = useMemo(() => shownMessages(messages, routines, replies ? (mid) => !!replies.get(mid)?.length : undefined), [messages, routines, replies])
@@ -360,7 +365,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
   }, [first])
 
   const more = (el: HTMLDivElement): void => {
-    if (!older || loading || el.scrollTop > 800) return
+    if (!older || cut > 0 || loading || el.scrollTop > 800) return
     setLoading(true)
     before.current = { height: el.scrollHeight, top: el.scrollTop }
     void loadOlder(conversationId).finally(() => setLoading(false))
@@ -407,12 +412,21 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
   }
 
   if (messages.length === 0 && !lead) {
+    // A cleared history leaves a conversation that is empty on screen but not new: it says where it
+    // starts, the way the line at the top of a list with messages does.
+    const date = cut > 0 ? new Date(cut).toLocaleDateString(locale()) : ''
     return (
       <div className="messages messages--empty">
         <div className="empty">
           <Icon name="spark" size={22} />
-          <p>{L('Nada por aqui ainda.', 'Nothing here yet.')}</p>
-          <p className="muted">{dmName ? L(`Escreva o que precisa: ${dmName} sempre responde aqui.`, `Write what you need: ${dmName} always replies here.`) : L('Escreva e quem estiver no canal responde. Pra chamar alguém, use @.', 'Write and whoever is in the channel replies. To call on someone, use @.')}</p>
+          <p>{cut > 0 ? L('Histórico limpo.', 'History cleared.') : L('Nada por aqui ainda.', 'Nothing here yet.')}</p>
+          <p className="muted">
+            {cut > 0
+              ? L(`O que veio antes de ${date} sai da tela e do que o agente lê; os recibos e os custos ficam. Escreva e a conversa começa do zero.`, `What came before ${date} leaves the screen and what the agent reads; the receipts and the costs stay. Write and the conversation starts from nothing.`)
+              : dmName
+                ? L(`Escreva o que precisa: ${dmName} sempre responde aqui.`, `Write what you need: ${dmName} always replies here.`)
+                : L('Escreva e quem estiver no canal responde. Pra chamar alguém, use @.', 'Write and whoever is in the channel replies. To call on someone, use @.')}
+          </p>
         </div>
       </div>
     )
@@ -431,6 +445,11 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
       }}
     >
       {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
+      {cut > 0 && (
+        <div className="messages__cleared">
+          <span>{L(`Histórico limpo em ${new Date(cut).toLocaleDateString(locale())}. O que veio antes continua nos recibos e nos custos.`, `History cleared on ${new Date(cut).toLocaleDateString(locale())}. What came before stays in the receipts and the costs.`)}</span>
+        </div>
+      )}
       {lead}
       {shown.map((item, i) => {
         if (item.kind === 'no-news') return <NoNewsLine key={item.key} line={item} focus={holder === item ? focus : undefined} replies={replies} />
