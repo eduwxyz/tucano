@@ -63,6 +63,19 @@ const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
+// An agent with no monthly ceiling (limit 0) still keeps a per-reply cap, or a
+// reply that keeps making progress would never be cut. The percentage then has
+// no month to apply to, so it is taken over this base instead.
+const NO_LIMIT_REPLY_BASE = 1_000_000
+
+// The month's ceiling for an agent: 0 (or anything that isn't a positive
+// number) is no ceiling, so every comparison against it is false.
+export const monthlyCeiling = (limit: number): number => (limit > 0 ? limit : Infinity)
+
+// How many tokens a single reply may spend. With a ceiling it is a share of it;
+// without one the share is taken over NO_LIMIT_REPLY_BASE, so a reply still has
+// a top even when the month doesn't.
+export const replyBudget = (limit: number, pct: number): number => Math.round(((limit > 0 ? limit : NO_LIMIT_REPLY_BASE) * pct) / 100)
 const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
 const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
 const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
@@ -948,8 +961,11 @@ export class Runner {
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
+    // A limit of 0 is no ceiling at all: comparing against it would stop the
+    // agent on its first turn, so every check below goes through `ceiling`.
     const used = db.usedThisMonth(agent.id)
-    if (used >= agent.limit) {
+    const ceiling = monthlyCeiling(agent.limit)
+    if (used >= ceiling) {
       save({
         text: L('Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.', "I stopped: I've used all my tokens for this month. It can be raised on my page."),
         run: { status: 'limit_reached', endedAt: Date.now(), depth: opts.depth, steps: [], ...again }
@@ -1078,7 +1094,7 @@ export class Runner {
 
     // Guards (spec §3). Long work that keeps going somewhere is never cut: a loop
     // repeats itself, a stuck turn goes quiet, and a costly one pauses to ask.
-    const budget = Math.round((agent.limit * (settings.runBudgetPct ?? RUN_BUDGET_PCT)) / 100)
+    const budget = replyBudget(agent.limit, settings.runBudgetPct ?? RUN_BUDGET_PCT)
     const stallMs = (settings.runStallMinutes ?? RUN_STALL_MINUTES) * 60_000
     const seen = new Map<string, { result: string; n: number }>()
     let failing = 0 // tool calls failing in a row
@@ -2112,7 +2128,7 @@ ${note}`,
             } else if (ev.type === 'progress') {
               progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
               const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
-              if (used + counted > agent.limit) halt('limit')
+              if (used + counted > ceiling) halt('limit')
               else if (counted > budget) {
                 if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
                 overBudget = true
@@ -2177,7 +2193,8 @@ ${note}`,
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
     const usedNow = db.usedThisMonth(agent.id)
-    if (used < agent.limit * USAGE_ALERT && usedNow >= agent.limit * USAGE_ALERT && usedNow < agent.limit) {
+    // Only an agent with a ceiling has a share of it to warn about.
+    if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {
       const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
       this.post(
         conv.id,
