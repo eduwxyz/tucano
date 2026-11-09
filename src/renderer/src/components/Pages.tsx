@@ -85,6 +85,7 @@ import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
+import type { NotifyState } from '../rpc'
 import { hasServers, ServersCard } from './Servers'
 import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
@@ -2316,6 +2317,7 @@ export function SettingsPage(): ReactNode {
               </div>
               <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
             </div>
+            <NotifyTest />
           </Card>
         )}
 
@@ -2510,5 +2512,42 @@ export function SettingsPage(): ReactNode {
         {pane('geral') && owner && <WorkspaceDangerArea />}
       </div>
     </Page>
+  )
+}
+
+// Why notifications can't come here, or what to check when one was sent and didn't show.
+export function notifyHint(state: NotifyState | 'shown', mac: boolean): string | null {
+  const elsewhere = L(
+    'Pra ser avisado, use o app do Tucano no computador (Configurações › Servidores), o app do iPhone ou o Telegram (Configurações › Celular).',
+    'To be told, use the Tucano app on your computer (Settings › Servers), the iPhone app or Telegram (Settings › Phone).'
+  )
+  if (state === 'insecure') return L('O navegador não mostra notificações de um endereço sem HTTPS (como o do Tailscale, http://100.…). ', "Browsers don't show notifications from an address without HTTPS (like Tailscale's, http://100.…). ") + elsewhere
+  if (state === 'blocked') return L('O navegador bloqueou as notificações deste endereço. Libere nas permissões do site e recarregue a página. ', 'The browser blocked notifications from this address. Allow them in the site’s permissions and reload the page. ') + elsewhere
+  if (state === 'unsupported') return L('Aqui não dá pra mostrar notificações. ', "Notifications can't be shown here. ") + elsewhere
+  if (state === 'shown')
+    return mac
+      ? L('Mandei uma. Se não apareceu, confira Ajustes do Sistema › Notificações › Tucano (permitir, e o estilo Faixas ou Alertas) e se um modo Foco está ligado.', 'Sent one. If it didn’t show, check System Settings › Notifications › Tucano (allowed, with Banners or Alerts) and whether a Focus is on.')
+      : L('Mandei uma. Se não apareceu, confira as notificações do sistema e do navegador para o Tucano, e o modo Não perturbe.', 'Sent one. If it didn’t show, check the system’s and the browser’s notification settings for Tucano, and Do Not Disturb.')
+  return null
+}
+
+function NotifyTest(): ReactNode {
+  const [state, setState] = useState<NotifyState | 'shown' | null>(() => window.tucano.notifyState?.() ?? null)
+  if (!window.tucano.testNotify) return null
+  const hint = state ? notifyHint(state, /Mac/i.test(navigator.userAgent)) : null
+  const off = state === 'insecure' || state === 'unsupported'
+  return (
+    <div className="key-row">
+      <Icon name="send" />
+      <div className="grow">
+        <strong>{L('Testar', 'Test')}</strong>
+        <p className="muted small">{hint ?? L('Manda uma notificação agora, pra ver se chega.', 'Sends a notification now, to see that it comes.')}</p>
+      </div>
+      {!off && (
+        <button className="btn btn--sm" onClick={() => void window.tucano.testNotify?.().then(setState, () => setState('unsupported'))}>
+          {L('Mandar uma', 'Send one')}
+        </button>
+      )}
+    </div>
   )
 }
