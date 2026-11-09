@@ -1,11 +1,11 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
 import type { AccountEngine, EngineId, EngineStatus } from '../../shared/types'
-import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '../platform'
+import { executableNames, isWin, killTree, pathDirs, spawnable, withInstallDirs } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
@@ -14,13 +14,31 @@ import { cursorSignedIn, parseCursorModels } from './cursor'
 import { grokLogin, parseGrokModels } from './grok'
 import { readClineLogins } from './cline'
 
-function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
+// The app waits for these answers before anything can run, so the limit has to hold whatever the
+// command does. execFile's own timeout only sends SIGTERM, which an interactive zsh ignores, and it
+// answers only when the output pipes close, which what the command started can keep open for good.
+export function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const s = spawnable(bin, args)
-    execFile(s.file, s.args, { timeout, env, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (err, stdout, stderr) => {
-      const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) })
-    })
+    // Its own process group, so the limit takes its children with it. (On Windows, detached would open a console.)
+    const child = spawn(s.file, s.args, { env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+    let stdout = ''
+    let stderr = ''
+    let giveUp: NodeJS.Timeout | undefined
+    child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout += d))
+    child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d))
+    const finish = (code: number): void => {
+      clearTimeout(limit)
+      clearTimeout(giveUp)
+      resolve({ code, stdout, stderr })
+    }
+    const limit = setTimeout(() => {
+      if (child.pid) killTree(child.pid, 'SIGKILL')
+      // Something that left the group can still hold the pipes: answer without waiting for them.
+      giveUp = setTimeout(() => finish(1), 1_000)
+    }, timeout)
+    child.on('error', () => finish(1))
+    child.on('close', (code) => finish(code ?? 1))
   })
 }
 

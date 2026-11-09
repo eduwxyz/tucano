@@ -20,6 +20,10 @@ import { autostartEntry, autostartFile, onPath } from '../core/platform'
 
 const NAME = 'Tucano'
 app.setName(NAME)
+// The AppImage's runtime sets ARGV0 for the app alone, but everything the app starts would inherit
+// it. In a login shell with mise, that made `mise activate zsh` open the AppImage again, and the
+// shell never came back.
+delete process.env['ARGV0']
 // Windows shows notifications only for an app with an id, the same as the installer's.
 if (process.platform === 'win32') app.setAppUserModelId('dev.tucano.app')
 
