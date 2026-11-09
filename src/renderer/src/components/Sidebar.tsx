@@ -35,6 +35,8 @@ import {
 } from '../store'
 import type { SidebarPart } from '../../../shared/onboarding'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
+import { moveBefore, nudge, ordered } from '../../../shared/list-order'
+import { useHoldReorder } from '../reorder'
 import { call } from '../rpc'
 import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
@@ -164,7 +166,10 @@ export function Sidebar(): ReactNode {
   const proposals = useStore((s) => s.skills.filter((k) => k.state === 'pending').length)
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const channels = conversations.filter((c) => c.kind === 'channel')
-  const dms = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')
+  // The person's own order for these two lists, the way the channels have one (they were creation
+  // order before, forever). A row the order doesn't know yet shows last.
+  const dms = ordered(conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca'), settings.dmOrder)
+  const teamAgents = ordered(agents.filter(isTeam), settings.agentOrder)
   const [menu, setMenu] = useState<MenuState>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
   const open = (e: React.MouseEvent, items: MenuItem[]): void => {
@@ -180,6 +185,13 @@ export function Sidebar(): ReactNode {
   const dmsWaiting = useStore((s) => anyWaiting(s, dms.map((c) => c.id)))
   const whole: ChannelLayout = { loose: arranged.loose.map((c) => c.id), groups: arranged.groups.map((g) => ({ ...g, channels: g.channels.map((c) => c.id) })) }
   const saveLayout = (next: ChannelLayout): void => updateSettings({ channelLayout: next })
+  const saveDmOrder = (next: string[]): void => updateSettings({ dmOrder: next })
+  const saveAgentOrder = (next: string[]): void => updateSettings({ agentOrder: next })
+  // Press and hold a row to pick it up, then drop it where it goes; Alt+arrows move the row the
+  // keyboard is on. Both start from the list as it is shown, so what's on screen is what's saved.
+  const dmsSort = useHoldReorder({ onDrop: (id, before) => saveDmOrder(moveBefore(dms, settings.dmOrder, id, before)), onNudge: (id, by) => saveDmOrder(nudge(dms, settings.dmOrder, id, by)) })
+  const agentsSort = useHoldReorder({ onDrop: (id, before) => saveAgentOrder(moveBefore(teamAgents, settings.agentOrder, id, before)), onNudge: (id, by) => saveAgentOrder(nudge(teamAgents, settings.agentOrder, id, by)) })
+  const rowClass = (sort: typeof dmsSort, id: string): string => `nav-row${sort.picked === id ? ' is-picked' : ''}${sort.over === id && sort.picked !== id ? ' is-over' : ''}`
   const [naming, setNaming] = useState<string | null>(null)
   const newGroup = (channelId: string): void => {
     const id = crypto.randomUUID()
@@ -263,6 +275,8 @@ export function Sidebar(): ReactNode {
     { label: L('Configurações da conversa…', 'Conversation settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id }) },
     wikiItem(id, conversations.find((x) => x.id === id)?.wikiCapture !== false),
     'separator',
+    { label: L('Mover para cima', 'Move up'), onClick: () => saveDmOrder(nudge(dms, settings.dmOrder, id, -1)) },
+    { label: L('Mover para baixo', 'Move down'), onClick: () => saveDmOrder(nudge(dms, settings.dmOrder, id, 1)) },
     {
       label: L('Apagar a conversa…', 'Delete the conversation…'),
       icon: 'trash',
@@ -280,6 +294,8 @@ export function Sidebar(): ReactNode {
   ]
   const agentMenu = (agentId: string, agentName: string): MenuItem[] => [
     { label: L('Mandar mensagem', 'Send a message'), icon: 'send', onClick: () => void openDm(agentId) },
+    { label: L('Mover para cima', 'Move up'), onClick: () => saveAgentOrder(nudge(teamAgents, settings.agentOrder, agentId, -1)) },
+    { label: L('Mover para baixo', 'Move down'), onClick: () => saveAgentOrder(nudge(teamAgents, settings.agentOrder, agentId, 1)) },
     ...(admin ? agentAdminMenu(agentId, agentName) : [{ label: L(`Ver ${agentName}`, `See ${agentName}`), icon: 'eye' as const, onClick: () => navigate({ kind: 'agent', id: agentId }) }])
   ]
   const agentAdminMenu = (agentId: string, agentName: string): MenuItem[] => [
@@ -409,7 +425,7 @@ export function Sidebar(): ReactNode {
             const agent = agentOf(c.name)
             if (!agent) return null
             return (
-              <div key={c.id} onContextMenu={(e) => open(e, dmMenu(c.id, agent.id, agent.name))}>
+              <div key={c.id} className={rowClass(dmsSort, c.id)} {...dmsSort.rowProps(c.id)} onContextMenu={(e) => open(e, dmMenu(c.id, agent.id, agent.name))}>
                 <DmItem id={c.id} agent={agent} unread={c.unread} owner={team && agent.owner !== you ? personById({ people }, agent.owner)?.name : undefined} />
               </div>
             )
@@ -428,13 +444,11 @@ export function Sidebar(): ReactNode {
             ) : undefined
           }
         >
-          {agents
-            .filter(isTeam)
-            .map((a) => (
-              <div key={a.id} onContextMenu={(e) => open(e, agentMenu(a.id, a.name))}>
-                <AgentItem id={a.id} owner={team && a.owner !== you ? personById({ people }, a.owner)?.name : undefined} />
-              </div>
-            ))}
+          {teamAgents.map((a) => (
+            <div key={a.id} className={rowClass(agentsSort, a.id)} {...agentsSort.rowProps(a.id)} onContextMenu={(e) => open(e, agentMenu(a.id, a.name))}>
+              <AgentItem id={a.id} owner={team && a.owner !== you ? personById({ people }, a.owner)?.name : undefined} />
+            </div>
+          ))}
           {agents.some((a) => a.archived) && (
             <button className="nav-item nav-item--quiet" onClick={() => openDialog({ kind: 'archived' })}>
               <Icon name="layers" />

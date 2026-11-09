@@ -11863,3 +11863,17 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
+/* Sorting the sidebar's own rows by hand: press and hold one to pick it up, drop it where it goes.
+   The row is a button, so nothing moves until the hold ends — a slightly short drag is still a click. */
+.nav-row { position: relative; }
+.nav-row.is-picked { opacity: 0.55; }
+.nav-row.is-over::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
