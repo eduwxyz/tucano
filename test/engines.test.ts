@@ -8,6 +8,8 @@ import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexPro
 import { antigravityArgs, antigravityHomeEnv, antigravityInput, antigravityModel, antigravityParser, antigravityPrompt, antigravitySettings, antigravityTurnDirs, parseAntigravityModels, RULES_MAX } from '../src/core/engines/antigravity'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { grokArgs, grokCleanup, grokConfig, grokEngine, grokLogin, grokParser, grokPrompt, grokTurnDirs, grokTurnEnv, parseGrokModels, userGrokHome } from '../src/core/engines/grok'
+import { CLINE_OFF, clineArgs, clineEngine, clineLead, clineLogins, clineMcp, clineModel, clineParser, clinePrompt, clineSettings, clineTurnDirs, clineTurnEnv, clineCleanup, clineLoginEnv, clineProvidersFile } from '../src/core/engines/cline'
+import { detectCline } from '../src/core/engines/detect'
 import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
@@ -863,5 +865,243 @@ printf '%s\\n' '{"type":"end","stopReason":"end_turn","usage":{"input_tokens":4,
     writeFileSync(png, 'x')
     const done = (await run(fakeCli(), { images: [{ block: 0, path: png, mime: 'image/png' }] })).find((e) => e.type === 'done')
     expect(done && done.type === 'done' && done.text).toContain('img=yes')
+  })
+})
+
+// Recorded from cline 3.0.74 (--json) against a stand-in model and gateway: some text, a call to the
+// gateway's lembrar, then the reply, two model calls.
+describe('Cline stream', () => {
+  it('streams the text of each model call as a paragraph, and ends with the whole of it', () => {
+    const events = feed(clineParser(), fixture('cline-stream-recorded.jsonl'))
+    expect(text(events)).toBe('Let me save that. \n\nHello from mock.')
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ type: 'done', text: 'Let me save that. \n\nHello from mock.' })
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+  })
+
+  it('keeps a running total per model call, and the whole turn at the end, cache reads counted as sent', () => {
+    const events = feed(clineParser(), fixture('cline-stream-recorded.jsonl'))
+    expect(events.filter((e) => e.type === 'progress')).toEqual([
+      { type: 'progress', tokens: 1000 + 20, cacheRead: 400 },
+      { type: 'progress', tokens: 2200 + 25, cacheRead: 1400 }
+    ])
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ usage: { inputTokens: 2200, cacheReadTokens: 1400, outputTokens: 25 } })
+    // A cost of 0 (an unknown price) isn't a cost.
+    const done = events.find((e) => e.type === 'done')
+    expect(done && done.type === 'done' && 'apiCostUsd' in done.usage).toBe(false)
+  })
+
+  it('takes the cost when the CLI knows it', () => {
+    const end = '{"type":"run_result","finishReason":"completed","usage":{"inputTokens":10,"outputTokens":2,"cacheReadTokens":0,"totalCost":0.0042},"text":"ok"}'
+    expect(feed(clineParser(), [end]).find((e) => e.type === 'done')).toMatchObject({ text: 'ok', usage: { inputTokens: 10, outputTokens: 2, apiCostUsd: 0.0042 } })
+  })
+
+  it("reports a page read or a web search once it ran, not a failed one, and not the gateway's tools", () => {
+    const start = (id: string, name: string, input: object): string => JSON.stringify({ type: 'agent_event', event: { type: 'content_start', contentType: 'tool', toolName: name, toolCallId: id, input } })
+    const end = (id: string, name: string, error?: string): string => JSON.stringify({ type: 'agent_event', event: { type: 'content_end', contentType: 'tool', toolName: name, toolCallId: id, ...(error ? { error } : {}) } })
+    const web = feed(clineParser(), [
+      start('a', 'fetch_web_content', { url: 'https://nodejs.org', prompt: 'LTS?' }),
+      end('a', 'fetch_web_content'),
+      start('b', 'web_search', { query: 'node lts' }),
+      end('b', 'web_search'),
+      start('c', 'fetch_web_content', { url: 'https://down.example' }),
+      end('c', 'fetch_web_content', 'fetch failed'),
+      start('d', 'tucano__lembrar', { fact: 'x' }),
+      end('d', 'tucano__lembrar')
+    ]).filter((e) => e.type === 'web')
+    expect(web).toEqual([
+      { type: 'web', action: 'fetch', detail: 'https://nodejs.org' },
+      { type: 'web', action: 'search', detail: 'node lts' }
+    ])
+  })
+
+  // Recorded from cline 3.0.74: a bad key, and a Cline account that isn't signed in.
+  it("turns a failed run into the CLI's own error, from the event, the result or stderr", () => {
+    const failed = [
+      '{"type":"agent_event","event":{"type":"error","error":{"name":"Error","message":"invalid x-api-key"},"errorClass":"auth","recoverable":false,"iteration":1}}',
+      '{"type":"run_result","finishReason":"error","iterations":1,"usage":{"inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheWriteTokens":0,"totalCost":0},"text":"invalid x-api-key"}'
+    ]
+    expect(feed(clineParser(), failed)).toEqual([{ type: 'error', message: 'invalid x-api-key' }])
+    expect(feed(clineParser(), [failed[1]!])).toEqual([{ type: 'error', message: 'invalid x-api-key' }])
+    const stderr = '{"ts":"2026-11-09T11:25:11.402Z","type":"error","message":"Unauthorized: re-authenticate your Cline account."}'
+    expect(feed(clineParser(), [], 1, stderr)).toEqual([{ type: 'error', message: 'Unauthorized: re-authenticate your Cline account.' }])
+    const gone = feed(clineParser(), ['{"type":"agent_event","event":{"type":"content_start","contentType":"text","text":"oi"}}'], 1, 'boom')
+    expect(gone.some((e) => e.type === 'done')).toBe(false)
+    expect((gone.find((e) => e.type === 'error') as { message: string }).message).toContain('boom')
+  })
+
+  it('a stopped run, or one with nothing said, is not a reply', () => {
+    expect(feed(clineParser(), ['{"type":"run_result","finishReason":"aborted","text":""}'])[0]).toMatchObject({ type: 'error' })
+    expect(feed(clineParser(), ['{"type":"run_result","finishReason":"completed","text":""}'])[0]).toMatchObject({ type: 'error' })
+  })
+})
+
+describe('Cline config', () => {
+  const base = { model: 'openai-compatible/mock-model', effort: 'high' as const, system: 'You are Pia.' }
+
+  it('runs headless with the model, its provider, the effort and the instructions; never a key', () => {
+    const args = clineArgs(base)
+    expect(args).toContain('--json')
+    expect(args[args.indexOf('--auto-approve') + 1]).toBe('true')
+    expect(args[args.indexOf('--thinking') + 1]).toBe('high')
+    expect(args[args.indexOf('--provider') + 1]).toBe('openai-compatible')
+    expect(args[args.indexOf('--model') + 1]).toBe('mock-model')
+    expect(args[args.indexOf('--system') + 1]).toBe('You are Pia.')
+    // The prompt argument is a lead-in with a space (one word would be taken for a command); the conversation goes on stdin.
+    expect(args.at(-1)).toBe(clineLead())
+    expect(clineLead()).toMatch(/\s/)
+    expect(args).not.toContain('-k')
+    expect(args).not.toContain('--key')
+    expect(args).not.toContain('--yolo')
+  })
+
+  it('splits the provider off the model, and keeps the rest of a Cline account model whole', () => {
+    expect(clineModel('cline/anthropic/claude-sonnet-4.5')).toEqual({ provider: 'cline', model: 'anthropic/claude-sonnet-4.5' })
+    expect(clineModel('anthropic/claude-sonnet-4-5')).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-5' })
+    expect(clineModel('mock-model')).toEqual({ model: 'mock-model' })
+    expect(clineArgs({ ...base, model: 'mock-model' })).not.toContain('--provider')
+    expect(modelInfo(customModel('cline', 'cline/anthropic/claude-sonnet-4.5'))).toMatchObject({ engine: 'cline', id: 'cline/anthropic/claude-sonnet-4.5' })
+  })
+
+  it('turns off every built-in tool, and the web ones unless the agent has the web', () => {
+    const off = clineSettings({}) as { disabledTools: string[]; tools: { web_search: { enabled: boolean } }; telemetryOptOut: boolean; autoUpdateEnabled: boolean }
+    for (const tool of ['read_files', 'search_codebase', 'run_commands', 'editor', 'apply_patch', 'skills', 'ask_question', 'spawn_agent', 'team_spawn_teammate', 'team_run_task', 'fetch_web_content', 'web_search']) expect(off.disabledTools).toContain(tool)
+    expect(off.tools.web_search.enabled).toBe(false)
+    expect(off.telemetryOptOut).toBe(true)
+    expect(off.autoUpdateEnabled).toBe(false)
+    const web = clineSettings({ web: true }) as typeof off
+    expect(web.disabledTools).toEqual(CLINE_OFF)
+    expect(web.disabledTools).not.toContain('fetch_web_content')
+    expect(web.tools.web_search.enabled).toBe(true)
+  })
+
+  it('has the gateway as the only MCP server, over streamable HTTP', () => {
+    expect(clineMcp({ mcpUrl: 'http://127.0.0.1:9/mcp/abc' })).toEqual({ mcpServers: { tucano: { type: 'streamableHttp', url: 'http://127.0.0.1:9/mcp/abc' } } })
+    expect(clineMcp({})).toEqual({ mcpServers: {} })
+  })
+
+  it('tells the agent its images were left out', () => {
+    const png = join(mkdtempSync(join(tmpdir(), 'tucano-cline-pic-')), 'p.png')
+    writeFileSync(png, 'x')
+    expect(clinePrompt({ prompt: 'Oi' })).toBe('Oi')
+    expect(clinePrompt({ prompt: 'Oi', images: [{ block: 0, path: png, mime: 'image/png' }] })).toMatch(/^Oi\n\n.*imag/s)
+  })
+
+  it("writes the turn's settings and gateway in a folder of its own, and the cleanup takes it all", () => {
+    const app = mkdtempSync(join(tmpdir(), 'tucano-cline-app-'))
+    const dirs = clineTurnDirs(app, { mcpUrl: 'http://127.0.0.1:9/mcp/abc', web: false })
+    const settings = join(dirs.config, 'data', 'settings')
+    expect(JSON.parse(readFileSync(join(settings, 'global-settings.json'), 'utf8')).disabledTools).toContain('run_commands')
+    expect(JSON.parse(readFileSync(join(settings, 'cline_mcp_settings.json'), 'utf8')).mcpServers.tucano.url).toBe('http://127.0.0.1:9/mcp/abc')
+    expect(dirs.config.startsWith(dirs.root) && dirs.work.startsWith(dirs.root)).toBe(true)
+    expect(readdirSync(dirs.work)).toEqual([])
+    clineCleanup(dirs)
+    expect(existsSync(dirs.root)).toBe(false)
+  })
+
+  it("points a turn at its own home and the app's login, and drops what would send Cline elsewhere", () => {
+    const dirs = { root: '/t/home', config: '/t/home/.cline', work: '/t/home/work' }
+    const env = clineTurnEnv({ PATH: '/bin', HOME: '/Users/me', CLINE_DATA_DIR: '/Users/me/.cline/data', CLINE_MCP_SETTINGS_PATH: '/x.json', CLINE_HOOKS_DIR: '/h', CLINE_HUB_PORT: '1', ANTHROPIC_API_KEY: 'k', OneDrive: 'C:/od' }, dirs, '/app/cline/login/data/settings/providers.json', 'windows')
+    expect(env).toMatchObject({ PATH: '/bin', HOME: '/t/home', USERPROFILE: '/t/home', CLINE_DIR: '/t/home/.cline', CLINE_PROVIDER_SETTINGS_PATH: '/app/cline/login/data/settings/providers.json', CLINE_SESSION_BACKEND_MODE: 'local', ANTHROPIC_API_KEY: 'k' })
+    for (const k of ['CLINE_DATA_DIR', 'CLINE_MCP_SETTINGS_PATH', 'CLINE_HOOKS_DIR', 'CLINE_HUB_PORT', 'OneDrive']) expect(env[k]).toBeUndefined()
+    expect(clineTurnEnv({}, dirs, 'p', 'mac')['USERPROFILE']).toBeUndefined()
+    expect(clineLoginEnv('/app/cline/login')).toEqual({ CLINE_DIR: '/app/cline/login', CLINE_SESSION_BACKEND_MODE: 'local' })
+    expect(clineProvidersFile('/app/cline/login')).toBe(join('/app/cline/login', 'data', 'settings', 'providers.json'))
+  })
+
+  it("reads what the app's login is signed into, and the model each provider last ran, never a provider with no credentials", () => {
+    const file = JSON.stringify({
+      version: 1,
+      lastUsedProvider: 'cline',
+      providers: {
+        cline: { settings: { provider: 'cline', model: 'anthropic/claude-sonnet-4.5', auth: { accessToken: 't', refreshToken: 'r' } } },
+        anthropic: { settings: { provider: 'anthropic', model: 'claude-sonnet-4-5', apiKey: 'k' } },
+        ollama: { settings: { provider: 'ollama', baseUrl: 'http://localhost:11434' } },
+        bedrock: { settings: { provider: 'bedrock', model: 'x', aws: { profile: 'work' } } },
+        // A run saves the provider and model it was asked for, signed in or not.
+        openai: { settings: { provider: 'openai', model: 'gpt-5' } }
+      }
+    })
+    expect(clineLogins(file)).toEqual({ providers: ['cline', 'anthropic', 'ollama', 'bedrock'], models: ['cline/anthropic/claude-sonnet-4.5', 'anthropic/claude-sonnet-4-5', 'bedrock/x'] })
+    expect(clineLogins('not json')).toEqual({ providers: [], models: [] })
+    expect(clineLogins('{"version":1,"providers":{}}')).toEqual({ providers: [], models: [] })
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('Cline engine', () => {
+  // Says where it ran, what it was given and whether stdin is a file; then a reply.
+  const fakeCli = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'tucano-cline-cli-'))
+    const bin = join(dir, 'cline')
+    writeFileSync(
+      bin,
+      `#!/bin/sh
+kind=other
+[ -f /dev/stdin ] && kind=file
+input=$(cat | tr '\\n' ' ')
+last=""
+for a in "$@"; do last=$a; done
+off=no
+grep -q '"run_commands"' "$CLINE_DIR/data/settings/global-settings.json" && off=yes
+mcp=no
+grep -q '"tucano"' "$CLINE_DIR/data/settings/cline_mcp_settings.json" && mcp=yes
+printf '%s\\n' "{\\"type\\":\\"agent_event\\",\\"event\\":{\\"type\\":\\"content_start\\",\\"contentType\\":\\"text\\",\\"text\\":\\"stdin=$kind input=$input| last=$last| off=$off mcp=$mcp home=$HOME clinedir=$CLINE_DIR prov=$CLINE_PROVIDER_SETTINGS_PATH data=\${CLINE_DATA_DIR-unset} cwd=$(pwd)\\"}}"
+printf '%s\\n' '{"type":"run_result","finishReason":"completed","usage":{"inputTokens":4,"outputTokens":1,"cacheReadTokens":0,"totalCost":0}}'
+`,
+      { mode: 0o755 }
+    )
+    return bin
+  }
+
+  const run = async (bin: string | undefined, app: string, shell: NodeJS.ProcessEnv = {}): Promise<EngineEvent[]> => {
+    const cwd = mkdtempSync(join(tmpdir(), 'tucano-cline-cwd-'))
+    const turn = { model: 'cline/anthropic/claude-sonnet-4.5', effort: 'medium' as const, system: 'You are Pia.', prompt: 'Oi, tudo bem?', cwd, mcpUrl: 'http://127.0.0.1:9/mcp/abc', signal: new AbortController().signal }
+    const out: EngineEvent[] = []
+    for await (const ev of clineEngine(() => bin, app, async () => shell).run(turn)) out.push(ev)
+    return out
+  }
+
+  it('is missing when the CLI is not installed', async () => {
+    expect(await run(undefined, mkdtempSync(join(tmpdir(), 'tucano-cline-app-')))).toEqual([expect.objectContaining({ type: 'error' })])
+  })
+
+  it("runs in a home of its own on the app's login, the conversation in a stdin file, and removes the turn's folder", async () => {
+    const app = mkdtempSync(join(tmpdir(), 'tucano-cline-app-'))
+    const done = (await run(fakeCli(), app, { CLINE_DATA_DIR: '/Users/me/.cline/data' })).find((e) => e.type === 'done')
+    const body = done && done.type === 'done' ? done.text : ''
+    expect(body).toContain('stdin=file')
+    expect(body).toContain('input=Oi, tudo bem?')
+    expect(body).toContain(`last=${clineLead()}|`)
+    expect(body).toContain('off=yes mcp=yes')
+    expect(body).toContain('data=unset')
+    expect(body).toContain(`prov=${join(app, 'login', 'data', 'settings', 'providers.json')}`)
+    const home = /home=(\S+)/.exec(body)?.[1]
+    const plain = (p: string): string => p.replace(/^\/private/, '')
+    expect(home && plain(home).startsWith(plain(join(app, 'turns')))).toBe(true)
+    expect(/clinedir=(\S+)/.exec(body)?.[1]).toBe(join(home!, '.cline'))
+    expect(plain(/cwd=(\S+)/.exec(body)![1]!)).toBe(plain(join(home!, 'work')))
+    expect(existsSync(home!)).toBe(false)
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('Cline detection', () => {
+  it("finds the CLI, its version, and what the app's own login is signed into", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tucano-cline-bin-'))
+    writeFileSync(join(dir, 'cline'), '#!/bin/sh\necho 3.0.74\n', { mode: 0o755 })
+    const login = mkdtempSync(join(tmpdir(), 'tucano-cline-login-'))
+    const path = process.env['PATH']
+    process.env['PATH'] = `${dir}:${path}`
+    try {
+      const out = await detectCline(login)
+      expect(out.status).toMatchObject({ installed: true, version: '3.0.74', loggedIn: false })
+      expect(out.status.account).toContain('cline auth')
+      mkdirSync(dirname(clineProvidersFile(login)), { recursive: true })
+      writeFileSync(clineProvidersFile(login), JSON.stringify({ version: 1, providers: { cline: { settings: { provider: 'cline', model: 'anthropic/claude-sonnet-4.5', auth: { accessToken: 't' } } } } }))
+      const signed = await detectCline(login)
+      expect(signed.status).toMatchObject({ installed: true, loggedIn: true, route: 'providers' })
+      expect(signed.status.account).toContain('Cline')
+      expect(signed.models).toEqual(['cline/anthropic/claude-sonnet-4.5'])
+    } finally {
+      process.env['PATH'] = path
+    }
   })
 })
