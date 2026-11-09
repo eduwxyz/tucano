@@ -16,7 +16,7 @@ beforeAll(async () => {
   member = core.connect('member')
 }, 30_000)
 
-describe('changing bot models through the core', () => {
+describe('changing agent models through the core', () => {
   it('updates one or several without changing other settings, channels or reserve', async () => {
     const a = agent('model-a', { accountId: 'claude-account', fallbackModelId: 'haiku', fallbackAccountId: 'reserve' })
     const b = agent('model-b', { archived: true, kind: 'tuca' })

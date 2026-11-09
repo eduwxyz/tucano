@@ -28,7 +28,7 @@ const click = async (el: Element) => act(async () => { el.dispatchEvent(new wind
 const pick = async (el: Element, value: string) => act(async () => { Object.defineProperty(el, 'value', { configurable: true, value }); el.dispatchEvent(new window.Event('change', { bubbles: true })) })
 const button = (text: string) => [...document.querySelectorAll('button')].find((b) => b.textContent?.includes(text))!
 
-it('selects all displayed active bots and applies only after the button is pressed', async () => {
+it('selects all displayed active agents and applies only after the button is pressed', async () => {
   await pick(document.querySelector('select')!, 'opus')
   expect(save).not.toHaveBeenCalled()
   const all = [...document.querySelectorAll('label')].find((l) => l.textContent?.includes('Selecionar todos'))!.querySelector('input')!
@@ -37,7 +37,7 @@ it('selects all displayed active bots and applies only after the button is press
   expect(save).toHaveBeenCalledWith(['lia', 'theo'], 'opus')
   expect(document.body.textContent).toContain('Modelo atualizado')
 })
-it('saves an individual bot without changing the others', async () => {
+it('saves an individual agent without changing the others', async () => {
   const row = document.querySelector('[role="group"][aria-label="lia"]')!
   await pick(row.querySelector('select')!, 'opus')
   await click(row.querySelector('button')!)
