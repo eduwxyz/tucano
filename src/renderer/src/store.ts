@@ -803,6 +803,8 @@ export const openApps = (): Promise<{ name: string; bundleId?: string }[]> => ca
 export const installDesktop = (): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installDesktop')
 export const desktopPermissions = (): void => void fire(L('Não consegui abrir as permissões.', "I couldn't open the permissions."), 'desktopPermissions')
 
+export const setAgentModels = (agentIds: string[], modelId: string): Promise<number> => call('setAgentModels', { agentIds, modelId })
+
 export function saveAgent(agent: Agent, channelIds: string[]): Promise<void> {
   return call('saveAgent', { agent, channelIds })
 }

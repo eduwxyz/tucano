@@ -177,6 +177,7 @@ export const NEEDS: Record<Method, Need> = {
   answerDecision: 'target', // who may answer the question (Runner.decidable)
   submitDecisions: 'target',
   // agents, skills and the team
+  setAgentModels: 'admin',
   saveAgent: 'admin',
   archiveAgent: 'admin',
   createFromDraft: 'admin',

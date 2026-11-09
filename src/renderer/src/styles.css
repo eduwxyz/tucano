@@ -10866,3 +10866,15 @@ button.agent-card__now:hover {
   flex: 1;
   min-width: 0;
 }
+
+/* Every agent's model in Settings › Models, with individual model edits and a shared batch picker. */
+.agent-models__controls { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
+.agent-models__bulk { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.agent-models__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.agent-models__filters > input { flex: 1; min-width: 180px; }
+.agent-models input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
+.agent-models__list { display: grid; }
+.agent-models__row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
+.agent-models__identity { display: flex; align-items: center; gap: 10px; flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.agent-models__choice { display: grid; gap: 6px; flex: 2 1 300px; min-width: 0; }
+.agent-models [role="status"]:not(:empty) { margin-top: 12px; }
