@@ -11863,3 +11863,48 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
+/* The open question, kept next to the field: in a long reply the card that waits for an answer is
+   pages up behind later steps, so the person needs a way back to it without scrolling. */
+.ask-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+  text-align: left;
+  font-size: 13px;
+}
+.ask-strip:hover {
+  border-color: var(--border-strong);
+}
+.ask-strip .icon {
+  color: var(--accent);
+  flex: none;
+}
+.ask-strip__who {
+  flex: none;
+  font-weight: 600;
+  color: var(--text);
+}
+.ask-strip__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ask-strip__count {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.ask-strip__go {
+  flex: none;
+  color: var(--accent);
+  font-weight: 600;
+}
