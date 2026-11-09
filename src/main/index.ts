@@ -15,10 +15,14 @@ import { Updates } from './updates'
 import { Workspaces } from './workspaces'
 import { homePhone } from './home-phone'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
-import { autostartEntry, autostartFile, onPath } from '../core/platform'
+import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
 
 const NAME = 'Tucano'
 app.setName(NAME)
+// Set here and not in the menu entry, so it holds when an update restarts the app. Someone who
+// chose a store with --password-store keeps it.
+const passwordStore = electronPasswordStore()
+if (passwordStore && !app.commandLine.hasSwitch('password-store')) app.commandLine.appendSwitch('password-store', passwordStore)
 // Windows shows notifications only for an app with an id, the same as the installer's.
 if (process.platform === 'win32') app.setAppUserModelId('dev.tucano.app')
 
