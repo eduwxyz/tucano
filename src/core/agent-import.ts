@@ -13,7 +13,7 @@
 // format "tucano-agent-import", version 1), read by `readTucanoImport`.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { channelName, codexValue, customModel, MAX_AGENT_ROUTINES, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
+import { channelName, codexValue, customModel, dateAt, MAX_AGENT_ROUTINES, validDate, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
 import { frontmatter } from './local-skills'
@@ -245,7 +245,7 @@ function openBotEffort(v: unknown): Effort {
   return v === 'none' || v === 'minimal' || v === 'low' ? 'low' : 'medium'
 }
 
-// Tucano runs a routine at a time on some weekdays; the rest (hourly, monthly, intervals, cron) has no match.
+// Tucano runs a routine at a time on some weekdays, on a date or on a day of the month; the rest (hourly, intervals, cron) has no match.
 export function openBotSchedule(s: Record<string, unknown>): Schedule | undefined {
   const t = time(s['time'])
   switch (s['kind']) {
@@ -257,11 +257,14 @@ export function openBotSchedule(s: Record<string, unknown>): Schedule | undefine
       const d = s['weekday']
       return t && typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6 ? { days: [d], time: t } : undefined
     }
+    case 'monthly': {
+      const d = s['day']
+      return t && typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= 31 ? { days: [0, 1, 2, 3, 4, 5, 6], time: t, monthDay: d } : undefined
+    }
     case 'once': {
-      // Tucano's "once" runs at the next matching weekday: right only within the coming week.
-      const date = typeof s['date'] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s['date']) ? new Date(`${s['date']}T${t ?? '00:00'}:00`) : undefined
-      const ahead = date ? date.getTime() - Date.now() : -1
-      return t && date && ahead > 0 && ahead < 7 * 86_400_000 ? { days: [date.getDay()], time: t, once: true } : undefined
+      // On that date, once; one already past isn't brought.
+      const date = typeof s['date'] === 'string' && validDate(s['date']) ? s['date'] : undefined
+      return t && date && dateAt(date, t) > Date.now() ? { days: [new Date(dateAt(date, t)).getDay()], time: t, once: true, date } : undefined
     }
     case 'advanced': {
       const months = arr(s['months'])
@@ -372,9 +375,12 @@ function tucanoAgent(zip: Zip, a: Record<string, unknown>, source: string): Fore
   }
 }
 
-// { days: ["mon", "wed"], time: "08:30", once?: true }: what a routine here already is, with day names.
+// { days: ["mon", "wed"], time: "08:30", once?: true, date?: "2026-11-17", monthDay?: 5 }: what a routine here already is, with day names.
 export function tucanoSchedule(r: Record<string, unknown>): Schedule | undefined {
   const t = time(r['time'])
+  if (t && typeof r['date'] === 'string' && validDate(r['date'])) return { days: [new Date(dateAt(r['date'], t)).getDay()], time: t, once: true, date: r['date'] }
+  const md = r['monthDay']
+  if (t && typeof md === 'number' && Number.isInteger(md) && md >= 1 && md <= 31) return { days: [0, 1, 2, 3, 4, 5, 6], time: t, monthDay: md }
   const days = arr(r['days']).map((d) => (typeof d === 'string' ? DAYS.indexOf(d.toLowerCase().slice(0, 3)) : -1))
   if (!t || !days.length || days.some((d) => d < 0)) return undefined
   return { days: [...new Set(days)].sort(), time: t, ...(r['once'] === true ? { once: true } : {}) }

@@ -10,6 +10,7 @@ import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
+import { serverNote } from '../shared/servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -730,6 +731,32 @@ ipcMain.handle('servers:pair', (e, link: unknown) => (fromApp(e) && typeof link 
 ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.show(id))
 ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
 ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
+// A server's page in this window hands its notifications here (src/preload/server.ts): the app
+// shows them as its own, and a click puts that server, and what it's about, on screen. The page
+// already left out the conversation being read there; a server can't send more than a few a minute.
+const serverNotes = new Map<string, number[]>()
+ipcMain.on('server:notify', (e, raw: unknown) => {
+  const frame = e.senderFrame
+  const id = frame && frame === e.sender.mainFrame ? servers.serverOf(e.sender, frame.url) : undefined
+  const note = id ? serverNote(raw) : null
+  if (!id || !note || !Notification.isSupported()) return
+  const now = Date.now()
+  const recent = (serverNotes.get(id) ?? []).filter((t) => now - t < 60_000)
+  if (recent.length >= 20) return
+  serverNotes.set(id, [...recent, now])
+  const sound = chirpOf(note.kind, note.sound)
+  if (sound) chirp(sound)
+  const n = new Notification({ title: note.title, body: note.body, silent: true, ...noteIcon() })
+  n.on('click', () => void servers.openNote(id, note).catch(console.error))
+  n.show()
+})
+// Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
+// under Notifications only after its first one), and the person sees whether they come.
+ipcMain.handle('notify:test', (e) => {
+  if (!fromApp(e) || !Notification.isSupported()) return 'unsupported'
+  new Notification({ title: NAME, body: L('As notificações estão chegando.', 'Notifications are coming through.'), silent: true, ...noteIcon() }).show()
+  return 'shown'
+})
 // A tucano://connect link: on a Mac the system hands it over by open-url; on Windows and Linux it
 // comes as an argument, to this instance or (the app already open) to second-instance.
 const linkIn = (argv: string[]): string | undefined => argv.find((a) => a.startsWith('tucano://'))

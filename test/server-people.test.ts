@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { AUTH_CACHE_MS, Grants, invitePage, joinFields, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from '../src/server/people'
+import { AUTH_CACHE_MS, Grants, invitePage, joinFields, notifyNote, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from '../src/server/people'
 import type { Person } from '../src/shared/types'
 
 const bia: Person = { id: 'bia', name: 'Bia', role: 'member', about: '' }
@@ -93,6 +93,23 @@ describe('the event streams', () => {
     expect(b1.got).toEqual(['for bia', 'for all'])
     expect(b2.got).toEqual(['for bia', 'for all'])
     expect(carl.got).toEqual(['for all'])
+  })
+
+  it("turn the core's notification into what a page shows, and where a click goes", () => {
+    const msg = { type: 'notify', title: 'Lia · Lembrete', body: 'Oi!', conversationId: 'c1', threadId: 't1', kind: 'done', sound: true, to: ['bia'] }
+    expect(notifyNote(msg)).toEqual({ notify: { title: 'Lia · Lembrete', body: 'Oi!', conversationId: 'c1', threadId: 't1', page: undefined, kind: 'done', sound: true } })
+    // Who it's for stays on the server: the page never learns the others.
+    expect(JSON.stringify(notifyNote(msg))).not.toContain('bia')
+    expect(notifyNote({ title: 'Skill', body: 'nova', page: 'skills', kind: 'evil' })).toEqual({ notify: { title: 'Skill', body: 'nova', conversationId: undefined, page: 'skills' } })
+    // A routine's reply for its person (to: [them]) reaches only that person's pages.
+    const streams = new Streams()
+    const owner = stream({ owner: true, role: 'owner' })
+    const bia = stream({ person: 'bia', role: 'member' })
+    streams.add('o', owner)
+    streams.add('b', bia)
+    streams.deliver(notifyNote(msg), msg.to, 'ana')
+    expect(bia.got).toHaveLength(1)
+    expect(owner.got).toEqual([])
   })
 
   it("end a removed person's streams, and only theirs", () => {

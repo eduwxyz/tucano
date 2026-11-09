@@ -208,6 +208,15 @@ describe('the curator', () => {
     expect(parseCuration('{"guardar": true, "mudancas": [{"op": "append", "pagina": "[[X]]", "texto": "y"}, {"op": "replace", "pagina": "X"}, {"op": "voar", "pagina": "X"}]}')).toMatchObject({ worth: true, ops: [{ op: 'append', page: 'X', text: 'y' }] })
   })
 
+  it('keeps the new passage of a swap the model wrote under "text"', () => {
+    const swap = (o: object): unknown => parseCuration(JSON.stringify({ worth: true, changes: [{ op: 'replace', page: 'X', old: 'a', ...o }] }))!.ops[0]
+    expect(swap({ text: 'b' })).toMatchObject({ op: 'replace', old: 'a', new: 'b' })
+    expect(swap({ texto: 'b' })).toMatchObject({ new: 'b' })
+    expect(swap({ new: 'c', text: 'b' })).toMatchObject({ new: 'c' })
+    expect(swap({ new: '', text: 'b' })).toMatchObject({ new: 'b' })
+    expect(swap({})).toMatchObject({ new: '' }) // a passage that just leaves the page
+  })
+
   it('leaves out a conversation kept out of the wiki, but keeps a message kept on purpose', async () => {
     const { w, curator, say, calls } = setup(() => decision)
     off.add('c')
@@ -249,7 +258,7 @@ describe('the curator and replies that overlap', () => {
   const LIA = `LIA-${'x'.repeat(200)}` // one word each, so the fake engine says it at once
   const THEO = `THEO-${'y'.repeat(200)}`
   const agent = (id: string): Agent => ({ id, name: id, handle: id, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
-  const settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
+  const settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
 
   // Real Db, Wiki and Runner. Lia works until `end()`; Theo is done at once.
   function world(theoSays = THEO) {
@@ -271,7 +280,7 @@ describe('the curator and replies that overlap', () => {
         yield* quick.run(t)
       }
     }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
     const runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'tucano-wiki-')) })
     const by = (who: string): Message | undefined => db.messages().find((m) => m.author.kind === 'agent' && m.author.id === who)
     // Lia is asked first and is at work when Theo is asked and answers: two messages, since agents called in one may take turns.
