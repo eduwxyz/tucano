@@ -78,4 +78,10 @@ describe("Tuca's list of models", () => {
       { id: 'grok:grok-4.5', label: 'Grok · grok-4.5' }
     ])
   })
+
+  it('includes the models of the Cline login when it is signed in', () => {
+    const off = { installed: false, loggedIn: false }
+    const s = { engines: { claude: off, codex: off, opencode: off, pi: off, antigravity: off, cursor: off, grok: off, cline: { installed: true, loggedIn: true, route: 'providers' } } } as unknown as Pick<Settings, 'engines'>
+    expect(availableModels(s, { cline: ['cline/anthropic/claude-sonnet-4.5'] })).toEqual([{ id: 'cline:cline/anthropic/claude-sonnet-4.5', label: 'Cline CLI · cline/anthropic/claude-sonnet-4.5' }])
+  })
 })

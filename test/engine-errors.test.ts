@@ -27,6 +27,12 @@ describe('a failing harness, in plain words', () => {
     expect(explainEngineError('antigravity', 'Please sign in again').kind).toBe('login')
   })
 
+  it("Cline signs in to providers: names the one that failed, but not Cline twice", () => {
+    expect(explainEngineError('cline', 'invalid x-api-key for anthropic').line).toBe('O login da Anthropic no Cline CLI não está valendo. Entre de novo no Cline CLI pra usar.')
+    const own = explainEngineError('cline', "Unauthorized: Please make sure you're using the latest version of Cline and re-authenticate your Cline account. (Request ID: x)")
+    expect(own).toMatchObject({ kind: 'login', line: 'O login do Cline CLI não está valendo. Entre de novo no Cline CLI pra usar.' })
+  })
+
   it('a limit and a timeout get their own line', () => {
     expect(explainEngineError('claude', "You've hit your limit · resets 5pm")).toMatchObject({ kind: 'limit', line: 'O Claude Code chegou no limite de uso. Tente de novo mais tarde.' })
     expect(explainEngineError('codex', 'The operation was aborted due to timeout')).toMatchObject({ kind: 'timeout' })

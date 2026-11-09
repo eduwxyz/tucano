@@ -13,7 +13,7 @@ A free, open-source alternative to Grok Bot: [see how it compares](https://tucan
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-141210)](LICENSE) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/uQp4x7wUgT)
 [![macOS](https://img.shields.io/badge/macOS-Apple%20silicon%20%7C%20Intel-141210?logo=apple)](#install) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#install) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#install)
-[![Runs on](https://img.shields.io/badge/runs%20on-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Grok%20·%20OpenCode%20·%20Pi-E2541B)](#runs-on-what-you-already-have)
+[![Runs on](https://img.shields.io/badge/runs%20on-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Grok%20·%20Cline%20·%20OpenCode%20·%20Pi-E2541B)](#runs-on-what-you-already-have)
 
 **English** · [Português](README.pt-BR.md) · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Discord](https://discord.gg/uQp4x7wUgT) · [Changelog](CHANGELOG.md)
 
@@ -29,7 +29,7 @@ Coding agents got good. Working with *several* of them is still a mess of termin
 
 - **A team, not a prompt box.** Agents with names, roles, tools and memory. They talk in channels, call each other with `@mentions` and hand work over: one finds the bug, another fixes it, a third reviews it, and you get the result.
 - **Your rules.** Each agent sees only the tools you give it, with *no access*, *read*, or *read and write* per tool. Merges, purchases, posts, emails and deletes become an approval tied to the exact action, on your computer or your phone.
-- **Runs on what you already have.** Agents think with the Claude Code, Codex, Cursor CLI, Grok, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
+- **Runs on what you already have.** Agents think with the Claude Code, Codex, Cursor CLI, Grok, Cline, OpenCode or Pi on your computer, the way you set them up: your subscription, your company's AI gateway, or your providers. No API key to paste, no per-token bill from us, and Tucano never sees your password.
 - **Everything stays on your computer.** Conversations, memory, logins, files. There is no Tucano server.
 
 ## What it does
@@ -92,6 +92,7 @@ Give an agent the apps on your computer, such as Notes, Calendar or Spotify, eac
 | [OpenCode](https://opencode.ai) | The providers you configured | Uses the models you have logins for |
 | [Pi](https://pi.dev) | The providers you configured | Uses the models you have logins for |
 | [Grok](https://x.ai/cli) | grok.com (`grok login`) | Runs with a home of its own, so your MCP servers, skills, hooks and plugins (Grok's and the ones installed for Claude Code or Cursor) don't load; Grok's own shell and files stay off; only Tucano's gateway; an `XAI_API_KEY` in the environment is unset when grok.com is signed in, so the subscription isn't billed as API. The official installer is macOS and Linux |
+| [Cline CLI](https://docs.cline.bot/cli/cli-reference) | Your Cline account, or the providers you add with your own key (`cline auth`) | Signs in once inside Tucano, to a login of its own, so your `~/.cline` isn't touched; each reply runs with a home of its own, so your rules, skills, workflows, hooks, plugins and MCP servers don't load; Cline's own file, shell, editor, subagent and team tools stay off; only Tucano's gateway; Cline's telemetry is off. Models go as `<provider>/<model>` (for example `cline/anthropic/claude-sonnet-4.5`); images aren't sent. Install with `npm install -g cline` (macOS, Linux and Windows) |
 
 Each agent picks its harness and model, so a team can mix them: Opus to fix, GPT to review, Haiku to route.
 
@@ -163,7 +164,7 @@ On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps 
 flowchart LR
   subgraph Mac["Your computer"]
     UI["Window<br/>(React)"] <-->|MessagePort| Core["Core process<br/>SQLite · runs · memory · routines"]
-    Core -->|"one turn, isolated"| CLI["Harness CLI<br/>claude · codex · cursor · grok · opencode · pi"]
+    Core -->|"one turn, isolated"| CLI["Harness CLI<br/>claude · codex · cursor · grok · cline · opencode · pi"]
     CLI -->|"secret per-turn URL<br/>only this agent's tools"| GW["Tucano MCP gateway"]
     GW --> Tools["Connectors (MCP)<br/>computer · browser · memory"]
     GW -.->|"write action"| OK{{"Your approval"}}

@@ -29,6 +29,7 @@ import { piEngine } from './engines/pi'
 import { antigravityAppDir, antigravityEngine } from './engines/antigravity'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
+import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engines/cline'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
@@ -87,6 +88,9 @@ mkdirSync(dataDir, { recursive: true })
 const db = new Db(join(dataDir, 'tucano.db'))
 const codexHome = join(dataDir, 'codex-home')
 mkdirSync(join(codexHome, '.codex'), { recursive: true })
+// Cline's own login for the app (see cline.ts), and where its turns run.
+const clineDir = clineAppDir(dataDir)
+const clineLogin = clineLoginDir(clineDir)
 // Until the settings are read, the language of a new install: the Mac's.
 setLang(langOf(process.env['TUCANO_LOCALE']))
 initializeWorkspace(db)
@@ -129,15 +133,15 @@ const fakeBrokenOpencode = fake && process.env['TUCANO_FAKE_BROKEN_OPENCODE'] ==
 const OPENCODE_CRASH = "TypeError: Cannot read properties of undefined (reading 'providers')\n    at loadConfig (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/config.js:212:30)\n    at async main (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/index.js:18:3)"
 const PI_EXPIRED = 'OAuth refresh failed for anthropic: 400 {"type":"error","error":{"type":"invalid_grant","message":"Refresh token expired"}}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/oauth.js:88:11)\n    at async refreshAnthropic (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/anthropic.js:41:5)\n    at async getAuth (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/index.js:23:12)'
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false } },
   listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'], ...(fakeBrokenPi ? { pi: ['anthropic/claude-haiku-4-5'] } : {}) },
   codexCatalog: []
 })
 // The harnesses' last check, kept in the data folder: the window opens on it while the next runs.
 const engineCheck = new EngineCheck({
   file: join(dataDir, 'engines.json'),
-  all: async () => (fake ? fakeFindings() : detectEngines(codexHome)),
-  one: async (e) => (fake ? { status: fakeFindings().engines[e], listed: fakeFindings().listed[e] } : detectEngine(e, codexHome)),
+  all: async () => (fake ? fakeFindings() : detectEngines(codexHome, clineLogin)),
+  one: async (e) => (fake ? { status: fakeFindings().engines[e], listed: fakeFindings().listed[e] } : detectEngine(e, codexHome, clineLogin)),
   after: async (found, engine) => {
     ;({ engines, listed, codexCatalog } = found)
     await checkAccounts(undefined, engine)
@@ -237,7 +241,7 @@ const loginTerminal = new LoginTerminal({
       const dir = accountDir(dataDir, account)
       return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir)
     }
-    return e === 'codex' ? codexEnv(codexHome) : { ...process.env, DISABLE_AUTOUPDATER: '1' }
+    return e === 'codex' ? codexEnv(codexHome) : e === 'cline' ? { ...process.env, ...clineLoginEnv(clineLogin) } : { ...process.env, DISABLE_AUTOUPDATER: '1' }
   },
   signedIn: async (e, account) => {
     if (!account) return (await engineCheck.recheck(e)).engines[e].loggedIn
@@ -317,7 +321,7 @@ function moved(id: EngineId): Parameters<typeof relocating>[1] {
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
@@ -325,7 +329,8 @@ const engineImpls: Record<EngineId, Engine> = fake
       pi: relocating(piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv), moved('pi')),
       antigravity: relocating(antigravityEngine(() => engines.antigravity.path, antigravityAppDir(dataDir), loginEnv), moved('antigravity')),
       cursor: relocating(cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv), moved('cursor')),
-      grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok'))
+      grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok')),
+      cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline'))
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
@@ -2219,14 +2224,14 @@ const api: Handlers = {
   },
 
   // Login always happens in the CLI's own flow; the app never sees credentials.
-  // Codex logs into the app's own home (see codexEnv), separate from the user's.
+  // Codex and Cline log into the app's own folders (see codexEnv, clineLoginEnv), separate from the user's.
   loginEngine: ({ engine, screen }) => {
     // On a server, for a page or a phone that can show it: the sign-in in a terminal of the server's.
     const shown = screen && engines[engine].installed ? loginTerminal.start(engine) : undefined
     if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
     // The sign-in happens in a terminal: check again until it lands, wherever the person is.
     watchEngine(engine, (s) => s.loggedIn)
-    return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : {})
+    return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : engine === 'cline' ? clineLoginEnv(clineLogin) : {})
   },
 
   // The introduction's setup with no terminal: Codex or Claude Code downloaded into the app's folder,
