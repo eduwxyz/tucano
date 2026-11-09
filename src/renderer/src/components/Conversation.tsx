@@ -86,6 +86,7 @@ import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
+import { localFileReferences } from './composer-file-paths'
 import { when } from './Routines'
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
@@ -1900,7 +1901,9 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     // On a server, a file that isn't an image goes up to it (~/Enviados) and the message says where:
     // an agent on that computer opens it there, and the link brings it back down.
     const upload = window.tucano.upload
-    const files = upload ? all.filter((f) => IMAGE_MIMES.includes(f.type)) : all
+    const local = upload ? undefined : localFileReferences(all.filter((f) => !IMAGE_MIMES.includes(f.type)), window.tucano.pathOf)
+    if (local?.references.length) setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${local.references.join('\n')}`)
+    const files = upload ? all.filter((f) => IMAGE_MIMES.includes(f.type)) : [...all.filter((f) => IMAGE_MIMES.includes(f.type)), ...(local?.unresolved ?? [])]
     const others = upload ? all.filter((f) => !IMAGE_MIMES.includes(f.type)) : []
     if (others.length && upload) {
       setNote(L(`Enviando ${others.length === 1 ? others[0]!.name : `${others.length} arquivos`}…`, `Sending ${others.length === 1 ? others[0]!.name : `${others.length} files`}…`))
