@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **An update can no longer delete the AppImage.** `electron-updater` deletes the AppImage in use before it moves the download into place, so installing a download that was already gone left no app to open, and the menu entry failed in silence. Tucano now checks that the download is still there: without it, quitting leaves the app as it is, and **Restart** downloads the update again.
+
 ## [0.2.22] - 2026-11-08
 
 > **Em português:**
