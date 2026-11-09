@@ -6,10 +6,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 > **Em português:**
 > - **Correção:** responder no canal a uma pergunta que um agente deixou no fim da mensagem dele ("posso disparar agora?") chama esse agente, não outro. Quem escolhe quem responde agora vê como terminam as mensagens longas e as outras threads, e o agente que responde numa thread que você abriu escrevendo no canal lê as últimas mensagens do canal antes dela, o que estava na sua tela. Obrigado, braxT!
+> - **Correção:** os modelos grátis do OpenCode (os `opencode/…-free`) funcionam no Tucano. O OpenCode recusava esses modelos e a resposta ficava "Pensando" pra sempre. Agora eles respondem, e aparecem marcados como **grátis** na lista de modelos. O agente no OpenCode ganha a ferramenta de leitura do próprio OpenCode, só dentro da pasta de trabalho dele: os seus arquivos continuam fora do alcance. Se o OpenCode recusar mesmo assim (o limite do uso grátis), ou se outro erro do modelo só aparecer no log, a resposta para com o motivo e o que fazer, em vez de ficar pensando.
 
 ### Fixed
 
 - **An answer written in the channel goes to the agent that asked.** In a channel that answers in threads, a person's message in the channel opens a thread of its own. The router read the other threads and messages only by their first 200 characters, so a question at the end of an agent's long reply (a routine's report ending "can I run it now?") never reached it, and "go ahead" was routed by role to someone else; the agent that answered read only the new thread, so it couldn't find what to run either. Now the router reads a long message as its opening and its end, sees how an agent last ended each other thread, and has a rule: a short answer to an agent's question goes to that agent. And a reply in a thread a person opened by writing in the conversation also reads the last 3 messages outside threads before it (from the 12 hours before), what that person had on screen.
+- **OpenCode's free models work.** OpenCode's free tier (`opencode/…-free`) refuses a call that doesn't offer OpenCode's built-in `read` tool ("Free usage limit reached. Free models work in OpenCode"), and the app turned every built-in tool off; `opencode run` only logs that error and waits without exiting, so the reply showed "Thinking" with no end. OpenCode 1.x turns now keep `read`, allowed only inside the agent's work folder (`external_directory: deny`; the folder comes from `PWD`, which OpenCode reads instead of the process's cwd, so the app now sets it to the turn's folder), and the person's files stay out of reach as before. Tested against OpenCode 1.19.5 with five free models, a read inside the folder, reads outside it and in the home folder (refused, the agent says so), and an attached image. The free models show as **free** in the model list.
+- **A model call that fails in OpenCode stops the reply.** The app runs `opencode run` with `--print-logs --log-level ERROR` and reads its stderr: a free model refused (past the free usage limit) stops the turn at once with the reason and what to do (a paid model, OpenCode Go or Zen, or a provider with your key); any other failed model call stops it after 30 seconds without output (a retry that works goes on).
 
 ## [0.2.25] - 2026-11-10
 
@@ -34,7 +37,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **The guide's Portuguese doesn't leak into what agents write** in an English workspace, and the wiki's prompts date things in the workspace's language. (#251, thanks @apoapostolov)
 - **Smaller things:** a favicon for server mode in the browser (#233, thanks @b7s), the drop overlay says content instead of image (#254, thanks @GianCdM), and the site's labels and phone layout (#213, thanks @pedrosatin).
 
-||||||| parent of 1345a38 (Send an answer written in the channel to the agent that asked)
 ## [0.2.24] - 2026-11-09
 
 > **Em português:**

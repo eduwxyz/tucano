@@ -80,8 +80,33 @@ export function opencodeConfig(turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, pr
   }
 }
 
+// Its errors logged to stderr: a model call that fails is only logged, and `run` waits on without
+// exiting (see opencodeParser's stderr).
+export const OPENCODE_LOGS = ['--print-logs', '--log-level', 'ERROR']
+
 export function opencodeArgs(turn: Pick<Turn, 'model' | 'images'>): string[] {
-  return ['run', '--pure', '--format', 'json', '--agent', 'tucano', '-m', turn.model, ...(turn.images ?? []).filter((i) => existsSync(i.path)).flatMap((i) => ['-f', i.path])]
+  return ['run', ...OPENCODE_LOGS, '--pure', '--format', 'json', '--agent', 'tucano', '-m', turn.model, ...(turn.images ?? []).filter((i) => existsSync(i.path)).flatMap((i) => ['-f', i.path])]
+}
+
+// The free models (opencode/…-free) answer only OpenCode's own app: a call without its built-in
+// tools, as the app's always is, gets "Free usage limit reached. Free models work in OpenCode".
+const FREE_ONLY = /free models work in opencode|free usage limit/i
+// How long a failed model call may still go on (OpenCode retrying) before the turn stops.
+export const OPENCODE_ERROR_WAIT_MS = 30_000
+
+// A model call that failed, from its log line: `level=ERROR … message="stream error" … error.error="…"`.
+export function opencodeStreamError(line: string): { message: string; waitMs: number } | undefined {
+  if (!/level=ERROR/.test(line) || !/message="stream error"/.test(line)) return undefined
+  const said = /error\.error="((?:[^"\\]|\\.)*)"/.exec(line)?.[1]?.replace(/\\"/g, '"').replace(/^AI_APICallError:\s*/, '').trim()
+  if (said && FREE_ONLY.test(said))
+    return {
+      message: L(
+        `O OpenCode recusou o modelo grátis: os modelos -free só funcionam no app do próprio OpenCode, não pelo Tucano. Troque o modelo deste agente por um pago (OpenCode Go ou Zen) ou de um provedor com a sua chave.\nO OpenCode disse: ${said}`,
+        `OpenCode refused the free model: the -free models only work in OpenCode's own app, not through Tucano. Switch this agent to a paid model (OpenCode Go or Zen) or one from a provider with your key.\nOpenCode said: ${said}`
+      ),
+      waitMs: 0
+    }
+  return { message: L(`O modelo falhou no OpenCode: ${said || 'erro sem detalhe'}`, `The model failed in OpenCode: ${said || 'error with no detail'}`), waitMs: OPENCODE_ERROR_WAIT_MS }
 }
 
 // One JSON event per line: step_start, text (a whole part), tool_use, step_finish (with tokens), error.
@@ -94,6 +119,7 @@ export function opencodeParser(): Parser {
   let failed = false
 
   return {
+    stderr: opencodeStreamError,
     line(line) {
       const ev = parseJson(line)
       if (!ev) return []
