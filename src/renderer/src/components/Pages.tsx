@@ -997,9 +997,31 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           )}
 
           {pane('memoria') && (
-            <Section title="Wiki" help={L('A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas.', 'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages.')}>
-              <Row label={L('Lê a wiki', 'Reads the wiki')}>
-                <Toggle label={L('Lê a wiki', 'Reads the wiki')} on={(draft.wiki ?? 'read') === 'read'} onChange={(v) => patch({ wiki: v ? 'read' : 'none' }, true)} />
+            <Section
+              title="Wiki"
+              help={L(
+                'A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas. Com escrita, ele também cria páginas e acrescenta trechos; mexer numa que já existe espera a sua aprovação.',
+                'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages. With writing, it also creates pages and adds stretches; changing one that exists waits for your approval.'
+              )}
+            >
+              <Row label={L('Acesso à wiki', 'Wiki access')}>
+                <div className="segmented segmented--quiet" role="radiogroup" aria-label="Wiki">
+                  {([
+                    ['write', L('Escreve na wiki', 'Writes the wiki')],
+                    ['read', L('Lê a wiki', 'Reads the wiki')],
+                    ['none', L('Sem acesso', 'No access')]
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      role="radio"
+                      aria-checked={(draft.wiki ?? 'read') === value}
+                      className={(draft.wiki ?? 'read') === value ? 'is-active' : ''}
+                      onClick={() => patch({ wiki: value }, true)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </Row>
               <Row label={L('Páginas', 'Pages')}>
                 <button className="link link--quiet" onClick={() => navigate({ kind: 'wiki' })}>
