@@ -29,6 +29,7 @@ import { canEditChannel,
   repliesOf,
   timelineOf,
   useLiveText,
+  useLiveThought,
   workingIds,
   openDialog,
   decideApproval,
@@ -1337,6 +1338,24 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
           ))}
         </ol>
       )}
+      <Thought message={message} working={working} />
+    </div>
+  )
+}
+
+// What the model is thinking, dim and small, as it arrives: not what it said, and not a step.
+// It stays after the reply ends (the window keeps it in memory) so it can be read back.
+function Thought({ message, working }: { message: Message; working: boolean }): ReactNode {
+  const thought = useLiveThought(message.id, STREAM_MS)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (working) box.current?.scrollTo({ top: box.current.scrollHeight })
+  }, [thought, working])
+  if (!thought) return null
+  return (
+    <div ref={box} className="thought" aria-label={L('O que o agente está pensando', "What the agent is thinking")}>
+      <div className="thought__label">{working ? L('Pensando', 'Thinking') : L('Pensou', 'Thought')}</div>
+      <div className="thought__text">{thought}</div>
     </div>
   )
 }

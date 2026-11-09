@@ -444,6 +444,7 @@ export async function loadThread(rootId: string): Promise<void> {
 
 const live = new Map<string, string>()
 const liveListeners = new Map<string, Set<() => void>>()
+const thoughtListeners = new Map<string, Set<() => void>>()
 
 function listen(map: Map<string, Set<() => void>>, key: string, l: () => void): () => void {
   let ls = map.get(key)
@@ -462,6 +463,42 @@ function stream(id: string, text: string): void {
 }
 
 export const liveText = (id: string): string | undefined => live.get(id)
+
+// What the model is thinking, streamed apart from the reply: kept here, in memory, because it is
+// something to watch as it goes and not part of what the agent said.
+const thoughts = new Map<string, string>()
+const THOUGHT_KEEP = 20_000 // a very long one is trimmed from the front, never allowed to grow forever
+
+function streamThought(id: string, text: string): void {
+  const all = (thoughts.get(id) ?? '') + text
+  thoughts.set(id, all.length > THOUGHT_KEEP ? all.slice(all.length - THOUGHT_KEEP) : all)
+  wake(thoughtListeners, id)
+}
+
+export const liveThought = (id: string): string | undefined => thoughts.get(id)
+
+// The thinking as it is now, woken as it arrives. `every`: wake at most that often (ms).
+export function useLiveThought(id: string, every = 0): string | undefined {
+  const subscribe = useCallback(
+    (l: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const off = listen(thoughtListeners, id, () => {
+        if (!every) return l()
+        if (timer) return
+        timer = setTimeout(() => {
+          timer = undefined
+          l()
+        }, every)
+      })
+      return () => {
+        if (timer) clearTimeout(timer)
+        off()
+      }
+    },
+    [id, every]
+  )
+  return useSyncExternalStore(subscribe, () => thoughts.get(id))
+}
 
 // The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.
 export function useLiveText(m: Message, every = 0): string {
@@ -526,6 +563,7 @@ function withSettings(s: State, settings: Settings): State {
 function apply(e: CoreEvent): void {
   // Streamed words and the browser's screen come many times a second: they wake only what shows them.
   if (e.type === 'delta') return stream(e.id, e.text)
+  if (e.type === 'thinking') return streamThought(e.id, e.text)
   if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   set((s) => {
     switch (e.type) {
