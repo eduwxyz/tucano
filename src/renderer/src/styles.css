@@ -572,6 +572,11 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A long name or role gives way, never the working dot or the unread count next to them. */
+.nav-item > .pulse,
+.nav-item > .badge {
+  flex: none;
+}
 .badge {
   background: var(--danger);
   color: #fff;
