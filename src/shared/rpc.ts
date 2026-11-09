@@ -3,7 +3,7 @@ import type { Answer } from './questions'
 import type { WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { DatabricksStatus, JobWatch } from './job-watch'
-import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus } from './types'
+import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -44,6 +44,7 @@ export interface Api {
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
+  setAgentModels(p: { agentIds: string[]; modelId: string }): number
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string; threads?: boolean }): string
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
@@ -52,10 +53,12 @@ export interface Api {
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
   openDm(p: { agentId: string }): string
-  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with his conversation; fresh starts a new session
+  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with this person's conversation with him, as it was; fresh starts a new one ("Nova conversa")
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
-  applyProposal(p: { messageId: string }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched
-  dismissProposal(p: { messageId: string }): void
+  applyProposal(p: { messageId: string; index?: number }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched; index: which of the reply's cards (unset: the first)
+  dismissProposal(p: { messageId: string; index?: number }): void
+  applyProposals(p: { messageId: string; draft?: boolean }): ProposalsResult // every card of the reply still open, in an order that makes agents first; one failing doesn't stop the rest. draft: its new-agent card too
+  dismissProposals(p: { messageId: string; draft?: boolean }): void
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void

@@ -5,7 +5,7 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type ResultTable, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type ResultTable, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -18,7 +18,7 @@ import { DATABRICKS, jobEventTask, JOB_TOOL_NAMES, jobTools, type JobWatches } f
 import { jobWatchConfig, type JobEvent, type JobWatch } from '../shared/job-watch'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { LER_GUIA, readGuide } from './guide'
-import { proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
+import { pendingAgents, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
@@ -1334,17 +1334,22 @@ ${note}`,
           const r =
             name === PROPOR_TIME.name
               ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
-              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable })
+              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
           if (!r.proposal) return textResult(r.error!, true)
-          msg.run = { ...msg.run!, proposal: r.proposal }
+          // Several in one reply, each its own card; one about the same thing as an earlier one replaces it.
+          const list = proposalsOf(msg.run)
+          const same = list.findIndex((x) => !x.state && proposalKey(x) === proposalKey(r.proposal!))
+          if (same < 0 && list.length >= MAX_PROPOSALS) return textResult(L(`Já são ${MAX_PROPOSALS} propostas nesta resposta: termine aqui e mande o resto na próxima.`, `That's ${MAX_PROPOSALS} proposals in this reply already: finish here and send the rest in the next one.`), true)
+          msg.run = { ...msg.run!, proposals: same < 0 ? [...list, r.proposal] : list.map((x, i) => (i === same ? r.proposal! : x)) }
+          delete msg.run.proposal
           const p = r.proposal
           const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : p.kind === 'team' ? L('Propôs um time', 'Proposed a team') : L('Propôs um canal', 'Proposed a channel')
           const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
           addSteps({ id: randomUUID(), label: what, detail, status: 'done' })
           return textResult(
             L(
-              'A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar. Termine com uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
-              "The proposal is in the card, with Apply and Discard, and has NOT happened yet: it only happens when the person applies it. Finish with one short sentence saying they just need to apply it (or ask for a change), without repeating what the card shows. One proposal per reply: the next one replaces this one."
+              `A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar.${p.needs?.length ? ` Ela depende de ${p.needs.join(', ')}, proposto antes nesta resposta: o app cria primeiro.` : ''} Se o pedido tem mais mudanças, proponha as outras agora, nesta mesma resposta: cada uma vira um card no mesmo grupo, com "Aplicar todos". No fim, uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que os cards mostram.`,
+              `The proposal is in the card, with Apply and Discard, and has NOT happened yet: it only happens when the person applies it.${p.needs?.length ? ` It depends on ${p.needs.join(', ')}, proposed earlier in this reply: the app makes that first.` : ''} If the request has more changes, propose the others now, in this same reply: each becomes a card in the same group, with "Apply all". At the end, one short sentence saying they just need to apply them (or ask for a change), without repeating what the cards show.`
             )
           )
         }
@@ -2191,7 +2196,7 @@ ${note}`,
       )
     }
 
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, jobWatchIds: jobWatchIds.length ? jobWatchIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, jobWatchIds: jobWatchIds.length ? jobWatchIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {

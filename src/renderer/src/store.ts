@@ -54,7 +54,8 @@ import {
   type Os,
   type LocalInfo,
   type VoiceModelId,
-  type VoiceStatus
+  type VoiceStatus,
+  type ProposalsResult
 } from '../../shared/types'
 import { call, connect, disconnect } from './rpc'
 
@@ -165,7 +166,7 @@ let state: State = {
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, gemini: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -808,6 +809,8 @@ export const openApps = (): Promise<{ name: string; bundleId?: string }[]> => ca
 export const installDesktop = (): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installDesktop')
 export const desktopPermissions = (): void => void fire(L('Não consegui abrir as permissões.', "I couldn't open the permissions."), 'desktopPermissions')
 
+export const setAgentModels = (agentIds: string[], modelId: string): Promise<number> => call('setAgentModels', { agentIds, modelId })
+
 export function saveAgent(agent: Agent, channelIds: string[]): Promise<void> {
   return call('saveAgent', { agent, channelIds })
 }
@@ -848,8 +851,11 @@ export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: 
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.
 export const openTuca = (): void => navigate({ kind: 'tuca', from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
-export const applyProposal = (messageId: string): Promise<{ id: string }> => call('applyProposal', { messageId })
-export const dismissProposal = (messageId: string): void => void call('dismissProposal', { messageId }).catch(() => {})
+// One card of a reply (index: which), or every one still open (draft: its new-agent card too).
+export const applyProposal = (messageId: string, index = 0): Promise<{ id: string }> => call('applyProposal', { messageId, index })
+export const dismissProposal = (messageId: string, index = 0): void => void call('dismissProposal', { messageId, index }).catch(() => {})
+export const applyProposals = (messageId: string, draft: boolean): Promise<ProposalsResult> => call('applyProposals', { messageId, draft })
+export const dismissProposals = (messageId: string, draft: boolean): void => void call('dismissProposals', { messageId, draft }).catch(() => {})
 export const settleDraft = (messageId: string, agentId?: string): void => void fire(L('Não consegui salvar o cartão.', "I couldn't save the card."), 'settleDraft', { messageId, agentId })
 
 export async function openDm(agentId: string): Promise<void> {

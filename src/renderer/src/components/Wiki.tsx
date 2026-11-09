@@ -1402,13 +1402,28 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
 
 // ---------- changes ----------
 
-// One change, as the curator wrote it: what goes where.
+// One change, as the curator wrote it: what goes where. What leaves and what comes in are each
+// labelled and wrap in full; a long change opens short, with "Ver tudo" for the rest.
 function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
   const md = (t?: string): ReactNode => (
     <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks()}>
       {wikiLinks(t ?? '')}
     </Markdown>
   )
+  const box = useRef<HTMLDivElement>(null)
+  const [long, setLong] = useState(false)
+  const [open, setOpen] = useState(false)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const fit = (): void => setLong(el.scrollHeight > DIFF_FOLD + 140)
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [op])
+  const added = (op.op === 'replace' ? op.new : op.text) ?? ''
+  const folded = long && !open
   return (
     <div className={`wiki-op wiki-op--${op.op}`}>
       <div className="wiki-op__head">
@@ -1418,17 +1433,27 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
         </button>
         {op.section && <span className="muted">› {op.section}</span>}
       </div>
-      {op.op === 'replace' ? (
-        <div className="wiki-diff">
-          <div className="wiki-diff__old md">{md(op.old)}</div>
-          <div className="wiki-diff__new md">{md(op.new)}</div>
+      <div ref={box} className={`wiki-diff${folded ? ' is-folded' : ''}`} style={folded ? { maxHeight: DIFF_FOLD } : undefined}>
+        {op.op === 'replace' && (
+          <div className="wiki-diff__old">
+            <span className="wiki-diff__tag">{L('Sai', 'Out')}</span>
+            <div className="md">{md(op.old)}</div>
+          </div>
+        )}
+        <div className={`wiki-diff__new${added.trim() ? '' : ' wiki-diff__new--none'}`}>
+          {op.op !== 'create' && <span className="wiki-diff__tag">{L('Entra', 'In')}</span>}
+          {added.trim() ? <div className="md">{md(added)}</div> : <p className="muted">{L('Nada no lugar: o trecho só sai da página.', 'Nothing in its place: the passage just leaves the page.')}</p>}
         </div>
-      ) : (
-        <div className="wiki-diff__new md">{md(op.text)}</div>
+      </div>
+      {long && (
+        <button className="text-btn wiki-diff__more" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? L('Ver menos', 'Show less') : L('Ver tudo', 'Show all')}
+        </button>
       )}
     </div>
   )
 }
+const DIFF_FOLD = 360 // px a long change shows before "Ver tudo"; a bit longer than that shows whole
 
 const STATE_LABEL = (s: WikiChange['state']): string =>
   s === 'pending' ? L('Esperando você', 'Waiting for you') : s === 'conflict' ? L('A página mudou depois', 'The page changed since') : s === 'applied' ? L('Entrou', 'Went in') : s === 'undone' ? L('Desfeita', 'Undone') : L('Recusada', 'Refused')

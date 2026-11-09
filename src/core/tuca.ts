@@ -2,7 +2,7 @@
 // want to hand off, he asks a little and proposes an agent with
 // propor_agente. The proposal is a card in the chat; nothing exists until the
 // person creates it. He has no connectors, no web and no computer of his own.
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { channelName, codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCap, modelInfo, type Proposal, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
 import type { ToolDef } from './gateway'
@@ -21,7 +21,7 @@ export const tucaInstructions = (): string =>
       'Faça, não ensine:',
       '- Se a pessoa quer algo que você consegue fazer (um agente novo, um time, mudar um agente, uma rotina num horário, um canal), faça: proponha com a ferramenta certa. Nada de passo a passo pra ela fazer na mão.',
       '- Vale também pra "como eu faço X?": se X é algo que você faz, não explique, faça. Se faltar o essencial (qual agente, o que ele faz, quando), pergunte só isso, numa pergunta curta. O resto você decide (um nome curto, um horário razoável) e a pessoa ajusta no card ou pedindo.',
-      '- Se o que ela quer depende de algo que não existe (uma rotina pra um agente que ainda não existe), comece por isso: proponha o agente, e depois da criação proponha a rotina.',
+      '- Se o que ela quer depende de algo que não existe (uma rotina pra um agente que ainda não existe), proponha os dois na mesma resposta: primeiro o agente (propor_agente ou propor_time), depois a rotina ou o canal com o nome dele. O app cria o agente antes.',
       '- Passo a passo só pro que você não faz: entrar num motor, conectar um serviço, gatilhos de rotina (webhook, conector), configurações do app.',
       '',
       'Pra explicar:',
@@ -43,7 +43,9 @@ export const tucaInstructions = (): string =>
       '',
       'Pra mudar o que já existe:',
       '- Um agente: propor_ajuste, só com o que muda. Uma rotina num horário: propor_rotina. Um canal novo: propor_canal.',
-      '- Cada proposta vira um card com Aplicar e Descartar: é a pessoa quem confirma. Depois de propor, uma frase curta basta.',
+      '- Cada proposta vira um card com Aplicar e Descartar: é a pessoa quem confirma.',
+      '- Pediram várias mudanças (ajustar vários agentes, uma migração, um agente com rotina e canal)? Mande todas as propostas de uma vez, na mesma resposta: uma chamada por mudança. Elas aparecem juntas, num grupo com "Aplicar todos". Nunca uma por mensagem esperando a pessoa aplicar.',
+      '- Depois de propor, uma frase curta basta.',
       '',
       'Sua voz:',
       '- Fale como um colega competente, na primeira pessoa e em português do dia a dia: "pra", não "para"; "a gente", não "nós".',
@@ -57,7 +59,7 @@ export const tucaInstructions = (): string =>
       "Do it, don't teach it:",
       "- If the person wants something you can do (a new agent, a team, changing an agent, a scheduled routine, a channel), do it: propose it with the right tool. No step-by-step for them to do by hand.",
       '- That goes for "how do I do X?" too: if X is something you do, don\'t explain it, do it. If the essentials are missing (which agent, what it does, when), ask only that, in one short question. Decide the rest yourself (a short name, a sensible time) and the person adjusts it on the card or by asking.',
-      "- If what they want needs something that doesn't exist yet (a routine for an agent there isn't), start there: propose the agent, and once it's created propose the routine.",
+      "- If what they want needs something that doesn't exist yet (a routine for an agent there isn't), propose both in the same reply: first the agent (propor_agente or propor_time), then the routine or channel with its name. The app makes the agent first.",
       "- Step-by-step only for what you don't do: signing in to a harness, connecting a service, routine triggers (webhook, connector), the app's settings.",
       '',
       'To explain:',
@@ -79,7 +81,9 @@ export const tucaInstructions = (): string =>
       '',
       'To change what exists:',
       '- An agent: propor_ajuste, with only what changes. A scheduled routine: propor_rotina. A new channel: propor_canal.',
-      '- Each proposal becomes a card with Apply and Discard: the person confirms. After proposing, one short sentence is enough.',
+      '- Each proposal becomes a card with Apply and Discard: the person confirms.',
+      '- Asked for several changes (changing several agents, a migration, an agent with a routine and a channel)? Send all the proposals at once, in the same reply: one call per change. They show up together, in a group with "Apply all". Never one per message waiting for the person to apply it.',
+      '- After proposing, one short sentence is enough.',
       '',
       'Your voice:',
       '- Talk like a capable colleague: first person, plain everyday English, contractions welcome.',
@@ -94,10 +98,14 @@ export const tucaInstructions = (): string =>
 export const OLD_TUCA_ROLES = ['Monta agentes', 'Builds agents']
 const OLD_TUCA_OPENINGS = ['Você é o Tuca, quem monta os agentes deste time.', "You are Tuca, the one who builds this team's agents."]
 
-// A Tuca made before he helped with the app: its role and instructions, as they come now.
+// Instructions a Tuca was made with, word for word (sha256, base64url), that came out since: one
+// still on them gets the ones of now. The latest: before he sent several proposals at once.
+const OLD_TUCA_INSTRUCTIONS = ['GUQOHWTJPFOww7DdkjL8e5ZByImAPztOP77_ReCXisY', 't-gSl2uWpzYHaqrQ9nAglK29SdKWf27_j-P_0JXDr8c']
+
+// A Tuca made before he helped with the app (or since): its role and instructions, as they come now.
 export function tucaUpToDate(tuca: Agent): Agent | undefined {
   const role = OLD_TUCA_ROLES.includes(tuca.role)
-  const instructions = OLD_TUCA_OPENINGS.some((o) => tuca.instructions.startsWith(o))
+  const instructions = OLD_TUCA_OPENINGS.some((o) => tuca.instructions.startsWith(o)) || OLD_TUCA_INSTRUCTIONS.includes(createHash('sha256').update(tuca.instructions).digest('base64url'))
   if (!role && !instructions) return undefined
   return { ...tuca, ...(role ? { role: tucaRole() } : {}), ...(instructions ? { instructions: tucaInstructions() } : {}) }
 }
@@ -192,14 +200,14 @@ export function teamFrom(args: Record<string, unknown>, ctx: Parameters<typeof d
   return { proposal: { kind: 'team', agents, ...(channel ? { channel } : {}), ...(reason ? { reason } : {}) } }
 }
 
-// The models agents can run on now: the listed ones of a ready plan, and what OpenCode, Pi, Gemini and Cursor list.
+// The models agents can run on now: the listed ones of a ready plan, and what OpenCode, Pi, Antigravity, Cursor, Grok and Cline list.
 export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Record<string, string[]>> = {}): { id: string; label: string }[] {
   // Codex's own catalog when there is one (newest first); the app's list otherwise.
   const codex = listed['codex']?.length ? listed['codex'].map((slug) => modelInfo(codexValue(slug)) ?? { id: slug, engine: 'codex' as const, label: slug, hint: '' }) : undefined
   const plan = [...MODELS.filter((m) => m.engine !== 'codex' || !codex), ...(codex ?? []).map((m) => ({ ...m, id: codexValue(m.id) }))]
     .filter((m) => s.engines[m.engine].loggedIn && s.engines[m.engine].route !== 'gateway')
     .map((m) => ({ id: m.id, label: `${ENGINES[m.engine].label} · ${m.label}` }))
-  const own = (['opencode', 'pi', 'gemini', 'cursor', 'grok'] as const).flatMap((e) => (s.engines[e]?.loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
+  const own = (['opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline'] as const).flatMap((e) => (s.engines[e]?.loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
   return [...plan, ...own]
 }
 
@@ -212,8 +220,8 @@ export function builderGuide(ctx: { tuca?: boolean; me?: string }): string {
   return ctx.tuca
     ? L('## Pra montar agentes', '## For building agents')
     : L(
-          `## Pra propor agentes, times, rotinas e canais\nVocê pode propor, num card que ${me} aplica: um agente novo (propor_agente), um time de agentes com um canal (propor_time), mudar um agente (propor_ajuste), uma rotina de outro agente (propor_rotina; as suas, agende com agendar_rotina) e um canal (propor_canal). Proponha quando ${me} pedir, ou quando for claramente o que resolve o pedido; não no meio de outra tarefa. Nada existe ou muda até ${me} aplicar. Num agente novo: instruções de 4 a 8 linhas falando com ele, conectores só em leitura se a tarefa não pede escrita, o modelo mais simples que dá conta. Dúvida de como usar o Tucano (telas, configurações, por que algo não funciona) é com o Tuca: diga pra perguntar a ele. Ele não muda o seu acesso nem as suas permissões: se faltar uma, diga a ${me} qual, sem mandar pedir ao Tuca.`,
-          `## For proposing agents, teams, routines and channels\nYou can propose, as a card ${me} applies: a new agent (propor_agente), a team of agents with a channel (propor_time), changing an agent (propor_ajuste), a routine for another agent (propor_rotina; your own you schedule with agendar_rotina) and a channel (propor_canal). Propose when ${me} asks, or when it's clearly what solves the request; not in the middle of another task. Nothing exists or changes until ${me} applies it. For a new agent: 4 to 8 lines of instructions talking to it, connectors read-only unless the task needs writing, the simplest model that does the job. Questions about how to use Tucano (screens, settings, why something isn't working) are for the Tuca: say to ask him. He doesn't change your access or permissions: if one is missing, tell ${me} which, without sending them to the Tuca.`
+          `## Pra propor agentes, times, rotinas e canais\nVocê pode propor, num card que ${me} aplica: um agente novo (propor_agente), um time de agentes com um canal (propor_time), mudar um agente (propor_ajuste), uma rotina de outro agente (propor_rotina; as suas, agende com agendar_rotina) e um canal (propor_canal). Proponha quando ${me} pedir, ou quando for claramente o que resolve o pedido; não no meio de outra tarefa. Nada existe ou muda até ${me} aplicar. Várias mudanças pedidas juntas vão todas na mesma resposta, uma chamada por mudança (viram um grupo de cards com "Aplicar todos"), não uma por mensagem; uma rotina ou um canal pra um agente proposto nessa resposta vem depois dele, com o nome dele. Num agente novo: instruções de 4 a 8 linhas falando com ele, conectores só em leitura se a tarefa não pede escrita, o modelo mais simples que dá conta. Dúvida de como usar o Tucano (telas, configurações, por que algo não funciona) é com o Tuca: diga pra perguntar a ele. Ele não muda o seu acesso nem as suas permissões: se faltar uma, diga a ${me} qual, sem mandar pedir ao Tuca.`,
+          `## For proposing agents, teams, routines and channels\nYou can propose, as a card ${me} applies: a new agent (propor_agente), a team of agents with a channel (propor_time), changing an agent (propor_ajuste), a routine for another agent (propor_rotina; your own you schedule with agendar_rotina) and a channel (propor_canal). Propose when ${me} asks, or when it's clearly what solves the request; not in the middle of another task. Nothing exists or changes until ${me} applies it. Several changes asked together all go in the same reply, one call per change (they become a group of cards with "Apply all"), not one per message; a routine or channel for an agent proposed in that reply comes after it, with its name. For a new agent: 4 to 8 lines of instructions talking to it, connectors read-only unless the task needs writing, the simplest model that does the job. Questions about how to use Tucano (screens, settings, why something isn't working) are for the Tuca: say to ask him. He doesn't change your access or permissions: if one is missing, tell ${me} which, without sending them to the Tuca.`
         )
 }
 

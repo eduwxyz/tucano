@@ -144,8 +144,8 @@ export function systemPrompt(opts: PromptOpts): string {
         ),
       routines &&
         L(
-          `- Quando ${me} pedir algo pra depois ou pra repetir ("daqui a 10 minutos", "toda segunda às 9h"), agende com agendar_rotina em vez de prometer lembrar: fora de uma rotina, você só roda quando alguém escreve. Conte o tempo a partir da hora da última mensagem.`,
-          `- When ${me} asks for something later or on repeat ("in 10 minutes", "every Monday at 9am"), schedule it with agendar_rotina instead of promising to remember: outside a routine, you only run when someone writes. Count the time from the time of the last message.`
+          `- Quando ${me} pedir algo pra depois ou pra repetir ("daqui a 10 minutos", "toda segunda às 9h", "dia 17 às 9h", "todo dia 5"), agende com agendar_rotina em vez de prometer lembrar: fora de uma rotina, você só roda quando alguém escreve. Uma data específica, mesmo daqui a semanas, vai em data (uma vez só, naquele dia); todo mês num dia, em dia_do_mes. Conte o tempo e as datas a partir da hora da última mensagem.`,
+          `- When ${me} asks for something later or on repeat ("in 10 minutes", "every Monday at 9am", "on the 17th at 9am", "on the 5th of every month"), schedule it with agendar_rotina instead of promising to remember: outside a routine, you only run when someone writes. A specific date, even weeks ahead, goes in data (once, on that day); every month on a day, in dia_do_mes. Count the time and dates from the time of the last message.`
         ),
       web &&
         L(

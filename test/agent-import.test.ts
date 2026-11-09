@@ -179,13 +179,13 @@ describe('importing agents from OpenBot', () => {
   })
 
   it('keeps a Gemini agent on Gemini, and moves a model whose CLI is not ready to one that is', () => {
-    const gem = { ...gil, key: 'gem', name: 'Gem', provider: 'gemini', model: 'gemini-3-pro', skills: [] }
+    const gem = { ...gil, key: 'gem', name: 'Gem', provider: 'antigravity', model: 'gemini-3-pro', skills: [] }
     const cur = { ...gil, key: 'cur', name: 'Cur', provider: 'cursor', model: 'composer-2', skills: [] }
     const db = fresh()
-    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': transfer([gem, cur]) }))), { ...opts, defaultModel: 'gemini:gemini-3-pro', works: (id) => id.startsWith('gemini:') })
-    expect(db.agents().map((a) => [a.name, a.modelId])).toEqual([['Gem', 'gemini:gemini-3-pro'], ['Cur', 'gemini:gemini-3-pro']])
+    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': transfer([gem, cur]) }))), { ...opts, defaultModel: 'antigravity:gemini-3-pro', works: (id) => id.startsWith('antigravity:') })
+    expect(db.agents().map((a) => [a.name, a.modelId])).toEqual([['Gem', 'antigravity:gemini-3-pro'], ['Cur', 'antigravity:gemini-3-pro']])
     expect(r.summary).not.toContain('não roda no Tucano')
-    expect(r.summary).toContain('@cur: o modelo cursor:composer-2 (o CLI dele não está pronto aqui: ficou gemini:gemini-3-pro)')
+    expect(r.summary).toContain('@cur: o modelo cursor:composer-2 (o CLI dele não está pronto aqui: ficou antigravity:gemini-3-pro)')
   })
 
   it('brings at most so many agents, memories and routines, and says how many stayed out', () => {
@@ -215,11 +215,16 @@ describe('importing agents from OpenBot', () => {
     expect(openBotSchedule({ kind: 'weekly', weekday: 0, time: '18:00' })).toEqual({ days: [0], time: '18:00' })
     expect(openBotSchedule({ kind: 'advanced', months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], days: { kind: 'days-of-week', days: [5, 1] }, time: { kind: 'at-time', time: '10:00' } })).toEqual({ days: [1, 5], time: '10:00' })
     expect(openBotSchedule({ kind: 'advanced', months: [1], days: { kind: 'every-day' }, time: { kind: 'at-time', time: '10:00' } })).toBeUndefined()
-    expect(openBotSchedule({ kind: 'monthly', day: 1, time: '10:00' })).toBeUndefined()
+    expect(openBotSchedule({ kind: 'monthly', day: 1, time: '10:00' })).toEqual({ days: [0, 1, 2, 3, 4, 5, 6], time: '10:00', monthDay: 1 })
+    expect(openBotSchedule({ kind: 'monthly', day: 40, time: '10:00' })).toBeUndefined()
     expect(openBotSchedule({ kind: 'custom', expression: '* * * * *' })).toBeUndefined()
     const soon = new Date(Date.now() + 2 * 86_400_000)
     const date = `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-${String(soon.getDate()).padStart(2, '0')}`
-    expect(openBotSchedule({ kind: 'once', date, time: '12:00' })).toEqual({ days: [soon.getDay()], time: '12:00', once: true })
+    expect(openBotSchedule({ kind: 'once', date, time: '12:00' })).toEqual({ days: [soon.getDay()], time: '12:00', once: true, date })
+    // Weeks ahead too, on that date (it used to be dropped past the coming week).
+    const later = new Date(Date.now() + 40 * 86_400_000)
+    const far = `${later.getFullYear()}-${String(later.getMonth() + 1).padStart(2, '0')}-${String(later.getDate()).padStart(2, '0')}`
+    expect(openBotSchedule({ kind: 'once', date: far, time: '12:00' })).toMatchObject({ once: true, date: far })
     expect(openBotSchedule({ kind: 'once', date: '2020-01-01', time: '12:00' })).toBeUndefined()
     expect(hueColor(0)).toMatch(/^#[0-9a-f]{6}$/)
   })

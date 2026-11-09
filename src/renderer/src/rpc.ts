@@ -4,6 +4,8 @@ import type { UpdateState } from '../../shared/types'
 import type { WorkspaceList, WorkspaceParts } from '../../shared/workspaces'
 
 // Seu iPhone: on, where the phone finds this computer, and how many are on the line now.
+export type NotifyState = 'on' | 'ask' | 'blocked' | 'insecure' | 'unsupported'
+
 export type PhoneState = { on: boolean; address: string; connected: number; workspace: string; error?: string }
 
 declare global {
@@ -26,6 +28,10 @@ declare global {
       onNavigatePage?: (cb: (page: 'skills') => void) => void // desktop only
       onCoreDown?: (cb: () => void) => void // desktop only: a browser reloads on its own
       viewing: (conversationId: string | null) => void
+      // Settings › General › Notifications: one sent now ('shown'), or why none can come here
+      // (a browser: blocked by the person, or a page without HTTPS, where browsers show none).
+      testNotify?: () => Promise<NotifyState | 'shown'>
+      notifyState?: () => NotifyState // a browser only: where its notifications stand now
       updateState: () => Promise<UpdateState>
       onUpdate: (cb: (state: UpdateState) => void) => void
       checkUpdates: () => void

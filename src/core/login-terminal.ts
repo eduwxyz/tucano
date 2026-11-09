@@ -33,10 +33,12 @@ export function loginCommand(engine: EngineId): { args: string[]; env: Record<st
       return { args: ['login', '--device-auth'], env: {} }
     case 'cursor':
       return { args: ['login'], env: { NO_OPEN_BROWSER: '1' } }
+    case 'cline':
+      return { args: ['auth'], env: {}, hint: L('Escolha o provedor com as setas e toque em Enter: Cline (a conta, no navegador) ou um provedor com a sua chave.', 'Pick the provider with the arrows and tap Enter: Cline (the account, in the browser) or a provider with your key.') }
     case 'opencode':
       return { args: ['auth', 'login'], env: {}, hint: L('Escolha o provedor com as setas e toque em Enter.', 'Pick the provider with the arrows and tap Enter.') }
-    case 'gemini':
-      return { args: [], env: { NO_BROWSER: 'true' }, hint: L('Escolha "Login with Google" e toque em Enter; depois cole aqui o código que a página mostrar.', 'Pick "Login with Google" and tap Enter; then paste here the code the page shows.') }
+    case 'antigravity':
+      return { args: [], env: {}, hint: L('Abra o link, entre com sua conta Google e cole aqui o código que a página mostrar.', 'Open the link, sign in with your Google account and paste here the code the page shows.') }
     case 'pi':
       return { args: [], env: {}, hint: L('Escreva /login e toque em Enter (de novo, se aparecer a lista de comandos); depois escolha o provedor com as setas.', 'Type /login and tap Enter (again, if the list of commands shows up); then pick the provider with the arrows.') }
   }
