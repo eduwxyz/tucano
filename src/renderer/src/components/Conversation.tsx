@@ -2104,7 +2104,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           <div className="drop-overlay__card">
             <Icon name="image" size={28} />
             <strong>{L('Solte pra anexar', 'Drop to attach')}</strong>
-            <span className="muted">{L('Os agentes veem a imagem junto com a mensagem.', 'Agents see the image along with the message.')}</span>
+            <span className="muted">{L('Os agentes veem o conteúdo junto com a mensagem.', 'Agents see the content along with the message.')}</span>
           </div>
         </div>
       )}
