@@ -160,6 +160,7 @@ export function Sidebar(): ReactNode {
   const parts = useSidebarParts()
   const fresh = (p: SidebarPart): (() => void) | undefined => (parts.fresh(p) ? () => parts.seen(p) : undefined)
   const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
+  const asks = useStore((s) => s.inbox.questions.length)
   const suggestions = useStore((s) => pendingMemories(s).length)
   const proposals = useStore((s) => s.skills.filter((k) => k.state === 'pending').length)
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
@@ -339,6 +340,7 @@ export function Sidebar(): ReactNode {
       )}
       <nav className="sidebar__scroll">
         <TucaItem />
+        <NavItem view={{ kind: 'asks' }} icon="ask" label={L('Perguntas', 'Asks')} badge={asks} />
         <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />
         {(parts.shows('memory') || suggestions > 0) && <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} fresh={fresh('memory')} />}
         {parts.shows('wiki') && <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} />}

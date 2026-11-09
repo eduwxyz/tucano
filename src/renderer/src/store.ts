@@ -69,6 +69,7 @@ export type View =
   | { kind: 'agent'; id: string }
   | { kind: 'new-agent'; draft?: Agent; fromMessage?: string } // a draft from a Tuca card, to edit before creating
   | { kind: 'tuca'; from?: View } // the builder screen: a new agent with the Tuca; closing goes back to `from`
+  | { kind: 'asks' }
   | { kind: 'approvals' }
   | { kind: 'usage' }
   | { kind: 'connectors' }

@@ -1213,6 +1213,66 @@ export function Field({ label, hint, error, group, children }: { label: string; 
   )
 }
 
+// ---------- Asks ----------
+
+// Every agent's question to the person, in one place, the way Approvals gathers the approvals:
+// without it a question only exists as a card inside the reply that made it, which in a long
+// session is pages up (see the placement issue) or on a DM nobody opened.
+export function AsksPage(): ReactNode {
+  const inbox = useStore((s) => s.inbox)
+  const conversations = useStore((s) => s.conversations)
+  const agents = useStore((s) => s.agents)
+  const questions = inbox.questions
+  const where = (conversationId: string | undefined, agentId: string): string => {
+    const conv = conversations.find((c) => c.id === conversationId)
+    const who = agents.find((x) => x.id === agentId)?.name
+    if (!conv) return L('numa conversa que você não vê', "in a conversation you don't see")
+    if (conv.kind === 'channel') return L(`em #${conv.name}`, `in #${conv.name}`)
+    return who ? L(`na sua DM com ${who}`, `in your DM with ${who}`) : L('na sua DM', 'in your DM')
+  }
+
+  return (
+    <Page
+      title={L('Perguntas', 'Asks')}
+      subtitle={L('O que os agentes perguntaram a você e ainda espera resposta, de todos eles, num lugar só.', 'What the agents asked you and is still waiting for an answer, from all of them, in one place.')}
+    >
+      {questions.length === 0 ? (
+        <div className="empty empty--rest">
+          <SleepingToucan />
+          <p>{L('Nenhuma pergunta esperando.', 'No questions waiting.')}</p>
+          <p className="muted">{L('Quando um agente precisar de uma decisão sua, a pergunta aparece aqui e na conversa.', 'When an agent needs a decision from you, the question shows up here and in the conversation.')}</p>
+        </div>
+      ) : (
+        <div className="stack-list">
+          {questions.map((q) => (
+            <div key={q.id}>
+              <div className="row row--between small muted list-meta">
+                <span>
+                  {where(q.conversationId, q.agentId)} · {time(q.createdAt)}
+                </span>
+                {q.conversationId && conversations.some((c) => c.id === q.conversationId) && (
+                  <button className="link" onClick={() => navigate({ kind: 'conversation', id: q.conversationId! })}>
+                    {L('Ver na conversa', 'See in the conversation')}
+                  </button>
+                )}
+              </div>
+              <QuestionCard
+                id={q.id}
+                agentName={agents.find((x) => x.id === q.agentId)?.name}
+                askedTo={q.askedTo}
+                question={q.text}
+                {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}) } : {})}
+                answered={false}
+                inbox
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </Page>
+  )
+}
+
 // ---------- Approvals ----------
 
 export function ApprovalsPage(): ReactNode {
