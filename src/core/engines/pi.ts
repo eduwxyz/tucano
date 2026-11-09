@@ -122,7 +122,10 @@ export function piParser(): Parser {
       if (ev['type'] === 'message_start') newMessage = true
       else if (ev['type'] === 'message_update') {
         const a = (ev['assistantMessageEvent'] ?? {}) as Record<string, unknown>
-        if (a['type'] === 'text_delta' && typeof a['delta'] === 'string') {
+        if (a['type'] === 'thinking_delta' && typeof a['delta'] === 'string') {
+          // What the model is thinking about, streamed apart from what it will say.
+          out.push({ type: 'thinking', delta: a['delta'] })
+        } else if (a['type'] === 'text_delta' && typeof a['delta'] === 'string') {
           // Text around tool calls comes in separate model calls; keep them as paragraphs.
           const sep = newMessage && text ? '\n\n' : ''
           newMessage = false

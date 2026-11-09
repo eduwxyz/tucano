@@ -303,7 +303,9 @@ export class People {
     switch (event.type) {
       case 'message':
         return conversation(event.message.conversationId) && this.visibleAt(person, event.message) ? event : undefined
-      case 'delta': {
+      case 'delta':
+      case 'thinking': {
+        // What the model is thinking reaches exactly who the reply's text reaches.
         const c = this.db.messageConversation(event.id)
         return c && conversation(c) && this.visibleAt(person, this.db.message(event.id) ?? { conversationId: c, at: Infinity }) ? event : undefined
       }
