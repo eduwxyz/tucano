@@ -46,7 +46,8 @@ describe.skipIf(process.platform === 'win32')('running a command to detect somet
 
   it('answers even when something outside the command holds its output open', async () => {
     const started = Date.now()
-    const result = await run('sh', ['-c', "trap '' TERM; setsid sleep 4 & wait"], 200)
+    // perl's setpgrp leaves the group (macOS has no setsid command) and keeps the inherited pipes.
+    const result = await run('sh', ['-c', "trap '' TERM; perl -e 'setpgrp(0, 0); sleep 4' & wait"], 200)
     expect(result.code).not.toBe(0)
     expect(Date.now() - started).toBeLessThan(3_000)
   })
