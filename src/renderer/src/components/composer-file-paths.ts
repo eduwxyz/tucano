@@ -6,7 +6,7 @@ export function localFileReferences(files: File[], pathOf?: (file: File) => stri
     try {
       path = pathOf?.(file) ?? ''
     } catch {}
-    if (path) references.push(`"${path}"`)
+    if (path) references.push(JSON.stringify(path))
     else unresolved.push(file)
   }
   return { references, unresolved }

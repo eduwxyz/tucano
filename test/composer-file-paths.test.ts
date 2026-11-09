@@ -12,6 +12,12 @@ describe('localFileReferences', () => {
     })
   })
 
+  it('escapes quotes in a path so it remains a single quoted reference', () => {
+    const file = new File(['pdf'], 'my "file".pdf', { type: 'application/pdf' })
+
+    expect(localFileReferences([file], () => '/tmp/my "file".pdf').references).toEqual(['"/tmp/my \\"file\\".pdf"'])
+  })
+
   it('leaves every file for the existing handling when local paths are unavailable', () => {
     const pdf = new File(['pdf'], 'menu.pdf', { type: 'application/pdf' })
 
