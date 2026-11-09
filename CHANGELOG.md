@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.24] - 2026-11-09
+
 > **Em português:**
 > - **Correção:** dá pra anexar qualquer arquivo numa mensagem no app (antes só imagem: um PDF era recusado). Pelo clipe, arrastando ou colando, até 5 por mensagem. O que um PDF, um Word, uma planilha ou um texto diz vai pro agente junto com a mensagem, em qualquer motor e mesmo sem computador; depois ele relê quando precisar.
 > - **Correção:** um conector que não conecta numa rede de empresa diz por quê, em vez de "Sem conexão com a internet" pra tudo: o certificado não foi aceito (um proxy ou antivírus que inspeciona HTTPS), o proxy recusou ou pede login, o DNS não achou o endereço, a conexão foi recusada ou caiu no meio. **Ver detalhes** mostra o que o sistema respondeu. E o Tucano agora confia nos certificados do sistema (Chaves no Mac, o repositório do Windows) e usa o proxy das configurações de rede do sistema ou de `HTTPS_PROXY`, então o certificado raiz que a empresa ou o antivírus instalou passa a valer pros conectores.
@@ -549,6 +551,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.24]: https://github.com/eduwxyz/tucano/compare/v0.2.23...v0.2.24
 [0.2.23]: https://github.com/eduwxyz/tucano/compare/v0.2.22...v0.2.23
 [0.2.22]: https://github.com/eduwxyz/tucano/compare/v0.2.21...v0.2.22
 [0.2.21]: https://github.com/eduwxyz/tucano/compare/v0.2.20...v0.2.21
