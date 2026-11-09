@@ -1,16 +1,17 @@
 // Tucanos on servers (docs/server.md), shown in the app's own window: picking one puts its page
 // over the app, under a bar the app draws (BAR px) to go back. The page is in a view of its own,
 // which brings its own bridge to its core over HTTP: it never gets this app's preload, so a server,
-// even one taken over, can't reach this computer through it. Each server keeps its own session
-// (cookies, storage), apart from this app's and from the others'.
-import { BrowserWindow, dialog, session, shell, WebContentsView, type MenuItemConstructorOptions, type Session } from 'electron'
+// even one taken over, can't reach this computer through it. Its own small preload
+// (src/preload/server.ts) only hands the app the notifications to show. Each server keeps its own
+// session (cookies, storage), apart from this app's and from the others'.
+import { BrowserWindow, dialog, session, shell, WebContentsView, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../shared/lang'
 import { isOutsideLink } from '../shared/links'
-import { isPreviewOf, onServer, pairProblem, parsePairing, serverName } from '../shared/servers'
+import { isPreviewOf, onServer, pairProblem, parsePairing, serverMayHave, serverName, type ServerNote } from '../shared/servers'
 import { redeemCode, thisDevice } from './redeem'
 
 interface Saved {
@@ -55,7 +56,7 @@ function guard(ses: Session, origin: string): void {
     }
     done(['notifications', 'clipboard-sanitized-write', 'fullscreen'].includes(permission))
   })
-  ses.setPermissionCheckHandler((_c, permission, requestingOrigin) => requestingOrigin === origin && ['notifications', 'clipboard-sanitized-write', 'media', 'fullscreen'].includes(permission))
+  ses.setPermissionCheckHandler((_c, permission, requestingOrigin) => serverMayHave(permission, requestingOrigin, origin))
   ses.setDevicePermissionHandler(() => false)
 }
 
@@ -151,7 +152,7 @@ export class Servers {
     if (!s) return
     let view = this.views.get(id)
     if (!view || view.webContents.isDestroyed()) {
-      const made = await this.make(s)
+      const made = await this.making(s)
       if (!made) return
       view = made
     }
@@ -187,11 +188,19 @@ export class Servers {
     if (s) win.setTitle(`Tucano · ${serverName(s.origin)}`)
   }
 
-  private async make(s: Saved): Promise<WebContentsView | null> {
+  // One view per server, even when it's asked for again while the first is being made.
+  private pending = new Map<string, Promise<WebContentsView | null>>()
+  private making(s: Saved, quiet = false): Promise<WebContentsView | null> {
+    const p = this.pending.get(s.id) ?? this.make(s, quiet).finally(() => this.pending.delete(s.id))
+    this.pending.set(s.id, p)
+    return p
+  }
+
+  private async make(s: Saved, quiet = false): Promise<WebContentsView | null> {
     const token = this.deps.unseal(s.token)
     if (!token) {
       console.error('[servers] the saved access could not be unsealed')
-      void dialog.showMessageBox({ type: 'error', message: L('Não consegui abrir o acesso guardado', "Couldn't open the saved access"), detail: L('Conecte de novo com o link do servidor.', "Connect again with the server's link.") })
+      if (!quiet) void dialog.showMessageBox({ type: 'error', message: L('Não consegui abrir o acesso guardado', "Couldn't open the saved access"), detail: L('Conecte de novo com o link do servidor.', "Connect again with the server's link.") })
       return null
     }
     const ses = session.fromPartition(`persist:server-${s.id}`)
@@ -203,7 +212,8 @@ export class Servers {
     await ses.cookies.set({ url: s.origin, name: 'tucano', value: token, httpOnly: true, secure: s.origin.startsWith('https:'), sameSite: 'lax', expirationDate: Date.now() / 1000 + 365 * 86400 })
     const name = serverName(s.origin)
     const webPreferences = { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false }
-    const view = new WebContentsView({ webPreferences })
+    // Only the server's own page gets the notifications' preload, not an agent's page from it.
+    const view = new WebContentsView({ webPreferences: { ...webPreferences, preload: join(import.meta.dirname, '../preload/server.cjs') } })
     const wc = view.webContents
     this.views.set(s.id, view)
     // Only the server's own pages in this view. Web and mail links open in the system; anything
@@ -251,6 +261,26 @@ export class Servers {
     return view
   }
 
+  // The server whose page this is: its main frame, on its own address. Anything else, none.
+  serverOf(sender: WebContents, frameUrl: string | undefined): string | undefined {
+    for (const [id, v] of this.views) {
+      if (v.webContents !== sender) continue
+      const s = this.list().find((x) => x.id === id)
+      return s && frameUrl && onServer(frameUrl, s.origin) ? id : undefined
+    }
+    return undefined
+  }
+
+  // A click on a server's notification: that server on screen, at what it's about.
+  async openNote(id: string, note: ServerNote): Promise<void> {
+    await this.show(id)
+    const v = this.views.get(id)
+    if (!v || v.webContents.isDestroyed()) return
+    const go = (): void => v.webContents.send('server:open', { conversationId: note.conversationId, threadId: note.threadId, page: note.page })
+    if (v.webContents.isLoading()) v.webContents.once('did-finish-load', go)
+    else go()
+  }
+
   // A server's view, gone (forgotten, paired again, crashed).
   private drop(id: string): void {
     const v = this.views.get(id)
@@ -290,9 +320,11 @@ export class Servers {
   }
 
   // At launch: the server that was on screen when the app quit, on screen again.
+  // The others load behind it, off screen, so their notifications come from the start.
   restore(): void {
     const last = this.list().find((s) => s.open)
     if (last) void this.show(last.id).catch((e: unknown) => console.error('[servers] restore', e instanceof Error ? e.message : e))
+    for (const s of this.list()) if (s.id !== last?.id && !this.views.has(s.id)) void this.making(s, true).catch((e: unknown) => console.error('[servers] restore', e instanceof Error ? e.message : e))
   }
 
   quit(): void {
