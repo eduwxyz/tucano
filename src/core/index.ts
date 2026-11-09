@@ -1562,6 +1562,24 @@ const api: Handlers = {
     if (found) toMain({ type: 'open_local', path: found.path, how: how === 'open' && (found.kind === 'folder' || found.kind === 'pdf') ? 'open' : 'reveal' })
   },
 
+  // Clearing the history of a conversation, keeping the conversation: the DM stays where it is and
+  // the rows stay, but the screen starts empty and the next turns stop reading what came before.
+  clearConversation: ({ id }, ctx) => {
+    const c = db.conversation(id)
+    if (!c) return
+    reach(ctx, id)
+    if (c.kind === 'channel') must(ctx.person, { kind: 'admin' })
+    record(ctx, c.kind === 'channel' ? 'channel.cleared' : 'dm.cleared', id, c.kind === 'channel' ? { name: c.name } : undefined)
+    // A reply at work is not cleared under the person's feet: it is stopped, and what it had said so
+    // far is before the cut.
+    for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
+    // The harnesses keep a session of their own per conversation: without this the model would go on
+    // from a history the person just cleared.
+    runner.forgetSessions({ conversationId: id })
+    db.clearConversation(id)
+    emit({ type: 'conversation', conversation: db.conversation(id)! })
+  },
+
   deleteConversation: ({ id }, ctx) => {
     const c = db.conversation(id)
     if (!c) return

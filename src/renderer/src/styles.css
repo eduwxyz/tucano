@@ -11863,3 +11863,21 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
+/* Where a cleared history starts: the rows before it are still stored (receipts, approvals) and out
+   of the screen, so the conversation says where it begins instead of pretending it always was empty. */
+.messages__cleared {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 14px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+}
+.messages__cleared::before,
+.messages__cleared::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}

@@ -127,6 +127,7 @@ export interface Conversation {
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
   threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
+  clearedAt?: number // the person cleared the history: earlier messages stay in the rows (costs, approvals) and out of the screen and the next turns
   owner?: string // a DM's person: one DM per agent and person, and only they read it
   createdBy?: string // a channel's maker: they (and admins) rename it, change its topic and its agents
 }
