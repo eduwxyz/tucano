@@ -15,9 +15,9 @@ import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
-import { admit, admitComputer, can, isAdmin, must } from './policy-people'
+import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
@@ -1053,7 +1053,8 @@ const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
 // The Tuca, made once (the introduction, or the first start after it) and kept
 // even when archived. His model: the one given, else a plan's, else the router's
 // or the memory's, which the introduction made sure work.
-// `fresh` starts a new session: the builder screen opens with only his hello.
+// Each person's DM with him is kept: every way to the builder screen opens it where it was, and his
+// session goes on. `fresh` ("Nova conversa") starts another: the old one goes, with only his hello in the new.
 // A model runs here when its harness is chosen and signed in.
 function worksWith(s: Settings): (id: string) => boolean {
   return (id) => {
@@ -1095,6 +1096,7 @@ function ensureTuca(modelId?: string, fresh = false, person = db.ownerId()): { a
   let dm = db.conversations().find(theirs)
   if (dm && fresh) {
     for (const m of db.messagesWithRun(['working'])) if (m.conversationId === dm.id) runner.stop(m.id)
+    runner.forgetSessions({ conversationId: dm.id })
     db.deleteConversation(dm.id)
     emit({ type: 'conversation_removed', id: dm.id, for: person })
     dm = undefined
@@ -1110,14 +1112,41 @@ function ensureTuca(modelId?: string, fresh = false, person = db.ownerId()): { a
   return { agentId: tuca.id, conversationId: dm.id }
 }
 
-// A Tuca's proposal is settled once: applied (with what it made or changed) or dismissed.
-function settleProposal(messageId: string, appliedId?: string): void {
+// One of a reply's proposals changed: settled once (applied, with what it made or changed, or
+// dismissed), or told why applying it didn't work. A reply from before (one `proposal`) gets the list.
+type ProposalPatch = { state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; agentIds?: string[] }
+function patchProposal(messageId: string, index: number, patch: ProposalPatch): void {
   const m = db.message(messageId)
-  if (!m?.run?.proposal || m.run.proposal.state) return
-  const updated: Message = { ...m, run: { ...m.run, proposal: { ...m.run.proposal, state: appliedId ? 'applied' : 'dismissed', ...(appliedId ? { appliedId } : {}) } } }
+  const list = proposalsOf(m?.run)
+  const p = list[index]
+  if (!m?.run || !p || p.state) return
+  const proposals = list.map((x, i) => (i === index ? ({ ...x, ...patch } as Proposal) : x))
+  if (patch.state || !patch.error) delete proposals[index]!.error
+  const { proposal: _old, ...run } = m.run
+  const updated: Message = { ...m, run: { ...run, proposals } }
   db.saveMessage(updated)
   emit({ type: 'message', message: updated })
-  emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
+  if (patch.state) emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
+}
+function settleProposal(messageId: string, index: number, appliedId?: string, extra: ProposalPatch = {}): void {
+  patchProposal(messageId, index, { ...extra, state: appliedId ? 'applied' : 'dismissed', ...(appliedId ? { appliedId } : {}) })
+}
+
+// The agents a card needs from its own reply (`needs`), as made: the new-agent card's, a team's.
+function neededAgents(messageId: string, p: Proposal): string[] {
+  const run = db.message(messageId)?.run
+  return (p.needs ?? []).map((name) => {
+    const same = (n: string): boolean => n.toLowerCase() === name.toLowerCase()
+    const d = run?.agentDraft
+    if (d && same(d.name) && d.state === 'created' && d.agentId && db.agent(d.agentId)) return d.agentId
+    for (const t of proposalsOf(run)) {
+      if (t.kind !== 'team' || t.state !== 'applied') continue
+      const at = t.agents.findIndex((a) => same(a.name))
+      const id = at >= 0 ? t.agentIds?.[at] : undefined
+      if (id && db.agent(id)) return id
+    }
+    throw new Error(L(`Antes, crie ${name}: está num card desta mesma resposta.`, `Create ${name} first: it's in a card of this same reply.`))
+  })
 }
 
 // A Tuca's card is settled once: created (with the agent) or dismissed.
@@ -1130,6 +1159,67 @@ function settleDraft(messageId: string, agentId?: string): void {
   emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
 }
 
+
+// A member's card for agents or a team: it went to the admins instead of being applied.
+class Forwarded extends Error {}
+
+// One card of a reply, done the way the screens do it (and checked the same way). `batch`: part of
+// "apply all", which tells the admins once for everything a member sent them.
+function applyOne(ctx: Ctx, messageId: string, index: number, batch = false): { id: string } {
+  const p = proposalsOf(db.message(messageId)?.run)[index]
+  if (!p) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
+  if (p.state) throw new Error(p.state === 'applied' ? L('Essa proposta já foi aplicada.', 'That proposal was already applied.') : L('Essa proposta foi descartada.', 'That proposal was discarded.'))
+  // Agents are the admins': a member's card goes to them instead (they get what it proposes).
+  if ((p.kind === 'agent' || p.kind === 'team') && !isAdmin(ctx.person)) {
+    const what = p.kind === 'agent' ? L(`mudar ${db.agent(p.agentId)?.name ?? 'um agente'}`, `change ${db.agent(p.agentId)?.name ?? 'an agent'}`) : L(`criar ${p.agents.map((a) => a.name).join(', ')}`, `create ${p.agents.map((a) => a.name).join(', ')}`)
+    if (!batch) notifyAll(L(`${ctx.person.name} pede pra ${what}`, `${ctx.person.name} asks to ${what}`), p.reason ?? L('Uma proposta do Tuca que só um admin aplica.', 'A Tuca proposal only an admin can apply.'), undefined, undefined, { to: db.people().filter(isAdmin).map((x) => x.id) })
+    record(ctx, 'proposal.forwarded', messageId, { kind: p.kind, index })
+    if (!batch) emit({ type: 'inbox' })
+    throw new Forwarded(L('Só um admin aplica isso: os admins foram avisados.', 'Only an admin can apply this: the admins were told.'))
+  }
+  if (p.kind === 'routine') mayRoutine(ctx, { scope: p.routine.scope, owner: ctx.person.id })
+  const needed = neededAgents(messageId, p)
+  let id: string
+  const extra: ProposalPatch = {}
+  if (p.kind === 'agent') {
+    const agent = db.agent(p.agentId)
+    if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
+    api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds }, ctx)
+    id = agent.id
+  } else if (p.kind === 'routine') {
+    if (p.routine.conversationId) reach(ctx, p.routine.conversationId)
+    const agentId = needed[0] ?? p.routine.agentId
+    const conversationId = p.routine.conversationId || api.openDm({ agentId }, ctx)
+    const made = routines.save({ ...p.routine, agentId, conversationId }, ctx.person.id)
+    id = made.id
+    record(ctx, 'routine.created', id, routineDetail(db, made))
+  } else if (p.kind === 'channel') {
+    id = api.createChannel({ name: p.name, ...(p.threads ? { threads: true } : {}) }, ctx)
+    api.setChannelMembers({ id, agentIds: [...new Set([...p.members, ...needed])] }, ctx)
+    if (p.topic) api.setTopic({ id, topic: p.topic }, ctx)
+  } else {
+    // A team: its agents, each with a DM, and the channel they share when there is one.
+    if (p.channel && db.conversations().some((c) => c.kind === 'channel' && c.name === p.channel!.name)) throw new Error(L(`Já existe o canal #${p.channel.name}.`, `There's already a #${p.channel.name} channel.`))
+    const made: string[] = []
+    for (const d of p.agents) {
+      const agent = { ...agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit), owner: ctx.person.id }
+      db.saveAgent(agent)
+      emit({ type: 'agent', agent })
+      record(ctx, 'agent.created', agent.id, { name: agent.name })
+      api.openDm({ agentId: agent.id }, ctx)
+      made.push(agent.id)
+    }
+    extra.agentIds = made
+    if (p.channel) {
+      id = api.createChannel({ name: p.channel.name, ...(p.channel.threads ? { threads: true } : {}) }, ctx)
+      api.setChannelMembers({ id, agentIds: made }, ctx)
+      if (p.channel.topic) api.setTopic({ id, topic: p.channel.topic }, ctx)
+    } else id = made[0]!
+  }
+  settleProposal(messageId, index, id, extra)
+  return { id }
+}
 
 const PAGE = 100 // messages outside threads per conversation, per page sent to the window
 
@@ -1446,59 +1536,61 @@ const api: Handlers = {
   },
   settleDraft: ({ messageId, agentId }, ctx) => (reachMessage(ctx, messageId), settleDraft(messageId, agentId)),
   // What a Tuca's card proposed, done the way the screens do it (and checked the same way).
-  applyProposal: ({ messageId }, ctx) => {
-    if (!people.forwarded(ctx.person, messageId)) reachMessage(ctx, messageId)
-    const p = db.message(messageId)?.run?.proposal
-    if (!p) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
-    if (p.state) throw new Error(p.state === 'applied' ? L('Essa proposta já foi aplicada.', 'That proposal was already applied.') : L('Essa proposta foi descartada.', 'That proposal was discarded.'))
-    // Agents are the admins': a member's card goes to them instead (they get what it proposes).
-    if ((p.kind === 'agent' || p.kind === 'team') && !isAdmin(ctx.person)) {
-      const what = p.kind === 'agent' ? L(`mudar ${db.agent(p.agentId)?.name ?? 'um agente'}`, `change ${db.agent(p.agentId)?.name ?? 'an agent'}`) : L(`criar ${p.agents.map((a) => a.name).join(', ')}`, `create ${p.agents.map((a) => a.name).join(', ')}`)
-      notifyAll(L(`${ctx.person.name} pede pra ${what}`, `${ctx.person.name} asks to ${what}`), p.reason ?? L('Uma proposta do Tuca que só um admin aplica.', 'A Tuca proposal only an admin can apply.'), undefined, undefined, { to: db.people().filter(isAdmin).map((x) => x.id) })
-      record(ctx, 'proposal.forwarded', messageId, { kind: p.kind })
-      emit({ type: 'inbox' })
-      throw new Error(L('Só um admin aplica isso: os admins foram avisados.', 'Only an admin can apply this: the admins were told.'))
+  applyProposal: ({ messageId, index = 0 }, ctx) => {
+    if (!people.forwarded(ctx.person, messageId, index)) reachMessage(ctx, messageId)
+    try {
+      return applyOne(ctx, messageId, index)
+    } catch (e) {
+      if (!(e instanceof Forwarded)) patchProposal(messageId, index, { error: e instanceof Error ? e.message : String(e) })
+      throw e
     }
-    if (p.kind === 'routine') mayRoutine(ctx, { scope: p.routine.scope, owner: ctx.person.id })
-    let id: string
-    if (p.kind === 'agent') {
-      const agent = db.agent(p.agentId)
-      if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
-      const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
-      api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds }, ctx)
-      id = agent.id
-    } else if (p.kind === 'routine') {
-      if (p.routine.conversationId) reach(ctx, p.routine.conversationId)
-      const conversationId = p.routine.conversationId || api.openDm({ agentId: p.routine.agentId }, ctx)
-      const made = routines.save({ ...p.routine, conversationId }, ctx.person.id)
-      id = made.id
-      record(ctx, 'routine.created', id, routineDetail(db, made))
-    } else if (p.kind === 'channel') {
-      id = api.createChannel({ name: p.name, ...(p.threads ? { threads: true } : {}) }, ctx)
-      api.setChannelMembers({ id, agentIds: p.members }, ctx)
-      if (p.topic) api.setTopic({ id, topic: p.topic }, ctx)
-    } else {
-      // A team: its agents, each with a DM, and the channel they share when there is one.
-      if (p.channel && db.conversations().some((c) => c.kind === 'channel' && c.name === p.channel!.name)) throw new Error(L(`Já existe o canal #${p.channel.name}.`, `There's already a #${p.channel.name} channel.`))
-      const made: string[] = []
-      for (const d of p.agents) {
-        const agent = { ...agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit), owner: ctx.person.id }
-        db.saveAgent(agent)
-        emit({ type: 'agent', agent })
-        record(ctx, 'agent.created', agent.id, { name: agent.name })
-        api.openDm({ agentId: agent.id }, ctx)
-        made.push(agent.id)
-      }
-      if (p.channel) {
-        id = api.createChannel({ name: p.channel.name, ...(p.channel.threads ? { threads: true } : {}) }, ctx)
-        api.setChannelMembers({ id, agentIds: made }, ctx)
-        if (p.channel.topic) api.setTopic({ id, topic: p.channel.topic }, ctx)
-      } else id = made[0]!
-    }
-    settleProposal(messageId, id)
-    return { id }
   },
-  dismissProposal: ({ messageId }, ctx) => (people.forwarded(ctx.person, messageId) || reachMessage(ctx, messageId), settleProposal(messageId)),
+  // Every card of the reply still open, in an order that makes agents first. One failing (or sent to
+  // the admins) doesn't stop the others; the admins hear once about what a member sent them.
+  applyProposals: ({ messageId, draft }, ctx) => {
+    reachMessage(ctx, messageId)
+    const m = db.message(messageId)
+    const list = proposalsOf(m?.run)
+    if (!m?.run || (!list.length && !m.run.agentDraft)) throw new Error(L('Essas propostas não existem mais.', 'Those proposals no longer exist.'))
+    const out: ProposalsResult = { applied: [], failed: [], forwarded: [] }
+    const d = m.run.agentDraft
+    if (draft && d && !d.state) {
+      try {
+        if (!isAdmin(ctx.person)) throw new Error(adminError()) // as createFromDraft checks it at the door
+        out.draft = { agentId: api.createFromDraft({ messageId }, ctx).agentId }
+      } catch (e) {
+        out.draft = { error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+    for (const index of applyOrder(list)) {
+      if (proposalsOf(db.message(messageId)?.run)[index]?.state) continue
+      try {
+        out.applied.push({ index, id: applyOne(ctx, messageId, index, true).id })
+      } catch (e) {
+        if (e instanceof Forwarded) {
+          out.forwarded.push(index)
+          continue
+        }
+        const error = e instanceof Error ? e.message : String(e)
+        patchProposal(messageId, index, { error })
+        out.failed.push({ index, error })
+      }
+    }
+    if (out.forwarded.length) {
+      const n = out.forwarded.length
+      notifyAll(L(`${ctx.person.name} pede pra aplicar ${n === 1 ? 'uma proposta' : `${n} propostas`} do Tuca`, `${ctx.person.name} asks to apply ${n === 1 ? 'a Tuca proposal' : `${n} Tuca proposals`}`), L('Mudanças em agentes que só um admin aplica.', 'Changes to agents only an admin can apply.'), undefined, undefined, { to: db.people().filter(isAdmin).map((x) => x.id) })
+      emit({ type: 'inbox' })
+    }
+    record(ctx, 'proposals.applied', messageId, { applied: out.applied.length, failed: out.failed.length, forwarded: out.forwarded.length })
+    return out
+  },
+  dismissProposal: ({ messageId, index = 0 }, ctx) => (people.forwarded(ctx.person, messageId, index) || reachMessage(ctx, messageId), settleProposal(messageId, index)),
+  dismissProposals: ({ messageId, draft }, ctx) => {
+    reachMessage(ctx, messageId)
+    const m = db.message(messageId)
+    proposalsOf(m?.run).forEach((p, i) => p.state || settleProposal(messageId, i))
+    if (draft && m?.run?.agentDraft && !m.run.agentDraft.state) settleDraft(messageId)
+  },
   // One DM per agent and person.
   openDm: ({ agentId }, ctx) => {
     const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)

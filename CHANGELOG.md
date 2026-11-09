@@ -4,6 +4,18 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Novidade:** o Tuca manda várias propostas numa resposta só. Pediu pra mudar vários agentes (uma migração, um agente com rotina e canal)? Elas chegam juntas, num grupo pra passar uma a uma ("1 de 5"), cada uma com Aplicar e Descartar, mais **Aplicar todos** (mostra o que vai fazer, na ordem) e **Descartar todos**. Se uma não der certo, as outras seguem e você vê o porquê. Um agente novo vem antes da rotina e do canal que dependem dele.
+> - **Correção:** sair da tela do Tuca não apaga mais a conversa. Voltando por qualquer caminho (a barra lateral, o + de Agentes, uma missão), ela está onde parou, com as propostas e o que você estava digitando, e ele lembra do que vocês planejaram. Pra começar do zero, **Nova conversa** (pergunta antes se ficou proposta sem aplicar).
+
+### Added
+
+- **Several proposals in one reply, applied one by one or all at once.** The Tuca (and any agent with proposal tools) used to put one card per reply, each replacing the last, so a migration meant applying a card, asking for the next and waiting. Now every `propor_ajuste`, `propor_rotina` and `propor_canal` call in a reply adds a card (up to 20; a second one about the same agent, routine or channel replaces the first in place), and the tool tells the model to send the rest in the same reply. A reply with more than one card shows them as one group: `1 de 5` with ← → and a dot per card colored by its state, each card with its own Apply and Discard, plus **Apply all**, which first lists what it will do, in order, and **Discard all**. Apply all goes in an order that makes agents first (the reply's new-agent card, teams, then changes to agents, channels, routines); one that fails keeps its error on the card and the others go on, and the group says how many were applied, which failed and why. A routine or channel can name an agent proposed earlier in the same reply: the card says it depends on it, and applying it alone before that agent exists says to create it first. A member's Apply all sends the agent and team cards to the admins with one notification, and each lands in their inbox by itself; nothing changes until a card is applied. The Tuca's instructions now say to send all related proposals at once, never one per message, and a Tuca still on the previous instructions (word for word) gets the new ones on start. New core calls `applyProposals` and `dismissProposals`; `applyProposal` and `dismissProposal` take the card's `index`. Replies from before, with one `proposal`, show and apply as they did.
+
+### Fixed
+
+- **Leaving the Tuca's screen no longer loses the conversation.** Every time the builder screen opened, it deleted the person's DM with the Tuca and started a new one with only his hello (`ensureTuca` with `fresh`), so closing it by accident lost the whole plan, its cards and the model's session. Now every way in (the sidebar's Tuca, the + by Agentes, a mission, the command menu, "Falar com o Tuca", and the introduction's "Ajustar com o Tuca") opens the person's conversation where it was: messages, proposal cards with their state, the text being typed, and his kept session, which goes on from there. Changing his model keeps the conversation too. **Nova conversa**, above the chat, starts another on purpose, and asks first when there are cards not applied yet. With a team, each person keeps their own.
+
 ## [0.2.22] - 2026-11-08
 
 > **Em português:**

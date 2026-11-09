@@ -194,7 +194,8 @@ export interface Run {
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
-  proposal?: Proposal // what an agent proposed (a change to an agent, a routine, a channel, a team), shown as a card
+  proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
+  proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
@@ -220,12 +221,43 @@ export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,
 // routine or channel it made or changed; `error`: why applying it didn't work.
+// A reply may hold several (a group under it, each applied on its own or all at once). `needs`: agents
+// proposed in the same reply (by name: propor_agente's card or a team's) that must exist first; a
+// routine for one has no agentId until then, and a channel adds them to `members`.
 export type Proposal = (
   | { kind: 'agent'; agentId: string; changes: AgentChanges; before?: AgentChanges } // before: those fields as they were
   | { kind: 'routine'; routine: RoutineInput }
   | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
-  | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean } } // several agents at once, and a channel with them
-) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string }
+  | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean }; agentIds?: string[] } // several agents at once, and a channel with them; agentIds: the ones it made, in order
+) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; needs?: string[] }
+
+// What "apply all" did, card by card: applied, failed (with why), sent to the admins (a member's
+// agents and teams); `draft`: the reply's new-agent card, when it went too.
+export interface ProposalsResult {
+  applied: { index: number; id: string }[]
+  failed: { index: number; error: string }[]
+  forwarded: number[]
+  draft?: { agentId?: string; error?: string }
+}
+
+// The most proposals one reply holds.
+export const MAX_PROPOSALS = 20
+
+// A reply's proposals: the list, or the one a reply from before had.
+export const proposalsOf = (run: { proposal?: Proposal; proposals?: Proposal[] } | undefined): Proposal[] => run?.proposals ?? (run?.proposal ? [run.proposal] : [])
+
+// What a proposal is about: a newer one about the same thing replaces it (in the reply, or a later one).
+export function proposalKey(p: Proposal): string {
+  if (p.kind === 'agent') return `agent:${p.agentId}`
+  if (p.kind === 'routine') return `routine:${p.routine.agentId || p.needs?.[0] || ''}:${p.routine.name.toLowerCase()}`
+  if (p.kind === 'channel') return `channel:${p.name}`
+  return `team:${p.channel?.name ?? p.agents.map((a) => a.name.toLowerCase()).sort().join(',')}`
+}
+
+// The order "apply all" goes in: what makes agents first (a team), then changes to agents, then
+// channels and routines, which may need an agent made just before. Same kind: as proposed.
+const RANK: Record<Proposal['kind'], number> = { team: 0, agent: 1, channel: 2, routine: 3 }
+export const applyOrder = (ps: Proposal[]): number[] => ps.map((_, i) => i).sort((a, b) => RANK[ps[a]!.kind] - RANK[ps[b]!.kind] || a - b)
 
 export type Author = { kind: 'person'; id: string } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
 
@@ -292,6 +324,7 @@ export interface Inbox {
 // A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
 export interface InboxProposal {
   id: string // the card's message
+  index?: number // which of its proposals (unset: the first)
   agentId: string // who proposed it (the Tuca)
   proposal: Proposal
   by: string // the member who asked
