@@ -10190,6 +10190,9 @@ button.agent-card__now:hover {
 .engine-problem__more[open] {
   flex-basis: 100%;
 }
+.note__more {
+  margin: 6px 0 8px;
+}
 .engine-problem__more summary {
   cursor: pointer;
   font-weight: 600;

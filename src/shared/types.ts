@@ -708,6 +708,7 @@ export interface Connector {
   auth: ConnectorAuth
   status: ConnectorStatus
   error?: string
+  errorDetail?: string // the raw error and its causes (a certificate's code, the DNS's), under "Ver detalhes"
   tools: ConnectorTool[]
 }
 

@@ -19,6 +19,7 @@
 - **precisa autorizar**: **Autorizar no navegador** na página do conector.
 - **não conectou**: **Conectar de novo**; se continuar, confira o endereço e o login (token novo em **Token (substitui o atual)**).
 - O agente não vê a ferramenta: o nível do agente pro conector (**Ler** só mostra as de leitura), a ferramenta ligada na página do conector, e **Atualizar ferramentas**.
+- Não conecta só numa rede (empresa, proxy, antivírus): a mensagem diz o motivo; veja **rede**.
 
 ## Computador do agente
 - **sem Docker**: abra o Docker Desktop e **Verificar de novo**.

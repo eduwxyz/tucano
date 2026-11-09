@@ -48,7 +48,7 @@ const ready = { installed: true, loggedIn: true }
 const settingsOf = (over: Partial<Settings> = {}): Settings => ({ workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'off', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', ...over }) as unknown as Settings
 
 describe('1. what each role reads of a connector', () => {
-  const stdio: Connector = { id: 'c1', name: 'Jira', kind: 'stdio', command: 'npx', args: ['-y', 'jira-mcp', '--token', 'ghp_SECRETSECRETSECRET1234', '--org=acme', '--api-key=sk-live-ABCDEF0123456789'], envKeys: ['JIRA_TOKEN'], auth: 'none', status: 'connected', error: 'ECONNREFUSED /Users/ana/x', tools: [{ name: 'issues', description: 'd', cls: 'read', enabled: true, highRisk: false, isNew: false }] }
+  const stdio: Connector = { id: 'c1', name: 'Jira', kind: 'stdio', command: 'npx', args: ['-y', 'jira-mcp', '--token', 'ghp_SECRETSECRETSECRET1234', '--org=acme', '--api-key=sk-live-ABCDEF0123456789'], envKeys: ['JIRA_TOKEN'], auth: 'none', status: 'connected', error: 'ECONNREFUSED /Users/ana/x', errorDetail: 'fetch failed ← Bearer ghp_SECRETsecret0123456789abcdefABCDEF0123 refused', tools: [{ name: 'issues', description: 'd', cls: 'read', enabled: true, highRisk: false, isNew: false }] }
   const remote: Connector = { id: 'c2', name: 'Notion', kind: 'remote', url: 'https://mcp.example.com/sse?key=abcdef123456&team=acme', auth: 'token', status: 'needs_auth', tools: [] }
 
   it('a member gets the name, kind, status and tools and nothing else', () => {
@@ -68,6 +68,8 @@ describe('1. what each role reads of a connector', () => {
     expect(c.args!.join(' ')).not.toMatch(/SECRET|sk-live/)
     expect(c.args!.join(' ')).toContain('--org=acme')
     expect(c.envKeys).toEqual(['JIRA_TOKEN'])
+    expect(c.errorDetail).toContain('fetch failed')
+    expect(c.errorDetail).not.toContain('SECRET')
     const r = people.connectorFor(carla, remote)
     expect(r.url).toMatch(/^https:\/\/mcp\.example\.com\/sse\?key=\*+&team=\*+$/)
     expect(people.connectorFor(ana, stdio)).toEqual(stdio)
