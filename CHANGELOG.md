@@ -4,6 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Correção:** um conector que não conecta numa rede de empresa diz por quê, em vez de "Sem conexão com a internet" pra tudo: o certificado não foi aceito (um proxy ou antivírus que inspeciona HTTPS), o proxy recusou ou pede login, o DNS não achou o endereço, a conexão foi recusada ou caiu no meio. **Ver detalhes** mostra o que o sistema respondeu. E o Tucano agora confia nos certificados do sistema (Chaves no Mac, o repositório do Windows) e usa o proxy das configurações de rede do sistema ou de `HTTPS_PROXY`, então o certificado raiz que a empresa ou o antivírus instalou passa a valer pros conectores.
+
+### Fixed
+
+- **Connectors on company networks: the real reason, and the system's certificates and proxy.** A connector that couldn't connect said "No internet connection, or the service didn't answer" whatever the cause, because Node throws `fetch failed` for every network failure and keeps the reason in `cause`. Now Tucano reads the causes (an `AggregateError` of each address included) and says which it was: a certificate that wasn't accepted (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`, `SELF_SIGNED_CERT_IN_CHAIN`: a proxy or antivirus that inspects HTTPS, with what to do), an expired one (check the clock), a proxy that refused or wants a login (407), a name the DNS didn't find, a refused or cut connection (a firewall), real offline, or a timeout; the connector's page shows what the system said under **See details**, and an agent's failed call carries it too. And the core now trusts the system's root certificates (the macOS Keychain, the Windows certificate store, `/etc/ssl`) as well as Node's bundled ones, so a company's or an antivirus's root that the system trusts works for connectors; certificates are still always checked (`TUCANO_SYSTEM_CA=0` turns it off). Its requests also go through the proxy in `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`, or else the one in the system's network settings (or PAC), which the app resolves at launch; `localhost` never goes through it, and the wiki's link reader still goes straight to the address it checked.
+
 ## [0.2.23] - 2026-11-09
 
 > **Em português:**

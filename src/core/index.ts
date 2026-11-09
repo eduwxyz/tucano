@@ -75,6 +75,10 @@ import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 import { isNewQuestion } from '../shared/questions'
+import { companyNetwork } from './network'
+
+// Before any request: the system's certificates and proxy, for networks that inspect HTTPS (src/core/network.ts).
+companyNetwork()
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
