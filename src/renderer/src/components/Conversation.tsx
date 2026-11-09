@@ -68,6 +68,7 @@ import { canEditChannel,
   type Author,
   type DelegationRef,
   type Message,
+  type SendMode,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
@@ -2203,14 +2204,18 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
-  const submit = (): void => {
+  const sendMode = useStore((st) => st.settings?.sendMode ?? 'parallel')
+  // How this one joins a reply that's already running here: the setting says what Enter does, and
+  // the modifier keys say the rest (see `send` in src/core/runs.ts). Nothing running: all the same.
+  const submit = (mode?: SendMode): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
       conversationId,
       text,
       images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
       threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data }))
+      images.filter(isFile).map(({ name, data }) => ({ name, data })),
+      (mode ?? sendMode) === 'parallel' ? undefined : (mode ?? sendMode)
     )
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
@@ -2316,9 +2321,17 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
                 if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
                 if (e.key === 'Escape') return setMention(null)
               }
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              // Enter as the setting says; the modifiers pick a mode whatever the setting says. Ctrl+Enter
+              // keeps the line break, which Shift+Enter used to be before these four modes took it.
+              if (e.key === 'Enter' && e.nativeEvent.isComposing) return
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault()
-                submit()
+                insert('\n')
+                return
+              }
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                submit(e.altKey && e.shiftKey ? 'interrupt' : e.altKey ? 'steer' : e.shiftKey ? 'queue' : undefined)
               }
             }}
           />
@@ -2346,7 +2359,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
             </button>
           ) : null}
-          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={submit} title={L('Enviar (Enter)', 'Send (Enter)')}>
+          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={() => submit()} title={L('Enviar (Enter)', 'Send (Enter)')}>
             <Icon name="send" size={14} />
           </button>
         </div>
