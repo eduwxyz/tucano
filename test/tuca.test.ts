@@ -87,7 +87,7 @@ describe('the Tuca in a conversation', () => {
 // session goes on from there, not only what's on screen. "Nova conversa" is another DM: a new session.
 describe("the Tuca's session, when the person comes back", () => {
   const ready = { installed: true, loggedIn: true }
-  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   let gateway: Gateway
 
   afterEach(async () => {
@@ -101,7 +101,7 @@ describe("the Tuca's session, when the person comes back", () => {
     const sessions: { id: string; resume: boolean; prompt: string }[] = []
     const base = fakeEngine('claude', { delayMs: 1, sessions: true })
     const claude: Engine = { ...base, run: (t) => (t.session && sessions.push({ id: t.session.id, resume: t.session.resume, prompt: t.prompt }), base.run(t)) }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
     const runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [] }) } })
     const tuca = tucaAgent('sonnet', [], 10_000_000)
     db.saveAgent(tuca)
