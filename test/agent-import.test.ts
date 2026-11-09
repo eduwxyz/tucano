@@ -215,11 +215,16 @@ describe('importing agents from OpenBot', () => {
     expect(openBotSchedule({ kind: 'weekly', weekday: 0, time: '18:00' })).toEqual({ days: [0], time: '18:00' })
     expect(openBotSchedule({ kind: 'advanced', months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], days: { kind: 'days-of-week', days: [5, 1] }, time: { kind: 'at-time', time: '10:00' } })).toEqual({ days: [1, 5], time: '10:00' })
     expect(openBotSchedule({ kind: 'advanced', months: [1], days: { kind: 'every-day' }, time: { kind: 'at-time', time: '10:00' } })).toBeUndefined()
-    expect(openBotSchedule({ kind: 'monthly', day: 1, time: '10:00' })).toBeUndefined()
+    expect(openBotSchedule({ kind: 'monthly', day: 1, time: '10:00' })).toEqual({ days: [0, 1, 2, 3, 4, 5, 6], time: '10:00', monthDay: 1 })
+    expect(openBotSchedule({ kind: 'monthly', day: 40, time: '10:00' })).toBeUndefined()
     expect(openBotSchedule({ kind: 'custom', expression: '* * * * *' })).toBeUndefined()
     const soon = new Date(Date.now() + 2 * 86_400_000)
     const date = `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-${String(soon.getDate()).padStart(2, '0')}`
-    expect(openBotSchedule({ kind: 'once', date, time: '12:00' })).toEqual({ days: [soon.getDay()], time: '12:00', once: true })
+    expect(openBotSchedule({ kind: 'once', date, time: '12:00' })).toEqual({ days: [soon.getDay()], time: '12:00', once: true, date })
+    // Weeks ahead too, on that date (it used to be dropped past the coming week).
+    const later = new Date(Date.now() + 40 * 86_400_000)
+    const far = `${later.getFullYear()}-${String(later.getMonth() + 1).padStart(2, '0')}-${String(later.getDate()).padStart(2, '0')}`
+    expect(openBotSchedule({ kind: 'once', date: far, time: '12:00' })).toMatchObject({ once: true, date: far })
     expect(openBotSchedule({ kind: 'once', date: '2020-01-01', time: '12:00' })).toBeUndefined()
     expect(hueColor(0)).toMatch(/^#[0-9a-f]{6}$/)
   })

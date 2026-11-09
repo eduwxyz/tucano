@@ -33,6 +33,8 @@ export function loginCommand(engine: EngineId): { args: string[]; env: Record<st
       return { args: ['login', '--device-auth'], env: {} }
     case 'cursor':
       return { args: ['login'], env: { NO_OPEN_BROWSER: '1' } }
+    case 'cline':
+      return { args: ['auth'], env: {}, hint: L('Escolha o provedor com as setas e toque em Enter: Cline (a conta, no navegador) ou um provedor com a sua chave.', 'Pick the provider with the arrows and tap Enter: Cline (the account, in the browser) or a provider with your key.') }
     case 'opencode':
       return { args: ['auth', 'login'], env: {}, hint: L('Escolha o provedor com as setas e toque em Enter.', 'Pick the provider with the arrows and tap Enter.') }
     case 'antigravity':

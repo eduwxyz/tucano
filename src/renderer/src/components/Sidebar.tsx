@@ -408,7 +408,7 @@ export function Sidebar(): ReactNode {
             if (!agent) return null
             return (
               <div key={c.id} onContextMenu={(e) => open(e, dmMenu(c.id, agent.id, agent.name))}>
-                <DmItem id={c.id} agent={agent} unread={c.unread} />
+                <DmItem id={c.id} agent={agent} unread={c.unread} owner={team && agent.owner !== you ? personById({ people }, agent.owner)?.name : undefined} />
               </div>
             )
           })}
@@ -477,7 +477,13 @@ function LiveDot({ working }: { working: boolean }): ReactNode {
   return <span className={`pulse ${done ? 'is-done' : ''}`} title={working ? L('Trabalhando', 'Working') : undefined} />
 }
 
-const DmItem = memo(function DmItem({ id, agent, unread }: { id: string; agent: Agent; unread?: number }): ReactNode {
+// The agent's role, in grey after its name (cut with an ellipsis, in full on hover). With a team and
+// someone else's agent, the hover says whose it is.
+function RoleMeta({ role, owner }: { role: string; owner?: string }): ReactNode {
+  return <span className="nav-item__meta nav-item__role" title={owner ? L(`${role ? `${role} · ` : ''}de ${owner}`, `${role ? `${role} · ` : ''}${owner}'s`) : role}>{role}</span>
+}
+
+const DmItem = memo(function DmItem({ id, agent, unread, owner }: { id: string; agent: Agent; unread?: number; owner?: string }): ReactNode {
   const name = agent.name
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
@@ -486,6 +492,7 @@ const DmItem = memo(function DmItem({ id, agent, unread }: { id: string; agent: 
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <AgentAvatar agent={agent} size={18} busy={working} />
       <span className="nav-item__label">{name}</span>
+      <RoleMeta role={agent.role} owner={owner} />
       {waiting ? <WaitingMark title={waiting} /> : <LiveDot working={working} />}
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}
     </button>
@@ -504,7 +511,7 @@ const AgentItem = memo(function AgentItem({ id, owner }: { id: string; owner?: s
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'agent', id })}>
       <AgentAvatar agent={agent} size={18} />
       <span className="nav-item__label">{agent.name}</span>
-      <span className="nav-item__meta nav-item__role" title={owner ? L(`${agent.role ? `${agent.role} · ` : ''}de ${owner}`, `${agent.role ? `${agent.role} · ` : ''}${owner}'s`) : agent.role}>{agent.role}</span>
+      <RoleMeta role={agent.role} owner={owner} />
       {agent.computer && agent.computerKind === 'mac' && (
         <span className="nav-item__mac" title={L('Roda no seu computador', 'Runs on your computer')}>
           <Icon name="laptop" size={13} />

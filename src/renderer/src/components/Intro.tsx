@@ -54,7 +54,7 @@ import { STATUS, Toggle } from './Pages'
 import { Select } from './Select'
 import { useEngineModels } from './Harness'
 import { Splash } from './Splash'
-import { Composer, MessageList, setComposerDraft, useDictation, VoiceButton } from './Conversation'
+import { Composer, composerDraft, MessageList, setComposerDraft, useDictation, VoiceButton } from './Conversation'
 import { draftAgent, UseDraft } from './Tuca'
 import { Onboarding } from './Onboarding'
 import { CatalogLogo, ConnectorGrid } from './ConnectorStore'
@@ -1211,10 +1211,11 @@ function Adjust({ agent, goal, onUse, onBack }: { agent: Agent; goal: Goal; onUs
   const [error, setError] = useState('')
   const messages = useStore((s) => (conv ? messagesIn(s, conv) : []))
   useEffect(() => {
-    void ensureTuca(agent.modelId, true).then(
+    // The person's conversation with him, where it was (going back and coming here again keeps it).
+    void ensureTuca(agent.modelId).then(
       (r) => {
-        // What he's adjusting, written for the person to finish and send.
-        setComposerDraft(r.conversationId, L(`Quero ajustar ${agent.name} antes de chamar pro time. Hoje: ${goal.tagline.toLowerCase()}. Quero que `, `I want to adjust ${agent.name} before bringing it to the team. Right now it ${goal.tagline.charAt(0).toLowerCase()}${goal.tagline.slice(1)}. I want it to `))
+        // What he's adjusting, written for the person to finish and send (unless they're typing something).
+        if (!composerDraft(r.conversationId).trim()) setComposerDraft(r.conversationId, L(`Quero ajustar ${agent.name} antes de chamar pro time. Hoje: ${goal.tagline.toLowerCase()}. Quero que `, `I want to adjust ${agent.name} before bringing it to the team. Right now it ${goal.tagline.charAt(0).toLowerCase()}${goal.tagline.slice(1)}. I want it to `))
         setConv(r.conversationId)
       },
       (e: unknown) => setError(e instanceof Error ? e.message : String(e))
