@@ -78,6 +78,10 @@ import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 import { isNewQuestion } from '../shared/questions'
+import { companyNetwork } from './network'
+
+// Before any request: the system's certificates and proxy, for networks that inspect HTTPS (src/core/network.ts).
+companyNetwork()
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
@@ -1416,9 +1420,9 @@ const api: Handlers = {
     return people.pageFor(ctx.person, [root, ...db.recentMessages(root.conversationId, 100_000, rootId)])
   },
 
-  sendMessage: ({ conversationId, text, images, threadId }, ctx) => {
+  sendMessage: ({ conversationId, text, images, files, threadId }, ctx) => {
     reach(ctx, conversationId)
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id), 'sendMessage')
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, files?.length ? { files } : {}), 'sendMessage')
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {

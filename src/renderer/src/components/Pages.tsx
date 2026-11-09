@@ -1533,10 +1533,16 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
           </p>
         )}
         {c.error && (
-          <p className="note note--error">
+          <div className="note note--error">
             {c.error}
             {c.status === 'error' && ` ${L('Clique em Conectar de novo. Se continuar, confira o endereço e o login.', 'Click Reconnect. If it keeps happening, check the address and the sign-in.')}`}
-          </p>
+            {c.errorDetail && c.errorDetail !== c.error && (
+              <details className="engine-problem__more note__more">
+                <summary>{L('Ver detalhes', 'See details')}</summary>
+                <pre>{c.errorDetail}</pre>
+              </details>
+            )}
+          </div>
         )}
         {c.kind === 'remote' && c.auth === 'token' && <ConnectorToken id={c.id} />}
         <div className="row connector__actions">

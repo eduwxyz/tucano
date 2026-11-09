@@ -382,7 +382,7 @@ export class People {
   connectorFor(person: Pick<Person, 'role'>, c: Connector): Connector {
     if (person.role === 'owner') return c
     if (!isAdmin(person)) return { id: c.id, name: c.name, kind: c.kind, auth: c.auth, status: c.status, tools: c.tools }
-    return { ...c, ...(c.args ? { args: redactArgs(c.args) } : {}), ...(c.url ? { url: redactUrl(c.url) } : {}), ...(c.error ? { error: maskSecrets(c.error) } : {}) }
+    return { ...c, ...(c.args ? { args: redactArgs(c.args) } : {}), ...(c.url ? { url: redactUrl(c.url) } : {}), ...(c.error ? { error: maskSecrets(c.error) } : {}), ...(c.errorDetail ? { errorDetail: maskSecrets(c.errorDetail) } : {}) }
   }
 
   // Whether this person may see a file or page that came from a conversation (none: everyone).
