@@ -18,7 +18,7 @@ import { availableModels, builderGuide, builderSection, draftFrom, helperSection
 import { LER_GUIA, readGuide } from './guide'
 import { pendingAgents, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
-import type { Engine, TurnImage } from './engines/types'
+import type { Engine, TurnImage, Usage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
@@ -227,6 +227,15 @@ export function githubAccess(connectors: Connector[], agent: Pick<Agent, 'grants
   const kinds: ActionKind[] = ['push', 'pr']
   return { connector: c.name, level: agent.grants[c.id] as 'read' | 'read_write', tools, ask: kinds.filter((k) => actionMode(k, policy) === 'ask'), off: kinds.filter((k) => actionMode(k, policy) === 'off') }
 }
+
+// Said after the router's reason when another account than the usual login decided: why, when the
+// usual login's limit was what moved it there (it may also just be signed out).
+const viaAccount = (label: string, d: { account?: Account; spent: boolean }): string =>
+  !d.account
+    ? ''
+    : d.spent
+      ? L(`o limite do ${label} acabou, decidi pela conta “${d.account.name}”`, `${label} hit its limit, decided on the “${d.account.name}” account`)
+      : L(`decidi pela conta “${d.account.name}” do ${label}`, `decided on ${label}'s “${d.account.name}” account`)
 
 // "2,4 mi", "850 mil"
 const tokenCount = (n: number): string =>
@@ -723,22 +732,51 @@ export class Runner {
       }
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
-      const status = settings.engines[model.engine]
-      if (!status.installed || !status.loggedIn) return fail(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+      const label = ENGINES[model.engine].label
 
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
-      const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
-      if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
+      const done = await this.withRouterLogins(settings, model, note.id, (account) => route({ ...input, engine: engines[model.engine], model: model.id, cwd, account }))
+      if (!done) return fail(L(`o ${label} não está pronto`, `${label} isn't ready`))
+      const { result: r, ...via } = done
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
-      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`)
+      this.routed(conv, note, r.agents, trigger, [`${r.reason}${fellBack}`, viaAccount(label, via)].filter(Boolean).join(' · '))
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
       this.routing--
       this.checkIdle()
     }
+  }
+
+  // A spent plan shouldn't leave a channel with no one picking who answers: after the usual login, the
+  // router tries the app's other signed-in accounts of the same harness. Only a quota error moves it on,
+  // since any other failure would repeat on the next login. Undefined when there's no login to try.
+  // `ms`: the time of every attempt, what the person waited.
+  private async withRouterLogins<R extends { usage?: Usage; ms: number; error?: string }>(
+    settings: Settings,
+    model: { id: string; engine: EngineId },
+    messageId: string,
+    call: (accountFolder: string | undefined) => Promise<R>
+  ): Promise<{ result: R; account?: Account; spent: boolean } | undefined> {
+    const status = settings.engines[model.engine]
+    const { dataDir } = this.deps
+    if (!status.installed) return undefined
+    const logins: { account?: Account; folder?: string }[] = [
+      ...(status.loggedIn ? [{}] : []),
+      ...(dataDir ? (settings.accounts ?? []).filter((a) => a.engine === model.engine && a.loggedIn).map((a) => ({ account: a, folder: accountDir(dataDir, a.id) })) : [])
+    ]
+    let last: { result: R; account?: Account; spent: boolean } | undefined
+    let ms = 0
+    for (const { account, folder } of logins) {
+      const result = await call(folder)
+      if (result.usage) this.deps.db.addReceipt({ ...result.usage, model: model.id, ms: result.ms, messageId, agentId: 'router', engine: model.engine, at: Date.now() })
+      ms += result.ms
+      last = { result: { ...result, ms }, account, spent: !!last }
+      if (!result.error || !outOfQuota(result.error)) break
+    }
+    return last
   }
 
   // Each reply answers the message that was routed (`trigger`), not whatever came in while it
@@ -2577,23 +2615,27 @@ ${note}`,
         const settings = await this.deps.settings()
         // Jev stays for human messages: here 'jev' isn't a model, so this falls to Haiku.
         const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
-        const status = settings.engines[model.engine]
-        if (!status.installed || !status.loggedIn) failed(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+        const label = ENGINES[model.engine].label
+        const cwd = join(this.deps.workDir, '_router')
+        mkdirSync(cwd, { recursive: true })
+        const { messages: all } = contextWindow(db, msg, ROUTER_HISTORY)
+        // The router reads what the person it answers may read (see People.visibleAt).
+        const sees = new People(db)
+        const messages = all.filter((m) => sees.visibleAt(requesterOf(db, conv, all), m))
+        const done = await this.withRouterLogins(settings, model, msg.id, (account) =>
+          screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: this.members(conv), me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), cwd, account })
+        )
+        if (!done) failed(L(`o ${label} não está pronto`, `${label} isn't ready`))
         else {
-          const cwd = join(this.deps.workDir, '_router')
-          mkdirSync(cwd, { recursive: true })
-          const { messages: all } = contextWindow(db, msg, ROUTER_HISTORY)
-          // The router reads what the person it answers may read (see People.visibleAt).
-          const sees = new People(db)
-          const messages = all.filter((m) => sees.visibleAt(requesterOf(db, conv, all), m))
-          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: this.members(conv), me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), cwd })
-          if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
+          const { result: r, ...via } = done
           step.ms = r.ms
           if ('error' in r) failed(r.error)
           else {
             called = r.agents
-            const why = r.reason ? ` · ${r.reason}` : ''
-            step = called.length ? { ...step, detail: `${list(called)}${why}` } : { label: L('Ninguém precisa responder', 'No one needs to answer'), detail: r.reason, ms: r.ms }
+            const how = viaAccount(label, via)
+            step = called.length
+              ? { ...step, detail: [list(called), r.reason, how].filter(Boolean).join(' · ') }
+              : { label: L('Ninguém precisa responder', 'No one needs to answer'), detail: [r.reason, how].filter(Boolean).join(' · '), ms: r.ms }
           }
         }
       } catch (e) {
