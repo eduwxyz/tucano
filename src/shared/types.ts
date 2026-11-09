@@ -3,7 +3,7 @@ import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
-import { L, lang, type Lang } from './lang'
+import { L, lang, locale, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
@@ -861,6 +861,8 @@ export interface Schedule {
   days: number[] // 0 = Sunday … 6 = Saturday
   time: string // "HH:MM", Mac local time
   once?: boolean // runs at the next matching time, then turns itself off
+  date?: string // "YYYY-MM-DD": that day only, at `time` (always once; `days` is its weekday)
+  monthDay?: number // 1–31: every month on that day (a shorter month's last day), at `time`
 }
 
 // What starts a routine other than the clock (spec §17). The app is local, so
@@ -923,10 +925,47 @@ const EVERY_DAY = (): string[] =>
 
 export const validTime = (t: string): boolean => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)
 
+// "2026-11-17", a day that exists.
+export const validDate = (d: string): boolean => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d)
+  if (!m) return false
+  const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return at.getFullYear() === Number(m[1]) && at.getMonth() === Number(m[2]) - 1 && at.getDate() === Number(m[3])
+}
+
+// A date's local time on this computer ("2026-11-17", "09:00").
+export const dateAt = (date: string, time: string): number => {
+  const [y, mo, d] = date.split('-').map(Number) as [number, number, number]
+  const [h, m] = time.split(':').map(Number) as [number, number]
+  return new Date(y, mo - 1, d, h, m).getTime()
+}
+
+// "2026-11-17" of a local time.
+export const isoDay = (at: number): string => {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // The first time after `after` that matches the schedule.
 export function nextRun(s: Schedule, after: number): number | undefined {
-  if (!validTime(s.time) || s.days.length === 0) return undefined
+  if (!validTime(s.time)) return undefined
+  if (s.date !== undefined) {
+    if (!validDate(s.date)) return undefined
+    const at = dateAt(s.date, s.time)
+    return at > after ? at : undefined
+  }
   const [h, m] = s.time.split(':').map(Number) as [number, number]
+  if (s.monthDay !== undefined) {
+    if (!Number.isInteger(s.monthDay) || s.monthDay < 1 || s.monthDay > 31) return undefined
+    const d = new Date(after)
+    for (let i = 0; i <= 12; i++) {
+      const last = new Date(d.getFullYear(), d.getMonth() + i + 1, 0).getDate()
+      const at = new Date(d.getFullYear(), d.getMonth() + i, Math.min(s.monthDay, last), h, m).getTime()
+      if (at > after) return at
+    }
+    return undefined
+  }
+  if (s.days.length === 0) return undefined
   const d = new Date(after)
   for (let i = 0; i <= 7; i++) {
     const at = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, h, m).getTime()
@@ -934,6 +973,8 @@ export function nextRun(s: Schedule, after: number): number | undefined {
   }
   return undefined
 }
+
+const ordinal = (n: number): string => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`
 
 export function describeSchedule(s: Schedule): string {
   const days = [...new Set(s.days)].sort()
@@ -953,6 +994,11 @@ export function describeSchedule(s: Schedule): string {
                 .join(', ')
                 .replace(/, ([^,]+)$/, `${and}$1`)
                 .replace(/^./, (c) => c.toUpperCase())
+  if (s.date !== undefined && validDate(s.date)) {
+    const day = new Date(dateAt(s.date, '12:00')).toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', ...(Number(s.date.slice(0, 4)) !== new Date().getFullYear() ? { year: 'numeric' } : {}) }).replace(/\./g, '')
+    return L(`Uma vez, ${day} às ${hour}`, `Once, ${day} at ${hour}`)
+  }
+  if (s.monthDay !== undefined) return L(`Todo dia ${s.monthDay} do mês às ${hour}`, `Every month on the ${ordinal(s.monthDay)} at ${hour}`)
   if (s.once) return days.length === 7 ? L(`Uma vez, às ${hour}`, `Once, at ${hour}`) : L(`Uma vez, ${days.map((d) => DAY_LONG()[d]).join(' ou ')} às ${hour}`, `Once, ${days.map((d) => DAY_LONG()[d]).join(' or ')} at ${hour}`)
   return L(`${when} às ${hour}`, `${when} at ${hour}`)
 }
