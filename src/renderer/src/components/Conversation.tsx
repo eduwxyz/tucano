@@ -69,6 +69,8 @@ import { canEditChannel,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
+  MAX_FILE_BYTES,
+  MAX_FILES_PER_MESSAGE,
   isTeam,
   cancelTranscribe,
   transcribe,
@@ -1533,7 +1535,9 @@ function ApprovalRoute({ approval, agent, requester, decider, you }: { approval:
 const MAX_SIDE = 2000
 const MAX_RAW = 3_700_000 // base64 under the models' 5 MB
 
-type Attached = ImageUpload & { url: string }
+// An image (with what shows it) or, in the app, any other file: `url` empty, its text goes to the agents.
+type Attached = ImageUpload & { url: string; size?: number }
+const isFile = (a: Attached): boolean => !a.url
 
 const dataUrlOf = (blob: Blob): Promise<string> =>
   new Promise((ok, fail) => {
@@ -1542,6 +1546,17 @@ const dataUrlOf = (blob: Blob): Promise<string> =>
     r.onerror = () => fail(r.error)
     r.readAsDataURL(blob)
   })
+
+async function prepareFile(file: File): Promise<Attached | string> {
+  if (file.size === 0) return L(`${file.name} está vazio.`, `${file.name} is empty.`)
+  if (file.size > MAX_FILE_BYTES) return L(`${file.name} passa de ${MAX_FILE_BYTES / 1024 / 1024} MB.`, `${file.name} is over ${MAX_FILE_BYTES / 1024 / 1024} MB.`)
+  try {
+    const url = await dataUrlOf(file)
+    return { name: file.name || L('arquivo', 'file'), mime: file.type || 'application/octet-stream', data: url.slice(url.indexOf(',') + 1), url: '', size: file.size }
+  } catch {
+    return L(`Não deu pra abrir ${file.name}.`, `${file.name} couldn't be opened.`)
+  }
+}
 
 async function prepareImage(file: File): Promise<Attached | string> {
   if (!file.type.startsWith('image/')) return L(`${file.name} não é imagem.`, `${file.name} isn't an image.`)
@@ -1912,15 +1927,19 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       if (!files.length) return void ref.current?.focus()
     }
     if (!files.length) return
-    const done = await Promise.all(files.map(prepareImage))
+    // In the app, a file that isn't an image goes with the message, and its text to the agents.
+    const done = await Promise.all(files.map((f) => (f.type.startsWith('image/') ? prepareImage(f) : prepareFile(f))))
     const ok = done.filter((d): d is Attached => typeof d !== 'string')
     const errors = done.filter((d): d is string => typeof d === 'string')
-    let over = false
+    let over = ''
     setImages((cur) => {
-      over = cur.length + ok.length > MAX_IMAGES_PER_MESSAGE
-      return [...cur, ...ok].slice(0, MAX_IMAGES_PER_MESSAGE)
+      const all = [...cur, ...ok]
+      const pics = all.filter((a) => !isFile(a))
+      const docs = all.filter(isFile)
+      over = pics.length > MAX_IMAGES_PER_MESSAGE ? L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`) : docs.length > MAX_FILES_PER_MESSAGE ? L(`Até ${MAX_FILES_PER_MESSAGE} arquivos por mensagem.`, `Up to ${MAX_FILES_PER_MESSAGE} files per message.`) : ''
+      return [...pics.slice(0, MAX_IMAGES_PER_MESSAGE), ...docs.slice(0, MAX_FILES_PER_MESSAGE)]
     })
-    setNote([...errors, over ? L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`) : ''].filter(Boolean).join(' '))
+    setNote([...errors, over].filter(Boolean).join(' '))
     ref.current?.focus()
   }
 
@@ -2066,8 +2085,9 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     sendMessage(
       conversationId,
       text,
-      images.map(({ name, mime, data }) => ({ name, mime, data })),
-      threadId
+      images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
+      threadId,
+      images.filter(isFile).map(({ name, data }) => ({ name, data }))
     )
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
@@ -2118,14 +2138,24 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">
-            {images.map((img, i) => (
+            {images.map((img, i) =>
+              isFile(img) ? (
+                <div key={i} className="composer__file" title={img.name}>
+                  <Icon name="clip" size={13} />
+                  <span className="composer__file-name">{img.name}</span>
+                  <button className="composer__file-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </div>
+              ) : (
               <div key={i} className="composer__image" title={img.name}>
                 <img src={img.url} alt={img.name} />
                 <button className="composer__image-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
                   <Icon name="x" size={11} />
                 </button>
               </div>
-            ))}
+              )
+            )}
           </div>
         )}
         <div className="composer__field">
@@ -2145,7 +2175,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               if (e.target.value.trim()) typing(conversationId, threadId)
             }}
             onPaste={(e) => {
-              const files = pastedFiles([...e.clipboardData.files], e.clipboardData.getData('text/plain'), !!window.tucano.upload)
+              const files = pastedFiles([...e.clipboardData.files], e.clipboardData.getData('text/plain'), true)
               if (!files.length) return
               e.preventDefault()
               void addFiles(files)
@@ -2172,13 +2202,12 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
         </div>
         <div className="composer__bar">
           <VoiceButton controls={voiceControls} state={voice} />
-          <button className="icon-btn" title={window.tucano.upload ? L('Anexar arquivo (ou arraste e solte, ou cole)', 'Attach a file (or drag and drop, or paste)') : L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
-            <Icon name="image" size={15} />
+          <button className="icon-btn" title={L('Anexar arquivo ou imagem (ou arraste e solte, ou cole)', 'Attach a file or an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
+            <Icon name="clip" size={15} />
           </button>
           <input
             ref={picker}
             type="file"
-            accept={window.tucano.upload ? undefined : 'image/*'}
             multiple
             hidden
             onChange={(e) => {
