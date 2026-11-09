@@ -1140,6 +1140,12 @@ export class Db {
     return rows.map((r) => this.toMessage(r))
   }
 
+  // The approval a reply is waiting on, newest first: one reply asks one thing at a time.
+  approvalForMessage(messageId: string): Approval | undefined {
+    const r = this.db.prepare('SELECT * FROM approvals WHERE message_id = ? ORDER BY created_at DESC LIMIT 1').get(messageId) as Row | undefined
+    return r ? this.toApproval(r) : undefined
+  }
+
   // Runs that were working when the app closed can't continue: their CLI process is gone.
   interruptStaleRuns(): number {
     let n = 0
