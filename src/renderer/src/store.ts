@@ -506,8 +506,7 @@ export const liveText = (id: string): string | undefined => live.get(id)
 const thoughts = new ThoughtCache((id) => wake(thoughtListeners, id))
 
 function streamThought(id: string, text: string): void {
-  thoughts.append(id, text)
-}
+  thoughts.append(id, text)}
 
 export const liveThought = (id: string): string | undefined => thoughts.get(id)
 
@@ -516,8 +515,7 @@ export function useLiveThought(id: string, every = 0): string | undefined {
   return useLiveThoughtState(id, every)?.text
 }
 
-export function useLiveThoughtState(id: string, every = 0): RetainedThought | undefined {
-  const subscribe = useCallback(
+export function useLiveThoughtState(id: string, every = 0): RetainedThought | undefined {  const subscribe = useCallback(
     (l: () => void) => {
       let timer: ReturnType<typeof setTimeout> | undefined
       const off = listen(thoughtListeners, id, () => {
@@ -537,8 +535,7 @@ export function useLiveThoughtState(id: string, every = 0): RetainedThought | un
   )
   // No thoughts before the window exists: a reply drawn to markup (a test, a server-side first
   // frame) has none, and asking for them there would throw instead of drawing the steps.
-  return useSyncExternalStore(subscribe, () => thoughts.snapshot(id), () => undefined)
-}
+  return useSyncExternalStore(subscribe, () => thoughts.snapshot(id), () => undefined)}
 
 // The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.
 export function useLiveText(m: Message, every = 0): string {
@@ -606,8 +603,7 @@ function apply(e: CoreEvent): void {
   if (e.type === 'delta') return stream(e.id, e.text)
   // The model's reasoning is kept only when this person asked for it (Settings › General): off, the
   // text never lands in memory, so nothing of it can be drawn or read back later.
-  if (e.type === 'thinking') return state.settings.showThinking === true ? streamThought(e.id, e.text) : undefined
-  if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
+  if (e.type === 'thinking') return state.settings.showThinking === true ? streamThought(e.id, e.text) : undefined  if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   if (e.type === 'tasks') return void (state.tasks && loadTasks())
   set((s) => {
     switch (e.type) {
