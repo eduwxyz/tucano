@@ -3,7 +3,7 @@
 // card with Aplicar and Descartar, like his new agents: nothing changes until the person applies it.
 // He sees settings, statuses and error messages, never what was said in a conversation.
 import { L } from '../shared/lang'
-import { channelName, ENGINES, modelInfo, validTime, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal } from '../shared/types'
+import { channelName, ENGINES, modelInfo, validTime, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
 import type { ToolDef } from './gateway'
 
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh']
@@ -103,6 +103,8 @@ export function workspaceState(area: unknown, x: StateInput): string {
 
 const reasonProp = () => ({ motivo: { type: 'string', description: L('Por que, em uma frase. Aparece no card.', 'Why, in one sentence. It shows on the card.') } })
 const agentProp = () => ({ agente: { type: 'string', description: L('O @handle do agente.', "The agent's @handle.") } })
+// propor_rotina and propor_canal may also name an agent proposed just before, in the same reply.
+const agentOrNewProp = () => ({ agente: { type: 'string', description: L('O @handle do agente, ou o nome de um agente proposto antes nesta mesma resposta (propor_agente ou propor_time): a rotina é criada depois dele.', "The agent's @handle, or the name of an agent proposed earlier in this same reply (propor_agente or propor_time): the routine is made after it.") } })
 
 export const PROPOR_AJUSTE: ToolDef = {
   name: 'propor_ajuste',
@@ -148,7 +150,7 @@ export const PROPOR_ROTINA: ToolDef = {
     return {
       type: 'object' as const,
       properties: {
-        ...agentProp(),
+        ...agentOrNewProp(),
         nome: { type: 'string', description: L('Curto (ex.: "Resumo do dia").', 'Short (e.g. "Daily summary").') },
         pedido: { type: 'string', description: L('O que o agente faz a cada vez, como um pedido a ele.', 'What the agent does each time, as a request to it.') },
         onde: { type: 'string', description: L('"dm" (a DM com o agente, o padrão) ou o nome de um canal de que ele participa.', '"dm" (the DM with the agent, the default) or the name of a channel it is in.') },
@@ -173,7 +175,7 @@ export const PROPOR_CANAL: ToolDef = {
       properties: {
         nome: { type: 'string' },
         tema: { type: 'string', description: L('Uma linha dizendo pra que ele serve.', 'One line saying what it is for.') },
-        agentes: { type: 'array', items: { type: 'string' }, description: L('Os @handles dos agentes.', "The agents' @handles.") },
+        agentes: { type: 'array', items: { type: 'string' }, description: L('Os @handles dos agentes (ou o nome de um proposto antes nesta mesma resposta: entra quando for criado).', "The agents' @handles (or the name of one proposed earlier in this same reply: it joins once made).") },
         threads: { type: 'boolean', description: L('Se cada mensagem abre uma thread (o padrão é responder na conversa).', 'Whether each message opens a thread (by default they answer in the conversation).') },
         ...reasonProp()
       },
@@ -187,12 +189,18 @@ export interface ProposalCtx {
   conversations: Conversation[]
   connectors: Connector[]
   usable: (modelId: string) => boolean
+  pending?: string[] // names of the agents proposed earlier in this same reply (a new-agent card, a team): not made yet
 }
 
 const text = (args: Record<string, unknown>, k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
 const findAgent = (ctx: ProposalCtx, raw: unknown): Agent | undefined => {
   const h = String(raw ?? '').trim().replace(/^@/, '').toLowerCase()
   return ctx.agents.find((a) => a.handle.toLowerCase() === h) ?? ctx.agents.find((a) => a.name.toLowerCase() === h)
+}
+// An agent proposed earlier in this reply, by name: it exists once its card is applied.
+const pendingAgent = (ctx: ProposalCtx, raw: unknown): string | undefined => {
+  const h = String(raw ?? '').trim().replace(/^@/, '').toLowerCase()
+  return ctx.pending?.find((n) => n.toLowerCase() === h || n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '-') === h)
 }
 const unknownAgent = (raw: unknown): string => L(`Não existe o agente "${String(raw ?? '')}". Use um @handle da lista do time.`, `There's no agent "${String(raw ?? '')}". Use a @handle from the team list.`)
 
@@ -210,10 +218,18 @@ function grantsFrom(raw: unknown, connectors: Connector[]): { grants?: Record<st
   return { grants }
 }
 
+// The agents a reply proposed so far that don't exist yet: its new-agent card, and its teams'.
+export function pendingAgents(run: { agentDraft?: AgentDraft; proposal?: Proposal; proposals?: Proposal[] } | undefined): string[] {
+  const teams = proposalsOf(run).flatMap((p) => (p.kind === 'team' && !p.state ? p.agents.map((a) => a.name) : []))
+  return [...(run?.agentDraft && !run.agentDraft.state ? [run.agentDraft.name] : []), ...teams]
+}
+
 export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: Proposal; error?: string } {
   const reason = text(args, 'motivo', 300) || undefined
   if (tool === PROPOR_AJUSTE.name) {
     const agent = findAgent(ctx, args['agente'])
+    const pending = agent ? undefined : pendingAgent(ctx, args['agente'])
+    if (pending) return { error: L(`${pending} ainda não existe: está num card desta resposta. Pra mudar, proponha ele de novo com tudo.`, `${pending} doesn't exist yet: it's in a card of this reply. To change it, propose it again with everything.`) }
     if (!agent) return { error: unknownAgent(args['agente']) }
     const changes: AgentChanges = {}
     const name = text(args, 'nome', 40)
@@ -245,7 +261,8 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
   }
   if (tool === PROPOR_ROTINA.name) {
     const agent = findAgent(ctx, args['agente'])
-    if (!agent) return { error: unknownAgent(args['agente']) }
+    const pending = agent ? undefined : pendingAgent(ctx, args['agente'])
+    if (!agent && !pending) return { error: unknownAgent(args['agente']) }
     const name = text(args, 'nome', 80)
     const prompt = text(args, 'pedido', 4000)
     if (!name || !prompt) return { error: L('Faltou nome ou pedido.', 'Missing nome or pedido.') }
@@ -254,6 +271,12 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
     const time = text(args, 'hora', 5)
     if (!validTime(time)) return { error: L('A hora vai como "HH:MM".', 'The time goes as "HH:MM".') }
     const where = text(args, 'onde', 80).replace(/^#/, '')
+    const schedule = { days, time, ...(args['uma_vez'] === true ? { once: true } : {}) }
+    // For an agent proposed in this reply: in its DM, opened once it's made (it's in no channel yet).
+    if (!agent) {
+      if (where && where.toLowerCase() !== 'dm') return { error: L(`${pending} ainda não existe, então não está em nenhum canal: use a DM.`, `${pending} doesn't exist yet, so it's in no channel: use the DM.`) }
+      return { proposal: { kind: 'routine', routine: { name, agentId: '', conversationId: '', prompt, schedule, enabled: true }, needs: [pending!], ...(reason ? { reason } : {}) } }
+    }
     let conversationId = '' // the agent's DM: opened when the routine is applied, if it isn't yet
     if (where && where.toLowerCase() !== 'dm') {
       const c = ctx.conversations.find((c) => c.kind === 'channel' && c.name === channelName(where))
@@ -261,21 +284,24 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
       if (!c.members.includes(agent.id)) return { error: L(`${agent.name} não está em #${c.name}. Use a DM, ou um canal de que ele participa.`, `${agent.name} isn't in #${c.name}. Use the DM, or a channel it's in.`) }
       conversationId = c.id
     } else conversationId = ctx.conversations.find((c) => c.kind === 'dm' && c.name === agent.id)?.id ?? ''
-    return { proposal: { kind: 'routine', routine: { name, agentId: agent.id, conversationId, prompt, schedule: { days, time, ...(args['uma_vez'] === true ? { once: true } : {}) }, enabled: true }, ...(reason ? { reason } : {}) } }
+    return { proposal: { kind: 'routine', routine: { name, agentId: agent.id, conversationId, prompt, schedule, enabled: true }, ...(reason ? { reason } : {}) } }
   }
   if (tool === PROPOR_CANAL.name) {
     const name = channelName(text(args, 'nome', 80))
     if (!name) return { error: L('Dê um nome ao canal.', 'Give the channel a name.') }
     if (ctx.conversations.some((c) => c.kind === 'channel' && c.name === name)) return { error: L(`Já existe o canal #${name}.`, `There's already a #${name} channel.`) }
     const members: string[] = []
+    const needs: string[] = [] // proposed in this reply: they join once made
     for (const raw of Array.isArray(args['agentes']) ? (args['agentes'] as unknown[]) : []) {
       const a = findAgent(ctx, raw)
-      if (!a) return { error: unknownAgent(raw) }
-      if (!members.includes(a.id)) members.push(a.id)
+      const pending = a ? undefined : pendingAgent(ctx, raw)
+      if (!a && !pending) return { error: unknownAgent(raw) }
+      if (a && !members.includes(a.id)) members.push(a.id)
+      if (pending && !needs.includes(pending)) needs.push(pending)
     }
-    if (!members.length) return { error: L('Diga quais agentes ficam no canal.', 'Say which agents are in the channel.') }
+    if (!members.length && !needs.length) return { error: L('Diga quais agentes ficam no canal.', 'Say which agents are in the channel.') }
     const topic = text(args, 'tema', 200)
-    return { proposal: { kind: 'channel', name, members, ...(topic ? { topic } : {}), ...(args['threads'] === true ? { threads: true } : {}), ...(reason ? { reason } : {}) } }
+    return { proposal: { kind: 'channel', name, members, ...(topic ? { topic } : {}), ...(args['threads'] === true ? { threads: true } : {}), ...(needs.length ? { needs } : {}), ...(reason ? { reason } : {}) } }
   }
   return { error: 'unknown proposal' }
 }

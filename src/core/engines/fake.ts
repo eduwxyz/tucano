@@ -44,8 +44,18 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (opts.reply) {
         reply = opts.reply(turn)
       } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
-        // The Tuca: asks once, then proposes a support agent.
-        if (/suporte|ticket|cliente|support|customer/i.test(last)) {
+        // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
+        // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).
+        if (/migra/i.test(last)) {
+          const calls: [string, Record<string, unknown>][] = [
+            ['propor_agente', { nome: 'Léo', funcao: L('Financeiro', 'Finance'), cor: 'amber', instrucoes: L('Você cuida das contas do time.\nLê os gastos do dia e separa por categoria.\nResponde em tópicos curtos.\nNunca paga nada: pergunta antes.', "You look after the team's accounts.\nRead the day's expenses and sort them by category.\nAnswer in short bullet points.\nNever pay anything: ask first."), esforco: 'low', web: false, motivo: L('Alguém só pras contas.', 'Someone just for the accounts.') }],
+            ...['lia', 'theo', 'nina'].map((agente): [string, Record<string, unknown>] => ['propor_ajuste', { agente, limite: 345_000, motivo: L('Migração: o limite novo do time.', "Migration: the team's new limit.") }]),
+            ['propor_rotina', { agente: 'Léo', nome: L('Fechamento do dia', 'Daily close'), pedido: L('Resuma os gastos do dia.', "Sum up the day's expenses."), dias: [1, 2, 3, 4, 5], hora: '18:00' }],
+            ['propor_canal', { nome: L('financeiro', 'finance'), agentes: ['nina', 'Léo'], tema: L('Contas e fechamento', 'Accounts and closing') }]
+          ]
+          for (const [tool, args] of calls) await callTool(turn.mcpUrl, tool, args)
+          reply = L('Mandei tudo de uma vez: o Léo, o limite novo de cada um, a rotina dele e o canal. Dá pra aplicar um por um ou todos.', 'I sent it all at once: Léo, the new limit for each, his routine and the channel. You can apply them one by one or all together.')
+        } else if (/suporte|ticket|cliente|support|customer/i.test(last)) {
           const r = await callTool(turn.mcpUrl, 'propor_agente', {
             nome: 'Rafa',
             funcao: L('Suporte', 'Support'),

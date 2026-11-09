@@ -1326,13 +1326,13 @@ export function InboxPage(): ReactNode {
           <h3 className="section-title">{L('Pedidos pra um admin aplicar', 'Requests for an admin to apply')}</h3>
           <div className="stack-list">
             {proposals.map((p) => (
-              <div key={p.id}>
+              <div key={`${p.id}:${p.index ?? 0}`}>
                 <div className="row row--between small muted list-meta">
                   <span>
                     {L(`${people.find((x) => x.id === p.by)?.name ?? 'Alguém'} pediu`, `${people.find((x) => x.id === p.by)?.name ?? 'Someone'} asked`)} · {time(p.at)}
                   </span>
                 </div>
-                <ProposalCard message={{ id: p.id, conversationId: '', author: { kind: 'agent', id: p.agentId }, text: '', at: p.at, run: { status: 'done', proposal: p.proposal } } as Message} />
+                <ProposalCard message={{ id: p.id, conversationId: '', author: { kind: 'agent', id: p.agentId }, text: '', at: p.at, run: { status: 'done' } } as Message} index={p.index ?? 0} proposal={p.proposal} />
               </div>
             ))}
           </div>

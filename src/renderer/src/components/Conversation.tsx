@@ -44,6 +44,7 @@ import { canEditChannel,
   openThread,
   seeThread,
   openTuca,
+  proposalsOf,
   removeRoutine,
   retryRun,
   continueRun,
@@ -86,7 +87,7 @@ import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
-import { AgentProposal, ProposalCard } from './Tuca'
+import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
@@ -513,8 +514,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             <AnswersSummary message={message} />
           ))}
         {approval && <ApprovalCard approval={approval} />}
-        {message.run?.agentDraft && <AgentProposal message={message} />}
-        {message.run?.proposal && <ProposalCard message={message} />}
+        {(message.run?.agentDraft || proposalsOf(message.run).length > 0) && <Proposals message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
@@ -1583,6 +1583,7 @@ try {
 } catch {}
 // What a conversation's field starts with next time it opens (the introduction leaves the first message there, unsent).
 export const setComposerDraft = (key: string, text: string): void => void drafts.set(key, { text, images: [] })
+export const composerDraft = (key: string): string => drafts.get(key)?.text ?? ''
 const keepForReload = (current?: { key: string; text: string }): void => {
   const texts: Record<string, string> = {}
   for (const [k, d] of drafts) if (d.text.trim()) texts[k] = d.text
