@@ -19,8 +19,8 @@ const by = { by: 'me', byName: 'Ana' }
 const finding = (over: Partial<WikiFinding>): WikiFinding => ({ id: 'f1', at: 1, kind: 'missing', pages: [], text: '', ...over })
 
 describe('which findings can be handed to an agent', () => {
-  it('takes the two that want a page, and nothing else', () => {
-    expect(['broken', 'missing'].every((k) => canHandOff(k as WikiFinding['kind']))).toBe(true)
+  it('takes the two that want a page and the one that wants links, and nothing else', () => {
+    expect(['broken', 'missing', 'orphan'].every((k) => canHandOff(k as WikiFinding['kind']))).toBe(true)
     for (const kind of ['contradiction', 'stale', 'duplicate', 'link', 'log', 'git'] as const) expect(canHandOff(kind)).toBe(false)
   })
 })
@@ -59,5 +59,27 @@ describe('the message a missing page gets', () => {
     const text = handOffText(finding({ kind: 'missing', name: 'Alvo', pages: ['Longa'] }), (t) => w.page(t))
     expect(text).toContain('Começo.')
     expect(text.length).toBeLessThan(1400)
+  })
+})
+
+describe('the message orphan pages get', () => {
+  it('lists every orphan and asks for links both ways, without rewriting the pages', () => {
+    const w = fresh()
+    w.save({ title: 'Founder Foundry agent', kind: 'Decisão', body: 'Cuida do Foundry.', ...by })
+    w.save({ title: 'OpenLibExtended', kind: 'Projeto', body: 'A CLI de livros.', ...by })
+    const f = finding({ kind: 'orphan', pages: ['Founder Foundry agent', 'OpenLibExtended'], text: 'No page links to them.' })
+    const text = handOffText(f, (t) => w.page(t))
+    expect(text).toContain('[[Founder Foundry agent]]')
+    expect(text).toContain('[[OpenLibExtended]]')
+    expect(text).toContain('A CLI de livros.')
+    expect(text).toContain('wiki_escrever')
+    expect(text).toMatch(/não reescreva|don't rewrite/)
+  })
+
+  it('says what to do with an orphan nothing has anything to do with', () => {
+    const f = finding({ kind: 'orphan', pages: ['Scratch files'] })
+    const text = handOffText(f, () => undefined)
+    expect(text).toContain('[[Scratch files]]')
+    expect(text).toMatch(/tiver a ver|nothing to do/)
   })
 })

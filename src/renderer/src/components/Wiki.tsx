@@ -1581,9 +1581,9 @@ const FINDING_ORDER: WikiFinding['kind'][] = ['git', 'contradiction', 'stale', '
 // The last agent a finding was handed to, so the next one comes with it picked already.
 let lastAsked: string | undefined
 
-// A page nobody has written yet: the wiki links to it and doesn't have it. It goes to an agent,
-// picked here, which gets one message with what it needs; the writing is the agent's own tool, so
-// only the ones with wiki write access are offered.
+// A finding nobody has written yet: a page the wiki links to and doesn't have, or pages nothing
+// links to. Either goes to an agent, picked here, which gets one message with what it needs; the
+// writing is the agent's own tool, so only the ones with wiki write access are offered.
 export function HandOff({ finding: f }: { finding: WikiFinding }): ReactNode {
   const agents = useStore((s) => s.agents)
   const [pick, setPick] = useState<string | null>(lastAsked ?? null)
@@ -1597,6 +1597,7 @@ export function HandOff({ finding: f }: { finding: WikiFinding }): ReactNode {
         {L('Nenhum agente escreve na wiki ainda: ligue "Escreve na wiki" nas configurações de um, em Wiki.', 'No agent writes on the wiki yet: turn on "Writes the wiki" in one of their settings, under Wiki.')}
       </span>
     )
+  const links = f.kind === 'orphan'
   const ask = (): void => {
     if (!chosen) return
     setBusy(true)
@@ -1628,7 +1629,7 @@ export function HandOff({ finding: f }: { finding: WikiFinding }): ReactNode {
         }}
       />
       <button className={`btn btn--primary btn--sm ${busy ? 'is-busy' : ''}`} disabled={busy || !chosen} onClick={ask}>
-        {busy ? <span className="wk-spin" /> : <Icon name="edit" size={13} />} {L('Escrever a página', 'Write the page')}
+        {busy ? <span className="wk-spin" /> : <Icon name={links ? 'thread' : 'edit'} size={13} />} {links ? L('Ligar as páginas', 'Link the pages') : L('Escrever a página', 'Write the page')}
       </button>
       {error && <span className="field__error">{error}</span>}
     </>
@@ -1699,7 +1700,7 @@ function WikiReviewPane(): ReactNode {
             <ChangeCard change={f.change} bare />
           ) : (
             <div className="wk-finding__actions">
-              {(f.kind === 'broken' || f.kind === 'missing') && <HandOff finding={f} />}
+              {(f.kind === 'broken' || f.kind === 'missing' || f.kind === 'orphan') && <HandOff finding={f} />}
               {f.name && (f.kind === 'broken' || f.kind === 'missing') && (
                 <button className="btn btn--ghost btn--sm" onClick={() => navigate({ kind: 'wiki', title: f.name!, edit: true })}>
                   <Icon name="edit" size={13} /> {L('Escrever eu mesmo', 'Write it myself')}
