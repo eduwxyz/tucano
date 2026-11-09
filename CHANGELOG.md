@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.23] - 2026-11-09
+
 > **Em português:**
 > - **Novidade:** os agentes rodam também no **Cline CLI** (`npm install -g cline`), na sua conta da Cline ou nos provedores que você adicionar com a sua chave. O Tucano entra num login só dele (**Entrar** abre o `cline auth`), sem mexer no seu `~/.cline`, e cada resposta roda isolada: sem as suas rules, skills, hooks, plugins e servidores MCP do Cline, sem o terminal e os arquivos do próprio Cline, só com as ferramentas do Tucano.
 > - **Novidade:** o Tuca manda várias propostas numa resposta só. Pediu pra mudar vários agentes (uma migração, um agente com rotina e canal)? Elas chegam juntas, num grupo pra passar uma a uma ("1 de 5"), cada uma com Aplicar e Descartar, mais **Aplicar todos** (mostra o que vai fazer, na ordem) e **Descartar todos**. Se uma não der certo, as outras seguem e você vê o porquê. Um agente novo vem antes da rotina e do canal que dependem dele.
@@ -538,6 +540,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.23]: https://github.com/eduwxyz/tucano/compare/v0.2.22...v0.2.23
 [0.2.22]: https://github.com/eduwxyz/tucano/compare/v0.2.21...v0.2.22
 [0.2.21]: https://github.com/eduwxyz/tucano/compare/v0.2.20...v0.2.21
 [0.2.20]: https://github.com/eduwxyz/tucano/compare/v0.2.19...v0.2.20
