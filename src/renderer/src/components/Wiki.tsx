@@ -1584,7 +1584,7 @@ let lastAsked: string | undefined
 // A page nobody has written yet: the wiki links to it and doesn't have it. It goes to an agent,
 // picked here, which gets one message with what it needs; the writing is the agent's own tool, so
 // only the ones with wiki write access are offered.
-function HandOff({ finding: f }: { finding: WikiFinding }): ReactNode {
+export function HandOff({ finding: f }: { finding: WikiFinding }): ReactNode {
   const agents = useStore((s) => s.agents)
   const [pick, setPick] = useState<string | null>(lastAsked ?? null)
   const [busy, setBusy] = useState(false)
