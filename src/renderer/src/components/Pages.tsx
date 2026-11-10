@@ -746,7 +746,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               {/* Settings › Router has the global switch; here it's this agent's own, in three states, so
                   the global one can be off while a bot or two still route. An explicit model above stays the
                   baseline it runs on whenever routing decides nothing. */}
-              <div className="key-row">
+              <div className="key-row key-row--switch">
                 <Icon name="spark" />
                 <div className="grow">
                   <strong>{L('Roteamento inteligente', 'Smart routing')}</strong>
