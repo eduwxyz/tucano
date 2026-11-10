@@ -4,6 +4,7 @@
 // the channel's recent messages to TypeSafe, so it's off unless chosen.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
+import type { Decision } from '../shared/questions'
 import type { Agent, Connector, Message, Person } from '../shared/types'
 import type { ThreadDigest } from './memory'
 import { describeAgent, MAX_ROUTED, REPLY_JSON, ROUTER_HISTORY, routerPrompt } from './router'
@@ -211,6 +212,94 @@ export async function listenJev(opts: {
   // It's the right agent for the subject, but the room can do without it: it stays out.
   if (needed.choice !== LISTEN_NO) return { agents: [], reason: L(`o ${picked.name} caberia, mas quem está no canal dá conta`, `${picked.name} would fit, but whoever is in the channel handles it`), ms: ms() }
   return { agents: [picked], reason: `${picked.name}, ${pct(picked.handle)}`, ms: ms() }
+}
+
+// ---------- the decisions an agent asks (ask_user) ----------
+// A question can offer two or three ways forward and the person has to pick one. One cheap typed
+// question per decision says which option Jev would pick, and the card shows it as a pill. It never
+// picks for anybody: "none" is a real answer, for a choice that's the person's own.
+export const RECOMMEND_NONE = '__nenhuma'
+const RECOMMEND_TIMEOUT_MS = 8_000
+const CONTEXT_MAX = 1_200
+
+type Suggested = number | null
+
+// One decision, one question. `state` is what the agent said, then the decision itself.
+async function recommendOne(opts: { key: string; state: string; decision: Decision; fetch?: Fetch }): Promise<Suggested | { error: string }> {
+  const options = opts.decision.options ?? []
+  const criteria: Record<string, string> = {}
+  options.forEach((o, j) => {
+    criteria[`o${j}`] = o.description ? `${o.label} — ${o.description}` : o.label
+  })
+  criteria[RECOMMEND_NONE] = L(
+    'Nenhuma: nenhuma opção é claramente melhor, ou a escolha é da própria pessoa (gosto, preferência, algo que só ela sabe).',
+    "None: no option is clearly better, or the choice is the person's own (taste, preference, something only they know)."
+  )
+  let res: Response
+  try {
+    res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'jev-latest',
+        state: opts.state,
+        questions: {
+          pick: {
+            type: 'choice',
+            instructions: L(
+              'Qual opção desta decisão é a melhor pra pessoa escolher? Prefira o que a pergunta e o contexto apontam: o mais direto e o de menor risco. Se empatarem, ou se a escolha for da pessoa, escolha Nenhuma.',
+              'Which option of this decision is the best for the person to pick? Prefer what the question and the context point to: the most direct, the lowest risk. If they tie, or the choice is the person\'s own, pick None.'
+            ),
+            criteria
+          }
+        }
+      }),
+      signal: AbortSignal.timeout(RECOMMEND_TIMEOUT_MS)
+    })
+  } catch {
+    return { error: noAnswer() }
+  }
+  if (!res.ok) return { error: failure(res.status) }
+  const body = (await res.json().catch(() => null)) as { answers?: { pick?: { choice?: unknown } } } | null
+  const choice = body?.answers?.pick?.choice
+  if (typeof choice !== 'string') return { error: badFormat() }
+  if (choice === RECOMMEND_NONE) return null
+  const j = options.findIndex((_, i) => choice === `o${i}`)
+  return j >= 0 ? j : { error: L('o TypeSafe escolheu uma opção que não existe', "TypeSafe picked an option that doesn't exist") }
+}
+
+// One pick per decision, in the order asked: an index into its options, or null. Decisions with a
+// single option (or none: a text answer) are skipped without a call — they have nothing to pick
+// between, and the card's own "Something else" row is never one of them.
+export async function recommendOptions(opts: {
+  key: string
+  questions: Decision[]
+  context?: string
+  fetch?: Fetch
+}): Promise<{ picks: Suggested[]; ms: number } | { error: string; ms: number }> {
+  const started = Date.now()
+  const ms = (): number => Date.now() - started
+  const worth = opts.questions.map((q) => (q.options?.length ?? 0) >= 2)
+  if (!worth.some(Boolean)) return { picks: opts.questions.map(() => null), ms: ms() }
+  const context = (opts.context ?? '').replace(/\s+/g, ' ').trim().slice(0, CONTEXT_MAX)
+  const picks = await Promise.all(
+    opts.questions.map((decision, i) => {
+      if (!worth[i]) return Promise.resolve(null as Suggested)
+      const options = (decision.options ?? []).map((o, j) => `${j + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`).join('\n')
+      const state = [
+        ...(context ? [L('O que o agente disse antes da pergunta:', 'What the agent said before asking:'), context, ''] : []),
+        L('A pergunta:', 'The question:'),
+        decision.question,
+        '',
+        L('As opções:', 'The options:'),
+        options
+      ].join('\n')
+      return recommendOne({ key: opts.key, state, decision, fetch: opts.fetch })
+    })
+  )
+  const problem = picks.find((p): p is { error: string } => !!p && typeof p === 'object')
+  if (problem) return { error: problem.error, ms: ms() }
+  return { picks: picks as Suggested[], ms: ms() }
 }
 
 // ---------- the browser (spec §24) ----------

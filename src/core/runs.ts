@@ -27,7 +27,7 @@ import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } fro
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
-import { JEV_MODEL, listenJev, routeJev } from './jev'
+import { JEV_MODEL, listenJev, recommendOptions, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -850,6 +850,26 @@ export class Runner {
     const seen = this.deps.db.recentMessages(conversationId, 3, threadId ?? null)
     if (seen.some((m) => m.text === hint)) return
     this.post(conversationId, threadId, hint)
+  }
+
+
+  // Turned on in the settings: one cheap Jev question per decision with options, and the pick is
+  // written on the reply after the card is already on screen — so asking never waits on TypeSafe.
+  // A failure, or no pick at all, leaves the card exactly as it was: a suggestion is a nice-to-have.
+  private async recommend(msg: Message, questions: Decision[], settings: Settings): Promise<void> {
+    if (!settings.jevRecommend || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
+    const key = await this.deps.jev?.key()
+    if (!key) return
+    try {
+      const r = await recommendOptions({ key, questions, context: msg.text, fetch: this.deps.jev?.fetch })
+      if ('error' in r || !r.picks.some((p) => p !== null)) return
+      // Answered while TypeSafe thought: the pill has nowhere to go, and the card is closed.
+      const now = this.deps.db.message(msg.id)
+      if (!now || now.run?.status !== 'waiting_input' || now.run.answers) return
+      this.update(now, { run: { ...now.run, recommended: r.picks } })
+    } catch {
+      // the card works without a suggestion
+    }
   }
 
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
@@ -2515,6 +2535,8 @@ ${note}`,
       if (question && up) this.askedUp(up, agent, msg, question)
       // Handed work that stopped at an approval: what else was asked from there may be told now.
       if (approval && handedNow) this.tellAsker(handedNow.from, handedNow.originConversationId, handedNow.originThreadId)
+      // Turned on in the settings: Jev's pick lands on the card afterwards, so asking never waits on it.
+      if (questions) void this.recommend(msg, questions, settings)
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (!question && !approval) {
         const finished = (): void => {
