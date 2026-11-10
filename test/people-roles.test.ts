@@ -332,6 +332,30 @@ describe('questions, mentions and memory between people', () => {
     expect(events.some((e) => e.type === 'inbox')).toBe(true)
   })
 
+  // The Asks page's Dismiss: in a workspace with one person `sweepQuestions` skips every ask
+  // (askedTo === requestedBy), so an unanswered question would sit at waiting_input for good.
+  it('a question left unanswered closes, and the reply goes on instead of waiting for good', async () => {
+    await runner.send('ch', '@lia me pergunta o que faltar', [], undefined, bia.id)
+    await runner.idle()
+    const [asked] = lia()
+    expect(db.question(asked!.id)).toMatchObject({ state: 'open', askedTo: bia.id })
+    expect(people.inbox(bia).questions.map((q) => q.id)).toEqual([asked!.id])
+    // Whoever may answer it may drop it; anyone else can't.
+    await expect(runner.dismiss(asked!.id, carl)).rejects.toThrow()
+    await runner.dismiss(asked!.id, bia)
+    await runner.idle()
+    expect(db.question(asked!.id)?.state).toBe('closed')
+    expect(db.message(asked!.id)?.run?.status).toBe('done')
+    expect(db.messages().find((m) => m.text.startsWith('Deixei a sua pergunta sem resposta'))?.author).toEqual({ kind: 'person', id: bia.id })
+    expect(turns.at(-1)?.prompt).toContain('Deixei a sua pergunta sem resposta')
+    // Gone from the list: the reply it woke may ask again, which is a new question, not this one.
+    expect(people.inbox(bia).questions.some((q) => q.id === asked!.id)).toBe(false)
+    expect(events.some((e) => e.type === 'inbox')).toBe(true)
+    // And it moves into the page's history, closed, not answered.
+    expect(people.history(bia).find((q) => q.id === asked!.id)).toMatchObject({ state: 'closed' })
+    await expect(runner.dismiss(asked!.id, bia)).rejects.toThrow('Essa pergunta não espera mais resposta.')
+  })
+
   it("an untargeted question is the requester's: another person's message there doesn't answer it", async () => {
     await runner.send('ch', '@lia me pergunta o que faltar', [], undefined, bia.id)
     await runner.idle()

@@ -1116,7 +1116,12 @@ function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, 
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
   const who = agentName ?? L('O agente', 'The agent')
-  if (!team || !target)
+  // A one-person workspace has no team to fall back on, so "your next message here is the answer"
+  // was the only thing an ask could say — true in the conversation, useless on the Asks page, which
+  // exists precisely to answer them from somewhere else. A question waiting on this person is
+  // answered wherever it shows; anything else stays read-only.
+  const mine = !!waiting && (waiting.askedTo === you || admin)
+  if (!target || (!team && !mine))
     return (
       <div className={`question ${answered ? 'is-answered' : ''}`}>
         <span className="question__label">{answered ? L('Perguntou', 'Asked') : L('Pergunta pra você', 'A question for you')}</span>

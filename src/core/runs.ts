@@ -2756,6 +2756,31 @@ ${note}`,
     await this.send(q.conversationId, text, [], q.threadId, by.id, { answers: q.id })
   }
 
+  // The person leaves a question unanswered on purpose (Dismiss on the Asks page): it closes, so it
+  // stops being "waiting for you" everywhere, and the reply goes on knowing the ask was dropped
+  // instead of sitting at waiting_input for good — in a workspace with one person `sweepQuestions`
+  // skips every ask (askedTo === requestedBy), so nothing else would ever wake it.
+  async dismiss(id: string, by: Person): Promise<void> {
+    const { db, emit } = this.deps
+    const q = db.question(id)
+    if (!q || q.state !== 'open') throw new Error(L('Essa pergunta não espera mais resposta.', "That question isn't waiting for an answer any more."))
+    if (!new People(db).canAnswer(by, q)) throw new Error(L('Essa pergunta não é pra você.', "That question isn't for you."))
+    db.saveQuestion({ ...q, state: 'closed' })
+    emit({ type: 'inbox' })
+    // Posted as the person, so it reads in their voice; `send` is what takes the reply out of
+    // waiting_input, exactly as an answer does.
+    await this.send(
+      q.conversationId,
+      L(
+        'Deixei a sua pergunta sem resposta. Siga com o que já sabe; se faltar algo que só eu posso decidir, diga em uma frase o que é.',
+        "I'm leaving your question unanswered. Go on with what you already know; if something only I can decide is missing, say it in one sentence."
+      ),
+      [],
+      q.threadId,
+      by.id
+    )
+  }
+
   // Questions to someone else, past their deadline: the requester is told, once, and may answer instead.
   sweepQuestions(now = Date.now()): void {
     const { db, emit } = this.deps

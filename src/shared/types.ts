@@ -350,6 +350,10 @@ export interface Question {
 }
 
 // What's waiting on a person: approvals they can decide and questions to them.
+// A question as one person's page shows it: without where it was asked when they can't see that
+// conversation (someone else's DM: they get the question only).
+export type AskEntry = Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string }
+
 // A question from someone else's DM comes without where it was asked (they see the question only).
 export interface Inbox {
   approvals: Approval[]

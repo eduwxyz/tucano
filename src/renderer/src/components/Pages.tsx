@@ -5,7 +5,9 @@ import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
+  dismissQuestion,
   navigate,
+  questionsHistory,
   newAgentDraft,
   openDm,
   refreshEngines,
@@ -54,6 +56,7 @@ import {
   MODELS,
   type Agent,
   type AgentColor,
+  type AskEntry,
   type Message,
   type Connector,
   type ConnectorAuth,
@@ -1222,7 +1225,26 @@ export function AsksPage(): ReactNode {
   const inbox = useStore((s) => s.inbox)
   const conversations = useStore((s) => s.conversations)
   const agents = useStore((s) => s.agents)
+  // Which one is being dismissed, and the two steps it takes: an ask left unanswered is gone for
+  // good, and the only list that showed it was this one.
+  const [dropping, setDropping] = useState<string | null>(null)
+  const [past, setPast] = useState<AskEntry[]>([])
+  const you = useStore((s) => s.you)
+  const people = useStore((s) => s.people)
   const questions = inbox.questions
+  // What left the list: answered and closed asks, newest first. Reloaded when the open ones change,
+  // which is exactly when one of them moved down here.
+  const open = questions.length
+  useEffect(() => {
+    let live = true
+    questionsHistory(30).then(
+      (rows) => live && setPast(rows),
+      () => {}
+    )
+    return () => {
+      live = false
+    }
+  }, [open])
   const where = (conversationId: string | undefined, agentId: string): string => {
     const conv = conversations.find((c) => c.id === conversationId)
     const who = agents.find((x) => x.id === agentId)?.name
@@ -1250,11 +1272,28 @@ export function AsksPage(): ReactNode {
                 <span>
                   {where(q.conversationId, q.agentId)} · {time(q.createdAt)}
                 </span>
-                {q.conversationId && conversations.some((c) => c.id === q.conversationId) && (
-                  <button className="link" onClick={() => navigate({ kind: 'conversation', id: q.conversationId! })}>
-                    {L('Ver na conversa', 'See in the conversation')}
-                  </button>
-                )}
+                <span className="row">
+                  {q.conversationId && conversations.some((c) => c.id === q.conversationId) && (
+                    <button className="link" onClick={() => navigate({ kind: 'conversation', id: q.conversationId! })}>
+                      {L('Ver na conversa', 'See in the conversation')}
+                    </button>
+                  )}
+                  {dropping === q.id ? (
+                    <>
+                      <span>{L('Deixar sem resposta?', 'Leave it unanswered?')}</span>
+                      <button className="link" onClick={() => (setDropping(null), dismissQuestion(q.id))}>
+                        {L('Sim, dispensar', 'Yes, dismiss')}
+                      </button>
+                      <button className="link" onClick={() => setDropping(null)}>
+                        {L('Manter', 'Keep it')}
+                      </button>
+                    </>
+                  ) : (
+                    <button className="link" onClick={() => setDropping(q.id)} title={L('Some perguntas não precisam de resposta: esta some daqui, fecha, e o agente segue sem ela.', "Some questions don't need an answer: this one leaves the page, closes, and the agent goes on without it.")}>
+                      {L('Dispensar', 'Dismiss')}
+                    </button>
+                  )}
+                </span>
               </div>
               <QuestionCard
                 id={q.id}
@@ -1268,6 +1307,36 @@ export function AsksPage(): ReactNode {
             </div>
           ))}
         </div>
+      )}
+      {past.length > 0 && (
+        <>
+          <h3 className="section-title">{L('Histórico', 'History')}</h3>
+          <div className="stack-list">
+            {past.map((q) => {
+              const who = agents.find((x) => x.id === q.agentId)?.name
+              const by = q.answeredBy ? people.find((p) => p.id === q.answeredBy) : undefined
+              const label =
+                q.state !== 'answered'
+                  ? L('Fechada sem resposta', 'Closed without an answer')
+                  : q.answeredBy === you
+                    ? L('Respondida por você', 'Answered by you')
+                    : by
+                      ? L(`Respondida por ${by.name}`, `Answered by ${by.name}`)
+                      : L('Respondida', 'Answered')
+              return (
+                <div className="question is-answered" key={q.id}>
+                  <span className="question__label">
+                    {who ?? L('O agente', 'The agent')} · {label}
+                  </span>
+                  <p>{q.text}</p>
+                  <span className="hint">
+                    {where(q.conversationId, q.agentId)} · {time(q.answeredAt ?? q.createdAt)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </>
       )}
     </Page>
   )

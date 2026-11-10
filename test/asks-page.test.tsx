@@ -62,10 +62,14 @@ describe('the Asks page', () => {
     expect(html).toContain('em #vendas')
   })
 
-  it('shows each open one as a card, not as already answered', () => {
+  it('shows each open one as a card, answerable from here, not as already answered', () => {
     const html = page([q('q1', 'a1', 'dm1', 'Publico o post hoje?')])
     expect(html).toContain('class="question')
-    expect(html).toContain('Pergunta pra você')
+    expect(html).toContain('Lia pergunta a você')
+    // A one-person workspace has no team form to fall back on: this page is where the plain ask is
+    // answered, so it carries the field itself.
+    expect(html).toContain('question__answer')
+    expect(html).toContain('Responder')
     expect(html).not.toContain('Respondida')
   })
 
