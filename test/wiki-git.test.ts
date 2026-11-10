@@ -11,7 +11,7 @@ import { pageKey, Wiki } from '../src/core/wiki'
 import { WikiCurator } from '../src/core/wiki-curator'
 import type { Message, Settings } from '../src/shared/types'
 
-vi.setConfig({ testTimeout: 30_000 })
+vi.setConfig({ testTimeout: process.platform === 'win32' ? 60_000 : 30_000 })
 
 // names byte for byte (an NFD name stays NFD, on a Mac too), and no identity of the machine's needed
 const git = (cwd: string, ...args: string[]): string => execFileSync('git', ['-c', 'core.precomposeunicode=false', '-c', 'core.quotepath=false', ...args], { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Eduardo', GIT_AUTHOR_EMAIL: 'e@x', GIT_COMMITTER_NAME: 'Eduardo', GIT_COMMITTER_EMAIL: 'e@x' } })
