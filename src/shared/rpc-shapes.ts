@@ -97,6 +97,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   testEngine: { model: 's' },
   saveSkill: { skill: 'o' },
   localSkills: {},
+  skillFolders: {},
   linkSkill: { source: 's', agents: 'S' },
   decideSkill: { id: 's', approve: 'b' },
   restoreSkill: { skillId: 's', versionId: 'n' },

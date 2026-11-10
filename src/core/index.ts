@@ -70,7 +70,7 @@ import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { loginEnv } from './mac'
-import { findLocalSkills } from './local-skills'
+import { findLocalSkills, skillFolders } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
@@ -1676,6 +1676,8 @@ const api: Handlers = {
     return saved
   },
   localSkills: () => findLocalSkills(),
+  // Every folder skills are read from on this computer, on and off (src/core/local-skills.ts).
+  skillFolders: () => skillFolders(undefined, settings().skillFolders ?? [], settings().skillFoldersOff ?? []),
   linkSkill: ({ source, agents }, ctx) => {
     if (!findLocalSkills().some((k) => k.source === source)) throw new Error(L('Essa skill não está mais no seu Claude Code nem no Codex.', "That skill is no longer in your Claude Code or Codex."))
     const linked = skills.link(source, agents)
