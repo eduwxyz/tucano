@@ -13,6 +13,7 @@ import {
   MODELS,
   modelInfo,
   type EngineId,
+  type Effort,
   type BrowserInput,
   type Agent,
   type Approval,
@@ -855,7 +856,8 @@ export const openApps = (): Promise<{ name: string; bundleId?: string }[]> => ca
 export const installDesktop = (): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installDesktop')
 export const desktopPermissions = (): void => void fire(L('Não consegui abrir as permissões.', "I couldn't open the permissions."), 'desktopPermissions')
 
-export const setAgentModels = (agentIds: string[], modelId: string): Promise<number> => call('setAgentModels', { agentIds, modelId })
+// The model, the reasoning effort, or both: what's left out keeps each agent's own.
+export const setAgentModels = (agentIds: string[], change: { modelId?: string; effort?: Effort }): Promise<number> => call('setAgentModels', { agentIds, ...change })
 
 export function saveAgent(agent: Agent, channelIds: string[]): Promise<void> {
   return call('saveAgent', { agent, channelIds })
