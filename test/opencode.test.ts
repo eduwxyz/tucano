@@ -90,7 +90,8 @@ describe('opencode', () => {
   })
 })
 
-describe('runCli with an error on stderr', () => {
+// The CLI here is a shell line (echo, sleep), which Windows doesn't run.
+describe.skipIf(process.platform === 'win32')('runCli with an error on stderr', () => {
   const collect = async (script: string, parser: Parser): Promise<{ events: EngineEvent[]; ms: number }> => {
     const start = Date.now()
     const events: EngineEvent[] = []
