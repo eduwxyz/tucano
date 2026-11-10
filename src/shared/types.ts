@@ -121,6 +121,7 @@ export interface Conversation {
   name: string // channel name, or agent id for a DM
   topic?: string
   members: string[] // agent ids
+  mentionOnly?: string[] // agents of a channel in mention mode: they read it, and answer only when mentioned
   summary?: string // what the conversation covered before its recent messages
   summaryUntil?: number // `at` of the last message the summary covers
   summaryAt?: number

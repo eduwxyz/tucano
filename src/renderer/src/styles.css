@@ -5169,6 +5169,39 @@ table.csv th {
 .member:hover {
   background: var(--hover);
 }
+/* A row of the channel's agent list: the agent itself, and mention mode beside it. */
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.member-row:last-child {
+  border-bottom: 0;
+}
+.member-row .member {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-bottom: 0;
+}
+.member-row__mention {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.member-row__mention input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+@media (max-width: 640px) {
+  .member-row__mention {
+    padding-right: 8px;
+  }
+}
 .member__text {
   display: flex;
   flex-direction: column;
