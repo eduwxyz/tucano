@@ -49,6 +49,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
+      } else if (/carries on from your last reply|continuação da sua última resposta/i.test(turn.prompt)) {
+        // A follow up: the reply goes on from the one before instead of starting again, and says so,
+        // so a frame can show the same row carrying on rather than a second reply beside it. Read from
+        // the whole prompt: when the session went on, this is the only block it got.
+        const direction = /(?:The direction now|A direção de agora): ([^\n]+)/is.exec(turn.prompt)?.[1]?.trim() ?? ''
+        reply = L(`Segui dali, sem refazer o que já estava pronto: ${direction}`, `I went on from there, without redoing what was already done: ${direction}`)
       } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
         // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
         // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).

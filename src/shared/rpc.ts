@@ -42,6 +42,7 @@ export interface Api {
   typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
+  followUpRun(p: { messageId: string; text: string }): void // a finished reply goes on from where it stopped, in the same row
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   setAgentModels(p: { agentIds: string[]; modelId: string }): number
   saveAgent(p: { agent: Agent; channelIds: string[] }): void

@@ -153,7 +153,9 @@ export interface Step {
   output?: string // what came back, in a few words ("120 rows")
   status: StepStatus
   ms?: number
-  kind?: 'steer' // not a tool call: what the person wrote while it worked, handed over between two of them
+  // Not a tool call: something the person wrote. `steer` was handed to the reply while it ran, between
+  // two calls; `followup` is the instruction a finished reply goes on with (runs.ts, followUp).
+  kind?: 'steer' | 'followup'
 }
 
 export interface Receipt {

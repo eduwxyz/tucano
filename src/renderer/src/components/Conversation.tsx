@@ -49,6 +49,7 @@ import { canEditChannel,
   removeRoutine,
   retryRun,
   continueRun,
+  followUpRun,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
@@ -88,7 +89,7 @@ import { canEditChannel,
   teamMode,
   type Person
 } from '../store'
-import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded, type IconName } from './ui'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
@@ -1364,7 +1365,13 @@ export function RunBlock({ message }: { message: Message }): ReactNode {
   return (
     <>
       <RunSteps message={message} />
-      {message.run?.status === 'working' && <SteerPill message={message} />}
+      {/* At the bottom of the chain and outside its box, the same pill either way: steer what's
+          running, go on from what ended. The thinking streams inside the box, above this. */}
+      {message.run?.status === 'working' ? (
+        <SteerPill message={message} />
+      ) : message.run?.status === 'done' ? (
+        <FollowUpPill message={message} />
+      ) : null}
     </>
   )
 }
@@ -1374,52 +1381,73 @@ export function RunBlock({ message }: { message: Message }): ReactNode {
 // next tool call, and the chain says so, in the person's words (send mode `steer`, src/core/runs.ts).
 // With the reply already over, the same text is an ordinary prompt: nothing here holds it back.
 function SteerPill({ message }: { message: Message }): ReactNode {
+  const steer = (text: string): void => sendMessage(message.conversationId, text, [], message.threadId, [], 'steer')
+  return (
+    <PillPrompt
+      icon="pointer"
+      label={L('Orientar', 'Steer')}
+      title={L('Dizer como seguir, sem parar o que ele está fazendo', 'Say how to go on, without stopping what it is doing')}
+      aria={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
+      placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+      onSend={steer}
+    />
+  )
+}
+
+// A follow up, from the bottom of a reply that has ended: the same pill, the same field, and the
+// instruction stays in this reply — it goes on in the same row, its text and steps kept, instead of
+// turning into another message in the conversation (src/core/runs.ts, `followUp`).
+function FollowUpPill({ message }: { message: Message }): ReactNode {
+  return (
+    <PillPrompt
+      icon="down"
+      label={L('Seguir', 'Follow Up')}
+      title={L('Pedir mais desta resposta, na mesma sessão', 'Ask more of this reply, in the same session')}
+      aria={L('O que mais esta resposta deve fazer', 'What more this reply should do')}
+      placeholder={L('O que mais?', 'What next?')}
+      onSend={(text) => followUpRun(message.id, text)}
+    />
+  )
+}
+
+// The one pill both use, under the steps: quiet until it's wanted, then a field and the send asleep
+// until there's something to send. Ctrl+Enter sends, Escape closes and sends nothing.
+function PillPrompt(p: { icon: IconName; label: string; title: string; aria: string; placeholder: string; onSend: (text: string) => void }): ReactNode {
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState('')
   const typed = note.trim()
-  const steer = (text: string): void => {
-    sendMessage(message.conversationId, text, [], message.threadId, [], 'steer')
+  const close = (): void => {
     setOpen(false)
     setNote('')
   }
+  const go = (text: string): void => {
+    p.onSend(text)
+    close()
+  }
   return (
-    <div className="steps__steer">
-      <button
-        className="steps__steer-pill"
-        aria-expanded={open}
-        title={L('Dizer como seguir, sem parar o que ele está fazendo', 'Say how to go on, without stopping what it is doing')}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
+    <div className={`steps__ask steps__ask--${p.icon}`}>
+      <button className="steps__ask-pill" aria-expanded={open} title={p.title} onClick={() => (open ? close() : setOpen(true))}>
+        <Icon name={p.icon} size={11} /> {p.label}
       </button>
       {open && (
-        <div className="steps__steer-note">
+        <div className="steps__ask-note">
           <textarea
-            aria-label={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
-            placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+            aria-label={p.aria}
+            placeholder={p.placeholder}
             rows={2}
             value={note}
             autoFocus
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && typed) steer(typed)
-              if (e.key === 'Escape') {
-                setOpen(false)
-                setNote('')
-              }
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && typed) go(typed)
+              if (e.key === 'Escape') close()
             }}
           />
-          <div className="steps__steer-row">
-            <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => steer(typed)}>
-              {L('Orientar', 'Steer')}
+          <div className="steps__ask-row">
+            <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => go(typed)}>
+              {p.label}
             </button>
-            <button
-              className="link"
-              onClick={() => {
-                setOpen(false)
-                setNote('')
-              }}
-            >
+            <button className="link" onClick={close}>
               {L('Cancelar', 'Cancel')}
             </button>
             <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
@@ -1433,16 +1461,16 @@ function SteerPill({ message }: { message: Message }): ReactNode {
 function StepRow({ step }: { step: Step }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
-  // A steer in the chain isn't a tool call: it's what the person wrote while the reply ran, and it
-  // reads as their words under the step it was handed over with.
-  if (step.kind === 'steer')
+  // A steer, or a follow up, in the chain isn't a tool call: it's what the person wrote — while the
+  // reply ran, or to make it go on — and it reads as their words under what it changed.
+  if (step.kind === 'steer' || step.kind === 'followup')
     return (
-      <li className="step step--steer">
+      <li className={`step step--${step.kind}`}>
         <span className="step__icon">
-          <Icon name="pointer" size={12} />
+          <Icon name={step.kind === 'steer' ? 'pointer' : 'down'} size={12} />
         </span>
         <span className="step__label">{step.label}</span>
-        {step.detail && <span className="step__steer">{step.detail}</span>}
+        {step.detail && <span className="step__said">{step.detail}</span>}
       </li>
     )
   return (

@@ -1439,15 +1439,15 @@ h3 {
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
 }
-/* The steer pill, at the bottom of the chain while the agent works: small, dim, and out of the
-   way until it's wanted. It lines up with the steps' own rail above it. */
-.steps__steer {
+/* The pill under the chain: a steer while the agent works, a follow up once the reply has ended.
+   Small, dim, out of the way until it's wanted, and lined up with the steps' own rail above it. */
+.steps__ask {
   display: grid;
   gap: 8px;
   margin: 2px 0 4px 3px;
   padding-left: 14px;
 }
-.steps__steer-pill {
+.steps__ask-pill {
   justify-self: start;
   display: inline-flex;
   align-items: center;
@@ -1460,37 +1460,40 @@ h3 {
   font-size: 11.5px;
   transition: var(--transition-ui);
 }
-.steps__steer-pill:hover {
+.steps__ask-pill:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--hover);
 }
-.steps__steer-note {
+.steps__ask-note {
   display: grid;
   gap: 8px;
   max-width: 520px;
 }
-.steps__steer-note textarea {
+.steps__ask-note textarea {
   width: 100%;
   min-height: 54px;
   resize: vertical;
 }
-.steps__steer-row {
+.steps__ask-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
-/* What the person steered, in the chain: not a tool call, so it doesn't wear a tool's colours. */
-.step--steer {
+/* What the person steered, or asked it to go on with, in the chain: not a tool call, so it doesn't
+   wear a tool's colours. */
+.step--steer,
+.step--followup {
   flex-wrap: wrap;
   row-gap: 2px;
 }
-.step--steer .step__icon {
+.step--steer .step__icon,
+.step--followup .step__icon {
   background: var(--accent-soft);
   color: var(--accent);
 }
-.step__steer {
+.step__said {
   flex-basis: 100%;
   padding-left: 26px; /* under the label, past the icon */
   color: var(--text-3);
