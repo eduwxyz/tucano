@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.27] - 2026-11-10
+
 > **Em português:**
 > - **Novo:** a barra lateral e o painel da direita têm largura ajustável. Arraste a borda entre a barra lateral e a página, ou a borda esquerda do painel (thread, imagem, documento, página, navegador do agente), pra alargar ou estreitar; dois cliques na borda voltam ao padrão. A largura fica guardada no computador.
 > - **Correção:** o navegador de um agente tem 90 segundos pra abrir na primeira vez, não 30: numa máquina lenta ou ocupada ele abria, mas o Tucano já tinha desistido.
@@ -603,6 +605,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.27]: https://github.com/eduwxyz/tucano/compare/v0.2.26...v0.2.27
 [0.2.26]: https://github.com/eduwxyz/tucano/compare/v0.2.25...v0.2.26
 [0.2.25]: https://github.com/eduwxyz/tucano/compare/v0.2.24...v0.2.25
 [0.2.24]: https://github.com/eduwxyz/tucano/compare/v0.2.23...v0.2.24
