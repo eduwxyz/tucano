@@ -10994,6 +10994,14 @@ button.agent-card__now:hover {
 .agent-models__row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
 .agent-models__identity { display: flex; align-items: center; gap: 10px; flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
 .agent-models__choice { display: grid; gap: 6px; flex: 2 1 300px; min-width: 0; }
+/* The model and the thinking side by side: the model takes the room, the thinking keeps to a column. */
+.agent-models__picks { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 168px); gap: 8px; align-items: end; min-width: 0; }
+.agent-models__pick { display: grid; gap: 6px; min-width: 0; }
+.agent-models__label { font-size: 12px; color: var(--text-3); }
+/* In a narrow window the model label has no room beside the thinking: one over the other, whole. */
+@media (max-width: 760px) {
+  .agent-models__picks { grid-template-columns: minmax(0, 1fr); }
+}
 .agent-models [role="status"]:not(:empty) { margin-top: 12px; }
 
 /* The intro of a Tucano on a server: a computer's backup brought in from the first screen. */
