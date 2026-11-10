@@ -489,11 +489,6 @@ export const MIGRATIONS = [
   `
   ALTER TABLE connector_tools ADD COLUMN cls_auto TEXT;
   `,
-  // Generic, per-agent execution boundary. NULL is kept for older agents and means explicit
-  // unsandboxed execution until the user selects a provider.
-  `
-  ALTER TABLE agents ADD COLUMN sandbox_config TEXT;
-  `,
   // Gemini CLI was replaced by the Antigravity CLI: what ran on the "gemini" harness now runs on
   // "antigravity", the same login and models (its own engine maps the old model names).
   `
@@ -511,6 +506,7 @@ export const MIGRATIONS = [
 // How far each agent goes on its own: a rule per kind of action, its level, the outside-content guard
 // (src/shared/actions.ts). Empty: Settings decide, which out of the box is how Tucano always worked.
 const COLUMNS: [string, string, string][] = [
+  ['agents', 'sandbox_config', 'TEXT'],
   ['agents', 'action_rules', "TEXT NOT NULL DEFAULT '{}'"],
   ['agents', 'autonomy', 'TEXT'],
   ['agents', 'outside_guard', 'INTEGER'],
