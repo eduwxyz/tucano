@@ -85,6 +85,7 @@ import { canEditChannel,
   type Person
 } from '../store'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
@@ -765,6 +766,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   )
   return (
     <aside className="side-panel side-panel--thread">
+      <PanelResize />
       <header className="side-panel__head">
         <Icon name="thread" size={14} />
         <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
