@@ -12,16 +12,25 @@ import { L } from '../../shared/lang'
 // matter which flags are passed, so Tucano runs it with a home of its
 // own. The user logs into Codex once more, for the app, through Codex itself.
 export function asdfEnv(bin?: string): NodeJS.ProcessEnv {
-  // An asdf shim resolves its install from ASDF_DATA_DIR, which otherwise
-  // follows HOME and points into this isolated Codex home.
+  const env: NodeJS.ProcessEnv = {}
+  // An asdf shim needs its install directory and selected tool version: HOME
+  // and the working directory both belong to Tucano when it checks the login.
   if (bin) {
     try {
-      if (/^# asdf-plugin:/m.test(readFileSync(bin, 'utf8'))) return { ASDF_DATA_DIR: dirname(dirname(bin)) }
+      const shim = readFileSync(bin, 'utf8')
+      const match = /^# asdf-plugin:\s+([\w-]+)\s+([^\s]+)/m.exec(shim)
+      if (match) {
+        env['ASDF_DATA_DIR'] = dirname(dirname(bin))
+        const versionKey = `ASDF_${match[1]!.replaceAll('-', '_').toUpperCase()}_VERSION`
+        if (!process.env[versionKey]) env[versionKey] = match[2]
+        return env
+      }
     } catch {
       // Native harness installs do not need an asdf data directory.
     }
   }
-  return process.env['ASDF_DATA_DIR'] ? { ASDF_DATA_DIR: process.env['ASDF_DATA_DIR'] } : {}
+  if (process.env['ASDF_DATA_DIR']) env['ASDF_DATA_DIR'] = process.env['ASDF_DATA_DIR']
+  return env
 }
 
 export function codexEnv(home: string, bin?: string): NodeJS.ProcessEnv {
