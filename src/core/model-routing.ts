@@ -1,26 +1,40 @@
-// Smart model routing (Settings › Routing): Jev reads the prompt and says what
-// kind of work it is and how much capability it deserves, and that judgment
-// picks one of the person's pools — free, or tier 1 to 5 — where a pool is an
-// ordered chain of harness · model · thinking to try, the first usable one
-// winning. A role (code, review, plan, debug…) can own its own chain, so
-// planning and review never land on whatever the water carrier got.
+// Smart model routing (Settings › Routing): Jev reads the prompt and says what kind of work it
+// is and how much capability it deserves; that judgment asks for a capability tier (1 to 5), and
+// the person's setup walks from there — the free pool when they prefer it, the role's own
+// specialists, the tier's chain, then the tiers below it, never above. A reply may land in the
+// free pool; the tier the read asked for is kept regardless, so the trace can say "judged t3,
+// free served it".
 //
 // The shapes — pools, chains, roles, what may be saved, the trace — live in
-// src/shared/routing.ts, which the screen reads too. Everything here is pure
-// except readPrompt, the one thing that talks to TypeSafe: the core decides
-// with it, the renderer draws the reading from the trace it leaves behind.
+// src/shared/routing.ts, which the screen reads too. Everything here is pure except readPrompt,
+// the one thing that talks to TypeSafe.
 import { L } from '../shared/lang'
-import { normalizeRouting, POOLS, POOL_RANK, ROLE_KINDS, type Pool, type RouteAttempt, type RouteTarget, type RouteTrace, type RoleSetting, type RoutingConfig } from '../shared/routing'
+import {
+  KIND_IMPORT,
+  POOL_RANK,
+  ROLE_KINDS,
+  TIERS,
+  tierAt,
+  type FreePolicy,
+  type Pool,
+  type RoleCandidate,
+  type RoleSetting,
+  type RouteAttempt,
+  type RouteTarget,
+  type RouteTrace,
+  type RoutingConfig,
+  type SkipCode,
+  type Tier
+} from '../shared/routing'
 
 export * from '../shared/routing'
-
-const T5 = 5
 
 // ---------- what Jev says ----------
 
 export interface RouteJudgment {
   role: string
-  roleConfidence: number
+  /** 0..1 when TypeSafe said how sure it is; absent when it didn't. Unknown is not zero. */
+  roleConfidence?: number
   roleProbabilities: Record<string, number>
   /** 0..3, probability-weighted over the four steps of the rubric. */
   complexity: number
@@ -31,9 +45,13 @@ export interface RouteJudgment {
   ms: number
 }
 
+export type ReadResult = RouteJudgment | { error: string }
+
 const API = 'https://api.typesafe.ai/v1'
 const JEV = 'jev-latest'
 const DEFAULT_TIMEOUT_MS = 4_000
+/** A choice answer with more options than this is a broken payload, not a reading. */
+const MAX_PROBABILITIES = 40
 
 const noAnswer = (): string => L('o TypeSafe não respondeu', "TypeSafe didn't answer")
 const badFormat = (): string => L('resposta do TypeSafe fora do formato', "TypeSafe's answer wasn't in the format")
@@ -46,6 +64,7 @@ function failure(status: number): string {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+const DANGEROUS = new Set(['__proto__', 'constructor', 'prototype'])
 
 export function readingBody(opts: { prompt: string; history?: string; roles: Record<string, RoleSetting> }): Record<string, unknown> {
   const criteria: Record<string, string> = {}
@@ -103,27 +122,82 @@ export function readingBody(opts: { prompt: string; history?: string; roles: Rec
   }
 }
 
-/** Turns the answer into a judgment, or says why it can't. */
-export function readAnswer(payload: unknown, ms: number, roles: Record<string, RoleSetting>): RouteJudgment | { error: string } {
+/** A 0..3 score, or the reason it can't be one. Nothing is assumed when the answer leaves it out. */
+function score(where: Record<string, unknown>, what: string): { value: number } | { error: string } {
+  const raw = num(where.score)
+  if (raw === undefined) return { error: L(`o TypeSafe não deu nota de ${what}`, `TypeSafe didn't score ${what}`) }
+  if (raw < 0 || raw > 3) return { error: L(`nota de ${what} fora de 0..3 (${raw})`, `${what} score outside 0..3 (${raw})`) }
+  return { value: raw }
+}
+
+/**
+ * Turns the answer into a judgment, or says why it can't. A required question that comes back
+ * missing or impossible is an error: a made-up score would route real work on invented numbers,
+ * and the fail-open path (`Routing unavailable · Using [model]`) is the honest answer instead.
+ */
+export function readAnswer(payload: unknown, ms: number, roles: Record<string, RoleSetting>): ReadResult {
   if (!isRecord(payload) || !isRecord(payload.answers)) return { error: badFormat() }
   const answers = payload.answers
+
+  // What kind of work.
   const acao = isRecord(answers.acao) ? answers.acao : {}
-  const complexidade = isRecord(answers.complexidade) ? answers.complexidade : {}
-  const capacidade = isRecord(answers.capacidade) ? answers.capacidade : {}
-  const raciocinio = isRecord(answers.raciocinio) ? answers.raciocinio : {}
-  const role = typeof acao.choice === 'string' ? acao.choice : 'chat'
+  const choice = typeof acao.choice === 'string' ? acao.choice.trim() : ''
+  if (!choice) return { error: L('o TypeSafe não disse que trabalho é', "TypeSafe didn't say what kind of work it is") }
+  const role = KIND_IMPORT[choice] ?? choice
   if (Object.keys(roles).length > 0 && !Object.hasOwn(roles, role)) {
     return { error: L('o TypeSafe escolheu um papel que não existe', "TypeSafe picked a role that doesn't exist") }
   }
-  const probabilities = isRecord(acao.probabilities) ? (acao.probabilities as Record<string, number>) : {}
-  const deep = num(raciocinio.noul) ?? num(raciocinio.noul_score) ?? 0
+
+  // How sure it is: absent is unknown, and unknown is not zero — it just can't unlock the dearest pools.
+  let confidence: number | undefined
+  const rawConfidence = num(acao.confidence)
+  if (rawConfidence !== undefined) {
+    if (rawConfidence < 0 || rawConfidence > 1) return { error: L(`confiança fora de 0..1 (${rawConfidence})`, `confidence outside 0..1 (${rawConfidence})`) }
+    confidence = rawConfidence
+  }
+
+  // The kind probabilities, when it gives them: real numbers, bounded, no prototype keys.
+  const probabilities: Record<string, number> = {}
+  if (acao.probabilities !== undefined) {
+    if (!isRecord(acao.probabilities)) return { error: L('probabilidades ilegíveis', 'unreadable probabilities') }
+    const entries = Object.entries(acao.probabilities)
+    if (entries.length > MAX_PROBABILITIES) return { error: L('probabilidades demais', 'too many probabilities') }
+    let broken = 0
+    for (const [kind, value] of entries) {
+      if (DANGEROUS.has(kind)) return { error: L('probabilidades ilegíveis', 'unreadable probabilities') }
+      const p = num(value)
+      if (p === undefined || p < 0 || p > 1) {
+        broken += 1
+        continue
+      }
+      probabilities[KIND_IMPORT[kind] ?? kind] = p
+    }
+    if (entries.length > 0 && broken === entries.length) return { error: L('probabilidades ilegíveis', 'unreadable probabilities') }
+  }
+  if (confidence === undefined) {
+    const fromProbabilities = probabilities[role]
+    if (fromProbabilities !== undefined) confidence = fromProbabilities
+  }
+
+  // The three judgments.
+  const complexity = score(isRecord(answers.complexidade) ? answers.complexidade : {}, L('complexidade', 'complexity'))
+  if ('error' in complexity) return { error: complexity.error }
+  const capability = score(isRecord(answers.capacidade) ? answers.capacidade : {}, L('capacidade', 'capability'))
+  if ('error' in capability) return { error: capability.error }
+
+  const raciocinio = isRecord(answers.raciocinio) ? answers.raciocinio : {}
+  const rawDeep = raciocinio.noul ?? raciocinio.noul_score
+  let deep: number | undefined = typeof rawDeep === 'boolean' ? (rawDeep ? 1 : 0) : num(rawDeep)
+  if (deep === undefined) return { error: L('o TypeSafe não disse se precisa de raciocínio longo', "TypeSafe didn't say whether it needs extended reasoning") }
+  if (deep < 0 || deep > 1) return { error: L(`raciocínio fora de 0..1 (${deep})`, `deep reasoning outside 0..1 (${deep})`) }
+
   return {
     role,
-    roleConfidence: num(acao.confidence) ?? probabilities[role] ?? 0,
+    ...(confidence !== undefined ? { roleConfidence: confidence } : {}),
     roleProbabilities: probabilities,
-    complexity: Math.min(3, Math.max(0, num(complexidade.score) ?? 1)),
-    capability: Math.min(3, Math.max(0, num(capacidade.score) ?? 1)),
-    deepReasoning: Math.min(1, Math.max(0, deep)),
+    complexity: complexity.value,
+    capability: capability.value,
+    deepReasoning: deep,
     ms
   }
 }
@@ -137,7 +211,7 @@ export async function readPrompt(opts: {
   fetch?: typeof fetch
   timeoutMs?: number
   signal?: AbortSignal
-}): Promise<RouteJudgment | { error: string }> {
+}): Promise<ReadResult> {
   const started = Date.now()
   const timeout = AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout
@@ -157,7 +231,7 @@ export async function readPrompt(opts: {
   return readAnswer(payload, Date.now() - started, opts.roles)
 }
 
-// ---------- what the person's pools make of it ----------
+// ---------- what the person's setup makes of it ----------
 
 /** demand 0..3: how much model this work deserves, the same scale the plugin uses. */
 export function demandOf(j: RouteJudgment): number {
@@ -167,110 +241,289 @@ export function demandOf(j: RouteJudgment): number {
   return Math.min(3, Math.max(0, demand))
 }
 
-/** The pool the judgment asks for, before availability. */
-export function poolFor(j: RouteJudgment, config: RoutingConfig): { pool: Pool; demand: number; notes: string[] } {
+/** The tier a demand asks for, before floors and the confidence cap: t1 at 0, t4 at 3. */
+export function tierOfDemand(demand: number): Tier {
+  const step = Math.min(4, Math.max(1, Math.round(demand) + 1))
+  return `t${step}` as Tier
+}
+
+export interface PoolDecision {
+  /** 0..3, the reading's own demand, before anything the setup does to it. */
+  rawDemand: number
+  /** 0..3, what the tiers actually policed after the role floor and the confidence cap. */
+  demand: number
+  /** The capability tier the raw demand asks for, kept even when something else serves the reply. */
+  requested: Tier
+  /** The tier the walk starts from: the request after the role floor and the confidence cap. */
+  policy: Tier
+  /** 0..1 when TypeSafe said how sure it is; absent when it didn't. */
+  confidence?: number
+  /** What the setup did to the raw read, in the person's language. */
+  notes: string[]
+}
+
+/**
+ * Which capability tier the reading asks for, and what the person's policy does with it. Free is
+ * never the answer here: it is a destination, not a tier, and the requested tier survives it.
+ */
+export function poolFor(j: RouteJudgment, config: RoutingConfig): PoolDecision {
   const notes: string[] = []
-  let demand = demandOf(j)
+  const raw = demandOf(j)
+  const confidence = j.roleConfidence
+  const known = confidence !== undefined
+  const unsure = known && config.confidenceFloor > 0 && confidence! < config.confidenceFloor
+
+  // Tier 5 is only ever unlocked by the reading itself, and only when it is a real install.
+  const wantsTop = Math.round(raw) >= 3
+  const t5Ready = config.allowTier5 && config.pools.t5.chain.length > 0
+  let requested = tierOfDemand(raw)
+  if (wantsTop) {
+    // Known, positive, sure confidence is part of qualifying for the dearest pool.
+    const sure = known && !unsure && confidence! > 0
+    if (t5Ready && sure) requested = 't5'
+    else {
+      requested = 't4'
+      if (!config.allowTier5) notes.push(L('o tier 5 está desligado', 'tier 5 is switched off'))
+      else if (!config.pools.t5.chain.length) notes.push(L('o tier 5 não tem modelos', 'tier 5 has no models'))
+      else notes.push(L('papel incerto não chega ao tier 5', 'an unsure read never reaches tier 5'))
+    }
+  }
+
+  // The role's floor lifts the tier; it never lowers it.
+  let policy = requested
   const floor = config.roleFloor[j.role]
-  if (floor && demand < POOL_RANK[floor] - 1) {
+  if (floor && POOL_RANK[policy] < POOL_RANK[floor]) {
     notes.push(L(`${j.role} não desce de ${floor}`, `${j.role} floors at ${floor}`))
-    demand = POOL_RANK[floor] - 1
+    policy = floor
   }
-  if (config.confidenceFloor > 0 && j.roleConfidence > 0 && j.roleConfidence < config.confidenceFloor && demand > 1) {
-    notes.push(L(`papel incerto (${j.roleConfidence.toFixed(2)}) → t2`, `unsure role (${j.roleConfidence.toFixed(2)}) → t2`))
-    demand = 1
+
+  // A floor reaches as high as tier 4. Tier 5 is only ever unlocked by the reading itself, so a
+  // role that floors at t5 still stops at t4 when the work didn't ask for the dearest pool.
+  if (policy === 't5' && requested !== 't5') {
+    notes.push(L('um piso não abre o tier 5: só a leitura abre', 'a floor never opens tier 5: only the reading does'))
+    policy = 't4'
   }
-  const top = demand >= 2.75 && j.roleConfidence >= config.confidenceFloor
-  const pool: Pool =
-    config.freeWhenCheap && demand < 0.6
-      ? 'free'
-      : top
-        ? 't5'
-        : (`t${Math.min(4, Math.round(demand) + 1)}` as Pool)
-  return { pool, demand, notes }
+
+  // A guess doesn't cost: unknown or low confidence caps at tier 2 and never reaches tier 5.
+  if (!known || unsure) {
+    if (POOL_RANK[policy] > POOL_RANK.t2) {
+      notes.push(
+        known
+          ? L(`papel incerto (${confidence!.toFixed(2)}) → t2`, `unsure role (${confidence!.toFixed(2)}) → t2`)
+          : L('o TypeSafe não disse a confiança → t2', "TypeSafe didn't say how sure it is → t2")
+      )
+      policy = 't2'
+    }
+  }
+
+  const demand = Math.max(raw, POOL_RANK[policy] - 1)
+  return { rawDemand: raw, demand, requested, policy, ...(known ? { confidence } : {}), notes }
 }
 
 /** Why a model can't run now, in the person's language; undefined when it can. */
 export type Availability = (t: RouteTarget) => string | undefined
 
-/**
- * The whole chain walked: every model in the order it was tried, each with why it was passed
- * over, and the one that ran. The pools next door are consulted nearest first, downwards before
- * upwards, so a missing model never blocks a reply.
- */
-export function walkRoute(
-  j: RouteJudgment,
-  config: RoutingConfig,
-  can: Availability
-): { pool: Pool; demand: number; notes: string[]; attempts: RouteAttempt[]; selected?: RouteTarget; roleSpecialised: boolean } {
-  const { pool, demand, notes } = poolFor(j, config)
-  const rank = POOL_RANK[pool]
-  const floor = POOL_RANK[config.roleFloor[j.role] ?? 't1']
-  const order: { target: RouteTarget; from: RouteAttempt['from']; specialist: boolean }[] = []
-  if (rank >= floor) {
-    for (const target of config.roles[j.role]?.chain ?? []) order.push({ target, from: { kind: 'role', role: j.role }, specialist: true })
-  }
-  for (const target of config.pools[pool].chain) order.push({ target, from: { kind: 'pool', pool }, specialist: false })
-  for (let distance = 1; distance <= T5; distance += 1) {
-    const down = POOLS[rank - distance]
-    const up = POOLS[rank + distance]
-    for (const p of [down, up]) if (p) for (const target of config.pools[p].chain) order.push({ target, from: { kind: 'pool', pool: p }, specialist: false })
-  }
-  const attempts: RouteAttempt[] = []
-  for (const entry of order) {
-    const skip = can(entry.target)
-    attempts.push({ ...entry.target, from: entry.from, ...(skip ? { skip } : {}) })
-    if (!skip) return { pool, demand, notes, attempts, selected: entry.target, roleSpecialised: entry.specialist }
-  }
-  return { pool, demand, notes, attempts, roleSpecialised: false }
+interface Candidate {
+  target: RoleCandidate
+  from: RouteAttempt['from']
 }
 
-/** The target to run, trying the role's chain, the pool's, then the pools next door. */
+/**
+ * The chains walked, in the order the contract fixes and never upward: the free pool when the
+ * person prefers it, the role's own specialists (each only from the tier they're eligible for),
+ * the tier the read asked for, then the tiers below it, then free as a fallback. Two candidates
+ * with the same execution identity are one candidate.
+ */
+export function chainFor(j: RouteJudgment, config: RoutingConfig, decision: PoolDecision): Candidate[] {
+  const out: Candidate[] = []
+  const seen = new Set<string>()
+  const push = (target: RoleCandidate, from: RouteAttempt['from']): void => {
+    if (seen.has(target.id)) return
+    seen.add(target.id)
+    out.push({ target, from })
+  }
+
+  const free: FreePolicy = config.free?.policy ?? 'off'
+  if (free === 'prefer') for (const t of config.pools.free?.chain ?? []) push(t, { kind: 'free' })
+
+  const floor = config.roleFloor[j.role]
+  const consulted = !floor || POOL_RANK[decision.policy] >= POOL_RANK[floor]
+  for (const t of config.roles[j.role]?.chain ?? []) {
+    const eligible = consulted && (!t.minTier || POOL_RANK[decision.policy] >= POOL_RANK[t.minTier])
+    if (eligible) push(t, { kind: 'role', role: j.role })
+  }
+
+  const startRank = POOL_RANK[decision.policy]
+  for (const t of config.pools[decision.policy]?.chain ?? []) push(t, { kind: 'tier', tier: decision.policy })
+  for (let rank = startRank - 1; rank >= 1; rank -= 1) {
+    const tier = tierAt(rank)!
+    for (const t of config.pools[tier]?.chain ?? []) push(t, { kind: 'tier', tier })
+  }
+  if (free === 'fallback') for (const t of config.pools.free?.chain ?? []) push(t, { kind: 'free' })
+
+  return out
+}
+
+export interface WalkOutcome extends PoolDecision {
+  attempts: RouteAttempt[]
+  selected?: RouteTarget
+  source?: 'free' | 'role' | 'tier'
+  /** The pool the winner came from, when it came from one (a role's own specialist has none). */
+  effective?: Pool
+  /** Set when the walk ended because nothing eligible was left and a configured reserve stepped in. */
+  reserve?: boolean
+}
+
+/** The pool a chain entry came from: the free pool, or its tier; a role specialist has none. */
+const poolOf = (from: RouteAttempt['from']): Pool | undefined => (from.kind === 'free' ? 'free' : from.kind === 'tier' ? from.tier : undefined)
+
+/** Every candidate, in order, with why it wasn't run — and the one that was. */
+export function walkRoute(j: RouteJudgment, config: RoutingConfig, can: Availability): WalkOutcome {
+  const decision = poolFor(j, config)
+  const candidates = chainFor(j, config, decision)
+  const attempts: RouteAttempt[] = []
+
+  for (const c of candidates) {
+    const skip = can(c.target as RouteTarget)
+    const attempt: RouteAttempt = {
+      id: c.target.id,
+      engine: c.target.engine,
+      ...(c.target.accountId ? { accountId: c.target.accountId } : {}),
+      model: c.target.model,
+      effort: c.target.effort,
+      from: c.from,
+      ...(skip ? { skip } : {})
+    }
+    attempts.push(attempt)
+    if (!skip) {
+      const { id, engine, accountId, model, effort } = c.target
+      return {
+        ...decision,
+        attempts,
+        selected: { id, engine, ...(accountId ? { accountId } : {}), model, effort },
+        source: c.from.kind,
+        ...(poolOf(c.from) ? { effective: poolOf(c.from)! } : {})
+      }
+    }
+  }
+
+  // Nothing in the chains. A reserve the person configured is the only thing allowed to answer,
+  // and only from inside the ceiling the reading asked for.
+  const reserve = reserveFor(config, decision)
+  if (reserve) {
+    const skip = can(reserve.target)
+    attempts.push({
+      id: reserve.target.id,
+      engine: reserve.target.engine,
+      ...(reserve.target.accountId ? { accountId: reserve.target.accountId } : {}),
+      model: reserve.target.model,
+      effort: reserve.target.effort,
+      from: reserve.from,
+      ...(skip ? { skip, skipCode: 'unavailable' as SkipCode } : {})
+    })
+    if (!skip)
+      return {
+        ...decision,
+        attempts,
+        selected: { ...reserve.target },
+        source: reserve.from.kind,
+        ...(poolOf(reserve.from) ? { effective: poolOf(reserve.from)! } : {}),
+        reserve: true
+      }
+  }
+  return { ...decision, attempts }
+}
+
+/** The configured reserve, when it sits at or below the tier the reading asked for. */
+function reserveFor(config: RoutingConfig, decision: PoolDecision): { target: RouteTarget; from: RouteAttempt['from'] } | undefined {
+  const wanted = config.fallbackTargetId
+  if (!wanted) return undefined
+  const ceiling = POOL_RANK[decision.policy]
+  const spots: ({ kind: 'free' } | { kind: 'tier'; tier: Tier })[] = []
+  if ((config.free?.policy ?? 'off') !== 'off') spots.push({ kind: 'free' })
+  for (let rank = 1; rank <= ceiling; rank += 1) spots.push({ kind: 'tier', tier: tierAt(rank)! })
+  for (const from of spots) {
+    const pool = from.kind === 'free' ? config.pools.free : config.pools[from.tier]
+    const hit = pool?.chain.find((t) => t.id === wanted || t.model === wanted)
+    if (hit) return { target: hit, from }
+  }
+  return undefined
+}
+
+/** The model to run, or why nothing ran. */
 export function pickRoute(
   j: RouteJudgment,
   config: RoutingConfig,
   available: (t: RouteTarget) => boolean = () => true
-): { pool: Pool; target?: RouteTarget; roleSpecialised: boolean; notes: string[] } {
+): { requested: Tier; policy: Tier; target?: RouteTarget; source?: 'free' | 'role' | 'tier'; notes: string[] } {
   const w = walkRoute(j, config, (t) => (available(t) ? undefined : L('não está disponível', "isn't available")))
-  return w.selected
-    ? { pool: w.pool, target: w.selected, roleSpecialised: w.roleSpecialised, notes: w.notes }
-    : { pool: w.pool, roleSpecialised: false, notes: [...w.notes, L('nenhum modelo dos pools está disponível', 'no model in the pools is available')] }
+  return {
+    requested: w.requested,
+    policy: w.policy,
+    ...(w.selected ? { target: w.selected, source: w.source } : {}),
+    notes: w.selected ? w.notes : [...w.notes, L('nenhum modelo elegível', 'no eligible model')]
+  }
 }
 
-/** The judgment walked over the config, with the trace one routed turn leaves behind. */
-export function decideRoute(
-  j: RouteJudgment,
-  config: RoutingConfig,
-  can: Availability,
-  baseline: RouteTarget
-): { selected: RouteTarget; trace: RouteTrace } | undefined {
+export type RouteDecision =
+  | { kind: 'selected'; selected: RouteTarget; trace: RouteTrace }
+  /** A good read, nothing eligible, and no reserve: the reply is not sent. */
+  | { kind: 'exhausted'; trace: RouteTrace }
+
+const readingOf = (j: RouteJudgment) => ({
+  role: j.role,
+  ...(j.roleConfidence !== undefined ? { confidence: j.roleConfidence } : {}),
+  ...(Object.keys(j.roleProbabilities).length > 0 ? { probabilities: j.roleProbabilities } : {}),
+  complexity: j.complexity,
+  capability: j.capability,
+  deepReasoning: j.deepReasoning,
+  ms: j.ms
+})
+
+const sameExecution = (a: RouteTarget, b: RouteTarget): boolean => a.id === b.id
+
+/** The judgment walked over the setup, with the trace one routed turn leaves behind. */
+export function decideRoute(j: RouteJudgment, config: RoutingConfig, can: Availability, baseline: RouteTarget): RouteDecision {
   const w = walkRoute(j, config, can)
-  if (!w.selected) return undefined
-  const hit = w.attempts.find((a) => !a.skip)
-  const same = w.selected.engine === baseline.engine && w.selected.model === baseline.model && w.selected.effort === baseline.effort
-  // A first choice that couldn't run makes it a fallback, whether or not the one that did run is the baseline.
-  const trace: RouteTrace = {
+  const skips = w.attempts.filter((a) => a.skip).length
+  const base: RouteTrace = {
     at: Date.now(),
-    reading: {
-      role: j.role,
-      roleConfidence: j.roleConfidence,
-      ...(Object.keys(j.roleProbabilities).length > 0 ? { probabilities: j.roleProbabilities } : {}),
-      complexity: j.complexity,
-      capability: j.capability,
-      deepReasoning: j.deepReasoning,
-      ms: j.ms
-    },
+    reading: readingOf(j),
+    rawDemand: w.rawDemand,
     demand: w.demand,
-    pool: w.pool,
-    ...(w.roleSpecialised ? { roleSpecialised: true } : {}),
-    ...(hit && hit.from.kind === 'pool' ? { effective: hit.from.pool } : {}),
+    requested: w.requested,
+    policy: w.policy,
     notes: w.notes,
     attempts: w.attempts,
-    selected: w.selected,
     baseline,
-    state: same ? 'kept' : w.attempts.length > 1 ? 'fallback' : 'changed'
+    state: 'exhausted'
   }
-  return { selected: w.selected, trace }
+  if (!w.selected) {
+    return {
+      kind: 'exhausted',
+      trace: {
+        ...base,
+        state: 'exhausted',
+        error: L(
+          'Nenhum modelo elegível nas rotas: a resposta não foi enviada.',
+          'No eligible model in the routes: the reply was not sent.'
+        )
+      }
+    }
+  }
+  const same = sameExecution(w.selected, baseline)
+  const notes = [...w.notes]
+  if (same) notes.push(L('a rota caiu no modelo de base: ninguém mudou', 'the route landed on the baseline: nothing changed'))
+  if (w.reserve) notes.push(L('entrou o modelo de reserva configurado', 'the configured reserve stepped in'))
+  const trace: RouteTrace = {
+    ...base,
+    ...(w.effective ? { effective: w.effective } : {}),
+    ...(w.source ? { source: w.source } : {}),
+    notes,
+    selected: w.selected,
+    state: same ? 'kept' : skips > 0 ? 'fallback' : 'changed'
+  }
+  return { kind: 'selected', selected: w.selected, trace }
 }
 
 /** The trace of a turn routing couldn't decide for: the baseline ran, and the line says why. */
@@ -278,19 +531,11 @@ export function unavailableTrace(j: RouteJudgment | undefined, config: RoutingCo
   const w = j ? walkRoute(j, config, () => error) : undefined
   return {
     at: Date.now(),
-    reading: j
-      ? {
-          role: j.role,
-          roleConfidence: j.roleConfidence,
-          ...(Object.keys(j.roleProbabilities).length > 0 ? { probabilities: j.roleProbabilities } : {}),
-          complexity: j.complexity,
-          capability: j.capability,
-          deepReasoning: j.deepReasoning,
-          ms: j.ms
-        }
-      : { role: 'chat', roleConfidence: 0, complexity: 0, capability: 0, deepReasoning: 0, ms: 0 },
+    reading: j ? readingOf(j) : { role: 'chat', complexity: 0, capability: 0, deepReasoning: 0, ms: 0 },
+    rawDemand: w?.rawDemand ?? 0,
     demand: w?.demand ?? 0,
-    pool: w?.pool ?? 't1',
+    requested: w?.requested ?? 't1',
+    policy: w?.policy ?? 't1',
     notes: w?.notes ?? [],
     attempts: w?.attempts ?? [],
     baseline,
@@ -299,18 +544,25 @@ export function unavailableTrace(j: RouteJudgment | undefined, config: RoutingCo
   }
 }
 
+/** Is there anything at all to route with? No chains anywhere: routing has nothing to decide with. */
+export function configured(config: RoutingConfig): boolean {
+  const pools = Object.values(config.pools).some((p) => p.chain.length > 0)
+  const roles = Object.values(config.roles).some((r) => r.chain.length > 0)
+  return pools || roles
+}
+
 // ---------- the line the person reads ----------
 
 /** The reading as short, drawn text — the bars themselves are the renderer's. */
 export function readingLine(j: RouteJudgment, config: RoutingConfig): string {
-  const { pool, demand } = poolFor(j, config)
+  const { requested, demand } = poolFor(j, config)
   const parts = [
     j.role,
     L(`complexidade ${j.complexity.toFixed(1)}/3`, `complexity ${j.complexity.toFixed(1)}/3`),
     L(`capacidade ${j.capability.toFixed(1)}/3`, `capability ${j.capability.toFixed(1)}/3`),
-    L(`raciocínio ${demand.toFixed(1)}/3`, `demand ${demand.toFixed(1)}/3`)
+    L(`exigência ${demand.toFixed(1)}/3`, `demand ${demand.toFixed(1)}/3`)
   ]
-  return `${parts.join(' · ')} → ${pool}`
+  return `${parts.join(' · ')} → ${requested}`
 }
 
 /** The role choices with their probabilities, best first: the bars for the role criterion. */
@@ -322,3 +574,5 @@ export function roleBars(j: RouteJudgment, limit = 3): { role: string; p: number
     .slice(0, limit)
 }
 
+/** Every tier a person can put a model in, in order: for a select's options. */
+export const TIER_CHOICES: readonly Tier[] = TIERS
