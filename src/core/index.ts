@@ -49,6 +49,7 @@ import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
+import { LISTEN_STUB_KEY, listenStub } from './jev-fake'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
@@ -85,6 +86,10 @@ companyNetwork()
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
+// Who Jev brings in when there is no TypeSafe key to ask with: a stand-in for the listen question
+// and the router's, so the built app and a test can drive a listening channel on a machine that
+// has no key. Off unless asked for: TUCANO_FAKE_LISTEN=<handle> brings that agent in, `none` never.
+const fakeListen = fake ? process.env['TUCANO_FAKE_LISTEN'] : undefined
 // Run by the server (src/server): no window, and the screens are in a browser elsewhere.
 const serverMode = process.env['TUCANO_SERVER'] === '1'
 const publicUrl = process.env['TUCANO_URL']?.replace(/\/+$/, '')
@@ -963,7 +968,7 @@ const runner = new Runner({
     toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
     void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
-  jev: { key: () => secrets.get(JEV_SECRET) },
+  jev: fakeListen ? { key: async () => LISTEN_STUB_KEY, fetch: listenStub(fakeListen) } : { key: () => secrets.get(JEV_SECRET) },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
   onQuota: (quota) => {
     db.setSettings({ quota })
