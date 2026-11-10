@@ -351,6 +351,13 @@ export class Wiki {
         // already there
       }
     }
+    // What the resolver made of a finding it couldn't settle (src/core/wiki-resolver.ts): a sentence,
+    // or the question only the person can answer.
+    try {
+      this.db.exec('ALTER TABLE findings ADD COLUMN note TEXT')
+    } catch {
+      // already there
+    }
     // Which source a version came from (a change the curator made of it): it's seen by whoever sees
     // the source, and goes with it.
     try {
@@ -1232,7 +1239,7 @@ export class Wiki {
     for (const r of rows) {
       const change = r['change_id'] ? this.change(String(r['change_id'])) : undefined
       if (r['change_id'] && (!change || (change.state !== 'pending' && change.state !== 'conflict'))) continue
-      out.push({ id: String(r['id']), at: Number(r['at']), kind: String(r['kind']) as WikiFinding['kind'], pages: JSON.parse(String(r['pages'])) as string[], text: String(r['text']), ...(r['name'] ? { name: String(r['name']) } : {}), ...(change ? { change } : {}) })
+      out.push({ id: String(r['id']), at: Number(r['at']), kind: String(r['kind']) as WikiFinding['kind'], pages: JSON.parse(String(r['pages'])) as string[], text: String(r['text']), ...(r['name'] ? { name: String(r['name']) } : {}), ...(r['note'] ? { note: String(r['note']) } : {}), ...(change ? { change } : {}) })
     }
     return out
   }
@@ -1241,6 +1248,8 @@ export class Wiki {
   setFindings(list: (Omit<WikiFinding, 'id' | 'at' | 'change'> & { key: string; ops?: WikiOp[]; reason?: string })[]): void {
     // a fix refused counts as "leave it"
     const keep = new Set((this.db.prepare("SELECT key FROM findings WHERE state = 'dismissed' OR change_id IN (SELECT id FROM changes WHERE state = 'refused')").all() as { key: string }[]).map((r) => r.key))
+    // What the resolver said about it, which is about the same finding however many times it's reviewed.
+    const notes = new Map((this.db.prepare('SELECT key, note FROM findings WHERE note IS NOT NULL').all() as { key: string; note: string }[]).map((r) => [r.key, r.note]))
     for (const f of this.findings()) if (f.change) keep.add((this.db.prepare('SELECT key FROM findings WHERE id = ?').get(f.id) as { key: string }).key)
     this.db.prepare("DELETE FROM findings WHERE state = 'open' AND kind != 'git' AND (change_id IS NULL OR change_id NOT IN (SELECT id FROM changes WHERE state IN ('pending', 'conflict')))").run()
     const at = Date.now()
@@ -1248,7 +1257,7 @@ export class Wiki {
       if (keep.has(f.key)) continue
       keep.add(f.key)
       const change = f.ops?.length ? this.addChange({ ops: f.ops, by: 'review', ...(f.reason ? { reason: f.reason } : {}) }) : undefined
-      this.db.prepare("INSERT INTO findings (id, key, at, kind, pages, text, name, change_id, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')").run(sha(f.key + at + Math.random()), f.key, at, f.kind, JSON.stringify(f.pages), f.text, f.name ?? null, change?.id ?? null)
+      this.db.prepare("INSERT INTO findings (id, key, at, kind, pages, text, name, change_id, state, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)").run(sha(f.key + at + Math.random()), f.key, at, f.kind, JSON.stringify(f.pages), f.text, f.name ?? null, change?.id ?? null, change ? null : (notes.get(f.key) ?? null))
     }
     this.onChange()
   }
@@ -1267,6 +1276,27 @@ export class Wiki {
     this.db.prepare("UPDATE findings SET state = 'dismissed' WHERE id = ?").run(id)
     if (r.change_id) this.refuseChange(r.change_id)
     this.onChange()
+  }
+
+  // What the resolver made of a finding (src/core/wiki-resolver.ts): a change package that takes its
+  // place, or what it found and couldn't settle, kept next to the finding so it's read where the
+  // problem is. Nothing is written here: a package from a review or a resolver always waits for the
+  // person, on automatic or not (see Wiki.applyWaiting).
+  resolveFinding(id: string, answer: { ops?: WikiOp[]; note?: string; reason?: string }): WikiChange | undefined {
+    const r = this.db.prepare('SELECT key, state FROM findings WHERE id = ?').get(id) as { key: string; state: string } | undefined
+    if (!r || r.state !== 'open') return undefined
+    const ops = answer.ops ?? []
+    if (ops.length) {
+      const change = this.addChange({ ops, by: 'review', ...(answer.reason ? { reason: answer.reason } : {}) })
+      this.db.prepare('UPDATE findings SET change_id = ?, note = NULL WHERE id = ?').run(change.id, id)
+      this.onChange()
+      return change
+    }
+    const note = (answer.note ?? '').trim()
+    if (!note) return undefined
+    this.db.prepare('UPDATE findings SET note = ? WHERE id = ?').run(note, id)
+    this.onChange()
+    return undefined
   }
 
     addChange(p: { ops: WikiOp[]; sourceId?: string; by: string; reason?: string }): WikiChange {

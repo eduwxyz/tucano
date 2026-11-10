@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { L, locale } from '../../shared/lang'
 import { memorySystem } from '../memory'
 import { curatorSystem } from '../wiki-curator'
+import { resolverSystem } from '../wiki-resolver'
 import { handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
@@ -47,6 +48,8 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
       } else if (turn.system === curatorSystem()) {
         reply = JSON.stringify(fakeCuration(turn.prompt))
+      } else if (turn.system === resolverSystem()) {
+        reply = JSON.stringify(fakeResolution(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
       } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
@@ -279,6 +282,24 @@ export async function callTool(url: string, name: string, args: Record<string, u
   } finally {
     await client.close()
   }
+}
+
+// The wiki's resolver, for trying it without an engine: the first page ends up saying what the second
+// one says about the fact, which is the swap a real resolver writes.
+function fakeResolution(prompt: string): { mudancas: Record<string, string>[]; motivo: string } {
+  const shown = prompt.split(/\n## [^\n]*(?:As páginas inteiras|The whole pages)[^\n]*\n/)[1]?.split(/\n## /)[0] ?? ''
+  const blocks = [...shown.matchAll(/### \[\[([^\]]+)\]\][^\n]*\n([\s\S]*?)(?=\n### \[\[|$)/g)].map((m) => ({ title: m[1]!, body: m[2]!.trim() }))
+  // the first sentence of each page, which is what they disagree on
+  const fact = (body: string): string =>
+    body
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l.length > 10 && !l.startsWith('#') && !l.startsWith('-') && !l.startsWith('[[')) ?? ''
+  const [a, b] = blocks
+  const was = a ? fact(a.body) : ''
+  const now = b ? fact(b.body) : ''
+  if (!a || !b || !was || !now || was === now) return { mudancas: [], motivo: L('Não deu pra decidir só com as páginas: elas precisam de você.', 'The pages alone did not settle it: they need you.') }
+  return { mudancas: [{ op: 'replace', pagina: a.title, old: was, new: now }], motivo: L('As duas páginas dizem a mesma coisa agora.', 'Both pages say the same thing now.') }
 }
 
 // The wiki's curator, for trying it without an engine: a page the stretch names gets a line

@@ -160,6 +160,7 @@ export const NEEDS: Record<Method, Need> = {
   wikiRedoChange: 'admin',
   wikiRunReview: 'admin',
   wikiDismissFinding: 'admin',
+  wikiResolveFinding: 'admin', // the resolver works on the whole wiki, as the review does
   wikiImport: 'admin',
   wikiImportZip: 'admin',
   setWikiDir: 'admin',
