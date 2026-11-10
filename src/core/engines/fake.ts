@@ -273,7 +273,11 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         })
         reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Te mandei duas decisões.'
       } else if (turn.mcpUrl && /pr[oó]ximos passos/i.test(last)) {
+<<<<<<< HEAD
         // "os próximos passos": a to-do card, one of its steps plainly optional.
+=======
+        // "os próximos passos": a to-do card, every box ticked, one of them plainly optional.
+>>>>>>> 7946ddde (Give a reply a card of next steps: every box ticked, so nothing it proposed is buried)
         const r = await callTool(turn.mcpUrl, 'next_steps', {
           question: 'O que vem agora?',
           steps: [

@@ -14,7 +14,8 @@ export interface Decision {
   question: string
   kind: DecisionKind
   options?: DecisionOption[]
-  nextSteps?: true // a list of next steps, not a question: nothing starts ticked, and the card sends what the person ticks as a to-do
+  nextSteps?: true // a list of next steps, not a question: the card shows them as a to-do and can start with options ticked
+  ticked?: number[] // which options start ticked when it isn't all of them (Jev said which are worth doing now)
 }
 export interface Answer {
   chosen?: number[] // indexes into the options
@@ -67,13 +68,20 @@ export function isNewQuestion(message: Message): boolean {
   return message.run?.status === 'waiting_input' && !message.run.answers && questionsOf(message.run).length > 0
 }
 
-// A list of next steps: the card reads as a to-do. Like a question, it opens with nothing picked:
-// what comes back is what the person chose, never the agent's own list.
+// A list of next steps: the card reads as a to-do. Like a question, it can stay open after the reply
+// is done; it starts with everything ticked (or with the ones Jev found worth doing now).
 export const isNextSteps = (question: Decision): boolean => question.nextSteps === true
 
 // A next-steps card still open. Unlike a question it holds nothing: the reply is done, the next
 // message is a message of its own, and the card can be answered, or ignored, for as long as it's there.
 export const hasOpenSteps = (run: Run | undefined): boolean => run?.status === 'done' && run.stepsOpen === true
+
+export function startsTicked(question: Decision): number[] {
+  if (!question.nextSteps) return []
+  const all = (question.options ?? []).map((_, i) => i)
+  const picked = question.ticked
+  return picked ? all.filter((i) => picked.includes(i)) : all
+}
 
 const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
 const tooLong = (question: string): string =>
@@ -126,8 +134,8 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Deci
   return { questions }
 }
 
-// What an agent proposes with next_steps: one multiple decision, with nothing ticked. Same limits
-// as a decision's options, but more of them; the card's own row takes a step written by hand.
+// What an agent proposes with next_steps: one multiple decision, starting ticked (all, unless the
+// classifier picked a subset). Same limits as a decision's options, but more of them.
 export function parseNextSteps(args: Record<string, unknown>): { decision: Decision } | { error: string } {
   const question = trimmed(args['question'])
   if (question.length > MAX_QUESTION_LENGTH) return { error: tooLong(question) }

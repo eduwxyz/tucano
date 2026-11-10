@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, startsTicked, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
 import { covers } from '../../../shared/access'
 import { amAdmin, answerDecision, cancelQuestion, personById, submitDecisions, teamMode, useStore, type Message } from '../store'
 import { Icon } from './ui'
@@ -258,7 +258,9 @@ function Answering({ id, questions, saved, badge, byline, steps, recommended, ex
 
 function DecisionStep({ draftId, question, answer, recommended, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; recommended?: number | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {
   const options = question.options ?? []
-  const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
+  // A next-steps card opens with its boxes already ticked (or with the ones Jev found worth doing
+  // now); a question opens with nothing picked. A draft I left here, or an answer saved, wins.
+  const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? startsTicked(question), other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
   const edit = (patch: Partial<AnswerDraft>): void => {
     const next = { ...draft, ...patch }
@@ -320,7 +322,7 @@ function DecisionStep({ draftId, question, answer, recommended, last, takeFocus,
     question.kind === 'text'
       ? L('Enter confirma · Shift+Enter quebra a linha', 'Enter confirms · Shift+Enter for a new line')
       : steps
-        ? L(`Marque com 1 a ${options.length + 1} · nada começa marcado`, `Tick with 1 to ${options.length + 1} · nothing starts ticked`)
+        ? L(`Marque ou desmarque com 1 a ${options.length + 1} · as marcadas são o ponto de partida`, `Tick or untick with 1 to ${options.length + 1} · ticked ones are the starting point`)
         : multiple
           ? L(`Marque quantas quiser com 1 a ${options.length + 1}`, `Tick as many as you like with 1 to ${options.length + 1}`)
           : L(`Escolha com 1 a ${options.length + 1}`, `Pick with 1 to ${options.length + 1}`)
