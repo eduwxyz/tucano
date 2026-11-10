@@ -83,7 +83,7 @@ function DialogBody(): ReactNode {
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
   if (dialog?.kind === 'new-channel') return <SettingsDialog onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
-  if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} onClose={close} />
+  if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} mentionOnly={conv.mentionOnly ?? []} onClose={close} />
   return <SettingsDialog conv={conv} onClose={close} />
 }
 
@@ -174,33 +174,57 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
   )
 }
 
-// Who is in the channel: a row per agent, on or off, saved together.
-function MembersDialog({ id, name, members, onClose }: { id: string; name: string; members: string[]; onClose: () => void }): ReactNode {
+// Who is in the channel: a row per agent, on or off, and mention mode for those in it, saved together.
+export function MembersDialog({ id, name, members, mentionOnly = [], onClose }: { id: string; name: string; members: string[]; mentionOnly?: string[]; onClose: () => void }): ReactNode {
   const agents = useStore((s) => s.agents.filter(isTeam))
   const [picked, setPicked] = useState<string[]>(members)
+  const [quiet, setQuiet] = useState<string[]>(mentionOnly)
   const [error, setError] = useState<string | null>(null)
-  const toggle = (a: string): void => setPicked(picked.includes(a) ? picked.filter((x) => x !== a) : [...picked, a])
-  const changed = picked.length !== members.length || picked.some((a) => !members.includes(a))
+  const toggle = (a: string): void => {
+    if (!picked.includes(a)) return setPicked([...picked, a])
+    setPicked(picked.filter((x) => x !== a))
+    setQuiet(quiet.filter((x) => x !== a)) // out of the channel, out of mention mode
+  }
+  const mention = (a: string): void => setQuiet(quiet.includes(a) ? quiet.filter((x) => x !== a) : [...quiet, a])
+  const changed =
+    picked.length !== members.length ||
+    picked.some((a) => !members.includes(a)) ||
+    quiet.length !== mentionOnly.length ||
+    quiet.some((a) => !mentionOnly.includes(a))
   // Archived agents can't be shown, so they don't show up in the count either (they stay picked: saving keeps them in the channel).
   const inRoom = picked.filter((a) => agents.some((x) => x.id === a))
+  const quietHere = inRoom.filter((a) => quiet.includes(a))
   return (
     <Modal title={L(`Agentes em #${name}`, `Agents in #${name}`)} onClose={onClose}>
-      <p className="muted small modal__lead">{L('Quem está no canal lê a conversa e pode responder. Pra chamar alguém específico, use @.', 'Whoever is in the channel reads the conversation and can reply. To call on someone specific, use @.')}</p>
+      <p className="muted small modal__lead">
+        {L(
+          'Quem está no canal lê a conversa e pode responder. Pra chamar alguém específico, use @. Em modo menção, o agente lê tudo mas só responde quando é chamado, por você ou por outro agente.',
+          'Whoever is in the channel reads the conversation and can reply. To call on someone specific, use @. In mention mode, an agent reads everything but answers only when mentioned, by you or by another agent.'
+        )}
+      </p>
       <div className="member-list">
         {agents.map((a) => {
           const on = picked.includes(a.id)
           return (
-            <button key={a.id} className={`member ${on ? 'is-on' : ''}`} onClick={() => toggle(a.id)}>
-              <AgentAvatar agent={a} size={28} />
-              <span className="member__text grow">
-                <strong>{a.name}</strong>
-                <span className="muted small">
-                  @{a.handle}
-                  {a.role ? ` · ${a.role}` : ''}
+            <div key={a.id} className="member-row">
+              <button className={`member ${on ? 'is-on' : ''}`} onClick={() => toggle(a.id)}>
+                <AgentAvatar agent={a} size={28} />
+                <span className="member__text grow">
+                  <strong>{a.name}</strong>
+                  <span className="muted small">
+                    @{a.handle}
+                    {a.role ? ` · ${a.role}` : ''}
+                  </span>
                 </span>
-              </span>
-              <span className="member__check">{on && <Icon name="check" size={13} />}</span>
-            </button>
+                <span className="member__check">{on && <Icon name="check" size={13} />}</span>
+              </button>
+              {on && (
+                <label className="member-row__mention muted small" title={L('Lê a conversa, mas só responde quando é mencionado', 'Reads the conversation, but answers only when mentioned')}>
+                  <input type="checkbox" checked={quiet.includes(a.id)} onChange={() => mention(a.id)} aria-label={L(`Modo menção para ${a.name}`, `Mention mode for ${a.name}`)} />
+                  {L('Modo menção', 'Mention mode')}
+                </label>
+              )}
+            </div>
           )
         })}
       </div>
@@ -208,11 +232,12 @@ function MembersDialog({ id, name, members, onClose }: { id: string; name: strin
       <footer className="modal__foot">
         <span className="muted small">
           {inRoom.length} {inRoom.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}
+          {quietHere.length > 0 && ` · ${quietHere.length} ${L('em modo menção', 'in mention mode')}`}
         </span>
         <button className="btn btn--ghost btn--sm" onClick={onClose}>
           {L('Cancelar', 'Cancel')}
         </button>
-        <button className="btn btn--primary btn--sm" disabled={!changed} onClick={() => setChannelMembers(id, picked).then(onClose, (e: unknown) => setError(message(e)))}>
+        <button className="btn btn--primary btn--sm" disabled={!changed} onClick={() => setChannelMembers(id, picked, quiet).then(onClose, (e: unknown) => setError(message(e)))}>
           {L('Salvar', 'Save')}
         </button>
       </footer>
