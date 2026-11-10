@@ -96,6 +96,61 @@ export const skillName = (s: string): string =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 40)
 
+// ---------- who follows what, by agent ----------
+
+// The active skills an agent follows, by name. A skill with an empty `agents` is everyone's.
+export function skillsOf(skills: Skill[], agentId: string): string[] {
+  return skills.filter((s) => skillApplies(s, agentId)).map((s) => s.name).sort()
+}
+
+// "Every active skill", as a whole-list assignment says it.
+export const EVERYONE = '*'
+
+// The whole list a bot follows, the way a proposal carries it: the names it keeps, or "*" for every
+// active skill. Reads back as "*" when the list is every one of them, so the same assignment written
+// two ways is one assignment.
+export function skillList(skills: Skill[], agentId: string): string[] {
+  const mine = skillsOf(skills, agentId)
+  return mine.length > 0 && mine.length === skills.filter((s) => s.state === 'active').length ? [EVERYONE] : mine
+}
+
+// Turning "these are the skills this bot follows" into the per-skill `agents` lists the app stores
+// (the same rule the agent page's checkboxes follow: one skill, everyone who has it, or "*").
+// `writes` are the skills that change; `unknown` are names that aren't active skills; `alone` names a
+// skill that could only be taken away by leaving it with no one, which the app has no way to say.
+export function assignSkills(
+  skills: Skill[],
+  agentId: string,
+  teamIds: string[],
+  names: string[]
+): { writes: { id: string; agents: string[] }[]; unknown: string[]; alone?: string } {
+  const active = skills.filter((s) => s.state === 'active')
+  const all = names.length === 1 && names[0] === EVERYONE
+  const known = new Map(active.map((s) => [s.name, s]))
+  const unknown = all ? [] : names.filter((n) => !known.has(n))
+  if (unknown.length) return { writes: [], unknown }
+  const want = new Set(all ? active.map((s) => s.name) : names)
+  const writes: { id: string; agents: string[] }[] = []
+  for (const s of active) {
+    const has = skillApplies(s, agentId)
+    const should = want.has(s.name)
+    if (should === has) continue
+    if (should) {
+      // Everyone's already: nothing to write. Otherwise, add this agent.
+      if (s.agents.length === 0) continue
+      const agents = [...new Set([...s.agents, agentId])]
+      writes.push({ id: s.id, agents: agents.length >= teamIds.length && teamIds.every((id) => agents.includes(id)) ? [] : agents })
+    } else {
+      const from = s.agents.length === 0 ? teamIds : s.agents
+      const agents = from.filter((id) => id !== agentId)
+      // Left with nobody: empty means everyone, so this bot can't be left out of it.
+      if (agents.length === 0) return { writes: [], unknown, alone: s.name }
+      writes.push({ id: s.id, agents })
+    }
+  }
+  return { writes, unknown }
+}
+
 type Outcome = { reply: string; error?: boolean; skill?: Skill }
 
 export class Skills {
@@ -119,6 +174,19 @@ export class Skills {
   // Active skills this agent follows, for its prompt.
   forAgent(agentId: string): Skill[] {
     return this.deps.db.skills().filter((s) => skillApplies(s, agentId))
+  }
+
+  // The whole list a bot follows, from a proposal: what it keeps, and nothing else.
+  assign(agentId: string, names: string[]): { changed: Skill[]; unknown: string[]; alone?: string } {
+    const teamIds = this.deps.db.agents().filter((a) => !a.archived && a.kind !== 'tuca').map((a) => a.id)
+    const r = assignSkills(this.deps.db.skills(), agentId, teamIds, names)
+    if (r.alone || r.unknown.length) return { changed: [], ...r }
+    const changed: Skill[] = []
+    for (const w of r.writes) {
+      const k = this.deps.db.skill(w.id)
+      if (k) changed.push(this.store({ ...k, agents: w.agents, updatedAt: this.now() }))
+    }
+    return { changed, unknown: [] }
   }
 
   private active(name: string, except?: string): Skill | undefined {
