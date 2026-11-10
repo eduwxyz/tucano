@@ -375,7 +375,11 @@ describe('a steer reaches the agent between two tool calls', () => {
     expect(allText(results[1])).toContain('mude de plano') // handed over at the second call
     expect(allText(results[1])).toContain('escreveu isto enquanto você trabalhava')
     const reply = agentMessages()[0]!
-    expect(reply.run?.steps.some((s) => s.label === 'Recebeu o que você escreveu')).toBe(true)
+    const steerStep = reply.run?.steps.find((s) => s.label === 'Recebeu o que você escreveu')
+    expect(steerStep).toBeDefined()
+    // In the chain it reads as a steer, not as a tool call, and it carries what the person wrote.
+    expect(steerStep?.kind).toBe('steer')
+    expect(steerStep?.detail).toContain('mude de plano: só as abertas')
   })
 })
 
