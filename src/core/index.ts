@@ -996,6 +996,8 @@ void ready.then(async () => {
   toMain({ type: 'ready' })
   workspaceSummary()
   await runner.expireApprovals()
+  const settled = await runner.settleDecidedRuns()
+  if (settled) console.log(`[core] ${settled} reply(ies) closed: their approval was decided without them`)
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   // A thread that went quiet gets its own summary, and the memories in it.
   setInterval(() => void memory.sweep().catch((e: unknown) => console.error('[memory]', e)), 60_000).unref()
@@ -2008,6 +2010,7 @@ const api: Handlers = {
   },
   wikiApplyChange: ({ id }, ctx) => (changeInReach(ctx, id), wiki.applyChange(id, nameOf(ctx))),
   wikiRefuseChange: ({ id }, ctx) => (changeInReach(ctx, id), wiki.refuseChange(id)),
+  wikiApplyWaiting: (_, ctx) => wiki.applyWaiting(nameOf(ctx), (c) => seesChange(ctx, c)),
   // Undoing puts back what the pages were: from before the heritage, that's the owner's history to restore.
   wikiUndoChange: ({ id }, ctx) => {
     // Said in so many words (before the reach check hides the change as the owner's history).

@@ -218,7 +218,7 @@ Entre no grupo `docker` com `sudo usermod -aG docker $USER`, saia e entre de nov
 Clique em **Autorizar no navegador**, na página do agente ou em Conectores, e entre na ferramenta.
 
 **"Este Linux não tem um chaveiro aberto" ao salvar uma senha.**
-O Tucano guarda senhas só no chaveiro do sistema. Instale o `gnome-keyring` (ou ative o KWallet, no KDE), saia e entre de novo na sessão e tente outra vez.
+O Tucano guarda senhas só no chaveiro do sistema. Instale o `gnome-keyring` ou outro Secret Service (ou ative o KWallet, no KDE), saia e entre de novo na sessão e tente outra vez. Funciona em qualquer desktop ou compositor, desde que o chaveiro esteja destravado.
 
 **O AppImage não abre no Ubuntu 24.04 em diante.**
 O Ubuntu restringe o isolamento que apps Electron usam. Instale o .deb: ele traz o perfil do AppArmor que libera isso.
