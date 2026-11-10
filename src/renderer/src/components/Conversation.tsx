@@ -99,6 +99,7 @@ import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { describeRoutine, when } from './Routines'
 import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
+import { QuotaStrip } from './QuotaStrip'
 import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
@@ -240,6 +241,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
           </div>
           <div className="topbar__actions">
+            {/* What the providers have left, in the window that lasts longest: the one line that says
+                whether the plan runs out before it renews, without opening Usage and limits. */}
+            <QuotaStrip />
             {conv.kind === 'channel' && (
               <div className="stack" title={L('Agentes no canal', 'Agents in the channel')}>
                 {members.map((a) => (
