@@ -58,9 +58,9 @@ afterEach(() => act(() => root.unmount()))
 const draw = async (message: Message): Promise<void> => {
   await act(async () => root.render(<RunBlock message={message} />))
 }
-const pill = (): HTMLElement | null => document.querySelector('.steps__ask-pill')
-const field = (): HTMLTextAreaElement | null => document.querySelector('.steps__ask-note textarea')
-const buttons = (): HTMLElement[] => [...document.querySelectorAll('.steps__ask-row button')] as HTMLElement[]
+const pill = (): HTMLElement | null => document.querySelector('.steps__steer-pill')
+const field = (): HTMLTextAreaElement | null => document.querySelector('.steps__steer-note textarea')
+const buttons = (): HTMLElement[] => [...document.querySelectorAll('.steps__steer-row button')] as HTMLElement[]
 // Typing as React sees it: the value set past React's own tracker, then the input event.
 const type = async (text: string): Promise<void> => {
   const ta = field()!
@@ -84,26 +84,16 @@ const key = async (k: string, extra: { ctrlKey?: boolean } = {}): Promise<void> 
 }
 
 describe('the steer pill', () => {
-<<<<<<< HEAD
   it('sits under the steps of a reply at work, and is gone once it is done', async () => {
-=======
-  it('sits at the bottom of the chain while the agent works, and gives way once it is done', async () => {
->>>>>>> da044c7 (Let a finished reply go on from where it stopped, with a Follow Up)
     await draw(reply('working'))
     expect(pill()?.textContent?.trim()).toBe('Orientar')
     expect(document.querySelector('.steps__list')).not.toBeNull()
     // Under the box, not inside it: everything the run says about itself stays above the pill.
     const block = document.querySelector('.steps')!
-<<<<<<< HEAD
     expect(block.querySelector('.steps__steer')).toBeNull()
     expect(block.nextElementSibling?.className).toBe('steps__steer')
-=======
-    expect(block.lastElementChild?.className).toBe('steps__ask steps__ask--pointer')
-    // Done, the same pill is the follow up (test/steer-followup.test.tsx): steering is for a reply
-    // that's running, and there is nothing left to steer here.
->>>>>>> da044c7 (Let a finished reply go on from where it stopped, with a Follow Up)
     await draw(reply('done'))
-    expect(pill()?.textContent?.trim()).toBe('Seguir')
+    expect(pill()).toBeNull()
   })
 
   it('opens a field, and sends nothing until something is written', async () => {

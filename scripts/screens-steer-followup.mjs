@@ -1,7 +1,7 @@
-// Frames for the follow up (#337 / this PR): at the bottom of a reply that has ended, the same pill a
-// steer is — Steer while it works, Follow Up once it's done. What the person writes stays in that
-// reply: it goes on in the same row, its text and steps kept, instead of becoming another message.
-// Fake engines, a workspace made from nothing, English.
+// Frames for the follow up (#337 / this PR): under a reply that has ended, the same pill a steer is —
+// Steer at the bottom of the chain while it works, Follow Up below the answer once it's done, never
+// above it. What the person writes stays in that reply: it goes on in the same row, its text and
+// steps kept, instead of becoming another message. Fake engines, a workspace made from nothing.
 import { _electron as electron } from 'playwright'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -37,17 +37,23 @@ const waitWorking = async (win, want = true) => {
   return false
 }
 
-// The last reply's steps block: where the pill sits, what it says, and what is under it.
+// The last reply: where its pill sits now — under the answer it goes on from, not in the chain above.
 const pillLook = (win) =>
   win.evaluate(() => {
-    const steps = [...document.querySelectorAll('.steps')].filter((s) => s.querySelector('.steps__toggle')).pop()
-    const pill = steps?.querySelector('.steps__ask-pill')
-    const list = steps?.querySelector('.steps__list')
-    if (!steps || !pill) return { pill: false }
+    const msg = [...document.querySelectorAll('.msg--agent')].at(-1)
+    const body = msg?.querySelector('.msg__body')
+    const pill = body?.querySelector('.steps__ask-pill')
+    const steps = body?.querySelector('.steps')
+    const md = body?.querySelector('.md')
+    const meta = body?.querySelector('.msg__meta')
+    if (!body || !pill) return { pill: false, working: !!body?.querySelector('.steps__stop') }
     const p = pill.getBoundingClientRect()
-    const l = list?.getBoundingClientRect()
+    const t = md?.getBoundingClientRect()
+    const m = meta?.getBoundingClientRect()
+    const block = pill.closest('.steps__ask')
+    const b = block.getBoundingClientRect()
     const st = getComputedStyle(pill)
-    const head = steps.getBoundingClientRect()
+    const kids = [...body.children]
     return {
       pill: true,
       tag: pill.tagName,
@@ -58,13 +64,21 @@ const pillLook = (win) =>
       radius: st.borderRadius,
       fontSize: st.fontSize,
       color: st.color,
-      underChain: l ? p.top >= l.bottom - 1 : null,
-      gapUnderChain: l ? Math.round(p.top - l.bottom) : null,
-      gapUnderBlock: Math.round(p.top - head.top),
-      lastInBlock: steps.lastElementChild === pill.closest('.steps__ask'),
-      rows: steps.querySelectorAll('.step').length,
-      summary: steps.querySelector('.steps__summary')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
-      working: !!steps.querySelector('.steps__stop'),
+      inChain: !!steps?.contains(pill),
+      afterAnswer: t ? p.top >= t.bottom - 1 : null,
+      gapUnderAnswer: t ? Math.round(p.top - t.bottom) : null,
+      gapUnderText: (() => {
+        const para = md?.querySelector('p:last-of-type')
+        return para ? Math.round(p.top - para.getBoundingClientRect().bottom) : null
+      })(),
+      gapUnderReceipt: m ? Math.round(p.top - m.bottom) : null,
+      afterAnswerInReply: md ? kids.indexOf(block) > kids.indexOf(md) : null,
+      // The reply's own hover icon is out of the flow, pinned to the row's top: it doesn't count.
+      lastInFlow: [...body.children].filter((c) => !c.classList.contains('msg__reply')).at(-1) === block,
+      alignedWithAnswer: t ? Math.round(b.left - t.left) : null,
+      rows: body.querySelectorAll('.step').length,
+      summary: steps?.querySelector('.steps__summary')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
+      working: !!body.querySelector('.steps__stop'),
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     }
   })

@@ -599,6 +599,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
+        {/* Under the answer it goes on from — the last thing in a reply that ended, after its text, its
+            cards and its receipt, and never inside the chain above them. */}
+        {message.run && <FollowUpPill message={message} />}
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
@@ -1367,11 +1370,7 @@ export function RunBlock({ message }: { message: Message }): ReactNode {
       <RunSteps message={message} />
       {/* At the bottom of the chain and outside its box, the same pill either way: steer what's
           running, go on from what ended. The thinking streams inside the box, above this. */}
-      {message.run?.status === 'working' ? (
-        <SteerPill message={message} />
-      ) : message.run?.status === 'done' ? (
-        <FollowUpPill message={message} />
-      ) : null}
+      {message.run?.status === 'working' && <SteerPill message={message} />}
     </>
   )
 }
@@ -1394,13 +1393,16 @@ function SteerPill({ message }: { message: Message }): ReactNode {
   )
 }
 
-// A follow up, from the bottom of a reply that has ended: the same pill, the same field, and the
-// instruction stays in this reply — it goes on in the same row, its text and steps kept, instead of
-// turning into another message in the conversation (src/core/runs.ts, `followUp`).
-function FollowUpPill({ message }: { message: Message }): ReactNode {
+// A follow up, under a reply that has ended: the same pill, the same field, and the instruction stays
+// in this reply — it goes on in the same row, its text and steps kept, instead of turning into another
+// message in the conversation (src/core/runs.ts, `followUp`). Under the answer, never above it: the
+// chain that led to it ends at the text, and what goes on from there comes after it.
+export function FollowUpPill({ message }: { message: Message }): ReactNode {
+  if (message.run?.status !== 'done') return null
   return (
     <PillPrompt
       icon="down"
+      place="reply"
       label={L('Seguir', 'Follow Up')}
       title={L('Pedir mais desta resposta, na mesma sessão', 'Ask more of this reply, in the same session')}
       aria={L('O que mais esta resposta deve fazer', 'What more this reply should do')}
@@ -1412,7 +1414,7 @@ function FollowUpPill({ message }: { message: Message }): ReactNode {
 
 // The one pill both use, under the steps: quiet until it's wanted, then a field and the send asleep
 // until there's something to send. Ctrl+Enter sends, Escape closes and sends nothing.
-function PillPrompt(p: { icon: IconName; label: string; title: string; aria: string; placeholder: string; onSend: (text: string) => void }): ReactNode {
+function PillPrompt(p: { icon: IconName; label: string; title: string; aria: string; placeholder: string; place?: 'rail' | 'reply'; onSend: (text: string) => void }): ReactNode {
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState('')
   const typed = note.trim()
@@ -1425,7 +1427,7 @@ function PillPrompt(p: { icon: IconName; label: string; title: string; aria: str
     close()
   }
   return (
-    <div className={`steps__ask steps__ask--${p.icon}`}>
+    <div className={`steps__ask steps__ask--${p.icon}${p.place === 'reply' ? ' steps__ask--reply' : ''}`}>
       <button className="steps__ask-pill" aria-expanded={open} title={p.title} onClick={() => (open ? close() : setOpen(true))}>
         <Icon name={p.icon} size={11} /> {p.label}
       </button>
