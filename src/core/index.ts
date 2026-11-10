@@ -33,7 +33,7 @@ import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engine
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
-import { codexEnv } from './engines/codex'
+import { asdfEnv, codexEnv } from './engines/codex'
 import { CATALOG, CATEGORIES, catalogInput, catalogView, entryOf, ownAppGuide } from '../shared/connector-catalog'
 import { LoginTerminal, type LoginKey } from './login-terminal'
 import { Push, pushUrl } from './push'
@@ -243,9 +243,9 @@ const loginTerminal = new LoginTerminal({
   env: (e, account) => {
     if (account) {
       const dir = accountDir(dataDir, account)
-      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir)
+      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir, engines.codex.path)
     }
-    return e === 'codex' ? codexEnv(codexHome) : e === 'cline' ? { ...process.env, ...clineLoginEnv(clineLogin) } : { ...process.env, DISABLE_AUTOUPDATER: '1' }
+    return e === 'codex' ? codexEnv(codexHome, engines.codex.path) : e === 'cline' ? { ...process.env, ...clineLoginEnv(clineLogin) } : { ...process.env, DISABLE_AUTOUPDATER: '1' }
   },
   signedIn: async (e, account) => {
     if (!account) return (await engineCheck.recheck(e)).engines[e].loggedIn
@@ -2259,7 +2259,7 @@ const api: Handlers = {
     if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
     // The sign-in happens in a terminal: check again until it lands, wherever the person is.
     watchEngine(engine, (s) => s.loggedIn)
-    return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : engine === 'cline' ? clineLoginEnv(clineLogin) : {})
+    return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex'), ...asdfEnv(engines.codex.path) } : engine === 'cline' ? clineLoginEnv(clineLogin) : {})
   },
 
   // The introduction's setup with no terminal: Codex or Claude Code downloaded into the app's folder,
@@ -2302,7 +2302,7 @@ const api: Handlers = {
     if (shown) return { opened: true, command: ENGINES[a.engine].login, screen: shown }
     const dir = accountDir(dataDir, a.id)
     watchAccount(a.id)
-    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex') })
+    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) })
   },
   // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
   removeAccount: ({ id }) => {

@@ -135,7 +135,7 @@ export function accountLogin(engine: AccountEngine, out: { code: number; stdout:
 export const accountDir = (dataDir: string, id: string): string => join(dataDir, 'accounts', id)
 
 export async function accountStatus(engine: AccountEngine, bin: string, dir: string): Promise<{ loggedIn: boolean; detail?: string }> {
-  const out = engine === 'claude' ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir }) : await run(bin, ['login', 'status'], 15_000, codexEnv(dir))
+  const out = engine === 'claude' ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir }) : await run(bin, ['login', 'status'], 15_000, codexEnv(dir, bin))
   return accountLogin(engine, out)
 }
 
@@ -144,7 +144,7 @@ export async function detectCodex(home: string): Promise<EngineStatus> {
   if (!path) return { installed: false, loggedIn: false }
   const gateway = gatewayHost(userCodexProvider().baseUrl)
   if (gateway) return { installed: true, path, version: version((await run(path, ['--version'])).stdout), loggedIn: true, route: 'gateway', gateway, account: L(`Gateway ${gateway} · pelo seu config.toml`, `Gateway ${gateway} · from your config.toml`) }
-  const [v, auth] = await Promise.all([run(path, ['--version']), run(path, ['login', 'status'], 15_000, codexEnv(home))])
+  const [v, auth] = await Promise.all([run(path, ['--version']), run(path, ['login', 'status'], 15_000, codexEnv(home, path))])
   const text = `${auth.stdout}\n${auth.stderr}`
   const loggedIn = auth.code === 0 && /logged in/i.test(text) && !/not logged in/i.test(text)
   const viaChatGpt = /chatgpt/i.test(text)
@@ -188,7 +188,7 @@ export function parseCodexCatalog(json: string): CodexModel[] {
 }
 
 export async function codexModels(path: string, home: string): Promise<CodexModel[]> {
-  const r = await run(path, ['debug', 'models'], 15_000, codexEnv(home))
+  const r = await run(path, ['debug', 'models'], 15_000, codexEnv(home, path))
   const list = r.code === 0 ? parseCodexCatalog(r.stdout) : []
   if (list.length) return list
   try {
