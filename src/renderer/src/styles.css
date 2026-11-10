@@ -1725,19 +1725,53 @@ h3 {
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
-/* The decisions: one 44px line, the primary at 244 and Refuse at 108, 12px apart. */
+/* The decisions: one 44px line, the three of them side by side, 12px apart — Approve, the one
+   that can be long, and Refuse, never wrapped onto a second line. The primary used to hold 244px of
+   its own and "Approve and always allow" asked for 196 more, so Refuse fell to a line below at every
+   width. Now the primary grows into whatever the row has left, and the long label gives way before
+   the row does. */
 .approval__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 12px;
 }
 .approval__actions .btn {
   height: 44px;
   border-radius: 9px;
+  flex: 0 0 auto;
 }
-.approval__approve {
-  min-width: 244px;
+.approval__actions .approval__approve {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+/* The hold carries a longer sentence ("Hold to approve · high-risk action") and is alone with
+   Refuse, so it keeps its own width; the plain Approve stops growing at the 244 the card was drawn
+   for — while the row is a row. Stacked, the three are the card's width, as before. */
+@media (min-width: 561px) {
+  .approval__approve:not(.btn--hold) {
+    max-width: 244px;
+  }
+}
+/* "Approve and always allow": its own words are what would push Refuse down, so it takes the space
+   the row has left and, when the sentence doesn't fit in one line there, it reads on two lines
+   inside the same 44px button ("Approve and / always allow") rather than shortening to "Approve and
+   alw…". Only past two lines — a runner listing every tool it covers — does it end in an
+   ellipsis; the whole sentence is in its tooltip either way. */
+.approval__actions .approval__allow {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.approval__allow-label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: normal;
+  line-height: 16px;
+  text-align: center;
 }
 .approval__refuse-btn {
   min-width: 108px;
@@ -1746,8 +1780,9 @@ h3 {
   font-size: 12.5px;
   color: var(--danger);
 }
-/* Below this width the two don't fit side by side: each takes the card's line. */
-@media (max-width: 520px) {
+/* Below this width the three don't fit on one line ("Approve and always allow" would start
+   losing its words at 560), so each takes the card's own line instead. */
+@media (max-width: 560px) {
   .approval__actions {
     flex-direction: column;
     align-items: stretch;

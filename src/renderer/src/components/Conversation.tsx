@@ -1658,13 +1658,13 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
                 {asking ? L('Enviando…', 'Submitting…') : L('Aprovar', 'Approve')}
               </button>
               {canAlways && (
-                <button className="btn approval__always" disabled={asking} title={alwaysTitle} onClick={() => decide('approved', undefined, true)}>
-                  {L('Aprovar e sempre permitir', 'Approve and always allow')}
+                <button className="btn approval__allow" disabled={asking} title={alwaysTitle} onClick={() => decide('approved', undefined, true)}>
+                  <span className="approval__allow-label">{L('Aprovar e sempre permitir', 'Approve and always allow')}</span>
                 </button>
               )}
               {forGood && (
                 <button
-                  className="btn approval__always"
+                  className="btn approval__allow"
                   disabled={asking}
                   title={L(
                     `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
@@ -1672,7 +1672,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
                   )}
                   onClick={() => decide('approved', undefined, true)}
                 >
-                  {L(`Aprovar e sempre permitir ${forGood.join(', ')}`, `Approve and always allow ${forGood.join(', ')}`)}
+                  <span className="approval__allow-label">{L(`Aprovar e sempre permitir ${forGood.join(', ')}`, `Approve and always allow ${forGood.join(', ')}`)}</span>
                 </button>
               )}
             </>

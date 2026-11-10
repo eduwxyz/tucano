@@ -245,6 +245,71 @@ const measured = await win.evaluate(() => {
   }
 })
 
+// The decisions, one row: the three side by side, the long one shortening instead of pushing
+// Refuse to a line below, and the same row with a label too long for any card.
+const rowAt = async (width) => {
+  await win.setViewportSize({ width, height: 900 })
+  await win.waitForTimeout(250)
+  await cardOf('ap-merge').scrollIntoViewIfNeeded()
+  return win.evaluate(() => {
+    const card = document.querySelector('[data-approval="ap-merge"]')
+    const actions = card.querySelector('.approval__actions')
+    const btns = [...actions.querySelectorAll('button')]
+    const r = (el) => el.getBoundingClientRect()
+    const label = actions.querySelector('.approval__allow-label')
+    const tops = btns.map((b) => Math.round(r(b).top))
+    return {
+      card: Math.round(r(card).width),
+      row: Math.round(r(actions).width),
+      buttons: btns.map((b) => ({ label: b.textContent.trim(), width: Math.round(r(b).width), height: Math.round(r(b).height) })),
+      heights: [...new Set(btns.map((b) => Math.round(r(b).height)))],
+      lines: new Set(tops).size,
+      gaps: tops.map(() => 0).length && Math.round(r(btns[1] ?? btns[0]).left - r(btns[0]).right),
+      labelCut: label ? label.scrollWidth - label.clientWidth : null,
+      overflow: actions.scrollWidth - actions.clientWidth,
+      sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    }
+  })
+}
+const row = { wide: await rowAt(1280), mid: await rowAt(800), tight: await rowAt(600) }
+await win.setViewportSize({ width: 1280, height: 900 })
+await win.waitForTimeout(250)
+await cardOf('ap-merge').scrollIntoViewIfNeeded()
+await win.locator('[data-approval="ap-merge"] .approval__actions').screenshot({ path: `${out}/13-decisoes.png` })
+// A runner's "always allow" can list every tool it covers: the row keeps its one line and the
+// label shortens with an ellipsis, its whole sentence still in the tooltip.
+const longLabel = await win.evaluate(() => {
+  const card = document.querySelector('[data-approval="ap-merge"]')
+  const label = card.querySelector('.approval__allow-label')
+  const actions = card.querySelector('.approval__actions')
+  const was = label.textContent
+  label.textContent = 'Approve and always allow read_file, write_file, list_dir, run_command, refund through Composio'
+  const out = {
+    // The clamp: two lines of the sentence, the rest clipped, and the row still one line.
+    shown: Math.round(label.getBoundingClientRect().height),
+    wanted: label.scrollHeight,
+    clamp: getComputedStyle(label).webkitLineClamp,
+    button: Math.round(label.closest('button').getBoundingClientRect().height),
+    lines: new Set([...actions.querySelectorAll('button')].map((b) => Math.round(b.getBoundingClientRect().top))).size,
+    overflow: actions.scrollWidth - actions.clientWidth
+  }
+  label.textContent = was
+  return out
+})
+await win.locator('[data-approval="ap-merge"] .approval__actions').screenshot({ path: `${out}/14-decisoes-legenda-longa.png` }).catch(() => {})
+
+// The high-risk card: a hold instead of a click, and Refuse beside it, still one row.
+const risky = await cardOf('ap-cmd').evaluate((card) => {
+  const btns = [...card.querySelectorAll('.approval__actions button')]
+  const r = (el) => el.getBoundingClientRect()
+  return {
+    labels: btns.map((b) => b.textContent.trim()),
+    widths: btns.map((b) => Math.round(r(b).width)),
+    lines: new Set(btns.map((b) => Math.round(r(b).top))).size,
+    heights: [...new Set(btns.map((b) => Math.round(r(b).height)))]
+  }
+})
+
 // 420 px: the decisions take the card's own line, full width.
 await win.setViewportSize({ width: 420, height: 880 })
 await win.waitForTimeout(700)
@@ -304,5 +369,5 @@ const said = await win.evaluate(() =>
       .filter(Boolean)
   }))
 )
-console.log(JSON.stringify({ reminder, focusAfterReview: focused, scroll: { before, after }, measured, narrow, hold: { size: holdSize, holding, during, afterHold }, said, errors }, null, 2))
+console.log(JSON.stringify({ reminder, focusAfterReview: focused, scroll: { before, after }, measured, row, longLabel, risky, narrow, hold: { size: holdSize, holding, during, afterHold }, said, errors }, null, 2))
 await app.close()

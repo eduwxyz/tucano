@@ -85,6 +85,17 @@ describe('the approval card', () => {
     expect(skipped).not.toContain('Concluído')
   })
 
+  it('marks the long "always allow" label as the one the row may shorten', () => {
+    // The row is one line (approval-row.test.ts): the three buttons never wrap, so the label that
+    // can be long lives in its own span, told apart by the CSS that lets it read on two lines.
+    const html = card()
+    expect(html).toContain('approval__allow')
+    expect(html).toMatch(/approval__allow-label">Aprovar e sempre permitir</)
+    // One row, in order: Approve, the long one, Refuse.
+    const order = ['approval__approve', 'approval__allow', 'approval__refuse-btn'].map((cls) => html.indexOf(cls))
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+  })
+
   it('refused keeps who refused it and the reason', () => {
     const html = card(approval({ state: 'refused', decidedBy: 'ana', decidedAt: 2_000, reason: 'not now', outcome: 'Nada foi executado.' }))
     expect(html).toContain('Recusado')
