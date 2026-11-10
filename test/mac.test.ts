@@ -141,7 +141,10 @@ describe('an agent whose computer is this Mac', () => {
     expect(mac.services('prod-0001')).toEqual([])
     await expect(fetch(`http://127.0.0.1:${port}/`)).rejects.toThrow()
     expect(text((await mac.call(me, 'start_service', { name: 'x', command: 'true', port: 47_718 }, ctx)).result)).toContain('não serve')
-  })
+    // A spawn, a fetch that waits for the port, a kill, a second spawn: five seconds is thin on a
+    // cold macOS runner, where the first python3 of the job is also the slowest (a 5 s ceiling is
+    // what called this a failure on 2026-11-10, while the same commit passed on macOS an hour before).
+  }, 30_000)
 
   it('Computers sends a Mac agent here and never starts a container for it', async () => {
     const computers = new Computers({ db, dataDir, emit: () => {} })
