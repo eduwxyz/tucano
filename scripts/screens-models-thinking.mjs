@@ -47,7 +47,19 @@ console.log('agents:', JSON.stringify(bots, null, 1))
 console.log('rows that show a thinking picker:', await panel.locator('.agent-models__row .select').count(), 'of', bots.length)
 const rowHeights = async (w) => w.locator('.agent-models__row').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)))
 console.log('row heights at 1280:', JSON.stringify(await rowHeights(win)))
-console.log('picks at 1280:', JSON.stringify(await win.locator('.agent-models__picks').first().evaluate((el) => ({ width: Math.round(el.getBoundingClientRect().width), kids: [...el.children].map((c) => Math.round(c.getBoundingClientRect().width)) }))))
+// The model on its own line, the thinking under it: measured, not read off the CSS.
+const stacked = async (w) => w.evaluate(() => [...document.querySelectorAll('.agent-models__picks')].map((p) => {
+  const kids = [...p.children].map((c) => c.getBoundingClientRect())
+  const a = kids[0], b = kids[1]
+  return {
+    picks: Math.round(p.getBoundingClientRect().width),
+    model: Math.round(a.width),
+    thinking: b ? Math.round(b.width) : null,
+    under: b ? b.top >= a.bottom - 1 : null,
+    sameLine: b ? Math.abs(b.top - a.top) < 2 : null
+  }
+}))
+console.log('model over thinking at 1280:', JSON.stringify(await stacked(win)))
 await panel.screenshot({ path: `${out}/01-the-panel.png` })
 await win.screenshot({ path: `${out}/01-the-panel-window.png` })
 
@@ -104,7 +116,8 @@ const narrow = await win.evaluate(() => ({
 }))
 console.log('at 420 px:', JSON.stringify(narrow))
 console.log('row heights at 420:', JSON.stringify(await rowHeights(win)))
-const clipped = await win.evaluate(() => [...document.querySelectorAll('.agent-models__row .model-picker__value, .agent-models__row .select__trigger__value')].map((el) => ({ text: (el.textContent ?? '').trim(), over: el.scrollWidth - el.clientWidth })))
+console.log('model over thinking at 420:', JSON.stringify(await stacked(win)))
+const clipped = await win.evaluate(() => [...document.querySelectorAll('.agent-models .model-picker__value, .agent-models .select__trigger')].map((el) => ({ text: (el.textContent ?? '').trim(), over: el.scrollWidth - el.clientWidth })))
 console.log('text cut inside the pickers at 420:', JSON.stringify(clipped.filter((c) => c.over > 0)))
 await panel.scrollIntoViewIfNeeded()
 await panel.screenshot({ path: `${out}/07-at-420.png` })

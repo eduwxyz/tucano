@@ -74,7 +74,7 @@ export function AgentModelsPanel(): ReactNode {
               <span className="agent-models__label">{L('Modelo', 'Model')}</span>
               <ModelPicker value={model} onChange={setModel} />
             </div>
-            <div className="agent-models__pick">
+            <div className="agent-models__pick agent-models__pick--effort">
               <span className="agent-models__label">{L('Esforço de raciocínio', 'Thinking')}</span>
               <Select
                 aria-label={L('Esforço de raciocínio em lote', 'Thinking for the bulk change')}
@@ -135,13 +135,15 @@ function AgentModelRow({ agent, selected, onSelect, onSave }: { agent: Agent; se
         <div className="agent-models__picks">
           <ModelPicker value={value} onChange={setDraft} />
           {thinks && (
-            <Select
-              aria-label={L(`Esforço de ${agent.name}`, `${agent.name}’s thinking`)}
-              options={thinkingOptions()}
-              value={effort}
-              onChange={(v) => setEffort((v as Effort | null) ?? null)}
-              placeholder={L(`Manter: ${effortLabel(agent.effort)}`, `Keep: ${effortLabel(agent.effort)}`)}
-            />
+            <div className="agent-models__pick agent-models__pick--effort">
+              <Select
+                aria-label={L(`Esforço de ${agent.name}`, `${agent.name}’s thinking`)}
+                options={thinkingOptions()}
+                value={effort}
+                onChange={(v) => setEffort((v as Effort | null) ?? null)}
+                placeholder={L(`Manter: ${effortLabel(agent.effort)}`, `Keep: ${effortLabel(agent.effort)}`)}
+              />
+            </div>
           )}
         </div>
       </div>
