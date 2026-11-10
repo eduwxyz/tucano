@@ -4,7 +4,7 @@
 // the channel's recent messages to TypeSafe, so it's off unless chosen.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import type { Decision } from '../shared/questions'
+import { MAX_STEPS, type Decision } from '../shared/questions'
 import type { Agent, Connector, Message, Person } from '../shared/types'
 import type { ThreadDigest } from './memory'
 import { describeAgent, MAX_ROUTED, REPLY_JSON, routerPrompt } from './router'
@@ -196,6 +196,85 @@ export async function recommendOptions(opts: {
   const problem = picks.find((p): p is { error: string } => !!p && typeof p === 'object')
   if (problem) return { error: problem.error, ms: ms() }
   return { picks: picks as Suggested[], ms: ms() }
+}
+
+// ---------- the next steps an agent proposes ----------
+// A next-steps card starts with every box ticked, and that is the point: nothing the agent offered
+// gets lost. With this on, one small typed question per step says which of them are worth doing now,
+// and only those keep their tick; the rest wait in the card, a click away. Never all of them off: a
+// list with nothing ticked is not a suggestion, it's a chore.
+const STEP_TIMEOUT_MS = 8_000
+const STEPS_CONTEXT_MAX = 1_200
+
+type Step = 'do' | 'later'
+
+// One step, one question: does the person do it now, or can it wait. The state carries the whole
+// list and then the step itself, so the answer is about that step and not about the list.
+async function worthDoing(opts: { key: string; state: string; fetch?: Fetch }): Promise<Step | { error: string }> {
+  const criteria: Record<string, string> = {
+    do: L('Fazer agora: é o que o trabalho pede em seguida, o que destrava o resto, ou o de maior risco.', 'Do it now: it is what the work asks for next, what unblocks the rest, or the riskiest.'),
+    later: L('Pode esperar: é opcional, um polimento, ou depende de algo que ainda não está feito.', 'Can wait: it is optional, a polish, or it depends on something not done yet.')
+  }
+  let res: Response
+  try {
+    res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'jev-latest',
+        state: opts.state,
+        questions: {
+          pick: {
+            type: 'choice',
+            instructions: L('Este próximo passo: a pessoa faz agora ou pode esperar?', 'This next step: does the person do it now, or can it wait?'),
+            criteria
+          }
+        }
+      }),
+      signal: AbortSignal.timeout(STEP_TIMEOUT_MS)
+    })
+  } catch {
+    return { error: noAnswer() }
+  }
+  if (!res.ok) return { error: failure(res.status) }
+  const body = (await res.json().catch(() => null)) as { answers?: { pick?: { choice?: unknown } } } | null
+  const choice = body?.answers?.pick?.choice
+  return choice === 'do' || choice === 'later' ? choice : { error: badFormat() }
+}
+
+// Which steps keep their tick: indexes into the list, in order. A failure, or none of them picked,
+// leaves every step ticked: the card never hides what the agent offered.
+export async function stepsWorthDoing(opts: { key: string; decision: Decision; context?: string; fetch?: Fetch }): Promise<{ ticked: number[]; ms: number } | { error: string; ms: number }> {
+  const started = Date.now()
+  const ms = (): number => Date.now() - started
+  const steps = (opts.decision.options ?? []).slice(0, MAX_STEPS)
+  const all = steps.map((_, i) => i)
+  if (steps.length < 2) return { ticked: all, ms: ms() }
+  const context = (opts.context ?? '').replace(/\s+/g, ' ').trim().slice(0, STEPS_CONTEXT_MAX)
+  const list = steps.map((o, i) => `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`).join('\n')
+  const answers = await Promise.all(
+    steps.map((o, i) =>
+      worthDoing({
+        key: opts.key,
+        state: [
+          ...(context ? [L('O que o agente disse antes de propor os passos:', 'What the agent said before proposing the steps:'), context, ''] : []),
+          L('O que os passos continuam:', 'What the steps go on with:'),
+          opts.decision.question,
+          '',
+          L('Os próximos passos:', 'The next steps:'),
+          list,
+          '',
+          L('O passo em questão:', 'The step in question:'),
+          `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`
+        ].join('\n'),
+        fetch: opts.fetch
+      })
+    )
+  )
+  const problem = answers.find((a): a is { error: string } => typeof a === 'object')
+  if (problem) return { error: problem.error, ms: ms() }
+  const ticked = answers.flatMap((a, i) => (a === 'do' ? [i] : []))
+  return { ticked: ticked.length ? ticked : all, ms: ms() }
 }
 
 // ---------- the browser (spec §24) ----------
