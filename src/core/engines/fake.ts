@@ -192,6 +192,26 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       const slow = /^\s*(?:delegue|hand) /i.test(last) ? null : /demore (\d+) ?s/i.exec(last) // what it hands down is the other's to take its time on
       if (slow) await new Promise((r) => setTimeout(r, Number(slow[1]) * 1000))
       if (id === 'claude') yield { type: 'quota', quota: { fiveHour: { utilization: 0.34, resetsAt: Date.now() + 2 * 3_600_000 }, sevenDay: { utilization: 0.21, resetsAt: Date.now() + 4 * 86_400_000 }, at: Date.now() } }
+      // With TUCANO_FAKE_THINKING=1, the model thinks out loud first, slowly, so the window has
+      // something to show as it arrives: the same shape Pi's thinking_delta has.
+      if (process.env['TUCANO_FAKE_THINKING'] === '1') {
+        const thoughts = [
+          'Reading the request: it is about ',
+          'a piece of code and a test that fails. ',
+          'Before answering, worth seeing where the request comes from ',
+          'and what was already said in this conversation. ',
+          'The short path is reading the file it names, ',
+          'checking the version in the repository ',
+          'and only then saying what to do. ',
+          'If the test fails the same on a clean main, it is not the build. ',
+          'Better to say that with the number in hand. '
+        ]
+        for (const piece of thoughts) {
+          if (turn.signal.aborted) return
+          await new Promise((r) => setTimeout(r, 260))
+          yield { type: 'thinking', delta: piece }
+        }
+      }
       let text = ''
       for (const word of reply.split(/(\s+)/)) {
         if (turn.signal.aborted) return
