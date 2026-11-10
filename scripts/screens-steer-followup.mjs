@@ -1,6 +1,6 @@
 // Frames for the follow up (#337 / this PR): under a reply that has ended, the same pill a steer is —
-// Steer at the bottom of the chain while it works, Follow Up below the answer once it's done, never
-// above it. What the person writes stays in that reply: it goes on in the same row, its text and
+// Steer at the bottom of the chain while it works, Follow Up on the reply's own footer line once it's
+// done (the line that fades in on hover), before its receipt, never above the answer. What the person writes stays in that reply: it goes on in the same row, its text and
 // steps kept, instead of becoming another message. Fake engines, a workspace made from nothing.
 import { _electron as electron } from 'playwright'
 import { mkdirSync, mkdtempSync } from 'node:fs'
@@ -65,6 +65,21 @@ const pillLook = (win) =>
       fontSize: st.fontSize,
       color: st.color,
       inChain: !!steps?.contains(pill),
+      // The reply's own footer line: the one that fades in on hover, where the pill now rides.
+      inFooter: !!meta?.contains(pill),
+      firstInFooter: meta ? meta.firstElementChild === block : null,
+      footerKids: meta ? [...meta.children].map((c) => c.className.split(' ')[0]) : null,
+      footerOpacity: block ? getComputedStyle(block).opacity : null,
+      sameRowAsReceipt: (() => {
+        const r = meta?.querySelector('.receipt__line')?.getBoundingClientRect()
+        const b = block?.getBoundingClientRect()
+        return r && b ? Math.round(Math.abs(r.top + r.height / 2 - (b.top + b.height / 2)) * 10) / 10 : null
+      })(),
+      beforeReceipt: (() => {
+        const r = meta?.querySelector('.receipt')?.getBoundingClientRect()
+        const b = block?.getBoundingClientRect()
+        return r && b ? Math.round(b.left) < Math.round(r.left) : null
+      })(),
       afterAnswer: t ? p.top >= t.bottom - 1 : null,
       gapUnderAnswer: t ? Math.round(p.top - t.bottom) : null,
       gapUnderText: (() => {
@@ -96,6 +111,10 @@ const fieldLook = (win) =>
       labelled: ta.getAttribute('aria-label'),
       width: Math.round(t.width),
       height: Math.round(t.height),
+      belowPill: (() => {
+        const p = document.querySelector('.msg__meta .steps__ask-pill')?.getBoundingClientRect()
+        return p ? Math.round(t.top - p.bottom) : null
+      })(),
       sendDisabled: !!send?.disabled,
       sendText: send?.textContent?.trim(),
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
@@ -150,20 +169,28 @@ await waitWorking(win, false)
 await sleep(600)
 console.log('finished reply, the pill:', JSON.stringify(await pillLook(win)))
 console.log('its text:', JSON.stringify(await replyText(win)))
-await win.screenshot({ path: `${out}/01-the-pill-under-a-finished-reply.png` })
+// The footer line is the one that fades in: pointer away, the reply ends in its answer, nothing else.
+await win.mouse.move(4, 4)
+await win.waitForTimeout(300)
+console.log('pointer away, under the answer:', JSON.stringify(await pillLook(win)))
+await win.screenshot({ path: `${out}/01-not-hovered-nothing-under-the-answer.png` })
+await win.locator('.msg--agent').last().hover()
+await win.waitForTimeout(300)
+console.log('hovered, the footer line:', JSON.stringify(await pillLook(win)))
+await win.screenshot({ path: `${out}/02-hovered-the-pill-on-the-footer-line.png` })
 
 // Opening it: a field, nothing sent, the send asleep while it's empty.
 await win.locator('.steps__ask-pill').last().click()
 await win.waitForTimeout(250)
 console.log('the field it opens:', JSON.stringify({ ...(await fieldLook(win)), replies: await replies(win) }))
-await win.screenshot({ path: `${out}/02-the-field-it-opens.png` })
+await win.screenshot({ path: `${out}/03-the-field-it-opens.png` })
 
 // What the person wants next.
 const INSTRUCTION = 'Add the two fixes from today as their own entries'
 await win.locator('.steps__ask-note textarea').fill(INSTRUCTION)
 await win.waitForTimeout(150)
 console.log('typed:', JSON.stringify(await fieldLook(win)))
-await win.screenshot({ path: `${out}/03-what-they-write.png` })
+await win.screenshot({ path: `${out}/04-what-they-write.png` })
 
 // Sending it: the field closes and the same reply goes on working — the pill becomes a steer again.
 const before = await replies(win)
@@ -177,12 +204,12 @@ await sleep(700)
 await win.locator('.steps__toggle').last().click()
 await win.waitForTimeout(300)
 console.log('the instruction in the chain:', JSON.stringify(await chainLook(win)))
-await win.screenshot({ path: `${out}/04-the-instruction-in-the-chain.png` })
+await win.screenshot({ path: `${out}/05-the-instruction-in-the-chain.png` })
 await win.locator('.steps__toggle').last().click()
 await win.waitForTimeout(300)
 console.log('when it is done:', JSON.stringify({ chain: await chainLook(win), pill: await pillLook(win), replies: await replies(win), before }))
 console.log('the reply now:', JSON.stringify(await replyText(win)))
-await win.screenshot({ path: `${out}/05-the-same-reply-carried-on.png` })
+await win.screenshot({ path: `${out}/06-the-same-reply-carried-on.png` })
 
 // 420 px: the pill and the field inside the column, nothing sideways.
 await win.setViewportSize({ width: 420, height: 880 })
@@ -191,7 +218,7 @@ console.log('420, the pill:', JSON.stringify(await pillLook(win)))
 await win.locator('.steps__ask-pill').last().click()
 await win.waitForTimeout(300)
 console.log('420, the field:', JSON.stringify(await fieldLook(win)))
-await win.screenshot({ path: `${out}/06-at-420.png` })
+await win.screenshot({ path: `${out}/07-at-420.png` })
 
 console.log('page errors:', JSON.stringify(errors.slice(0, 6)))
 await app.close()

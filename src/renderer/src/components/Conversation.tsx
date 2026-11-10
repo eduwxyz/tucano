@@ -592,16 +592,18 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
         )}
-        {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
-        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
+        {/* The line under a finished reply, the one that fades in when you hover it: the way to go on
+            from this answer first, then the receipt and the way to keep it in the wiki. One footer, one
+            line — the pill belongs to the reply's own numbers, not to the chain that led to it.
+            A request and what came back from one are posted, not replies: nothing there to keep in the
+            wiki, so that half of the line waits for the receipt. */}
+        {(message.run?.status === 'done' || message.run?.receipt) && (
           <div className="msg__meta">
+            {message.run?.status === 'done' && <FollowUpPill message={message} />}
             {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
-        {/* Under the answer it goes on from — the last thing in a reply that ended, after its text, its
-            cards and its receipt, and never inside the chain above them. */}
-        {message.run && <FollowUpPill message={message} />}
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>

@@ -1,7 +1,8 @@
 // A follow up, under a reply that has ended: the same pill a steer is, for the reply that isn't
-// running anymore — and under the answer, not above it, where the chain's own pill sits. What the
-// person writes stays in that reply: it goes on in the same row, resuming the session it ended with,
-// instead of becoming another message in the conversation.
+// running anymore — and under the answer, in the reply's own footer line, before its receipt, not
+// above it where the chain's own pill sits. What the person writes stays in that reply: it goes on in
+// the same row, resuming the session it ended with, instead of becoming another message in the
+// conversation.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -57,15 +58,24 @@ beforeEach(() => {
 })
 afterEach(() => act(() => root.unmount()))
 
-// The reply the way the app draws it: the chain, then the answer, then — under the answer — the pill
-// that goes on from it. That order is the point of the test below.
+// The reply the way the app draws it: the chain, the answer, and then the footer line under it — the
+// pill that goes on from the reply first in that line, before the receipt. That order is the point of
+// the first test below.
 const draw = async (message: Message): Promise<void> => {
   await act(async () =>
     root.render(
       <div className="msg__body">
         <RunSteps message={message} />
         <div className="md">{message.text}</div>
-        <FollowUpPill message={message} />
+        <div className="msg__meta">
+          <FollowUpPill message={message} />
+          <div className="receipt">
+            <button className="receipt__line">sonnet · 6.4k tokens · 5s</button>
+          </div>
+          <span className="wiki-keep">
+            <button className="link">Guardar na wiki</button>
+          </span>
+        </div>
       </div>
     )
   )
@@ -98,17 +108,20 @@ const key = async (k: string, extra: { ctrlKey?: boolean } = {}): Promise<void> 
 }
 
 describe('the follow up pill', () => {
-  it('is under the answer it goes on from, never above it, and a running reply shows a steer instead', async () => {
+  it('rides the footer line under the answer, before the receipt, and never above it', async () => {
     await draw(reply('done'))
     expect(pill()?.textContent?.trim()).toBe('Seguir')
     expect(document.querySelector('.steps__list')).toBeNull() // done: the steps are folded, it is still there
     // Out of the chain: a reply that ended carries no pill up there any more.
     expect(document.querySelector('.steps .steps__ask')).toBeNull()
-    // Under the answer: after its text, the last thing in the reply, lined up with the reply itself.
+    // In the footer: the reply's own line, after its text, first in that line and before the numbers.
     const block = pill()!.closest('.steps__ask')!
     expect(block.className).toBe('steps__ask steps__ask--down steps__ask--reply')
-    expect(at(block)).toBeGreaterThan(at(document.querySelector('.md')))
-    expect(document.querySelector('.msg__body')!.lastElementChild).toBe(block)
+    const footer = document.querySelector('.msg__meta')!
+    expect(block.parentElement).toBe(footer)
+    expect(footer.firstElementChild).toBe(block)
+    expect(at(footer)).toBeGreaterThan(at(document.querySelector('.md')))
+    expect([...footer.children].map((el) => el.className.split(' ')[0])).toEqual(['steps__ask', 'receipt', 'wiki-keep'])
     // A reply that's working has nothing to follow up yet: that pill says Steer, and it is in the chain.
     await draw(reply('working'))
     expect(pill()?.textContent?.trim()).toBe('Orientar')

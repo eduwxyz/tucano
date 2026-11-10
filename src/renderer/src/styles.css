@@ -1447,11 +1447,31 @@ h3 {
   margin: 2px 0 4px 3px;
   padding-left: 14px;
 }
-/* The same pill under a finished reply: it lines up with the answer's own text, not with the steps'
-   rail that isn't above it anymore, and keeps a breath under the receipt line. */
-.steps__ask--reply {
-  margin: 10px 0 2px;
-  padding-left: 0;
+/* The follow up pill rides the reply's own footer — the line that fades in under a finished answer,
+   first in it, before the receipt. So it comes in with that line: a reply that has ended shows its
+   answer, not a button, and a hover (or a tab to it) brings the way to go on with the numbers. */
+.msg__meta .steps__ask--reply {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.msg:hover .msg__meta .steps__ask--reply,
+.msg__meta .steps__ask--reply:focus-within,
+.msg__meta .steps__ask--reply:has(.steps__ask-pill[aria-expanded='true']) {
+  opacity: 1;
+}
+/* Open, the field needs the row: the pill keeps its place and the receipt goes under it. */
+.msg__meta .steps__ask--reply:has(.steps__ask-pill[aria-expanded='true']) {
+  flex: 1 1 100%;
+}
+/* Nothing to hover with: no fade to depend on, so it is simply there. */
+@media (hover: none) {
+  .msg__meta .steps__ask--reply {
+    opacity: 1;
+  }
 }
 .steps__ask-pill {
   justify-self: start;
@@ -3314,8 +3334,9 @@ body.is-resizing webview {
 .msg__meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   column-gap: 14px;
+  row-gap: 6px;
   margin-top: 4px;
 }
 .msg__meta .receipt,
