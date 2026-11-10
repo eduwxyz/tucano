@@ -52,7 +52,7 @@ export interface Api {
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
   archiveAgent(p: { id: string; archived: boolean }): void // out of the sidebar, its replies stopped and routines off; back with archived: false
   setTopic(p: { id: string; topic: string }): void
-  setChannelMembers(p: { id: string; agentIds: string[]; mentionOnly?: string[] }): void // mentionOnly: those answering only when mentioned
+  setChannelMembers(p: { id: string; agentIds: string[]; mentionOnly?: string[]; listen?: string[] }): void // mentionOnly: those answering only when mentioned; listen: those Jev decides when to bring in
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
   openDm(p: { agentId: string }): string
   tasks(): Task[] // my to-dos on the board (Quadro), in order
