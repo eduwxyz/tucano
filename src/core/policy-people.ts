@@ -267,6 +267,7 @@ export const NEEDS: Record<Method, Need> = {
   openBackups: 'admin',
   report: 'admin',
   usage: 'admin',
+  quotas: 'admin', // the person's own provider logins: an admin's business, like the spending
   // people
   createInvite: 'admin',
   revokeInvite: 'admin',
