@@ -117,6 +117,7 @@ import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
 import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
+import { RoutingPane, SmartRoutingSwitch } from './Routing'
 
 // Every page's head, the same on all of them: the title big, inside the content and at the same
 // place; the actions on its line, at the right; one line under it. Tabs, when a page has them,
@@ -698,8 +699,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
       )}
       {!admin && <div className="admin-only--lead"><AdminOnly>{L('Só um admin muda os agentes. Você pode conversar com eles e ver como estão configurados.', 'Only an admin changes the agents. You can chat with them and see how they’re set up.')}</AdminOnly></div>}
       <fieldset className="member-lock" disabled={!admin || !!existing?.deleted}>
-        <div className="agent-sections">
-          {pane('perfil') && (
+        <div className="agent-sections">          {pane('perfil') && (
             <Section title={L('Identidade', 'Identity')} help={L('Como você chama e reconhece o agente no chat. O papel, numa linha, ajuda a decidir quem responde nos canais.', 'The agent’s name and appearance identify it in chat. Its role helps decide who replies in channels.')}>
               <label className="lrow lrow--field">
                 <span className="lrow__key">{L('Nome', 'Name')}</span>
@@ -2627,8 +2627,7 @@ type TabList = readonly (readonly [string, string])[]
 // The groups at the top of Settings, from settings-structure.ts: only those this person has something
 // in. A member sees only what's theirs to change; the phone (Telegram) is the owner's alone.
 export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList =>
-  settingsGroups(settingsStructure({ admin, owner, team, servers: hasServers() })).map((group) => [group, settingsGroupLabel(group)])
-const AGENT_TABS = (): TabList => [
+  settingsGroups(settingsStructure({ admin, owner, team, servers: hasServers() })).map((group) => [group, settingsGroupLabel(group)])const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
   ['canais', L('Canais e skills', 'Channels and skills')],
   ['ferramentas', L('Ferramentas', 'Tools')],
@@ -3665,8 +3664,7 @@ export function SettingsPage(): ReactNode {
     setLanding(section.id)
   }
   const searching = query.trim().length > 0
-  const on = (group: SettingsPageId): boolean => !searching && tab === group
-  return (
+  const on = (group: SettingsPageId): boolean => !searching && tab === group  return (
     <Page title={L('Configurações', 'Settings')} actions={<SettingsSearchField value={query} onChange={setQuery} />}>
       <div className="settings-page" ref={body}>
         <SettingsGroups groups={tabs.map(([id]) => id as SettingsPageId)} current={searching ? null : tab} onPick={pickGroup} />
@@ -3774,8 +3772,7 @@ export function SettingsPage(): ReactNode {
                   <strong>{L('Mostrar os passos enquanto o agente trabalha', 'Show the steps while the agent works')}</strong>
                   <p className="muted small">{L('Abre a lista do que o agente está fazendo embaixo da resposta. Desligado, fica só a linha com o que ele faz agora; um clique nela abre os passos. Muda só pra você.', 'Shows steps under replies. When off, select the current step to see the list. This affects only you.')}</p>
                 </div>
-                <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
-              </div>
+                <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />              </div>
               <div className="key-row">
                 <Icon name="spark" />
                 <div className="grow">
