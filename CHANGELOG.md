@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **The wiki's waiting list empties.** Switching **Changing a page that exists** to **Automatic** only applied to the curator's next changes: what was already in **Waiting for you** stayed there, one card at a time to approve. Now switching to Automatic puts in what was waiting too, and the list has **Approve all** when there's more than one. Oldest first; a change that ran into a newer page (often the one approved just before it) is made again on that page and goes in; one whose passage is gone stays, to redo by hand. The weekly review's fixes stay in Care.
+
 ## [0.2.24] - 2026-11-09
 
 > **Em português:**

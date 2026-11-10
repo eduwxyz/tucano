@@ -159,6 +159,7 @@ export interface Api {
   wikiChange(p: { id: string }): WikiChange | null
   wikiApplyChange(p: { id: string }): WikiChange // a pending one; a conflict comes back as such
   wikiRefuseChange(p: { id: string }): void
+  wikiApplyWaiting(): { applied: number; left: number } // all that waits, at once
   wikiUndoChange(p: { id: string }): void
   wikiSources(): WikiSource[]
   wikiSource(p: { id: string }): (WikiSource & { text: string }) | null
