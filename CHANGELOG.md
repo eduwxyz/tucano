@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tucano in a browser opens where you left it.** On a phone, putting the tab away and coming back reloads the page, and it always opened on the first channel. Now the screen you're on rides in the page's address (`#/c/<conversation>`, `#/settings`, `#/wiki/page/<title>`…), so a reload, a bookmark or a pasted link opens that screen; a conversation or agent that's gone falls back to the first channel. The desktop app is unchanged.
+
 ## [0.2.26] - 2026-11-10
 
 > **Em português:**
