@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { parse } from 'smol-toml'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
@@ -11,8 +11,30 @@ import { L } from '../../shared/lang'
 // Codex reads AGENTS.md, skills, plugins and memories from the user's home no
 // matter which flags are passed, so Tucano runs it with a home of its
 // own. The user logs into Codex once more, for the app, through Codex itself.
-export function codexEnv(home: string): NodeJS.ProcessEnv {
-  return { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex') }
+export function asdfEnv(bin?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  // An asdf shim needs its install directory and selected tool version: HOME
+  // and the working directory both belong to Tucano when it checks the login.
+  if (bin) {
+    try {
+      const shim = readFileSync(bin, 'utf8')
+      const match = /^# asdf-plugin:\s+([\w-]+)\s+([^\s]+)/m.exec(shim)
+      if (match) {
+        env['ASDF_DATA_DIR'] = dirname(dirname(bin))
+        const versionKey = `ASDF_${match[1]!.replaceAll('-', '_').toUpperCase()}_VERSION`
+        if (!process.env[versionKey]) env[versionKey] = match[2]
+        return env
+      }
+    } catch {
+      // Native harness installs do not need an asdf data directory.
+    }
+  }
+  if (process.env['ASDF_DATA_DIR']) env['ASDF_DATA_DIR'] = process.env['ASDF_DATA_DIR']
+  return env
+}
+
+export function codexEnv(home: string, bin?: string): NodeJS.ProcessEnv {
+  return { ...process.env, ...asdfEnv(bin), HOME: home, CODEX_HOME: join(home, '.codex') }
 }
 
 // How the user's own Codex reaches the model, from their config.toml: the
@@ -261,7 +283,7 @@ export function codexEngine(
     const p = await provider()
     const shell = await shellEnv() // read once per launch
     const keys = Object.fromEntries(p.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
-    const env = { ...codexEnv(t.account ?? home), ...keys, ...p.env }
+    const env = { ...codexEnv(t.account ?? home, bin()), ...keys, ...p.env }
     return { env, config: p.config, launch: { key: JSON.stringify([t.account ?? home, p.config, keys, p.env ?? {}]), home: codexHome(t.account), args: codexAppArgs(p.config), env, cwd: t.account ?? home } }
   }
   const app = new CodexApp({ thread: codexThread })
@@ -326,7 +348,7 @@ export function codexEngine(
       app.release(bin(), id, appLaunch)
     },
     clean(workDir, accountDirs = []) {
-      app.clean(bin(), workDir, [home, ...accountDirs].map((h) => codexHome(h)), (h) => ({ key: JSON.stringify(['clean', h]), home: h, args: codexAppArgs(), env: codexEnv(join(h, '..')), cwd: join(h, '..') }))
+      app.clean(bin(), workDir, [home, ...accountDirs].map((h) => codexHome(h)), (h) => ({ key: JSON.stringify(['clean', h]), home: h, args: codexAppArgs(), env: codexEnv(join(h, '..'), bin()), cwd: join(h, '..') }))
     },
     settle: () => app.settle(),
     dispose: () => app.dispose()
