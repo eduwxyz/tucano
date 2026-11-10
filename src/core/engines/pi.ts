@@ -164,7 +164,7 @@ export function piEngine(bin: () => string | undefined, appDir: string, shellEnv
       }
       // Provider keys may live in the user's shell, which an app opened from Finder doesn't get.
       const env = { ...process.env, ...(await shellEnv()), TUCANO_MCP_URL: turn.mcpUrl ?? '', TUCANO_WEB: turn.web ? '1' : '0' }
-      yield* runCli({ bin: path, args: piArgs(turn, piExtension(appDir)), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: piParser(), env })
+      yield* runCli({ bin: path, args: piArgs(turn, piExtension(appDir)), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: piParser(), env, sandbox: turn.sandbox })
     }
   }
 }

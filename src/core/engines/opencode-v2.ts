@@ -147,7 +147,7 @@ export async function* runOpencodeV2(path: string, turn: Turn, appDir: string, s
     if (turn.mcpUrl) await mcpReady(server.url, password, turn.cwd, turn.signal)
     if (turn.signal.aborted) return
     let done: Extract<EngineEvent, { type: 'done' }> | undefined
-    for await (const ev of runCli({ bin: path, args: opencodeV2Args(turn, session, server.url), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })) {
+    for await (const ev of runCli({ bin: path, args: opencodeV2Args(turn, session, server.url), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env, sandbox: turn.sandbox })) {
       if (ev.type === 'done') done = ev
       // Stopped, V2 reports the dropped connection to its server: not the turn's error.
       else if (!(ev.type === 'error' && turn.signal.aborted)) yield ev

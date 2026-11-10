@@ -294,7 +294,7 @@ export function clineEngine(bin: () => string | undefined, appDir: string, shell
         // no length limit, as an argument would have.
         const prompt = join(dirs.root, 'prompt.txt')
         writeFileSync(prompt, clinePrompt(turn))
-        yield* runCli({ bin: path, args: clineArgs(turn), stdin: '', stdinFile: prompt, cwd: dirs.work, signal: turn.signal, parser: clineParser(), env })
+        yield* runCli({ bin: path, args: clineArgs(turn), stdin: '', stdinFile: prompt, cwd: dirs.work, signal: turn.signal, parser: clineParser(), env, sandbox: turn.sandbox })
       } finally {
         clineCleanup(dirs)
       }

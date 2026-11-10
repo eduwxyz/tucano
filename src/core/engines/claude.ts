@@ -289,7 +289,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
           }
           return
         }
-        yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env })
+        yield* runCli({ bin: path, args: claudeArgs(turn, p.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env, sandbox: turn.sandbox })
         return
       }
 

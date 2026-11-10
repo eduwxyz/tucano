@@ -292,7 +292,7 @@ export function codexEngine(
   const usable = (path: string, account?: string): boolean => !process.env[EXEC_ONLY] && app.supports(path) && isolated(account)
 
   const exec = (path: string, turn: Turn, l: { env: NodeJS.ProcessEnv; config: string[] }): AsyncIterable<EngineEvent> =>
-    runCli({ bin: path, args: codexArgs(turn, l.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: l.env })
+    runCli({ bin: path, args: codexArgs(turn, l.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: l.env, sandbox: turn.sandbox })
 
   return {
     id: 'codex',

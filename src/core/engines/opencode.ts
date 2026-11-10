@@ -183,7 +183,7 @@ export function opencodeEngine(bin: () => string | undefined, appDir: string, sh
       // PWD too: OpenCode takes its folder (where `read` may go) from it, not from the process's cwd,
       // and the app's own PWD is wherever it was opened from (`/` from the Finder).
       const env = { ...process.env, ...(await shellEnv()), ...opencodeHome(appDir), PWD: turn.cwd, OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(turn, userOpencodeProviders())), OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_AUTOUPDATE: '1' }
-      yield* runCli({ bin: path, args: opencodeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })
+      yield* runCli({ bin: path, args: opencodeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env, sandbox: turn.sandbox })
     }
   }
 }

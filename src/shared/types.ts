@@ -82,6 +82,7 @@ export interface Agent {
   memory: MemoryMode
   computer: boolean // has a computer (spec §13): see computerKind for which
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
+  sandbox?: SandboxConfig // selected boundary for locally executed agents; unset means explicit unsandboxed execution
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
@@ -112,6 +113,18 @@ export const PROJECTS_DIR = '/projetos'
 
 // Where an agent's computer runs: an isolated Linux container, or the user's own Mac (spec §23).
 export type ComputerKind = 'linux' | 'mac'
+
+// Execution boundary for agents running on the host computer. `none` is explicit and preserves
+// the historical behavior; a selected provider must be available or the run fails closed.
+export type SandboxProviderId = 'none' | 'ai-jail'
+export interface SandboxConfig {
+  provider: SandboxProviderId
+  network?: boolean
+  readOnlyPaths?: string[]
+  readWritePaths?: string[]
+  environment?: string[]
+}
+
 export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a.computer && a.computerKind === 'mac'
 
 export interface Conversation {
