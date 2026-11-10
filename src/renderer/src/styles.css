@@ -5938,6 +5938,54 @@ kbd {
   background: var(--danger);
 }
 
+/* The session header's little bars: one per provider, only the window that lasts longest (a month
+   outlasts a week, a week outlasts the five hours), so the line says whether the plan runs out
+   before it renews. A wallet has no cap, so it draws no bar. In a narrow window only the ones that
+   are actually running low stay, because those are the ones worth the space. */
+.quota-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 5px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.quota-strip:hover {
+  background: var(--hover);
+}
+.quota-strip__pill {
+  display: block;
+  width: 18px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--border);
+  overflow: hidden;
+}
+.quota-strip__pill i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--accent);
+  transition: width var(--dur-data) var(--ease-out);
+}
+.quota-strip__pill.is-warn i {
+  background: var(--warn);
+}
+.quota-strip__pill.is-danger i {
+  background: var(--danger);
+}
+@media (max-width: 900px) {
+  .quota-strip__pill:not(.is-warn):not(.is-danger) {
+    display: none;
+  }
+  .quota-strip:not(:has(.is-warn, .is-danger)) {
+    display: none;
+  }
+}
+
 .usage-agents {
   padding: 4px;
 }

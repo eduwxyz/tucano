@@ -11,7 +11,7 @@ const DAY = 86_400_000
 const APP = 'app' // the chart's one color for the app's own turns: router, memory, the Tuca
 const MODEL_COLORS = ['var(--accent)', 'var(--c-violet)', 'var(--c-teal)', 'var(--c-sky)', 'var(--text-3)']
 
-const until = (at: number): string => {
+export const until = (at: number): string => {
   const left = at - Date.now()
   if (left <= 0) return L('agora', 'now')
   const total = Math.round(left / 60_000) // in whole minutes, so it never says "1 h 60 min"
@@ -320,7 +320,7 @@ const ROWS = [
 type Row = (typeof ROWS)[number]['key']
 
 // What the provider says is left, in its own unit.
-function left(w: QuotaWindow): string {
+export function left(w: QuotaWindow): string {
   if (w.unit === '%') {
     const p = w.used !== undefined ? (w.limit ? 1 - w.used : (w.remaining ?? 0)) : (w.remaining ?? 0)
     return p > 0 && p < 0.01 ? '<1%' : `${Math.round(p * 100)}%`
@@ -328,7 +328,7 @@ function left(w: QuotaWindow): string {
   if (w.unit === 'usd') return usd(w.remaining ?? 0)
   return tokens(w.remaining ?? 0)
 }
-const share = (w: QuotaWindow): number | undefined => (w.limit && w.limit > 0 && w.remaining !== undefined ? Math.min(1, Math.max(0, w.remaining / w.limit)) : undefined)
+export const share = (w: QuotaWindow): number | undefined => (w.limit && w.limit > 0 && w.remaining !== undefined ? Math.min(1, Math.max(0, w.remaining / w.limit)) : undefined)
 
 // The CLI's own reading of the subscription, when its credentials aren't on disk (or are expired):
 // the last reply already told Tucano where those windows stand.
