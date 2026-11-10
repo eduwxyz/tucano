@@ -1,6 +1,7 @@
-// A follow up, at the bottom of a reply that has ended: the same pill a steer is, for the reply that
-// isn't running anymore. What the person writes stays in that reply — it goes on in the same row,
-// resuming the session it ended with, instead of becoming another message in the conversation.
+// A follow up, under a reply that has ended: the same pill a steer is, for the reply that isn't
+// running anymore — and under the answer, not above it, where the chain's own pill sits. What the
+// person writes stays in that reply: it goes on in the same row, resuming the session it ended with,
+// instead of becoming another message in the conversation.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -36,7 +37,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 })
 
 const { createRoot } = await import('react-dom/client')
-const { RunSteps } = await import('../src/renderer/src/components/Conversation')
+const { RunSteps, FollowUpPill } = await import('../src/renderer/src/components/Conversation')
 
 const step = (id: string, extra: Partial<Step> = {}): Step => ({ id, label: `read ${id}.ts`, status: 'done', ms: 120, ...extra })
 
@@ -56,9 +57,21 @@ beforeEach(() => {
 })
 afterEach(() => act(() => root.unmount()))
 
+// The reply the way the app draws it: the chain, then the answer, then — under the answer — the pill
+// that goes on from it. That order is the point of the test below.
 const draw = async (message: Message): Promise<void> => {
-  await act(async () => root.render(<RunSteps message={message} />))
+  await act(async () =>
+    root.render(
+      <div className="msg__body">
+        <RunSteps message={message} />
+        <div className="md">{message.text}</div>
+        <FollowUpPill message={message} />
+      </div>
+    )
+  )
 }
+// Where the pill's block sits in the reply, as an index among the body's children.
+const at = (el: Element | null): number => [...document.querySelector('.msg__body')!.children].indexOf(el as Element)
 const pill = (): HTMLElement | null => document.querySelector('.steps__ask-pill')
 const field = (): HTMLTextAreaElement | null => document.querySelector('.steps__ask-note textarea')
 const buttons = (): HTMLElement[] => [...document.querySelectorAll('.steps__ask-row button')] as HTMLElement[]
@@ -85,15 +98,21 @@ const key = async (k: string, extra: { ctrlKey?: boolean } = {}): Promise<void> 
 }
 
 describe('the follow up pill', () => {
-  it('is what the bottom of a finished reply shows, and a running reply shows a steer instead', async () => {
+  it('is under the answer it goes on from, never above it, and a running reply shows a steer instead', async () => {
     await draw(reply('done'))
     expect(pill()?.textContent?.trim()).toBe('Seguir')
     expect(document.querySelector('.steps__list')).toBeNull() // done: the steps are folded, it is still there
-    const block = document.querySelector('.steps')!
-    expect(block.lastElementChild?.className).toBe('steps__ask steps__ask--down') // under the chain, last
-    // A reply that's working has nothing to follow up yet: that pill says Steer.
+    // Out of the chain: a reply that ended carries no pill up there any more.
+    expect(document.querySelector('.steps .steps__ask')).toBeNull()
+    // Under the answer: after its text, the last thing in the reply, lined up with the reply itself.
+    const block = pill()!.closest('.steps__ask')!
+    expect(block.className).toBe('steps__ask steps__ask--down steps__ask--reply')
+    expect(at(block)).toBeGreaterThan(at(document.querySelector('.md')))
+    expect(document.querySelector('.msg__body')!.lastElementChild).toBe(block)
+    // A reply that's working has nothing to follow up yet: that pill says Steer, and it is in the chain.
     await draw(reply('working'))
     expect(pill()?.textContent?.trim()).toBe('Orientar')
+    expect(document.querySelector('.steps .steps__ask')).not.toBeNull()
   })
 
   it('is not offered for a reply that failed or was stopped: that one is tried again', async () => {
