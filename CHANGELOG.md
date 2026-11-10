@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Keenable in the connector store.** Web search and pages read as Markdown, from [Keenable](https://docs.keenable.ai/mcp-server)'s official server, in Research next to Exa. It needs no account or key, so one click connects it; the searches and the pages an agent asks for go to Keenable.
+
 ### Fixed
 
 - **Passwords can be saved on Hyprland, niri, sway and other desktops Electron doesn't know.** Electron only tries the keyring on the desktops it knows; elsewhere it fell back to a fixed key even with a keyring open, so Tucano said "This Linux has no keyring open". The workaround, `--password-store=gnome-libsecret` in the menu entry, was lost whenever an update restarted the app. Tucano now asks for the Secret Service itself on every Linux desktop except KDE, which stays on KWallet. A `--password-store` of your own still wins.
