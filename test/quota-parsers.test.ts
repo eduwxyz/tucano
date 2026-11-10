@@ -1,6 +1,6 @@
-// The providers' own answers, read as the rows of the panel. Fixtures are the shapes Quotable
-// validated against live accounts; the edges are the ones that used to lie: a zero that is a real
-// exhausted reading, a percentage that arrives as used, a window that isn't a percentage at all.
+// The providers' own answers, read as the rows of the panel. The fixtures are shapes taken from live
+// accounts; the edges are the ones that used to lie: a zero that is a real exhausted reading, a
+// percentage that arrives as used, a window that isn't a percentage at all.
 import { describe, expect, it } from 'vitest'
 import { parseQuota, slot, ms } from '../src/core/quota-parsers'
 

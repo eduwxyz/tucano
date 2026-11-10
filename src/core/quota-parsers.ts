@@ -1,9 +1,9 @@
 // Reading what each provider answers when asked for its own quota. Pure functions over the
 // response body: no network, no files, so every shape can be tested from a fixture.
 //
-// The contracts are the ones Quotable already validated against live accounts
-// (C:/git-win/Quotable/docs/PROVIDERS.md): percentages arrive as USED and are turned into what's
-// left, zero is a real exhausted reading, and a missing number is unavailable rather than zero.
+// The contracts were checked against live accounts before this was written: percentages arrive as
+// USED and are turned into what's left, zero is a real exhausted reading, and a missing number is
+// unavailable rather than zero.
 import type { QuotaWindow } from '../shared/types'
 
 export interface QuotaRead {
