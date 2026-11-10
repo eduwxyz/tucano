@@ -46,7 +46,26 @@ function result(r?: SkillReport): string {
   )
 }
 
-const from = (k: Skill): string => (k.source ? L(`do seu ${k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}`, `from your ${k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}`) : L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`))
+// Which harness a linked skill came from, by the folder it lives in: a path is the only thing a
+// linked skill keeps (src/core/local-skills.ts finds them all, each with its own origin).
+const HARNESS_FOLDERS: [string, string][] = [
+  ['/.hermes/', 'Hermes'],
+  ['/.config/opencode/', 'OpenCode'],
+  ['/.opencode/', 'OpenCode'],
+  ['/.copilot/', 'Copilot'],
+  ['/.gemini/', 'Gemini'],
+  ['/.codex/', 'Codex'],
+  ['/.pi/', 'Pi'],
+  ['/.agents/', 'Agents'],
+  ['/.claude/', 'Claude Code']
+]
+const harnessOf = (path: string): string => {
+  const slash = path.replaceAll('\\', '/')
+  return HARNESS_FOLDERS.find(([seg]) => slash.includes(seg))?.[1] ?? 'Claude Code'
+}
+
+const from = (k: Skill): string =>
+  k.source ? L(`do seu ${harnessOf(k.source)}`, `from your ${harnessOf(k.source)}`) : L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`)
 
 // Skills are the admins': a member reads them (what the agents follow), changes nothing.
 export function SkillsPage(): ReactNode {

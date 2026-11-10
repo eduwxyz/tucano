@@ -5,9 +5,9 @@
 // edit in Claude Code counts from the next read.
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync, type Dirent } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, extname, join, relative, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { L } from '../shared/lang'
-import type { LocalSkill } from '../shared/types'
+import type { LocalSkill, LocalSkillFolder } from '../shared/types'
 
 const TEXT = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.toml', '.xml', '.html'])
 const SCRIPT = new Set(['.py', '.sh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.go', '.swift'])
@@ -138,10 +138,102 @@ function pluginSkills(claude: string): LocalSkill[] {
   })
 }
 
-export function findLocalSkills(home = homedir()): LocalSkill[] {
+// The folders each harness keeps its skills in on this computer. One only appears when its folder
+// is there: nothing is invented for a harness that isn't installed, and a harness that is gets no
+// setup step.
+// `alsoHome`: the folder of the house counts too, not only the one the variable names (Hermes keeps a
+// library in ~/.hermes and its install may live elsewhere). Claude Code and Codex point away on
+// purpose when the variable is set, so for them it replaces the default.
+const HARNESSES: { source: string; env?: string; roots: string[]; alsoHome?: boolean }[] = [
+  { source: 'Claude Code', env: 'CLAUDE_CONFIG_DIR', roots: ['.claude'] },
+  { source: 'Codex', env: 'CODEX_HOME', roots: ['.codex'] },
+  { source: 'Agents', env: 'AGENTS_HOME', roots: ['.agents'], alsoHome: true },
+  { source: 'Pi', env: 'PI_HOME', roots: ['.pi/agent', '.pi'], alsoHome: true },
+  { source: 'Hermes', env: 'HERMES_HOME', roots: ['.hermes'], alsoHome: true },
+  { source: 'OpenCode', env: 'OPENCODE_CONFIG_DIR', roots: ['.config/opencode', '.opencode'], alsoHome: true },
+  { source: 'Copilot', roots: ['.copilot'] },
+  { source: 'Gemini', roots: ['.gemini'] }
+]
+
+const isDirAt = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// The same folder spelled two ways (a link, a drive letter's case) is one folder.
+const same = (path: string): string => (process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path))
+
+// "~/skills", "~\skills" and an absolute path: the folder the person typed, or nothing.
+export function expandFolder(raw: string, home = homedir()): string | undefined {
+  const t = raw.trim()
+  if (!t) return undefined
+  if (t === '~') return home
+  if (t.startsWith('~/') || t.startsWith('~\\')) return join(home, t.slice(2))
+  return isAbsolute(t) ? resolve(t) : undefined
+}
+
+// A folder's skills: the folders inside it that hold a SKILL.md, or itself when it is one skill.
+export function skillsIn(dir: string, origin: string): LocalSkill[] {
+  if (existsSync(join(dir, 'SKILL.md'))) return [skill(join(dir, 'SKILL.md'), origin)].filter((s): s is LocalSkill => !!s)
+  return inDirs(dir, origin)
+}
+
+const countIn = (dir: string): number =>
+  existsSync(join(dir, 'SKILL.md')) ? 1 : dirs(dir).filter((d) => existsSync(join(d, 'SKILL.md'))).length
+
+// The folders the harnesses on this computer keep skills in.
+export function detectedFolders(home = homedir()): LocalSkillFolder[] {
+  const out: LocalSkillFolder[] = []
+  const seen = new Set<string>()
+  for (const h of HARNESSES) {
+    const env = h.env ? process.env[h.env] : undefined
+    const defaults = h.roots.map((r) => join(home, ...r.split('/')))
+    for (const root of [...(env ? [env] : []), ...(env && !h.alsoHome ? [] : defaults)]) {
+      const path = join(root, 'skills')
+      if (!isDirAt(path) || seen.has(same(path))) continue
+      seen.add(same(path))
+      out.push({ path, source: h.source, detected: true, on: true, count: countIn(path) })
+    }
+  }
+  return out
+}
+
+// Every folder skills are read from, in the order they're shown: the harnesses' first, then the ones
+// added by hand. `on` is what the settings say, so a folder found here reads unless it was turned off.
+export function skillFolders(home = homedir(), extra: string[] = [], off: string[] = []): LocalSkillFolder[] {
+  const offSet = new Set(off.map(same))
+  const out = detectedFolders(home).map((f) => ({ ...f, on: !offSet.has(same(f.path)) }))
+  for (const raw of extra) {
+    const path = expandFolder(raw, home)
+    if (!path || out.some((f) => same(f.path) === same(path))) continue
+    out.push({ path, source: 'Added', detected: false, on: !offSet.has(same(path)), count: isDirAt(path) ? countIn(path) : 0 })
+  }
+  return out
+}
+
+// Every skill the app can see: the ones in the folders that are on, plus the plugins turned on in
+// Claude Code. A skill reachable twice (the skills CLI links ~/.agents/skills into ~/.claude/skills)
+// is one skill: the first folder to hold it wins.
+export function findLocalSkills(home = homedir(), folders = skillFolders(home)): LocalSkill[] {
   const claude = process.env['CLAUDE_CONFIG_DIR'] || join(home, '.claude')
-  const codex = process.env['CODEX_HOME'] || join(home, '.codex')
-  return [...inDirs(join(claude, 'skills'), 'Claude Code'), ...pluginSkills(claude), ...inDirs(join(codex, 'skills'), 'Codex')]
+  const all = [...folders.filter((f) => f.on).flatMap((f) => skillsIn(f.path, f.source)), ...pluginSkills(claude)]
+  const seen = new Set<string>()
+  return all.filter((k) => {
+    // The folder it really is: a skill the skills CLI linked into two homes is one skill, and the
+    // first folder to hold it — Claude Code before Agents — is the origin that shows.
+    let key = same(dirname(k.source))
+    try {
+      key = same(realpathSync(dirname(k.source)))
+    } catch {
+      // a broken link: its own path is as good as it gets
+    }
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 // A linked skill's recipe, or one of its files; never a file outside its folder.
