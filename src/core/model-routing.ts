@@ -12,6 +12,7 @@ import { L } from '../shared/lang'
 import {
   KIND_IMPORT,
   POOL_RANK,
+  roleBars as bars,
   ROLE_KINDS,
   TIERS,
   tierAt,
@@ -565,13 +566,9 @@ export function readingLine(j: RouteJudgment, config: RoutingConfig): string {
   return `${parts.join(' · ')} → ${requested}`
 }
 
-/** The role choices with their probabilities, best first: the bars for the role criterion. */
+/** The role choices of a judgment, best first: the bars for the role criterion. */
 export function roleBars(j: RouteJudgment, limit = 3): { role: string; p: number }[] {
-  return Object.entries(j.roleProbabilities)
-    .filter(([role]) => !!role)
-    .map(([role, p]) => ({ role, p }))
-    .sort((a, b) => b.p - a.p)
-    .slice(0, limit)
+  return bars(j.roleProbabilities, limit)
 }
 
 /** Every tier a person can put a model in, in order: for a select's options. */
