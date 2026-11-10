@@ -10,7 +10,7 @@ import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, E
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { decideRoute, readPrompt, unavailableTrace } from './model-routing'
-import type { RouteTarget, RouteTrace, RoutingConfig } from '../shared/routing'
+import { targetId, type RouteTarget, type RouteTrace, type RoutingConfig } from '../shared/routing'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
@@ -1098,23 +1098,25 @@ export class Runner {
     return { model, account }
   }
 
-  // Smart routing: Jev reads what the person asked, the config turns it into a pool, and that pool's
-  // chain gives the model this reply runs on. It never throws and never blocks a reply: when it can't
-  // decide (no key, no answer, nothing usable), the trace says so and the agent's own model runs.
+  // Smart routing: Jev reads what the person asked, the config turns it into a tier, and the person's
+  // chains give the model this reply runs on. It never throws. Two different things can go wrong: no
+  // reading at all (no key, no answer, a malformed one) leaves the agent's own model running and the
+  // trace saying why, which is the documented fail-open; a good reading with nothing eligible leaves
+  // the reply unsent, and `blocked` says so.
   private async routeModel(
     agent: Agent,
     settings: Settings,
     config: RoutingConfig,
     baseline: RouteTarget,
     asked: { trigger?: string; replyTo?: string; task?: string }
-  ): Promise<RouteTrace> {
+  ): Promise<{ trace: RouteTrace; blocked: boolean }> {
     const { db } = this.deps
     const anchorId = asked.trigger ?? asked.replyTo
     const anchor = anchorId ? db.message(anchorId) : undefined
     const prompt = (asked.task ?? anchor?.text ?? '').trim()
-    if (!prompt) return unavailableTrace(undefined, config, L('não havia pedido pra ler', 'there was no request to read'), baseline)
+    if (!prompt) return { trace: unavailableTrace(undefined, config, L('não havia pedido pra ler', 'there was no request to read'), baseline), blocked: false }
     const key = await this.deps.jev?.key()
-    if (!key) return unavailableTrace(undefined, config, L('falta a chave do TypeSafe', 'the TypeSafe key is missing'), baseline)
+    if (!key) return { trace: unavailableTrace(undefined, config, L('falta a chave do TypeSafe', 'the TypeSafe key is missing'), baseline), blocked: false }
     // The last few messages, so a short follow-up ("e o teste?") is read in its context.
     const before = anchor ? contextWindow(db, anchor, 6).messages : []
     const who = (m: Message): string =>
@@ -1127,18 +1129,20 @@ export class Runner {
       roles: config.roles,
       ...(this.deps.jev?.fetch ? { fetch: this.deps.jev.fetch } : {})
     })
-    if ('error' in read) return unavailableTrace(undefined, config, read.error, baseline)
-    const decided = decideRoute(read, config, (t) => this.whyNot(t, settings, agent), baseline)
-    return decided ? decided.trace : unavailableTrace(read, config, L('nenhum modelo dos pools está disponível', 'no model in the pools is available'), baseline)
+    if ('error' in read) return { trace: unavailableTrace(undefined, config, read.error, baseline), blocked: false }
+    const decided = decideRoute(read, config, (t) => this.whyNot(t, settings), baseline)
+    return decided.kind === 'exhausted' ? { trace: decided.trace, blocked: true } : { trace: decided.trace, blocked: false }
   }
 
-  // Why a chain's model can't run this reply, in the person's language; undefined when it can.
-  private whyNot(t: RouteTarget, settings: Settings, agent: Agent): string | undefined {
+  // Why a candidate can't run this reply, in the person's language; undefined when it can. A
+  // candidate names its own login: a chain entry may run on an account the agent itself doesn't use.
+  private whyNot(t: RouteTarget, settings: Settings): string | undefined {
     const label = ENGINES[t.engine].label
     const status = settings.engines[t.engine]
     if (!status?.installed) return L(`${label} não está instalado aqui`, `${label} isn't installed here`)
     if (settings.harnesses && !settings.harnesses.includes(t.engine)) return L(`${label} está desligado`, `${label} is turned off`)
-    const own = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === t.engine) : undefined
+    const own = t.accountId ? settings.accounts?.find((a) => a.id === t.accountId && a.engine === t.engine) : undefined
+    if (t.accountId && !own) return L(`a conta ${t.accountId} não existe mais`, `the account ${t.accountId} is gone`)
     if (!status.loggedIn && !own?.loggedIn) return L(`${label} não está logado`, `${label} isn't signed in`)
     return undefined
   }
@@ -1230,22 +1234,50 @@ export class Runner {
     // Smart routing (Settings › Routing): Jev reads what was asked and the person's pools pick the model
     // for this reply. Only for an agent that lets it decide; anyone's explicit pick of a model stays.
     let effort = agent.effort
+    // A routed reply may run on another login than the agent's own, when the chain entry names one.
+    let routedAccountId: string | undefined
     const routing = settings.routing
     if (routing?.enabled && agent.smartRouting) {
-      const trace = await this.routeModel(agent, settings, routing, { engine: engineId, model: modelName, effort }, { ...(opts.trigger ? { trigger: opts.trigger } : {}), ...(replyTo ? { replyTo } : {}), ...(task ? { task } : {}) })
-      msg.run = { ...msg.run!, route: trace }
-      if (trace.selected && trace.state !== 'unavailable') {
+      const baseline: RouteTarget = {
+        id: targetId({ engine: engineId, ...(agent.accountId ? { accountId: agent.accountId } : {}), model: modelName, effort }),
+        engine: engineId,
+        ...(agent.accountId ? { accountId: agent.accountId } : {}),
+        model: modelName,
+        effort
+      }
+      const routed = await this.routeModel(agent, settings, routing, baseline, { ...(opts.trigger ? { trigger: opts.trigger } : {}), ...(replyTo ? { replyTo } : {}), ...(task ? { task } : {}) })
+      msg.run = { ...msg.run!, route: routed.trace }
+      if (routed.blocked) {
+        // A good reading and nothing eligible: sending it on some dearer model anyway is exactly what
+        // the person's pools said not to do. The reply is not sent, and it says why.
+        save({
+          run: {
+            status: 'failed',
+            endedAt: Date.now(),
+            depth: opts.depth,
+            steps: [],
+            ...again,
+            route: routed.trace,
+            error: routed.trace.error ?? L('Nenhum modelo elegível nas rotas: a resposta não foi enviada.', 'No eligible model in the routes: the reply was not sent.')
+          }
+        })
+        return msg
+      }
+      const picked = routed.trace.selected
+      if (picked && routed.trace.state !== 'unavailable') {
         modelId = agent.modelId // the baseline stays the agent's own: what the trace compares against
-        modelName = trace.selected.model
-        engineId = trace.selected.engine
-        effort = trace.selected.effort
-        engineLabel = `${ENGINES[engineId].label} · ${trace.selected.model}`
+        modelName = picked.model
+        engineId = picked.engine
+        effort = picked.effort
+        routedAccountId = picked.accountId
+        engineLabel = `${ENGINES[engineId].label} · ${picked.model}`
         msg.run.steps = msg.run.steps.map((st) => (st.status === 'running' ? { ...st, detail: engineLabel } : st))
       }
     }
 
     // Another login of this harness (Settings › Accounts), when the agent has one.
-    let account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    const accountId = routedAccountId ?? agent.accountId
+    let account = accountId ? settings.accounts?.find((a) => a.id === accountId && a.engine === engineId) : undefined
     if (account && !account.loggedIn) {
       save({
         run: {
