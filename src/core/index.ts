@@ -22,7 +22,7 @@ import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnC
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
-import { normalizeRouting } from '../shared/routing'
+import { defaultRouting, normalizeRouting, validateRouting } from '../shared/routing'
 import { cleanEndpoint, listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db, MIGRATIONS } from './db'
@@ -2635,8 +2635,23 @@ const api: Handlers = {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
-    // A routing setup saved by an older or a hand-edited install: known pools, known harnesses, real levels.
-    if (patch.routing !== undefined && typeof normalizeRouting === "function") patch.routing = normalizeRouting(patch.routing)
+    // A routing setup is judged, not cleaned: an entry this build can't run (a harness it doesn't have,
+    // a thinking level it doesn't support) is refused with where it is, so nothing is quietly turned
+    // into something else. Reading an old or hand-edited setup stays tolerant, inside normalizeRouting.
+    if (patch.routing !== undefined) {
+      if (patch.routing === null && typeof defaultRouting === "function") patch.routing = defaultRouting()
+      else if (typeof validateRouting === "function") {
+        const checked = validateRouting(patch.routing)
+        if (!checked.ok) {
+          const where = checked.problems
+            .slice(0, 4)
+            .map((p: any) => `${p.path || 'routing'}: ${p.message}`)
+            .join(' · ')
+          throw new Error(L(`Rotas não salvas — ${where}`, `Routing not saved — ${where}`))
+        }
+        patch.routing = checked.value
+      } else if (typeof normalizeRouting === "function") patch.routing = normalizeRouting(patch.routing)
+    }
     const removedClassifiers = settleClassifiers(patch)
     db.setSettings(patch)
     for (const c of removedClassifiers) {
