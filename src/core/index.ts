@@ -1620,6 +1620,8 @@ const api: Handlers = {
 
   retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId)),
 
+  followUpRun: ({ messageId, text }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.followUp(messageId, text)),
+
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
 
   setAgentModels: ({ agentIds, modelId }, ctx) => {

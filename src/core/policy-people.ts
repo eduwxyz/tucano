@@ -91,6 +91,7 @@ export const NEEDS: Record<Method, Need> = {
   threadMessages: 'anyone',
   stopRun: 'anyone',
   retryRun: 'anyone',
+  followUpRun: 'anyone',
   continueRun: 'anyone',
   createChannel: 'anyone',
   renameChannel: 'anyone',
