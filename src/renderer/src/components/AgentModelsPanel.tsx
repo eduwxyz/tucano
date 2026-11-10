@@ -69,21 +69,18 @@ export function AgentModelsPanel(): ReactNode {
       <fieldset disabled={busy} className="agent-models__controls">
         <div className="agent-models__bulk">
           <strong>{L('Alterar em lote', 'Bulk change')}</strong>
-          <div className="agent-models__picks">
-            <div className="agent-models__pick">
-              <span className="agent-models__label">{L('Modelo', 'Model')}</span>
-              <ModelPicker value={model} onChange={setModel} />
-            </div>
-            <div className="agent-models__pick agent-models__pick--effort">
-              <span className="agent-models__label">{L('Esforço de raciocínio', 'Thinking')}</span>
-              <Select
-                aria-label={L('Esforço de raciocínio em lote', 'Thinking for the bulk change')}
-                options={thinkingOptions()}
-                value={effort}
-                onChange={(v) => setEffort((v as Effort | null) ?? null)}
-                placeholder={L('Manter o de cada agente', 'Keep each agent’s own')}
-              />
-            </div>
+          {/* Three picks, one strip: harness, model, thinking, same width. No captions above them —
+              the thinking's own placeholder says what it is, and a caption on one of the three
+              would push the other two up and break the line. */}
+          <div className="agent-models__picks agent-models__picks--bulk">
+            <ModelPicker value={model} onChange={setModel} />
+            <Select
+              aria-label={L('Esforço de raciocínio em lote', 'Thinking for the bulk change')}
+              options={thinkingOptions()}
+              value={effort}
+              onChange={(v) => setEffort((v as Effort | null) ?? null)}
+              placeholder={L('Esforço: não mudar', 'Thinking: don’t change')}
+            />
           </div>
           <p className="hint">{L('Deixe o modelo em branco para mudar só o esforço. Ao trocar de harness, o agente passa a usar o login padrão dele. O modelo reserva continua igual.', 'Leave the model empty to change only the thinking. When switching harnesses, the agent uses its default login. The reserve model stays the same.')}</p>
           <div className="row">

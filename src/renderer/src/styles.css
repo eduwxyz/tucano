@@ -10997,10 +10997,27 @@ button.agent-card__now:hover {
 /* The model on its own line, the thinking under it: beside each other the thinking took the width the
    model's name needs, and the name was what got cut. */
 .agent-models__picks { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
-.agent-models__pick { display: grid; gap: 6px; min-width: 0; }
+/* The bulk change is one strip of three equal picks - harness, model, thinking - flush against each
+   other: no captions on top of them, no gaps between them, and one shared line between neighbours. */
+.agent-models__picks--bulk { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+/* The model picker's own two picks become cells of that strip instead of a row of their own. */
+.agent-models__picks--bulk .model-picker { display: contents; }
+.agent-models__picks--bulk .model-picker > input,
+.agent-models__picks--bulk .model-picker > .hint { grid-column: 1 / -1; }
+.agent-models__picks--bulk > .select > .select__trigger,
+.agent-models__picks--bulk .model-picker > .select > .select__trigger { border-radius: 0; border-left-width: 0; }
+.agent-models__picks--bulk .model-picker > .select:first-child > .select__trigger { border-radius: var(--radius) 0 0 var(--radius); border-left-width: 1px; }
+.agent-models__picks--bulk > .select:last-child > .select__trigger { border-radius: 0 var(--radius) var(--radius) 0; }
+/* Three across is a strip only while there is room for the names; narrower, each gets the line. */
+@media (max-width: 760px) {
+  .agent-models__picks--bulk { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .agent-models__picks--bulk > .select > .select__trigger,
+  .agent-models__picks--bulk .model-picker > .select > .select__trigger,
+  .agent-models__picks--bulk .model-picker > .select:first-child > .select__trigger,
+  .agent-models__picks--bulk > .select:last-child > .select__trigger { border-radius: var(--radius); border-left-width: 1px; }
+}
 /* A short list of efforts: under a full-width model it does not need the whole line to itself. */
 .agent-models__pick--effort { width: min(100%, 240px); }
-.agent-models__label { font-size: 12px; color: var(--text-3); }
 .agent-models [role="status"]:not(:empty) { margin-top: 12px; }
 
 /* The intro of a Tucano on a server: a computer's backup brought in from the first screen. */
