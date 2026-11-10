@@ -100,10 +100,11 @@ it('keeps Save out of reach until something actually changes', async () => {
   expect((row.querySelector('button') as HTMLButtonElement).disabled).toBe(true)
 })
 
-it('puts the bulk change in one strip, and the thinking names itself', async () => {
-  // The model picker and the thinking side by side in one strip, and no caption above either of
-  // them: a caption on one would push the other down and break the line. (The real ModelPicker
-  // draws two cells there, harness and model; the mock draws one.)
+it('puts the bulk change in one flush column, and the thinking names itself', async () => {
+  // The harness, the model and the thinking one above the next, the same width, and no caption
+  // above any of them: a caption on one would push the other two out of line, and the thinking
+  // says what it is in its own placeholder. (The real ModelPicker draws two picks there,
+  // harness and model; the mock draws one.)
   const strip = document.querySelector('.agent-models__picks--bulk')!
   expect(strip.classList.contains('agent-models__pick')).toBe(false)
   expect(strip.querySelectorAll('.agent-models__label')).toHaveLength(0)
@@ -112,7 +113,7 @@ it('puts the bulk change in one strip, and the thinking names itself', async () 
   const thinking = strip.lastElementChild as HTMLSelectElement
   expect(thinking.tagName).toBe('SELECT')
   expect(thinking.getAttribute('aria-label')).toBe('Esforço de raciocínio em lote')
-  expect(thinking.querySelector('option')?.textContent).toBe('Esforço: não mudar')
+  expect(thinking.querySelector('option')?.textContent).toBe('Esforço: manter o de cada agente')
   await pick(thinking, 'low')
   expect(thinking.value).toBe('low')
 })
