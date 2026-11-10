@@ -244,6 +244,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 }
 
 const NO_REPLIES: Message[] = []
+// A phone or a tablet: focusing the message field there raises the keyboard over the
+// conversation, so it only takes the focus when the person taps it.
+const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
@@ -1912,7 +1915,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     setText(draft?.text ?? '')
     setImages(draft?.images ?? [])
     setNote('')
-    ref.current?.focus()
+    if (!touchScreen()) ref.current?.focus()
     return () => {
       const { text, images } = live.current
       if (text.trim() || images.length) drafts.set(key, { text, images })
@@ -1934,7 +1937,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       if (paths.length) setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${paths.map((p) => L(`Arquivo enviado: \`${p}\``, `File sent: \`${p}\``)).join('\n')}`)
       const failed = sent.find((r): r is PromiseRejectedResult => r.status === 'rejected')
       setNote(failed ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason) : '')
-      if (!files.length) return void ref.current?.focus()
+      if (!files.length) return void (touchScreen() || ref.current?.focus())
     }
     if (!files.length) return
     // In the app, a file that isn't an image goes with the message, and its text to the agents.
@@ -1950,7 +1953,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       return [...pics.slice(0, MAX_IMAGES_PER_MESSAGE), ...docs.slice(0, MAX_FILES_PER_MESSAGE)]
     })
     setNote([...errors, over].filter(Boolean).join(' '))
-    ref.current?.focus()
+    if (!touchScreen()) ref.current?.focus()
   }
 
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
@@ -2086,7 +2089,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       const glue = before && !/\s$/.test(before) ? ' ' : ''
       return `${before}${glue}${said}${cur.slice(end)}`
     })
-    el?.focus()
+    if (!touchScreen()) el?.focus()
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
