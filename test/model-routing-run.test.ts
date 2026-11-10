@@ -82,9 +82,9 @@ describe('routing a reply', () => {
     expect(trace.baseline).toEqual(target('claude', 'sonnet', 'low'))
   })
 
-  it('makes no classifier call at all for an agent that has not opted in', async () => {
+  it('makes no classifier call at all for an agent set to off by itself', async () => {
     settings.routing = routed()
-    db.saveAgent(agent('a1', 'lia'))
+    db.saveAgent(agent('a1', 'lia', { smartRouting: false }))
     let asked = 0
     const r = runner({ jev: { key: async () => 'k-1', fetch: (async () => (asked++, Response.json(answer()))) as unknown as typeof fetch } })
     await r.send('d1', 'ajusta o readme')
@@ -95,7 +95,7 @@ describe('routing a reply', () => {
     expect(replies()[0]?.run?.route).toBeUndefined()
   })
 
-  it('does nothing at all while routing is off, even for an agent that opted in', async () => {
+  it('does nothing at all when there is no routing setup, even for an agent set to on', async () => {
     let asked = 0
     const r = runner({ jev: { key: async () => 'k-1', fetch: (async () => (asked++, Response.json(answer()))) as unknown as typeof fetch } })
     await r.send('d1', 'oi')
@@ -104,18 +104,52 @@ describe('routing a reply', () => {
     expect(turns.at(-1)).toMatchObject({ model: 'sonnet' })
   })
 
-  it('keeps the opt-in through a reload, and the global off uses the baseline again', async () => {
+  it('routes for an agent set to on by itself with the global switch off', async () => {
+    settings.routing = routed({ enabled: false })
+    const r = runner({ jev: { key: async () => 'k-1', fetch: (async () => Response.json(answer())) as unknown as typeof fetch } })
+    await r.send('d1', 'ajusta o readme')
+    await r.idle()
+
+    expect(turns.at(-1)).toMatchObject({ model: 'gpt-5.6-luna', effort: 'high' })
+    expect(replies()[0]?.run?.route?.state).toBe('changed')
+  })
+
+  it('follows the global switch for an agent that chose neither', async () => {
     settings.routing = routed()
+    db.saveAgent(agent('a1', 'lia')) // no smartRouting: inherit
+    const r = runner({ jev: { key: async () => 'k-1', fetch: (async () => Response.json(answer())) as unknown as typeof fetch } })
+    await r.send('d1', 'ajusta o readme')
+    await r.idle()
+    expect(turns.at(-1)).toMatchObject({ model: 'gpt-5.6-luna' })
+
+    // …and the same agent stays on its baseline once the global switch goes off.
+    settings.routing = routed({ enabled: false })
+    db.saveAgent({ ...db.agent('a1')!, modelId: 'claude:sonnet' })
+    await r.send('d1', 'outra vez')
+    await r.idle()
+    expect(turns.at(-1)).toMatchObject({ model: 'sonnet' })
+    expect(replies()[1]?.run?.route).toBeUndefined()
+  })
+
+  it('keeps on and off on the agent, and reads a cleared switch as following the global one', () => {
     db.saveAgent(agent('a1', 'lia', { smartRouting: true }))
     expect(db.agent('a1')?.smartRouting).toBe(true)
-    settings.routing = { ...routed(), enabled: false }
+    db.saveAgent(agent('a1', 'lia', { smartRouting: false }))
+    expect(db.agent('a1')?.smartRouting).toBe(false)
+    db.saveAgent(agent('a1', 'lia')) // the switch cleared: inherit, not an off
+    expect(db.agent('a1')?.smartRouting).toBeUndefined()
+  })
+
+  it('keeps the agent on its own model while no pool has one, as the tab promises', async () => {
+    settings.routing = routed({ pools: { ...routed().pools, t2: { descriptor: 't2', chain: [] } } })
     let asked = 0
     const r = runner({ jev: { key: async () => 'k-1', fetch: (async () => (asked++, Response.json(answer()))) as unknown as typeof fetch } })
     await r.send('d1', 'ajusta o readme')
     await r.idle()
     expect(asked).toBe(0)
+    expect(replies()[0]?.run?.status).toBe('done')
     expect(turns.at(-1)).toMatchObject({ model: 'sonnet' })
-    expect(db.agent('a1')?.smartRouting).toBe(true) // kept for when it is on again
+    expect(replies()[0]?.run?.route).toBeUndefined()
   })
 
   it('says routing was unavailable, and still replies, when TypeSafe does not answer', async () => {
