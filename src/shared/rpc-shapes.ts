@@ -131,6 +131,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   wikiChange: { id: 's' },
   wikiApplyChange: { id: 's' },
   wikiRefuseChange: { id: 's' },
+  wikiApplyWaiting: {},
   wikiUndoChange: { id: 's' },
   wikiSources: {},
   wikiSource: { id: 's' },

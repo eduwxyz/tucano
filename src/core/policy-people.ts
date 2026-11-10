@@ -155,6 +155,7 @@ export const NEEDS: Record<Method, Need> = {
   openWikiFolder: 'admin',
   wikiApplyChange: 'admin',
   wikiRefuseChange: 'admin',
+  wikiApplyWaiting: 'admin',
   wikiUndoChange: 'admin',
   wikiRedoChange: 'admin',
   wikiRunReview: 'admin',
