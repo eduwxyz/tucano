@@ -3687,6 +3687,77 @@ table.csv th {
   top: 0;
 }
 
+/* An agent's own tables, on its page (Memória). */
+.data-tables__row {
+  text-align: left;
+}
+.data-tables__row > svg {
+  flex-shrink: 0;
+  color: var(--text-3);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+/* Like a reply's steps: the chevron points right, and down once open. */
+.data-tables__row.is-open > svg {
+  transform: rotate(90deg);
+}
+.data-tables__row.is-open {
+  background: var(--hover);
+}
+.data-tables__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.data-tables__cols {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.data-tables__count {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.data-rows {
+  margin-top: 12px;
+}
+.data-rows__head {
+  margin-bottom: 8px;
+}
+.data-rows__scroll {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.data-rows__scroll table.csv {
+  width: 100%;
+}
+.data-rows__scroll table.csv tr > :first-child {
+  border-left: 0;
+}
+.data-rows__scroll table.csv tr > :last-child {
+  border-right: 0;
+}
+.data-rows__scroll table.csv thead th {
+  border-top: 0;
+}
+.data-rows__scroll table.csv td {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.data-rows__scroll table.csv td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.data-rows__scroll table.csv td.null {
+  color: var(--text-3);
+  font-style: italic;
+}
+
 /* ---------- routines ---------- */
 .avatar--routine {
   background: var(--hover);

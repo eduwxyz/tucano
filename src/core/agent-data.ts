@@ -6,6 +6,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { L } from '../shared/lang'
+import type { AgentRows, AgentTable } from '../shared/types'
 import type { ToolDef } from './gateway'
 
 export const DADOS = 'dados' // the "connector" of approvals for SQL that destroys data
@@ -157,11 +158,11 @@ export function paramsOf(raw: unknown): Params | { error: string } {
 
 const cell = (v: unknown): unknown => (v instanceof Uint8Array ? `<blob ${v.byteLength} bytes>` : typeof v === 'bigint' ? Number(v) : v)
 
-export interface Table {
-  name: string
-  type: 'table' | 'view'
-  columns: { name: string; type: string }[]
-  rows: number
+const MAX_CSV_ROWS = 100_000
+const quoteName = (name: string): string => `"${name.replace(/"/g, '""')}"`
+const csvField = (v: unknown): string => {
+  const s = v === null || v === undefined ? '' : String(v)
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 export class AgentData {
@@ -185,16 +186,50 @@ export class AgentData {
     return db
   }
 
-  tables(agentId: string): Table[] {
+  tables(agentId: string): AgentTable[] {
     const db = this.open(agentId, true)
     try {
-      const names = db.prepare("SELECT name, type FROM sqlite_schema WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string; type: 'table' | 'view' }[]
-      return names.map(({ name, type }) => {
-        const quoted = `"${name.replace(/"/g, '""')}"`
-        const columns = (db.prepare('SELECT name, type FROM pragma_table_info(?)').all(name) as { name: string; type: string }[]).map((c) => ({ name: c.name, type: c.type }))
-        const rows = Number((db.prepare(`SELECT COUNT(*) AS n FROM ${quoted}`).get() as { n: number }).n)
-        return { name, type, columns, rows }
-      })
+      return this.listed(db)
+    } finally {
+      db.close()
+    }
+  }
+
+  private listed(db: DatabaseSync): AgentTable[] {
+    const names = db.prepare("SELECT name, type FROM sqlite_schema WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string; type: 'table' | 'view' }[]
+    return names.map(({ name, type }) => {
+      const columns = (db.prepare('SELECT name, type FROM pragma_table_info(?)').all(name) as { name: string; type: string }[]).map((c) => ({ name: c.name, type: c.type }))
+      const rows = Number((db.prepare(`SELECT COUNT(*) AS n FROM ${quoteName(name)}`).get() as { n: number }).n)
+      return { name, type, columns, rows }
+    })
+  }
+
+  // For the agent's page: one table's newest rows (a table keeps them in the order they came; a view as it gives them).
+  rows(agentId: string, table: string, limit = 100): AgentRows {
+    const db = this.open(agentId, true)
+    try {
+      const t = this.listed(db).find((x) => x.name === table)
+      if (!t) throw new Error(L(`Não há tabela ${table}.`, `There's no table ${table}.`))
+      const columns = t.columns.map((c) => c.name)
+      const order = t.type === 'table' ? ' ORDER BY rowid DESC' : ''
+      const got = db.prepare(`SELECT * FROM ${quoteName(table)}${order} LIMIT ?`).all(Math.max(1, Math.min(limit, 500))) as Record<string, unknown>[]
+      return { columns, rows: got.map((r) => columns.map((c) => cell(r[c]))), total: t.rows }
+    } finally {
+      db.close()
+    }
+  }
+
+  // The whole table as CSV, oldest first, for the person to open in a spreadsheet.
+  csv(agentId: string, table: string): string {
+    const db = this.open(agentId, true)
+    try {
+      const t = this.listed(db).find((x) => x.name === table)
+      if (!t) throw new Error(L(`Não há tabela ${table}.`, `There's no table ${table}.`))
+      const columns = t.columns.map((c) => c.name)
+      const order = t.type === 'table' ? ' ORDER BY rowid' : ''
+      const lines = [columns.map(csvField).join(',')]
+      for (const r of db.prepare(`SELECT * FROM ${quoteName(table)}${order} LIMIT ${MAX_CSV_ROWS}`).iterate() as Iterable<Record<string, unknown>>) lines.push(columns.map((c) => csvField(cell(r[c]))).join(','))
+      return `${lines.join('\r\n')}\r\n`
     } finally {
       db.close()
     }
@@ -254,7 +289,7 @@ export function tablesCall(data: Pick<AgentData, 'tables'>, agentId: string): Da
 
 export function queryCall(data: Pick<AgentData, 'query'>, agentId: string, args: Record<string, unknown>): DataResult {
   const sql = typeof args['sql'] === 'string' ? args['sql'] : ''
-  const step = (detail: string): DataResult['step'] => ({ label: L('Consultou os dados', 'Queried the data'), detail })
+  const step = (detail: string): DataResult['step'] => ({ label: L('Consultou', 'Queried'), detail })
   const checked = checkSql(sql, 'read')
   if (!checked.ok) return { text: checked.error, error: true, step: step(snip(sql)) }
   const params = paramsOf(args['parametros'])
@@ -270,9 +305,11 @@ export function queryCall(data: Pick<AgentData, 'query'>, agentId: string, args:
 }
 
 export function executeCall(data: Pick<AgentData, 'execute'>, agentId: string, sql: string, params: Params): DataResult {
-  const step = (detail: string): DataResult['step'] => ({ label: L('Alterou os dados', 'Changed the data'), detail })
+  const step = (detail: string): DataResult['step'] => ({ label: L('Gravou', 'Wrote'), detail })
   try {
     const { changes } = data.execute(agentId, sql, params)
+    // CREATE, DROP and ALTER touch no rows: a count of 0 there would read as "nothing happened".
+    if (/^\s*(create|drop|alter)\b/i.test(codeOf(sql))) return { text: L('Feito.', 'Done.'), step: step(snip(sql, 80)) }
     const done = changes === 1 ? L('1 linha afetada', '1 row affected') : L(`${changes} linhas afetadas`, `${changes} rows affected`)
     return { text: L(`Feito: ${done}.`, `Done: ${done}.`), step: step(`${snip(sql, 80)} · ${done}`) }
   } catch (e) {

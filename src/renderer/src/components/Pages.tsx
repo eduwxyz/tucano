@@ -85,6 +85,8 @@ import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
+import { call } from '../rpc'
+import type { AgentRows, AgentTable } from '../../../shared/types'
 import { UpdateSettings } from './Update'
 import type { NotifyState } from '../rpc'
 import { hasServers, ServersCard } from './Servers'
@@ -705,6 +707,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               </p>
             </Card>
           )}
+
+          {!isNew && admin && pane('memoria') && <AgentDataCard agentId={draft.id} name={draft.name} />}
 
           {pane('perfil') && (
             <Card title={L('Onde roda e modelo', 'Where it runs and model')} lead={L('O agente roda no Claude Code, no Codex ou em outro que você já usa, do jeito que você configurou: no seu plano, no gateway da empresa ou no seu provedor.', 'The agent runs in Claude Code, Codex or another one you already use, the way you set it up: on your plan, your company’s gateway or your provider.')}>
@@ -1752,6 +1756,116 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
               </label>
             )
           })}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// The agent's own tables (the dados_* tools): what it keeps, the newest rows of one, and all of it as CSV.
+// Read when the card shows and on Atualizar: an agent writes in the middle of a reply, with no event for it.
+function AgentDataCard({ agentId, name }: { agentId: string; name: string }): ReactNode {
+  const [tables, setTables] = useState<AgentTable[] | null>(null)
+  const [open, setOpen] = useState<string | null>(null)
+  const [rows, setRows] = useState<AgentRows | null>(null)
+  const [error, setError] = useState<string>()
+  const [rev, setRev] = useState(0)
+  const failed = (e: unknown): void => setError(e instanceof Error ? e.message : String(e))
+  useEffect(() => {
+    let live = true
+    setError(undefined)
+    call('agentTables', { agentId }).then((t) => live && setTables(t), (e: unknown) => live && failed(e))
+    return () => void (live = false)
+  }, [agentId, rev])
+  useEffect(() => {
+    setRows(null)
+    if (!open) return
+    let live = true
+    call('agentRows', { agentId, table: open }).then((r) => live && setRows(r), (e: unknown) => live && failed(e))
+    return () => void (live = false)
+  }, [agentId, open, rev])
+  const count = (n: number): string => (n === 1 ? L('1 linha', '1 row') : L(`${n.toLocaleString(locale())} linhas`, `${n.toLocaleString(locale())} rows`))
+  const exportCsv = (table: string): void => {
+    call('agentTableCsv', { agentId, table }).then((text) => {
+      const a = document.createElement('a')
+      // The BOM makes Excel read accents right; the agent's page names the file after the table.
+      a.href = URL.createObjectURL(new Blob([`﻿${text}`], { type: 'text/csv;charset=utf-8' }))
+      a.download = `${table}.csv`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    }, failed)
+  }
+  const shown = tables?.find((t) => t.name === open)
+  return (
+    <Card
+      title={L('Dados', 'Data')}
+      lead={L(
+        `As tabelas que ${name || 'o agente'} guarda pra si, com SQL: o que uma rotina grava a cada vez e consulta depois. Só ele lê e escreve; apagar de vez segue a regra de apagar dele.`,
+        `The tables ${name || 'the agent'} keeps for itself, with SQL: what a routine writes each time and reads back later. Only it reads and writes them; deleting for good follows its delete rule.`
+      )}
+      action={
+        tables && tables.length > 0 ? (
+          <button className="btn btn--xs" onClick={() => setRev((r) => r + 1)}>
+            {L('Atualizar', 'Refresh')}
+          </button>
+        ) : undefined
+      }
+    >
+      {error && <p className="hint hint--warn">{error}</p>}
+      {tables === null ? (
+        !error && <p className="muted small">{L('Carregando…', 'Loading…')}</p>
+      ) : tables.length === 0 ? (
+        <p className="muted small">{L(`Nenhuma tabela ainda. Peça a ${name || 'o agente'} pra guardar algo, ex.: "anote o preço de cada consulta numa tabela".`, `No tables yet. Ask ${name || 'the agent'} to keep something, e.g. "write down the price from each check in a table".`)}</p>
+      ) : (
+        <div className="table data-tables">
+          {tables.map((t) => (
+            <button key={t.name} className={`table__row table__row--btn data-tables__row${open === t.name ? ' is-open' : ''}`} aria-expanded={open === t.name} onClick={() => setOpen((o) => (o === t.name ? null : t.name))}>
+              <Icon name="chevron" size={12} />
+              <span className="data-tables__name">
+                <strong>{t.name}</strong>
+                {t.type === 'view' && <span className="tag">view</span>}
+              </span>
+              <span className="muted small data-tables__cols">{t.columns.map((c) => c.name).join(' · ')}</span>
+              <span className="muted small data-tables__count">{count(t.rows)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {shown && (
+        <div className="data-rows">
+          <div className="row row--between data-rows__head">
+            <span className="muted small">
+              {rows ? (rows.total > rows.rows.length ? L(`As ${rows.rows.length} mais recentes de ${count(rows.total)}`, `The ${rows.rows.length} newest of ${count(rows.total)}`) : shown.type === 'table' ? L('Mais recentes primeiro', 'Newest first') : '') : L('Carregando…', 'Loading…')}
+            </span>
+            <button className="btn btn--xs" onClick={() => exportCsv(shown.name)} disabled={!shown.rows}>
+              {L('Exportar CSV', 'Export CSV')}
+            </button>
+          </div>
+          {rows && rows.rows.length > 0 && (
+            <div className="data-rows__scroll">
+              <table className="csv">
+                <thead>
+                  <tr>
+                    {rows.columns.map((c) => (
+                      <th key={c}>{c}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.rows.map((r, i) => (
+                    <tr key={i}>
+                      {r.map((v, j) => (
+                        <td key={j} className={typeof v === 'number' ? 'num' : v === null ? 'null' : undefined} title={typeof v === 'string' && v.length > 60 ? v : undefined}>
+                          {v === null ? 'null' : typeof v === 'number' ? v.toLocaleString(locale()) : String(v)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {rows && rows.rows.length === 0 && <p className="muted small">{L('Tabela vazia.', 'Empty table.')}</p>}
         </div>
       )}
     </Card>

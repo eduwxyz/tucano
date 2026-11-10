@@ -1553,14 +1553,15 @@ ${note}`,
           if (name === DADOS_CONSULTAR.name) return shown(queryCall(data, agent.id, args))
           const { [REASON_PARAM]: why, ...callArgs } = args
           const sql = typeof callArgs['sql'] === 'string' ? callArgs['sql'] : ''
-          const label = L('Alterou os dados', 'Changed the data')
+          const label = L('Gravou', 'Wrote')
           const checked = checkSql(sql, 'write')
           if (!checked.ok) return shown({ text: checked.error, error: true, step: { label, detail: snip(sql, 120) } })
           const params = paramsOf(callArgs['parametros'])
           if ('error' in params) return shown({ text: params.error, error: true, step: { label, detail: snip(sql, 120) } })
           if (checked.destructive) {
-            // Destroying rows or tables is deleting: the agent's delete rule decides, like a command that deletes.
-            const rules = verdict({ cls: 'write', kinds: ['delete'], p: await policyNow(), outside })
+            // Destroying rows or tables is deleting: the agent's delete rule decides. With no rule, it's sensitive,
+            // like a connector's delete tool: "Normal" asks first, as its description promises.
+            const rules = verdict({ cls: 'sensitive', kinds: ['delete'], p: await policyNow(), outside })
             if (rules.off) {
               addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L('apagar dados: desligado pra este agente', 'deleting data: turned off for this agent'), status: 'error' })
               return textResult(

@@ -764,6 +764,20 @@ export interface Approval {
   behalf?: string // what it's for, when not a person's message: "rotina da Ana", "rotina do #vendas"
 }
 
+// One of an agent's own tables (core/agent-data.ts), as its page lists it.
+export interface AgentTable {
+  name: string
+  type: 'table' | 'view'
+  columns: { name: string; type: string }[]
+  rows: number
+}
+// A table's newest rows, for the agent's page: cells in the order of `columns`.
+export interface AgentRows {
+  columns: string[]
+  rows: unknown[][]
+  total: number
+}
+
 // A person's memories are `person:<id>` (personScope); otherwise the scope is the id of the one agent they belong to.
 export type MemoryScope = string
 export type MemoryState = 'active' | 'pending' | 'archived' | 'forgotten'
