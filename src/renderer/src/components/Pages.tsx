@@ -1002,9 +1002,50 @@ function SandboxCard({ sandbox, enabled, onChange }: { sandbox?: SandboxConfig; 
         </button>
       </div>
       {provider === 'ai-jail' && enabled && (
-        <p className="muted small">
-          {L('O ai-jail usa a rede para o CLI falar com o provedor. Compartilhamento de arquivos e variáveis de ambiente será configurado em uma etapa posterior.', 'ai-jail uses the network so the CLI can reach its provider. File and environment sharing will be configured in a later step.')}
-        </p>
+        <>
+          <p className="muted small">
+            {L('A pasta de trabalho do agente é compartilhada automaticamente. Os caminhos abaixo são compartilhamentos adicionais; use um caminho por linha. A rede fica desligada por padrão.', 'The agent workspace is shared automatically. The paths below are additional mounts; use one path per line. Network is off by default.')}
+          </p>
+          <Field label={L('Rede', 'Network')} hint={L('Permite conexões de saída para o agente falar com o provedor.', 'Allows outbound connections so the agent can reach its provider.')} group>
+            <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Rede', 'Network')}>
+              {[false, true].map((value) => (
+                <button
+                  key={String(value)}
+                  type="button"
+                  role="radio"
+                  aria-checked={sandbox?.network === value}
+                  className={(sandbox?.network === value || (sandbox?.network === undefined && !value)) ? 'is-active' : ''}
+                  onClick={() => onChange({ ...sandbox, provider: 'ai-jail', network: value })}
+                >
+                  {value ? L('Ligada', 'On') : L('Desligada', 'Off')}
+                </button>
+              ))}
+            </div>
+          </Field>
+          {([
+            ['readOnlyPaths', L('Caminhos somente leitura', 'Read-only paths')],
+            ['readWritePaths', L('Caminhos leitura e escrita', 'Read-write paths')],
+            ['environment', L('Variáveis de ambiente', 'Environment variables')]
+          ] as const).map(([key, label]) => (
+            <Field key={key} label={label} hint={L('Um item por linha.', 'One item per line.')}>
+              <textarea
+                rows={2}
+                className="mono"
+                value={(sandbox?.[key] ?? []).join('\\n')}
+                onChange={(event) =>
+                  onChange({
+                    ...sandbox,
+                    provider: 'ai-jail',
+                    [key]: event.target.value.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean)
+                  })
+                }
+              />
+            </Field>
+          ))}
+          <p className="hint">
+            {L('Compartilhe somente o necessário: mounts e variáveis podem expor dados do host ao agente.', 'Share only what is necessary: mounts and variables can expose host data to the agent.')}
+          </p>
+        </>
       )}
       {!enabled && <p className="muted small">{L('Disponível quando “Este computador” estiver selecionado.', 'Available when “This computer” is selected.')}</p>}
     </Card>

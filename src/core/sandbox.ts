@@ -33,13 +33,15 @@ export class AiJailProvider implements SandboxProvider {
 
   constructor(private readonly locate: () => string | undefined = findAiJail) {}
 
-  wrap({ command, args, policy }: SandboxLaunch): SandboxCommand {
+  wrap(launch: SandboxLaunch): SandboxCommand {
+    const { command, args, policy } = launch
     const executable = this.locate()
     if (!executable) throw new Error('Selected sandbox provider ai-jail is not available. Install ai-jail or select another sandbox.')
-    const wrapped: string[] = []
-    if (policy.network) wrapped.push('--network')
+    const wrapped: string[] = [policy.network ? '--network' : '--no-network', '--rw-map', launch.cwd]
     for (const path of policy.readOnlyPaths ?? []) wrapped.push('--map', path)
-    for (const path of policy.readWritePaths ?? []) wrapped.push('--rw-map', path)
+    for (const path of policy.readWritePaths ?? []) {
+      if (path !== launch.cwd) wrapped.push('--rw-map', path)
+    }
     for (const name of policy.environment ?? []) wrapped.push('--env', name)
     return { command: executable, args: [...wrapped, '--', command, ...args] }
   }

@@ -18,7 +18,7 @@ The provider contract accepts:
 - `readWritePaths`: host paths mounted read-write.
 - `environment`: environment variable names explicitly passed through.
 
-The current UI exposes provider selection. The policy fields are part of the generic persisted contract and will be exposed through the host-resource configuration UI as providers mature.
+The agent settings UI exposes provider selection, network access, read-only mounts, read-write mounts, and explicit environment variables. The agent work directory is always mounted read-write for the selected local run.
 
 ## Process behavior
 
