@@ -508,6 +508,13 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ))}
           </div>
         )}
+        {/* A prompt of mine waiting its turn behind the reply above (the mode on the message, runs.ts):
+            it says so until its own reply starts, and then the mark goes. */}
+        {message.sendMode === 'queue' && (
+          <span className="tag msg__queued" title={L('Chega quando a resposta acima terminar', 'Goes when the reply above ends')}>
+            {L('Na fila, esperando a resposta acima', 'Queued, waiting for the reply above')}
+          </span>
+        )}
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
