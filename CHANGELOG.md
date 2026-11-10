@@ -6,6 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **Passwords can be saved on Hyprland, niri, sway and other desktops Electron doesn't know.** Electron only tries the keyring on the desktops it knows; elsewhere it fell back to a fixed key even with a keyring open, so Tucano said "This Linux has no keyring open". The workaround, `--password-store=gnome-libsecret` in the menu entry, was lost whenever an update restarted the app. Tucano now asks for the Secret Service itself on every Linux desktop except KDE, which stays on KWallet. A `--password-store` of your own still wins.
 - **The wiki's waiting list empties.** Switching **Changing a page that exists** to **Automatic** only applied to the curator's next changes: what was already in **Waiting for you** stayed there, one card at a time to approve. Now switching to Automatic puts in what was waiting too, and the list has **Approve all** when there's more than one. Oldest first; a change that ran into a newer page (often the one approved just before it) is made again on that page and goes in; one whose passage is gone stays, to redo by hand. The weekly review's fixes stay in Care.
 
 ## [0.2.24] - 2026-11-09
