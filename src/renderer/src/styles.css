@@ -12159,7 +12159,7 @@ button.agent-card__now:hover {
   font-weight: 500;
 }
 .route-line__pool {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .route-line__arrow {
   color: var(--text-3);
@@ -12217,31 +12217,75 @@ button.agent-card__now:hover {
   color: var(--warn);
 }
 
-/* Three bars for what Jev read: complexity and capability over 3, reasoning as a chance. */
-.route-bars {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.route-bar {
+/* One bar for what Jev read: complexity and capability weighted together, with the reasoning bonus
+   the core applies, so its length is the demand the tier name beside it comes from. */
+.route-demand {
   display: inline-block;
-  width: 26px;
+  flex: none;
+  width: 76px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+.route-demand__fill {
+  /* The accent held back a fifth toward the ink, measured against the track it is drawn on: the raw
+     accent on --border-strong is 2.61:1 in the light theme, under the 3:1 a graphic that carries a
+     value has to meet. 80/20 measures 3.53:1 light and 5.71:1 dark. */
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 80%, var(--text));
+  transition: width 180ms ease;
+}
+/* The three criteria and their sum, only once the line is opened. */
+.route-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 4px;
+}
+.route-scores__row {
+  display: grid;
+  grid-template-columns: 96px 64px 44px;
+  align-items: center;
+  gap: 8px;
+}
+.route-scores__label {
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.route-scores__track {
+  display: block;
   height: 5px;
   border-radius: 3px;
   background: var(--border-strong);
   overflow: hidden;
 }
-.route-bar__fill {
+.route-scores__fill {
   display: block;
   height: 100%;
   border-radius: 3px;
-  background: var(--accent);
+  background: var(--text-2);
 }
-.route-bars__values {
-  margin-left: 3px;
+.route-scores__value {
   color: var(--text-3);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.route-scores__row--sum .route-scores__label {
+  color: var(--text);
+  font-weight: 600;
+}
+.route-scores__row--sum .route-scores__fill {
+  background: color-mix(in srgb, var(--accent) 80%, var(--text));
+}
+.route-scores__row--sum .route-scores__value {
+  color: var(--text-2);
 }
 @media (max-width: 900px) {
   .routing__body {
