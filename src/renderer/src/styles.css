@@ -11919,32 +11919,45 @@ button.agent-card__now:hover {
 .routing__rail {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--panel);
+  gap: 1px;
+  /* Flush: the row is the selection, not a box inside a box. The old rail's 6px padding made the
+     2px accent bar float against nothing; nobody gets to line up against nothing. */
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .routing__pool {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 1px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border: 0;
   border-radius: 9px;
   background: transparent;
   color: var(--text-2);
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 .routing__pool:hover {
   background: var(--hover);
-}
-.routing__pool.is-active {
-  background: var(--hover);
-  box-shadow: inset 2px 0 0 var(--accent);
   color: var(--text);
+}
+/* The same warm wash as the role pills right below it: selected reads as colour, not as elevation,
+   and there is no stripe to misalign. */
+.routing__pool.is-active {
+  background: var(--accent-soft);
+}
+/* The accent pulled 28% toward the ink, measured, not guessed: the raw accent on its own wash is
+   3.03:1 in the light theme, and the selected row has to be the easiest to read, not the hardest.
+   72/28 measures 4.65:1 light and 7.7:1 dark, over the wash the row actually paints. */
+.routing__pool.is-active .routing__pool-name {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  font-weight: 600;
+}
+.routing__pool.is-active .routing__pool-count {
+  color: var(--text-2);
 }
 .routing__pool-name {
   font-size: 13px;
@@ -12201,7 +12214,9 @@ button.agent-card__now:hover {
   }
   .routing__rail {
     flex-direction: row;
+    gap: 4px;
     overflow-x: auto;
+    padding-bottom: 2px;
   }
   .route-row,
   .route-add {
