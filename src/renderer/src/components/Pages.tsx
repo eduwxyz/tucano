@@ -3708,8 +3708,7 @@ export function SettingsPage(): ReactNode {
 
         {on('geral') && (
           <SectionAnchor id="app-appearance" sections={structure}>
-            <Card title={L('Aparência', 'Appearance')} section="app-appearance" lead={L('Como o Tucano aparece pra você. Muda só pra você.', 'Tucano’s appearance for you only.')}>
-              <div className="key-row">
+            <Card title={L('Aparência', 'Appearance')} section="app-appearance" lead={L('Como o Tucano aparece pra você. Muda só pra você.', 'Tucano’s appearance for you only.')}>              <div className="key-row">
                 <Icon name="sun" />
                 <div className="grow">
                   <strong>{L('Tema', 'Theme')}</strong>
@@ -3753,7 +3752,6 @@ export function SettingsPage(): ReactNode {
         )}
 
         {on('geral') && admin && <SectionAnchor id="app-dictation" sections={structure}><VoiceCard /></SectionAnchor>}
-
         {on('geral') && (
           <SectionAnchor id="app-conversation" sections={structure}>
             <Card title={L('Conversas', 'Conversations')} section="app-conversation">
