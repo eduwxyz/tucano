@@ -202,6 +202,15 @@ export interface RouteTrace {
   error?: string
 }
 
+/** The role choices with their probabilities, best first: the bars for the role criterion. */
+export function roleBars(probabilities: Record<string, number> | undefined, limit = 3): { role: string; p: number }[] {
+  return Object.entries(probabilities ?? {})
+    .filter(([role]) => !!role)
+    .map(([role, p]) => ({ role, p }))
+    .sort((a, b) => b.p - a.p)
+    .slice(0, limit)
+}
+
 // ---------- reading and writing ----------
 
 const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh']

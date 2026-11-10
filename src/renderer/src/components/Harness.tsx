@@ -105,12 +105,15 @@ const providerOf = (value: string): string => {
 }
 
 // A model to run with: the harness, then its model from the list, or another by name.
-// jev adds TypeSafe's Jev (the router). Engines limits the harnesses offered.
-export function ModelPicker({ value, onChange, engines, jev }: { value: string; onChange: (v: string) => void; engines?: EngineId[]; jev?: boolean }): ReactNode {
+// jev adds TypeSafe's Jev (the router); routing adds "Smart routing", where Jev picks the model from
+// the person's pools for each prompt ('smart' is never a model id: the agent keeps its own as baseline).
+// Engines limits the harnesses offered.
+export function ModelPicker({ value, onChange, engines, jev, routing }: { value: string; onChange: (v: string) => void; engines?: EngineId[]; jev?: boolean; routing?: boolean }): ReactNode {
   const usable = useStore((s) => usableEngines(s.settings))
   const statuses = useStore((s) => s.settings.engines)
   const choices = (engines ?? usable).filter((e) => usable.includes(e))
-  const m = value && value !== 'jev' ? modelInfo(value) : undefined
+  const smart = value === 'smart'
+  const m = value && value !== 'jev' && !smart ? modelInfo(value) : undefined
   const engine: EngineId | undefined = m && choices.includes(m.engine) ? m.engine : choices[0]
   const { options, loading, error } = useEngineModels(engine)
   const inList = options.some((o) => o.value === value)
@@ -120,8 +123,8 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
 
   // Engine/harness choices for the first pick.
   const engineOptions = useMemo(
-    () => [...choices.map((e) => ({ value: e, label: ENGINES[e].label })), ...(jev ? [{ value: 'jev', label: 'TypeSafe · Jev' }] : [])],
-    [choices, jev]
+    () => [...choices.map((e) => ({ value: e, label: ENGINES[e].label })), ...(jev ? [{ value: 'jev', label: 'TypeSafe · Jev' }] : []), ...(routing ? [{ value: 'smart', label: L('Roteamento inteligente', 'Smart routing') }] : [])],
+    [choices, jev, routing]
   )
   // The models, grouped by provider (part before "/", or before ":") when there's more than one;
   // "Other model…" last either way.
@@ -135,8 +138,8 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
   }, [options])
 
   // A harness's own card passes just that harness: it's already chosen there, so no select.
-  const fixed = engines?.length === 1 && !jev
-  if (!engine && !jev)
+  const fixed = engines?.length === 1 && !jev && !routing
+  if (!engine && !jev && !routing)
     return (
       <p className="hint hint--warn">
         {L('Nenhum Claude Code ou Codex pronto ainda.', 'No Claude Code or Codex ready yet.')}{' '}
@@ -149,18 +152,19 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
     <div className="model-picker">
       {!fixed && (
         <Select
-          value={value === 'jev' ? 'jev' : engine}
+          value={smart ? 'smart' : value === 'jev' ? 'jev' : engine}
           onChange={(v) => {
             setTyping(false)
             const vv = v ?? ''
             // On a plan, the harness's first model; otherwise the person picks from its list.
-            const plan = vv !== 'jev' && statuses[vv as EngineId].route === 'plan' ? MODELS.find((x) => x.engine === vv) : undefined
-            onChange(vv === 'jev' ? 'jev' : (plan?.id ?? customModel(vv as EngineId, '')))
+            const plan = vv !== 'jev' && vv !== 'smart' && statuses[vv as EngineId].route === 'plan' ? MODELS.find((x) => x.engine === vv) : undefined
+            onChange(vv === 'jev' || vv === 'smart' ? vv : (plan?.id ?? customModel(vv as EngineId, '')))
           }}
           options={engineOptions}
         />
       )}
-      {value !== 'jev' && engine && (
+      {smart && <span className="hint">{L('O Jev escolhe um modelo dos seus pools a cada pedido.', 'Jev chooses from your routing pools for each prompt.')}</span>}
+      {value !== 'jev' && !smart && engine && (
         <>
           <Select
             className="grow"

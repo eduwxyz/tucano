@@ -104,6 +104,7 @@ import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
+import { RoutingPane, SmartRoutingSwitch } from './Routing'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
   return (
@@ -386,7 +387,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
       {!admin && <div className="admin-only--lead"><AdminOnly>{L('Só um admin muda os agentes. Você pode conversar com eles e ver como estão configurados.', 'Only an admin changes the agents. You can chat with them and see how they’re set up.')}</AdminOnly></div>}
       <fieldset className="member-lock" disabled={!admin}>
       <div className="agent-layout">
-        <div className="agent-form">
+        {/* The Routing pane carries more per row than the other panes: it gets the wider column. */}
+      <div className={`agent-form ${tab === 'roteamento' ? 'agent-form--wide' : ''}`}>
           {pane('perfil') && (
             <Card title={L('Identidade', 'Identity')} lead={L('Como você chama e reconhece o agente no chat.', 'How you call and recognize the agent in chat.')}>
               <div className="grid2">
@@ -1868,12 +1870,15 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
 type TabList = readonly (readonly [string, string])[]
 // With a team, Pessoas (everyone) and Atividade (admins); a member sees only what's theirs to change.
 // The phone (Telegram) is the owner's alone.
-export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList => [
+// `routing`: smart model routing is on, so its tab exists. Off, the tab is gone and what was
+// configured stays saved (a reply that already has a trace keeps it, drawn from the trace).
+export const SETTINGS_TABS = (team = false, admin = true, owner = true, routing = false): TabList => [
   ['geral', L('Geral', 'General')],
   ...(admin
     ? ([
         ['modelos', L('Modelos', 'Models')],
         ['agentes', L('Agentes', 'Agents')],
+        ...(routing ? [['roteamento', L('Rotas', 'Routing')]] : []),
         ...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])
       ] as [string, string][])
     : []),
@@ -2547,7 +2552,8 @@ export function SettingsPage(): ReactNode {
   const team = useStore(teamMode)
   const admin = useStore(amAdmin)
   const owner = useStore(amOwner)
-  const tabs = SETTINGS_TABS(team, admin, owner)
+  const routingOn = useStore((s) => s.settings.routing?.enabled === true)
+  const tabs = SETTINGS_TABS(team, admin, owner, routingOn)
   const tab = useTab('settings', tabs)
   const pane = (t: string): boolean => tab === t
   return (
@@ -2689,9 +2695,15 @@ export function SettingsPage(): ReactNode {
               <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
             </Field>
             {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
+            <SmartRoutingSwitch />
+            {routingOn && work && (
+              <OutsideGateway what={L('o pedido de cada resposta vai pro TypeSafe escolher o modelo.', 'each reply’s request goes to TypeSafe to pick the model.')} />
+            )}
             {settings.routerModel === 'jev' && work && <OutsideGateway what={L('cada mensagem sem @menção vai pra TypeSafe escolher quem responde.', 'every message without an @mention goes to TypeSafe to pick who replies.')} />}
           </Card>
         )}
+
+        {pane('roteamento') && admin && routingOn && <RoutingPane />}
 
         {pane('agentes') && (
           <Card

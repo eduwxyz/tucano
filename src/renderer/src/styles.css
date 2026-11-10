@@ -11874,4 +11874,341 @@ button.agent-card__now:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+/* ---------- Settings › Routing ---------- */
+/* The pools on the left, one pool's chain on the right: six destinations visible at once, one
+   editor in front of you. Widened past the other settings panes because a chain row carries a
+   harness, a model and a thinking level side by side. */
+.agent-form--wide {
+  max-width: 980px;
+}
+.routing {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.routing__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.routing__title {
+  margin: 0 0 2px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.routing__status {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.routing__status.is-on {
+  border-color: transparent;
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.routing__body {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.routing__rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.routing__pool {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.routing__pool:hover {
+  background: var(--hover);
+}
+.routing__pool.is-active {
+  background: var(--hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+}
+.routing__pool-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.routing__pool-count {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.routing__pool-count.is-empty {
+  font-style: italic;
+}
+.routing__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.routing__roles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.routing__role {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.routing__role:hover {
+  background: var(--hover);
+}
+.routing__role.is-active {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+.routing__role-more {
+  min-width: 130px;
+}
+.routing__pool-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.routing__chain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.route-row,
+.route-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.route-row {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+}
+.route-row__n {
+  flex: none;
+  width: 18px;
+  color: var(--text-3);
+  font-size: 11px;
+  text-align: center;
+}
+.route-row__engine {
+  flex: none;
+  width: 132px;
+}
+.route-row__effort {
+  flex: none;
+  width: 108px;
+}
+.route-row__min {
+  flex: none;
+  width: 132px;
+}
+.route-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.route-row__down .icon {
+  transform: rotate(180deg);
+}
+.route-row__actions .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.route-add {
+  padding-top: 4px;
+}
+/* The shared Select is width:100% by design; inside a row that steals the whole line from the model
+   field, so the selects here size themselves and the model takes what's left. */
+.route-row > .select,
+.route-add > .select {
+  width: auto;
+}
+.route-row .grow,
+.route-add .grow {
+  flex: 1 1 180px;
+}
+.route-row > .select:first-of-type,
+.route-add > .select:first-of-type {
+  width: 132px;
+}
+
+/* ---------- the thin line over a reply ---------- */
+.route-line {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.route-line__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 6px 4px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.route-line__row:hover .route-line__chev {
+  color: var(--text-2);
+}
+.route-line__jev {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.route-line__role {
+  color: var(--text);
+  font-weight: 500;
+}
+.route-line__pool {
+  color: var(--text-3);
+}
+.route-line__arrow {
+  color: var(--text-3);
+}
+.route-line__model {
+  color: var(--text);
+}
+.route-line__thinking,
+.route-line__state {
+  color: var(--text-3);
+}
+.route-line__chev {
+  display: inline-flex;
+  color: var(--text-3);
+  transform: rotate(0deg);
+  transition: transform 180ms ease;
+}
+.route-line.is-open .route-line__chev {
+  transform: rotate(180deg);
+}
+.route-line__why {
+  margin: 0 0 4px;
+  color: var(--warn);
+}
+.route-line__detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+}
+.route-line__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+.route-line__label {
+  color: var(--text-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.route-line__group ul,
+.route-line__attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 0 14px;
+}
+.route-line__warn {
+  color: var(--warn);
+}
+
+/* Three bars for what Jev read: complexity and capability over 3, reasoning as a chance. */
+.route-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.route-bar {
+  display: inline-block;
+  width: 26px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+.route-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+.route-bars__values {
+  margin-left: 3px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 900px) {
+  .routing__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .routing__rail {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .route-row,
+  .route-add {
+    flex-wrap: wrap;
+  }
+  .route-row__engine,
+  .route-row__effort {
+    width: auto;
+  }
 }
