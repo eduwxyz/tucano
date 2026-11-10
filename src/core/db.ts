@@ -547,11 +547,19 @@ const COLUMNS: [string, string, string][] = [
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
   ['agents', 'reports_to', 'TEXT'],
   // A channel's mention mode, per member: in the room, answering only when mentioned.
-  ['members', 'mention_only', 'INTEGER NOT NULL DEFAULT 0']
+  ['members', 'mention_only', 'INTEGER NOT NULL DEFAULT 0'],
+  // A channel's listen mode, per member: in the room, and Jev says when a message is for them.
+  ['members', 'listen', 'INTEGER NOT NULL DEFAULT 0']
 ]
 
 
 type Row = Record<string, unknown>
+
+// A row of `members`, the one place a channel's modes are read from.
+type MemberRow = { conversation_id?: string; agent_id: string; mention_only: number; listen: number }
+
+// The agents of these rows whose `column` is on.
+const idsWhere = (rows: MemberRow[], column: 'mention_only' | 'listen'): string[] => rows.filter((m) => m[column] === 1).map((m) => m.agent_id)
 
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
 const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
@@ -886,15 +894,16 @@ export class Db {
          ORDER BY c.created_at`
       )
       .all(personId) as Row[]
-    const members = this.db.prepare('SELECT conversation_id, agent_id, mention_only FROM members').all() as { conversation_id: string; agent_id: string; mention_only: number }[]
+    const members = this.db.prepare('SELECT conversation_id, agent_id, mention_only, listen FROM members').all() as MemberRow[]
     return rows.map((r) => {
       const mine = members.filter((m) => m.conversation_id === r['id'])
-      return this.toConversation(r, mine.map((m) => m.agent_id), mine.filter((m) => m.mention_only === 1).map((m) => m.agent_id))
+      return this.toConversation(r, mine.map((m) => m.agent_id), idsWhere(mine, 'mention_only'), idsWhere(mine, 'listen'))
     })
   }
 
-  // `mentionOnly`: the agents of a channel that answer only when mentioned (left out when none is).
-  private toConversation(r: Row, members: string[], mentionOnly: string[] = []): Conversation {
+  // `mentionOnly`: the agents of a channel that answer only when mentioned; `listen`: the ones Jev
+  // brings in when the message is theirs (each left out when empty).
+  private toConversation(r: Row, members: string[], mentionOnly: string[] = [], listen: string[] = []): Conversation {
     return {
       id: str(r['id']),
       kind: str(r['kind']) as Conversation['kind'],
@@ -902,6 +911,7 @@ export class Db {
       topic: r['topic'] ? str(r['topic']) : undefined,
       members,
       ...(mentionOnly.length ? { mentionOnly } : {}),
+      ...(listen.length ? { listen } : {}),
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
@@ -928,8 +938,8 @@ export class Db {
       )
       .get(personId, id) as Row | undefined
     if (!r) return undefined
-    const mine = this.db.prepare('SELECT agent_id, mention_only FROM members WHERE conversation_id = ? ORDER BY rowid').all(id) as { agent_id: string; mention_only: number }[]
-    return this.toConversation(r, mine.map((m) => m.agent_id), mine.filter((m) => m.mention_only === 1).map((m) => m.agent_id))
+    const mine = this.db.prepare('SELECT agent_id, mention_only, listen FROM members WHERE conversation_id = ? ORDER BY rowid').all(id) as MemberRow[]
+    return this.toConversation(r, mine.map((m) => m.agent_id), idsWhere(mine, 'mention_only'), idsWhere(mine, 'listen'))
   }
 
   // Only whose a conversation is, for checks on every event (no counts, no members).
@@ -974,13 +984,20 @@ export class Db {
   }
 
   // Exactly these agents in the conversation. `mentionOnly`: which of them answer only when
-  // mentioned (a channel's mention mode); left out, each agent keeps the mode it had.
-  setMembers(id: string, agentIds: string[], mentionOnly?: string[]): void {
+  // mentioned (a channel's mention mode); `listen`: which of them Jev brings in when a message is
+  // about what they do (a channel's listen mode). Left out, each agent keeps the mode it had. An
+  // agent is in one mode or the other, never both: the one named in `listen` leaves mention mode.
+  setMembers(id: string, agentIds: string[], mentionOnly?: string[], listen?: string[]): void {
     const agents = [...new Set(agentIds)]
-    const quiet = new Set(mentionOnly === undefined ? this.conversation(id)?.mentionOnly ?? [] : mentionOnly)
+    const before = this.conversation(id)
+    const quiet = new Set(mentionOnly === undefined ? before?.mentionOnly ?? [] : mentionOnly)
+    const hears = new Set(listen === undefined ? before?.listen ?? [] : listen)
+    for (const a of hears) quiet.delete(a)
+    for (const a of quiet) hears.delete(a)
     this.tx(() => {
       this.db.prepare('DELETE FROM members WHERE conversation_id = ?').run(id)
-      for (const a of agents) this.db.prepare('INSERT INTO members (conversation_id, agent_id, mention_only) VALUES (?, ?, ?)').run(id, a, quiet.has(a) ? 1 : 0)
+      for (const a of agents)
+        this.db.prepare('INSERT INTO members (conversation_id, agent_id, mention_only, listen) VALUES (?, ?, ?, ?)').run(id, a, quiet.has(a) ? 1 : 0, hears.has(a) ? 1 : 0)
     })
   }
 

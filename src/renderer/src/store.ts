@@ -945,8 +945,10 @@ export const archiveAgent = (id: string, archived: boolean): Promise<void> => ca
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
 // Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
-// `mentionOnly`: the agents in the channel that answer only when mentioned.
-export const setChannelMembers = (id: string, agentIds: string[], mentionOnly?: string[]): Promise<void> => call('setChannelMembers', { id, agentIds, ...(mentionOnly ? { mentionOnly } : {}) })
+// `mentionOnly`: the agents in the channel that answer only when mentioned. `listen`: those Jev
+// brings in when the message is about what they do.
+export const setChannelMembers = (id: string, agentIds: string[], mentionOnly?: string[], listen?: string[]): Promise<void> =>
+  call('setChannelMembers', { id, agentIds, ...(mentionOnly ? { mentionOnly } : {}), ...(listen ? { listen } : {}) })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 

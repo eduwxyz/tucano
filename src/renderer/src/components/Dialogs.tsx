@@ -83,7 +83,8 @@ function DialogBody(): ReactNode {
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
   if (dialog?.kind === 'new-channel') return <SettingsDialog onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
-  if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} mentionOnly={conv.mentionOnly ?? []} onClose={close} />
+  if (dialog.kind === 'members')
+    return <MembersDialog id={conv.id} name={conv.name} members={conv.members} mentionOnly={conv.mentionOnly ?? []} listen={conv.listen ?? []} onClose={close} />
   return <SettingsDialog conv={conv} onClose={close} />
 }
 
@@ -174,32 +175,59 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
   )
 }
 
-// Who is in the channel: a row per agent, on or off, and mention mode for those in it, saved together.
-export function MembersDialog({ id, name, members, mentionOnly = [], onClose }: { id: string; name: string; members: string[]; mentionOnly?: string[]; onClose: () => void }): ReactNode {
+// Who is in the channel: a row per agent, on or off, and the mode of those in it — answers
+// everything, mention mode, or listen mode — saved together. An agent is in one mode at a time.
+export function MembersDialog({
+  id,
+  name,
+  members,
+  mentionOnly = [],
+  listen = [],
+  onClose
+}: {
+  id: string
+  name: string
+  members: string[]
+  mentionOnly?: string[]
+  listen?: string[]
+  onClose: () => void
+}): ReactNode {
   const agents = useStore((s) => s.agents.filter(isTeam))
   const [picked, setPicked] = useState<string[]>(members)
   const [quiet, setQuiet] = useState<string[]>(mentionOnly)
+  const [hears, setHears] = useState<string[]>(listen)
   const [error, setError] = useState<string | null>(null)
   const toggle = (a: string): void => {
     if (!picked.includes(a)) return setPicked([...picked, a])
     setPicked(picked.filter((x) => x !== a))
     setQuiet(quiet.filter((x) => x !== a)) // out of the channel, out of mention mode
+    setHears(hears.filter((x) => x !== a)) // and out of listen mode
   }
-  const mention = (a: string): void => setQuiet(quiet.includes(a) ? quiet.filter((x) => x !== a) : [...quiet, a])
+  const mention = (a: string): void => {
+    setQuiet(quiet.includes(a) ? quiet.filter((x) => x !== a) : [...quiet, a])
+    if (!quiet.includes(a)) setHears(hears.filter((x) => x !== a)) // one mode at a time
+  }
+  const listening = (a: string): void => {
+    setHears(hears.includes(a) ? hears.filter((x) => x !== a) : [...hears, a])
+    if (!hears.includes(a)) setQuiet(quiet.filter((x) => x !== a))
+  }
   const changed =
     picked.length !== members.length ||
     picked.some((a) => !members.includes(a)) ||
     quiet.length !== mentionOnly.length ||
-    quiet.some((a) => !mentionOnly.includes(a))
+    quiet.some((a) => !mentionOnly.includes(a)) ||
+    hears.length !== listen.length ||
+    hears.some((a) => !listen.includes(a))
   // Archived agents can't be shown, so they don't show up in the count either (they stay picked: saving keeps them in the channel).
   const inRoom = picked.filter((a) => agents.some((x) => x.id === a))
   const quietHere = inRoom.filter((a) => quiet.includes(a))
+  const hearsHere = inRoom.filter((a) => hears.includes(a))
   return (
     <Modal title={L(`Agentes em #${name}`, `Agents in #${name}`)} onClose={onClose}>
       <p className="muted small modal__lead">
         {L(
-          'Quem está no canal lê a conversa e pode responder. Pra chamar alguém específico, use @. Em modo menção, o agente lê tudo mas só responde quando é chamado, por você ou por outro agente.',
-          'Whoever is in the channel reads the conversation and can reply. To call on someone specific, use @. In mention mode, an agent reads everything but answers only when mentioned, by you or by another agent.'
+          'Quem está no canal lê a conversa e pode responder. Pra chamar alguém específico, use @. Em modo menção, o agente lê tudo mas só responde quando é chamado, por você ou por outro agente. Em modo escuta, ele fica de fora até o Jev ver que a mensagem pede o que só ele faz, e que quem está no canal não dá conta.',
+          "Whoever is in the channel reads the conversation and can reply. To call on someone specific, use @. In mention mode, an agent reads everything but answers only when mentioned, by you or by another agent. In listen mode, it stays out until Jev sees the message needs what only it does, and that whoever is in the channel can't handle it."
         )}
       </p>
       <div className="member-list">
@@ -219,10 +247,19 @@ export function MembersDialog({ id, name, members, mentionOnly = [], onClose }: 
                 <span className="member__check">{on && <Icon name="check" size={13} />}</span>
               </button>
               {on && (
-                <label className="member-row__mention muted small" title={L('Lê a conversa, mas só responde quando é mencionado', 'Reads the conversation, but answers only when mentioned')}>
-                  <input type="checkbox" checked={quiet.includes(a.id)} onChange={() => mention(a.id)} aria-label={L(`Modo menção para ${a.name}`, `Mention mode for ${a.name}`)} />
-                  {L('Modo menção', 'Mention mode')}
-                </label>
+                <>
+                  <label className="member-row__mention muted small" title={L('Lê a conversa, mas só responde quando é mencionado', 'Reads the conversation, but answers only when mentioned')}>
+                    <input type="checkbox" checked={quiet.includes(a.id)} onChange={() => mention(a.id)} aria-label={L(`Modo menção para ${a.name}`, `Mention mode for ${a.name}`)} />
+                    {L('Modo menção', 'Mention mode')}
+                  </label>
+                  <label
+                    className="member-row__mention muted small"
+                    title={L('Lê a conversa e entra quando o Jev vê que a mensagem precisa do que só ele faz', 'Reads the conversation and joins when Jev sees the message needs what only it does')}
+                  >
+                    <input type="checkbox" checked={hears.includes(a.id)} onChange={() => listening(a.id)} aria-label={L(`Modo escuta para ${a.name}`, `Listen mode for ${a.name}`)} />
+                    {L('Modo escuta', 'Listen mode')}
+                  </label>
+                </>
               )}
             </div>
           )
@@ -233,11 +270,12 @@ export function MembersDialog({ id, name, members, mentionOnly = [], onClose }: 
         <span className="muted small">
           {inRoom.length} {inRoom.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}
           {quietHere.length > 0 && ` · ${quietHere.length} ${L('em modo menção', 'in mention mode')}`}
+          {hearsHere.length > 0 && ` · ${hearsHere.length} ${L('em modo escuta', 'in listen mode')}`}
         </span>
         <button className="btn btn--ghost btn--sm" onClick={onClose}>
           {L('Cancelar', 'Cancel')}
         </button>
-        <button className="btn btn--primary btn--sm" disabled={!changed} onClick={() => setChannelMembers(id, picked, quiet).then(onClose, (e: unknown) => setError(message(e)))}>
+        <button className="btn btn--primary btn--sm" disabled={!changed} onClick={() => setChannelMembers(id, picked, quiet, hears).then(onClose, (e: unknown) => setError(message(e)))}>
           {L('Salvar', 'Save')}
         </button>
       </footer>
