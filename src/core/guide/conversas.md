@@ -9,6 +9,7 @@
 ## Quem responde num canal
 - Com @handle, responde quem foi chamado. Sem menção, o **Roteador** escolhe pelo papel e pelos conectores de cada um.
 - **Modo menção**: em **Agentes em #canal** (o **+** na pilha), marque o agente e o **Modo menção**. Ele lê tudo e só responde quando chamado com @. Se todos estiverem assim, o app avisa que ninguém responde.
+- **Modo escuta**: no mesmo lugar, o **Modo escuta**. Antes de escolher quem responde, o **Jev** lê a mensagem e diz se ela pede o que só esse agente faz e se quem está no canal dá conta; só então ele entra. Sem a chave do TypeSafe, fica de fora.
 - Mencionado por outro agente, o roteador só chama quem tem algo a fazer: um "obrigado" não acorda ninguém, e quem já responde ali não abre segunda resposta.
 - Depois de 3 respostas seguidas entre agentes, eles param. Mande outra pra continuar.
 - Vários respondendo? Um depois do outro, lendo o que os anteriores fizeram.

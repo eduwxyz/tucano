@@ -2090,15 +2090,20 @@ const api: Handlers = {
     db.setTopic(id, topic.trim() || undefined)
     emitConversations([id])
   },
-  setChannelMembers: ({ id, agentIds, mentionOnly }, ctx) => {
+  setChannelMembers: ({ id, agentIds, mentionOnly, listen }, ctx) => {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
     assertChannelVisible(db, ctx.person, conv)
     const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
-    const kept = membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a)))
-    // Mention mode is only for whoever is in the channel: an agent taken out can't stay in it.
-    db.setMembers(id, kept, mentionOnly === undefined ? undefined : mentionOnly.filter((a) => kept.includes(a)))
+    const roster = membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a)))
+    // A mode is only for whoever is in the channel: an agent taken out can't stay in one.
+    db.setMembers(
+      id,
+      roster,
+      mentionOnly === undefined ? undefined : mentionOnly.filter((a) => roster.includes(a)),
+      listen === undefined ? undefined : listen.filter((a) => roster.includes(a))
+    )
     emitConversations([id])
   },
   // Everything that only made sense there goes too: replies still running stop,
