@@ -133,33 +133,72 @@ await shoot(win, '14-rail-dark', rail)
 await setTheme(win, 'light')
 await app.close()
 
-// ---------- the line over a reply: one trace, written where the conversation reads it ----------
+// ---------- the line over a reply: three traces, written where the conversation reads them ----------
 {
   const db = new DatabaseSync(`${data}/tucano.db`)
   const conv = db.prepare(`SELECT id, name FROM conversations WHERE kind = 'channel' ORDER BY name LIMIT 1`).get()
   const agent = db.prepare(`SELECT id, name FROM agents LIMIT 1`).get()
-  const route = {
-    at: Date.now(),
-    reading: { role: 'code', confidence: 0.71, probabilities: { code: 0.71, plan: 0.19, review: 0.1 }, complexity: 2, capability: 2, deepReasoning: 0.5, ms: 640 },
-    rawDemand: 2, demand: 2, requested: 't3', policy: 't3', effective: 't3', source: 'tier',
-    notes: ['code floors at t3'],
-    attempts: [
-      { id: 'opencode/beam-free#low', engine: 'opencode', model: 'beam-free', effort: 'low', from: { kind: 'free' }, skip: 'the free pool is a fallback, and tier 3 answered first', skipCode: 'ineligible' },
-      { id: 'pi/openai-codex/gpt-6.1-sol#high', engine: 'pi', model: 'openai-codex/gpt-6.1-sol', effort: 'high', from: { kind: 'tier', tier: 't3' } }
-    ],
-    selected: { id: 'pi/openai-codex/gpt-6.1-sol#high', engine: 'pi', model: 'openai-codex/gpt-6.1-sol', effort: 'high' },
-    baseline: { id: 'claude/sonnet#medium', engine: 'claude', model: 'sonnet', effort: 'medium' },
-    state: 'changed'
+  const t = (engine, model, effort) => ({ id: `${engine}/${model}#${effort}`, engine, model, effort })
+  // Three reads worth photographing: a heavy one that opens a tier, a light one that lands in tier 1,
+  // and one where routing agreed with the agent's own model.
+  const traces = [
+    {
+      text: 'Rewrote the pool walk so a candidate that cannot run is skipped with a reason instead of ending the chain. Tests cover the empty pool and the unsigned-in login.',
+      route: {
+        reading: { role: 'code', confidence: 0.71, probabilities: { code: 0.71, plan: 0.19, review: 0.1 }, complexity: 2.6, capability: 2.2, deepReasoning: 0.8, ms: 640 },
+        rawDemand: 2.89, demand: 2.89, requested: 't3', policy: 't3', effective: 't3', source: 'tier',
+        notes: ['code floors at t3'],
+        attempts: [
+          { ...t('opencode', 'beam-free', 'low'), from: { kind: 'free' }, skip: 'the free pool is a fallback, and tier 3 answered first', skipCode: 'ineligible' },
+          { ...t('pi', 'openai-codex/gpt-6.1-sol', 'high'), from: { kind: 'tier', tier: 't3' } }
+        ],
+        selected: t('pi', 'openai-codex/gpt-6.1-sol', 'high'),
+        state: 'changed'
+      }
+    },
+    {
+      text: 'Added the missing comma and re-ran the formatter. Nothing else changed.',
+      route: {
+        reading: { role: 'operate', confidence: 0.66, probabilities: { operate: 0.66, code: 0.24, chat: 0.1 }, complexity: 0.4, capability: 0.3, deepReasoning: 0.1, ms: 410 },
+        rawDemand: 0.27, demand: 1, requested: 't1', policy: 't1', effective: 't1', source: 'tier',
+        notes: ['the read was small enough for tier 1'],
+        attempts: [{ ...t('claude', 'claude-haiku-5-5', 'low'), from: { kind: 'tier', tier: 't1' } }],
+        selected: t('claude', 'claude-haiku-5-5', 'low'),
+        state: 'changed'
+      }
+    },
+    {
+      text: 'So the two receipts disagree because the second one was written before the refund cleared. That is the whole story.',
+      route: {
+        reading: { role: 'explain', confidence: 0.58, probabilities: { explain: 0.58, research: 0.27, chat: 0.15 }, complexity: 1.4, capability: 1.1, deepReasoning: 0.3, ms: 520 },
+        rawDemand: 1.27, demand: 2, requested: 't2', policy: 't2', effective: 't2', source: 'role',
+        notes: ['the agent already ran on this model, so the read kept it'],
+        attempts: [
+          { ...t('claude', 'claude-sonnet-4-6', 'medium'), from: { kind: 'role', role: 'explain' } }
+        ],
+        selected: t('claude', 'claude-sonnet-4-6', 'medium'),
+        state: 'kept'
+      }
+    }
+  ]
+  const now = Date.now()
+  for (const [n, trace] of traces.entries()) {
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, thread_id) VALUES (?, ?, 'agent', ?, ?, ?, ?, NULL)`
+    ).run(
+      randomUUID(), conv.id, agent.id, trace.text, now + n * 1000,
+      JSON.stringify({
+        status: 'done', endedAt: now + n * 1000, depth: 1, steps: [],
+        route: {
+          at: now + n * 1000,
+          ...trace.route,
+          baseline: t('claude', 'claude-sonnet-4-6', 'medium')
+        }
+      })
+    )
   }
-  db.prepare(
-    `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, thread_id) VALUES (?, ?, 'agent', ?, ?, ?, ?, NULL)`
-  ).run(
-    randomUUID(), conv.id, agent.id,
-    'Rewrote the pool walk so a candidate that cannot run is skipped with a reason instead of ending the chain. Tests cover the empty pool and the unsigned-in login.',
-    Date.now(), JSON.stringify({ status: 'done', endedAt: Date.now(), depth: 1, steps: [], route })
-  )
   db.close()
-  console.log('seeded a routed reply in', conv.name)
+  console.log('seeded three routed replies in', conv.name)
 
   app = await launch()
   win = await app.firstWindow()
@@ -169,17 +208,60 @@ await app.close()
   await setTheme(win, 'light')
   await win.getByText(conv.name, { exact: true }).first().click()
   await win.waitForTimeout(1500)
-  const line = win.locator('.route-line').first()
-  console.log('route lines:', await win.locator('.route-line').count())
-  if (await line.count()) {
-    await shoot(win, '15-line-collapsed', line)
-    await shoot(win, '16-conversation')
-    await line.locator('.route-line__row').click()
-    await win.waitForTimeout(800)
-    await shoot(win, '17-line-open', line)
-    await shoot(win, '18-line-open-full')
-    console.log('the line reads:', (await line.innerText()).replace(/\n+/g, ' | '))
+  const lines = win.locator('.route-line')
+  console.log('route lines:', await lines.count())
+  for (const [n, name] of [[0, 'heavy'], [1, 'light'], [2, 'kept']]) {
+    const line = lines.nth(n)
+    if (!(await line.count())) continue
+    await shoot(win, `15-line-${name}`, line)
+    const m = await line.evaluate((el) => {
+      const row = el.querySelector('.route-line__row').getBoundingClientRect()
+      const bar = el.querySelector('.route-demand')?.getBoundingClientRect()
+      const fill = el.querySelector('.route-demand__fill')?.getBoundingClientRect()
+      // one line: every piece sits on the row's own centre line (the bar is 6 px tall inside a 32 px
+      // row, so comparing raw tops reads a centred bar as a second line)
+      const mid = row.top + row.height / 2
+      const kids = [...el.querySelector('.route-line__row').children].map((c) => c.getBoundingClientRect())
+      return { rowH: Math.round(row.height), barW: bar && Math.round(bar.width), fillW: fill && Math.round(fill.width), oneRow: kids.every((k) => Math.abs(k.top + k.height / 2 - mid) <= 6) }
+    })
+    console.log(`  ${name}:`, JSON.stringify(m), (await line.locator('.route-line__row').innerText()).replace(/\s+/g, ' '))
   }
+  await shoot(win, '16-conversation')
+  const heavy = lines.nth(0)
+  await heavy.locator('.route-line__row').click()
+  await win.waitForTimeout(800)
+  await shoot(win, '17-line-open', heavy)
+  await shoot(win, '18-line-open-full')
+  console.log('opened line reads:', (await heavy.innerText()).replace(/[\r\n]+/g, ' | '))
+  const geom = await heavy.evaluate((el) => {
+    const row = el.querySelector('.route-line__row')
+    const bar = el.querySelector('.route-demand')
+    const fill = el.querySelector('.route-demand__fill')
+    const tier = el.querySelector('.route-line__pool')
+    const cs = (n) => (n ? getComputedStyle(n) : null)
+    const r = (n) => {
+      const b = n.getBoundingClientRect()
+      return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) }
+    }
+    return {
+      row: r(row),
+      bar: { ...r(bar), radius: cs(bar).borderRadius, track: cs(bar).backgroundColor, fillPaint: cs(fill).backgroundColor, fill: r(fill) },
+      tier: { text: tier.textContent, ...r(tier), color: cs(tier).color },
+      items: [...row.children].map((c) => ({ cls: c.className, text: (c.textContent || '').trim().slice(0, 40), ...r(c) }))
+    }
+  })
+  console.log(JSON.stringify(geom, null, 1))
+  await setTheme(win, 'dark')
+  await win.waitForTimeout(700)
+  await shoot(win, '19-line-open-dark', heavy)
+  await heavy.locator('.route-line__row').click()
+  await win.waitForTimeout(500)
+  await shoot(win, '20-line-dark', heavy)
+  console.log('dark bar:', JSON.stringify(await heavy.evaluate((el) => {
+    const bar = el.querySelector('.route-demand')
+    const fill = el.querySelector('.route-demand__fill')
+    return { track: getComputedStyle(bar).backgroundColor, fill: getComputedStyle(fill).backgroundColor, w: Math.round(fill.getBoundingClientRect().width) }
+  })))
   await app.close()
 }
 console.log('frames in', out)
