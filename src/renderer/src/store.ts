@@ -563,7 +563,9 @@ function withSettings(s: State, settings: Settings): State {
 function apply(e: CoreEvent): void {
   // Streamed words and the browser's screen come many times a second: they wake only what shows them.
   if (e.type === 'delta') return stream(e.id, e.text)
-  if (e.type === 'thinking') return streamThought(e.id, e.text)
+  // The model's reasoning is kept only when this person asked for it (Settings › General): off, the
+  // text never lands in memory, so nothing of it can be drawn or read back later.
+  if (e.type === 'thinking') return state.settings.showThinking === true ? streamThought(e.id, e.text) : undefined
   if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   set((s) => {
     switch (e.type) {
