@@ -1823,6 +1823,26 @@ h3 {
 .work-row--queued .work-row__text {
   color: var(--text-2);
 }
+/* A reply that ended: the glyph says how, and its row stays until the trash takes it off. */
+.work-row__state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--text-3);
+}
+.work-row__state--ok {
+  color: var(--ok);
+}
+.work-row__state--bad {
+  color: var(--danger);
+}
+.work-row--done .work-row__text {
+  color: var(--text-2);
+}
+.work-row .icon-btn:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
 .work-row__dot {
   flex: none;
   width: 6px;

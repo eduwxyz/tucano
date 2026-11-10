@@ -1,6 +1,6 @@
-// Screenshots of the work drawer above the composer: what it looks like with two replies at work at
-// once, a prompt marked as queued under its own group, jumping to a reply, stopping one, and the
-// drawer closed by hand. Fake engines, fresh data.
+// Screenshots of the work drawer above the composer: a reply running with the glyph that stops it,
+// the reply that already ended (kept, marked with how it ended), jumping to it, the trash that takes
+// a row off, and that each conversation keeps its own drawer. Fake engines, fresh data.
 import { _electron as electron } from 'playwright'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -17,6 +17,7 @@ const errors = []
 win.on('pageerror', (e) => errors.push(String(e)))
 win.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
 const shot = (name) => win.screenshot({ path: `${out}/${name}.png` })
+const head = async () => ((await win.locator('.work-drawer__count').count()) ? await win.locator('.work-drawer__count').innerText() : '(no drawer)')
 const rows = () => win.locator('.work-row').count()
 const step = async (name, fn) => {
   try {
@@ -34,66 +35,106 @@ const say = async (text, opts = {}) => {
     await win.keyboard.up('Shift')
   } else await win.keyboard.press('Enter')
 }
+// The same DM comes back when it already exists, so its drawer's memory is what's on trial here.
+const dm = async (name) => {
+  await win.click(`.section:has-text("Agents") .nav-item:has-text("${name}")`)
+  const open = win.locator('button:has-text("Open DM")')
+  if (await open.count()) await open.first().click()
+  await win.waitForSelector('.composer textarea')
+}
+const openIt = async () => {
+  if (!(await win.locator('.work-drawer.is-open').count())) await win.locator('.work-drawer__head').click()
+}
 
 await step('abrir', async () => {
-  await win.click('.section:has-text("Agents") .nav-item:has-text("Lia")')
-  await win.click('button:has-text("Open DM")')
-  await win.waitForSelector('.composer textarea')
+  await dm('Lia')
 })
 
-// The stop glyph first, on its own slow reply: the fake engine only notices the abort when its sleep
-// ends, so the proof is that the row goes and the reply ends as stopped, not in a flash.
-await step('parar', async () => {
-  await say('demore 6 s e organize o relatório do mês')
-  await win.waitForSelector('.work-drawer', { timeout: 15_000 })
-  await win.waitForTimeout(700)
-  console.log(`one at work: ${JSON.stringify(await win.locator('.work-drawer__count').innerText())}, rows: ${await rows()}`)
-  await win.locator('.work-drawer__head').click() // closed with one reply: opened by hand
-  await win.waitForTimeout(300)
-  console.log(`rows once opened: ${await rows()}`)
-  await shot('01-uma-respondendo')
-  await win.locator('.work-row button[title*="Stop"]').first().click()
-  await win.waitForTimeout(7000)
-  console.log(`rows after stopping: ${await rows()}, drawer: ${await win.locator('.work-drawer').count()}`)
-  console.log(`said stopped: ${await win.locator('.note:has-text("Stopped by you")').count()}`)
-  await shot('02-depois-de-parar')
-})
-
-await step('duas', async () => {
-  await say('demore 25 s e organize o relatório do mês')
+// A reply that ends stays: the head counts it, its row says how it ended, and it still jumps.
+await step('terminada', async () => {
+  await say('demore 3 s e organize o relatório do mês')
+  // Closed while it's the only thing running: the head is what says it ended.
+  await win.waitForSelector('.work-drawer__count:has-text("finished")', { timeout: 30_000 })
+  await openIt()
   await win.waitForTimeout(400)
-  await say('demore 25 s e revise o diff do PR 247')
-  await win.waitForSelector('.work-drawer.is-open', { timeout: 15_000 })
-  await win.waitForTimeout(600)
-  console.log(`head says: ${JSON.stringify(await win.locator('.work-drawer__count').innerText())}`)
-  console.log(`rows: ${await rows()}`)
-  console.log(`prompts: ${JSON.stringify(await win.locator('.work-row__text').allInnerTexts())}`)
-  await shot('03-duas-respondendo')
-})
-
-await step('fila', async () => {
-  await say('isto pode esperar: some as horas do relatório', { queue: true })
-  await win.waitForSelector('.work-drawer__group', { timeout: 15_000 })
-  await win.waitForTimeout(600)
-  console.log(`head says: ${JSON.stringify(await win.locator('.work-drawer__count').innerText())}`)
-  console.log(`queued group: ${JSON.stringify(await win.locator('.work-drawer__group').innerText())}`)
-  console.log(`rows now: ${await rows()}`)
-  await shot('04-com-um-na-fila')
-})
-
-await step('ir', async () => {
-  await win.locator('.work-row__go').first().click()
+  console.log(`head after it ended: ${JSON.stringify(await head())}`)
+  console.log(`rows: ${await rows()}, finished rows: ${await win.locator('.work-row--done').count()}, done glyphs: ${await win.locator('.work-row__state--ok').count()}`)
+  console.log(`trash on the finished row: ${await win.locator('.work-row--done button[title*="Remove"]').count()}`)
+  await shot('01-terminada')
+  await win.locator('.work-row--done .work-row__go').first().click()
   await win.waitForTimeout(700)
-  console.log(`flashed: ${await win.locator('.msg.is-flash').count()}`)
-  await shot('05-pulo-pra-resposta')
+  console.log(`flashed on jump: ${await win.locator('.msg.is-flash').count()}`)
+  await shot('02-pulo')
 })
 
-await step('fechar', async () => {
-  await win.locator('.work-drawer__head').click()
+// The x in a running row stops that one; the row stays and says it was stopped.
+await step('parar', async () => {
+  await say('demore 6 s e revise o diff do PR 247')
+  await win.waitForSelector('.work-drawer__count:has-text("replying")', { timeout: 15_000 })
+  await openIt()
+  await win.waitForSelector('.work-row button[title*="Stop"]', { timeout: 10_000 })
+  await win.waitForTimeout(400)
+  console.log(`head with one running: ${JSON.stringify(await head())}`)
+  const stop = win.locator('.work-row button[title*="Stop"]').first()
+  console.log(`stop glyph has no square: ${(await stop.locator('svg rect').count()) === 0}, paths: ${JSON.stringify(await stop.locator('svg path').getAttribute('d'))}`)
+  await shot('03-respondendo-com-x')
+  await stop.click()
+  await win.waitForTimeout(9000)
+  console.log(`head after stopping: ${JSON.stringify(await head())}`)
+  console.log(`stopped rows: ${await win.locator('.work-row__state--off').count()}, rows: ${await rows()}`)
+  await shot('04-parada-fica')
+})
+
+// It sits on the composer's width and nothing inside it runs off, wide or narrow.
+await step('medidas', async () => {
+  const box = () =>
+    win.evaluate(() => {
+      const wr = document.querySelector('.work-drawer')
+      const co = document.querySelector('.composer')
+      const rows = [...document.querySelectorAll('.work-row')]
+      return {
+        drawer: wr ? Math.round(wr.getBoundingClientRect().width) : 0,
+        composer: co ? Math.round(co.getBoundingClientRect().width) : 0,
+        rowsOverflowing: rows.filter((r) => r.scrollWidth > r.clientWidth + 1).length,
+        sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth
+      }
+    })
+  await openIt()
+  console.log(`at 1280: ${JSON.stringify(await box())}`)
+  await win.setViewportSize({ width: 420, height: 860 })
   await win.waitForTimeout(500)
-  console.log(`open after closing by hand: ${await win.locator('.work-drawer.is-open').count()}`)
-  console.log(`rows drawn while closed: ${await rows()}`)
-  await shot('06-fechado-a-mao')
+  console.log(`at 420: ${JSON.stringify(await box())}`)
+  await shot('05-aperto')
+  await win.setViewportSize({ width: 1280, height: 860 })
+  await win.waitForTimeout(400)
+})
+
+// Each DM and channel has its own drawer: another one has none, and coming back finds this one.
+await step('por-conversa', async () => {
+  const before = await head()
+  await dm('Theo')
+  await win.waitForTimeout(700)
+  console.log(`drawer in Theo's DM: ${await win.locator('.work-drawer').count()}`)
+  await shot('06-outro-dm-sem-gaveta')
+  await dm('Lia')
+  await win.waitForTimeout(700)
+  console.log(`back in Lia's DM: ${JSON.stringify(await head())} (was ${JSON.stringify(before)})`)
+  await openIt()
+  await win.waitForTimeout(300)
+  console.log(`rows back: ${await rows()}`)
+  await shot('07-de-volta')
+})
+
+// The trash takes a row off; the drawer goes when its last row does.
+await step('tirar', async () => {
+  await openIt()
+  let guard = 0
+  while ((await rows()) > 0 && guard++ < 10) {
+    await win.locator('.work-row button[title*="Remove"]').first().click()
+    await win.waitForTimeout(250)
+  }
+  console.log(`rows after removing all: ${await rows()}, drawer: ${await win.locator('.work-drawer').count()}`)
+  await shot('08-limpa')
 })
 
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no console errors')
