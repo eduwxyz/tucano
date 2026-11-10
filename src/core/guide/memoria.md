@@ -21,6 +21,13 @@ O **Contexto** em **Configurações › Geral** é outra coisa: um texto fixo qu
 ## Resumo das conversas
 O modelo da memória também resume o que sai da janela das conversas longas (roda a cada ~20 mensagens numa conversa longa) e, de uma thread que fica parada alguns minutos, tira um resumo próprio. Veja o botão **Resumo** em cada conversa (página **conversas**).
 
+## Tabelas de cada agente
+Memória é texto. Pro que uma rotina grava a cada execução e consulta depois (um histórico de preços, o que já foi avisado), cada agente tem tabelas próprias, num banco SQLite só dele (na pasta `data` do workspace, um arquivo por agente). Ele cria, consulta e altera com SQL, pelas ferramentas `dados_tabelas`, `dados_consultar` e `dados_alterar`.
+- Um agente nunca vê as tabelas de outro.
+- Apagar de vez (DROP, ou DELETE e UPDATE sem WHERE) segue a regra de **apagar** do agente: no modo cuidadoso, vira um pedido de aprovação com o SQL exato.
+- Limite de 100 MB por agente.
+- Por enquanto as tabelas não entram no backup diário nem na exportação do time.
+
 ## Quando dá errado
 - O agente "esqueceu" algo: veja se está em **Memória** e não em **Esquecidas**; ensine de novo com uma frase curta.
 - Guardou algo errado: edite ou **Esquecer** na tela Memória.

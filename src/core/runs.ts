@@ -9,6 +9,7 @@ import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, E
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
+import { checkSql, DADOS, DADOS_ALTERAR, DADOS_CONSULTAR, DADOS_TABELAS, DATA_TOOL_NAMES, executeCall, paramsOf, queryCall, tablesCall, type AgentData } from './agent-data'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
@@ -243,6 +244,7 @@ export interface RunnerDeps {
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
+  data?: Pick<AgentData, 'tables' | 'query' | 'execute'> // without it, agents have no tables of their own
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
 
@@ -1084,6 +1086,7 @@ export class Runner {
     // A page held for one person (see Wiki.inherit) is read only in their own DM: anywhere else the reply reaches others.
     const wikiShown = this.deps.wiki?.view(this.deps.wiki.heldTitles(dmOwner(conv, db.ownerId())))
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
+    const data = this.deps.gateway ? this.deps.data : undefined
 
     const control: Control = { ctl: new AbortController(), msg }
     this.controllers.set(msg.id, control)
@@ -1151,7 +1154,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DATA_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1253,7 +1256,17 @@ ${note}`,
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
-      ...(wiki ? WIKI_TOOLS : [])
+      ...(wiki ? WIKI_TOOLS : []),
+      ...(data
+        ? [
+            DADOS_TABELAS,
+            DADOS_CONSULTAR,
+            {
+              ...DADOS_ALTERAR,
+              inputSchema: { ...DADOS_ALTERAR.inputSchema, properties: { ...(DADOS_ALTERAR.inputSchema.properties ?? {}), [REASON_PARAM]: { type: 'string', description: L(`Se o comando apaga dados e pede aprovação: por que, em uma frase. Aparece pra ${settings.workspaceName} no pedido.`, `If the command destroys data and asks for approval: why, in one sentence. ${settings.workspaceName} sees it in the request.`) } } }
+            }
+          ]
+        : [])
     ]
     // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
     const byStep = new Map([...exposed].map(([name, { connector, tool }]) => [`${connector.name} · ${tool.name}`, name]))
@@ -1529,6 +1542,68 @@ ${note}`,
           const r = wikiCall(wiki, name, args)
           addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: 'done' })
           return textResult(r.text, r.error)
+        }
+
+        if (data && DATA_TOOL_NAMES.has(name)) {
+          const shown = (r: { text: string; error?: boolean; step: { label: string; detail: string } }): CallToolResult => {
+            addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: r.error ? 'error' : 'done', ...(r.error ? { error: r.text } : {}) })
+            return textResult(r.text, r.error)
+          }
+          if (name === DADOS_TABELAS.name) return shown(tablesCall(data, agent.id))
+          if (name === DADOS_CONSULTAR.name) return shown(queryCall(data, agent.id, args))
+          const { [REASON_PARAM]: why, ...callArgs } = args
+          const sql = typeof callArgs['sql'] === 'string' ? callArgs['sql'] : ''
+          const label = L('Alterou os dados', 'Changed the data')
+          const checked = checkSql(sql, 'write')
+          if (!checked.ok) return shown({ text: checked.error, error: true, step: { label, detail: snip(sql, 120) } })
+          const params = paramsOf(callArgs['parametros'])
+          if ('error' in params) return shown({ text: params.error, error: true, step: { label, detail: snip(sql, 120) } })
+          if (checked.destructive) {
+            // Destroying rows or tables is deleting: the agent's delete rule decides, like a command that deletes.
+            const rules = verdict({ cls: 'write', kinds: ['delete'], p: await policyNow(), outside })
+            if (rules.off) {
+              addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L('apagar dados: desligado pra este agente', 'deleting data: turned off for this agent'), status: 'error' })
+              return textResult(
+                L(
+                  `Não rodei: apagar está desligado pra você (${settings.workspaceName} decide isso em Configurações ou na sua página). Use um DELETE com WHERE pro que precisa sair, ou siga sem isso.`,
+                  `I didn't run it: deleting is turned off for you (${settings.workspaceName} decides that in Settings or on your page). Use a DELETE with a WHERE for what has to go, or go on without it.`
+                ),
+                true
+              )
+            }
+            if (!rules.run) {
+              if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+              approval = {
+                id: randomUUID(),
+                hash: approvalHash(DADOS, DADOS_ALTERAR.name, callArgs),
+                agentId: agent.id,
+                conversationId: conv.id,
+                messageId: msg.id,
+                connectorId: DADOS,
+                connectorName: L('Dados', 'Data'),
+                tool: DADOS_ALTERAR.name,
+                args: callArgs,
+                why: typeof why === 'string' ? why.trim() : '',
+                // Lost rows don't come back: held to approve, and never allowed for good from the card.
+                highRisk: true,
+                state: 'pending',
+                createdAt: Date.now(),
+                expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+              }
+              db.createApproval(approval)
+              emit({ type: 'approval', approval })
+              msg.run = { ...msg.run!, approvalId: approval.id }
+              addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail: `${L('apagar dados', 'delete data')} · ${snip(sql, 120)}`, ...(rules.why === 'guard' ? { note: guardNote() } : {}), status: 'done' })
+              this.deps.notify?.(L(`${agent.name} quer apagar dados`, `${agent.name} wants to delete data`), approval.why || snip(sql, 120), conv.id, 'approval')
+              return textResult(
+                L(
+                  `Pedido de aprovação criado, com o SQL exato. Ele ainda NÃO rodou. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
+                  `Approval request created, with the exact SQL. It has NOT run yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
+                ) + askedBecause(rules)
+              )
+            }
+          }
+          return shown(executeCall(data, agent.id, sql, params))
         }
 
         if (skills && SKILL_TOOL_NAMES.has(name)) {
@@ -2365,6 +2440,30 @@ ${note}`,
         task = L(
           `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi rodado. Responda considerando isso; se fizer sentido, proponha outro caminho.`,
           `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was run. Reply with that in mind; if it makes sense, suggest another way.`
+        )
+      }
+    } else if (ap.connectorId === DADOS) {
+      // SQL that destroys data in the agent's own tables: the app runs exactly the statement approved.
+      const sql = String(ap.args['sql'] ?? '')
+      const what = L(`rodar \`${snip(sql, 200)}\` nos seus dados`, `running \`${snip(sql, 200)}\` on your data`)
+      const checked = checkSql(sql, 'write')
+      const params = paramsOf(ap.args['parametros'])
+      if (decision === 'approved' && agent && this.deps.data && checked.ok && !('error' in params)) {
+        const r = executeCall(this.deps.data, agent.id, sql, params)
+        ok = !r.error
+        outcome = ok ? ran : L(`Rodou, com erro: ${r.text.slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${r.text.slice(0, STEP_ERROR_MAX)}`)
+        task = L(
+          `${me} aprovou ${what}. O app rodou exatamente esse SQL${ok ? '' : ' e ele deu erro'}. Resultado: ${r.text}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
+          `${me} approved ${what}. The app ran exactly that SQL${ok ? '' : ' and it failed'}. Result: ${r.text}\n\nGo on from here and tell ${me} the result.`
+        )
+      } else if (decision === 'approved') {
+        outcome = L('Não executou: o SQL não é mais aceito.', "Didn't run: the SQL is no longer accepted.")
+        task = L(`${me} aprovou ${what}, mas o app não rodou: o SQL não passa mais na checagem. Avise ${me} em uma frase.`, `${me} approved ${what}, but the app didn't run it: the SQL no longer passes the check. Tell ${me} in one sentence.`)
+      } else {
+        outcome = decision === 'refused' ? L('Nada foi apagado.', 'Nothing was deleted.') : expired
+        task = L(
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi apagado. Responda considerando isso; se fizer sentido, proponha outro caminho.`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was deleted. Reply with that in mind; if it makes sense, suggest another way.`
         )
       }
     } else if (ap.connectorId === APPS) {
