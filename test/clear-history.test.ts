@@ -67,6 +67,14 @@ describe('clearing a history', () => {
     expect(contextWindow(db, msg('m7', id, cut + 1_000), 30).summary).toBeUndefined()
   })
 
+  it('takes the summaries of threads with it, written as they were about what went', () => {
+    const { db, id } = made()
+    db.setThreadSummary('m1', 'Falaram de preco.', base + 2_000)
+    expect(db.summarizedThreads(id)).toEqual(['m1'])
+    db.clearConversation(id, cut)
+    expect(db.summarizedThreads(id)).toEqual([])
+  })
+
   it('takes the unread badge with it: nobody can reach those messages any more', () => {
     const { db, id } = made()
     // Lia's reply, not seen: a badge of one over a conversation that is about to be emptied.

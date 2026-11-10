@@ -917,6 +917,9 @@ export class Db {
     this.tx(() => {
       this.db.prepare('UPDATE conversations SET cleared_at = ?, summary = NULL, summary_until = ?, summary_at = ? WHERE id = ?').run(at, at, at, id)
       this.db.prepare('DELETE FROM unread WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)').run(id)
+      // A thread's summary was written about messages that are now behind the cut, and the reply that
+      // would read it can't be reached any more.
+      this.db.prepare('UPDATE messages SET thread_summary = NULL WHERE conversation_id = ?').run(id)
     })
   }
 
