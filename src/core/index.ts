@@ -22,6 +22,7 @@ import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnC
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
+import { normalizeRouting } from '../shared/routing'
 import { cleanEndpoint, listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db, MIGRATIONS } from './db'
@@ -2079,6 +2080,7 @@ const api: Handlers = {
     const doesNext = typeof sectorDoes === 'string' ? sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) : ''
     if (doesNext) clean.sectorDoes = doesNext
     else delete clean.sectorDoes
+    if (typeof clean.smartRouting !== 'boolean') delete clean.smartRouting
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -2633,6 +2635,8 @@ const api: Handlers = {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
+    // A routing setup saved by an older or a hand-edited install: known pools, known harnesses, real levels.
+    if (patch.routing !== undefined && typeof normalizeRouting === "function") patch.routing = normalizeRouting(patch.routing)
     const removedClassifiers = settleClassifiers(patch)
     db.setSettings(patch)
     for (const c of removedClassifiers) {

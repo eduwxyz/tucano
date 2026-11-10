@@ -10,6 +10,9 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   workspaceLabel: { kind: 'string', max: 500, nullable: true },
   context: { kind: 'string', max: 100_000 },
   routerModel: { kind: 'string', max: 200 },
+  // Settings › Routing: six pools of up to 40 targets, plus the roles' chains. Kept small on purpose:
+  // it rides in every snapshot, and a setup bigger than this is a mistake, not an intent.
+  routing: { kind: 'object', max: 80_000, nullable: true },
   memoryModel: { kind: 'string', max: 200 },
   voice: { kind: 'object', max: 10_000, nullable: true },
   channelLayout: { kind: 'object', max: 500_000, nullable: true },
