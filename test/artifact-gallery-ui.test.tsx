@@ -69,6 +69,9 @@ describe('the pictures of a reply', () => {
     expect(count(html, 'gallery__cell--hero')).toBe(1)
     expect(count(html, 'gallery__more')).toBe(1)
     expect(html).toContain('+5')
+    // The cell that counts also says it aloud: it opens that picture, with five more beside it.
+    expect(html).toContain('aria-label="Imagem 4 — e mais 5"')
+    expect(html).not.toContain('aria-label="Imagem 1 — e mais')
     expect(html).toContain('grid-row:span 3')
   })
 
