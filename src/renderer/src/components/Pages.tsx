@@ -2631,6 +2631,24 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
+        {pane('geral') && (
+          <Card title={L('A conversa', 'The conversation')}>
+            <div className="key-row">
+              <Icon name="spark" />
+              <div className="grow">
+                <strong>{L('O que o modelo pensa', 'What the model is thinking')}</strong>
+                <p className="muted small">
+                  {L(
+                    'Enquanto um agente responde, o raciocínio dele aparece em letra pequena e apagada, embaixo dos passos, e fica ali depois que a resposta acaba. Desligado, você vê só os passos e a resposta. Por enquanto, só os agentes que rodam no Pi mandam o raciocínio.',
+                    'While an agent replies, its reasoning shows in small, dim text under the steps, and it stays there once the reply ends. Off, you see only the steps and the answer. For now only agents running on Pi send their reasoning.'
+                  )}
+                </p>
+              </div>
+              <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />
+            </div>
+          </Card>
+        )}
+
         {pane('geral') && admin && (
           <Card title={L('Atualizações', 'Updates')}>
             <UpdateSettings />
