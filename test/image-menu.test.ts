@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeImageMenu,
+  folderLabel,
   imageActions,
   imageFileName,
   imageMenuState,
@@ -13,7 +14,9 @@ import {
   subscribeImageMenu
 } from '../src/renderer/src/image-menu'
 import { attachToComposer, composerListenerCount, onComposerImages } from '../src/renderer/src/composer-attach'
-import { artifactImagePath, fileNameFor, imageBytesOf, mimeOfImage, MAX_IMAGE_BYTES } from '../src/main/image-bytes'
+import { artifactImagePath, fileNameFor, freeName, imageBytesOf, mimeOfImage, MAX_IMAGE_BYTES } from '../src/main/image-bytes'
+import { settingsPatchError } from '../src/core/settings-patch'
+import { isPersonalSetting } from '../src/core/policy-people'
 
 const DATA = 'C:/Users/someone/Tucano Dev'
 
@@ -26,6 +29,48 @@ describe('what a right-clicked picture offers', () => {
     // Full window, there is no prompt under it to copy into.
     expect(imageActions('gallery')).toEqual(['save', 'clipboard'])
     expect(imageActions('gallery')).not.toContain('prompt')
+  })
+
+  it('before anything was saved: only the dialog, never a folder it was not told', () => {
+    expect(imageActions('reply', false)).toEqual(['save', 'clipboard', 'prompt'])
+    expect(imageActions('reply', false)).not.toContain('save-here')
+  })
+
+  it('once a folder is remembered: one click into it, then the dialog, then the rest', () => {
+    expect(imageActions('reply', true)).toEqual(['save-here', 'save', 'clipboard', 'prompt'])
+    expect(imageActions('gallery', true)).toEqual(['save-here', 'save', 'clipboard'])
+  })
+})
+
+describe('the folder a picture is saved to', () => {
+  it('is named by its own name, capitalised', () => {
+    expect(folderLabel('C:\\Users\\theap\\Downloads')).toBe('Downloads')
+    expect(folderLabel('C:/Users/theap/Pictures/Screenshots')).toBe('Screenshots')
+    expect(folderLabel('C:\\Users\\theap\\shots')).toBe('Shots')
+    expect(folderLabel('/home/someone/pictures/')).toBe('Pictures')
+  })
+
+  it('says what Windows calls a drive that has no name of its own', () => {
+    expect(folderLabel('C:\\')).toBe('Local Disk (C:)')
+    expect(folderLabel('d:')).toBe('Local Disk (D:)')
+    expect(folderLabel('')).toBe('')
+  })
+
+  it('can be remembered at all: the core takes the setting, and it belongs to the person', () => {
+    expect(settingsPatchError({ lastImageFolder: 'C:/Users/theap/Pictures' })).toBeUndefined()
+    expect(isPersonalSetting('lastImageFolder')).toBe(true)
+  })
+
+  it('never takes a name already in the folder', () => {
+    const taken = new Set(['shot.png', 'shot (2).png'])
+    const ask = (n: string): boolean => taken.has(n)
+    expect(freeName('other.png', ask)).toBe('other.png')
+    expect(freeName('shot.png', ask)).toBe('shot (3).png')
+    // The extension stays where it was, and a name with no extension still gets a number.
+    expect(freeName('shot.png', (n) => n === 'shot.png')).toBe('shot (2).png')
+    expect(freeName('notes', (n) => n === 'notes')).toBe('notes (2)')
+    // A folder that answers yes to everything still gets a name rather than an overwrite.
+    expect(freeName('shot.png', () => true)).not.toBe('shot.png')
   })
 })
 
@@ -43,10 +88,18 @@ describe('the name it is saved under', () => {
     expect(imageFileName('', 'tucano://artifact/abc/a.png')).toBe('image.png')
   })
 
+  it('keeps one extension when the title already has it', () => {
+    expect(imageFileName('pic.png', 'tucano://artifact/abc/pic.png')).toBe('pic.png')
+    expect(imageFileName('pic.PNG', 'tucano://artifact/abc/pic.png')).toBe('pic.png')
+    // A title that ends in another extension keeps both, because that one is part of its name.
+    expect(imageFileName('report.pdf', 'tucano://artifact/abc/shot.png')).toBe('report.pdf.png')
+  })
+
   it('offers the same kind of name from the main process', () => {
     expect(fileNameFor('Screenshot 2026-11-10', 'tucano://artifact/abc/shot.png')).toBe('Screenshot 2026-11-10.png')
     expect(fileNameFor('../../etc/passwd', 'tucano://artifact/abc/a.png')).not.toContain('/')
     expect(fileNameFor('', 'tucano://artifact/abc/a.webp')).toBe('image.webp')
+    expect(fileNameFor('pic.png', 'tucano://artifact/abc/pic.png')).toBe('pic.png')
   })
 })
 

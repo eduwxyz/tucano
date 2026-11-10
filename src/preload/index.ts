@@ -25,8 +25,14 @@ contextBridge.exposeInMainWorld('tucano', {
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
   // A picture right-clicked in a conversation: saved where the person says, or into the clipboard.
   image: {
-    save: (url: string, title: string): Promise<{ result: 'saved'; path: string } | { result: 'cancelled' | 'failed' }> =>
-      ipcRenderer.invoke('image:save', { url, title }) as Promise<{ result: 'saved'; path: string } | { result: 'cancelled' | 'failed' }>,
+    save: (
+      url: string,
+      title: string,
+      opts?: { dir?: string; dialog?: boolean }
+    ): Promise<{ result: 'saved'; path: string; folder: string } | { result: 'missing_folder'; folder: string } | { result: 'cancelled' | 'failed' }> =>
+      ipcRenderer.invoke('image:save', { url, title, ...(opts ?? {}) }) as Promise<
+        { result: 'saved'; path: string; folder: string } | { result: 'missing_folder'; folder: string } | { result: 'cancelled' | 'failed' }
+      >,
     copy: (url: string): Promise<boolean> => ipcRenderer.invoke('image:clipboard', { url }) as Promise<boolean>,
     read: (url: string): Promise<{ mime: string; data: string } | null> => ipcRenderer.invoke('image:read', { url }) as Promise<{ mime: string; data: string } | null>
   },

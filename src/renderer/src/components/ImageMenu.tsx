@@ -3,20 +3,24 @@
 // lives outside every screen: one instance, opened from wherever the picture was.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { toast } from '../store'
-import { closeImageMenu, imageActions, imageFileName, toPromptImage, useImageMenu, type ImageAction } from '../image-menu'
+import { getState, toast, updateSettings } from '../store'
+import { closeImageMenu, folderLabel, imageActions, imageFileName, toPromptImage, useImageMenu, type ImageAction } from '../image-menu'
 import { attachToComposer } from '../composer-attach'
-import { Icon } from './ui'
+import { Icon, type IconName } from './ui'
 
-const LABEL = (): Record<ImageAction, string> => ({
-  save: L('Salvar como…', 'Save as…'),
+const LABEL = (folder: string): Record<ImageAction, string> => ({
+  'save-here': folder ? L(`Salvar em ${folder}`, `Save to ${folder}`) : L('Salvar', 'Save'),
+  save: L('Salvar em…', 'Save to…'),
   clipboard: L('Copiar para a área de transferência', 'Copy to clipboard'),
   prompt: L('Copiar para o campo de mensagem', 'Copy to prompt')
 })
 
-const ICON: Record<ImageAction, 'down' | 'copy' | 'edit'> = { save: 'down', clipboard: 'copy', prompt: 'edit' }
+const ICON: Record<ImageAction, IconName> = { 'save-here': 'folder', save: 'down', clipboard: 'copy', prompt: 'edit' }
 
 const SAVED = (path: string): string => L(`Salvo em ${path}`, `Saved to ${path}`)
+const SAVED_HERE = (folder: string): string => L(`Salvo em ${folder}`, `Saved to ${folder}`)
+const FOLDER_GONE = (folder: string): string => L(`A pasta ${folder} não está mais lá — escolha onde salvar.`, `${folder} isn't there any more — choose where to save it.`)
+
 const FAILED_SAVE = (): string => L('Não consegui salvar a imagem.', "Couldn't save the image.")
 const COPIED = (): string => L('Imagem copiada.', 'Image copied.')
 const FAILED_COPY = (): string => L('Não consegui copiar a imagem.', "Couldn't copy the image.")
@@ -99,16 +103,34 @@ export function ImageMenu(): ReactNode {
 
   if (!menu) return null
   const { target } = menu
-  const actions = imageActions(target.surface)
+  // Where the last picture went, named as the folder is called. No folder remembered yet (the first
+  // save ever, or one cleared), so the menu offers only the dialog: it never guesses a folder.
+  const remembered = getState().settings.lastImageFolder ?? ''
+  const folder = folderLabel(remembered)
+  const actions = imageActions(target.surface, !!remembered)
 
   const run = async (action: ImageAction): Promise<void> => {
     closeImageMenu()
-    if (action === 'save') {
+    if (action === 'save-here' || action === 'save') {
       const api = window.tucano?.image
       if (!api) return void saveInBrowser(target.url, target.title)
-      const done = await api.save(target.url, target.title)
-      if (done.result === 'saved') toast(SAVED(done.path))
-      else if (done.result === 'failed') toast(FAILED_SAVE())
+      const oneClick = action === 'save-here'
+      let done = oneClick
+        ? await api.save(target.url, target.title, { dir: remembered })
+        : await api.save(target.url, target.title, { dir: remembered, dialog: true })
+      // The folder is gone — deleted, a drive unplugged, a share down. Say it, and let the person
+      // pick somewhere instead of the click doing nothing.
+      let fellBack = false
+      if (done.result === 'missing_folder') {
+        fellBack = true
+        toast(FOLDER_GONE(folderLabel(done.folder) || done.folder))
+        done = await api.save(target.url, target.title, { dialog: true })
+      }
+      if (done.result === 'saved') {
+        // Wherever it landed is where the next one goes in one click.
+        if (done.folder && done.folder !== remembered) updateSettings({ lastImageFolder: done.folder })
+        toast(oneClick && !fellBack ? SAVED_HERE(folderLabel(done.folder)) : SAVED(done.path))
+      } else if (done.result === 'failed') toast(FAILED_SAVE())
       return
     }
     if (action === 'clipboard') {
@@ -127,7 +149,7 @@ export function ImageMenu(): ReactNode {
       {actions.map((action) => (
         <button key={action} role="menuitem" className="image-menu__item" onClick={() => void run(action)}>
           <Icon name={ICON[action]} size={15} />
-          <span>{LABEL()[action]}</span>
+          <span>{LABEL(folder)[action]}</span>
         </button>
       ))}
     </div>

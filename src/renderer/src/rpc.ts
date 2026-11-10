@@ -22,9 +22,14 @@ declare global {
       }
       connect: () => void
       pickFolder: () => Promise<string | null>
-      // desktop only: a right-clicked picture, saved where the person says or put in the clipboard
+      // desktop only: a right-clicked picture, saved where the person says or put in the clipboard.
+      // `dir` without `dialog` is the one click into the last folder; `dialog` opens the system's.
       image?: {
-        save: (url: string, title: string) => Promise<{ result: 'saved'; path: string } | { result: 'cancelled' | 'failed' }>
+        save: (
+          url: string,
+          title: string,
+          opts?: { dir?: string; dialog?: boolean }
+        ) => Promise<{ result: 'saved'; path: string; folder: string } | { result: 'missing_folder'; folder: string } | { result: 'cancelled' | 'failed' }>
         copy: (url: string) => Promise<boolean>
         read: (url: string) => Promise<{ mime: string; data: string } | null>
       }
