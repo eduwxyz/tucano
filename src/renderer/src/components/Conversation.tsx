@@ -2,9 +2,10 @@ import { L, lang, locale } from '../../../shared/lang'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
+import { readThreadPanelWidth, saveThreadPanelWidth, threadPanelWidthForDrag } from '../thread-panel-size'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { saidAt } from '../../../shared/types'
@@ -162,8 +163,72 @@ export function ConversationView({ id }: { id: string }): ReactNode {
     if (focus && !focusHere) void loadOlder(id, focus)
   }, [id, focus, focusHere])
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
+  const [threadWidth, setThreadWidth] = useState<number | null>(null)
+  const [narrow, setNarrow] = useState(() => window.innerWidth <= 760)
+  const resizeStart = useRef<{ pointerId: number; right: number } | null>(null)
   const [showSummary, setShowSummary] = useState(false)
   const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
+  const threadWidthLimits = (): { min: number; max: number; right: number } | undefined => {
+    const split = document.querySelector<HTMLElement>('.split')
+    if (!split) return
+    const { width, right } = split.getBoundingClientRect()
+    const min = Math.min(360, width)
+    return { min, max: Math.max(min, Math.min(760, width - 320)), right }
+  }
+  const threadPanelStyle: CSSProperties | undefined = threadWidth !== null && !narrow ? { width: threadWidth, minWidth: 0 } : undefined
+  const preferredThreadWidth = (): number | null => {
+    const width = readThreadPanelWidth(localStorage)
+    const limits = threadWidthLimits()
+    return width !== null && limits ? threadPanelWidthForDrag(limits.right, limits.right - width, limits.min, limits.max) : width
+  }
+  useLayoutEffect(() => {
+    setThreadWidth(thread ? preferredThreadWidth() : null)
+  }, [thread])
+  useEffect(() => {
+    const resize = (): void => {
+      const isNarrow = window.innerWidth <= 760
+      setNarrow(isNarrow)
+      if (!isNarrow) setThreadWidth(preferredThreadWidth())
+    }
+    window.addEventListener('resize', resize)
+    return () => window.removeEventListener('resize', resize)
+  }, [])
+  const startThreadResize = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const limits = threadWidthLimits()
+    if (!limits) return
+    resizeStart.current = { pointerId: e.pointerId, right: limits.right }
+    if (threadWidth === null) setThreadWidth(Math.round(document.querySelector<HTMLElement>('.side-panel--thread')?.getBoundingClientRect().width ?? 560))
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const moveThreadResize = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (resizeStart.current?.pointerId !== e.pointerId) return
+    const limits = threadWidthLimits()
+    if (limits) setThreadWidth(threadPanelWidthForDrag(resizeStart.current.right, e.clientX, limits.min, limits.max))
+  }
+  const finishThreadResize = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (resizeStart.current?.pointerId !== e.pointerId) return
+    resizeStart.current = null
+    const panel = document.querySelector<HTMLElement>('.side-panel--thread')
+    if (panel) {
+      const width = panel.getBoundingClientRect().width
+      saveThreadPanelWidth(localStorage, width)
+      setThreadWidth(Math.round(width))
+    }
+  }
+  const keyThreadResize = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
+    e.preventDefault()
+    const limits = threadWidthLimits()
+    if (!limits) return
+    const current = threadWidth ?? document.querySelector<HTMLElement>('.side-panel--thread')?.getBoundingClientRect().width ?? 560
+    const step = e.shiftKey ? 48 : 16
+    const next = e.key === 'Home' ? limits.min : e.key === 'End' ? limits.max : current + (e.key === 'ArrowLeft' ? step : -step)
+    const width = threadPanelWidthForDrag(limits.right, limits.right - next, limits.min, limits.max)
+    setThreadWidth(width)
+    saveThreadPanelWidth(localStorage, width)
+  }
 
   if (!conv)
     return (
@@ -238,7 +303,26 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
         <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
       </section>
-      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
+      {thread && (
+        <div
+          className="thread-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={L('Redimensionar painel da thread', 'Resize thread panel')}
+          aria-controls="thread-panel"
+          aria-valuemin={threadWidthLimits()?.min ?? 0}
+          aria-valuemax={threadWidthLimits()?.max ?? 0}
+          aria-valuenow={Math.round(threadWidth ?? document.querySelector<HTMLElement>('.side-panel--thread')?.getBoundingClientRect().width ?? 560)}
+          tabIndex={0}
+          onPointerDown={startThreadResize}
+          onPointerMove={moveThreadResize}
+          onPointerUp={finishThreadResize}
+          onPointerCancel={finishThreadResize}
+          onLostPointerCapture={() => { resizeStart.current = null }}
+          onKeyDown={keyThreadResize}
+        />
+      )}
+      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} panelStyle={threadPanelStyle} id="thread-panel" /> : <SidePanel />}
     </div>
   )
 }
@@ -721,7 +805,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
-function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
+function ThreadPanel({ rootId, conv, title, members, panelStyle, id }: { rootId: string; conv: Conversation; title: string; members: Agent[]; panelStyle?: CSSProperties; id: string }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
   // A thread from before what's here comes from the core; only then is it gone if it isn't there.
@@ -764,7 +848,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
     </div>
   )
   return (
-    <aside className="side-panel side-panel--thread">
+    <aside id={id} className="side-panel side-panel--thread" style={panelStyle}>
       <header className="side-panel__head">
         <Icon name="thread" size={14} />
         <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>

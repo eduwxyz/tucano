@@ -3044,6 +3044,18 @@ h3 {
 .side-panel--thread {
   width: min(42%, 560px);
 }
+.thread-resize {
+  flex: 0 0 5px;
+  margin-right: -5px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.thread-resize:hover,
+.thread-resize:focus-visible {
+  background: var(--accent);
+}
 .side-panel__where {
   font-size: 12.5px;
   color: var(--text-3);
@@ -7461,6 +7473,9 @@ kbd {
     z-index: 58;
     border-left: 0;
     padding-top: env(safe-area-inset-top);
+  }
+  .thread-resize {
+    display: none;
   }
   /* A conversation's header: its name first; the agents' count and Summary's label go. */
   .conversation .topbar__title {
