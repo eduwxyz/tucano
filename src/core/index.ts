@@ -996,6 +996,8 @@ void ready.then(async () => {
   toMain({ type: 'ready' })
   workspaceSummary()
   await runner.expireApprovals()
+  const settled = await runner.settleDecidedRuns()
+  if (settled) console.log(`[core] ${settled} reply(ies) closed: their approval was decided without them`)
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   // A thread that went quiet gets its own summary, and the memories in it.
   setInterval(() => void memory.sweep().catch((e: unknown) => console.error('[memory]', e)), 60_000).unref()
