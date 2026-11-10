@@ -11,7 +11,7 @@ import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import { call } from '../rpc'
 import { agentById, amAdmin, navigate, openExternal, personName, setTab, updateSettings, useStore, type State, type View, type WikiChange, type WikiFinding, type WikiGitStatus, type WikiGitTest, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
-import { Sheet, Toggle } from './Pages'
+import { ModelSelect, Sheet, Toggle } from './Pages'
 import { AdminOnly } from './People'
 import { confirmDialog } from './Dialogs'
 import { AgentAvatar, Icon, type IconName } from './ui'
@@ -1079,6 +1079,7 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
   const s = useStore((st) => st.settings)
   const capture = s.wikiCapture !== false
   const edits = s.wikiEdits ?? 'approve'
+  const resolve = s.wikiResolve === true
   const [dir, setDir] = useState(data?.dir ?? '')
   const [error, setError] = useState('')
   const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> }).pickFolder
@@ -1128,6 +1129,33 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
             </span>
             <Toggle on={s.wikiReview === 'weekly'} onChange={(v) => updateSettings({ wikiReview: v ? 'weekly' : 'off' })} />
           </div>
+        </section>
+
+        <section>
+          <h4>{L('O resolvedor', 'The resolver')}</h4>
+          <div className="wk-setting">
+            <span>
+              <b>{L('Resolver o que a revisão só aponta', 'Settle what the review can only point at')}</b>
+              <small>{L('Um bot de dentro do app, sem conversa: no botão Resolver de um achado, ele lê as páginas inteiras com as fontes de onde vieram e propõe a mudança — ou faz a pergunta que só você pode responder. Nada muda sem você.', "A bot inside the app, with no conversation: on a finding's Resolve button, it reads the whole pages with the sources they came from and proposes the change — or asks the one question only you can answer. Nothing changes without you.")}</small>
+            </span>
+            <Toggle on={resolve} onChange={(v) => updateSettings({ wikiResolve: v })} />
+          </div>
+          {resolve && (
+            <div className="wk-setting">
+              <span>
+                <b>{L('O modelo dele', 'Its model')}</b>
+                <small>{L('Vazio: o modelo da memória, e depois o Haiku.', 'Empty: the memory model, and then Haiku.')}</small>
+              </span>
+              <div className="wk-row">
+                <ModelSelect value={s.wikiResolveModel ?? ''} onChange={(v) => updateSettings({ wikiResolveModel: v })} />
+                {s.wikiResolveModel ? (
+                  <button className="btn btn--ghost btn--sm" onClick={() => updateSettings({ wikiResolveModel: '' })}>
+                    {L('Usar o da memória', "Use the memory's")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          )}
         </section>
 
         <section>
@@ -1617,11 +1645,26 @@ const FINDING_LABEL: Record<WikiFinding['kind'], () => string> = {
 const FINDING_TONE: Record<WikiFinding['kind'], 'danger' | 'warn' | 'calm'> = { contradiction: 'danger', stale: 'warn', duplicate: 'warn', link: 'calm', broken: 'calm', missing: 'calm', orphan: 'calm', log: 'warn', git: 'warn' }
 const FINDING_ORDER: WikiFinding['kind'][] = ['git', 'contradiction', 'stale', 'duplicate', 'log', 'link', 'broken', 'missing', 'orphan']
 
-function WikiReviewPane(): ReactNode {
+export function WikiReviewPane(): ReactNode {
   const rev = useStore((s) => s.wikiRev)
+  const resolveOn = useStore((st) => st.settings.wikiResolve) === true
   const [r, setR] = useState<WikiReview | null>(null)
+  const [busy, setBusy] = useState('') // the finding the resolver is reading now
+  const [said, setSaid] = useState<{ id: string; text: string } | null>(null) // the resolver's answer, under its finding
   useEffect(() => void call('wikiReview').then(setR), [rev])
   if (!r) return null
+  // The resolver reads the whole pages, which takes a minute: the one clicked says so, the rest wait.
+  const resolve = (id: string): void => {
+    setBusy(id)
+    setSaid(null)
+    void call('wikiResolveFinding', { id })
+      .then((a) => {
+        if (a.gone) setSaid({ id, text: L('Essa coisa mudou com a última revisão: veja a lista de novo.', 'That one moved on with the last review: look at the list again.') })
+        else if (a.note) setSaid({ id, text: a.note })
+      })
+      .catch((e: Error) => setSaid({ id, text: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') }))
+      .finally(() => setBusy(''))
+  }
   const sorted = [...r.findings].sort((a, b) => FINDING_ORDER.indexOf(a.kind) - FINDING_ORDER.indexOf(b.kind))
   const md = (t: string): ReactNode => (
     <Markdown urlTransform={safeUrl} components={{ ...mdLinks(), p: (p) => <span>{p.children}</span> }}>{wikiLinks(t)}</Markdown>
@@ -1686,10 +1729,32 @@ function WikiReviewPane(): ReactNode {
                   <Icon name="edit" size={13} /> {L('Escrever a página', 'Write the page')}
                 </button>
               )}
+              {f.kind !== 'git' && resolveOn && (
+                <button className={`btn btn--sm ${busy === f.id ? 'is-busy' : ''}`} disabled={!!busy} title={L('Lê as páginas inteiras, com as fontes, e propõe a mudança — ou pergunta.', 'Reads the whole pages, with the sources, and proposes the change — or asks.')} onClick={() => resolve(f.id)}>
+                  {busy === f.id ? <span className="wk-spin" /> : <Icon name="spark" size={13} />} {busy === f.id ? L('Resolvendo…', 'Resolving…') : L('Resolver', 'Resolve')}
+                </button>
+              )}
               <button className="btn btn--ghost btn--sm" onClick={() => void call('wikiDismissFinding', { id: f.id })}>
                 {L('Deixar assim', 'Leave it')}
               </button>
             </div>
+          )}
+          {!f.change && !f.note && f.kind !== 'git' && !resolveOn && (
+            <small className="wk-finding__note">
+              {L('Pra ela resolver sozinha o que a revisão só aponta, ligue ', 'For it to settle on its own what the review can only point at, turn on ')}
+              <b>{L('O resolvedor', 'The resolver')}</b>
+              {L(' em Ajustes da wiki.', ' in Wiki settings.')}
+            </small>
+          )}
+          {f.note && (
+            <small className="wk-finding__note">
+              <Icon name="spark" size={12} /> {f.note}
+            </small>
+          )}
+          {said?.id === f.id && busy !== f.id && (
+            <small className="wk-finding__note">
+              <Icon name="spark" size={12} /> {said.text}
+            </small>
           )}
         </section>
       ))}
