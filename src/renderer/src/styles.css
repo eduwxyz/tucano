@@ -3273,6 +3273,11 @@ body.is-resizing webview {
 .msg__reply:focus-visible {
   opacity: 1;
 }
+/* Back to the prompt this reply answers, right under the thread button: only on a reply that
+   something came in between, so the two glyphs never fight for the same corner. */
+.msg__reply--up {
+  top: 28px;
+}
 @media (hover: none) {
   .msg__reply {
     opacity: 1;
