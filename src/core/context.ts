@@ -430,6 +430,7 @@ type TranscriptOpts = {
   images?: Map<string, string[]>
   files?: Map<string, string[]> // the names of the files (not images) attached to each message
   thread?: Message
+  before?: Message[] // a thread a person opened writing in the conversation: the messages outside threads just before theirs
   searchable?: boolean
   unix?: boolean // message times with the year, the offset and the Unix seconds: for an agent whose tools filter by time
   live?: string // liveContext: the first block
@@ -453,7 +454,7 @@ export const snip = (text: string, max: number): string => {
 
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
-  const { agent, conversation, messages, agents, me, task, summary, images, files, thread, searchable, unix, people, live } = opts
+  const { agent, conversation, messages, agents, me, task, summary, images, files, thread, before = [], searchable, unix, people, live } = opts
   const scheduler = (id: string): string | undefined => (typeof opts.routineOwner === 'function' ? opts.routineOwner(id) : (opts.routineOwner ?? me))
   const personName = (id: string): string => people?.find((p) => p.id === id)?.name || me
   const name = (m: Message): string | null => {
@@ -480,6 +481,8 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       .join('\n\n')
 
   const shown = messages.filter((m) => m.author.kind !== 'system' && body(m))
+  const line = (m: Message): string => `[${name(m)} · ${unix ? stamp(m.at) : clock(m.at)}]\n${body(m)}`
+  const above = thread ? before.filter((m) => m.author.kind !== 'system' && body(m)) : []
   const where = conversation.kind === 'dm' ? L(`DM com ${me}`, `DM with ${me}`) : `#${conversation.name}`
   // Who started the thread this reply is in.
   const starter = thread?.author
@@ -511,6 +514,15 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
         ? `${L('Resumo do começo desta thread (as mensagens mais antigas dela não vão inteiras)', "Summary of this thread's beginning (its oldest messages don't go in full)")}:\n${summary.trim()}`
         : `${L(`Resumo do que veio antes em ${where}`, `Summary of what came before in ${where}`)}:\n${summary.trim()}`),
     !thread && apart.trim(),
+    ...(above.length && starter?.kind === 'person'
+      ? [
+          L(
+            `Antes desta thread, as últimas mensagens de ${where} fora de threads: o que ${personName(starter.id)} tinha na tela quando a abriu. Se a mensagem que abriu a thread responde a uma delas (uma pergunta, um pedido), é a ela que responde.`,
+            `Before this thread, the latest messages of ${where} outside threads: what ${personName(starter.id)} had on screen when starting it. If the message that started the thread answers one of them (a question, a request), that's what it answers.`
+          ),
+          ...above.map(line)
+        ]
+      : []),
     thread
       ? L(
           `Você está respondendo numa thread em ${where}, aberta ${by}.${apart} Abaixo, a mensagem que abriu a thread e as respostas dela, das mais antigas pras mais novas:`,
@@ -528,7 +540,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
         )
       ]
     : []
-  const blocks = [...head, ...shown.map((m) => `[${name(m)} · ${unix ? stamp(m.at) : clock(m.at)}]\n${body(m)}`), ...answering, ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
+  const blocks = [...head, ...shown.map(line), ...answering, ...(task ? [`${task}\n\n${L('Agora', 'Now')}: ${now()}.`] : [])]
   return { blocks, blockOf }
 }
 

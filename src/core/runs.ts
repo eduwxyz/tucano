@@ -1016,7 +1016,7 @@ export class Runner {
     const members = this.members(conv)
     const peers = members.filter((a) => a.id !== agent.id)
     const memory = this.deps.memory
-    const { summary, messages: windowAll } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
+    const { summary, messages: windowAll, before: beforeAll = [] } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // Whom this reply is for: the person every "ask", "tell" and "approve" in its prompt and tools
     // means. The owner reads by the workspace's name, so one person's prompts stay as they were.
     const requester = requesterOf(db, conv, windowAll)
@@ -1024,6 +1024,7 @@ export class Runner {
     // what a channel held before the Tucano had more people (the owner's: see People.visibleAt).
     const sees = new People(db)
     const windowed = windowAll.filter((m) => sees.visibleAt(requester, m))
+    const above = beforeAll.filter((m) => sees.visibleAt(requester, m)) // what was on screen when a person opened this thread
     // A routed reply answers its message, and its transcript ends there: what people wrote after it
     // is another reply's. Replies that came in since to what was before it (its own earlier one,
     // say) are what was already said: they go before it. Replies to it or to later ones, none.
@@ -2065,7 +2066,7 @@ ${note}`,
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
     const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))

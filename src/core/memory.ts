@@ -205,7 +205,9 @@ function digests(db: Pick<Db, 'message'>, recent: Message[], except?: string): T
 
 // What a reply reads of the conversation. In a thread, only that thread: the message that
 // opened it and its newest `limit` replies, with the thread's summary when older ones are
-// left out. The other threads aren't in it (an agent looks them up with buscar_threads);
+// left out. A thread a person opened by writing in the conversation also gets `before`: the
+// last messages outside threads before theirs, what they had on screen as they wrote ("pode
+// disparar agora" answers the question at the end of the agent's message above it). The other threads aren't in it (an agent looks them up with buscar_threads);
 // `threads` digests them for the router. Outside threads (a conversation that answers in it,
 // a routine): its recent messages after `until`, what the conversation's summary covers, and of
 // a thread only the message that opened it; what was said inside is looked up the same way.
@@ -214,18 +216,34 @@ export function contextWindow(
   before: Message,
   limit: number,
   until = 0
-): { messages: Message[]; threads: ThreadDigest[]; summary?: string } {
+): { messages: Message[]; threads: ThreadDigest[]; summary?: string; before?: Message[] } {
   const here = (m: Message): boolean => m.id !== before.id && m.at <= before.at && m.at > until
   if (!before.threadId) return { messages: db.recentMessages(before.conversationId, limit + 40, null).filter(here).slice(-limit), threads: [] }
   const recent = db.recentMessages(before.conversationId, limit + 40).filter(here)
   const root = db.message(before.threadId)
   const replies = db.recentMessages(before.conversationId, limit + 2, before.threadId).filter((m) => m.id !== before.id && m.at <= before.at)
   const omitted = replies.length > limit
+  const above = root ? onScreen(db, root) : []
   return {
     messages: [...(root ? [root] : []), ...replies.slice(-limit)],
     threads: digests(db, recent, before.threadId),
-    ...(omitted && root?.threadSummary?.text.trim() ? { summary: root.threadSummary.text } : {})
+    ...(omitted && root?.threadSummary?.text.trim() ? { summary: root.threadSummary.text } : {}),
+    ...(above.length ? { before: above } : {})
   }
+}
+
+export const ON_SCREEN = 3
+export const ON_SCREEN_MS = 12 * 60 * 60 * 1000
+
+// The messages outside threads just before a person's message that opened a thread: the newest
+// ON_SCREEN with something said, from the ON_SCREEN_MS before it. Not one still being written: it
+// changes, and what a reply reads before its thread doesn't.
+function onScreen(db: Pick<Db, 'recentMessages'>, root: Message): Message[] {
+  if (root.author.kind !== 'person' || root.threadId) return []
+  return db
+    .recentMessages(root.conversationId, ON_SCREEN + 10, null, root.at)
+    .filter((m) => m.at >= root.at - ON_SCREEN_MS && m.author.kind !== 'system' && !!m.text.trim() && m.run?.status !== 'working')
+    .slice(-ON_SCREEN)
 }
 
 // One thread found by buscar_threads.
@@ -357,7 +375,7 @@ export class Memories {
 
   // What a turn sees of the conversation (contextWindow): in a thread, the thread and its own
   // summary; outside threads, the conversation's summary and what came after it.
-  window(conv: Conversation, before: Message): { summary?: string; messages: Message[]; threads: ThreadDigest[] } {
+  window(conv: Conversation, before: Message): { summary?: string; messages: Message[]; threads: ThreadDigest[]; before?: Message[] } {
     const w = contextWindow(this.deps.db, before, MAX_AFTER, conv.summaryUntil ?? 0)
     return before.threadId ? w : { ...w, summary: conv.summary }
   }

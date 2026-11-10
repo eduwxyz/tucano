@@ -997,9 +997,10 @@ export class Db {
   }
 
   // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
-  recentMessages(conversationId: string, limit: number, threadId?: string | null): Message[] {
-    const where = threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?'
-    const args = typeof threadId === 'string' ? [conversationId, threadId, limit] : [conversationId, limit]
+  // `before`: only those from before that moment.
+  recentMessages(conversationId: string, limit: number, threadId?: string | null, before?: number): Message[] {
+    const where = (threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?') + (before === undefined ? '' : ' AND at < ?')
+    const args = [conversationId, ...(typeof threadId === 'string' ? [threadId] : []), ...(before === undefined ? [] : [before]), limit]
     const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ?${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
   }
