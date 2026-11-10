@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('tucano', {
   onCoreDown: (cb: () => void): void => {
     ipcRenderer.on('core:down', () => cb())
   },
+  // Settings › General › Notifications: one now, to see that they come.
+  testNotify: (): Promise<unknown> => ipcRenderer.invoke('notify:test'),
   // The conversation on screen: the Mac doesn't notify about the one you're reading.
   viewing: (conversationId: string | null): void => ipcRenderer.send('viewing', conversationId),
   // The app's own updates.

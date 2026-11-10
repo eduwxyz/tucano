@@ -1078,13 +1078,13 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
           <div className="wk-setting">
             <span>
               <b>{L('Mudar uma página que já existe', 'Changing a page that exists')}</b>
-              <small>{L('Páginas novas sempre entram direto. Tudo fica no histórico, com Desfazer.', 'New pages always go in right away. It all stays in the history, with Undo.')}</small>
+              <small>{L('Páginas novas sempre entram direto. No automático, o que já estava esperando entra junto. Tudo fica no histórico, com Desfazer.', 'New pages always go in right away. On automatic, what was already waiting goes in too. It all stays in the history, with Undo.')}</small>
             </span>
             <div className="segmented">
               <button className={edits === 'approve' ? 'is-active' : ''} onClick={() => updateSettings({ wikiEdits: 'approve' })}>
                 {L('Pede aprovação', 'Asks first')}
               </button>
-              <button className={edits === 'auto' ? 'is-active' : ''} onClick={() => updateSettings({ wikiEdits: 'auto' })}>
+              <button className={edits === 'auto' ? 'is-active' : ''} onClick={() => (updateSettings({ wikiEdits: 'auto' }), void call('wikiApplyWaiting').catch((e: Error) => setError(e.message)))}>
                 {L('Automático', 'Automatic')}
               </button>
             </div>
@@ -1402,13 +1402,28 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
 
 // ---------- changes ----------
 
-// One change, as the curator wrote it: what goes where.
+// One change, as the curator wrote it: what goes where. What leaves and what comes in are each
+// labelled and wrap in full; a long change opens short, with "Ver tudo" for the rest.
 function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
   const md = (t?: string): ReactNode => (
     <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks()}>
       {wikiLinks(t ?? '')}
     </Markdown>
   )
+  const box = useRef<HTMLDivElement>(null)
+  const [long, setLong] = useState(false)
+  const [open, setOpen] = useState(false)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const fit = (): void => setLong(el.scrollHeight > DIFF_FOLD + 140)
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [op])
+  const added = (op.op === 'replace' ? op.new : op.text) ?? ''
+  const folded = long && !open
   return (
     <div className={`wiki-op wiki-op--${op.op}`}>
       <div className="wiki-op__head">
@@ -1418,17 +1433,27 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
         </button>
         {op.section && <span className="muted">› {op.section}</span>}
       </div>
-      {op.op === 'replace' ? (
-        <div className="wiki-diff">
-          <div className="wiki-diff__old md">{md(op.old)}</div>
-          <div className="wiki-diff__new md">{md(op.new)}</div>
+      <div ref={box} className={`wiki-diff${folded ? ' is-folded' : ''}`} style={folded ? { maxHeight: DIFF_FOLD } : undefined}>
+        {op.op === 'replace' && (
+          <div className="wiki-diff__old">
+            <span className="wiki-diff__tag">{L('Sai', 'Out')}</span>
+            <div className="md">{md(op.old)}</div>
+          </div>
+        )}
+        <div className={`wiki-diff__new${added.trim() ? '' : ' wiki-diff__new--none'}`}>
+          {op.op !== 'create' && <span className="wiki-diff__tag">{L('Entra', 'In')}</span>}
+          {added.trim() ? <div className="md">{md(added)}</div> : <p className="muted">{L('Nada no lugar: o trecho só sai da página.', 'Nothing in its place: the passage just leaves the page.')}</p>}
         </div>
-      ) : (
-        <div className="wiki-diff__new md">{md(op.text)}</div>
+      </div>
+      {long && (
+        <button className="text-btn wiki-diff__more" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? L('Ver menos', 'Show less') : L('Ver tudo', 'Show all')}
+        </button>
       )}
     </div>
   )
 }
+const DIFF_FOLD = 360 // px a long change shows before "Ver tudo"; a bit longer than that shows whole
 
 const STATE_LABEL = (s: WikiChange['state']): string =>
   s === 'pending' ? L('Esperando você', 'Waiting for you') : s === 'conflict' ? L('A página mudou depois', 'The page changed since') : s === 'applied' ? L('Entrou', 'Went in') : s === 'undone' ? L('Desfeita', 'Undone') : L('Recusada', 'Refused')
@@ -1509,12 +1534,21 @@ function WikiPending(): ReactNode {
   const [list, setList] = useState<WikiChange[] | null>(null)
   const [recent, setRecent] = useState<WikiChange[]>([])
   const [showRecent, setShowRecent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   useEffect(() => void Promise.all([call('wikiChanges', { state: 'pending' }), call('wikiChanges', { state: 'conflict' })]).then(([a, b]) => setList([...a, ...b].filter((c) => c.by !== 'review'))), [rev])
   useEffect(() => void call('wikiChanges', {}).then((all) => setRecent(all.filter((c) => c.state !== 'pending' && c.state !== 'conflict' && c.by !== 'review').slice(0, 12))), [rev])
   if (!list) return null
   return (
     <div className="wk-pane">
-      <PaneHead icon="hand" title={L('Esperando você', 'Waiting for you')} lede={L('O que o curador quer mudar em páginas que já existem. Aprove, recuse, ou mude o jeito nos ajustes.', 'What the curator wants to change in pages that already exist. Approve, refuse, or change how it works in the settings.')} />
+      <PaneHead icon="hand" title={L('Esperando você', 'Waiting for you')} lede={L('O que o curador quer mudar em páginas que já existem. Aprove, recuse, ou mude o jeito nos ajustes.', 'What the curator wants to change in pages that already exist. Approve, refuse, or change how it works in the settings.')}>
+        {list.length > 1 && (
+          <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => (setBusy(true), setError(''), void call('wikiApplyWaiting').then((r) => r.left && setError(L(`${r.left} não deu pra aprovar sozinha: a página mudou demais. Refaça cada uma abaixo.`, `${r.left} couldn't be approved on their own: the page changed too much. Redo each one below.`)), (e: Error) => setError(e.message)).finally(() => setBusy(false)))}>
+            <Icon name="check" size={13} /> {L(`Aprovar todas (${list.length})`, `Approve all (${list.length})`)}
+          </button>
+        )}
+      </PaneHead>
+      {error && <p className="field__error">{error}</p>}
       {list.length === 0 ? (
         <div className="wk-calm">
           <Icon name="check" size={18} />

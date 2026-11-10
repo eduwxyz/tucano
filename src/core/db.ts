@@ -510,7 +510,10 @@ const COLUMNS: [string, string, string][] = [
   ['agents', 'autonomy', 'TEXT'],
   ['agents', 'outside_guard', 'INTEGER'],
   // A phone's push handle (src/core/push.ts), on its device key: {"handle", "tag"} as JSON.
-  ['person_keys', 'push', 'TEXT']
+  ['person_keys', 'push', 'TEXT'],
+  // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
+  ['routines', 'date', 'TEXT'],
+  ['routines', 'month_day', 'INTEGER']
 ]
 
 
@@ -1505,7 +1508,13 @@ export class Db {
       agentId: str(r['agent_id']),
       conversationId: str(r['conversation_id']),
       prompt: str(r['prompt']),
-      schedule: { days: JSON.parse(str(r['days']) || '[]') as number[], time: str(r['time']), ...(r['once'] === 1 ? { once: true } : {}) },
+      schedule: {
+        days: JSON.parse(str(r['days']) || '[]') as number[],
+        time: str(r['time']),
+        ...(r['once'] === 1 ? { once: true } : {}),
+        ...(r['date'] ? { date: str(r['date']) } : {}),
+        ...(r['month_day'] != null ? { monthDay: Number(r['month_day']) } : {})
+      },
       enabled: r['enabled'] === 1,
       nextAt: r['next_at'] == null ? undefined : Number(r['next_at']),
       lastAt: r['last_at'] == null ? undefined : Number(r['last_at']),
@@ -1532,10 +1541,10 @@ export class Db {
   saveRoutine(r: Routine): void {
     this.db
       .prepare(
-        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, date, month_day, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, prompt = excluded.prompt,
-           days = excluded.days, time = excluded.time, once = excluded.once, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
+           days = excluded.days, time = excluded.time, once = excluded.once, date = excluded.date, month_day = excluded.month_day, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
            last_message_id = excluded.last_message_id, trigger = excluded.trigger`
       )
       .run(
@@ -1547,6 +1556,8 @@ export class Db {
         JSON.stringify(r.schedule.days),
         r.schedule.time,
         r.schedule.once ? 1 : 0,
+        r.schedule.date ?? null,
+        r.schedule.monthDay ?? null,
         r.enabled ? 1 : 0,
         r.nextAt ?? null,
         r.lastAt ?? null,

@@ -19,6 +19,7 @@ import {
   ensureTuca,
   settleDraft,
   messagesIn,
+  proposalsOf,
   useStore,
   type Agent,
   type AgentColor,
@@ -172,7 +173,9 @@ export function Onboarding({ build = false, from, manual }: { build?: boolean; f
   // The agent comes from the Tuca's card, or from the form for who prefers it (always, from the introduction).
   const [hand, setManual] = useState(!!manual)
   const [fromTuca, setFromTuca] = useState<{ messageId: string; task?: string } | null>(null)
-  // A new session with the Tuca each time this screen opens (made when his step first shows).
+  // The person's conversation with the Tuca, where they left it: every way in (the sidebar, the + by
+  // Agentes, a mission, the command menu) opens the same one, messages, cards and what was being
+  // typed, and his session goes on. "Nova conversa" starts another on purpose.
   const [tucaConv, setTucaConv] = useState<{ id?: string; error?: string }>({})
 
   const models = readyModels(settings.engines)
@@ -196,7 +199,7 @@ export function Onboarding({ build = false, from, manual }: { build?: boolean; f
   // On the builder screen the Tuca starts on his own model.
   useEffect(() => {
     if (!build || step !== 'agent' || tucaConv.id || tucaConv.error) return
-    ensureTuca(agent.modelId, true)
+    ensureTuca(agent.modelId)
       .then((r) => setTucaConv({ id: r.conversationId }))
       .catch((e: unknown) => setTucaConv({ error: e instanceof Error ? e.message : String(e) }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -306,7 +309,8 @@ function Nav({ onBack, onNext, next = L('Continuar', 'Continue'), disabled }: { 
 // ---------- 4. the agent ----------
 
 // A new agent, made with the Tuca: he asks, proposes a card, "Usar esse agente" fills it in.
-// He starts on his own model; changing it starts a new session with him on that model.
+// He starts on his own model; changing it keeps the conversation (he goes on from it on the new one).
+// "Nova conversa" starts over: asked first when cards there weren't applied yet.
 function MeetTuca({ conv: session, onUse, onManual }: { conv: { id?: string; error?: string }; onUse: (d: AgentDraft, messageId: string) => void; onManual: () => void }): ReactNode {
   const [conv, setConv] = useState(session.id)
   const tuca = useStore((s) => s.agents.find((a) => a.kind === 'tuca'))
@@ -322,18 +326,35 @@ function MeetTuca({ conv: session, onUse, onManual }: { conv: { id?: string; err
   const error = session.error ?? ''
   const messages = useStore((s) => (conv ? messagesIn(s, conv) : []))
   const latest = [...messages].reverse().find((m) => m.run?.agentDraft && !m.run.agentDraft.state)?.run?.agentDraft
+  // Cards not applied or discarded yet: starting over drops them, so it asks first.
+  const unsettled = messages.reduce((n, m) => n + (m.run?.agentDraft && !m.run.agentDraft.state ? 1 : 0) + proposalsOf(m.run).filter((p) => !p.state).length, 0)
+  const said = messages.some((m) => m.author.kind === 'person')
+  const [confirmNew, setConfirmNew] = useState(false)
+  const [starting, setStarting] = useState(false)
+
+  async function startOver(): Promise<void> {
+    setStarting(true)
+    try {
+      setConv((await ensureTuca(undefined, true)).conversationId)
+      setConfirmNew(false)
+    } catch (e) {
+      setModelError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setStarting(false)
+    }
+  }
 
   async function start(value: string): Promise<void> {
     if (conv && value === tuca?.modelId) return
     setApplying(true)
     setModelError('')
     try {
-      // He's made with the chosen model; once he exists, it's saved on him and a new session starts.
+      // He's made with the chosen model; once he exists, it's saved on him and he goes on in the same conversation.
       if (tuca) {
         const channels = getState().conversations.filter((c) => c.kind === 'channel' && c.members.includes(tuca.id)).map((c) => c.id)
         await saveAgent({ ...tuca, modelId: value }, channels)
       }
-      setConv((await ensureTuca(value, true)).conversationId)
+      setConv((await ensureTuca(value)).conversationId)
     } catch (e) {
       setModelError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -368,11 +389,37 @@ function MeetTuca({ conv: session, onUse, onManual }: { conv: { id?: string; err
             {applying
               ? L('Chamando o Tuca com esse modelo…', 'Calling Tuca with this model…')
               : conv
-                ? L('Trocar o modelo começa uma conversa nova com ele.', 'Changing the model starts a new conversation with him.')
+                ? L('Trocar o modelo mantém a conversa: ele continua de onde parou.', 'Changing the model keeps the conversation: he goes on from where you left off.')
                 : L('Escolha com qual modelo o Tuca conversa com você e monta os agentes.', 'Pick the model Tuca uses to talk with you and build the agents.')}
           </span>
           {modelError && <p className="hint hint--warn">{modelError}</p>}
         </div>
+        {conv && tuca && (
+          <div className="onb-tuca__bar">
+            {confirmNew ? (
+              <>
+                <span className="small">
+                  {unsettled
+                    ? L(`${unsettled === 1 ? 'Tem 1 proposta que você não aplicou' : `Tem ${unsettled} propostas que você não aplicou`}. Começar uma conversa nova apaga esta, com ${unsettled === 1 ? 'ela' : 'elas'}.`, `There ${unsettled === 1 ? 'is 1 proposal you haven’t applied' : `are ${unsettled} proposals you haven’t applied`}. Starting a new conversation deletes this one, with ${unsettled === 1 ? 'it' : 'them'}.`)
+                    : L('Começar uma conversa nova apaga esta.', 'Starting a new conversation deletes this one.')}
+                </span>
+                <button className="btn btn--sm btn--danger" disabled={starting} onClick={() => void startOver()}>
+                  {L('Começar do zero', 'Start over')}
+                </button>
+                <button className="btn btn--ghost btn--sm" disabled={starting} onClick={() => setConfirmNew(false)}>
+                  {L('Manter esta', 'Keep this one')}
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="muted small">{said ? L('A conversa fica aqui quando você sai e volta.', 'The conversation stays here when you leave and come back.') : ''}</span>
+                <button className="btn btn--ghost btn--sm" disabled={!said || starting} onClick={() => (unsettled ? setConfirmNew(true) : void startOver())} title={L('Começa outra conversa com o Tuca, do zero', 'Starts another conversation with Tuca, from scratch')}>
+                  <Icon name="plus" size={13} /> {L('Nova conversa', 'New conversation')}
+                </button>
+              </>
+            )}
+          </div>
+        )}
         <div className="onb-tuca">
           {conv && tuca ? (
             <UseDraft.Provider value={onUse}>

@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import type { CoreEvent, Snapshot, Wire } from '../shared/rpc'
-import { CODE_SPANS, delegating, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type Question, type Role, type Routine, type RoutineInput, type Settings } from '../shared/types'
+import { CODE_SPANS, delegating, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
 import { maskSecrets } from './step-text'
@@ -380,7 +380,7 @@ export class People {
   connectorFor(person: Pick<Person, 'role'>, c: Connector): Connector {
     if (person.role === 'owner') return c
     if (!isAdmin(person)) return { id: c.id, name: c.name, kind: c.kind, auth: c.auth, status: c.status, tools: c.tools }
-    return { ...c, ...(c.args ? { args: redactArgs(c.args) } : {}), ...(c.url ? { url: redactUrl(c.url) } : {}), ...(c.error ? { error: maskSecrets(c.error) } : {}) }
+    return { ...c, ...(c.args ? { args: redactArgs(c.args) } : {}), ...(c.url ? { url: redactUrl(c.url) } : {}), ...(c.error ? { error: maskSecrets(c.error) } : {}), ...(c.errorDetail ? { errorDetail: maskSecrets(c.errorDetail) } : {}) }
   }
 
   // Whether this person may see a file or page that came from a conversation (none: everyone).
@@ -462,21 +462,23 @@ export class People {
     return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}) }
   }
 
-  // The cards members sent to the admins that no one has applied or dismissed yet.
+  // The cards members sent to the admins that no one has applied or dismissed yet (a reply's cards
+  // each on its own: `index`, which of them).
   forwardedProposals(): InboxProposal[] {
     const out: InboxProposal[] = []
     for (const e of this.db.activity({ kind: 'proposal.forwarded', limit: 200 })) {
       const m = e.target ? this.db.message(e.target) : undefined
-      const p = m?.run?.proposal
-      if (!m || !p || p.state || m.author.kind !== 'agent' || out.some((x) => x.id === m.id)) continue
-      out.push({ id: m.id, agentId: m.author.id, proposal: p, by: e.personId ?? '', at: e.at })
+      const index = typeof e.detail?.['index'] === 'number' ? e.detail['index'] : 0
+      const p = proposalsOf(m?.run)[index]
+      if (!m || !p || p.state || m.author.kind !== 'agent' || out.some((x) => x.id === m.id && (x.index ?? 0) === index)) continue
+      out.push({ id: m.id, ...(index ? { index } : {}), agentId: m.author.id, proposal: p, by: e.personId ?? '', at: e.at })
     }
     return out
   }
 
   // An admin reaches a card a member sent them, even from that member's DM (the card, not the DM).
-  forwarded(person: Person, messageId: string): boolean {
-    return isAdmin(person) && this.forwardedProposals().some((p) => p.id === messageId)
+  forwarded(person: Person, messageId: string, index = 0): boolean {
+    return isAdmin(person) && this.forwardedProposals().some((p) => p.id === messageId && (p.index ?? 0) === index)
   }
 
   // The snapshot as this person gets it: no one else's DMs, their messages or their memories.

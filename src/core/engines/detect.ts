@@ -1,25 +1,44 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
 import type { AccountEngine, EngineId, EngineStatus } from '../../shared/types'
-import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '../platform'
+import { executableNames, isWin, killTree, pathDirs, spawnable, withInstallDirs } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
 import { parseAntigravityModels } from './antigravity'
 import { cursorSignedIn, parseCursorModels } from './cursor'
 import { grokLogin, parseGrokModels } from './grok'
+import { readClineLogins } from './cline'
 
-function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
+// The app waits for these answers before anything can run, so the limit has to hold whatever the
+// command does. execFile's own timeout only sends SIGTERM, which an interactive zsh ignores, and it
+// answers only when the output pipes close, which what the command started can keep open for good.
+export function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const s = spawnable(bin, args)
-    execFile(s.file, s.args, { timeout, env, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (err, stdout, stderr) => {
-      const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) })
-    })
+    // Its own process group, so the limit takes its children with it. (On Windows, detached would open a console.)
+    const child = spawn(s.file, s.args, { env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+    let stdout = ''
+    let stderr = ''
+    let giveUp: NodeJS.Timeout | undefined
+    child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout += d))
+    child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d))
+    const finish = (code: number): void => {
+      clearTimeout(limit)
+      clearTimeout(giveUp)
+      resolve({ code, stdout, stderr })
+    }
+    const limit = setTimeout(() => {
+      if (child.pid) killTree(child.pid, 'SIGKILL')
+      // Something that left the group can still hold the pipes: answer without waiting for them.
+      giveUp = setTimeout(() => finish(1), 1_000)
+    }, timeout)
+    child.on('error', () => finish(1))
+    child.on('close', (code) => finish(code ?? 1))
   })
 }
 
@@ -181,7 +200,7 @@ export async function codexModels(path: string, home: string): Promise<CodexMode
 
 // OpenCode and Pi keep their own logins and providers; what they list is what
 // the person can use, so the list is the status. Their models go to `listed`.
-const providerName = (id: string): string => ({ openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter', google: 'Google', opencode: 'OpenCode', 'opencode-go': 'OpenCode Go', 'openai-codex': 'ChatGPT', 'github-copilot': 'Copilot' })[id] ?? id
+const providerName = (id: string): string => ({ openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter', google: 'Google', opencode: 'OpenCode', 'opencode-go': 'OpenCode Go', 'openai-codex': 'ChatGPT', 'github-copilot': 'Copilot', cline: 'Cline', 'openai-compatible': 'OpenAI Compatible', deepseek: 'DeepSeek', bedrock: 'Bedrock', ollama: 'Ollama', lmstudio: 'LM Studio' })[id] ?? id
 
 function listedStatus(path: string, v: string, models: string[], login: string): EngineStatus {
   const providers = [...new Set(models.map((m) => m.split('/')[0]!))]
@@ -275,6 +294,28 @@ export async function detectGrok(): Promise<{ status: EngineStatus; models: stri
   }
 }
 
+// Cline's CLI, on Tucano's own login (see cline.ts): what it's signed into is in that
+// login's providers.json, read here (there's no status command), with the model each
+// provider last ran. Cline lists no models of its own; the rest go by name.
+export async function detectCline(loginDir: string): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('cline')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  const { providers, models } = readClineLogins(loginDir)
+  const signedIn = providers.length > 0
+  const names = `${providers.slice(0, 3).map(providerName).join(', ')}${providers.length > 3 ? L(` e mais ${providers.length - 3}`, ` and ${providers.length - 3} more`) : ''}`
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: signedIn,
+      ...(signedIn ? { route: 'providers' as const, account: `${names} · ${L('login próprio do Tucano', "Tucano's own login")}` } : { account: L('Precisa de um login próprio do Tucano: cline auth', "Needs Tucano's own login: cline auth") })
+    },
+    models
+  }
+}
+
 // Cursor's agent CLI, by its unique name (it also installs a plain `agent`).
 // `status` says whether it's signed in; `models` lists what the account can run.
 export async function detectCursor(): Promise<{ status: EngineStatus; models: string[] }> {
@@ -295,17 +336,17 @@ export async function detectCursor(): Promise<{ status: EngineStatus; models: st
   }
 }
 
-export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
+export async function detectEngines(codexHome: string, clineLogin: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
   // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
   const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
-  const [claude, codex, opencode, pi, antigravity, cursor, grok] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectAntigravity(), detectCursor(), detectGrok()])
+  const [claude, codex, opencode, pi, antigravity, cursor, grok, cline] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectAntigravity(), detectCursor(), detectGrok(), detectCline(clineLogin)])
   // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
   const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
   return {
-    engines: { claude, codex, opencode: opencode.status, pi: pi.status, antigravity: antigravity.status, cursor: cursor.status, grok: grok.status },
-    listed: { opencode: opencode.models, pi: pi.models, antigravity: antigravity.models, cursor: cursor.models, grok: grok.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, antigravity: antigravity.status, cursor: cursor.status, grok: grok.status, cline: cline.status },
+    listed: { opencode: opencode.models, pi: pi.models, antigravity: antigravity.models, cursor: cursor.models, grok: grok.models, cline: cline.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
     codexCatalog
   }
 }

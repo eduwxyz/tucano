@@ -3,7 +3,7 @@
 
 O Tucano é um time de agentes de IA que roda no seu computador. Você conversa com eles em canais, como num chat do trabalho. Eles pesquisam, escrevem, programam e usam as suas ferramentas, e você decide até onde cada um vai. Conversas, memória e logins ficam no computador: nada passa por um servidor do Tucano.
 
-Os agentes rodam nos programas que você já usa (Claude Code, Codex, OpenCode, Pi, Antigravity CLI, Cursor CLI ou Grok), do jeito que você configurou cada um. Veja a página **motores**.
+Os agentes rodam nos programas que você já usa (Claude Code, Codex, OpenCode, Pi, Antigravity CLI, Cursor CLI, Grok ou Cline CLI), do jeito que você configurou cada um. Veja a página **motores**.
 
 ## A introdução
 Na primeira vez, o app guia em poucos passos: o seu nome; conectar a IA (o que já está pronto aparece testado; quem não tem nada escolhe ChatGPT ou Claude e o Tucano instala o programa oficial e abre o login no navegador, sem terminal); a pergunta do Tuca sobre o que tirar das suas costas; e o primeiro agente, que entra no **#geral** com a primeira mensagem escrita, esperando você apertar enviar. Chave de API, gateway da empresa ou outro programa: **Uso chave de API, gateway da empresa ou outro programa**. Os modelos dos bastidores são escolhidos sozinhos (**Trocar** muda). Rever: **Configurações › Geral** (Settings › General) › **Rever a introdução**.
@@ -14,6 +14,7 @@ Quem entra num time por convite vê uma boas-vindas curta: quem convidou, os age
 
 ## O Tuca
 O Tuca fica no topo da barra lateral. Ele monta agentes: você conta uma tarefa, ele faz poucas perguntas e propõe um agente num card. Nada é criado sem você clicar em **Criar** (ou **Editar antes**, ou **Descartar**).
+Várias mudanças pedidas juntas chegam num grupo (**1 de 5**), cada uma com **Aplicar**, mais **Aplicar todos** e **Descartar todos**. A conversa fica guardada ao sair e voltar; **Nova conversa** começa do zero.
 
 ## A barra lateral
 - **Aprovações** (Approvals), **Memória** (Memory), **Wiki**, **Rotinas** (Routines), **Skills** e **Boletim** (Report).

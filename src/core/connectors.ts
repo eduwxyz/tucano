@@ -10,7 +10,7 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { L } from '../shared/lang'
-import { friendly } from '../shared/errors'
+import { causeText, friendly, netProblem, netText, type Friendly } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connector-catalog'
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
@@ -37,15 +37,28 @@ export function notAuthorized(url: URL): string {
   return L(`Autorização não concluída: ${why}. Tente de novo pelo app.`, `Authorization not completed: ${why}. Try again from the app.`)
 }
 
-// Why a server didn't open, in words that say what to do; the SDK's own text otherwise.
-export function connectError(e: unknown): string {
+// Why a server didn't open, in words that say what to do; the SDK's own text otherwise. The network's
+// reason is under Node's "fetch failed", in the error's causes: a certificate, a proxy, the DNS. What the
+// error said, causes and all, is the detail ("Ver detalhes").
+export function connectProblem(e: unknown, url?: string): Friendly {
   const raw = (e instanceof Error ? e.message : String(e)).trim()
-  const f = friendly(raw)
-  if (f.detail === raw) return f.text // a case it knows: no Node.js, no internet, a refused login…
-  if (/ENOENT/.test(raw)) return L('O comando do conector não foi encontrado. Se ele usa npx, instale o Node.js (nodejs.org).', "The connector's command wasn't found. If it uses npx, install Node.js (nodejs.org).")
-  if (/connection closed/i.test(raw)) return L('O servidor fechou logo ao abrir. Confira o comando e os argumentos do conector.', 'The server closed right after opening. Check the connector’s command and arguments.')
-  return raw
+  let host: string | undefined
+  try {
+    host = url ? new URL(url).host : undefined
+  } catch {
+    host = undefined
+  }
+  const net = netProblem(e)
+  if (net) return { text: netText(net, host), detail: net.detail }
+  const detail = causeText(e) || raw
+  const f = friendly(raw, { host })
+  if (f.detail === raw) return { text: f.text, detail } // a case it knows: no Node.js, a refused login…
+  if (/ENOENT/.test(raw)) return { text: L('O comando do conector não foi encontrado. Se ele usa npx, instale o Node.js (nodejs.org).', "The connector's command wasn't found. If it uses npx, install Node.js (nodejs.org)."), detail }
+  if (/connection closed/i.test(raw)) return { text: L('O servidor fechou logo ao abrir. Confira o comando e os argumentos do conector.', 'The server closed right after opening. Check the connector’s command and arguments.'), detail }
+  return detail === raw ? { text: raw } : { text: raw, detail }
 }
+
+export const connectError = (e: unknown, url?: string): string => connectProblem(e, url).text
 
 // The text of a tool's result: its text blocks, the text of embedded resources, and the structured content
 // when that's all there is (a server may put an error's reason only there).
@@ -165,6 +178,9 @@ export function callError(e: unknown, timeoutMs = CALL_TIMEOUT_MS): string {
     const data = e.data === undefined || e.data === null ? '' : typeof e.data === 'string' ? e.data : JSON.stringify(e.data)
     return `${message} (${L('código', 'code')} ${e.code})${data ? `: ${data}` : ''}`
   }
+  // The network's reason, said plainly, with what Node said after it for whoever reads further.
+  const net = netProblem(e)
+  if (net && e instanceof Error && e.cause !== undefined) return `${netText(net)} (${net.detail})`
   const message = (e instanceof Error ? e.message : String(e)).trim()
   return message || L('A chamada falhou sem mensagem.', 'The call failed with no message.')
 }
@@ -188,6 +204,7 @@ interface Live {
   transport?: Transport
   status: ConnectorStatus
   error?: string
+  errorDetail?: string // what the error said, causes and all, under "Ver detalhes"
   failures: number
   connecting?: Promise<void>
   retry?: NodeJS.Timeout // the next try after a drop
@@ -304,15 +321,16 @@ export class ConnectorManager {
     return c && this.withStatus(c)
   }
 
-  private withStatus(c: Omit<Connector, 'status' | 'error'>): Connector {
+  private withStatus(c: Omit<Connector, 'status' | 'error' | 'errorDetail'>): Connector {
     const l = this.live.get(c.id)
-    return { ...c, status: l?.status ?? 'disconnected', error: l?.error }
+    return { ...c, status: l?.status ?? 'disconnected', error: l?.error, ...(l?.error && l.errorDetail ? { errorDetail: l.errorDetail } : {}) }
   }
 
-  private setStatus(id: string, status: ConnectorStatus, error?: string): void {
+  private setStatus(id: string, status: ConnectorStatus, error?: string | Friendly): void {
     const l = this.live.get(id) ?? { status, failures: 0 }
     l.status = status
-    l.error = error
+    l.error = typeof error === 'string' ? error : error?.text
+    l.errorDetail = typeof error === 'string' ? undefined : error?.detail
     this.live.set(id, l)
     this.emitConnector(id)
   }
@@ -495,7 +513,7 @@ export class ConnectorManager {
       }
     } catch (e) {
       // A 1Password secret that wasn't read, or a saved one the system's key won't open: it needs you, so no retries.
-      this.setStatus(id, 'error', unreadable(e) ? unreadableMessage(c.auth) : e instanceof OpError ? e.message : connectError(e))
+      this.setStatus(id, 'error', unreadable(e) ? unreadableMessage(c.auth) : e instanceof OpError ? e.message : connectProblem(e, c.url))
       return
     }
 
@@ -550,7 +568,7 @@ export class ConnectorManager {
         this.live.get(id)!.passing = true
         this.reconnectLater(id)
       } else {
-        this.setStatus(id, 'error', connectError(e))
+        this.setStatus(id, 'error', connectProblem(e, c.url))
         this.live.get(id)!.passing = true
         this.reconnectLater(id)
       }

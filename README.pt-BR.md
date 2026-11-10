@@ -13,7 +13,7 @@ Uma alternativa grátis e open source ao Grok Bot: [veja a comparação](https:/
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-141210)](LICENSE) [![Discord](https://img.shields.io/badge/Discord-entrar-5865F2?logo=discord&logoColor=white)](https://discord.gg/uQp4x7wUgT)
 [![macOS](https://img.shields.io/badge/macOS-chip%20Apple%20%7C%20Intel-141210?logo=apple)](#instalar) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#instalar) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#instalar)
-[![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Grok%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
+[![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Grok%20·%20Cline%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
 
 [English](README.md) · **Português** · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Discord](https://discord.gg/uQp4x7wUgT) · [Novidades](CHANGELOG.md)
 
@@ -29,7 +29,7 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
 - **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
-- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o Grok, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
+- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o Grok, o Cline, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
 - **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
 
 ## O que ele faz
@@ -92,6 +92,7 @@ Dê a um agente os apps do seu computador, como Notas, Calendário ou Spotify, c
 | [OpenCode](https://opencode.ai) | Os provedores que você configurou | Usa os modelos em que você tem login |
 | [Pi](https://pi.dev) | Os provedores que você configurou | Usa os modelos em que você tem login |
 | [Grok](https://x.ai/cli) | grok.com (`grok login`) | Roda com uma pasta pessoal própria, pra não carregar os seus servidores MCP, skills, hooks e plugins (do Grok e os instalados pro Claude Code ou Cursor); o shell e os arquivos do próprio Grok ficam desligados; só o gateway do Tucano; uma `XAI_API_KEY` no ambiente é retirada quando o grok.com está logado, pra a assinatura não ser cobrada como API. O instalador oficial é macOS e Linux |
+| [Cline CLI](https://docs.cline.bot/cli/cli-reference) | Sua conta da Cline, ou os provedores que você adicionar com a sua chave (`cline auth`) | Você entra uma vez dentro do Tucano, num login só dele, pra não mexer no seu `~/.cline`; cada resposta roda com uma pasta pessoal própria, pra não carregar suas rules, skills, workflows, hooks, plugins e servidores MCP; as ferramentas de arquivo, shell, editor, subagentes e times do próprio Cline ficam desligadas; só o gateway do Tucano; a telemetria do Cline fica desligada. O modelo vai como `<provedor>/<modelo>` (por exemplo `cline/anthropic/claude-sonnet-4.5`); imagens não vão. Instala com `npm install -g cline` (macOS, Linux e Windows) |
 
 Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra corrigir, GPT pra revisar, Haiku pra rotear.
 
@@ -163,7 +164,7 @@ No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o
 flowchart LR
   subgraph Mac["Seu computador"]
     UI["Janela<br/>(React)"] <-->|MessagePort| Core["Núcleo<br/>SQLite · respostas · memória · rotinas"]
-    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · cursor · grok · opencode · pi"]
+    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · cursor · grok · cline · opencode · pi"]
     CLI -->|"URL secreta por turno<br/>só as ferramentas do agente"| GW["Gateway MCP do Tucano"]
     GW --> Tools["Conectores (MCP)<br/>computador · navegador · memória"]
     GW -.->|"ação de escrita"| OK{{"Sua aprovação"}}

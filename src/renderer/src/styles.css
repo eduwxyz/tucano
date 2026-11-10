@@ -572,6 +572,11 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A long name or role gives way, never the working dot or the unread count next to them. */
+.nav-item > .pulse,
+.nav-item > .badge {
+  flex: none;
+}
 .badge {
   background: var(--danger);
   color: #fff;
@@ -5248,6 +5253,38 @@ kbd {
 .composer__image:hover .composer__image-x {
   opacity: 1;
 }
+.composer__file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.composer__file-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.composer__file-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  color: var(--text-2);
+}
+.composer__file-x:hover {
+  background: var(--hover);
+  color: var(--text);
+}
 .composer__hint--warn {
   color: var(--warn);
 }
@@ -7854,13 +7891,27 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wiki-op { display: grid; gap: 6px; }
 .wiki-op__head { display: flex; gap: 6px; align-items: center; font-size: 12.5px; flex-wrap: wrap; }
 .wiki-op__verb { color: var(--text-3); font-weight: 600; }
-.wiki-diff { display: grid; gap: 3px; }
-.wiki-diff__old, .wiki-diff__new { padding: 9px 13px; border-radius: 9px; font-size: 13.5px; line-height: 1.55; border-left: 3px solid; }
-.wiki-diff__old { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 50%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--danger) 50%, transparent); color: var(--text-2); }
-.wiki-diff__new { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
-.wiki-diff__old > :first-child, .wiki-diff__new > :first-child { margin-top: 0; }
-.wiki-diff__old > :last-child, .wiki-diff__new > :last-child { margin-bottom: 0; }
-.wiki-diff__new ul, .wiki-diff__old ul { padding-left: 18px; }
+.wiki-change, .wiki-change__ops, .wiki-op { min-width: 0; }
+/* What leaves and what comes in, each wrapped in full: long words, links and code never push the card wider. */
+.wiki-diff { display: grid; gap: 3px; min-width: 0; position: relative; }
+.wiki-diff.is-folded { overflow: hidden; }
+.wiki-diff.is-folded::after { content: ''; position: absolute; inset: auto 0 0 0; height: 56px; background: linear-gradient(to bottom, transparent, var(--panel)); pointer-events: none; }
+.wiki-diff__old, .wiki-diff__new { min-width: 0; padding: 8px 13px 10px; border-radius: 9px; font-size: 13.5px; line-height: 1.55; border-left: 3px solid; overflow-wrap: anywhere; }
+.wiki-diff__old { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 50%, transparent); color: var(--text-2); }
+.wiki-diff__old .md { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.wiki-diff__new { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 55%, transparent); color: var(--text); }
+.wiki-diff__new--none { background: transparent; border-style: dashed; }
+.wiki-diff__new--none p { margin: 0; font-size: 12.5px; }
+.wiki-diff__tag { display: block; margin-bottom: 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; text-decoration: none; color: color-mix(in srgb, var(--danger) 80%, var(--text)); }
+.wiki-diff__new .wiki-diff__tag { color: color-mix(in srgb, var(--ok) 80%, var(--text)); }
+.wiki-diff .md > :first-child { margin-top: 0; }
+.wiki-diff .md > :last-child { margin-bottom: 0; }
+.wiki-diff .md ul, .wiki-diff .md ol { padding-left: 20px; margin: 0 0 8px; }
+.wiki-diff .md h1, .wiki-diff .md h2, .wiki-diff .md h3, .wiki-diff .md h4 { font-size: 14px; margin: 10px 0 4px; }
+.wiki-diff .md blockquote { margin: 0 0 8px; padding: 2px 12px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
+.wiki-diff .md pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.wiki-diff .md table { display: block; max-width: 100%; overflow-x: auto; }
+.wiki-diff__more { justify-self: start; font-size: 12.5px; color: var(--accent); }
 
 .wk-finding { display: grid; gap: 12px; padding: 16px 18px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel); position: relative; overflow: hidden; }
 .wk-finding::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--tone); }
@@ -10171,6 +10222,9 @@ button.agent-card__now:hover {
 .engine-problem__more[open] {
   flex-basis: 100%;
 }
+.note__more {
+  margin: 6px 0 8px;
+}
 .engine-problem__more summary {
   cursor: pointer;
   font-weight: 600;
@@ -10739,3 +10793,123 @@ button.agent-card__now:hover {
 @keyframes wk-git-pulse { 50% { opacity: .35; } }
 .wk-ro { display: inline-flex; gap: 4px; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); white-space: nowrap; flex: none; }
 @media (max-width: 520px) { .wk-git__choices { grid-template-columns: 1fr; } }
+
+/* Several proposals under one reply: a group to go through, one card at a time, with "apply all" */
+.proposal-group {
+  margin-top: 10px;
+  max-width: 560px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px 12px;
+  background: var(--bubble);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.proposal-group__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.proposal-group__count {
+  flex: 1;
+  min-width: 0;
+}
+.proposal-group__dots {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.proposal-group__dots button {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--text-3);
+  background: transparent;
+  cursor: pointer;
+}
+.proposal-group__dots button.is-applied {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.proposal-group__dots button.is-failed {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.proposal-group__dots button.is-dismissed,
+.proposal-group__dots button.is-replaced {
+  opacity: 0.4;
+}
+.proposal-group__dots button.is-now {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.proposal-group__pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+}
+.proposal-group__card .draft-card {
+  margin-top: 0;
+  max-width: none;
+}
+.proposal-group__confirm {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.proposal-group__confirm ol {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 2px;
+}
+.proposal-group__result {
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--ok-soft);
+  font-size: 13px;
+}
+.proposal-group__result.is-partial {
+  background: var(--danger-soft);
+}
+.proposal-group__result ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.proposal__needs {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* Above the Tuca's chat on the builder screen: "Nova conversa", and its confirmation */
+.onb-tuca__bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 18px 0 -10px;
+  min-height: 30px;
+  flex-wrap: wrap;
+}
+.onb-tuca__bar > span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Every agent's model in Settings › Models, with individual model edits and a shared batch picker. */
+.agent-models__controls { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
+.agent-models__bulk { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.agent-models__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.agent-models__filters > input { flex: 1; min-width: 180px; }
+.agent-models input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
+.agent-models__list { display: grid; }
+.agent-models__row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
+.agent-models__identity { display: flex; align-items: center; gap: 10px; flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.agent-models__choice { display: grid; gap: 6px; flex: 2 1 300px; min-width: 0; }
+.agent-models [role="status"]:not(:empty) { margin-top: 12px; }

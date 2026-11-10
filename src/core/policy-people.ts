@@ -100,6 +100,8 @@ export const NEEDS: Record<Method, Need> = {
   settleDraft: 'anyone',
   dismissProposal: 'anyone',
   applyProposal: 'target', // agents and teams, admins (a member's card tells them); a routine, its rules; a channel, anyone
+  applyProposals: 'target', // each card as applyProposal checks it
+  dismissProposals: 'anyone',
   localPath: 'anyone',
   openLocal: 'anyone',
   openExternal: 'anyone',
@@ -153,6 +155,7 @@ export const NEEDS: Record<Method, Need> = {
   openWikiFolder: 'admin',
   wikiApplyChange: 'admin',
   wikiRefuseChange: 'admin',
+  wikiApplyWaiting: 'admin',
   wikiUndoChange: 'admin',
   wikiRedoChange: 'admin',
   wikiRunReview: 'admin',
@@ -175,6 +178,7 @@ export const NEEDS: Record<Method, Need> = {
   answerDecision: 'target', // who may answer the question (Runner.decidable)
   submitDecisions: 'target',
   // agents, skills and the team
+  setAgentModels: 'admin',
   saveAgent: 'admin',
   archiveAgent: 'admin',
   createFromDraft: 'admin',

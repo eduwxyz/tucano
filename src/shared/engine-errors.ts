@@ -20,7 +20,8 @@ const PROVIDERS: [RegExp, string][] = [
   [/\bx\.?ai\b|grok/i, 'xAI'],
   [/openrouter/i, 'OpenRouter'],
   [/github|copilot/i, 'GitHub'],
-  [/cursor/i, 'Cursor']
+  [/cursor/i, 'Cursor'],
+  [/\bcline\b/i, 'Cline']
 ]
 
 const LOGIN = /invalid_grant|refresh[_ ]?token|token (has )?expired|expired token|oauth|\b401\b|unauthori[sz]ed|not (logged|signed) in|not authenticated|authentication (failed|required|error)|login required|please (log|sign) ?in|(log|sign) ?in again|invalid (api[_ ]?key|x-api-key|credentials)|credentials? (expired|invalid)/i
@@ -43,8 +44,9 @@ export function explainEngineError(engine: EngineId, raw: string): EngineProblem
   const label = ENGINES[engine].label
   const text = raw.trim()
   if (LOGIN.test(text)) {
-    // Pi and OpenCode sign in to providers; the others are the provider's own app.
-    const provider = engine === 'pi' || engine === 'opencode' ? providerOf(text) : undefined
+    // Pi, OpenCode and Cline sign in to providers; the others are the provider's own app.
+    const named = engine === 'pi' || engine === 'opencode' || engine === 'cline' ? providerOf(text) : undefined
+    const provider = named && named !== label.split(' ')[0] ? named : undefined
     const whose = provider ? L(`O login da ${provider} no ${label}`, `The ${provider} sign-in in ${label}`) : L(`O login do ${label}`, `${label}’s sign-in`)
     const state = EXPIRED.test(text) ? L('expirou', 'expired') : L('não está valendo', 'isn’t valid')
     return { kind: 'login', line: L(`${whose} ${state}. Entre de novo no ${label} pra usar.`, `${whose} ${state}. Sign in to ${label} again to use it.`), details: text }

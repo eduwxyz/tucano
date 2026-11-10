@@ -45,10 +45,10 @@ const freshWiki = (deps: Partial<ConstructorParameters<typeof Wiki>[0]> = {}): W
 }
 const dmOf = (id: string): string | null | undefined => (id === 'dm' ? 'owner' : id === 'ch' ? null : undefined)
 const ready = { installed: true, loggedIn: true }
-const settingsOf = (over: Partial<Settings> = {}): Settings => ({ workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'off', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', ...over }) as unknown as Settings
+const settingsOf = (over: Partial<Settings> = {}): Settings => ({ workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'off', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', ...over }) as unknown as Settings
 
 describe('1. what each role reads of a connector', () => {
-  const stdio: Connector = { id: 'c1', name: 'Jira', kind: 'stdio', command: 'npx', args: ['-y', 'jira-mcp', '--token', 'ghp_SECRETSECRETSECRET1234', '--org=acme', '--api-key=sk-live-ABCDEF0123456789'], envKeys: ['JIRA_TOKEN'], auth: 'none', status: 'connected', error: 'ECONNREFUSED /Users/ana/x', tools: [{ name: 'issues', description: 'd', cls: 'read', enabled: true, highRisk: false, isNew: false }] }
+  const stdio: Connector = { id: 'c1', name: 'Jira', kind: 'stdio', command: 'npx', args: ['-y', 'jira-mcp', '--token', 'ghp_SECRETSECRETSECRET1234', '--org=acme', '--api-key=sk-live-ABCDEF0123456789'], envKeys: ['JIRA_TOKEN'], auth: 'none', status: 'connected', error: 'ECONNREFUSED /Users/ana/x', errorDetail: 'fetch failed ← Bearer ghp_SECRETsecret0123456789abcdefABCDEF0123 refused', tools: [{ name: 'issues', description: 'd', cls: 'read', enabled: true, highRisk: false, isNew: false }] }
   const remote: Connector = { id: 'c2', name: 'Notion', kind: 'remote', url: 'https://mcp.example.com/sse?key=abcdef123456&team=acme', auth: 'token', status: 'needs_auth', tools: [] }
 
   it('a member gets the name, kind, status and tools and nothing else', () => {
@@ -68,6 +68,8 @@ describe('1. what each role reads of a connector', () => {
     expect(c.args!.join(' ')).not.toMatch(/SECRET|sk-live/)
     expect(c.args!.join(' ')).toContain('--org=acme')
     expect(c.envKeys).toEqual(['JIRA_TOKEN'])
+    expect(c.errorDetail).toContain('fetch failed')
+    expect(c.errorDetail).not.toContain('SECRET')
     const r = people.connectorFor(carla, remote)
     expect(r.url).toMatch(/^https:\/\/mcp\.example\.com\/sse\?key=\*+&team=\*+$/)
     expect(people.connectorFor(ana, stdio)).toEqual(stdio)
@@ -263,7 +265,7 @@ describe('8. channel messages from before the heritage are the owner’s', () =>
     const prompts: { prompt: string; who: string }[] = []
     let who = ''
     const claude: Engine = fakeEngine('claude', { delayMs: 1, reply: (t) => (prompts.push({ prompt: t.prompt ?? '', who }), 'ok') })
-    const r = new Runner({ db, engines: { claude, codex: claude, opencode: claude, pi: claude, antigravity: claude, cursor: claude, grok: claude } as Record<EngineId, Engine>, settings: async () => settingsOf(), emit: () => {}, workDir: tmp() })
+    const r = new Runner({ db, engines: { claude, codex: claude, opencode: claude, pi: claude, antigravity: claude, cursor: claude, grok: claude, cline: claude } as Record<EngineId, Engine>, settings: async () => settingsOf(), emit: () => {}, workDir: tmp() })
     who = 'bia'
     await r.send('ch', '@lia me resume o que foi dito', undefined, undefined, 'bia')
     await r.idle()
@@ -292,7 +294,7 @@ describe('9. two wordings', () => {
     db.createConversation({ id: 'c1', kind: 'channel', name: 'geral', members: ['a1', 'a2'] })
     const base = fakeEngine('claude', { delayMs: 1 })
     const claude: Engine = { id: 'claude', run: (t) => (t.system === routerSystem() ? (async function* () { yield { type: 'error' as const, message: "You've hit your 5-hour limit · resets 1:20am (America/Bahia)" } })() : base.run(t)) }
-    const r = new Runner({ db, engines: { claude, codex: base, opencode: base, pi: base, antigravity: base, cursor: base, grok: base } as Record<EngineId, Engine>, settings: async () => settingsOf(), emit: () => {}, workDir: tmp() })
+    const r = new Runner({ db, engines: { claude, codex: base, opencode: base, pi: base, antigravity: base, cursor: base, grok: base, cline: base } as Record<EngineId, Engine>, settings: async () => settingsOf(), emit: () => {}, workDir: tmp() })
     await r.send('c1', 'bom dia, quem me ajuda?')
     await r.idle()
     const note = db.messages().find((m) => m.author.kind === 'system')!

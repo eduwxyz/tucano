@@ -1,5 +1,5 @@
 # Quando algo dá errado
-> Diagnóstico dos problemas comuns: agente que não responde, motor sem login, conector pedindo login ou falhando, Docker desligado, limites, rotina que não rodou, aprovação expirada.
+> Diagnóstico dos problemas comuns: agente que não responde, motor sem login, conector pedindo login ou falhando, Docker desligado, limites, rotina que não rodou, aprovação expirada, notificação que não chega.
 
 ## O agente não responde
 1. Os agentes estão pausados? O botão no topo da barra lateral mostra o ▶ (**Retomar os agentes deste workspace**) e a conversa mostra a nota de pausa. Clique pra retomar.
@@ -19,6 +19,7 @@
 - **precisa autorizar**: **Autorizar no navegador** na página do conector.
 - **não conectou**: **Conectar de novo**; se continuar, confira o endereço e o login (token novo em **Token (substitui o atual)**).
 - O agente não vê a ferramenta: o nível do agente pro conector (**Ler** só mostra as de leitura), a ferramenta ligada na página do conector, e **Atualizar ferramentas**.
+- Não conecta só numa rede (empresa, proxy, antivírus): a mensagem diz o motivo; veja **rede**.
 
 ## Computador do agente
 - **sem Docker**: abra o Docker Desktop e **Verificar de novo**.
@@ -34,6 +35,12 @@
 ## Aprovação
 - Expirou: nada aconteceu. Peça de novo ao agente. O prazo fica em **Configurações › Agentes** › **Limites** › **Expiração de aprovações**.
 - Aprovou e não viu o resultado: ele chega numa nova mensagem do agente.
+
+## Notificação que não chega
+- **Configurações › Geral › Notificações** › **Mandar uma**. No Mac, o Tucano só aparece em Ajustes do Sistema › Notificações depois da primeira.
+- No Mac: Ajustes do Sistema › Notificações › Tucano permitido, e nenhum modo Foco ligado.
+- A conversa aberta na tela não avisa.
+- Servidor: avisa pelo app do computador conectado a ele em **Configurações › Servidores**. O navegador só avisa por HTTPS. Veja **servidor**.
 
 ## Microfone (ditado)
 - "O microfone está bloqueado": libere o Tucano nas configurações de privacidade do sistema (no Mac, Ajustes do Sistema › Privacidade e Segurança › Microfone).

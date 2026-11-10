@@ -5,18 +5,19 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
-import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
+import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
+import { extractFile } from './wiki-extract'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { LER_GUIA, readGuide } from './guide'
-import { proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
+import { pendingAgents, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
@@ -83,6 +84,41 @@ export const VER_IMAGEM: ToolDef = {
       properties: { nome: { type: 'string', description: L('O nome, como aparece em [imagem anexada: nome]. Sem nome: a mais recente.', 'The name, as in [attached image: name]. No name: the newest.') } }
     }
   }
+}
+
+// A file I attached (a PDF, a Word doc, a spreadsheet, text): its text goes in with the reply to the
+// message that brought it; later turns only name it, and the agent reads it again with this.
+export const LER_ANEXO: ToolDef = {
+  name: 'ler_anexo',
+  get description() {
+    return L(
+      'Lê o texto de um arquivo anexado numa mensagem desta conversa (PDF, Word, planilha, texto). O texto de cada arquivo vai pra você junto da mensagem que o trouxe, só na resposta a ela; depois o arquivo aparece só pelo nome, como [arquivo anexado: nome]. Use pra ler de novo, ou pra continuar de onde o texto foi cortado (de: a posição, em caracteres).',
+      'Reads the text of a file attached to a message of this conversation (PDF, Word doc, spreadsheet, text). Each file\'s text goes to you with the message that brought it, only in the reply to it; after that the file shows only by name, as [attached file: name]. Use it to read it again, or to go on from where the text was cut (de: the position, in characters).'
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        nome: { type: 'string', description: L('O nome, como aparece em [arquivo anexado: nome]. Sem nome: o mais recente.', 'The name, as in [attached file: name]. No name: the newest.') },
+        de: { type: 'number', description: L('De que caractere começar (0 no início).', 'Which character to start from (0 at the start).') }
+      }
+    }
+  }
+}
+
+// How much of attached files' text goes in at once (characters): per file, and per reply.
+const FILE_TEXT_INLINE = 100_000
+const FILES_TEXT_TURN = 150_000
+const FILE_TEXT_NAME = '.texto.json' // beside the file in its artifact folder: { text } or { error }
+
+// A file's text from `de`, at most `max` characters, saying where it goes on when cut.
+export function fileChunk(name: string, text: string, de = 0, max = FILE_TEXT_INLINE): string {
+  const part = text.slice(de, de + max)
+  const end = de + part.length
+  const head = de > 0 ? L(`[arquivo anexado: ${name}, a partir do caractere ${de} de ${text.length}]`, `[attached file: ${name}, from character ${de} of ${text.length}]`) : L(`[arquivo anexado: ${name}]`, `[attached file: ${name}]`)
+  const tail = end < text.length ? L(`[o texto continua: ${text.length - end} caracteres a mais. Leia com ler_anexo, de: ${end}]`, `[the text goes on: ${text.length - end} more characters. Read them with ler_anexo, de: ${end}]`) : L(`[fim de ${name}]`, `[end of ${name}]`)
+  return `${head}\n${part}\n${tail}`
 }
 
 export const ASK_USER: ToolDef = {
@@ -410,11 +446,12 @@ export class Runner {
   // `by`: the person writing (the Tucano's owner when left out: the phone, older callers).
   // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
   // wherever the person writes from). The caller checked that they may answer it.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string } = {}): Promise<void> {
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[] } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const typed = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
+    const docs = this.deps.dataDir ? (opts.files ?? []).filter((f) => typeof f?.name === 'string' && typeof f.data === 'string' && f.data.length > 0).slice(0, MAX_FILES_PER_MESSAGE) : []
     if (!conv) return
     const writer = (by ? db.person(by) : undefined) ?? db.owner()
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
@@ -440,13 +477,14 @@ export class Runner {
     // written in the field. Only by whoever answers the question: anyone else's message is just theirs.
     const fromCard = asked ? formatAnswers(questionsOf(asked.run), asked.run?.answers) : ''
     const body = [fromCard, typed].filter(Boolean).join('\n\n')
-    if (!body && pictures.length === 0) return
+    if (!body && pictures.length === 0 && docs.length === 0) return
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
     for (const img of pictures) this.keepImage(mine, img)
+    const reading = docs.map((f) => this.keepFile(mine, f))
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
@@ -465,7 +503,7 @@ export class Runner {
       }
       // The message keeps the answers for the agent; the card, which shows them, says which one it is (and
       // what it had beyond them), so the conversation shows them once. With images, it shows whole.
-      const link = fromCard && pictures.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
+      const link = fromCard && pictures.length === 0 && docs.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
       this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
       if (asker && responders.length === 0) responders = [asker]
@@ -479,6 +517,9 @@ export class Runner {
           )
         }
     }
+
+    // What the files say, before anyone answers (after the question is taken: nothing else waits here).
+    if (reading.length) await Promise.all(reading)
 
     if (members.length === 0) {
       this.post(conv.id, replyIn, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
@@ -521,6 +562,31 @@ export class Runner {
     const artifact: Artifact = { id, agentId: '', conversationId: message.conversationId, messageId: message.id, kind: 'image', name, title: name, source: 'anexo', size: data.length, createdAt: message.at }
     this.deps.db.saveArtifact(artifact)
     this.deps.emit({ type: 'artifact', artifact })
+  }
+
+  // A file I attached that isn't an image, kept with my message; what it says is read once, here,
+  // and kept beside it for the agents (or why it couldn't be read, which they tell me).
+  private async keepFile(message: Message, file: FileUpload): Promise<void> {
+    const data = Buffer.from(file.data, 'base64')
+    if (data.length === 0 || data.length > MAX_FILE_BYTES) return
+    const id = randomUUID()
+    const name = file.name.replace(/[/\\]/g, '_').replace(/[^\p{L}\p{N}._ ()-]+/gu, '').replace(/^\.+/, '').trim().slice(-120) || L('arquivo', 'file')
+    const dir = join(this.deps.dataDir!, 'artifacts', id)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, name), data)
+    const kind = artifactKind(name)
+    const artifact: Artifact = { id, agentId: '', conversationId: message.conversationId, messageId: message.id, kind: kind === 'image' ? 'file' : kind, name, title: name, source: 'anexo', size: data.length, createdAt: message.at }
+    this.deps.db.saveArtifact(artifact)
+    this.deps.emit({ type: 'artifact', artifact })
+    let read: { text: string } | { error: string }
+    try {
+      read = { text: await extractFile(name, data) }
+    } catch (e) {
+      // Not a kind the wiki reads: plain text (code, a config, a log) still is, as it is.
+      const head = data.subarray(0, 8192)
+      read = !head.includes(0) && !head.toString('utf8').includes('\uFFFD') ? { text: data.toString('utf8') } : { error: e instanceof Error ? e.message : String(e) }
+    }
+    writeFileSync(join(dir, FILE_TEXT_NAME), JSON.stringify(read))
   }
 
   stop(messageId: string): void {
@@ -1068,7 +1134,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1141,6 +1207,18 @@ ${note}`,
     const unanswered = new Set(history.slice(answered + 1).map((m) => m.id))
     const fresh = attached.filter((a) => unanswered.has(a.messageId))
     const canSeeImages = !!this.deps.gateway && attached.length > 0
+    // Files I attached, the same way: their text goes in until this agent has answered them; then by name.
+    const filed = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind !== 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
+    const fileNames = new Map<string, string[]>()
+    for (const a of filed) fileNames.set(a.messageId, [...(fileNames.get(a.messageId) ?? []), a.name])
+    const fileText = (a: Artifact): { text: string } | { error: string } => {
+      try {
+        return JSON.parse(readFileSync(join(this.deps.dataDir!, 'artifacts', a.id, FILE_TEXT_NAME), 'utf8')) as { text: string } | { error: string }
+      } catch {
+        return { error: L('o texto dele não foi lido', "its text wasn't read") }
+      }
+    }
+    const canReadFiles = !!this.deps.gateway && filed.length > 0
     // The app's own tools stay in the prompt; the connectors' wait behind tool search (ALWAYS_LOAD).
     const others = db.people()
     const ownTools: ToolDef[] = [
@@ -1150,6 +1228,7 @@ ${note}`,
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
       ...(canSeeImages ? [VER_IMAGEM] : []),
+      ...(canReadFiles ? [LER_ANEXO] : []),
       ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
       ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
@@ -1303,17 +1382,22 @@ ${note}`,
           const r =
             name === PROPOR_TIME.name
               ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
-              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable })
+              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
           if (!r.proposal) return textResult(r.error!, true)
-          msg.run = { ...msg.run!, proposal: r.proposal }
+          // Several in one reply, each its own card; one about the same thing as an earlier one replaces it.
+          const list = proposalsOf(msg.run)
+          const same = list.findIndex((x) => !x.state && proposalKey(x) === proposalKey(r.proposal!))
+          if (same < 0 && list.length >= MAX_PROPOSALS) return textResult(L(`Já são ${MAX_PROPOSALS} propostas nesta resposta: termine aqui e mande o resto na próxima.`, `That's ${MAX_PROPOSALS} proposals in this reply already: finish here and send the rest in the next one.`), true)
+          msg.run = { ...msg.run!, proposals: same < 0 ? [...list, r.proposal] : list.map((x, i) => (i === same ? r.proposal! : x)) }
+          delete msg.run.proposal
           const p = r.proposal
           const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : p.kind === 'team' ? L('Propôs um time', 'Proposed a team') : L('Propôs um canal', 'Proposed a channel')
           const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
           addSteps({ id: randomUUID(), label: what, detail, status: 'done' })
           return textResult(
             L(
-              'A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar. Termine com uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que o card mostra. Uma proposta por resposta: a próxima troca esta.',
-              "The proposal is in the card, with Apply and Discard, and has NOT happened yet: it only happens when the person applies it. Finish with one short sentence saying they just need to apply it (or ask for a change), without repeating what the card shows. One proposal per reply: the next one replaces this one."
+              `A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar.${p.needs?.length ? ` Ela depende de ${p.needs.join(', ')}, proposto antes nesta resposta: o app cria primeiro.` : ''} Se o pedido tem mais mudanças, proponha as outras agora, nesta mesma resposta: cada uma vira um card no mesmo grupo, com "Aplicar todos". No fim, uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que os cards mostram.`,
+              `The proposal is in the card, with Apply and Discard, and has NOT happened yet: it only happens when the person applies it.${p.needs?.length ? ` It depends on ${p.needs.join(', ')}, proposed earlier in this reply: the app makes that first.` : ''} If the request has more changes, propose the others now, in this same reply: each becomes a card in the same group, with "Apply all". At the end, one short sentence saying they just need to apply them (or ask for a change), without repeating what the cards show.`
             )
           )
         }
@@ -1358,6 +1442,17 @@ ${note}`,
           if (!found || !data) return textResult(L(`Não achei a imagem "${nome}" nesta conversa. Use o nome como aparece em [imagem anexada: nome]: ${attached.map((a) => a.name).join(', ')}.`, `I couldn't find the image "${nome}" in this conversation. Use the name as in [attached image: name]: ${attached.map((a) => a.name).join(', ')}.`), true)
           addSteps({ id: randomUUID(), label: L('Viu uma imagem anexada', 'Looked at an attached image'), detail: found.name, status: 'done' })
           return { content: [{ type: 'image', data: data.toString('base64'), mimeType: mimeOf(found.name) }, { type: 'text', text: L(`${found.name}, anexada antes nesta conversa.`, `${found.name}, attached earlier in this conversation.`) }] }
+        }
+
+        if (name === LER_ANEXO.name && canReadFiles) {
+          const nome = typeof args['nome'] === 'string' ? args['nome'].trim().replace(/^\[?(?:arquivo anexado|attached file):\s*/i, '').replace(/\]$/, '') : ''
+          const found = nome ? (filed.findLast((a) => a.name === nome) ?? filed.findLast((a) => a.name.toLowerCase() === nome.toLowerCase())) : filed.at(-1)
+          if (!found) return textResult(L(`Não achei o arquivo "${nome}" nesta conversa. Use o nome como aparece em [arquivo anexado: nome]: ${filed.map((a) => a.name).join(', ')}.`, `I couldn't find the file "${nome}" in this conversation. Use the name as in [attached file: name]: ${filed.map((a) => a.name).join(', ')}.`), true)
+          const read = fileText(found)
+          if ('error' in read) return textResult(L(`Não deu pra ler ${found.name}: ${read.error}`, `${found.name} couldn't be read: ${read.error}`), true)
+          const de = typeof args['de'] === 'number' && args['de'] > 0 ? Math.floor(args['de']) : 0
+          addSteps({ id: randomUUID(), label: L('Leu um arquivo anexado', 'Read an attached file'), detail: found.name, status: 'done' })
+          return textResult(fileChunk(found.name, read.text, de))
         }
 
         if (name === BUSCAR_THREADS.name && canSeekThreads) {
@@ -1954,10 +2049,22 @@ ${note}`,
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
     const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
+    // The text of the files not answered yet goes after its message's block, in what is sent only:
+    // the blocks a kept session compares stay as they are. The newest first, while there's room.
+    const withFiles = [...blocks]
+    let room = FILES_TEXT_TURN
+    for (const a of filed.filter((f) => unanswered.has(f.messageId)).reverse()) {
+      const at = blockOf.get(a.messageId)
+      if (at === undefined || room <= 0) continue
+      const read = fileText(a)
+      const part = 'error' in read ? L(`[arquivo anexado: ${a.name}. Não deu pra ler o texto dele: ${read.error}]`, `[attached file: ${a.name}. Its text couldn't be read: ${read.error}]`) : fileChunk(a.name, read.text, 0, Math.min(FILE_TEXT_INLINE, room))
+      room -= part.length
+      withFiles[at] = `${withFiles[at]}\n\n${part}`
+    }
 
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
     // thread) with only what's new since. Not while another agent is still writing a message this
@@ -1970,14 +2077,14 @@ ${note}`,
     let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
     let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
     const session = this.deps.gateway?.open(tools, plan?.token)
-    const whole = { prompt: blocks.join('\n\n'), blocks, images }
+    const whole = { prompt: withFiles.join('\n\n'), blocks: withFiles, images }
     // Resumed: the live context if it changed, the new messages' blocks, then the task's, with their images.
     const since = (p: SessionPlan): typeof whole => {
       const at = p.send.map((id) => blockOf.get(id)!)
       if (task) at.push(blocks.length - 1)
       const lead = p.live ? [live || NO_LIVE()] : []
       const pos = new Map(at.map((b, i) => [b, lead.length + i]))
-      const sent = [...lead, ...at.map((i) => blocks[i]!)]
+      const sent = [...lead, ...at.map((i) => withFiles[i]!)]
       return { prompt: sent.join('\n\n'), blocks: sent, images: images.flatMap((img) => (pos.has(img.block) ? [{ ...img, block: pos.get(img.block)! }] : [])) }
     }
     let input = plan?.resume ? since(plan) : whole
@@ -2089,7 +2196,7 @@ ${note}`,
       )
     }
 
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {

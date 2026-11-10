@@ -133,8 +133,8 @@ export function systemPrompt(opts: PromptOpts): string {
         ),
       routines &&
         L(
-          `- Quando ${me} pedir algo pra depois ou pra repetir ("daqui a 10 minutos", "toda segunda às 9h"), agende com agendar_rotina em vez de prometer lembrar: fora de uma rotina, você só roda quando alguém escreve. Conte o tempo a partir da hora da última mensagem.`,
-          `- When ${me} asks for something later or on repeat ("in 10 minutes", "every Monday at 9am"), schedule it with agendar_rotina instead of promising to remember: outside a routine, you only run when someone writes. Count the time from the time of the last message.`
+          `- Quando ${me} pedir algo pra depois ou pra repetir ("daqui a 10 minutos", "toda segunda às 9h", "dia 17 às 9h", "todo dia 5"), agende com agendar_rotina em vez de prometer lembrar: fora de uma rotina, você só roda quando alguém escreve. Uma data específica, mesmo daqui a semanas, vai em data (uma vez só, naquele dia); todo mês num dia, em dia_do_mes. Conte o tempo e as datas a partir da hora da última mensagem.`,
+          `- When ${me} asks for something later or on repeat ("in 10 minutes", "every Monday at 9am", "on the 17th at 9am", "on the 5th of every month"), schedule it with agendar_rotina instead of promising to remember: outside a routine, you only run when someone writes. A specific date, even weeks ahead, goes in data (once, on that day); every month on a day, in dia_do_mes. Count the time and dates from the time of the last message.`
         ),
       web &&
         L(
@@ -428,6 +428,7 @@ type TranscriptOpts = {
   task?: string
   summary?: string
   images?: Map<string, string[]>
+  files?: Map<string, string[]> // the names of the files (not images) attached to each message
   thread?: Message
   searchable?: boolean
   unix?: boolean // message times with the year, the offset and the Unix seconds: for an agent whose tools filter by time
@@ -452,7 +453,7 @@ export const snip = (text: string, max: number): string => {
 
 // The blocks, and which block each message became (where its images go).
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
-  const { agent, conversation, messages, agents, me, task, summary, images, thread, searchable, unix, people, live } = opts
+  const { agent, conversation, messages, agents, me, task, summary, images, files, thread, searchable, unix, people, live } = opts
   const scheduler = (id: string): string | undefined => (typeof opts.routineOwner === 'function' ? opts.routineOwner(id) : (opts.routineOwner ?? me))
   const personName = (id: string): string => people?.find((p) => p.id === id)?.name || me
   const name = (m: Message): string | null => {
@@ -472,6 +473,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
     [
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
+      ...(files?.get(m.id) ?? []).map((n) => L(`[arquivo anexado: ${n}]`, `[attached file: ${n}]`)),
       questionsOf(m.run).length > 0 && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`)
     ]
       .filter(Boolean)
