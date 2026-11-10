@@ -909,8 +909,20 @@ export class Db {
   // Clearing a conversation's history without deleting it. The rows stay (receipts, approvals and the
   // costs they carry point at message ids), the summary goes with them because it was written about
   // them, and `summary_until` is moved so the next turns stop looking behind the cut.
+  // The history goes off the screen and out of every read, but the conversation stays: the rows are
+  // still there for the receipts and the approvals that point at them.
+  // What nobody can reach any more goes with it: an unread row would leave a badge over an empty
+  // screen (markRead heals it, but only the next time the conversation is opened).
   clearConversation(id: string, at = Date.now()): void {
-    this.db.prepare('UPDATE conversations SET cleared_at = ?, summary = NULL, summary_until = ?, summary_at = ? WHERE id = ?').run(at, at, at, id)
+    this.tx(() => {
+      this.db.prepare('UPDATE conversations SET cleared_at = ?, summary = NULL, summary_until = ?, summary_at = ? WHERE id = ?').run(at, at, at, id)
+      this.db.prepare('DELETE FROM unread WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)').run(id)
+    })
+  }
+
+  // The questions still waiting in one conversation: their message is about to be off the screen.
+  openQuestionsIn(conversationId: string): Question[] {
+    return (this.db.prepare("SELECT * FROM questions WHERE state = 'open' AND conversation_id = ? ORDER BY created_at").all(conversationId) as Row[]).map((r) => this.toQuestion(r))
   }
 
   // `until` is the `at` of the last message the summary covers; leave it out to keep it (a hand edit).

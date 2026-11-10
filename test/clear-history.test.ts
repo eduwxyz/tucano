@@ -25,7 +25,7 @@ const cut = base + 3_000
 function made(): { db: Db; id: string } {
   const db = new Db(join(mkdtempSync(join(tmpdir(), 'clear-')), 'test.db'))
   db.saveAgent({ id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
-  db.createConversation({ id: 'dm', kind: 'dm', name: 'a1', members: ['a1'], owner: 'p1' })
+  db.createConversation({ id: 'dm', kind: 'dm', name: 'a1', members: ['a1'], owner: db.ownerId() })
   for (const m of [msg('m1', 'dm', base + 1_000), msg('m2', 'dm', base + 2_000), msg('m3', 'dm', base + 2_500, { author: { kind: 'agent', id: 'a1' }, run: { status: 'done', steps: [] } })]) db.saveMessage(m)
   db.addReceipt({ messageId: 'm3', agentId: 'a1', engine: 'claude', model: 'sonnet', inputTokens: 900, cacheReadTokens: 0, outputTokens: 100, ms: 1, at: base + 2_500 })
   return { db, id: 'dm' }
@@ -65,6 +65,15 @@ describe('clearing a history', () => {
     db.clearConversation(id, cut)
     expect(db.conversation(id)!.summary).toBeUndefined()
     expect(contextWindow(db, msg('m7', id, cut + 1_000), 30).summary).toBeUndefined()
+  })
+
+  it('takes the unread badge with it: nobody can reach those messages any more', () => {
+    const { db, id } = made()
+    // Lia's reply, not seen: a badge of one over a conversation that is about to be emptied.
+    expect(db.recordActivity(msg('m3', id, base + 2_500, { author: { kind: 'agent', id: 'a1' }, run: { status: 'done', steps: [] } }), null)).toBe(true)
+    expect(db.unread(id)).toBe(1)
+    db.clearConversation(id, cut)
+    expect(db.unread(id)).toBe(0)
   })
 
   it('leaves a conversation that was never cleared alone', () => {

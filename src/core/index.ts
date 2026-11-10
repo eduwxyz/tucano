@@ -1576,6 +1576,14 @@ const api: Handlers = {
     // The harnesses keep a session of their own per conversation: without this the model would go on
     // from a history the person just cleared.
     runner.forgetSessions({ conversationId: id })
+    // What was waiting in there can't be reached any more, and leaving it would be worse than
+    // dropping it: an approval's card sits in a message that is now off the screen, so it could
+    // neither be decided nor seen until it expired on its own; an open question would show up in
+    // Questions with nothing behind it.
+    for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O histórico da conversa foi limpo.', 'The history was cleared.'))) emit({ type: 'approval', approval: db.approval(a.id)! })
+    const asked = db.openQuestionsIn(id)
+    for (const q of asked) db.saveQuestion({ ...q, state: 'closed' })
+    if (asked.length) emit({ type: 'inbox' })
     db.clearConversation(id)
     emit({ type: 'conversation', conversation: db.conversation(id)! })
   },
