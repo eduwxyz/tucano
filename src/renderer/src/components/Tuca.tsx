@@ -44,6 +44,16 @@ export function draftAgent(d: AgentDraft): Agent {
   return { ...newAgentDraft(), name: d.name, handle: slug(d.name), role: d.role, color: d.color, instructions: d.instructions, modelId: d.modelId, effort: d.effort, web: d.web, grants: d.grants }
 }
 
+// A whole list of skills, on one line of the card: "*" is every active skill, and a long list keeps
+// its first few names and says how many it left out.
+function skillList(names: string[] | undefined): string {
+  if (!names) return ''
+  if (names.length === 1 && names[0] === '*') return L('todas', 'all of them')
+  if (names.length === 0) return L('nenhuma', 'none')
+  const head = names.slice(0, 5).join(', ')
+  return names.length > 5 ? `${head} ${L(`e mais ${names.length - 5}`, `and ${names.length - 5} more`)}` : head
+}
+
 export function AgentProposal({ message }: { message: Message }): ReactNode {
   const d = message.run!.agentDraft!
   const use = useContext(UseDraft)
@@ -200,7 +210,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
       if (c.grants !== undefined) rows.push([L('Conectores', 'Connectors'), grantList(was.grants ?? {}), grantList(c.grants)])
       // 0 is no limit, so the card says that instead of a figure that reads as "set it to zero".
       if (c.limit !== undefined) rows.push([L('Limite do mês', "Month's limit"), monthlyLimitText(was.limit ?? agent.limit), monthlyLimitText(c.limit)])
-    }
+      if (c.skills !== undefined) rows.push([L('Skills', 'Skills'), skillList(was.skills), skillList(c.skills)])    }
     head = (
       <>
         {agent && <AgentAvatar agent={agent} size={40} />}

@@ -5,9 +5,10 @@
 import { L } from '../shared/lang'
 import { usedShare } from '../shared/limits'
 import { RECOMMENDED_INSTRUCTION_LENGTH } from '../shared/instructions'
-import { channelName, dateAt, ENGINES, modelInfo, nextRun, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
+import { channelName, dateAt, ENGINES, modelInfo, nextRun, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf, skillApplies, type Skill } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { dateArg } from './routines'
+import { assignSkills, EVERYONE, skillList, skillsOf } from './skills'
 
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh']
 const DAY = 24 * 3_600_000
@@ -17,7 +18,7 @@ const DAY = 24 * 3_600_000
 // The areas ver_estado can be asked for, in English: the enum is in the model's prompt, and a
 // Portuguese enum in an English workspace teaches the model Portuguese words for the app. The names
 // that came before them keep working, so a memory or a prompt that already says "agentes" resolves.
-const AREAS = ['all', 'harnesses', 'connectors', 'agents', 'routines', 'failures'] as const
+const AREAS = ['all', 'harnesses', 'connectors', 'agents', 'skills', 'routines', 'failures'] as const
 type Area = (typeof AREAS)[number]
 const AREA_ALIASES: Record<string, Area> = {
   tudo: 'all',
@@ -32,12 +33,18 @@ export const VER_ESTADO: ToolDef = {
   name: 'ver_estado',
   get description() {
     return L(
-      'Mostra como este workspace está: motores e logins, conectores e seus erros, agentes (modelo, limite, acessos), rotinas (próxima, última, erro) e as respostas que falharam nos últimos 7 dias, com a mensagem de erro. Use antes de dizer por que algo não funciona. Não mostra o conteúdo das conversas.',
-      "Shows how this workspace is doing: harnesses and sign-ins, connectors and their errors, agents (model, limit, access), routines (next, last, error) and the replies that failed in the last 7 days, with the error. Use it before saying why something doesn't work. It doesn't show what was said in conversations."
+      'Mostra como este workspace está: motores e logins, conectores e seus erros, agentes (modelo, limite, acessos, skills), skills (quem segue cada uma; filtre com busca), rotinas (próxima, última, erro) e as respostas que falharam nos últimos 7 dias, com a mensagem de erro. Use antes de dizer por que algo não funciona, e antes de propor mudanças. Não mostra o conteúdo das conversas.',
+      "Shows how this workspace is doing: harnesses and sign-ins, connectors and their errors, agents (model, limit, access, skills), skills (who follows each one; narrow them with busca), routines (next, last, error) and the replies that failed in the last 7 days, with the error. Use it before saying why something doesn't work, and before proposing changes. It doesn't show what was said in conversations."
     )
   },
   get inputSchema() {
-    return { type: 'object' as const, properties: { area: { type: 'string', enum: [...AREAS] } } }
+    return {
+      type: 'object' as const,
+      properties: {
+        area: { type: 'string', enum: [...AREAS] },
+        busca: { type: 'string', description: L('Só na área skills: um trecho do nome ou da descrição.', 'Only in the skills area: part of the name or the description.') }
+      }
+    }
   }
 }
 
@@ -49,6 +56,7 @@ export interface StateInput {
   routines: Routine[]
   approvals: Approval[]
   failures: { agentId: string; conversationId: string; at: number; status: string; error?: string }[]
+  skills?: Skill[] // every skill, for who follows what (a skill with an empty `agents` is everyone's)
   lastRun: (r: Routine) => { status?: string; error?: string } | undefined // the routine's last reply, how it ended
   now: number
 }
@@ -61,10 +69,12 @@ const when = (at: number | undefined, now: number): string => {
   return `${d.toISOString().slice(0, 16).replace('T', ' ')}${rel ? ` (${rel})` : ''}`
 }
 
-export function workspaceState(area: unknown, x: StateInput): string {
+export function workspaceState(area: unknown, x: StateInput, busca?: unknown): string {
   const asked = String(area ?? '')
   const want = (AREAS as readonly string[]).includes(asked) ? (asked as Area) : (AREA_ALIASES[asked] ?? 'all')
   const show = (a: Area): boolean => want === 'all' || want === a
+  const needle = String(busca ?? '').trim().toLowerCase()
+  const allSkills = (x.skills ?? []).filter((k) => k.state === 'active')
   const s = x.settings
   const agentName = (id: string): string => x.agents.find((a) => a.id === id)?.name ?? (id === 'router' ? 'router' : L('agente removido', 'removed agent'))
   const where = (id: string): string => {
@@ -96,9 +106,42 @@ export function workspaceState(area: unknown, x: StateInput): string {
       const share = usedShare(a.used, a.limit)
       const pct = share === undefined ? undefined : Math.round(share * 100)
       const pending = x.approvals.filter((p) => p.agentId === a.id && p.state === 'pending').length
-      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
-    })
+      // The skills it follows: how many, and by name the ones that are just its own (the rest is the
+      // same list every agent gets, which the skills area has).
+      const mine = x.skills ? skillsOf(x.skills, a.id) : []
+      const own = x.skills ? mine.filter((n) => (x.skills!.find((k) => k.name === n)?.agents.length ?? 0) > 0) : []
+      const skills = x.skills ? L(` · ${mine.length} skill(s)${own.length ? `, só dele: ${own.slice(0, 8).join(', ')}${own.length > 8 ? ` +${own.length - 8}` : ''}` : ''}`, ` · ${mine.length} skill(s)${own.length ? `, its own: ${own.slice(0, 8).join(', ')}${own.length > 8 ? ` +${own.length - 8}` : ''}` : ''}`) : ''
+      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}${skills}`    })
     out.push(`## ${L('Agentes', 'Agents')}\n${lines.join('\n') || L('nenhum ainda', 'none yet')}`)
+  }
+  if (show('skills')) {
+    const hit = (k: Skill): boolean => !needle || k.name.toLowerCase().includes(needle) || k.description.toLowerCase().includes(needle)
+    const found = allSkills.filter(hit)
+    const named = found.filter((k) => k.agents.length > 0)
+    const shared = found.filter((k) => k.agents.length === 0)
+    const lines: string[] = [
+      L(`${found.length} de ${allSkills.length} skills ativas · ${named.length} só com alguns agentes · ${shared.length} de todos`, `${found.length} of ${allSkills.length} active skills · ${named.length} with some agents · ${shared.length} with everyone`)
+    ]
+    if (named.length) {
+      const shown = named.slice(0, 80).map((k) => `- ${k.name} → ${k.agents.map(agentName).join(', ')}`)
+      lines.push(`${L('com dono', 'with owners')}:
+${shown.join('
+')}${named.length > 80 ? `
+${L(`… e mais ${named.length - 80}`, `… and ${named.length - 80} more`)}` : ''}`)
+    }
+    // Everyone's skills are the same list for every agent: names only, in a line that stays readable.
+    if (shared.length) lines.push(`${L('de todos', 'with everyone')}: ${shared.slice(0, 60).map((k) => k.name).join(', ')}${shared.length > 60 ? `, ${L(`… e mais ${shared.length - 60}`, `… and ${shared.length - 60} more`)}` : ''}`)
+    if (needle) {
+      // A search says when to use each one: that is how the Tuca picks a name to assign.
+      const hits = found.slice(0, 40).map((k) => `- ${k.name}: ${k.description.slice(0, 160)}`)
+      lines.push(`${L('achadas', 'found')}:
+${hits.join('
+') || L('nenhuma', 'none')}${found.length > 40 ? `
+${L(`… e mais ${found.length - 40}`, `… and ${found.length - 40} more`)}` : ''}`)
+    }
+    out.push(`## ${L('Skills', 'Skills')}
+${lines.join('
+')}`)
   }
   if (show('routines')) {
     const lines = x.routines.map((r) => {
@@ -127,8 +170,8 @@ export const PROPOR_AJUSTE: ToolDef = {
   name: 'propor_ajuste',
   get description() {
     return L(
-      'Propõe mudar um agente que já existe. Vira um card com o antes e o depois, Aplicar e Descartar: nada muda até a pessoa aplicar. Mande só o que muda; instruções vão inteiras.',
-      'Proposes changing an agent that exists. It becomes a card with before and after, Apply and Discard: nothing changes until the person applies it. Send only what changes; instructions go whole.'
+      'Propõe mudar um agente que já existe: nome, função, instruções, modelo, esforço, web, conectores, limite e as skills que ele segue. Vira um card com o antes e o depois, Aplicar e Descartar: nada muda até a pessoa aplicar. Mande só o que muda; instruções vão inteiras.',
+      'Proposes changing an agent that exists: name, role, instructions, model, thinking, web, connectors, limit and the skills it follows. It becomes a card with before and after, Apply and Discard: nothing changes until the person applies it. Send only what changes; instructions go whole.'
     )
   },
   get inputSchema() {
@@ -148,6 +191,14 @@ export const PROPOR_AJUSTE: ToolDef = {
           items: { type: 'object', properties: { conector: { type: 'string' }, nivel: { type: 'string', enum: ['leitura', 'escrita'] } }, required: ['conector'] }
         },
         limite: { type: 'number', description: L('O limite do mês, em tokens.', "The month's limit, in tokens.") },
+        skills: {
+          type: 'array',
+          items: { type: 'string' },
+          description: L(
+            'A lista inteira de skills que ele passa a seguir, pelos nomes (as de fora saem). Uma lista com "*" = todas as skills ativas. Sem o campo, as skills dele ficam como estão. Veja os nomes em ver_estado (área skills).',
+            'The whole list of skills it follows, by name (the ones left out go). A list of just "*" means every active skill. Without the field its skills stay as they are. Get the names from ver_estado (the skills area).'
+          )
+        },
         ...reasonProp()
       },
       required: ['agente']
@@ -208,6 +259,7 @@ export interface ProposalCtx {
   conversations: Conversation[]
   connectors: Connector[]
   usable: (modelId: string) => boolean
+  skills?: Skill[] // every skill, so a whole list of them is checked against the ones that exist
   pending?: string[] // names of the agents proposed earlier in this same reply (a new-agent card, a team): not made yet
 }
 
@@ -244,6 +296,34 @@ export function pendingAgents(run: { agentDraft?: AgentDraft; proposal?: Proposa
   return [...(run?.agentDraft && !run.agentDraft.state ? [run.agentDraft.name] : []), ...teams]
 }
 
+// The list of skills a proposal names, matched to the ones that exist. "*" (or "todos"/"all") means
+// every active skill, and comes back as "*" so the same assignment is written only one way.
+function skillsWanted(raw: unknown[], skills: Skill[]): { names?: string[]; error?: string } {
+  const active = skills.filter((s) => s.state === 'active')
+  const said = [...new Set(raw.map((n) => String(n ?? '').trim()).filter(Boolean))]
+  if (!said.length) return { names: [] }
+  if (said.length === 1 && ['*', 'todos', 'todas', 'all', 'everyone'].includes(said[0]!.toLowerCase())) return { names: [EVERYONE] }
+  const byLower = new Map(active.map((k) => [k.name.toLowerCase(), k.name]))
+  const names: string[] = []
+  const unknown: string[] = []
+  for (const n of said) {
+    const found = byLower.get(n.toLowerCase())
+    if (found) names.push(found)
+    else unknown.push(n)
+  }
+  if (unknown.length) {
+    return {
+      error: L(
+        `Não existe skill ativa ${unknown.map((u) => `"${u}"`).join(', ')}. Veja os nomes em ver_estado (área skills) e use os de lá.`,
+        `There's no active skill ${unknown.map((u) => `"${u}"`).join(', ')}. Get the names from ver_estado (the skills area) and use those.`
+      )
+    }
+  }
+  // Every one of them, said by name: the same as "*".
+  const sorted = [...names].sort()
+  return { names: sorted.length === active.length && active.every((k) => names.includes(k.name)) ? [EVERYONE] : sorted }
+}
+
 export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: Proposal; error?: string } {
   const reason = text(args, 'motivo', 300) || undefined
   if (tool === PROPOR_AJUSTE.name) {
@@ -275,8 +355,23 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
       if (!Number.isFinite(n) || n < 0) return { error: L('O limite é em tokens: no mínimo 1000, ou 0 para sem limite.', 'The limit is in tokens: at least 1000, or 0 for no limit.') }
       if (n !== agent.limit) changes.limit = n
     }
+    // The whole list of skills it follows: the names it keeps, or "*" for every active skill.
+    if (args['skills'] !== undefined) {
+      if (!Array.isArray(args['skills'])) return { error: L('skills vai como lista de nomes, ou ["*"] para todas.', 'skills goes as a list of names, or ["*"] for all of them.') }
+      const wanted = skillsWanted(args['skills'], ctx.skills ?? [])
+      if (wanted.error) return { error: wanted.error }
+      const before = skillList(ctx.skills ?? [], agent.id)
+      const check = assignSkills(ctx.skills ?? [], agent.id, ctx.agents.map((a) => a.id), wanted.names!)
+      if (check.alone) {
+        return { error: L(`"${check.alone}" é de todos os agentes e é a única forma de tirá-la deste: arquive a skill em Skills, ou tire todos os agentes dela.`, `"${check.alone}" is every agent's, and that's the only way to take it from this one: archive the skill in Skills, or take every agent off it.`) }
+      }
+      if (JSON.stringify(before) !== JSON.stringify(wanted.names)) changes.skills = wanted.names!
+    }
     if (!Object.keys(changes).length) return { error: L('Nada mudaria: mande só o que é diferente do que ele tem hoje.', 'Nothing would change: send only what differs from what it has now.') }
-    const before = Object.fromEntries(Object.keys(changes).map((k) => [k, agent[k as keyof AgentChanges]])) as AgentChanges
+    // `skills` isn't on the agent: the skills hold their own list, and it's read after this.
+    const before = Object.fromEntries(Object.keys(changes).filter((k) => k !== 'skills').map((k) => [k, agent[k as keyof Agent]])) as AgentChanges
+    // What it followed before: the skills live on the skills, not on the agent.
+    if (changes.skills) before.skills = skillList(ctx.skills ?? [], agent.id)
     return { proposal: { kind: 'agent', agentId: agent.id, changes, before, ...(reason ? { reason } : {}) } }
   }
   if (tool === PROPOR_ROTINA.name) {
