@@ -93,7 +93,7 @@ import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { Proposals } from './Tuca'
-import { FoldToggle } from './Fold'
+import { FoldToggle, setFolded } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
@@ -1265,16 +1265,23 @@ function useNow(on: boolean): number {
   return now
 }
 
+// The steps of a conversation, folded or not, are remembered under the conversation: leaving it or
+// restarting the app and coming back finds them as they were left.
+const stepsMemory = (conversationId: string): string => `steps:${conversationId}`
+
 // One quiet line: what the agent is doing now (and for how long), or how many
 // steps it took. The steps themselves open on a click.
 export function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
   // Open while the agent works, so its steps read as they go, unless the person closes it or turned
   // that off in Settings (several agents at once would fill the screen); closed after.
+  // A conversation that was left folded stays folded, and a run that starts in it opens folded too.
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
+  const memory = stepsMemory(message.conversationId)
+  const remembered = useStore((s) => (s.settings.folded ?? []).includes(memory))
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
-  const open = toggled ?? (working && stepsOpen)
+  const open = toggled ?? (working && stepsOpen && !remembered)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
@@ -1282,8 +1289,14 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   // line is where the eye already is, so a double-click on it folds the steps from there. Then the
   // block, now one line, is brought into view: otherwise folding looks like the steps vanishing.
   const box = useRef<HTMLDivElement>(null)
+  // Both ways of folding (the toggle, the handle) write the same thing down, so the next visit to
+  // the conversation agrees with this one; unfolding writes it too, or the next run would open folded.
+  const show = (next: boolean): void => {
+    setOpen(next)
+    setFolded(memory, !next)
+  }
   const fold = (): void => {
-    setOpen(false)
+    show(false)
     requestAnimationFrame(() => box.current?.scrollIntoView({ block: 'nearest' }))
   }
 
@@ -1294,7 +1307,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
 
   return (
     <div ref={box} className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
-      <button className="steps__toggle" onClick={() => setOpen(!open)}>
+      <button className="steps__toggle" aria-expanded={open} onClick={() => show(!open)}>
         {working ? (
           <span className="steps__pulse" />
         ) : justDone ? (

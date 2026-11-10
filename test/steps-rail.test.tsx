@@ -6,8 +6,7 @@
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { setLang } from '../src/shared/lang'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Message, Step } from '../src/shared/types'
 
 const { window, document } = parseHTML('<!doctype html><html><body><div id="root"></div></body></html>')
@@ -23,6 +22,7 @@ Object.assign(globalThis, {
   cancelAnimationFrame: (id: number) => clearTimeout(id)
 })
 
+const { updateSettings } = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
 const { RunSteps } = await import('../src/renderer/src/components/Conversation')
 
@@ -41,8 +41,11 @@ const reply = (status: 'done' | 'working'): Message => ({
 })
 
 let root: Root
-beforeAll(() => setLang('en'))
 beforeEach(() => {
+  // Through the settings, not straight at the language: folding the steps writes the fold down, and
+  // every settings write re-applies the app's language, so a language held only in the module falls
+  // back to the app's own mid-test.
+  updateSettings({ language: 'en', folded: [] }) // and nothing folded from the test before
   scrolled.length = 0
   root = createRoot(document.getElementById('root')!)
 })
