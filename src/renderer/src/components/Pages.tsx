@@ -111,6 +111,7 @@ import { hasServers, NodeCard, ServersCard } from './Servers'
 import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
+import { stepsKeep, STEPS_LATEST, STEPS_LATEST_MAX, STEPS_LATEST_MIN, type StepsMode } from '../../../shared/steps'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
 import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
@@ -285,6 +286,40 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
   { value: 'read', label: L('Só lê', 'Read only'), hint: L('Usa as memórias, mas não guarda novas.', 'Uses memories but doesn’t keep new ones.') }
 ]
+// How a reply's steps read, in the order they go from "everything" to "nothing": the labels carry
+// the number the person chose, since that is what "the latest few" means on this computer.
+const STEPS_CHOICES = (keep: number): { value: StepsMode; label: string; hint: string }[] => [
+  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Every step, the way it always was.') },
+  {
+    value: 'latest',
+    label: L(`Últimos ${keep}`, `Last ${keep}`),
+    hint: L('A resposta mostra só os mais novos, numa janela que rola sozinha; os mais antigos somem no topo, desbotando.', 'A reply shows only the newest, in a window that scrolls itself; the oldest fade out at the top.')
+  },
+  {
+    value: 'one-line',
+    label: L('Uma linha', 'One line'),
+    hint: L('Uma linha animada com a contagem de passos, sem os passos. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'One animated line with the step count, without the steps. Good for a busy channel with several agents at once.')
+  }
+]
+
+// One choice among the three, or — on an agent's own page — "same as the app" before them.
+function StepsModePick({ value, keep, onChange, follow, label }: { value?: StepsMode; keep: number; onChange: (v: StepsMode | undefined) => void; follow?: boolean; label: string }): ReactNode {
+  return (
+    <div className="segmented segmented--wide steps-pick" role="radiogroup" aria-label={label}>
+      {follow && (
+        <button role="radio" aria-checked={!value} className={!value ? 'is-active' : ''} onClick={() => onChange(undefined)}>
+          {L('Do app', 'App setting')}
+        </button>
+      )}
+      {STEPS_CHOICES(keep).map((c) => (
+        <button key={c.value} role="radio" aria-checked={value === c.value} className={value === c.value ? 'is-active' : ''} onClick={() => onChange(c.value)}>
+          {c.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 const LEVELS = (): { value: GrantLevel; label: string }[] => [
   { value: 'none', label: L('Sem acesso', 'No access') },
   { value: 'read', label: L('Ler', 'Read') },
@@ -420,6 +455,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const globalRules = useStore((s) => s.settings.actionRules)
   const globalAutonomy = useStore((s) => s.settings.autonomy)
   const globalGuard = useStore((s) => s.settings.outsideGuard)
+  // How many steps "the latest few" keeps, so this agent's choice reads with the same number.
+  const stepsLatest = useStore((s) => s.settings.stepsLatest)
 
   const memberOf = (agentId: string): string[] => channels.filter((c) => c.members.includes(agentId)).map((c) => c.id)
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
@@ -3244,6 +3281,35 @@ export function SettingsPage(): ReactNode {
                 <p className="muted small">{L('Abre a lista do que o agente está fazendo embaixo da resposta. Desligado, fica só a linha com o que ele faz agora; um clique nela abre os passos. Muda só pra você.', 'Opens the list of what the agent is doing under its reply. Off, only the line with what it’s doing now stays; a click on it opens the steps. It changes only for you.')}</p>
               </div>
               <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
+            </div>
+            {/* What a reply's steps look like, and how many of the latest ones: beside the settings that
+                change how a reply reads, and each person's own. */}
+            {/* The same field, one line down: what a reply's steps look like. Both are about how a
+                reply reads, and nobody turns one on without the other being right there. */}
+            <div className="key-row">
+              <Icon name="menu" />
+              <div className="grow">
+                <strong>{L('Os passos da resposta', 'A reply’s steps')}</strong>
+                <p className="muted small">{STEPS_CHOICES(stepsKeep(settings.stepsLatest)).find((c) => c.value === (settings.steps ?? 'all'))!.hint}</p>
+                <StepsModePick
+                  value={settings.steps ?? 'all'}
+                  keep={stepsKeep(settings.stepsLatest)}
+                  label={L('Como a resposta mostra os passos', 'How a reply shows its steps')}
+                  onChange={(v) => updateSettings({ steps: v ?? 'all' })}
+                />
+                {settings.steps === 'latest' && (
+                  <label className="row row--center steps-keep">
+                    <span className="muted small">{L('Quantos passos mostrar', 'How many steps to show')}</span>
+                    <NumberInput
+                      min={STEPS_LATEST_MIN}
+                      max={STEPS_LATEST_MAX}
+                      value={stepsKeep(settings.stepsLatest)}
+                      aria-label={L('Quantos passos mostrar na janela', 'How many steps the window shows')}
+                      onChange={(n) => updateSettings({ stepsLatest: stepsKeep(n) })}
+                    />
+                  </label>
+                )}
+              </div>
             </div>
           </Card>
         )}
