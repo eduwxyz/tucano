@@ -79,8 +79,8 @@ export function ArtifactGallery({ ids }: { ids: string[] }): ReactNode {
                 className={`artifact-image gallery__cell${c.hero ? ' gallery__cell--hero' : ''}`}
                 style={{ gridRow: `span ${c.rowSpan}` }}
                 onClick={() => showImages(a)}
-                title={a.title}
-                aria-label={a.title}
+                title={c.more ? L(`${a.title} — e mais ${c.more}`, `${a.title} — and ${c.more} more`) : a.title}
+                aria-label={c.more ? L(`${a.title} — e mais ${c.more}`, `${a.title} — and ${c.more} more`) : a.title}
               >
                 <img src={artifactUrl(a)} alt={a.title} />
                 {c.more ? (
