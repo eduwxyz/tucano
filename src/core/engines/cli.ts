@@ -10,6 +10,10 @@ import { OUT_OF_QUOTA } from '../../shared/errors'
 export interface Parser {
   line(line: string): EngineEvent[]
   end(exitCode: number | null, stderr: string): EngineEvent[]
+  // A line of stderr that ends the turn, for a CLI that logs an error and then hangs without
+  // exiting (OpenCode): the error, and how long to wait for output anyway (a retry that works)
+  // before stopping it.
+  stderr?(line: string): { message: string; waitMs: number } | undefined
 }
 
 // `stdinFile`: stdin is that file instead of `stdin`, for a CLI that reads stdin only when it's a
@@ -41,10 +45,30 @@ export async function* runCli(opts: {
   }
   opts.signal.addEventListener('abort', kill, { once: true })
 
+  const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity })
   let stderr = ''
+  let partial = ''
+  let fatal: string | undefined // the error that stopped it
+  let failing: NodeJS.Timeout | undefined // an error logged: it stops unless output goes on
   child.stderr!.setEncoding('utf8')
   child.stderr!.on('data', (chunk: string) => {
     stderr = (stderr + chunk).slice(-8000)
+    if (!opts.parser.stderr || fatal !== undefined || failing) return
+    const lines = (partial + chunk).split('\n')
+    partial = lines.pop()!.slice(-8000)
+    for (const line of lines) {
+      const f = opts.parser.stderr(line)
+      if (!f) continue
+      failing = setTimeout(() => {
+        fatal = f.message
+        kill()
+        // What it started may still hold its output open: the turn ends now.
+        rl.close()
+        child.stdout!.destroy()
+        child.stderr!.destroy()
+      }, f.waitMs)
+      return
+    }
   })
   const exited = new Promise<number | null>((resolve) => {
     child.on('close', (code) => resolve(code))
@@ -58,14 +82,19 @@ export async function* runCli(opts: {
   child.stdin?.end(opts.stdin)
 
   try {
-    const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity })
     for await (const line of rl) {
       if (!line.trim()) continue
+      if (failing && fatal === undefined) {
+        clearTimeout(failing) // it went on: the error wasn't the end
+        failing = undefined
+      }
       yield* opts.parser.line(line)
     }
     const code = await exited
-    if (!opts.signal.aborted) yield* opts.parser.end(code, stderr)
+    if (fatal !== undefined && !opts.signal.aborted) yield { type: 'error', message: fatal }
+    else if (!opts.signal.aborted) yield* opts.parser.end(code, stderr)
   } finally {
+    clearTimeout(failing)
     opts.signal.removeEventListener('abort', kill)
     if (child.exitCode === null) {
       if (isWin && child.pid) killTree(child.pid)
