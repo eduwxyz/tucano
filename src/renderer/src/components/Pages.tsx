@@ -742,7 +742,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                     />
                   </Field>
                 )}
-                <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you.`)}>
+                <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa. Zero é sem limite.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you. Zero means no limit.`)}>
                   <NumberInput
                     min={0}
                     step={0.5}
