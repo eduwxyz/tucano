@@ -362,6 +362,13 @@ export const workingIds = (s: State, conversationId: string, threadId?: string):
     .working.filter((m) => m.threadId === threadId && m.author.kind === 'agent')
     .map((m) => m.id)
 export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
+// The approvals still waiting on this person here, oldest first: what the reminder over the field
+// counts, and what Review goes back to. In the thread it counts only the ones asked in it.
+export const approvalsIn = (s: State, conversationId: string, threadId?: string): Approval[] =>
+  s.approvals
+    .filter((a) => a.state === 'pending' && a.conversationId === conversationId && canDecide(s, a))
+    .filter((a) => (s.messages[conversationId]?.find((m) => m.id === a.messageId)?.threadId ?? undefined) === threadId)
+    .sort((a, b) => a.createdAt - b.createdAt)
 export const lastBrowserIn = (s: State, conversationId: string, agentId: string): string | undefined => conversationIndex(s, conversationId).browser.get(agentId)
 
 // Across conversations, once per change.
@@ -979,8 +986,17 @@ export const stopRun = (messageId: string): void => void fire(L('Não consegui p
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
 
-export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
-  void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })
+// Returns whether the core acknowledged the decision: the card keeps its controls disabled until it
+// hears one, and when it doesn't hear one it says so instead of pretending the call went through.
+export const decideApproval = async (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): Promise<boolean> => {
+  try {
+    await call('decideApproval', { id, decision, reason, always })
+    return true
+  } catch (e) {
+    if (!state.coreDown) toast(`${decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it.")} ${e instanceof Error && e.message ? e.message : L('Tente de novo.', 'Try again.')}`)
+    return false
+  }
+}
 
 const memoryFailed = (): string => L('Não consegui salvar a memória.', "I couldn't save the memory.")
 export const addMemory = (scope: MemoryScope, text: string): void => void fire(memoryFailed(), 'addMemory', { scope, text })

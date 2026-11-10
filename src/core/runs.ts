@@ -2517,6 +2517,7 @@ ${note}`,
 
     let outcome: string
     let ok = false // whether the approved thing went through
+    let attempted = false // whether the app itself made the call (a computer that was off never did)
     let task: string
     if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
       // A PR asked for before pushing from the agent's computer left Tucano: nothing is opened.
@@ -2531,6 +2532,7 @@ ${note}`,
       const command = String(ap.args['command'] ?? '')
       const what = L(`rodar \`${command}\``, `running \`${command}\``)
       if (decision === 'approved' && agent?.computer && this.deps.computers) {
+        attempted = true
         const out = await this.deps.computers.call(agent, 'bash', ap.args, { conversationId: ap.conversationId, messageId: ap.messageId })
         ok = !out.result.isError
         outcome = ok ? ran : L('Rodou, com erro.', 'Ran, with an error.')
@@ -2554,6 +2556,7 @@ ${note}`,
       const where = onde === 'menu de contexto' ? L(', no menu que abre com o clique direito (app_clicar com botao_direito)', ', in the menu a right click opens (app_clicar with botao_direito)') : onde === 'barra de menus' ? L(', na barra de menus (app_menu)', ', in the menu bar (app_menu)') : ''
       const what = typeof ap.args['texto'] === 'string' ? L(`confirmar "${ap.args['texto']}" no ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `clique em "${String(ap.args['alvo'] ?? '')}"`})`, `confirming "${ap.args['texto']}" in ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `click on "${String(ap.args['alvo'] ?? '')}"`})`) : typeof ap.args['tecla'] === 'string' ? L(`apertar ${ap.args['tecla']} no ${String(ap.args['app'])}`, `pressing ${ap.args['tecla']} in ${String(ap.args['app'])}`) : L(`clicar em "${String(ap.args['alvo'] ?? '')}" no ${String(ap.args['app'])}${where}`, `clicking "${String(ap.args['alvo'] ?? '')}" in ${String(ap.args['app'])}${where}`)
       if (decision === 'approved' && agent?.apps?.length && this.deps.apps) {
+        attempted = true
         const r = await this.deps.apps.approved(agent, ap.args)
         ok = r.ok
         outcome = r.ok ? L('Liberado: o agente faz agora.', 'Allowed: the agent does it now.') : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
@@ -2579,6 +2582,7 @@ ${note}`,
       const key = typeof ap.args['tecla'] === 'string' ? (ap.args['tecla'] === 'enter' ? 'Enter' : L('Espaço', 'Space')) : undefined
       const what = key ? L(`apertar ${key} em "${alvo}"`, `pressing ${key} on "${alvo}"`) : L(`clicar em "${alvo}"`, `clicking "${alvo}"`)
       if (decision === 'approved' && agent?.browser && this.deps.browser) {
+        attempted = true
         const r = await this.deps.browser.approved(agent, ap.args)
         ok = r.ok
         outcome = r.ok ? ran : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
@@ -2628,6 +2632,7 @@ ${note}`,
         )
       } else {
         try {
+          attempted = true
           const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
           ok = !r.isError
           outcome = r.isError ? L(`Executou, com erro: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`) : ran
@@ -2651,6 +2656,10 @@ ${note}`,
       outcome = expired
       task = L(`O seu pedido ${call} expirou sem decisão de ${me}. Nada foi executado. Avise ${me} em uma frase.`, `Your request ${call} expired without a decision from ${me}. Nothing was run. Tell ${me} in one sentence.`)
     }
+    // What became of the call, for the receipt the card keeps: it went through, it ran and came
+    // back an error, or nothing ran (a refusal, a computer that was off, an access that changed).
+    // Never read out of the outcome text, which is prose.
+    db.setApprovalResult(id, ok ? 'done' : attempted ? 'error' : 'not_run')
     db.setApprovalOutcome(id, outcome)
     emit({ type: 'approval', approval: db.approval(id)! })
 
