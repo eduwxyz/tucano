@@ -46,7 +46,9 @@ export class AiJailProvider implements SandboxProvider {
 }
 
 export function sandboxProvider(id: SandboxProviderId): SandboxProvider {
-  return id === 'ai-jail' ? new AiJailProvider() : new NoneSandboxProvider()
+  if (id === 'none') return new NoneSandboxProvider()
+  if (id === 'ai-jail') return new AiJailProvider()
+  throw new Error('Unknown sandbox provider: ' + String(id))
 }
 
 export function findAiJail(): string | undefined {
