@@ -1247,3 +1247,20 @@ export interface WikiReview {
   error?: string // the last review failed
   findings: WikiFinding[] // still open
 }
+
+// A whole Tucano in one .zip (Settings › General › Export everything), and what a server finds in
+// one before restoring it (src/core/restore.ts).
+export interface BackupSummary {
+  version: 1
+  madeAt: number
+  app: string
+  workspace: string
+  schema: number
+  agents: number
+  channels: number
+  messages: number
+  memories: number
+  wikiPages: number
+  files: number
+  filesLeftOut: number // the agents' files that didn't fit in one upload
+}

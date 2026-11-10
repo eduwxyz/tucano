@@ -5,8 +5,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Novo:** o Tucano do computador vai inteiro pra um servidor. **Configurações › Geral › Exportar tudo** gera um .zip com agentes, conversas, memórias, wiki e arquivos; no Tucano do servidor (como o Tucano Pro), **Restaurar um backup**, já na primeira tela, põe tudo no lugar, e você continua conectado.
 > - **Correção:** responder no canal a uma pergunta que um agente deixou no fim da mensagem dele ("posso disparar agora?") chama esse agente, não outro. Quem escolhe quem responde agora vê como terminam as mensagens longas e as outras threads, e o agente que responde numa thread que você abriu escrevendo no canal lê as últimas mensagens do canal antes dela, o que estava na sua tela. Obrigado, braxT!
 > - **Correção:** os modelos grátis do OpenCode (os `opencode/…-free`) funcionam no Tucano. O OpenCode recusava esses modelos e a resposta ficava "Pensando" pra sempre. Agora eles respondem, e aparecem marcados como **grátis** na lista de modelos. O agente no OpenCode ganha a ferramenta de leitura do próprio OpenCode, só dentro da pasta de trabalho dele: os seus arquivos continuam fora do alcance. Se o OpenCode recusar mesmo assim (o limite do uso grátis), ou se outro erro do modelo só aparecer no log, a resposta para com o motivo e o que fazer, em vez de ficar pensando.
+
+### Added
+
+- **Take a computer's Tucano to a server, whole.** Starting on the desktop and moving to a Tucano on a server (Tucano Pro, or your own) meant starting over: Export team carries agents, skills, channels and routines, but no conversations, memories or wiki. Now **Settings › General › Export everything** writes one .zip to Downloads with the database, the wiki's folder and index, and the agents' files (as many as fit in one upload, about 950 MB; what's left out is said). On the server, the owner sends it from **Settings › General › Full backup**, or from the first screen of a new server (**I already use Tucano on my computer**); a daily backup's `.db` works too, with the database alone. The server checks the file (a backup, readable, not from a newer Tucano than itself), shows what's in it, and after a confirmation restarts with it: what was there is kept in `restore/before-…`, and the person stays signed in. What only worked on the other computer goes (its sealed secrets, its devices and invites, its extra logins, agents' use of that computer's desktop, apps and folders), the server's own logins, secrets, harnesses and Telegram stay, and routines come in off, so they don't run twice; the card then says what's left to do.
 
 ### Fixed
 

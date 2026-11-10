@@ -10913,3 +10913,6 @@ button.agent-card__now:hover {
 .agent-models__identity { display: flex; align-items: center; gap: 10px; flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
 .agent-models__choice { display: grid; gap: 6px; flex: 2 1 300px; min-width: 0; }
 .agent-models [role="status"]:not(:empty) { margin-top: 12px; }
+
+/* The intro of a Tucano on a server: a computer's backup brought in from the first screen. */
+.intro-restore { margin-top: 18px; max-width: 520px; }

@@ -197,6 +197,11 @@ export const NEEDS: Record<Method, Need> = {
   exportTeam: 'admin',
   importTeam: 'admin',
   importAgents: 'admin',
+  exportBackup: 'owner',
+  restoreCheck: 'owner',
+  restoreApply: 'owner',
+  restoreCancel: 'owner',
+  restoreInfo: 'owner',
   // connectors, harnesses and this computer
   addConnector: 'admin',
   removeConnector: 'admin',
