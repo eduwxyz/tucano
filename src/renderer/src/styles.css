@@ -5253,6 +5253,38 @@ kbd {
 .composer__image:hover .composer__image-x {
   opacity: 1;
 }
+.composer__file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.composer__file-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.composer__file-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  color: var(--text-2);
+}
+.composer__file-x:hover {
+  background: var(--hover);
+  color: var(--text);
+}
 .composer__hint--warn {
   color: var(--warn);
 }

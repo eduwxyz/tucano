@@ -4,11 +4,19 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **The wiki's waiting list empties.** Switching **Changing a page that exists** to **Automatic** only applied to the curator's next changes: what was already in **Waiting for you** stayed there, one card at a time to approve. Now switching to Automatic puts in what was waiting too, and the list has **Approve all** when there's more than one. Oldest first; a change that ran into a newer page (often the one approved just before it) is made again on that page and goes in; one whose passage is gone stays, to redo by hand. The weekly review's fixes stay in Care.
+
+## [0.2.24] - 2026-11-09
+
 > **Em português:**
+> - **Correção:** dá pra anexar qualquer arquivo numa mensagem no app (antes só imagem: um PDF era recusado). Pelo clipe, arrastando ou colando, até 5 por mensagem. O que um PDF, um Word, uma planilha ou um texto diz vai pro agente junto com a mensagem, em qualquer motor e mesmo sem computador; depois ele relê quando precisar.
 > - **Correção:** um conector que não conecta numa rede de empresa diz por quê, em vez de "Sem conexão com a internet" pra tudo: o certificado não foi aceito (um proxy ou antivírus que inspeciona HTTPS), o proxy recusou ou pede login, o DNS não achou o endereço, a conexão foi recusada ou caiu no meio. **Ver detalhes** mostra o que o sistema respondeu. E o Tucano agora confia nos certificados do sistema (Chaves no Mac, o repositório do Windows) e usa o proxy das configurações de rede do sistema ou de `HTTPS_PROXY`, então o certificado raiz que a empresa ou o antivírus instalou passa a valer pros conectores.
 
 ### Fixed
 
+- **Any file attached to a message, and its text to the agents.** In the app the composer took only images: a PDF was refused as "not an image". Now the paperclip, a drop or a paste takes any file (up to 5 per message, 20 MB each), kept with the message like an attached image. What a PDF, Word doc, spreadsheet, CSV or plain text file says goes to the agent as text with that message, in every engine and with or without a computer (the wiki's reader). As with images, only in the reply to that message: later turns name it, and the new `ler_anexo` tool reads it again or goes on where a long text was cut. A file that can't be read (a scanned PDF) reaches the agent with the reason, so it can say so.
 - **Connectors on company networks: the real reason, and the system's certificates and proxy.** A connector that couldn't connect said "No internet connection, or the service didn't answer" whatever the cause, because Node throws `fetch failed` for every network failure and keeps the reason in `cause`. Now Tucano reads the causes (an `AggregateError` of each address included) and says which it was: a certificate that wasn't accepted (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`, `SELF_SIGNED_CERT_IN_CHAIN`: a proxy or antivirus that inspects HTTPS, with what to do), an expired one (check the clock), a proxy that refused or wants a login (407), a name the DNS didn't find, a refused or cut connection (a firewall), real offline, or a timeout; the connector's page shows what the system said under **See details**, and an agent's failed call carries it too. And the core now trusts the system's root certificates (the macOS Keychain, the Windows certificate store, `/etc/ssl`) as well as Node's bundled ones, so a company's or an antivirus's root that the system trusts works for connectors; certificates are still always checked (`TUCANO_SYSTEM_CA=0` turns it off). Its requests also go through the proxy in `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`, or else the one in the system's network settings (or PAC), which the app resolves at launch; `localhost` never goes through it, and the wiki's link reader still goes straight to the address it checked.
 
 ## [0.2.23] - 2026-11-09
@@ -547,6 +555,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.24]: https://github.com/eduwxyz/tucano/compare/v0.2.23...v0.2.24
 [0.2.23]: https://github.com/eduwxyz/tucano/compare/v0.2.22...v0.2.23
 [0.2.22]: https://github.com/eduwxyz/tucano/compare/v0.2.21...v0.2.22
 [0.2.21]: https://github.com/eduwxyz/tucano/compare/v0.2.20...v0.2.21

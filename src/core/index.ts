@@ -1390,9 +1390,9 @@ const api: Handlers = {
     return people.pageFor(ctx.person, [root, ...db.recentMessages(root.conversationId, 100_000, rootId)])
   },
 
-  sendMessage: ({ conversationId, text, images, threadId }, ctx) => {
+  sendMessage: ({ conversationId, text, images, files, threadId }, ctx) => {
     reach(ctx, conversationId)
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id), 'sendMessage')
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, files?.length ? { files } : {}), 'sendMessage')
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {
@@ -2008,6 +2008,7 @@ const api: Handlers = {
   },
   wikiApplyChange: ({ id }, ctx) => (changeInReach(ctx, id), wiki.applyChange(id, nameOf(ctx))),
   wikiRefuseChange: ({ id }, ctx) => (changeInReach(ctx, id), wiki.refuseChange(id)),
+  wikiApplyWaiting: (_, ctx) => wiki.applyWaiting(nameOf(ctx), (c) => seesChange(ctx, c)),
   // Undoing puts back what the pages were: from before the heritage, that's the owner's history to restore.
   wikiUndoChange: ({ id }, ctx) => {
     // Said in so many words (before the reach check hides the change as the owner's history).

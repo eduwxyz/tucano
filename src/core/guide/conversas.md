@@ -29,8 +29,8 @@ Nos dois jeitos dá pra abrir uma thread numa mensagem com **Responder na thread
 ## Resumo
 O botão **Resumo** no topo mostra o que a conversa já cobriu. As últimas 30 mensagens vão inteiras; passando de 50, o que sai da janela vira resumo. Dá pra **Resumir agora** e editar.
 
-## Imagens e ditado
-- Até 10 imagens por mensagem: anexe, arraste ou cole.
+## Anexos e ditado
+- Até 10 imagens e 5 arquivos por mensagem (clipe, arrastar ou colar). De PDF, Word, planilha e texto, o agente recebe o que está escrito, mesmo sem computador; depois relê com ler_anexo.
 - Ditado: o microfone do campo, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros. O áudio vira texto no próprio computador, sem internet. Ative em **Configurações › Geral** › **Ditado**.
 
 ## Quando dá errado
