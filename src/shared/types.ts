@@ -70,6 +70,8 @@ export interface Agent {
   wiki?: WikiAccess // what it can do with the wiki; 'read' when unset
   instructions: string
   modelId: string
+  // How this agent's replies show their steps: over the workspace's setting; unset: follow it.
+  steps?: StepsMode
   // Where a reply goes when modelId's subscription is out (its 5-hour or weekly limit, a 429): tried
   // only when the main model failed before doing anything, and the next reply tries the main one again.
   fallbackModelId?: string
@@ -546,6 +548,9 @@ export interface EndpointSettings {
   models: string[] // the ones the agents may run on
   hasKey?: boolean // computed: a key is saved
 }
+// How a reply's steps read: every step, the latest few (older ones fading), or one line with the
+// count. Resolved per reply in src/shared/steps.ts: the agent's own, else the workspace's, else all.
+export type StepsMode = 'all' | 'latest' | 'one-line'
 
 export interface Settings {
   node?: { apps?: AgentApp[]; folders?: string[]; device?: string } // this computer lent to servers' Tucanos (core/node-server.ts): the apps and folders it lends, and its id there
@@ -614,6 +619,10 @@ export interface Settings {
   // The model's reasoning, dim and small under the steps, as it arrives. Unset: off, so nobody
   // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
   showThinking?: boolean
+  // How a reply's steps read: every one, the latest few, or a single line with the count
+  // (src/shared/steps.ts). Unset: every one, which is what the app has always done.
+  steps?: StepsMode
+  stepsLatest?: number // how many the 'latest' mode keeps; unset: STEPS_LATEST (20)
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on

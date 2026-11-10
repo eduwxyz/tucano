@@ -13,6 +13,7 @@ import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { saidAt } from '../../../shared/types'
 import { CUT, canContinue } from '../../../shared/run-progress'
+import { stepsModeFor, stepsWindow } from '../../../shared/steps'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -1749,9 +1750,14 @@ function useNow(on: boolean): number {
 }
 
 // One quiet line: what the agent is doing now (and for how long), or how many
-// steps it took. The steps themselves open on a click.
+// steps it took. The steps themselves open on a click — unless the person asked for
+// one line only, or for just the latest few (Settings › General, or one agent's own).
 export function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
+  // Every step (what the app has always done), the latest few, or one line with the count: the
+  // agent's own setting over the workspace's (src/shared/steps.ts).
+  const mode = useStore((s) => stepsModeFor(s.settings, message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
+  const keep = useStore((s) => s.settings.stepsLatest)
   // Open while the agent works, so its steps read as they go, unless the person closes it or turned
   // that off in Settings (several agents at once would fill the screen); closed after.
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
@@ -1767,15 +1773,26 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
     setSteerOpen(false)
     setSteerNote('')
   }
-  const open = toggled ?? (working && stepsOpen)
+  // One line is the whole point of 'one-line': there is nothing to open.
+  const mode = (useStore((s) => s.settings.stepsDisplay) ?? 'all') as string
+  const opens = mode !== 'one-line'
+  const open = opens && (toggled ?? (working && stepsOpen))
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
+  const { shown, hidden, fade } = stepsWindow(run.steps, mode, keep)
+  // The window keeps itself at the bottom as steps arrive: new ones come in, old ones fade out above.
+  const list = useRef<HTMLOListElement>(null)
+  useEffect(() => {
+    if (!open || mode !== 'latest') return
+    list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' })
+  }, [open, mode, shown.length])
 
   if (run.steps.length === 0 && !working) return null
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
   const failed = run.steps.filter((st) => st.status === 'error').length
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
+  const count = `${run.steps.length} ${L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}`
 
   return (
     <>
@@ -1962,8 +1979,7 @@ export function Thought({ message, working }: { message: Message; working: boole
         }}>
           {thought}
           {working && <span className="thought__caret" aria-hidden="true" />}
-        </div>
-      )}
+        </div>     )}
       <Thought message={message} working={working} />
     </div>
   )
@@ -2056,7 +2072,7 @@ export function RunBlock({ message }: { message: Message }): ReactNode {
   return <RunSteps message={message} />
 }
 
-function StepRow({ step }: { step: Step }): ReactNode {
+function StepRow({ step, dim: _dim = 0 }: { step: Step; dim?: number }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
   // A steer is not a prompt and not a tool: it is the person's direction for this reply, handed over
@@ -2078,7 +2094,7 @@ function StepRow({ step }: { step: Step }): ReactNode {
       </li>
     )
   return (
-    <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}`}>
+    <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}${dim > 0 ? ' step--fading' : ''}`} style={dim > 0 ? { opacity: dim } : undefined}>
       <span className="step__icon">
         {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'done' ? 'check' : 'x'} size={12} />}
       </span>

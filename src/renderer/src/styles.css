@@ -1669,8 +1669,7 @@ h3 {
 /* Their words, not a tool's arguments: the same row, in the font people read in. */
 .step--steer .step__input {
   font-family: var(--font);
-  font-size: 12.5px;
-}
+  font-size: 12.5px;}
 .step {
   display: flex;
   align-items: center;
