@@ -987,8 +987,8 @@ h3 {
   overflow: hidden;
   user-select: none;
 }
-/* Held, the light fills the button in 1.5s (linear: it's a clock) and the approval
-   goes on transitionend; let go and it drains back. */
+/* Held, the light fills the button in 1.5s (linear: it's a clock) and the component
+   approves when that same 1.5 s run out; let go and it drains back. */
 .btn--hold::before {
   content: '';
   position: absolute;
