@@ -52,6 +52,7 @@ import {
   AUTO_CONTINUES,
   routineCap,
   RUN_STALL_MINUTES,
+  TEAM_UP_DAYS,
   archiveAgent,
   setTab,
   saveSkill,
@@ -4096,8 +4097,7 @@ export function SettingsPage(): ReactNode {
             </Card>
           </SectionAnchor>
         )}
-        {on('workspace') && owner && <SectionAnchor id="workspace-danger" sections={structure}><WorkspaceDangerArea /></SectionAnchor>}
-      </div>
+        {on('workspace') && owner && <SectionAnchor id="workspace-danger" sections={structure}><WorkspaceDangerArea /></SectionAnchor>}      </div>
     </Page>
   )
 }
