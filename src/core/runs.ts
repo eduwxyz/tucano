@@ -2299,6 +2299,13 @@ ${note}`,
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason, decider)) return
     // Everyone who sees the card learns it's decided (and by whom) now, not after the call it allowed.
     emit({ type: 'approval', approval: db.approval(id)! })
+    // The reply the decision was holding is over: it asked, and it got an answer. Closing it here
+    // rather than after the call means a quit in the middle of that call can't leave it saying
+    // "waiting for you" with nothing left to wake it. A live reply keeps its run, which ends itself.
+    if (!this.controllers.has(ap.messageId)) {
+      const waiting = db.message(ap.messageId)
+      if (waiting?.run?.status === 'waiting_approval') this.update(waiting, { run: { ...waiting.run, status: 'done' } })
+    }
     if (decider) db.addActivity({ personId: decider, kind: 'approval.decided', target: id, detail: { decision, agentId: ap.agentId, connector: ap.connectorName, tool: ap.tool } })
     const owner = db.agent(ap.agentId)
     // A runner (Composio's) is never allowed for good itself: "always" allows the inner tools that asked, each on its own.
@@ -2596,6 +2603,32 @@ ${note}`,
 
   async expireApprovals(): Promise<void> {
     for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
+  }
+
+  // A decision written while the app was quitting (or while the approved call was running) leaves
+  // the reply at waiting_approval for good: the approval is no longer pending, so decide() ignores
+  // it, expireApprovals() skips it and nothing else looks. Closing those at every start is the only
+  // way the "?" on the DM can come off again.
+  async settleDecidedRuns(): Promise<number> {
+    const { db } = this.deps
+    let n = 0
+    for (const m of db.messagesWithRun(['waiting_approval'])) {
+      if (m.run?.status !== 'waiting_approval' || this.controllers.has(m.id)) continue
+      const ap = db.approvalForMessage(m.id)
+      if (!ap || ap.state === 'pending') continue // still the person's to answer
+      const label = ap.state === 'approved' ? L('Aprovado', 'Approved') : ap.state === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
+      const detail = ap.outcome ?? L('A decisão ficou salva, mas a resposta nunca terminou de ser gravada.', 'The decision was saved, but the reply never finished saving.')
+      this.update(m, {
+        run: {
+          ...m.run,
+          status: 'done',
+          steps: [...m.run.steps, { id: randomUUID(), label, detail, status: ap.state === 'approved' ? 'done' : 'error' }]
+        }
+      })
+      n++
+      this.deps.emit({ type: 'approval', approval: db.approval(ap.id)! })
+    }
+    return n
   }
 
   // A question whose decisions `by` may answer on the card now: theirs (or one they may answer for

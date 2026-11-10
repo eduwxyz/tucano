@@ -16,11 +16,15 @@ import { Updates } from './updates'
 import { Workspaces } from './workspaces'
 import { homePhone } from './home-phone'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
-import { autostartEntry, autostartFile, onPath } from '../core/platform'
+import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
 import { proxyFromPac } from '../core/network'
 
 const NAME = 'Tucano'
 app.setName(NAME)
+// Set here and not in the menu entry, so it holds when an update restarts the app. Someone who
+// chose a store with --password-store keeps it.
+const passwordStore = electronPasswordStore()
+if (passwordStore && !app.commandLine.hasSwitch('password-store')) app.commandLine.appendSwitch('password-store', passwordStore)
 // The AppImage's runtime sets ARGV0 for the app alone, but everything the app starts would inherit
 // it. In a login shell with mise, that made `mise activate zsh` open the AppImage again, and the
 // shell never came back.
