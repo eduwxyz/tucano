@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
-import type { CoreEvent, Message } from '../src/shared/types'
+import type { CoreEvent } from '../src/shared/rpc'
+import type { Message } from '../src/shared/types'
 
 // The store against a fake core: what it asks for, and the events it gets back.
 let emit: (e: CoreEvent) => void = () => {}
