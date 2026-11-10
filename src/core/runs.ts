@@ -26,8 +26,8 @@ import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
-import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
-import { JEV_MODEL, recommendOptions, routeJev } from './jev'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, startsTicked, type Answer, type Decision } from '../shared/questions'
+import { JEV_MODEL, recommendOptions, routeJev, stepsWorthDoing } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -202,6 +202,41 @@ export const askUserFor = (names: string[]): ToolDef =>
           properties: { ...ASK_USER.inputSchema.properties, para: { type: 'string', description: L('O nome da pessoa a quem perguntar (opcional): todas as decisões vão pra ela.', 'The name of the person to ask (optional): every decision goes to them.') } }
         }
       }
+
+// What the agent proposes as the work that comes after this reply: a card with a box per step,
+// every box ticked. It is ask_user's multiple choice turned around: there, nothing is picked; here,
+// the point is that nobody has to go hunting for the follow-up inside the text.
+export const NEXT_STEPS: ToolDef = {
+  name: 'next_steps',
+  get description() {
+    return L(
+      `Põe o que você propõe como próximo passo num card de caixas de marcar, todas marcadas, pra ninguém perder no meio do texto o que você sugeriu. Use quando a sua resposta termina propondo de 1 a ${MAX_STEPS} caminhos de continuação: um label curto por passo e, quando ajudar, uma description. A pessoa desmarca o que não quer e manda o resto de volta como a próxima mensagem; o que ela deixar marcado é o que você faz em seguida. Não use pra perguntar uma decisão (isso é ask_user) nem pra uma coisa só. Depois de chamar, encerre a resposta com no máximo uma frase, sem repetir os passos.`,
+      `Puts what you propose as the next step into a card of checkboxes, all ticked, so nothing you suggested gets lost in the middle of the text. Use it when your reply ends by proposing 1 to ${MAX_STEPS} ways to go on: a short label per step and, when it helps, a description. The person unticks what they don't want and sends the rest back as the next message; whatever stays ticked is what you do next. Don't use it to ask a decision (that's ask_user) or for a single thing. After calling it, end your reply with one sentence at most, without repeating the steps.`
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        steps: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_STEPS,
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', maxLength: MAX_LABEL_LENGTH, description: L('Curto: o passo, como aparece na caixa.', 'Short: the step, as it shows on the box.') },
+              description: { type: 'string', maxLength: MAX_DESCRIPTION_LENGTH, description: L('Opcional: o que esse passo faz, em uma linha.', 'Optional: what that step does, in one line.') }
+            },
+            required: ['label']
+          }
+        },
+        question: { type: 'string', maxLength: MAX_QUESTION_LENGTH, description: L('Opcional: o título do card. Sem ele: "Por onde eu sigo?".', 'Optional: the card’s title. Without it: "What comes next?".') }
+      },
+      required: ['steps']
+    }
+  }
+}
 
 // A DM's person saying the agent may ask someone else ("sim", "pode", "yes"); anything else is a no.
 const YES = /^\s*(sim|s|pode( sim)?|ok(ay)?|claro|autorizo|yes|y|sure|go ahead)\b/i
@@ -1249,7 +1284,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, NEXT_STEPS.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1338,6 +1373,7 @@ ${note}`,
     const others = db.people()
     const ownTools: ToolDef[] = [
       askUserFor(others.map((p) => (p.id === db.ownerId() ? ownerName || p.name : p.name))),
+      NEXT_STEPS,
       ...(accessTool ? [accessTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
@@ -1502,6 +1538,39 @@ ${note}`,
             L(
               `Pedido [${codeOf(d)}] entregue a ${to.name} ${inPlace(channel)}: ele já começou. A resposta volta pra cá e você é chamado. Não espere nem confira: se não há mais nada a pedir, encerre dizendo a ${settings.workspaceName} o que pediu a quem e onde.`,
               `Request [${codeOf(d)}] delivered to ${to.name} ${inPlace(channel)}: they have started. The answer comes back here and you are called. Do not wait or check: if there is nothing else to ask, end by telling ${settings.workspaceName} what you asked of whom and where.`
+            )
+          )
+        }
+
+        if (name === NEXT_STEPS.name) {
+          const parsed = parseNextSteps(args)
+          if ('error' in parsed) return textResult(parsed.error, true)
+          if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
+          let decision = parsed.decision
+          const count = decision.options?.length ?? 0
+          // Turned on in the settings: Jev says which of these are worth doing now and only those
+          // start ticked. Unlike the pill on a question, this one waits: the ticks are the card, and
+          // it's a couple of small calls, not a turn.
+          if (settings.jevNextSteps && count > 1) {
+            const key = await this.deps.jev?.key()
+            if (key) {
+              try {
+                const r = await stepsWorthDoing({ key, decision, context: msg.text, fetch: this.deps.jev?.fetch })
+                // None worth doing is not a card with nothing ticked: that would throw the whole list away.
+                if (!('error' in r) && r.ticked.length > 0 && r.ticked.length < count) decision = { ...decision, ticked: r.ticked }
+              } catch {
+                // every step stays ticked
+              }
+            }
+          }
+          questions = [decision]
+          question = questionsAsText(questions)
+          askedTo = requester
+          addSteps({ id: randomUUID(), label: L('Propôs os próximos passos', 'Proposed the next steps'), detail: `${count} · ${startsTicked(decision).length} ${L('marcados', 'ticked')}`, status: 'done' })
+          return textResult(
+            L(
+              `Os próximos passos estão no card, com as caixas já marcadas. Encerre sua resposta agora com no máximo uma frase, sem repetir os passos. O que ficar marcado volta como a sua próxima tarefa, na próxima mensagem.`,
+              `The next steps are in the card, with the boxes already ticked. End your reply now with one sentence at most, without repeating the steps. Whatever stays ticked comes back as your next task, in the next message.`
             )
           )
         }

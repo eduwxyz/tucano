@@ -13,6 +13,8 @@ export interface Decision {
   question: string
   kind: DecisionKind
   options?: DecisionOption[]
+  nextSteps?: true // a list of next steps, not a question: every option starts ticked and the card sends them as a to-do
+  ticked?: number[] // which options start ticked when it isn't all of them (Jev said which are worth doing now)
 }
 export interface Answer {
   chosen?: number[] // indexes into the options
@@ -31,6 +33,9 @@ export const MAX_QUESTIONS = 4
 export const MIN_OPTIONS = 1
 // The card always adds "Something else" (a free answer) after the agent's options: 4 rows at most.
 export const MAX_OPTIONS = 3
+// A next-steps list is read as a to-do, not as a menu: it takes more lines than a question's
+// options, and it has no "Something else" row pushing the count down.
+export const MAX_STEPS = 6
 // A decision is read at a glance: the context goes in the reply's text, not here.
 export const MAX_QUESTION_LENGTH = 200
 export const MAX_LABEL_LENGTH = 80
@@ -47,6 +52,17 @@ export function questionsOf(run: Run | undefined): Decision[] {
 // A question that was just asked. Answering part of it saves the message again, which asks nothing new.
 export function isNewQuestion(message: Message): boolean {
   return message.run?.status === 'waiting_input' && !message.run.answers && questionsOf(message.run).length > 0
+}
+
+// A list of next steps: the card reads as a to-do, and it starts with everything ticked (or with
+// the ones Jev found worth doing now) — the opposite of a question, where nothing is picked.
+export const isNextSteps = (question: Decision): boolean => question.nextSteps === true
+
+export function startsTicked(question: Decision): number[] {
+  if (!question.nextSteps) return []
+  const all = (question.options ?? []).map((_, i) => i)
+  const picked = question.ticked
+  return picked ? all.filter((i) => picked.includes(i)) : all
 }
 
 const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
@@ -96,6 +112,43 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Deci
     questions.push({ question, kind, options })
   }
   return { questions }
+}
+
+// What an agent proposes with next_steps: one multiple decision, every option ticked from the
+// start. Same limits as a decision's options, but more of them and no "Something else" row: an
+// extra step is something the person writes in the message box.
+export function parseNextSteps(args: Record<string, unknown>): { decision: Decision } | { error: string } {
+  const question = trimmed(args['question'])
+  if (question.length > MAX_QUESTION_LENGTH) return { error: tooLong(question) }
+  const list = args['steps']
+  if (!Array.isArray(list) || list.length === 0) return { error: L('Faltaram os próximos passos: mande de 1 a ' + MAX_STEPS + ' em steps.', 'Missing the next steps: send 1 to ' + MAX_STEPS + ' of them in steps.') }
+  if (list.length > MAX_STEPS) return { error: L(`No máximo ${MAX_STEPS} próximos passos: os que não couberem vão no texto da sua resposta.`, `At most ${MAX_STEPS} next steps: the ones that don't fit go in your reply's text.`) }
+  const options: DecisionOption[] = []
+  const seen = new Set<string>()
+  for (const item of list as Record<string, unknown>[]) {
+    const label = trimmed(typeof item === 'string' ? item : item?.['label'])
+    const description = trimmed(typeof item === 'string' ? '' : item?.['description'])
+    if (!label) return { error: L('Todo próximo passo precisa de um label.', 'Every next step needs a label.') }
+    if (label.length > MAX_LABEL_LENGTH || description.length > MAX_DESCRIPTION_LENGTH)
+      return {
+        error: L(
+          `Label de até ${MAX_LABEL_LENGTH} caracteres e description de até ${MAX_DESCRIPTION_LENGTH}; o detalhe vai no texto da sua resposta.`,
+          `Label up to ${MAX_LABEL_LENGTH} characters and description up to ${MAX_DESCRIPTION_LENGTH}; the detail goes in your reply's text.`
+        )
+      }
+    const key = label.toLowerCase()
+    if (seen.has(key)) return { error: L(`"${label}" está duas vezes na lista: junte os dois num só passo.`, `"${label}" is in the list twice: put both in one step.`) }
+    seen.add(key)
+    options.push(description ? { label, description } : { label })
+  }
+  return {
+    decision: {
+      question: question || L('Por onde eu sigo?', 'What comes next?'),
+      kind: 'multiple',
+      options,
+      nextSteps: true
+    }
+  }
 }
 
 export function isAnswered(answer: Answer | null | undefined): boolean {

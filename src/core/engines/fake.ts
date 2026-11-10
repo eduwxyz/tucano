@@ -175,6 +175,18 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           ...(para ? { para } : {})
         })
         reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Te mandei duas decisões.'
+      } else if (turn.mcpUrl && /pr[oó]ximos passos/i.test(last)) {
+        // "os próximos passos": a to-do card, every box ticked, one of them plainly optional.
+        const r = await callTool(turn.mcpUrl, 'next_steps', {
+          question: 'O que vem agora?',
+          steps: [
+            { label: 'Rodar a suíte inteira', description: 'o que já está escrito' },
+            { label: 'Traduzir os rótulos novos' },
+            { label: 'Escrever o teste do card' },
+            { label: 'Publicar as capturas', description: 'só quando o resto estiver verde' }
+          ]
+        })
+        reply = textOf(r).includes('card') ? 'Deixei os próximos passos no card.' : textOf(r)
       } else if (turn.mcpUrl && /pergunte (?:a|à|pra|para) (\p{L}+)/iu.test(last)) {
         // "pergunte a Bia": a question to someone in particular (a Tucano with people).
         const r = await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?', para: /pergunte (?:a|à|pra|para) (\p{L}+)/iu.exec(last)![1]! })
