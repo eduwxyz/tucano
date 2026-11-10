@@ -48,7 +48,11 @@ export function fileNameFor(title: string, url: string): string {
     .trim()
     .replace(/^[.\s]+/, '') // a title that starts with dots stays a name, not a hidden file
     .slice(0, 80)
-  return `${base || 'image'}${ext}`
+  // A title that already ends in the picture's own extension keeps one, not two: a picture called
+  // "pic.png" is saved as "pic.png".
+  const named = base || 'image'
+  const stem = named.toLowerCase().endsWith(ext) ? named.slice(0, -ext.length) : named
+  return `${stem || 'image'}${ext}`
 }
 
 function safeDecode(s: string): string {
@@ -97,4 +101,19 @@ export async function imageBytesOf(
   } catch {
     return null
   }
+}
+
+// A name already taken in the folder gets " (2)" before its extension, then " (3)": saving without a
+// dialog never replaces a file that is already there. `taken` is the folder's own answer, so this
+// stays a pure question about names.
+export function freeName(name: string, taken: (candidate: string) => boolean): string {
+  if (!taken(name)) return name
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${stem} (${n})${ext}`
+    if (!taken(candidate)) return candidate
+  }
+  return `${stem} (${Date.now()})${ext}`
 }

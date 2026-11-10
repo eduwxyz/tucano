@@ -6,7 +6,9 @@ import { useSyncExternalStore } from 'react'
 // so it offers the two ways out of the app; a picture in a reply also offers going back in, attached
 // to what you're about to ask.
 export type ImageSurface = 'reply' | 'gallery'
-export type ImageAction = 'save' | 'clipboard' | 'prompt'
+// `save-here` is the one click: into the folder the last picture went to, no dialog. It only exists
+// once something has been saved, because until then there is no folder to name in the entry.
+export type ImageAction = 'save-here' | 'save' | 'clipboard' | 'prompt'
 
 export interface MenuTarget {
   url: string
@@ -21,7 +23,21 @@ export interface OpenImageMenu {
   y: number
 }
 
-export const imageActions = (surface: ImageSurface): ImageAction[] => (surface === 'gallery' ? ['save', 'clipboard'] : ['save', 'clipboard', 'prompt'])
+export const imageActions = (surface: ImageSurface, hasFolder = false): ImageAction[] => {
+  const saving: ImageAction[] = hasFolder ? ['save-here', 'save'] : ['save']
+  return surface === 'gallery' ? [...saving, 'clipboard'] : [...saving, 'clipboard', 'prompt']
+}
+
+// The folder as a menu entry says it: its own name, capitalised — `C:\Users\theap\Downloads` reads
+// `Downloads`, a folder called `shots` reads `Shots`. A drive on its own has no name of its own, so
+// it says what Windows calls it.
+export function folderLabel(dir: string): string {
+  const trimmed = dir.replace(/[\\/]+$/, '')
+  const last = trimmed.split(/[\\/]/).pop() ?? ''
+  if (!last) return ''
+  if (/^[A-Za-z]:$/.test(last)) return `Local Disk (${last.toUpperCase()})`
+  return last.charAt(0).toUpperCase() + last.slice(1)
+}
 
 // What the save dialog is offered as a name: the title, and the extension the picture already has.
 export function imageFileName(title: string, url: string): string {
@@ -31,8 +47,11 @@ export function imageFileName(title: string, url: string): string {
     .trim()
     .replace(/^[.\s]+/, '') // a title that starts with dots stays a name, not a hidden file
     .slice(0, 80)
-  const ext = /\.(png|jpe?g|gif|webp|avif|svg)$/i.exec(url.split('?')[0] ?? '')
-  return `${asked || 'image'}${(ext?.[0] ?? '.png').toLowerCase()}`
+  const ext = (/\.(png|jpe?g|gif|webp|avif|svg)$/i.exec(url.split('?')[0] ?? '')?.[0] ?? '.png').toLowerCase()
+  // One extension, not two: a picture whose title already says "pic.png" is saved as "pic.png".
+  const named = asked || 'image'
+  const stem = named.toLowerCase().endsWith(ext) ? named.slice(0, -ext.length) : named
+  return `${stem || 'image'}${ext}`
 }
 
 // ---------- the menu's state ----------

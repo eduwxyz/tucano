@@ -14,7 +14,7 @@ import { Browsers } from './browser'
 import { Servers } from './servers'
 import { thisDevice } from './redeem'
 import { serverNote } from '../shared/servers'
-import { artifactImagePath, fileNameFor, imageBytesOf, mimeOfImage } from './image-bytes'
+import { artifactImagePath, fileNameFor, freeName, imageBytesOf, mimeOfImage } from './image-bytes'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -742,27 +742,51 @@ const imageBytes = (url: unknown): Promise<Buffer | null> =>
 
 ipcMain.handle('image:save', async (event, arg: unknown) => {
   if (!fromApp(event)) return null
-  const { url, title } = (arg ?? {}) as { url?: unknown; title?: unknown }
+  const { url, title, dir, dialog: wantsDialog } = (arg ?? {}) as { url?: unknown; title?: unknown; dir?: unknown; dialog?: unknown }
   const bytes = await imageBytes(url)
   if (!bytes) return { result: 'failed' as const }
   const name = fileNameFor(typeof title === 'string' ? title : '', String(url))
+  const folder = typeof dir === 'string' ? dir : ''
+  const win = BrowserWindow.fromWebContents(event.sender)
+  // One click, no dialog: into the folder the last picture went to. A folder that has gone is said
+  // out loud (a drive unplugged, a share down) so the page can open the dialog instead of saving
+  // into nowhere, and a name already there gets a number rather than replacing it.
+  if (folder && wantsDialog !== true) {
+    if (!isFolder(folder)) return { result: 'missing_folder' as const, folder }
+    try {
+      const target = join(folder, freeName(name, (candidate) => existsSync(join(folder, candidate))))
+      writeFileSync(target, bytes)
+      return { result: 'saved' as const, path: target, folder }
+    } catch {
+      return { result: 'failed' as const }
+    }
+  }
   const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
   const opts = {
     title: L('Salvar imagem', 'Save image'),
-    defaultPath: join(app.getPath('downloads'), name),
+    // The dialog opens where the last picture went, so choosing another folder is one step from there.
+    defaultPath: folder ? join(folder, name) : join(app.getPath('downloads'), name),
     buttonLabel: L('Salvar', 'Save'),
     filters: [{ name: L('Imagem', 'Image'), extensions: [ext] }]
   }
-  const win = BrowserWindow.fromWebContents(event.sender)
   const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
   if (r.canceled || !r.filePath) return { result: 'cancelled' as const }
   try {
     writeFileSync(r.filePath, bytes)
-    return { result: 'saved' as const, path: r.filePath }
+    // Where it landed is where the next one goes in one click — a folder made in the dialog too.
+    return { result: 'saved' as const, path: r.filePath, folder: dirname(r.filePath) }
   } catch {
     return { result: 'failed' as const }
   }
 })
+
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
 
 // "Copy to prompt": the picture goes back into the field as an attachment, so the page needs its bytes.
 ipcMain.handle('image:read', async (event, arg: unknown) => {
