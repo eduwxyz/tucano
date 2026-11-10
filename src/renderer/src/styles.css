@@ -2353,6 +2353,20 @@ h3 {
   flex-shrink: 0;
 }
 
+/* A three-state switch (Global · On · Off) beside a sentence needs more room than a toggle: in a
+   narrow card it drops to its own line, right-aligned, instead of squeezing the sentence into a
+   column of single words (a 900 px window left it 70 px wide and fourteen lines tall). */
+.key-row--switch {
+  flex-wrap: wrap;
+}
+.key-row--switch .grow {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.key-row--switch .segmented {
+  margin-left: auto;
+}
+
 /* An error arrives calm: it rises in on a red tint that fades, no shake. */
 .note--error {
   color: var(--danger);
