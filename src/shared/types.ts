@@ -448,6 +448,9 @@ export interface Message {
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
   title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
+  // A prompt of mine waiting its turn in a conversation that was already answering: 'queue' while it
+  // waits, unset once its reply goes. Kept in the database, so it outlives a restart (runs.ts, resumeQueued).
+  sendMode?: SendMode
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
