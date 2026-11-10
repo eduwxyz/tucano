@@ -9,6 +9,7 @@ import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { saidAt } from '../../../shared/types'
+import { stepsModeFor, stepsWindow } from '../../../shared/steps'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -1272,74 +1273,109 @@ function useNow(on: boolean): number {
 }
 
 // One quiet line: what the agent is doing now (and for how long), or how many
-// steps it took. The steps themselves open on a click.
+// steps it took. The steps themselves open on a click — unless the person asked for
+// one line only, or for just the latest few (Settings › General, or one agent's own).
 export function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
+  // Every step (what the app has always done), the latest few, or one line with the count: the
+  // agent's own setting over the workspace's (src/shared/steps.ts).
+  const mode = useStore((s) => stepsModeFor(s.settings, message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
+  const keep = useStore((s) => s.settings.stepsLatest)
   // Open while the agent works, so its steps read as they go, unless the person closes it or turned
   // that off in Settings (several agents at once would fill the screen); closed after.
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
-  const open = toggled ?? (working && stepsOpen)
+  // One line is the whole point of 'one-line': there is nothing to open.
+  const opens = mode !== 'one-line'
+  const open = opens && (toggled ?? (working && stepsOpen))
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
+  const { shown, hidden, fade } = stepsWindow(run.steps, mode, keep)
+  // The window keeps itself at the bottom as steps arrive: new ones come in, old ones fade out above.
+  const list = useRef<HTMLOListElement>(null)
+  useEffect(() => {
+    if (!open || mode !== 'latest') return
+    list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' })
+  }, [open, mode, shown.length])
 
   if (run.steps.length === 0 && !working) return null
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
   const failed = run.steps.filter((st) => st.status === 'error').length
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
+  const count = `${run.steps.length} ${L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}`
 
-  return (
-    <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
-      <button className="steps__toggle" onClick={() => setOpen(!open)}>
-        {working ? (
-          <span className="steps__pulse" />
-        ) : justDone ? (
-          <span className="steps__done">
-            <Icon name="check" size={12} />
-          </span>
-        ) : (
-          <span className="steps__chev">
-            <Icon name="chevron" size={12} />
-          </span>
-        )}
-        {working ? (
-          <span className="shimmer">
-            {current
+  const line = (
+    <>
+      {working ? (
+        <span className="steps__pulse" />
+      ) : justDone ? (
+        <span className="steps__done">
+          <Icon name="check" size={12} />
+        </span>
+      ) : (
+        <span className="steps__chev">
+          <Icon name="chevron" size={12} />
+        </span>
+      )}
+      {working ? (
+        <span className="shimmer">
+          {/* One line: what it's doing is the count going up, not the label of the step. */}
+          {mode === 'one-line'
+            ? `${count}…`
+            : current
               ? `${current.label}…`
               : now - message.at > 60_000
                 ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
                 : run.steps.length === 0
                   ? L('Lendo o pedido…', 'Reading the request…')
                   : L('Pensando…', 'Thinking…')}
-          </span>
-        ) : (
-          <span className="steps__summary">
-            {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
-            {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
-            {total > 0 && ` · ${duration(total)}`}
-          </span>
-        )}
-        {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
-        {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
-        {working && (
-          <span
-            className="btn btn--xs btn--ghost steps__stop"
-            role="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              stopRun(message.id)
-            }}
-          >
-            <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
-          </span>
-        )}
-      </button>
+        </span>
+      ) : (
+        <span className="steps__summary">
+          {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
+          {count}
+          {total > 0 && ` · ${duration(total)}`}
+        </span>
+      )}
+      {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
+      {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
+      {working && (
+        <span
+          className="btn btn--xs btn--ghost steps__stop"
+          role="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            stopRun(message.id)
+          }}
+        >
+          <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
+        </span>
+      )}
+    </>
+  )
+
+  return (
+    <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''} steps--${mode}`}>
+      {opens ? (
+        <button className="steps__toggle" onClick={() => setOpen(!open)}>
+          {line}
+        </button>
+      ) : (
+        <div className="steps__toggle steps__toggle--line">
+          {line}
+        </div>
+      )}
       {open && (
-        <ol className="steps__list">
-          {run.steps.map((st) => (
-            <StepRow key={st.id} step={st} />
+        <ol ref={list} className="steps__list">
+          {hidden > 0 && (
+            <li className="steps__earlier">
+              {L(`${hidden} ${hidden === 1 ? 'passo' : 'passos'} antes destes`, `${hidden} earlier ${hidden === 1 ? 'step' : 'steps'}`)}
+            </li>
+          )}
+          {shown.map((st, i) => (
+            <StepRow key={st.id} step={st} dim={i < fade ? 0.2 + (0.8 * i) / fade : 0} />
           ))}
         </ol>
       )}
@@ -1367,11 +1403,12 @@ export function Thought({ message, working }: { message: Message; working: boole
   )
 }
 
-function StepRow({ step }: { step: Step }): ReactNode {
+// `dim`: how far into the fade this step is (0: not fading) — the oldest ones of a window, on their way out.
+function StepRow({ step, dim = 0 }: { step: Step; dim?: number }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
   return (
-    <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}`}>
+    <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}${dim > 0 ? ' step--fading' : ''}`} style={dim > 0 ? { opacity: dim } : undefined}>
       <span className="step__icon">
         {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'done' ? 'check' : 'x'} size={12} />}
       </span>

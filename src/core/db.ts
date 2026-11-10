@@ -1,6 +1,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
+import { isStepsMode } from '../shared/steps'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
@@ -539,6 +540,9 @@ const COLUMNS: [string, string, string][] = [
   ['agents', 'action_rules', "TEXT NOT NULL DEFAULT '{}'"],
   ['agents', 'autonomy', 'TEXT'],
   ['agents', 'outside_guard', 'INTEGER'],
+  // How an agent's replies show their steps (src/shared/steps.ts): 'all', 'latest', 'one-line'.
+  // Empty: the workspace's setting, which out of the box is every step.
+  ['agents', 'steps_mode', 'TEXT'],
   // A phone's push handle (src/core/push.ts), on its device key: {"handle", "tag"} as JSON.
   ['person_keys', 'push', 'TEXT'],
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
@@ -826,6 +830,7 @@ export class Db {
       ...(str(r['action_rules']) && str(r['action_rules']) !== '{}' ? { actionRules: cleanRules(JSON.parse(str(r['action_rules']))) } : {}),
       ...(isAutonomy(r['autonomy']) ? { autonomy: r['autonomy'] } : {}),
       ...(r['outside_guard'] === 0 || r['outside_guard'] === 1 ? { outsideGuard: r['outside_guard'] === 1 } : {}),
+      ...(isStepsMode(r['steps_mode']) ? { steps: r['steps_mode'] } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
@@ -847,14 +852,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, action_rules, autonomy, outside_guard, archived, kind, custom_color, picture, avatar, wiki, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, action_rules, autonomy, outside_guard, steps_mode, archived, kind, custom_color, picture, avatar, wiki, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
            limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, autonomy = excluded.autonomy, outside_guard = excluded.outside_guard, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, autonomy = excluded.autonomy, outside_guard = excluded.outside_guard, steps_mode = excluded.steps_mode, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, isStepsMode(a.steps) ? a.steps : null, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
     this.db.prepare('UPDATE agents SET reports_to = ? WHERE id = ?').run(a.reportsTo || null, a.id)

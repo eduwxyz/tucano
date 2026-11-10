@@ -1432,6 +1432,48 @@ h3 {
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
 }
+/* One line: nothing opens, so the row is not a button and doesn't offer a chevron. */
+.steps__toggle--line {
+  cursor: default;
+}
+.steps__toggle--line:hover {
+  background: none;
+}
+/* The latest few (Settings › General): a window that keeps itself at the bottom, the older steps
+   fading into the top edge instead of pushing the new ones off the message. */
+.steps--latest .steps__list {
+  max-height: 232px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+}
+/* The three ways a reply can show its steps (Settings › General, and an agent's own page):
+   four buttons on a wide window, two lines of two on a narrow one. */
+.steps-pick {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.steps-pick button {
+  flex: 1 1 auto;
+}
+/* The number under the choices, only while the window is the chosen one. */
+.steps-keep {
+  gap: 8px;
+  margin-top: 10px;
+}
+.steps-keep input {
+  width: 72px;
+}
+.steps__earlier {
+  padding: 2px 0 4px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.step--fading {
+  transition: opacity var(--dur-base) var(--ease-out);
+}
 .step {
   display: flex;
   align-items: center;
