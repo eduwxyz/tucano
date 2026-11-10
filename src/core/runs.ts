@@ -2185,12 +2185,13 @@ ${note}`,
               routines: db.routines().filter((r) => seen.canSeeFrom(requester, r.conversationId)),
               approvals: db.approvals().filter((a) => seen.canSeeApproval(requester, a)),
               failures: db.recentFailures(now - 7 * 24 * 3_600_000).filter((m) => seen.canSeeFrom(requester, m.conversationId)),
+              skills: db.skills(),
               lastRun: (r) => {
                 const run = r.lastMessageId ? db.message(r.lastMessageId)?.run : undefined
                 return run && { status: run.status, ...(run.error ? { error: run.error } : {}) }
               },
               now
-            })
+            }, args['busca'])
           )
         }
 
@@ -2200,7 +2201,7 @@ ${note}`,
           const r =
             name === PROPOR_TIME.name
               ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
-              : proposalFrom(name, args, { agents: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
+              : proposalFrom(name, args, { agents: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, skills: db.skills(), pending: pendingAgents(msg.run) })
           if (!r.proposal) return textResult(r.error!, true)
           // Its cards as they are now: the person may have applied or discarded one meanwhile.
           msg.run = keepDecided(msg.run!, db.message(msg.id)?.run)
