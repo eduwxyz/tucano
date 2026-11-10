@@ -98,6 +98,8 @@ const count = (chain: RouteTarget[]): number => chain.length
 export function SmartRoutingSwitch(): ReactNode {
   const settings = useStore((s) => s.settings)
   const routing = settings.routing?.enabled === true
+  // The switch is in two places: here for everyone, and on each agent's page (On · Off · Global).
+  const onTheirOwn = useStore((s) => s.agents.filter((a) => a.smartRouting === true && !a.archived).length)
   const on = settings.routing ?? defaultRouting()
   const set = (enabled: boolean, rest: Partial<RoutingConfig> = {}): void => updateSettings({ routing: normalizeRouting({ ...on, ...rest, enabled }) })
   return (
@@ -107,12 +109,24 @@ export function SmartRoutingSwitch(): ReactNode {
         <Toggle on={routing} onChange={(v) => set(v)} />
       </div>
       <span className="hint">
-        {L(
-          'O Jev lê cada pedido e escolhe o modelo nos seus pools. Acrescenta a aba Rotas às Configurações; nenhum agente passa a usá-lo sozinho.',
-          'Jev reads each prompt and picks the model from your pools. Adds the Routing tab to Settings; no agent starts using it on its own.'
-        )}
+        {routing
+          ? L(
+              'O Jev lê cada pedido e escolhe o modelo nos seus pools, pra todo agente que não tiver a própria chave em Ligado ou Desligado. Um agente em Desligado na página dele usa o próprio modelo.',
+              'Jev reads each prompt and picks the model from your pools, for every agent that hasn’t set its own switch to On or Off. An agent set to Off on its page uses its own model.'
+            )
+          : L(
+              'Desligado: cada agente usa o próprio modelo, menos os que estiverem em Ligado na página deles.',
+              'Off: every agent uses its own model, except the ones set to On on their own page.'
+            )}
       </span>
-      {routing && (
+      {routing && onTheirOwn > 0 && (
+        <span className="hint">
+          {onTheirOwn === 1
+            ? L('1 agente está ligado só pra si e continua roteando com isto desligado.', '1 agent is set to on by itself and keeps routing with this off.')
+            : L(`${onTheirOwn} agentes estão ligados só pra si e continuam roteando com isto desligado.`, `${onTheirOwn} agents are set to on by themselves and keep routing with this off.`)}
+        </span>
+      )}
+      {(routing || onTheirOwn > 0) && (
         <p className="small">
           <a
             className="link"
@@ -142,6 +156,8 @@ export function SmartRoutingSwitch(): ReactNode {
 export function RoutingPane(): ReactNode {
   const settings = useStore((s) => s.settings)
   const config = useMemo(() => normalizeRouting(settings.routing ?? defaultRouting()), [settings.routing])
+  // Bots set to On by themselves route with the global switch off (their page has the switch).
+  const onTheirOwn = useStore((s) => s.agents.filter((a) => a.smartRouting === true && !a.archived).length)
   const [pool, setPool] = useState<Pool>('t2')
   const [role, setRole] = useState('') // '': the pool's own chain; otherwise a role's
   const save = (next: RoutingConfig): void => updateSettings({ routing: next })
@@ -150,6 +166,7 @@ export function RoutingPane(): ReactNode {
   const setRoleSetting = (r: string, patch: Partial<RoleSetting>): void => save({ ...config, roles: { ...config.roles, [r]: { ...config.roles[r]!, ...patch } } })
 
   const enabled = config.enabled
+  const active = enabled || onTheirOwn > 0
   const anyModel = POOLS.some((p) => config.pools[p].chain.length > 0) || Object.values(config.roles).some((r) => r.chain.length > 0)
   const roleIds = useMemo(() => Object.keys(config.roles), [config.roles])
   const rest = roleIds.filter((r) => !(FIRST_ROLES as readonly string[]).includes(r))
@@ -164,18 +181,33 @@ export function RoutingPane(): ReactNode {
           <p className="muted small">
             {enabled
               ? L('O Jev lê cada pedido e escolhe o modelo nos pools abaixo.', 'Jev reads each prompt and picks the model from the pools below.')
-              : L('Desligado: nada é roteado até você ligar em Agentes › Roteador.', 'Off: nothing is routed until you turn it on under Agents › Router.')}
+              : onTheirOwn === 1
+                ? L(
+                    'Desligado no geral: 1 agente está ligado só pra si e roteia por estes pools. Os outros usam o próprio modelo.',
+                    'Off globally: 1 agent is set to on by itself and routes through these pools. The rest use their own model.'
+                  )
+                : onTheirOwn > 1
+                  ? L(
+                      `Desligado no geral: ${onTheirOwn} agentes estão ligados só pra si e roteiam por estes pools. Os outros usam o próprio modelo.`,
+                      `Off globally: ${onTheirOwn} agents are set to on by themselves and route through these pools. The rest use their own model.`
+                    )
+                  : L(
+                      'Desligado: nada é roteado até você ligar em Modelos › Roteador, ou ligar num agente, na página dele.',
+                      'Off: nothing is routed until you turn it on under Models › Router, or on an agent, on its own page.'
+                    )}
           </p>
         </div>
-        <span className={`routing__status ${enabled ? 'is-on' : ''}`}>{enabled ? L('Ligado', 'On') : L('Desligado', 'Off')}</span>
+        <span className={`routing__status ${active ? 'is-on' : ''}`}>
+          {enabled ? L('Ligado', 'On') : onTheirOwn > 0 ? L(`Desligado · ${onTheirOwn} só pra si`, `Off · ${onTheirOwn} on their own`) : L('Desligado', 'Off')}
+        </span>
       </div>
 
-      {enabled && !settings.jevKey && (
+      {active && !settings.jevKey && (
         <Card title={L('Chave do TypeSafe', 'TypeSafe key')} lead={L('O Jev é do TypeSafe e usa a mesma chave dos outros classificadores do app.', 'Jev is TypeSafe’s and uses the same key as the app’s other classifiers.')}>
           <JevKey saved={!!settings.jevKey} />
         </Card>
       )}
-      {enabled && !anyModel && (
+      {active && !anyModel && (
         <p className="hint hint--warn">{L('Nenhum pool tem modelo ainda. Eles rodam no modelo do próprio agente até você pôr um.', 'No pool has a model yet. Until you add one, replies run on the agent’s own model.')}</p>
       )}
 
