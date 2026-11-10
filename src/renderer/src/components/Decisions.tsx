@@ -34,6 +34,7 @@ export type AskMode = 'answer' | 'view' | 'done'
 
 // `answer`: this person may answer it now. `view`: someone else's to answer (or not yet asked).
 // `done`: answered. `badge`: the state, as the head says it; `byline`: who asked whom (a team).
+// `recommended`: Jev's pick per decision, when it's turned on and has answered.
 // `children`: what goes under it (a hint, buttons).
 export function AskCard({
   id,
@@ -43,6 +44,7 @@ export function AskCard({
   badge,
   byline,
   answeredInText,
+  recommended,
   children
 }: {
   id: string
@@ -52,13 +54,14 @@ export function AskCard({
   badge: string
   byline?: string
   answeredInText?: boolean
+  recommended?: (number | null)[] | undefined
   children?: ReactNode
 }): ReactNode {
-  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} extra={children} />
+  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} recommended={recommended} extra={children} />
   return (
     <section className={`ask ask--${mode}`} aria-label={badge}>
       <Head badge={badge} byline={byline} done={mode === 'done'} />
-      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} /> : <Asked questions={questions} />}
+      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} /> : <Asked questions={questions} recommended={recommended} />}
       {children}
     </section>
   )
@@ -77,8 +80,14 @@ function Head({ badge, byline, done, nav }: { badge: string; byline?: string | u
   )
 }
 
+// Jev's pick, as a pill: the card still waits for the person, so it never takes the tick or the
+// keyboard. It's a hint on an option, not a state.
+function Recommended(): ReactNode {
+  return <span className="ask-option__pill">{L('Recomendado', 'Recommended')}</span>
+}
+
 // Someone else's question, waiting: each decision with its options, to read.
-function Asked({ questions }: { questions: Decision[] }): ReactNode {
+function Asked({ questions, recommended }: { questions: Decision[]; recommended?: (number | null)[] | undefined }): ReactNode {
   return (
     <ol className="ask-list">
       {questions.map((q, i) => (
@@ -87,8 +96,9 @@ function Asked({ questions }: { questions: Decision[] }): ReactNode {
           {q.options && (
             <span className="ask-list__options">
               {q.options.map((o, j) => (
-                <span key={j} className="ask-chip">
-                  {o.label}
+                <span key={j} className="ask-list__option">
+                  <span className="ask-chip">{o.label}</span>
+                  {recommended?.[i] === j && <Recommended />}
                 </span>
               ))}
             </span>
@@ -120,7 +130,7 @@ function Summary({ questions, answers, answeredInText }: { questions: Decision[]
   )
 }
 
-function Answering({ id, questions, saved, badge, byline, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; extra?: ReactNode }): ReactNode {
+function Answering({ id, questions, saved, badge, byline, recommended, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; recommended?: (number | null)[] | undefined; extra?: ReactNode }): ReactNode {
   // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
@@ -201,14 +211,14 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
       {step === 'review' ? (
         <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} sending={sending} />
       ) : (
-        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} />
+        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} recommended={recommended?.[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} />
       )}
       {extra}
     </section>
   )
 }
 
-function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void }): ReactNode {
+function DecisionStep({ draftId, question, answer, recommended, last, takeFocus, onAnswer }: { draftId: string; question: Decision; answer: Answer | null; recommended?: number | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void }): ReactNode {
   const options = question.options ?? []
   const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
@@ -287,7 +297,10 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: 
               <button key={i} role={multiple ? 'checkbox' : 'radio'} aria-checked={on} className={`ask-option ${on ? 'is-on' : ''} ${focus === i ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(i)} onClick={() => pick(i)}>
                 <span className="ask-option__key">{i + 1}</span>
                 <span className="ask-option__text">
-                  <span className="ask-option__label">{o.label}</span>
+                  <span className="ask-option__line">
+                    <span className="ask-option__label">{o.label}</span>
+                    {recommended === i && <Recommended />}
+                  </span>
                   {o.description && <span className="ask-option__detail">{o.description}</span>}
                 </span>
                 <span className={`ask-option__mark ${multiple ? 'is-box' : ''}`} aria-hidden>
@@ -364,7 +377,7 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
   const questions = questionsOf(message.run)
   if (!questions.length) return null
   const waiting = message.run?.status === 'waiting_input'
-  return <AskCard id={message.id} questions={questions} saved={message.run?.answers} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} />
+  return <AskCard id={message.id} questions={questions} saved={message.run?.answers} recommended={message.run?.recommended} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} />
 }
 
 // The message that sent a card's answers says nothing the card doesn't: in the conversation it
