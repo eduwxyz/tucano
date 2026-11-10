@@ -590,6 +590,30 @@ export interface CodexQuota {
   at: number
 }
 
+// One window of a provider's own quota, as the provider reports it (src/core/quotas.ts):
+// a percentage left, a wallet's money, or a count of requests against a cap.
+export interface QuotaWindow {
+  used?: number // 0..1, when the provider says how much is used
+  remaining?: number // in `unit`
+  limit?: number // what the window allows, in `unit`; a wallet has none
+  unit: '%' | 'usd' | 'req' | 'tokens'
+  resetsAt?: number
+}
+
+// A provider whose quota Tucano read from the person's own logins: the CLI's, or the ones
+// Pi and Hermes are signed in to. One column in Usage and limits.
+export interface ProviderQuota {
+  id: string // 'codex', 'opencode-go', 'zai', 'grok'…
+  label: string
+  via: string // where the login was found: 'Codex', 'Pi', 'Hermes', 'OpenCode'
+  plan?: string // what the provider calls the account, when it says
+  session?: QuotaWindow // the short window: 5 hours, or hourly
+  week?: QuotaWindow
+  month?: QuotaWindow
+  error?: string // why nothing could be read; the other providers still show
+  at: number // when this reading was taken
+}
+
 // Whether `now` falls in the quiet hours (which may cross midnight).
 export function inQuietHours(q: Settings['quietHours'], now = new Date()): boolean {
   if (!q || !validTime(q.from) || !validTime(q.to) || q.from === q.to) return false
