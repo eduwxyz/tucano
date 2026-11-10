@@ -406,6 +406,9 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+  // A prompt of mine waiting its turn in a conversation that was already answering: 'queue' while it
+  // waits, unset once its reply goes. Kept in the database, so it outlives a restart (runs.ts, resumeQueued).
+  sendMode?: SendMode
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
