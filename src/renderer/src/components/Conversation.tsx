@@ -1771,6 +1771,14 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
+  // The line beside the steps is a handle. In a long run the toggle is scrolled away above, and the
+  // line is where the eye already is, so a double-click on it folds the steps from there. Then the
+  // block, now one line, is brought into view: otherwise folding looks like the steps vanishing.
+  const box = useRef<HTMLDivElement>(null)
+  const fold = (): void => {
+    setOpen(false)
+    requestAnimationFrame(() => box.current?.scrollIntoView({ block: 'nearest' }))
+  }
 
   if (run.steps.length === 0 && !working) return null
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
@@ -1779,7 +1787,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
 
   return (
     <>
-      <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
+      <div ref={box} className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
         <button className="steps__toggle" onClick={() => setOpen(!open)}>
           {working ? (
             <span className="steps__pulse" />
