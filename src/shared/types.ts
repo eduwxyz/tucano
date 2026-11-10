@@ -505,6 +505,9 @@ export interface Settings {
     guest?: { by?: string } // someone just invited: their own short welcome first (who invited them)
   }
   folded?: string[] // the ids of what I folded in the sidebar
+  // Asks and Approvals out of the sidebar while nothing is waiting in them; unset: both always there
+  hideEmptyAsks?: boolean
+  hideEmptyApprovals?: boolean
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once

@@ -2758,6 +2758,27 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
+        {pane('geral') && (
+          <Card title={L('Barra lateral', 'Sidebar')}>
+            <div className="key-row">
+              <Icon name="ask" />
+              <div className="grow">
+                <strong>{L('Esconder Perguntas quando não há nenhuma', 'Hide Asks when there are none')}</strong>
+                <p className="muted small">{L('A entrada Perguntas sai da barra lateral enquanto nenhum agente te perguntou nada, e volta na primeira pergunta. Desligado, ela fica sempre lá.', 'The Asks entry leaves the sidebar while no agent is asking you anything, and comes back with the first question. Off, it is always there.')}</p>
+              </div>
+              <Toggle on={settings.hideEmptyAsks === true} onChange={(v) => updateSettings({ hideEmptyAsks: v })} />
+            </div>
+            <div className="key-row">
+              <Icon name="shield" />
+              <div className="grow">
+                <strong>{L('Esconder Aprovações quando não há nenhuma', 'Hide Approvals when there are none')}</strong>
+                <p className="muted small">{L(team ? 'A entrada Pra você sai da barra lateral enquanto nada espera por você, e volta na primeira aprovação ou pergunta. Desligado, ela fica sempre lá.' : 'A entrada Aprovações sai da barra lateral enquanto nada espera por você, e volta na primeira aprovação. Desligado, ela fica sempre lá.', team ? 'The For you entry leaves the sidebar while nothing waits on you, and comes back with the first approval or question. Off, it is always there.' : 'The Approvals entry leaves the sidebar while nothing waits on you, and comes back with the first approval. Off, it is always there.')}</p>
+              </div>
+              <Toggle on={settings.hideEmptyApprovals === true} onChange={(v) => updateSettings({ hideEmptyApprovals: v })} />
+            </div>
+          </Card>
+        )}
+
         {pane('geral') && admin && (
           <Card title={L('Atualizações', 'Updates')}>
             <UpdateSettings />
