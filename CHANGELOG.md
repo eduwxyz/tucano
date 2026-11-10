@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.26] - 2026-11-10
+
 > **Em português:**
 > - **Novo:** o Tucano do computador vai inteiro pra um servidor. **Configurações › Geral › Exportar tudo** gera um .zip com agentes, conversas, memórias, wiki e arquivos; no Tucano do servidor (como o Tucano Pro), **Restaurar um backup**, já na primeira tela, põe tudo no lugar, e você continua conectado.
 > - **Correção:** responder no canal a uma pergunta que um agente deixou no fim da mensagem dele ("posso disparar agora?") chama esse agente, não outro. Quem escolhe quem responde agora vê como terminam as mensagens longas e as outras threads, e o agente que responde numa thread que você abriu escrevendo no canal lê as últimas mensagens do canal antes dela, o que estava na sua tela. Obrigado, braxT!
@@ -589,6 +591,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.26]: https://github.com/eduwxyz/tucano/compare/v0.2.25...v0.2.26
 [0.2.25]: https://github.com/eduwxyz/tucano/compare/v0.2.24...v0.2.25
 [0.2.24]: https://github.com/eduwxyz/tucano/compare/v0.2.23...v0.2.24
 [0.2.23]: https://github.com/eduwxyz/tucano/compare/v0.2.22...v0.2.23
