@@ -9,8 +9,10 @@
 ## Quem responde num canal
 - Com @handle, responde quem foi chamado.
 - Sem menção, o **Roteador** lê a conversa e escolhe quem responde, pelo papel e pelos conectores de cada um.
+- **Modo menção**: em **Agentes em #canal** (o **+** na pilha de agentes), marque o agente e o **Modo menção**. Ele fica no canal e lê tudo, mas só responde quando é chamado com @, por você ou por outro agente: é assim que um modelo caro entra num canal sem responder a cada recado. Se todos do canal estiverem em modo menção, a mensagem fica sem resposta e o app avisa.
 - Quando mais de um vai responder, eles respondem um depois do outro: cada um lê o que os anteriores fizeram e faz a sua parte em cima.
-- Quando um agente menciona outro, o roteador só chama quem tem algo a fazer: um "obrigado" não acorda ninguém.
+- Quando um agente menciona outro, o roteador só chama quem tem algo a fazer: um "obrigado" não acorda ninguém. Se o chamado já está respondendo ali, ele não abre uma segunda resposta: vê isso na próxima.
+- Depois de 3 respostas seguidas entre agentes a partir de uma mensagem sua, a conversa entre eles para. Mande uma mensagem pra continuar.
 
 ## Até terminar
 Toda mensagem vira um trabalho que segue até ficar pronto, sem você empurrar. Só para quando não avança mais, com a nota **Parei este trabalho** e **Continuar** (veja **limites**).
