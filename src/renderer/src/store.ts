@@ -603,7 +603,8 @@ function apply(e: CoreEvent): void {
   if (e.type === 'delta') return stream(e.id, e.text)
   // The model's reasoning is kept only when this person asked for it (Settings › General): off, the
   // text never lands in memory, so nothing of it can be drawn or read back later.
-  if (e.type === 'thinking') return state.settings.showThinking === true ? streamThought(e.id, e.text) : undefined  if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
+  if (e.type === 'thinking') return state.settings.showThinking === true ? streamThought(e.id, e.text) : undefined
+  if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   if (e.type === 'tasks') return void (state.tasks && loadTasks())
   set((s) => {
     switch (e.type) {
