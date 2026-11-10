@@ -2324,8 +2324,10 @@ ${note}`,
             const said = handed.map(
               (n) => `${L(`${n.who} escreveu isto enquanto você trabalhava:`, `${n.who} wrote this while you were working:`)}\n\n${n.text}`
             )
+            // `kind: 'steer'`: in the chain it reads as the person's words, not as a tool call.
             addSteps({
               id: randomUUID(),
+              kind: 'steer',
               label: L('Recebeu o que você escreveu', 'Took in what you wrote'),
               detail: said.join(' · ').replace(/\s+/g, ' ').slice(0, 160),
               status: 'done'

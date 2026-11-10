@@ -1353,6 +1353,68 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
           ))}
         </ol>
       )}
+      {working && <SteerPill message={message} />}
+    </div>
+  )
+}
+
+// A steer, from the bottom of the chain: while the agent works, the person can say how to go on
+// without stopping it. What they write isn't a message of its own — it's handed to the reply at its
+// next tool call, and the chain says so, in the person's words (send mode `steer`, src/core/runs.ts).
+// With the reply already over, the same text is an ordinary prompt: nothing here holds it back.
+function SteerPill({ message }: { message: Message }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const typed = note.trim()
+  const steer = (text: string): void => {
+    sendMessage(message.conversationId, text, [], message.threadId, [], 'steer')
+    setOpen(false)
+    setNote('')
+  }
+  return (
+    <div className="steps__steer">
+      <button
+        className="steps__steer-pill"
+        aria-expanded={open}
+        title={L('Dizer como seguir, sem parar o que ele está fazendo', 'Say how to go on, without stopping what it is doing')}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
+      </button>
+      {open && (
+        <div className="steps__steer-note">
+          <textarea
+            aria-label={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
+            placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+            rows={2}
+            value={note}
+            autoFocus
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && typed) steer(typed)
+              if (e.key === 'Escape') {
+                setOpen(false)
+                setNote('')
+              }
+            }}
+          />
+          <div className="steps__steer-row">
+            <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => steer(typed)}>
+              {L('Orientar', 'Steer')}
+            </button>
+            <button
+              className="link"
+              onClick={() => {
+                setOpen(false)
+                setNote('')
+              }}
+            >
+              {L('Cancelar', 'Cancel')}
+            </button>
+            <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1360,6 +1422,18 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
 function StepRow({ step }: { step: Step }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
+  // A steer in the chain isn't a tool call: it's what the person wrote while the reply ran, and it
+  // reads as their words under the step it was handed over with.
+  if (step.kind === 'steer')
+    return (
+      <li className="step step--steer">
+        <span className="step__icon">
+          <Icon name="pointer" size={12} />
+        </span>
+        <span className="step__label">{step.label}</span>
+        {step.detail && <span className="step__steer">{step.detail}</span>}
+      </li>
+    )
   return (
     <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}`}>
       <span className="step__icon">

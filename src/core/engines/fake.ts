@@ -127,6 +127,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           'Rodei o SQL pela skill: Sudeste lidera, depois Sul e Nordeste. O segundo comando falhou: o token foi recusado.',
           'I ran the SQL through the skill: Southeast leads, then South and Northeast. The second command failed: the token was refused.'
         )
+      } else if (turn.mcpUrl && /sem pressa com a skill `([\w-]+)`/i.test(last)) {
+        // A run that is still working when the person steers it: a step, a pause long enough to write
+        // in (TUCANO_FAKE_HOLD_MS), then a second call, which is where the steer is handed over. Only
+        // the fake engine holds: it is how the steer pill can be shown at all (screens-steer-pill.mjs).
+        const [, nome] = /sem pressa com a skill `([\w-]+)`/i.exec(last)!
+        await callTool(turn.mcpUrl, 'ler_skill', { nome })
+        await new Promise((ok) => setTimeout(ok, Number(process.env['TUCANO_FAKE_HOLD_MS'] ?? 6000)))
+        await callTool(turn.mcpUrl, 'ler_skill', { nome })
+        reply = L('Segui a orientação e terminei.', 'I followed the steer and finished.')
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`
