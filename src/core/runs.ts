@@ -745,11 +745,16 @@ export class Runner {
     // at once a conversation may have (Settings › Agents › Replies); past that it waits its turn.
     const cap = await this.repliesAtOnce()
     if (responders.length === 0) {
-      if (conv.kind === 'dm' || may.length === 1) responders = may
-      else if (may.length > 1) {
-        this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id, true), mine, cap)
+      // Mention mode (a channel only): those agents read the room but are never picked for it, so
+      // they're neither offered to the router nor the one agent a channel answers through. A
+      // mention, mine or another agent's, still wakes them: that's the whole point of the mode.
+      const asked = this.answering(conv, may)
+      if (conv.kind === 'dm' || asked.length === 1) responders = asked
+      else if (asked.length > 1) {
+        this.runIn(conv.id, () => this.routeAndRun(conv, asked, replyIn, mine.id, true), mine, cap)
         return
-      }
+        return
+      } else if (may.length > 0) return this.nobodyAsked(conv.id, replyIn)
     }
     // An answer to a question asked on a job: the same job goes on (its brakes count from where they were).
     const jobOn = asked?.run?.job && this.jobOf(asked.run.job)?.state === 'running' ? asked.run.job : undefined
@@ -1153,6 +1158,26 @@ export class Runner {
 
   private members(conv: Conversation): Agent[] {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
+  }
+
+  // Who in the room answers a message nobody was mentioned in: in a channel, mention mode leaves
+  // an agent out of it (it still reads everything, and still answers a mention).
+  private answering(conv: Conversation, members: Agent[]): Agent[] {
+    if (conv.kind !== 'channel' || !conv.mentionOnly?.length) return members
+    const quiet = new Set(conv.mentionOnly)
+    return members.filter((a) => !quiet.has(a.id))
+  }
+
+  // A channel where every agent is in mention mode: nobody is picked, and it says why instead of
+  // leaving the message unanswered. Once per thread: the second message in a row doesn't repeat it.
+  private nobodyAsked(conversationId: string, threadId: string | undefined): void {
+    const hint = L(
+      'Ninguém responde aqui sem ser chamado: todos os agentes deste canal estão em **modo menção**. Chame com **@nome** ou peça a outro agente.',
+      'Nobody here answers unless mentioned: every agent in this channel is in **mention mode**. Call one with **@name**, or ask another agent.'
+    )
+    const seen = this.deps.db.recentMessages(conversationId, 3, threadId ?? null)
+    if (seen.some((m) => m.text === hint)) return
+    this.post(conversationId, threadId, hint)
   }
 
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
