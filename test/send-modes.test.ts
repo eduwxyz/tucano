@@ -181,6 +181,35 @@ describe('a prompt that arrives while a reply is running', () => {
   })
 })
 
+describe('a queued prompt outlives a restart', () => {
+  it('is kept as waiting while its reply has not started, and goes when the app opens again', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'person', id: db.ownerId() }, text: 'isto depois', at: Date.now(), sendMode: 'queue' })
+    expect(db.queuedMessages().map((m) => m.id)).toEqual(['m1']) // what a restart finds
+
+    // A fresh runner over the same database, as if the app had been closed and opened.
+    const r = runnerWith(fakeEngine('claude', { delayMs: 1 }))
+    r.resumeQueued()
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done'])
+    expect(agentMessages()[0]?.run?.replyTo).toBe('m1')
+    expect(db.queuedMessages()).toEqual([]) // the mark went with the reply, so it can't start twice
+  })
+
+  it('takes its turn after what is already running there', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'comece, demore 1 s')
+    db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'person', id: db.ownerId() }, text: 'e isto', at: Date.now(), sendMode: 'queue' })
+    r.resumeQueued() // the app reopened while a reply was still going
+    await r.idle()
+    expect(rec).toEqual(['start', 'end', 'start', 'end']) // never side by side
+  })
+})
+
 describe('a steer reaches the agent between two tool calls', () => {
   it('hands it over with the next tool result, and says so in a step', async () => {
     // Two calls, with a pause between them: the person writes during the pause.
