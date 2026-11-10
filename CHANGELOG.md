@@ -4,10 +4,28 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.25] - 2026-11-10
+
+> **Em português:**
+> - **Correção:** na wiki, trocar **Mudar uma página que já existe** pra **Automático** agora aprova também o que já estava em **Esperando você**, e a lista ganhou **Aprovar todas**.
+> - **Correção:** o botão **Segure pra aprovar** das ações de alto risco não perde mais o clique com o mouse antes de encher.
+> - **Correção:** uma resposta não fica mais presa em "esperando você" depois que a aprovação foi decidida; as que já estavam presas se fecham ao abrir o app.
+> - **Correção:** um limite mensal de 0 tokens num agente quer dizer sem limite, não limite já gasto.
+> - **Correção:** o Codex instalado pelo asdf consegue entrar e rodar no Tucano.
+> - **Correção:** no Linux, senhas ficam no chaveiro também no Hyprland, niri, sway e outros desktops que o Electron não conhece.
+> - **Correção:** o português do guia do app não vaza mais no que os agentes escrevem num workspace em inglês.
+> - **Melhoria:** o modo servidor tem ícone na aba do navegador, e o aviso de soltar arquivo diz "conteúdo", não só imagem.
+
 ### Fixed
 
-- **Passwords can be saved on Hyprland, niri, sway and other desktops Electron doesn't know.** Electron only tries the keyring on the desktops it knows; elsewhere it fell back to a fixed key even with a keyring open, so Tucano said "This Linux has no keyring open". The workaround, `--password-store=gnome-libsecret` in the menu entry, was lost whenever an update restarted the app. Tucano now asks for the Secret Service itself on every Linux desktop except KDE, which stays on KWallet. A `--password-store` of your own still wins.
+- **Passwords can be saved on Hyprland, niri, sway and other desktops Electron doesn't know.** Electron only tries the keyring on the desktops it knows; elsewhere it fell back to a fixed key even with a keyring open, so Tucano said "This Linux has no keyring open". The workaround, `--password-store=gnome-libsecret` in the menu entry, was lost whenever an update restarted the app. Tucano now asks for the Secret Service itself on every Linux desktop except KDE, which stays on KWallet. A `--password-store` of your own still wins. (#218, thanks @SchonsWeb)
 - **The wiki's waiting list empties.** Switching **Changing a page that exists** to **Automatic** only applied to the curator's next changes: what was already in **Waiting for you** stayed there, one card at a time to approve. Now switching to Automatic puts in what was waiting too, and the list has **Approve all** when there's more than one. Oldest first; a change that ran into a newer page (often the one approved just before it) is made again on that page and goes in; one whose passage is gone stays, to redo by hand. The weekly review's fixes stay in Care.
+- **The high-risk hold button keeps the press.** Swapping its label to "Hold…" shrank the button under the cursor, so the browser ended the hold 15 ms in and the approval never went. It keeps one label, takes pointer capture and approves on its own 1.5 s timer instead of a transitionend. (#232, thanks @apoapostolov)
+- **A reply no longer stays stuck waiting for an approval that was decided.** The reply is closed at the decision, before the approved call runs, and replies an earlier quit left behind are closed at start. (#246, thanks @apoapostolov)
+- **An agent's monthly limit of 0 means no ceiling,** not already spent; a reply still has its own cap. (#243, thanks @apoapostolov)
+- **Codex installed through asdf signs in and runs** with Tucano's own home: the shim's data folder and tool version go with it. (#265, thanks @andrelramos)
+- **The guide's Portuguese doesn't leak into what agents write** in an English workspace, and the wiki's prompts date things in the workspace's language. (#251, thanks @apoapostolov)
+- **Smaller things:** a favicon for server mode in the browser (#233, thanks @b7s), the drop overlay says content instead of image (#254, thanks @GianCdM), and the site's labels and phone layout (#213, thanks @pedrosatin).
 
 ## [0.2.24] - 2026-11-09
 
@@ -556,6 +574,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.25]: https://github.com/eduwxyz/tucano/compare/v0.2.24...v0.2.25
 [0.2.24]: https://github.com/eduwxyz/tucano/compare/v0.2.23...v0.2.24
 [0.2.23]: https://github.com/eduwxyz/tucano/compare/v0.2.22...v0.2.23
 [0.2.22]: https://github.com/eduwxyz/tucano/compare/v0.2.21...v0.2.22
