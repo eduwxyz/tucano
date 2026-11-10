@@ -22,6 +22,12 @@ declare global {
       }
       connect: () => void
       pickFolder: () => Promise<string | null>
+      // desktop only: a right-clicked picture, saved where the person says or put in the clipboard
+      image?: {
+        save: (url: string, title: string) => Promise<{ result: 'saved'; path: string } | { result: 'cancelled' | 'failed' }>
+        copy: (url: string) => Promise<boolean>
+        read: (url: string) => Promise<{ mime: string; data: string } | null>
+      }
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
       upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)
       onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void

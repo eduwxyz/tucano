@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
-import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, clipboard, ClipboardItem, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
@@ -11,6 +11,7 @@ import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
 import { serverNote } from '../shared/servers'
+import { artifactImagePath, fileNameFor, imageBytesOf, mimeOfImage } from './image-bytes'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -650,6 +651,70 @@ ipcMain.handle('pick-folder', async (event) => {
   const opts = { title: L('Escolher pasta', 'Choose a folder'), buttonLabel: L('Escolher', 'Choose'), properties: ['openDirectory' as const] }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
   return r.canceled ? null : (r.filePaths[0] ?? null)
+})
+
+// A picture right-clicked in a conversation: saved where the person says, or taken to the clipboard.
+// The page names it by the URL it was shown from; the bytes are read here (src/main/image-bytes.ts),
+// so a page never gets to ask for a file of its choosing.
+// A picture a reply links to on this computer, signed for the window by the core (src/core/local-paths).
+const localImagePath = (url: string): string | null => {
+  try {
+    return verifyLocalUrl(localKey, new URL(url))
+  } catch {
+    return null
+  }
+}
+const imageBytes = (url: unknown): Promise<Buffer | null> =>
+  typeof url === 'string' && url.length <= 8192
+    ? imageBytesOf(url, (u) => artifactImagePath(registry.selected().dataDir, u) ?? localImagePath(u))
+    : Promise.resolve(null)
+
+ipcMain.handle('image:save', async (event, arg: unknown) => {
+  if (!fromApp(event)) return null
+  const { url, title } = (arg ?? {}) as { url?: unknown; title?: unknown }
+  const bytes = await imageBytes(url)
+  if (!bytes) return { result: 'failed' as const }
+  const name = fileNameFor(typeof title === 'string' ? title : '', String(url))
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  const opts = {
+    title: L('Salvar imagem', 'Save image'),
+    defaultPath: join(app.getPath('downloads'), name),
+    buttonLabel: L('Salvar', 'Save'),
+    filters: [{ name: L('Imagem', 'Image'), extensions: [ext] }]
+  }
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+  if (r.canceled || !r.filePath) return { result: 'cancelled' as const }
+  try {
+    writeFileSync(r.filePath, bytes)
+    return { result: 'saved' as const, path: r.filePath }
+  } catch {
+    return { result: 'failed' as const }
+  }
+})
+
+// "Copy to prompt": the picture goes back into the field as an attachment, so the page needs its bytes.
+ipcMain.handle('image:read', async (event, arg: unknown) => {
+  if (!fromApp(event)) return null
+  const { url } = (arg ?? {}) as { url?: unknown }
+  const bytes = await imageBytes(url)
+  const mime = bytes ? mimeOfImage(bytes) : null
+  if (!bytes || !mime) return null
+  return { mime, data: bytes.toString('base64') }
+})
+
+ipcMain.handle('image:clipboard', async (event, arg: unknown) => {
+  if (!fromApp(event)) return false
+  const { url } = (arg ?? {}) as { url?: unknown }
+  const bytes = await imageBytes(url)
+  const mime = bytes ? mimeOfImage(bytes) : null
+  if (!bytes || !mime) return false
+  try {
+    await clipboard.write([new ClipboardItem({ [mime]: new Blob([new Uint8Array(bytes)], { type: mime }) })])
+    return true
+  } catch {
+    return false
+  }
 })
 
 function createWindow(): BrowserWindow {

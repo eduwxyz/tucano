@@ -5,6 +5,7 @@ import { Sidebar } from './components/Sidebar'
 import { SidebarResize } from './components/SidebarResize'
 import { ConversationView } from './components/Conversation'
 import { Lightbox } from './components/Lightbox'
+import { ImageMenu } from './components/ImageMenu'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage } from './components/Pages'
 import { UsagePage } from './components/Usage'
 import { MemoryPage } from './components/Memory'
@@ -122,6 +123,7 @@ export function App(): ReactNode {
       <NameModal />
       <WhatsNew />
       <Lightbox />
+      <ImageMenu />
       <Toasts />
       <CoreDown />
     </div>
