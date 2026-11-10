@@ -40,7 +40,7 @@ export function poolName(p: Pool): string {
     t2: L('Tier 2 · Comum', 'Tier 2 · Standard'),
     t3: L('Tier 3 · Forte', 'Tier 3 · High'),
     t4: L('Tier 4 · Premium', 'Tier 4 · Premium'),
-    t5: L('Tier 5 · Máximo', 'Tier 5 · Extra premium')
+    t5: L('Tier 5 · Ultra premium', 'Tier 5 · Ultra premium')
   }[p]
 }
 
@@ -176,13 +176,16 @@ export function RoutingPane(): ReactNode {
                 role="tab"
                 aria-selected={active}
                 className={`routing__pool ${active ? 'is-active' : ''}`}
+                aria-label={n ? `${poolName(p)} · ${n}` : `${poolName(p)} · ${L('sem modelo', 'not configured')}`}
                 onClick={() => {
                   setPool(p)
                   setRole('')
                 }}
               >
                 <span className="routing__pool-name">{poolName(p)}</span>
-                <span className={`routing__pool-count ${n ? '' : 'is-empty'}`}>{n ? n : L('Sem modelo', 'Not configured')}</span>
+                <span className={`routing__pool-count ${n ? '' : 'is-empty'}`} title={n ? undefined : L('Sem modelo', 'Not configured')}>
+                  {n}
+                </span>
               </button>
             )
           })}
