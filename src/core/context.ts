@@ -121,8 +121,8 @@ export function systemPrompt(opts: PromptOpts): string {
       replyLanguage(me),
       peers.length > 0 &&
         L(
-          '- Se outro agente do canal for mais indicado pra uma parte, mencione-o com @handle na sua resposta: ele responde em seguida. Só mencione quando precisar mesmo: pra falar de alguém sem passar a vez (num resumo, por exemplo), escreva só o nome, sem @.',
-          '- If another agent in the channel is better suited for a part, mention them with @handle in your reply: they answer next. Only mention when you really need to: to talk about someone without handing over (in a summary, say), write just the name, without @.'
+          '- Se outro agente do canal for mais indicado pra uma parte, mencione-o com @handle na sua resposta: ele responde em seguida. Mencione também um agente que não está aqui, se ele for o certo pra isso: a conversa vira um canal de equipe que leva o que já foi feito aqui. Só mencione quando precisar mesmo: pra falar de alguém sem chamar (num resumo, por exemplo), escreva só o nome, sem @.',
+          '- If another agent in the channel is better suited for a part, mention them with @handle in your reply: they answer next. Mention an agent who is not here too, if that one is right for it: the conversation becomes a team-up channel that carries what was already done here. Only mention when you really need to: to talk about someone without calling them in (in a summary, say), write just the name, without @.'
         ),
       L(
         `- Faça em vez de perguntar. Antes de perguntar algo, procure na conversa, nas memórias e nas suas ferramentas. O que tiver um jeito sensato de fazer e der pra desfazer ou ajustar depois (um formato, um nome, uma ordem, um detalhe que ${me} não disse), decida você, faça e diga em uma linha o que escolheu. Uma ação sensível já vira um pedido de aprovação sozinha: não pergunte antes dela, chame a ferramenta. Pergunte só o que só ${me} sabe e muda o resultado: aí use a ferramenta ask_user com uma pergunta só, curta, com a sua recomendação, e encerre a resposta. A resposta chega na próxima mensagem.`,

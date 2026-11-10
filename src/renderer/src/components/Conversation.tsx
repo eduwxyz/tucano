@@ -211,6 +211,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
     const a = dmAgentId ? agentById(s, dmAgentId) : undefined
     return a?.deleted ? a : undefined
   })
+  // Who opened this team-up: a channel an agent made to work with agents it called in.
+  const teamLead = useStore((s) => (conv?.teamUp ? agentById(s, conv.teamUp.by)?.name : undefined))
 
   if (!conv)
     return (
@@ -267,6 +269,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <span className="tag tag--warn topbar__mac" title={dmAgent ? macTitle.one : macTitle.many}>
                 <Icon name={onServer ? 'globe' : 'laptop'} size={12} />
                 {dmAgent ? macLabel.dm : onMac.length === 1 ? macLabel.one : macLabel.many}
+              </span>
+            )}
+            {conv.teamUp && (
+              <span className="tag" title={teamLead ? L(`Equipe montada por ${teamLead}`, `A team ${teamLead} put together`) : L('Equipe montada por um agente', 'A team an agent put together')}>
+                {L('Equipe', 'Team-up')}
               </span>
             )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
