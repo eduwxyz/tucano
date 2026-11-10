@@ -79,7 +79,7 @@ export function AgentModelsPanel(): ReactNode {
               options={thinkingOptions()}
               value={effort}
               onChange={(v) => setEffort((v as Effort | null) ?? null)}
-              placeholder={L('Esforço: não mudar', 'Thinking: don’t change')}
+              placeholder={L('Esforço: manter o de cada agente', 'Thinking: keep each agent’s own')}
             />
           </div>
           <p className="hint">{L('Deixe o modelo em branco para mudar só o esforço. Ao trocar de harness, o agente passa a usar o login padrão dele. O modelo reserva continua igual.', 'Leave the model empty to change only the thinking. When switching harnesses, the agent uses its default login. The reserve model stays the same.')}</p>
