@@ -124,24 +124,16 @@ export function workspaceState(area: unknown, x: StateInput, busca?: unknown): s
     ]
     if (named.length) {
       const shown = named.slice(0, 80).map((k) => `- ${k.name} → ${k.agents.map(agentName).join(', ')}`)
-      lines.push(`${L('com dono', 'with owners')}:
-${shown.join('
-')}${named.length > 80 ? `
-${L(`… e mais ${named.length - 80}`, `… and ${named.length - 80} more`)}` : ''}`)
+      lines.push(`${L('com dono', 'with owners')}:\n${shown.join('\n')}${named.length > 80 ? `\n${L(`… e mais ${named.length - 80}`, `… and ${named.length - 80} more`)}` : ''}`)
     }
     // Everyone's skills are the same list for every agent: names only, in a line that stays readable.
     if (shared.length) lines.push(`${L('de todos', 'with everyone')}: ${shared.slice(0, 60).map((k) => k.name).join(', ')}${shared.length > 60 ? `, ${L(`… e mais ${shared.length - 60}`, `… and ${shared.length - 60} more`)}` : ''}`)
     if (needle) {
       // A search says when to use each one: that is how the Tuca picks a name to assign.
       const hits = found.slice(0, 40).map((k) => `- ${k.name}: ${k.description.slice(0, 160)}`)
-      lines.push(`${L('achadas', 'found')}:
-${hits.join('
-') || L('nenhuma', 'none')}${found.length > 40 ? `
-${L(`… e mais ${found.length - 40}`, `… and ${found.length - 40} more`)}` : ''}`)
+      lines.push(`${L('achadas', 'found')}:\n${hits.join('\n') || L('nenhuma', 'none')}${found.length > 40 ? `\n${L(`… e mais ${found.length - 40}`, `… and ${found.length - 40} more`)}` : ''}`)
     }
-    out.push(`## ${L('Skills', 'Skills')}
-${lines.join('
-')}`)
+    out.push(`## ${L('Skills', 'Skills')}\n${lines.join('\n')}`)
   }
   if (show('routines')) {
     const lines = x.routines.map((r) => {
