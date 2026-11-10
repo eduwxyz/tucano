@@ -566,9 +566,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
             With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
         {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
-          <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
-            {L('Tentar de novo', 'Try again')}
-          </button>
+          <TryAgain messageId={message.id} />
         )}
         {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
           <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
@@ -587,6 +585,56 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
     </article>
   )
 })
+
+// A reply that stopped — by the person, by the app closing, by a failure — has two ways back:
+// "Try again" repeats what was asked, and "Try with instructions" repeats it in a new direction.
+// The direction is written under the buttons and goes into the prompt, not into a new message, so
+// the reply that comes back is the answer to the same ask, steered.
+function TryAgain({ messageId }: { messageId: string }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const typed = note.trim()
+  const retry = (withNote?: string): void => {
+    retryRun(messageId, withNote)
+    setOpen(false)
+    setNote('')
+  }
+  return (
+    <>
+      <button className="btn btn--xs retry" onClick={() => retry()}>
+        {L('Tentar de novo', 'Try again')}
+      </button>
+      <button className="btn btn--xs retry" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {L('Tentar com instruções', 'Try with instructions')}
+      </button>
+      {open && (
+        <div className="retry-note">
+          <textarea
+            aria-label={L('Instruções para a nova tentativa', 'Instructions for the new try')}
+            placeholder={L('O que deve ser diferente nesta tentativa?', 'What should be different this time?')}
+            rows={2}
+            value={note}
+            autoFocus
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && typed) retry(typed)
+              if (e.key === 'Escape') setOpen(false)
+            }}
+          />
+          <div className="retry-note__row">
+            <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => retry(typed)}>
+              {L('Tentar de novo com isso', 'Try again with this')}
+            </button>
+            <button className="link" onClick={() => { setOpen(false); setNote('') }}>
+              {L('Cancelar', 'Cancel')}
+            </button>
+            <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 // What a routine asked, posted at its time; the agent's reply comes next.
 function RoutineMessage({ message, replies }: { message: Message; replies?: Message[] }): ReactNode {

@@ -263,6 +263,31 @@ describe('Runner', () => {
     expect(retried.run?.error).toBeUndefined()
   })
 
+  it('tries a stopped reply again in the direction the person wrote', async () => {
+    // "Try with instructions": the ask stays the same, the reply comes back steered.
+    const r = runner(fakeEngine('claude', { delayMs: 20 }))
+    await r.send('d1', 'preciso do relatório de outubro')
+    await new Promise((res) => setTimeout(res, 40))
+    const working = agentMessages()[0]!
+    r.stop(working.id)
+    await r.idle()
+    expect(db.message(working.id)!.run?.status).toBe('stopped')
+
+    r.retry(working.id, 'Faça em tabela e cite as fontes.')
+    await r.idle()
+
+    const turn = claude.turns.at(-1)!
+    const said = `${turn.system}
+${turn.prompt}`
+    expect(said).toContain('Faça em tabela e cite as fontes.') // the direction reached the model
+    expect(said).toContain('direção para a nova tentativa') // and it is told what that is
+    expect(said).toContain('preciso do relatório de outubro') // the ask it is answering did not change
+    const retried = db.message(working.id)!
+    expect(retried.run?.status).toBe('done')
+    expect(agentMessages()).toHaveLength(1) // the same reply, tried again — not a second one
+    expect(retried.text).toContain('Resposta de teste') // and the retry really answered
+  })
+
   it('stops mid-turn when the usage limit is crossed, then refuses the next turn without starting the engine', async () => {
     db.saveAgent(agent('a1', 'lia', { limit: 10 })) // the fake reports more than 10 tokens up front
     const r = runner()

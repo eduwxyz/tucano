@@ -1435,7 +1435,7 @@ const api: Handlers = {
 
   stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
-  retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.retry(messageId)),
+  retryRun: ({ messageId, note }, ctx) => (reachMessage(ctx, messageId), runner.retry(messageId, note ?? undefined)),
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), bg(runner.continue(messageId), 'continueRun')),
 

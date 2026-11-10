@@ -325,6 +325,13 @@ export interface RoutineEvent {
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
+// "Try with instructions": what the person wrote goes into the prompt as a direction for the new
+// attempt, and the model is told it outranks the course of what was asked before.
+const RETRY_NOTE = (): string =>
+  L(
+    'Ao pedir para você tentar de novo, a pessoa escreveu esta direção para a nova tentativa. Siga-a, mesmo onde ela muda o rumo do que foi pedido antes:',
+    'When asking you to try again, the person wrote this direction for the new attempt. Follow it, even where it changes the course of what was asked before:'
+  )
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
@@ -648,7 +655,9 @@ export class Runner {
   }
 
   // Runs the same agent again in place of a reply that didn't finish.
-  retry(messageId: string): void {
+  // `note`: the person's own direction for the new try. It is added to the prompt after what was
+  // asked, so the reply starts steered instead of merely repeated.
+  retry(messageId: string, note?: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (this.paused) return // nobody starts working while paused
@@ -656,7 +665,9 @@ export class Runner {
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }, { urgent: true })
+    const said = note?.trim()
+    const task = said ? [msg.run.task, RETRY_NOTE(), said].filter(Boolean).join('\n\n') : undefined
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg, ...(task ? { task } : {}) }, { urgent: true })
   }
 
   // A reply paused at its budget goes on in a new reply that knows what it did:
