@@ -90,7 +90,7 @@ import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
-import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
+import { ArtifactCard, ArtifactGallery, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
@@ -538,9 +538,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">
-            {message.run.artifactIds.map((aid) => (
-              <ArtifactCard key={aid} id={aid} />
-            ))}
+            <ArtifactGallery ids={message.run.artifactIds} />
           </div>
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
