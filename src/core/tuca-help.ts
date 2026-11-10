@@ -12,8 +12,19 @@ const DAY = 24 * 3_600_000
 
 // ---------- ver_estado ----------
 
-const AREAS = ['tudo', 'motores', 'conectores', 'agentes', 'rotinas', 'falhas'] as const
+// The areas ver_estado can be asked for, in English: the enum is in the model's prompt, and a
+// Portuguese enum in an English workspace teaches the model Portuguese words for the app. The names
+// that came before them keep working, so a memory or a prompt that already says "agentes" resolves.
+const AREAS = ['all', 'harnesses', 'connectors', 'agents', 'routines', 'failures'] as const
 type Area = (typeof AREAS)[number]
+const AREA_ALIASES: Record<string, Area> = {
+  tudo: 'all',
+  motores: 'harnesses',
+  conectores: 'connectors',
+  agentes: 'agents',
+  rotinas: 'routines',
+  falhas: 'failures'
+}
 
 export const VER_ESTADO: ToolDef = {
   name: 'ver_estado',
@@ -49,8 +60,9 @@ const when = (at: number | undefined, now: number): string => {
 }
 
 export function workspaceState(area: unknown, x: StateInput): string {
-  const want = (AREAS as readonly string[]).includes(String(area)) ? (area as Area) : 'tudo'
-  const show = (a: Area): boolean => want === 'tudo' || want === a
+  const asked = String(area ?? '')
+  const want = (AREAS as readonly string[]).includes(asked) ? (asked as Area) : (AREA_ALIASES[asked] ?? 'all')
+  const show = (a: Area): boolean => want === 'all' || want === a
   const s = x.settings
   const agentName = (id: string): string => x.agents.find((a) => a.id === id)?.name ?? (id === 'router' ? 'router' : L('agente removido', 'removed agent'))
   const where = (id: string): string => {
@@ -60,7 +72,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
   const out: string[] = [
     `${L('Workspace', 'Workspace')}: ${s.workspaceLabel || s.workspaceName}${s.paused ? L(' · PAUSADO: nenhum agente começa a trabalhar e nenhuma rotina roda', ' · PAUSED: no agent starts working and no routine runs') : ''}${s.quietHours ? L(` · horário de silêncio ${s.quietHours.from}–${s.quietHours.to}`, ` · quiet hours ${s.quietHours.from}–${s.quietHours.to}`) : ''}`
   ]
-  if (show('motores')) {
+  if (show('harnesses')) {
     const lines = (Object.keys(s.engines) as (keyof typeof ENGINES)[]).map((e) => {
       const st = s.engines[e]
       const state = st.off ? L('desligado na introdução', 'turned off in the introduction') : !st.installed ? L('não instalado', 'not installed') : st.loggedIn ? L(`pronto${st.account ? ` (${st.account})` : ''}`, `ready${st.account ? ` (${st.account})` : ''}`) : L('instalado, sem login', 'installed, not signed in')
@@ -69,12 +81,12 @@ export function workspaceState(area: unknown, x: StateInput): string {
     const accounts = (s.accounts ?? []).map((a) => `- ${a.name} (${ENGINES[a.engine].label}): ${a.loggedIn ? L('com login', 'signed in') : L('sem login', 'not signed in')}`)
     out.push(`## ${L('Motores', 'Harnesses')}\n${lines.join('\n')}${accounts.length ? `\n${L('Contas extras', 'Extra accounts')}:\n${accounts.join('\n')}` : ''}\n${L('Roteador', 'Router')}: ${s.routerModel} · ${L('memória', 'memory')}: ${s.memoryModel} (${s.memoryLearning})`)
   }
-  if (show('conectores')) {
+  if (show('connectors')) {
     const status: Record<Connector['status'], string> = { connected: L('conectado', 'connected'), connecting: L('conectando', 'connecting'), needs_auth: L('pede login', 'needs sign-in'), error: L('com erro', 'error'), disconnected: L('desconectado', 'disconnected') }
     const lines = x.connectors.map((c) => `- ${c.name}: ${status[c.status]}${c.error ? ` · ${c.error}` : ''}`)
     out.push(`## ${L('Conectores', 'Connectors')}\n${lines.join('\n') || L('nenhum adicionado', 'none added')}`)
   }
-  if (show('agentes')) {
+  if (show('agents')) {
     const lines = x.agents.map((a) => {
       const m = modelInfo(a.modelId)
       const grants = Object.entries(a.grants).map(([id, g]) => `${x.connectors.find((c) => c.id === id)?.name ?? id} (${g === 'read_write' ? L('escrita', 'write') : g === 'read' ? L('leitura', 'read') : g})`)
@@ -84,7 +96,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
     })
     out.push(`## ${L('Agentes', 'Agents')}\n${lines.join('\n') || L('nenhum ainda', 'none yet')}`)
   }
-  if (show('rotinas')) {
+  if (show('routines')) {
     const lines = x.routines.map((r) => {
       const last = x.lastRun(r)
       const t = r.trigger
@@ -93,7 +105,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
     })
     out.push(`## ${L('Rotinas', 'Routines')}\n${lines.join('\n') || L('nenhuma', 'none')}`)
   }
-  if (show('falhas')) {
+  if (show('failures')) {
     const lines = x.failures.map((f) => `- ${when(f.at, x.now)} · ${agentName(f.agentId)} · ${where(f.conversationId)} · ${f.status}${f.error ? `: ${f.error}` : ''}`)
     out.push(`## ${L('Respostas que falharam (7 dias)', 'Replies that failed (7 days)')}\n${lines.join('\n') || L('nenhuma', 'none')}`)
   }
