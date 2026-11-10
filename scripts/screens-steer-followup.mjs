@@ -162,10 +162,19 @@ const agents = win.locator('.section', { has: win.locator('.section__head', { ha
 await agents.locator('.nav-item', { hasText: 'Lia' }).first().click({ button: 'right' })
 await win.getByText('Send a message').click()
 await win.waitForSelector('.composer textarea')
+// The DM has to be the open conversation before anything is typed: otherwise the send lands in the
+// channel and the frame measures a view that has no reply in it at all.
+await win
+  .waitForFunction(() => /Lia/i.test(document.querySelector('.composer textarea')?.getAttribute('placeholder') ?? ''), null, { timeout: 15000 })
+  .catch(() => console.log('composer:', 'the DM did not open; going on with whatever is in front'))
 
 await ask(win, 'Update the changelog for the 0.2.27 release, and stop there')
 await waitWorking(win, true)
 await waitWorking(win, false)
+// The reply on screen before measuring anything about it.
+await win
+  .waitForFunction(() => document.querySelectorAll('.msg--agent').length > 0, null, { timeout: 30000 })
+  .catch(() => console.log('reply:', 'no agent reply appeared'))
 await sleep(600)
 console.log('finished reply, the pill:', JSON.stringify(await pillLook(win)))
 console.log('its text:', JSON.stringify(await replyText(win)))
