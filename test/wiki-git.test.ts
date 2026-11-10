@@ -31,7 +31,9 @@ function remote(files: Record<string, string | Buffer> = {}, hook?: string): { b
     git(mac, 'commit', '--quiet', '-m', 'vault')
     git(mac, 'push', '--quiet', 'origin', 'main')
   }
-  if (hook) (writeFileSync(join(bare, 'hooks', 'pre-receive'), hook), chmodSync(join(bare, 'hooks', 'pre-receive'), 0o755))
+  // The repository's own hooks, even on a machine whose gitconfig points core.hooksPath somewhere
+  // else: without this the hook is written and never run, and the push it must refuse goes through.
+  if (hook) (writeFileSync(join(bare, 'hooks', 'pre-receive'), hook), chmodSync(join(bare, 'hooks', 'pre-receive'), 0o755), git(bare, 'config', 'core.hooksPath', join(bare, 'hooks')))
   return { bare, url: `file://${bare}`, mac, root }
 }
 // What the Mac does with Obsidian Git: edit, commit, push.
