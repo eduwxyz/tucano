@@ -27,7 +27,7 @@ import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } fro
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
-import { JEV_MODEL, routeJev } from './jev'
+import { JEV_MODEL, listenJev, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -594,11 +594,18 @@ export class Runner {
       // they're neither offered to the router nor the one agent a channel answers through. A
       // mention, mine or another agent's, still wakes them: that's the whole point of the mode.
       const asked = this.answering(conv, members)
-      if (asked.length === 1) responders = asked
-      else if (asked.length > 1) {
-        void this.routeAndRun(conv, asked, replyIn, mine.id)
+      // Listen mode: Jev reads this one message and says whether it needs one of them, and whether
+      // the room already handles it. They join the roster only when it says yes.
+      const heard = await this.heard(conv, mine, members, asked)
+      const roster = [...asked, ...heard.agents]
+      // It answers alone: say why an agent nobody mentioned is the one answering.
+      if (roster.length === 1 && heard.agents.length === 1)
+        this.post(conv.id, replyIn, L(`O Jev ouviu esta mensagem e trouxe **${heard.agents[0]!.name}** (${heard.reason}).`, `Jev heard this message and brought in **${heard.agents[0]!.name}** (${heard.reason}).`))
+      if (roster.length === 1) responders = roster
+      else if (roster.length > 1) {
+        void this.routeAndRun(conv, roster, replyIn, mine.id, heard.reason)
         return
-      } else if (members.length > 0) return this.nobodyAsked(conv.id, replyIn)
+      } else if (members.length > 0) return this.nobodyAsked(conv.id, replyIn, heard.problem)
     }
     for (const agent of responders) void this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
   }
@@ -779,20 +786,65 @@ export class Runner {
   }
 
   // Who in the room answers a message nobody was mentioned in: in a channel, mention mode leaves
-  // an agent out of it (it still reads everything, and still answers a mention).
+  // an agent out of it (it still reads everything, and still answers a mention), and so does
+  // listen mode, which gets an agent back in only when Jev says the message is theirs.
   private answering(conv: Conversation, members: Agent[]): Agent[] {
-    if (conv.kind !== 'channel' || !conv.mentionOnly?.length) return members
-    const quiet = new Set(conv.mentionOnly)
+    if (conv.kind !== 'channel') return members
+    const quiet = new Set([...(conv.mentionOnly ?? []), ...(conv.listen ?? [])])
+    if (quiet.size === 0) return members
     return members.filter((a) => !quiet.has(a.id))
+  }
+
+  // The agents of a channel in listen mode, in the order they were added.
+  private listening(conv: Conversation, members: Agent[]): Agent[] {
+    if (conv.kind !== 'channel' || !conv.listen?.length) return []
+    const hears = new Set(conv.listen)
+    return members.filter((a) => hears.has(a.id))
+  }
+
+  // One cheap Jev question per message, and only when the channel has agents listening: does this
+  // message need one of them, and can the room do without it? A failure never keeps the message
+  // from being answered — the listeners simply stay out, and the note says why.
+  private async heard(conv: Conversation, trigger: Message, members: Agent[], answering: Agent[]): Promise<{ agents: Agent[]; reason: string; problem: string }> {
+    const listeners = this.listening(conv, members)
+    if (listeners.length === 0) return { agents: [], reason: '', problem: '' }
+    const key = await this.deps.jev?.key()
+    if (!key) return { agents: [], reason: '', problem: L('os agentes que escutam ficaram de fora: falta a chave do TypeSafe', 'the listening agents stayed out: the TypeSafe key is missing') }
+    try {
+      const settings = await this.deps.settings()
+      const { messages } = contextWindow(this.deps.db, trigger, ROUTER_HISTORY)
+      const j = await listenJev({
+        key,
+        messages,
+        trigger,
+        listeners,
+        answering,
+        me: settings.workspaceName,
+        people: promptPeople(this.deps.db, settings, true),
+        connectors: this.deps.connectors?.list(),
+        fetch: this.deps.jev?.fetch
+      })
+      if ('error' in j) return { agents: [], reason: '', problem: L(`o Jev não conseguiu ouvir (${j.error})`, `Jev couldn't listen (${j.error})`) }
+      // `j.reason` is empty when it picked no one, and explains a no when the room could do without it.
+      return { agents: j.agents, reason: j.agents.length ? j.reason : '', problem: j.agents.length ? '' : j.reason }
+    } catch (e) {
+      return { agents: [], reason: '', problem: L(`o Jev não conseguiu ouvir (${e instanceof Error ? e.message : String(e)})`, `Jev couldn't listen (${e instanceof Error ? e.message : String(e)})`) }
+    }
   }
 
   // A channel where every agent is in mention mode: nobody is picked, and it says why instead of
   // leaving the message unanswered. Once per thread: the second message in a row doesn't repeat it.
-  private nobodyAsked(conversationId: string, threadId: string | undefined): void {
-    const hint = L(
-      'Ninguém responde aqui sem ser chamado: todos os agentes deste canal estão em **modo menção**. Chame com **@nome** ou peça a outro agente.',
-      'Nobody here answers unless mentioned: every agent in this channel is in **mention mode**. Call one with **@name**, or ask another agent.'
-    )
+  private nobodyAsked(conversationId: string, threadId: string | undefined, heard = ''): void {
+    const conv = this.deps.db.conversation(conversationId)
+    const hint = conv?.listen?.length
+      ? L(
+          `Ninguém respondeu: os agentes deste canal estão em **modo menção** ou **modo escuta**, e o Jev não viu nesta mensagem nada que peça um deles${heard ? ` (${heard})` : ''}. Chame com **@nome**.`,
+          `Nobody answered: the agents in this channel are in **mention mode** or **listen mode**, and Jev saw nothing in this message that needs one of them${heard ? ` (${heard})` : ''}. Call one with **@name**.`
+        )
+      : L(
+          'Ninguém responde aqui sem ser chamado: todos os agentes deste canal estão em **modo menção**. Chame com **@nome** ou peça a outro agente.',
+          'Nobody here answers unless mentioned: every agent in this channel is in **mention mode**. Call one with **@name**, or ask another agent.'
+        )
     const seen = this.deps.db.recentMessages(conversationId, 3, threadId ?? null)
     if (seen.some((m) => m.text === hint)) return
     this.post(conversationId, threadId, hint)
@@ -817,11 +869,14 @@ export class Runner {
   }
 
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
-  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string): Promise<void> {
+  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string, heard = ''): Promise<void> {
     const { db, engines } = this.deps
     if (this.paused) return // nobody starts working while paused
     this.routing++
     const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
+    // What Jev heard, when it brought a listening agent in: it reads better in the note than as a
+    // separate line, and the person sees why an agent they weren't talking to answered.
+    const heardWhy = heard ? L(` · o Jev trouxe ${heard}`, ` · Jev brought in ${heard}`) : ''
     const fail = (why: string): void => {
       const reason = why.trim().replace(/[.\s]+$/, '') // one sentence: the reason may carry parentheses of its own
       this.update(note, { text: L(`Não consegui escolher quem responde: ${reason}. Mencione um agente com **@nome**.`, `I couldn't pick who answers: ${reason}. Mention an agent with **@name**.`), run: undefined })
@@ -845,7 +900,7 @@ export class Runner {
       if (settings.routerModel === JEV_MODEL) {
         const key = await this.deps.jev?.key()
         const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
+        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s${heardWhy}`)
         fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
       }
 
@@ -859,7 +914,7 @@ export class Runner {
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
-      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`)
+      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}${heardWhy}`)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
