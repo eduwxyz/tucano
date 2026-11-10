@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, startsTicked, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
 import { answerDecision, submitDecisions, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
@@ -57,23 +57,26 @@ export function AskCard({
   recommended?: (number | null)[] | undefined
   children?: ReactNode
 }): ReactNode {
-  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} recommended={recommended} extra={children} />
+  // A next-steps card is a to-do, not a menu: it says so, in every mode.
+  const steps = questions.some(isNextSteps)
+  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} recommended={recommended} steps={steps} extra={children} />
   return (
-    <section className={`ask ask--${mode}`} aria-label={badge}>
-      <Head badge={badge} byline={byline} done={mode === 'done'} />
+    <section className={`ask ask--${mode}${steps ? ' ask--steps' : ''}`} aria-label={badge}>
+      <Head badge={badge} byline={byline} done={mode === 'done'} steps={steps} />
       {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} /> : <Asked questions={questions} recommended={recommended} />}
       {children}
     </section>
   )
 }
 
-function Head({ badge, byline, done, nav }: { badge: string; byline?: string | undefined; done?: boolean; nav?: ReactNode }): ReactNode {
+function Head({ badge, byline, done, nav, steps }: { badge: string; byline?: string | undefined; done?: boolean; nav?: ReactNode; steps?: boolean }): ReactNode {
   return (
     <div className="ask__head">
       <span className="ask__badge">
         <Icon name={done ? 'check' : 'ask'} size={13} />
         {badge}
       </span>
+      {steps && <span className="ask-option__pill">{L('Próximos passos', 'Next steps')}</span>}
       {byline && <span className="ask__byline">{byline}</span>}
       {nav}
     </div>
@@ -130,7 +133,7 @@ function Summary({ questions, answers, answeredInText }: { questions: Decision[]
   )
 }
 
-function Answering({ id, questions, saved, badge, byline, recommended, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; recommended?: (number | null)[] | undefined; extra?: ReactNode }): ReactNode {
+function Answering({ id, questions, saved, badge, byline, recommended, steps, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; recommended?: (number | null)[] | undefined; steps?: boolean; extra?: ReactNode }): ReactNode {
   // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
@@ -199,8 +202,8 @@ function Answering({ id, questions, saved, badge, byline, recommended, extra }: 
     ) : undefined
 
   return (
-    <section className="ask ask--answer" aria-label={badge}>
-      <Head badge={badge} byline={byline} nav={nav} />
+    <section className={`ask ask--answer${steps ? ' ask--steps' : ''}`} aria-label={badge}>
+      <Head badge={badge} byline={byline} nav={nav} steps={steps} />
       {questions.length > 1 && (
         <div className="ask__progress" aria-hidden>
           {questions.map((_, i) => (
@@ -220,7 +223,9 @@ function Answering({ id, questions, saved, badge, byline, recommended, extra }: 
 
 function DecisionStep({ draftId, question, answer, recommended, last, takeFocus, onAnswer }: { draftId: string; question: Decision; answer: Answer | null; recommended?: number | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void }): ReactNode {
   const options = question.options ?? []
-  const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
+  // A next-steps card opens with its boxes already ticked (or with the ones Jev found worth doing
+  // now); a question opens with nothing picked. A draft I left here, or an answer saved, wins.
+  const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? startsTicked(question), other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
   const edit = (patch: Partial<AnswerDraft>): void => {
     const next = { ...draft, ...patch }
@@ -277,12 +282,15 @@ function DecisionStep({ draftId, question, answer, recommended, last, takeFocus,
     else body.current?.focus()
   }
 
+  const steps = isNextSteps(question)
   const keyHint =
     question.kind === 'text'
       ? L('Enter confirma · Shift+Enter quebra a linha', 'Enter confirms · Shift+Enter for a new line')
-      : multiple
-        ? L(`Marque quantas quiser com 1 a ${options.length + 1}`, `Tick as many as you like with 1 to ${options.length + 1}`)
-        : L(`Escolha com 1 a ${options.length + 1}`, `Pick with 1 to ${options.length + 1}`)
+      : steps
+        ? L(`Marque ou desmarque com 1 a ${options.length + 1} · todas começam marcadas`, `Tick or untick with 1 to ${options.length + 1} · all start ticked`)
+        : multiple
+          ? L(`Marque quantas quiser com 1 a ${options.length + 1}`, `Tick as many as you like with 1 to ${options.length + 1}`)
+          : L(`Escolha com 1 a ${options.length + 1}`, `Pick with 1 to ${options.length + 1}`)
 
   return (
     <div className="ask__body" ref={body} tabIndex={-1} onKeyDown={keys}>
@@ -318,7 +326,7 @@ function DecisionStep({ draftId, question, answer, recommended, last, takeFocus,
             <button className={`ask-option ask-option--other ${focus === options.length ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(options.length)} onClick={openOther}>
               <span className="ask-option__key">{options.length + 1}</span>
               <span className="ask-option__text">
-                <span className="ask-option__label">{L('Outra coisa…', 'Something else…')}</span>
+                <span className="ask-option__label">{steps ? L('Outro passo…', 'Another step…') : L('Outra coisa…', 'Something else…')}</span>
               </span>
               <span className="ask-option__mark" aria-hidden>
                 <Icon name="edit" size={12} />
@@ -334,7 +342,7 @@ function DecisionStep({ draftId, question, answer, recommended, last, takeFocus,
         </button>
         {(question.kind !== 'single' || writing) && (
           <button className="btn btn--primary btn--sm" disabled={!typed} onClick={confirm}>
-            {last ? L('Enviar', 'Send') : L('Próxima', 'Next')}
+            {steps && last ? L('Fazer estes', 'Do these') : last ? L('Enviar', 'Send') : L('Próxima', 'Next')}
           </button>
         )}
       </div>

@@ -2733,6 +2733,19 @@ export function SettingsPage(): ReactNode {
               </div>
               <Toggle on={!!settings.jevRecommend} onChange={(v) => updateSettings({ jevRecommend: v })} />
             </div>
+            <div className="key-row">
+              <Icon name="spark" />
+              <div className="grow">
+                <strong>{L('Marcar só os próximos passos que importam', 'Tick only the next steps worth doing')}</strong>
+                <p className="muted small">
+                  {L(
+                    'Desligado por padrão. Ligado, cada passo de um card de próximos passos vai pro TypeSafe com o que o agente disse antes, e só os que ele consideraria pra agora começam marcados; o resto espera no card, a um clique. Nunca deixa a lista vazia: se nenhum for marcado, todos ficam.',
+                    'Off by default. On, every step of a next-steps card goes to TypeSafe with what the agent said before it, and only the ones it would do now start ticked; the rest waits in the card, one click away. It never empties the list: if none is picked, all of them stay ticked.'
+                  )}
+                </p>
+              </div>
+              <Toggle on={!!settings.jevNextSteps} onChange={(v) => updateSettings({ jevNextSteps: v })} />
+            </div>
             {settings.jevRecommend && work && (
               <OutsideGateway what={L('cada pergunta de agente com opções, com o texto da pergunta e das opções, vai pro TypeSafe.', "every agent question with options, with the question's and the options' text, goes to TypeSafe.")} />
             )}
