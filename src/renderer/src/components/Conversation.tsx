@@ -103,6 +103,7 @@ import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
+import { RouteLine } from './Routing'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -550,6 +551,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           </div>
         )}
         {ask && showAsk && <RoutineAsk ask={ask} />}
+        {message.run?.route && <RouteLine route={message.run.route} />}
         {/* A run is taller than the screen, so the way into the thread can't sit at its start: it rides the
             top of the run here, in the same block, and leaves with the run's last line. Without threads, or
             without a run, it stays where it was, at the corner of the message (ThreadLink). */}
