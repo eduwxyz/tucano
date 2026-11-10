@@ -1095,6 +1095,9 @@ export interface LocalSkill {
   origin: string // "Claude Code", "Plugin <name>", "Codex", "Pi", "Hermes", "Added"
   files: string[] // its other text files, relative to its folder
   scripts: boolean // it has scripts: an agent needs a computer to run them
+  category?: string // the folder it sits in, when the library is organised in categories (a Hermes one)
+  version?: string // from the frontmatter: a Hermes library keeps one; a plain skill may under metadata
+  tags?: string[] // metadata.hermes.tags, facets included (family:*, tool:*, risk:*…)
 }
 
 // A folder skills are read from: one a harness keeps for itself on this computer (Claude Code,

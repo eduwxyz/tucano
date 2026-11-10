@@ -35,15 +35,55 @@ const dirs = (d: string): string[] => {
   }
 }
 
-// name and description from the YAML frontmatter, including "description: |" blocks.
-export function frontmatter(text: string): { name?: string; description?: string; body: string } {
+// A bare or quoted value, or the items of a "[a, b]" list.
+const cleaned = (v: string): string => v.trim().replace(/^(["'])(.*)\1$/, '$2')
+const listed = (inline: string): string[] =>
+  inline
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .split(',')
+    .map(cleaned)
+    .filter(Boolean)
+
+// "metadata.hermes.tags", as one line ("tags: [a, b]") or as a "- a" list under it. A library that
+// is tagged stays tagged: the facets (family:*, tool:*, risk:*) are how a big library is navigated.
+function tagsOf(lines: string[]): string[] {
+  const at = lines.findIndex((l) => /^\s*tags\s*:/.test(l))
+  if (at < 0) return []
+  const line = lines[at]!
+  const inline = line.slice(line.indexOf(':') + 1).trim()
+  if (inline) return listed(inline)
+  const out: string[] = []
+  for (const l of lines.slice(at + 1)) {
+    const item = /^\s*-\s*(.+)$/.exec(l)
+    if (item) out.push(cleaned(item[1]!))
+    else if (/^\s*\S/.test(l)) break
+  }
+  return out
+}
+
+// The frontmatter, read as far as a skill library needs: the two fields every layout has (name,
+// description), the two a Hermes library adds (category, and a version that sits at the top), and
+// the facets under metadata.hermes.tags. None of them is required, so a plain Claude Code or Codex
+// skill reads exactly as it did.
+export function frontmatter(text: string): { name?: string; description?: string; category?: string; version?: string; tags?: string[]; body: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text)
   if (!m) return { body: text }
   const lines = m[1]!.split(/\r?\n/)
-  const field = (key: string): string | undefined => {
-    const i = lines.findIndex((l) => l.startsWith(`${key}:`))
+  // A key at the top level, or one under a section ("version" under "metadata", which is where a
+  // plain Agent Skills file keeps it).
+  const field = (key: string, under?: string): string | undefined => {
+    const top = (name: string): number => lines.findIndex((l) => l.startsWith(`${name}:`))
+    let i = top(key)
+    if (under) {
+      const head = top(under)
+      if (head < 0) return undefined
+      i = lines.findIndex((l, n) => n > head && /^\s/.test(l) && l.trim().startsWith(`${key}:`))
+      if (i >= 0 && lines.slice(head + 1, i).some((l) => !/^\s/.test(l))) return undefined // past that section
+    }
     if (i < 0) return undefined
-    const inline = lines[i]!.slice(key.length + 1).trim()
+    const indent = lines[i]!.length - lines[i]!.trimStart().length
+    const inline = lines[i]!.slice(indent + key.length + 1).trim()
     if (inline && !/^[|>][-+]?$/.test(inline)) return inline.replace(/^(["'])(.*)\1$/, '$2')
     const block: string[] = []
     for (const l of lines.slice(i + 1)) {
@@ -52,7 +92,18 @@ export function frontmatter(text: string): { name?: string; description?: string
     }
     return block.join(' ').trim() || undefined
   }
-  return { name: field('name'), description: field('description'), body: text.slice(m[0].length) }
+  const category = field('category')
+  // A plain Agent Skills file keeps its version under "metadata.version"; a Hermes one at the top.
+  const version = field('version') ?? field('version', 'metadata')
+  const tags = tagsOf(lines)
+  return {
+    name: field('name'),
+    description: field('description'),
+    ...(category ? { category: cleaned(category) } : {}),
+    ...(version ? { version: cleaned(version) } : {}),
+    ...(tags.length ? { tags } : {}),
+    body: text.slice(m[0].length)
+  }
 }
 
 // The other files of a skill: text ones it may point to, and whether it has scripts.
@@ -84,16 +135,24 @@ function skill(file: string, origin: string): LocalSkill | undefined {
   try {
     const fm = frontmatter(readFileSync(file, 'utf8'))
     const dir = dirname(file)
-    return { source: file, name: fm.name || basename(dir), description: fm.description || '', bodyLength: fm.body.trim().length, origin, ...contents(dir) }
+    return { source: file, name: fm.name || basename(dir), description: fm.description || '', bodyLength: fm.body.trim().length, origin, ...(fm.category ? { category: fm.category } : {}), ...(fm.version ? { version: fm.version } : {}), ...(fm.tags ? { tags: fm.tags } : {}), ...contents(dir) }
   } catch {
     return undefined
   }
 }
 
 const inDirs = (root: string, origin: string): LocalSkill[] =>
-  dirs(root)
-    .map((d) => skill(join(d, 'SKILL.md'), origin))
-    .filter((s): s is LocalSkill => !!s)
+  dirs(root).flatMap((d) => {
+    // "<name>/SKILL.md" is a skill, and is not looked into further.
+    const here = skill(join(d, 'SKILL.md'), origin)
+    if (here) return [here]
+    // One level deeper, "<category>/<name>/SKILL.md": how a Hermes library is organised (the folder
+    // is the category, the leaf is the skill). Only one extra level, so a big tree stays cheap.
+    return dirs(d)
+      .filter((x) => existsSync(join(x, 'SKILL.md')))
+      .map((x) => skill(join(x, 'SKILL.md'), origin))
+      .filter((s): s is LocalSkill => !!s)
+  })
 
 // The newest version folder of each plugin the user turned on in Claude Code.
 function pluginSkills(claude: string): LocalSkill[] {
@@ -182,7 +241,9 @@ export function skillsIn(dir: string, origin: string): LocalSkill[] {
 }
 
 const countIn = (dir: string): number =>
-  existsSync(join(dir, 'SKILL.md')) ? 1 : dirs(dir).filter((d) => existsSync(join(d, 'SKILL.md'))).length
+  existsSync(join(dir, 'SKILL.md'))
+    ? 1
+    : dirs(dir).reduce((n, d) => n + (existsSync(join(d, 'SKILL.md')) ? 1 : dirs(d).filter((x) => existsSync(join(x, 'SKILL.md'))).length), 0)
 
 // The folders the harnesses on this computer keep skills in.
 export function detectedFolders(home = homedir()): LocalSkillFolder[] {

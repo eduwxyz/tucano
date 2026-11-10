@@ -7159,6 +7159,17 @@ kbd {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* The facets of a tagged library (metadata.hermes.tags): family:*, tool:*, risk:*… */
+.skill-add__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.skill-add__more {
+  font-size: 11px;
+  color: var(--text-3);
+  align-self: center;
+}
 .skill-add__none {
   padding: 18px 12px;
   margin: 0;

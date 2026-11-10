@@ -300,7 +300,9 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
     void localSkills().then(setFound, () => setFound([]))
   }, [])
   const needle = q.trim().toLowerCase()
-  const shown = (found ?? []).filter((l) => !needle || `${l.name} ${l.description} ${l.origin}`.toLowerCase().includes(needle))
+  // The search reads what the library is organised by, not only the name: a category or a facet
+  // ("hermes", "family:model-routing") narrows a library of hundreds the way its own tags do.
+  const shown = (found ?? []).filter((l) => !needle || `${l.name} ${l.description} ${l.origin} ${l.category ?? ''} ${(l.tags ?? []).join(' ')}`.toLowerCase().includes(needle))
   const linked = (l: LocalSkill): boolean => skills.some((k) => k.source === l.source && k.state === 'active')
   useEffect(() => setAt(0), [q])
   useEffect(() => {
@@ -343,10 +345,22 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
                     <span className="skill-add__head">
                       <strong>{l.name}</strong>
                       <span>{l.origin}</span>
+                      {l.category && <span>{l.category}</span>}
+                      {l.version && <span>v{l.version}</span>}
                       {l.scripts && <span className="warn-text">{L('precisa de computador', 'needs a computer')}</span>}
                       {on && <span className="tag tag--ok">{L('em uso', 'in use')}</span>}
                     </span>
                     <span className="skill-add__desc">{l.description}</span>
+                    {l.tags && l.tags.length > 0 && (
+                      <span className="skill-add__tags">
+                        {l.tags.slice(0, 6).map((t) => (
+                          <span key={t} className="tag">
+                            {t}
+                          </span>
+                        ))}
+                        {l.tags.length > 6 && <span className="skill-add__more">+{l.tags.length - 6}</span>}
+                      </span>
+                    )}
                     {l.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <span className="warn-text small" role="status">{skillLengthNote(l.bodyLength)}</span>}
                   </button>
                 )
