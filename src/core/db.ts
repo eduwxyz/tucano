@@ -540,6 +540,7 @@ const COLUMNS: [string, string, string][] = [
   ['agents', 'autonomy', 'TEXT'],
   ['agents', 'outside_guard', 'INTEGER'],
   // Smart routing (Settings › Routing): Jev picks the model from the person's pools instead of the agent's own.
+  // 1 on for this agent · 0 off for this agent · NULL follow the global switch (Settings › Models › Router).
   ['agents', 'smart_routing', 'INTEGER'],
   // A phone's push handle (src/core/push.ts), on its device key: {"handle", "tag"} as JSON.
   ['person_keys', 'push', 'TEXT'],
@@ -838,7 +839,7 @@ export class Db {
       ...(str(r['action_rules']) && str(r['action_rules']) !== '{}' ? { actionRules: cleanRules(JSON.parse(str(r['action_rules']))) } : {}),
       ...(isAutonomy(r['autonomy']) ? { autonomy: r['autonomy'] } : {}),
       ...(r['outside_guard'] === 0 || r['outside_guard'] === 1 ? { outsideGuard: r['outside_guard'] === 1 } : {}),
-      ...(r['smart_routing'] === 1 ? { smartRouting: true } : {}),
+      ...(r['smart_routing'] === 0 || r['smart_routing'] === 1 ? { smartRouting: r['smart_routing'] === 1 } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),

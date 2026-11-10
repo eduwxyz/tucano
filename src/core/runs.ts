@@ -10,7 +10,7 @@ import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, E
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { decideRoute, readPrompt, unavailableTrace } from './model-routing'
-import { targetId, type RouteTarget, type RouteTrace, type RoutingConfig } from '../shared/routing'
+import { POOLS, targetId, type RouteTarget, type RouteTrace, type RoutingConfig } from '../shared/routing'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
@@ -1232,12 +1232,19 @@ export class Runner {
     }
 
     // Smart routing (Settings › Routing): Jev reads what was asked and the person's pools pick the model
-    // for this reply. Only for an agent that lets it decide; anyone's explicit pick of a model stays.
+    // for this reply. The switch is in two places: the global one (Settings › Models › Router) and, on each
+    // agent's page, On · Off · Follow the global one. A bot set to On routes even with the global switch
+    // off; one set to Off never routes; the rest follow the switch. An agent that decides nothing keeps
+    // its own model, which is also the baseline the trace compares against.
     let effort = agent.effort
     // A routed reply may run on another login than the agent's own, when the chain entry names one.
     let routedAccountId: string | undefined
     const routing = settings.routing
-    if (routing?.enabled && agent.smartRouting) {
+    const wantsRouting = agent.smartRouting === true || (agent.smartRouting === undefined && routing?.enabled === true)
+    // Switched on before any pool has a model is a setup half done, not a route with nothing eligible:
+    // the tab says replies run on the agent's own model until one is added, and that has to hold.
+    const anyModel = !!routing && (POOLS.some((p) => (routing.pools[p]?.chain.length ?? 0) > 0) || Object.values(routing.roles).some((r) => (r.chain?.length ?? 0) > 0))
+    if (routing && wantsRouting && anyModel) {
       const baseline: RouteTarget = {
         id: targetId({ engine: engineId, ...(agent.accountId ? { accountId: agent.accountId } : {}), model: modelName, effort }),
         engine: engineId,
