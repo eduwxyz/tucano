@@ -153,6 +153,7 @@ export interface Step {
   output?: string // what came back, in a few words ("120 rows")
   status: StepStatus
   ms?: number
+  kind?: 'steer' // not a tool call: what the person wrote while it worked, handed over between two of them
 }
 
 export interface Receipt {
