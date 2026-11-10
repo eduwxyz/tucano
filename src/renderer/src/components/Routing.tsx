@@ -44,6 +44,20 @@ export function poolName(p: Pool): string {
   }[p]
 }
 
+// The same tiers by the word alone, without the "Tier N ·". The thin line says this one beside the
+// demand bar: with the number gone the row reads as a judgment, and the rail still carries "Tier 3"
+// where the ladder itself is being edited.
+export function tierWord(p: Pool): string {
+  return {
+    free: L('Grátis', 'Free'),
+    t1: L('Rápido', 'Quick'),
+    t2: L('Comum', 'Standard'),
+    t3: L('Forte', 'High'),
+    t4: L('Premium', 'Premium'),
+    t5: L('Ultra premium', 'Ultra premium')
+  }[p]
+}
+
 // The first roles, in the order they show: the work that most often needs a different model.
 const FIRST_ROLES = ['code', 'review', 'plan', 'debug'] as const
 
@@ -544,18 +558,23 @@ export function RouteLine({ route }: { route: RouteTrace }): ReactNode {
             ? L('Mantido', 'Kept')
             : undefined
   const why = route.state === 'unavailable' ? route.error : route.state === 'exhausted' ? route.error : undefined
+  // The tier as one word beside the bar, and the model's thinking only when it isn't that same word:
+  // "High → gpt-6.1-sol · High" said the same thing twice on one 32 px row.
+  const tier = tierWord(route.policy ?? pool)
+  const thinking = thinkingLabel(target.effort)
+  const showThinking = thinking !== tier
   return (
     <div className={`route-line ${open ? 'is-open' : ''} route-line--${route.state}`}>
       <button type="button" className="route-line__row" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="route-line__jev">Jev</span>
         {reading ? <span className="route-line__role">{roleName(reading.role)}</span> : <span className="route-line__role">{state}</span>}
         {reading && <DemandBar value={route.rawDemand} />}
-        {reading && <span className="route-line__pool">{poolName(route.policy ?? pool)}</span>}
+        {reading && <span className="route-line__pool">{tier}</span>}
         {route.effective === 'free' && <span className="route-line__state">{L('grátis', 'free')}</span>}
         <span className="route-line__arrow" aria-hidden="true">→</span>
         <span className="route-line__model">
           {route.state === 'kept' ? `${modelLabel(target.model)} · ${L('mantido', 'kept')}` : route.state === 'exhausted' ? L('nenhum modelo elegível', 'no eligible model') : modelLabel(target.model)}
-          <span className="route-line__thinking"> · {thinkingLabel(target.effort)}</span>
+          {showThinking && <span className="route-line__thinking"> · {thinking}</span>}
         </span>
         {state && route.state !== 'kept' && <span className="route-line__state">{state}</span>}
         <span className="route-line__chev" aria-hidden="true">
