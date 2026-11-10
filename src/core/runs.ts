@@ -50,6 +50,9 @@ export const PRELOAD_DAYS = 14
 // hand-offs and follow-ups, and may run past MAX_CONCURRENT up to this: four routines running
 // mustn't keep a reply to the person waiting for minutes.
 export const MAX_CONCURRENT_URGENT = 6
+// How often a routed reply parked behind another one checks again that the reply holding its place
+// is really there (see startSlot): a place taken for a job that never ran would keep it silent.
+const PARK_RECHECK_MS = 2000
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
@@ -330,6 +333,9 @@ export function routedHistory(db: Pick<Db, 'message'>, windowed: Message[], anch
   return [...before, ...since, anchor]
 }
 
+// A routed reply that hasn't started: the place it holds, the message it answers, and the way in.
+type Parked = { trigger: string; queued: boolean; dropped?: boolean; timer?: NodeJS.Timeout; start: () => void }
+
 export class Runner {
   private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
   private active = 0
@@ -342,7 +348,7 @@ export class Runner {
   // Routed replies not started yet, by agent and place: a newer routing that picks the same agent
   // there moves the reply's trigger to its message instead of queueing a second reply. One whose
   // agent is still replying there starts when that reply ends (it reads what that reply said).
-  private waiting = new Map<string, { trigger: string; queued: boolean; start: () => void }>()
+  private waiting = new Map<string, Parked>()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -386,6 +392,8 @@ export class Runner {
   stopAll(): void {
     this.paused = true
     this.queue.length = 0
+    for (const slot of this.waiting.values()) if (slot.timer) clearTimeout(slot.timer)
+    this.waiting.clear()
     this.followups = new Followups() // the places the dropped queue held, and what was noted for later
     for (const c of this.controllers.values()) {
       c.reason = 'stopped'
@@ -833,21 +841,51 @@ export class Runner {
         waiting.trigger = trigger
         continue
       }
-      const slot = {
+      const slot: Parked = {
         trigger,
         queued: false,
         start: (): void => {
           if (slot.queued) return
           slot.queued = true
-          this.enqueue(() => {
+          if (slot.timer) clearTimeout(slot.timer)
+          slot.timer = undefined
+          this.enqueue(async () => {
+            if (slot.dropped) return
             if (this.waiting.get(key) === slot) this.waiting.delete(key)
-            return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger })
+            await this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger })
           }, true)
         }
       }
       this.waiting.set(key, slot)
-      if (!this.followups.busy(key)) slot.start()
+      this.startSlot(key, slot)
     }
+  }
+
+  // Away from the reply that holds the key, a routed reply waits for it to end (see startWaiting).
+  // A place taken (reserve) with nothing running on it is a job that never started — the queue
+  // dropped it, or the app paused between the two — and nothing would ever end to start this one:
+  // the place is let go and the reply goes.
+  private startSlot(key: string, slot: Parked): void {
+    if (slot.queued) return
+    if (!this.followups.busy(key)) return slot.start()
+    if (this.followups.running(key) === 0) {
+      this.followups.forget(key)
+      return slot.start()
+    }
+    this.watch(key, slot)
+  }
+
+  // The reply holding the place can be taken out from under it (it ends before its end is counted,
+  // or it was dropped), and then no end ever comes: rather than wait for good, look again.
+  private watch(key: string, slot: Parked): void {
+    if (slot.timer) return
+    slot.timer = setTimeout(() => {
+      slot.timer = undefined
+      if (slot.queued || this.waiting.get(key) !== slot) return
+      if (this.paused) return this.watch(key, slot)
+      this.startSlot(key, slot)
+    }, PARK_RECHECK_MS)
+    slot.timer.unref?.()
   }
 
   // A routed reply that waited for this agent to finish here goes now.
@@ -901,6 +939,16 @@ export class Runner {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
+    // A reply this agent was routed to, still waiting for the place: this one answers in its stead
+    // (it's the same agent, in the same place, on a newer word or on a mention), so it goes rather
+    // than answering the same thing twice. A routed one deletes itself before it gets here, so
+    // what is still in the map is never the reply starting now.
+    const parked = this.waiting.get(key)
+    if (parked) {
+      parked.dropped = true
+      if (parked.timer) clearTimeout(parked.timer)
+      this.waiting.delete(key)
+    }
     this.followups.start(key, reserved)
     let msg: Message
     try {
