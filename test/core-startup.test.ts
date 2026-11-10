@@ -20,7 +20,7 @@ vi.mock('../src/core/engines/detect', async (original) => ({
     detection.calls++
     await detection.held
     const no: EngineStatus = { installed: false, loggedIn: false }
-    const engines: Record<EngineId, EngineStatus> = { claude: signedIn, codex: no, opencode: no, pi: no, antigravity: no, cursor: no, grok: no, cline: no }
+    const engines: Record<EngineId, EngineStatus> = { claude: signedIn, codex: no, opencode: no, pi: no, antigravity: no, cursor: no, grok: no, cline: no, hermes: no }
     return { engines, listed: {}, codexCatalog: [] }
   }
 }))

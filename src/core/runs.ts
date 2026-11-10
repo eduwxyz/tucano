@@ -2093,7 +2093,11 @@ ${note}`,
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
     let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
     let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
-    const session = this.deps.gateway?.open(tools, plan?.token)
+    // An engine whose daemon holds the MCP connection between turns keeps the URL it was given
+    // (Hermes): its token is the agent's, not the turn's. Every other engine gets a fresh one, or
+    // the token of the session it keeps.
+    const token = plan?.token ?? (engines[engineId].keepsMcp ? this.deps.gateway?.agentToken(agent.id) : undefined)
+    const session = this.deps.gateway?.open(tools, token)
     const whole = { prompt: withFiles.join('\n\n'), blocks: withFiles, images }
     // Resumed: the live context if it changed, the new messages' blocks, then the task's, with their images.
     const since = (p: SessionPlan): typeof whole => {
@@ -2118,6 +2122,7 @@ ${note}`,
             signal: control.ctl.signal,
             mcpUrl: session?.url,
             web: agent.web !== false,
+            agentKey: agent.id,
             account: account && this.deps.dataDir ? accountDir(this.deps.dataDir, account.id) : undefined
           })
           for await (const ev of events) {

@@ -8,7 +8,7 @@ import { L, lang, locale, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -589,7 +589,7 @@ export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number;
   Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
 
 // `windows`: the install command for PowerShell, where the POSIX one doesn't run.
-export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; site: string }> = {
+export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; min?: string; windows?: string; site: string }> = {
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', windows: 'irm https://claude.ai/install.ps1 | iex', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
@@ -597,7 +597,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   antigravity: { label: 'Antigravity CLI', cli: 'agy', login: 'agy', install: 'curl -fsSL https://antigravity.google/cli/install.sh | bash', windows: 'irm https://antigravity.google/cli/install.ps1 | iex', site: 'https://antigravity.google/docs/cli/overview' },
   cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
   grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' },
-  cline: { label: 'Cline CLI', cli: 'cline', login: 'cline auth', install: 'npm install -g cline', site: 'https://docs.cline.bot/cli/cli-reference' }
+  cline: { label: 'Cline CLI', cli: 'cline', login: 'cline auth', install: 'npm install -g cline', site: 'https://docs.cline.bot/cli/cli-reference' },
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 

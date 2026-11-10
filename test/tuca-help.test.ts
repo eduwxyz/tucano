@@ -17,7 +17,7 @@ import { proposalFrom, workspaceState } from '../src/core/tuca-help'
 import { screenOf } from '../src/shared/screens'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: { installed: true, loggedIn: false }, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: { installed: true, loggedIn: false }, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 const linear: Connector = { id: 'c-lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth', status: 'needs_auth', error: 'O Linear pediu pra entrar de novo.', tools: [] }
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: 'Você tria tickets.', modelId: 'sonnet', effort: 'low', limit: 100_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const lia = agent('a1', 'lia', { grants: { 'c-lin': 'read' } })
@@ -182,7 +182,7 @@ describe('the Tuca helping, in a conversation', () => {
     turns.length = 0
     results.length = 0
     calls = []
-    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [] }) } })
     db.saveAgent(lia)
     const tuca = tucaAgent('sonnet', ['lia'], 1000)

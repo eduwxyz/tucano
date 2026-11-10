@@ -30,6 +30,7 @@ import { antigravityAppDir, antigravityEngine } from './engines/antigravity'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engines/cline'
+import { hermesAppDir, hermesEngine } from './engines/hermes'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
@@ -149,7 +150,7 @@ const fakeBrokenOpencode = fake && process.env['TUCANO_FAKE_BROKEN_OPENCODE'] ==
 const OPENCODE_CRASH = "TypeError: Cannot read properties of undefined (reading 'providers')\n    at loadConfig (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/config.js:212:30)\n    at async main (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/index.js:18:3)"
 const PI_EXPIRED = 'OAuth refresh failed for anthropic: 400 {"type":"error","error":{"type":"invalid_grant","message":"Refresh token expired"}}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/oauth.js:88:11)\n    at async refreshAnthropic (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/anthropic.js:41:5)\n    at async getAuth (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/index.js:23:12)'
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false } },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
   listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'], ...(fakeBrokenPi ? { pi: ['anthropic/claude-haiku-4-5'] } : {}) },
   codexCatalog: []
 })
@@ -337,7 +338,7 @@ function moved(id: EngineId): Parameters<typeof relocating>[1] {
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
@@ -346,7 +347,8 @@ const engineImpls: Record<EngineId, Engine> = fake
       antigravity: relocating(antigravityEngine(() => engines.antigravity.path, antigravityAppDir(dataDir), loginEnv), moved('antigravity')),
       cursor: relocating(cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv), moved('cursor')),
       grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok')),
-      cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline'))
+      cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline')),
+      hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes'))
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
