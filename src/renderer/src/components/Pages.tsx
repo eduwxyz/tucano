@@ -46,6 +46,7 @@ import {
   RUN_BUDGET_PCT,
   routineCap,
   RUN_STALL_MINUTES,
+  TEAM_UP_DAYS,
   archiveAgent,
   setTab,
   saveSkill,
@@ -2816,6 +2817,28 @@ export function SettingsPage(): ReactNode {
                   ]}
                   placeholder={L('Escolha', 'Pick')}
                 />
+              </Field>
+            </div>
+          </Card>
+        )}
+
+        {pane('agentes') && (
+          <Card
+            title={L('Equipes montadas por agentes', 'Team-ups agents put together')}
+            lead={L(
+              'Quando um agente chama outro que não está na conversa (escrevendo @handle), a conversa vira um canal de equipe, com o que já foi feito levado junto. Esses canais são trabalho, não conversas que ficam: eles fecham sozinhos.',
+              'When an agent calls another one that is not in the conversation (writing @handle), the conversation becomes a team-up channel, with what was already done carried along. Those channels are work, not conversations that stay: they close themselves.'
+            )}
+          >
+            <div className="grid2">
+              <Field
+                label={L('Fechar sozinho depois de (dias parado)', 'Close on its own after (days quiet)')}
+                hint={L(
+                  'Contados da última mensagem do canal. 0 mantém todos. Também dá pra fechar na hora: botão direito no canal, "Fechar equipe…".',
+                  'Counted from the channel’s last message. 0 keeps every one of them. You can also close one now: right-click the channel, “Close team-up…”.'
+                )}
+              >
+                <NumberInput min={0} value={settings.teamUpDays ?? TEAM_UP_DAYS} onChange={(n) => updateSettings({ teamUpDays: Math.max(0, Math.round(n)) })} />
               </Field>
             </div>
           </Card>

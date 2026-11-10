@@ -240,22 +240,39 @@ export function Sidebar(): ReactNode {
     { label: L('Novo grupo com este canal', 'New group with this channel'), icon: 'plus', onClick: () => newGroup(c.id) },
     ...(admin ? channelDelete(c) : [])
   ]
+  // A team-up closes instead of being deleted: same thing underneath (its messages go, the conversation
+  // that opened it stays whole), said in the words that fit a room an agent put together for one job.
   const channelDelete = (c: (typeof channels)[number]): MenuItem[] => [
     'separator',
-    {
-      label: L('Excluir canal…', 'Delete channel…'),
-      icon: 'trash',
-      danger: true,
-      onClick: () =>
-        void confirmDialog({
-          title: L(`Excluir #${c.name}?`, `Delete #${c.name}?`),
-          body: L('As mensagens e as rotinas que postam nele vão junto. Os agentes continuam no time. Não dá pra desfazer.', "Its messages and the routines that post in it go too. The agents stay on the team. This can't be undone."),
-          confirm: L(`Excluir #${c.name}`, `Delete #${c.name}`),
-          danger: true
-        }).then((ok) => {
-          if (ok) void deleteConversation(c.id)
-        })
-    }
+    c.teamUp
+      ? {
+          label: L('Fechar equipe…', 'Close team-up…'),
+          icon: 'users',
+          danger: true,
+          onClick: () =>
+            void confirmDialog({
+              title: L(`Fechar #${c.name}?`, `Close #${c.name}?`),
+              body: L('As mensagens dela vão junto. A conversa que a abriu continua inteira, e os agentes continuam no time. Não dá pra desfazer.', "Its messages go with it. The conversation that opened it stays whole, and the agents stay on the team. This can't be undone."),
+              confirm: L(`Fechar #${c.name}`, `Close #${c.name}`),
+              danger: true
+            }).then((ok) => {
+              if (ok) void deleteConversation(c.id)
+            })
+        }
+      : {
+          label: L('Excluir canal…', 'Delete channel…'),
+          icon: 'trash',
+          danger: true,
+          onClick: () =>
+            void confirmDialog({
+              title: L(`Excluir #${c.name}?`, `Delete #${c.name}?`),
+              body: L('As mensagens e as rotinas que postam nele vão junto. Os agentes continuam no time. Não dá pra desfazer.', "Its messages and the routines that post in it go too. The agents stay on the team. This can't be undone."),
+              confirm: L(`Excluir #${c.name}`, `Delete #${c.name}`),
+              danger: true
+            }).then((ok) => {
+              if (ok) void deleteConversation(c.id)
+            })
+        }
   ]
   const dmMenu = (id: string, agentId: string, agentName: string): MenuItem[] => [
     { label: L(`Ver ${agentName}`, `See ${agentName}`), icon: 'eye', onClick: () => navigate({ kind: 'agent', id: agentId }) },

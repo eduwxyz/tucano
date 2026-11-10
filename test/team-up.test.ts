@@ -1,9 +1,13 @@
 // Team-ups: an agent's reply that calls agents who aren't in the room it's answering in. The plan
 // (team-up.ts) on its own, then the whole thing through the real core with fake engines.
-import { rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, Conversation, Message } from '../src/shared/types'
-import { carriedText, pickCarried, teamUpName, teamUpTask, teamUpTopic, TEAM_UP_CHARS, TEAM_UP_LINE, TEAM_UP_MESSAGES } from '../src/core/team-up'
+import { carriedText, pickCarried, staleTeamUps, teamUpDays, teamUpName, teamUpTask, teamUpTopic, TEAM_UP_CHARS, TEAM_UP_LINE, TEAM_UP_MESSAGES } from '../src/core/team-up'
+import { Db } from '../src/core/db'
+import { TEAM_UP_DAYS } from '../src/shared/types'
 import { setLang } from '../src/shared/lang'
 import { bootCore, type Client, type TestCore } from './helpers/core'
 
@@ -55,12 +59,72 @@ describe('team-up: the plan', () => {
     expect(text).not.toContain('and 0 messages before these')
   })
 
+  it('a team-up closes itself after the days set, counted from its last message', () => {
+    const day = 86_400_000
+    const now = 1_000 * day
+    const convs = [
+      { id: 'old', teamUp: { at: now - 30 * day } },
+      { id: 'fresh', teamUp: { at: now - 30 * day } },
+      { id: 'handoff', teamUp: { at: now - 5 * day } },
+      { id: 'plain' }
+    ]
+    const last: Record<string, number> = { old: now - 9 * day, fresh: now - day }
+    const ids = staleTeamUps(convs, (id) => last[id], { days: 7, now })
+    // `old` is quiet past the week; `fresh` was used today; `handoff` never got an answer, so its own
+    // opening counts and it is still inside the week; `plain` isn't a team-up at all.
+    expect(ids).toEqual(['old'])
+    expect(staleTeamUps(convs, (id) => last[id], { days: 0, now })).toEqual([])
+    expect(teamUpDays(undefined)).toBe(TEAM_UP_DAYS)
+    expect(teamUpDays(0)).toBe(0)
+  })
+
   it('the task tells each guest why it is there and where its context is', () => {
     const task = teamUpTask({ by: 'Wrench', source: '#ops', channel: 'team-up-tinker', said: 'audite isto' })
     expect(task).toContain('Wrench called you')
     expect(task).toContain('#team-up-tinker')
     expect(task).toContain('#ops')
     expect(task).toContain('audite isto')
+  })
+})
+
+// The clock the sweep goes by, over a real database: which channels it hands back to close.
+describe('team-up: quiet too long', () => {
+  let dir: string
+  let db: Db
+  const day = 86_400_000
+  beforeEach(() => {
+    setLang('en')
+    dir = mkdtempSync(join(tmpdir(), 'team-up-close-'))
+    db = new Db(join(dir, 'test.db'))
+  })
+  afterEach(() => {
+    db.close()
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // Windows: still open
+    }
+  })
+  const last = (id: string): number | undefined => db.recentMessages(id, 1).at(-1)?.at
+
+  it('picks the team-up nobody came back to, and leaves the rest alone', () => {
+    const now = Date.now()
+    db.createConversation({ id: 'old', kind: 'channel', name: 'team-up-old', members: [], teamUp: { from: 'ops', title: '#ops', by: 'a1', at: now - 20 * day } })
+    db.saveMessage({ id: 'm1', conversationId: 'old', author: { kind: 'agent', id: 'a1' }, text: 'leva isto', at: now - 9 * day })
+    db.createConversation({ id: 'fresh', kind: 'channel', name: 'team-up-fresh', members: [], teamUp: { from: 'ops', title: '#ops', by: 'a1', at: now - 20 * day } })
+    db.saveMessage({ id: 'm2', conversationId: 'fresh', author: { kind: 'agent', id: 'a1' }, text: 'ainda trabalhando', at: now - day })
+    db.createConversation({ id: 'plain', kind: 'channel', name: 'ops', members: [] })
+    db.saveMessage({ id: 'm3', conversationId: 'plain', author: { kind: 'agent', id: 'a1' }, text: 'velho, mas não é equipe', at: now - 60 * day })
+    expect(staleTeamUps(db.conversations(), last, { days: 7, now })).toEqual(['old'])
+  })
+
+  it('counts from the hand-off when nobody ever answered', () => {
+    const now = Date.now()
+    db.createConversation({ id: 'alone', kind: 'channel', name: 'team-up-alone', members: [], teamUp: { from: 'ops', title: '#ops', by: 'a1', at: now - 10 * day } })
+    db.saveMessage({ id: 'm1', conversationId: 'alone', author: { kind: 'agent', id: 'a1' }, text: 'leva isto', at: now - 10 * day })
+    expect(staleTeamUps(db.conversations(), last, { days: 7, now })).toEqual(['alone'])
+    // ...and 0 days, what the person sets to keep them, closes nothing.
+    expect(staleTeamUps(db.conversations(), last, { days: 0, now })).toEqual([])
   })
 })
 
@@ -136,6 +200,24 @@ describe('team-up: through the core', () => {
     await until(async () => (await snap()).messages.some((m) => m.conversationId === dados.id && m.author.kind === 'agent' && m.text.includes('@lia') && m.at > Date.now() - 60_000))
     await new Promise((r) => setTimeout(r, 500))
     expect((await snap()).conversations.filter((c) => c.teamUp?.from === dados.id)).toHaveLength(before)
+  })
+
+  it('an agent in a DM looks the team up, and can call one in by handle', async () => {
+    const lia = (await snap()).agents.find((a) => a.handle === 'lia')!
+    const dm = await ana.call<string>('openDm', { agentId: lia.id })
+    await ana.call('sendMessage', { conversationId: dm, text: 'liste o time' })
+    const mine = async (): Promise<Message | undefined> =>
+      (await snap()).messages.filter((m) => m.conversationId === dm && m.author.kind === 'agent' && m.author.id === lia.id).at(-1)
+    await until(async () => {
+      const m = await mine()
+      return !!m && m.run?.status !== 'working'
+    })
+    const reply = (await mine())!
+    // Who exists, with the handle to write — a DM's prompt names only Lia herself.
+    expect(reply.text).toContain('@theo')
+    expect(reply.text).toContain('@handle')
+    // And the step a person sees on the reply.
+    expect(reply.run?.steps?.some((st) => /^(Looked at the team|Olhou o time)$/.test(st.label))).toBe(true)
   })
 
   it('an agent alone in its own room who mentions nobody makes none', async () => {
