@@ -11,6 +11,7 @@ import { saidAt } from '../../../shared/types'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
+import { SessionDrawer } from './Sessions'
 import { canEditChannel,
   agentById,
   askerIn,
@@ -280,6 +281,20 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus, conversationId, focusAt >= 0])
+
+  // A row of the drawer above the field: where that reply is now, its end in view (that's what the
+  // live steps are), and the prompt it answers flashes so it's clear which one it is.
+  const jumpTo = useStore((s) => s.jumpTo)
+  useEffect(() => {
+    if (!jumpTo) return
+    const el = ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(jumpTo.id)}"]`)
+    if (!el) return
+    stick.current = false
+    el.scrollIntoView({ block: 'end' })
+    el.classList.add('is-flash')
+    const t = setTimeout(() => el.classList.remove('is-flash'), 1800)
+    return () => clearTimeout(t)
+  }, [jumpTo])
 
   useEffect(() => {
     if (!lead) stick.current = true
@@ -2147,6 +2162,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           )}
         </div>
       )}
+      <SessionDrawer conversationId={conversationId} threadId={threadId} />
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">

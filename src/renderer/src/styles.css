@@ -1715,6 +1715,147 @@ h3 {
   max-width: 860px;
   margin: 0 auto;
 }
+/* The drawer above the field: what is running here now, and what waits its turn (Sessions.tsx).
+   It sits on the composer's edge like a lid, so the two read as one thing when it is closed. */
+.drawer {
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: drawer-in var(--dur-enter) var(--ease-out);
+}
+.drawer__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.drawer__head:hover {
+  background: var(--hover);
+}
+.drawer__title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.drawer__more {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.drawer__caret {
+  display: inline-flex;
+  color: var(--text-3);
+  transform: rotate(90deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.drawer__caret.is-open {
+  transform: rotate(-90deg);
+}
+.drawer__body {
+  display: grid;
+  gap: 1px;
+  padding: 0 6px 6px;
+}
+.drawer__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius);
+}
+.drawer__row:hover {
+  background: var(--hover);
+}
+.drawer__go {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.drawer__go--queued {
+  color: var(--text-2);
+}
+.drawer__name {
+  font-weight: 600;
+  flex: none;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer__prompt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.drawer__meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.drawer__stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 7px;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.drawer__stop:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.drawer__group {
+  display: grid;
+  gap: 1px;
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+}
+.drawer__label {
+  padding: 2px 8px 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer {
+    animation: none;
+  }
+}
 .composer {
   border: 1px solid var(--border);
   border-radius: 20px;

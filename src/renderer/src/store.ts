@@ -117,6 +117,9 @@ export interface State {
   demoServer?: { command: string; args: string[] }
   toasts: Toast[] // short notes at the bottom: an action that didn't go through
   coreDown: boolean // the core's process ended; a banner offers to reopen
+  // A message to scroll to and show (the drawer above the field, a routine's run): the `at` makes
+  // the same message able to be asked for twice.
+  jumpTo: { id: string; at: number } | null
 }
 
 export interface Toast {
@@ -196,7 +199,8 @@ let state: State = {
   dialog: null,
   tabs: {},
   toasts: [],
-  coreDown: false
+  coreDown: false,
+  jumpTo: null
 }
 
 // ---------- store plumbing ----------
@@ -282,6 +286,7 @@ interface ConversationIndex {
   timeline: Message[] // what's outside threads
   replies: Map<string, Message[]> // a thread's first message → its replies
   working: Message[] // replies at work, and notes still pending
+  queued: Message[] // my prompts still waiting their turn (sendMode 'queue')
   waiting: Message[] // questions waiting on me
   browser: Map<string, string> // an agent → its latest message that used the browser
   receipts: Message[]
@@ -296,7 +301,7 @@ const sameList = (a: Message[], b: Message[]): boolean => a.length === b.length 
 function indexOf(list: Message[]): ConversationIndex {
   const had = indexes.get(list)
   if (had) return had
-  const ix: ConversationIndex = { byId: new Map(), timeline: [], replies: new Map(), working: [], waiting: [], browser: new Map(), receipts: [], agentDone: false }
+  const ix: ConversationIndex = { byId: new Map(), timeline: [], replies: new Map(), working: [], queued: [], waiting: [], browser: new Map(), receipts: [], agentDone: false }
   // In the order things were said (a reply when it ended), whoever is still working at the end.
   for (const m of asSaid(list)) {
     ix.byId.set(m.id, m)
@@ -306,6 +311,7 @@ function indexOf(list: Message[]): ConversationIndex {
       if (r) r.push(m)
       else ix.replies.set(m.threadId, [m])
     }
+    if (m.sendMode === 'queue') ix.queued.push(m)
     const status = m.run?.status
     if (status === 'working') ix.working.push(m)
     else if (status === 'waiting_input') ix.waiting.push(m)
@@ -356,6 +362,24 @@ export const workingIds = (s: State, conversationId: string, threadId?: string):
   conversationIndex(s, conversationId)
     .working.filter((m) => m.threadId === threadId && m.author.kind === 'agent')
     .map((m) => m.id)
+// The replies at work in a place, as the drawer above the field lists them: the same order the
+// conversation shows them in (oldest first), so the rows and the steps agree.
+export const workingRuns = (s: State, conversationId: string, threadId?: string): Message[] =>
+  conversationIndex(s, conversationId).working.filter((m) => m.threadId === threadId && m.author.kind === 'agent')
+// My prompts in a place still waiting their turn (sendMode 'queue', runs.ts `send`).
+export const queuedRuns = (s: State, conversationId: string, threadId?: string): Message[] =>
+  conversationIndex(s, conversationId).queued.filter((m) => m.threadId === threadId)
+// The message a reply is answering, when one did: its `replyTo`, or the last thing a person said
+// before it started (a routine's run, an agent called by an agent).
+export function promptOf(s: State, conversationId: string, run: Message): Message | undefined {
+  const ix = conversationIndex(s, conversationId)
+  const own = run.run?.replyTo ? ix.byId.get(run.run.replyTo) : undefined
+  if (own) return own
+  const before = ix.timeline.filter((m) => m.author.kind === 'person' && m.at <= run.at)
+  return before.at(-1)
+}
+// Scroll the conversation to a message and show it: what a row of the drawer does.
+export const jumpToMessage = (id: string): void => set((s) => ({ ...s, jumpTo: { id, at: Date.now() } }))
 export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
 export const lastBrowserIn = (s: State, conversationId: string, agentId: string): string | undefined => conversationIndex(s, conversationId).browser.get(agentId)
 
