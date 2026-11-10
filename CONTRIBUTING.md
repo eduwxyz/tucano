@@ -6,7 +6,7 @@ Development talk happens in `#contributing` on our [Discord](https://discord.gg/
 
 ## Setup
 
-You need macOS on Apple silicon or Linux (x64 or ARM64), Node 24 or later, and at least one harness signed in (`claude auth login` is the quickest). Windows 10/11 works too, with Git for Windows installed: see [docs/windows.md](docs/windows.md).
+You need macOS on Apple silicon or Linux (x64 or ARM64), Node 24 or later, and at least one harness signed in: whatever you already pay for. The reference machine runs Pi with its `opencode-go` provider (DeepSeek 4.1 Flash), and nothing here assumes Claude Code — see [A testing checkout](#a-testing-checkout). Windows 10/11 works too, with Git for Windows installed: see [docs/windows.md](docs/windows.md).
 
 For Arch Linux or CachyOS with Niri, see the [validation guide](docs/arch-linux.md), including the checks still needed for desktop integration.
 
@@ -27,6 +27,7 @@ Handy environment variables:
 | `TUCANO_FAKE_ENGINES=1` | Agents answer with a scripted fake engine: no subscription, no tokens. Comes with a sample team |
 | `TUCANO_SEED=0` | With fake engines, start empty instead of with the sample team |
 | `TUCANO_LOCALE=en-US` | The system language a new install starts in |
+| `TUCANO_TEST_MODEL=<id>` | The core model a testing run uses, instead of the one the app picks: see [A testing checkout](#a-testing-checkout) |
 
 To try connectors without any account, add the demo server in **Connectors → Add → Local → "Fill in with the demo server"** (`scripts/demo-mcp-server.mjs`, a local task list).
 
@@ -40,6 +41,20 @@ npm test
 Both must pass, and GitHub runs them (plus the build) on macOS, Linux and Windows for every pull request. Tests cover the core: the CLI stream parsers (with recorded outputs), context building, runs, limits, governance, routines, memory, the migration from the old name. A change in the core comes with a test.
 
 For UI changes, attach a screenshot to the pull request. `node scripts/screens.mjs <folder>` opens the built app with Playwright on a temporary database and saves screenshots of the main screens.
+
+### A testing checkout
+
+Every checkout runs on the same model, and none of them assumes Claude. `test/testing.json` names it once — `pi:opencode-go/deepseek-v4.1-flash`, DeepSeek 4.1 Flash through Pi's `opencode-go` provider — and `scripts/pre-go.mjs` hands it to the core as `TUCANO_TEST_MODEL`. The core takes it as `routerModel` and `memoryModel` (who replies in a channel, and memory) and as the model of the demo team it seeds, so a run here has a model that actually answers. Unset, as on a real install, nothing changes: the app picks from what is signed in.
+
+The suite itself spends nothing: it runs on fake engines, and each test makes its own `TUCANO_DATA` folder.
+
+```bash
+node scripts/pre-go.mjs                              # what a fresh checkout needs before it runs
+node scripts/pre-go.mjs --check                      # is this checkout ready?
+node scripts/pre-go.mjs --run npm run dev --data <d> # run something on the testing model
+```
+
+`pre-go` links `node_modules` to a checkout that already has an install (a junction on Windows, so a worktree tests in seconds instead of a second `npm ci`) and writes `.pre-go.json` recording the model it runs on. It installs nothing and touches nothing outside the checkout.
 
 ## How the code is laid out
 

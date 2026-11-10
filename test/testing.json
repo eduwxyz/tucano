@@ -1,0 +1,5 @@
+{
+  "_comment": "What a test run is set up with: the model behind the two small jobs (who replies in a channel, and memory). Read by test/helpers/testing.ts and by scripts/pre-go.mjs, so a checkout and the suite never disagree. Never a Claude model: the machine the tests are verified on has no Claude subscription.",
+  "coreModel": "pi:opencode-go/deepseek-v4.1-flash",
+  "coreModelLabel": "DeepSeek V4.1 Flash (OpenCode Go) on Pi"
+}

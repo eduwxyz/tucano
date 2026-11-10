@@ -14,6 +14,7 @@
     "server": "node out/main/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "pre-go": "node scripts/pre-go.mjs",
     "dist": "sh scripts/dist.sh",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "install-app": "npm run dist && sh scripts/install-app.sh",

@@ -73,6 +73,7 @@ import { Routines } from './routines'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { initializeWorkspace } from './seed'
+import { unlessTesting } from './testing-model'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 import { isNewQuestion } from '../shared/questions'
@@ -123,8 +124,10 @@ const user = userInfo().username
 const DEFAULTS: Omit<Settings, 'engines'> = {
   workspaceName: user ? user[0]!.toUpperCase() + user.slice(1) : 'Eu',
   context: '',
-  routerModel: 'haiku',
-  memoryModel: 'haiku',
+  // A testing checkout names its own core model (scripts/pre-go.mjs); a real install picks from
+  // what is signed in.
+  routerModel: unlessTesting('haiku'),
+  memoryModel: unlessTesting('haiku'),
   memoryLearning: 'approve',
   defaultLimit: 2_000_000,
   approvalTtlHours: 24,
