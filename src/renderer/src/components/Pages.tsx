@@ -271,6 +271,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const globalRules = useStore((s) => s.settings.actionRules)
   const globalAutonomy = useStore((s) => s.settings.autonomy)
   const globalGuard = useStore((s) => s.settings.outsideGuard)
+  const routing = useStore((s) => s.settings.routing)
 
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
   const [chosen, setChosen] = useState<string[]>(() => (id ? channels.filter((c) => c.members.includes(id)).map((c) => c.id) : []))
@@ -725,6 +726,20 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           {pane('perfil') && (
             <Card title={L('Onde roda e modelo', 'Where it runs and model')} lead={L('O agente roda no Claude Code, no Codex ou em outro que você já usa, do jeito que você configurou: no seu plano, no gateway da empresa ou no seu provedor.', 'The agent runs in Claude Code, Codex or another one you already use, the way you set it up: on your plan, your company’s gateway or your provider.')}>
               <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
+              {/* Settings › Routing, once it's on: this agent may let Jev pick the model for each prompt.
+                  An explicit model above stays the baseline it runs on when routing is off. */}
+              {routing?.enabled && (
+                <div className="key-row">
+                  <Icon name="spark" />
+                  <div className="grow">
+                    <strong>{L('Roteamento inteligente', 'Smart routing')}</strong>
+                    <p className="muted small">
+                      {L('O Jev escolhe dos seus pools de roteamento a cada prompt. O modelo acima é a base, quando o roteamento está desligado.', 'Jev chooses from your routing pools for each prompt. The model above is the baseline, for when routing is off.')}
+                    </p>
+                  </div>
+                  <Toggle on={!!draft.smartRouting} onChange={(smartRouting) => patch({ smartRouting })} />
+                </div>
+              )}
               <AccountPicker draft={draft} patch={patch} />
               <ReserveModel draft={draft} patch={patch} />
               {!engineStatus.loggedIn && !draft.accountId && (

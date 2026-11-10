@@ -20,6 +20,7 @@ import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEdi
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
+import { normalizeRouting } from '../shared/routing'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db, MIGRATIONS } from './db'
@@ -1479,6 +1480,7 @@ const api: Handlers = {
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
     // One that already answered to the same agent keeps doing so: only a change is checked.
     if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo
+    if (typeof clean.smartRouting !== 'boolean') delete clean.smartRouting
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -1850,6 +1852,8 @@ const api: Handlers = {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
+    // A routing setup saved by an older or a hand-edited install: known pools, known harnesses, real levels.
+    if (patch.routing !== undefined) patch.routing = normalizeRouting(patch.routing)
     db.setSettings(patch)
     // The settings' name is the owner's: what the agents call them.
     if (patch.workspaceName && cleanName(patch.workspaceName)) {
