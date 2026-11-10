@@ -41,6 +41,8 @@ Both must pass, and GitHub runs them (plus the build) on macOS, Linux and Window
 
 For UI changes, attach a screenshot to the pull request. `node scripts/screens.mjs <folder>` opens the built app with Playwright on a temporary database and saves screenshots of the main screens.
 
+The tests can't see a check-then-use, an unvalidated argument crossing IPC, or a secret in a log line. For a second reader on the diff itself, see [docs/ai-review-bots.md](docs/ai-review-bots.md): an automated review bot (CodeRabbit or Sourcery, both free for public repositories) on every pull request.
+
 ## How the code is laid out
 
 ```
