@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { closeLightbox, moveLightbox, useStore } from '../store'
+import { imageMenuState, openImageMenu } from '../image-menu'
 import { Icon } from './ui'
 
 const MAX = 8
@@ -35,6 +36,7 @@ export function Lightbox(): ReactNode {
   useEffect(() => {
     if (!box) return
     const onKey = (e: KeyboardEvent): void => {
+      if (imageMenuState()) return // the picture's right-click menu is open: Esc is for that
       const keys: Record<string, () => void> = {
         Escape: closeLightbox,
         ArrowLeft: () => moveLightbox(-1),
@@ -117,6 +119,11 @@ export function Lightbox(): ReactNode {
             src={item.url}
             alt={item.title}
             draggable={false}
+            // Right-click here: the two ways out of the app. (In a reply there is a third, the prompt.)
+            onContextMenu={(e) => {
+              e.preventDefault()
+              openImageMenu({ url: item.url, title: item.title, surface: 'gallery' }, { x: e.clientX, y: e.clientY })
+            }}
             style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
             onDoubleClick={(e) => {
               if (view.scale > 1) return setView(FIT)
