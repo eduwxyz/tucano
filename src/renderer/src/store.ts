@@ -520,7 +520,20 @@ function apply(e: CoreEvent): void {
     switch (e.type) {
       case 'message': {
         const id = e.message.conversationId
-        return { ...s, messages: { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) } }
+        const messages = { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) }
+        // What I just wrote in a conversation that answers in threads opens its thread, where the
+        // answers go: it's what clicking the thread's link would do, without having to find it.
+        const m = e.message
+        const opens =
+          openNext?.conversationId === id &&
+          Date.now() < openNext.until &&
+          !m.threadId &&
+          isMine(s, m.author) &&
+          !messagesIn(s, id).some((x) => x.id === m.id)
+        if (!opens) return { ...s, messages }
+        openNext = null
+        const here = s.view?.kind === 'conversation' && s.view.id === id
+        return { ...s, messages, ...(here ? { panel: { kind: 'thread' as const, id: m.id } } : {}) }
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
@@ -892,9 +905,15 @@ export const setChannelMembers = (id: string, agentIds: string[]): Promise<void>
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
+// A message sent outside threads, in a conversation that answers in them: its thread opens when it
+// comes back from the core (a while at most, so one that never does doesn't open a later one).
+let openNext: { conversationId: string; until: number } | null = null
 // `threadId`: a reply in the thread that message started.
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
-  if (text.trim() || images.length || files.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  if (!(text.trim() || images.length || files.length)) return
+  const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
+  openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
