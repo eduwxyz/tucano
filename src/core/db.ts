@@ -489,6 +489,11 @@ export const MIGRATIONS = [
   `
   ALTER TABLE connector_tools ADD COLUMN cls_auto TEXT;
   `,
+  // Generic, per-agent execution boundary. NULL is kept for older agents and means explicit
+  // unsandboxed execution until the user selects a provider.
+  `
+  ALTER TABLE agents ADD COLUMN sandbox_config TEXT;
+  `,
   // Gemini CLI was replaced by the Antigravity CLI: what ran on the "gemini" harness now runs on
   // "antigravity", the same login and models (its own engine maps the old model names).
   `
@@ -498,11 +503,6 @@ export const MIGRATIONS = [
   UPDATE agents SET fallback_model = 'antigravity:' || substr(fallback_model, 8) WHERE fallback_model LIKE 'gemini:%';
   UPDATE receipts SET engine = 'antigravity' WHERE engine = 'gemini';
   UPDATE receipts SET model = 'antigravity:' || substr(model, 8) WHERE model LIKE 'gemini:%';
-  `,
-  // Generic, per-agent execution boundary. NULL is kept for older agents and means explicit
-  // unsandboxed execution until the user selects a provider.
-  `
-  ALTER TABLE agents ADD COLUMN sandbox_config TEXT;
   `
 ]
 
