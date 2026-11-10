@@ -2010,7 +2010,9 @@ const api: Handlers = {
     const doesNext = typeof sectorDoes === 'string' ? sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) : ''
     if (doesNext) clean.sectorDoes = doesNext
     else delete clean.sectorDoes
-    if (typeof clean.smartRouting !== 'boolean') delete clean.smartRouting
+    // On, off, or inherit (absent): anything else, a cleared switch included, goes back to following the
+    // global one instead of turning into an off that reads as a choice.
+    if (clean.smartRouting !== true && clean.smartRouting !== false) delete clean.smartRouting
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)

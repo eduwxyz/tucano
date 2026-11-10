@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
 import { AgentVaultKeys, AgentVaultLogins } from './Vault'
 import { COFRE } from '../../../shared/vault'
+import { defaultRouting } from '../../../shared/routing'
 import {
   agentById,
   harnessNoticeSeen,
@@ -535,6 +536,14 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
     navigate({ kind: 'agent', id: draft.id })
   }
 
+  // Smart routing for this agent only: on, off, or follow the global switch (the key absent).
+  // `patch` is the page's autosave path; it stores the absent key as null, which reads back as undefined.
+  const setSmartRouting = (v: boolean | undefined): void => {
+    patch({ smartRouting: v })
+    // A bot can route with the global switch off, so its pools have to exist for it to have anywhere to go.
+    if (v === true && !routing) updateSettings({ routing: defaultRouting() })
+  }
+
   const model = modelInfo(draft.modelId)
   const engine: EngineId = model?.engine ?? 'claude'
   const engineStatus = engines[engine]
@@ -762,16 +771,41 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <Row label={L('Modelo', 'Model')} className="lrow--wide">
                 <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
               </Row>
-              {/* Settings › Routing, once it's on: this agent may let Jev pick the model for each prompt.
-                  An explicit model above stays the baseline it runs on when routing is off. */}
-              {routing?.enabled && (
-                <Row
-                  label={L('Roteamento inteligente', 'Smart routing')}
-                  sub={L('O Jev escolhe dos seus pools de roteamento a cada prompt. O modelo acima é a base, quando o roteamento está desligado.', 'Jev chooses from your routing pools for each prompt. The model above is the baseline, for when routing is off.')}
-                >
-                  <Toggle on={!!draft.smartRouting} onChange={(smartRouting) => patch({ smartRouting })} />
-                </Row>
-              )}
+              {/* Settings › Router has the global switch; here it's this agent's own, in three states, so
+                  the global one can be off while a bot or two still route. An explicit model above stays the
+                  baseline it runs on whenever routing decides nothing. */}
+              <Row
+                label={L('Roteamento inteligente', 'Smart routing')}
+                sub={
+                  draft.smartRouting === true
+                    ? L(
+                        'Ligado só pra este agente: o Jev escolhe dos seus pools a cada prompt, mesmo com o roteamento geral desligado. O modelo acima é a base.',
+                        'On for this agent alone: Jev picks from your pools for each prompt, even with global routing off. The model above is the baseline.'
+                      )
+                    : draft.smartRouting === false
+                      ? L(
+                          'Desligado só pra este agente: ele usa o modelo acima em todo prompt, mesmo com o roteamento geral ligado.',
+                          'Off for this agent alone: it uses the model above for every prompt, even with global routing on.'
+                        )
+                      : routing?.enabled
+                        ? L(
+                            'Seguindo o geral, que está ligado: o Jev escolhe o modelo a cada prompt. O modelo acima é a base.',
+                            'Following the global switch, which is on: Jev picks the model for each prompt. The model above is the baseline.'
+                          )
+                        : L(
+                            'Seguindo o geral, que está desligado: este agente usa o modelo acima em todo prompt.',
+                            'Following the global switch, which is off: this agent uses the model above for every prompt.'
+                          )
+                }
+              >
+                <div className="segmented" role="radiogroup" aria-label={L('Roteamento inteligente', 'Smart routing')}>
+                  {([undefined, true, false] as const).map((v) => (
+                    <button key={String(v)} role="radio" aria-checked={draft.smartRouting === v} className={draft.smartRouting === v ? 'is-active' : ''} onClick={() => setSmartRouting(v)}>
+                      {v === undefined ? L('Geral', 'Global') : v ? L('Ligado', 'On') : L('Desligado', 'Off')}
+                    </button>
+                  ))}
+                </div>
+              </Row>
               <div className="lrow lrow--picker">
                 <AccountPicker draft={draft} patch={patch} />
               </div>
@@ -2542,8 +2576,8 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
 type TabList = readonly (readonly [string, string])[]
 // With a team, Pessoas (everyone) and Atividade (admins); a member sees only what's theirs to change.
 // The phone (Telegram) is the owner's alone.
-// `routing`: smart model routing is on, so its tab exists. Off, the tab is gone and what was
-// configured stays saved (a reply that already has a trace keeps it, drawn from the trace).
+// `routing`: smart model routing is on, globally or for at least one bot, so its tab exists. Off,
+// the tab is gone and what was configured stays saved (a reply that already has a trace keeps it).
 export const SETTINGS_TABS = (team = false, admin = true, owner = true, routing = false): TabList => [
   ['geral', L('Geral', 'General')],
   ...(admin
@@ -3231,7 +3265,9 @@ export function SettingsPage(): ReactNode {
   const team = useStore(teamMode)
   const admin = useStore(amAdmin)
   const owner = useStore(amOwner)
-  const routingOn = useStore((s) => s.settings.routing?.enabled === true)
+  // Smart routing's tab exists while the global switch is on, or while any bot is set to On by itself:
+  // its pools are what both of those route through.
+  const routingOn = useStore((s) => s.settings.routing?.enabled === true || s.agents.some((a) => a.smartRouting === true))
   const tabs = SETTINGS_TABS(team, admin, owner, routingOn)
   const tab = useTab('settings', tabs)
   const pane = (t: string): boolean => tab === t
