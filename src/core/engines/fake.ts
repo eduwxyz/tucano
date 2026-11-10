@@ -200,6 +200,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         await callTool(turn.mcpUrl, 'buscar_memorias', { busca: texto })
         await new Promise((ok) => setTimeout(ok, Number(process.env['TUCANO_FAKE_HOLD_MS'] ?? 6000)))
         reply = L('Guardei e procurei de volta.', 'I saved it and searched it back.')
+      } else if (turn.mcpUrl && /(quem (?:é|e) o time|liste o time|who'?s on the team)/i.test(last)) {
+        // The team an agent looks at: a DM's prompt names only itself, so the tool is how it finds the rest.
+        const r = await callTool(turn.mcpUrl, 'equipe', {})
+        reply = textOf(r)
       } else if (turn.mcpUrl && /lembr[ae] que (.+)/i.test(last)) {
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })

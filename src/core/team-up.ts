@@ -4,8 +4,10 @@
 // and the person sees it in the sidebar like any other channel.
 //
 // Everything here is a plan: no database, no model. runs.ts decides when to open one (see `openTeamUp`).
-import { channelName } from '../shared/types'
+import { channelName, TEAM_UP_DAYS } from '../shared/types'
 import { L } from '../shared/lang'
+
+const DAY = 86_400_000
 
 // Agents one reply can call in: the same ceiling as agents it can hand the turn to (runs.ts MAX_MENTIONS).
 export const TEAM_UP_GUESTS = 3
@@ -17,6 +19,23 @@ export const TEAM_UP_LINE = 900
 // The same agent calling the same agents from the same conversation within this is the same room,
 // reused: a second mention an hour later isn't a second channel.
 export const TEAM_UP_REUSE_MS = 6 * 60 * 60_000
+
+// Which team-up channels have been quiet long enough to close themselves: the ones whose last message
+// (the hand-off, when nobody ever answered) is `days` old. `days` 0 or less keeps every one of them, and
+// a channel with a reply still running is never one: the clock only runs while nothing is happening.
+export function staleTeamUps(
+  conversations: { id: string; teamUp?: { at: number } }[],
+  lastAt: (id: string) => number | undefined,
+  opts: { days: number; now?: number }
+): string[] {
+  const days = Math.round(opts.days)
+  if (!(days > 0)) return []
+  const now = opts.now ?? Date.now()
+  return conversations.filter((c) => !!c.teamUp && now - (lastAt(c.id) ?? c.teamUp.at) >= days * DAY).map((c) => c.id)
+}
+
+// How long a team-up stays, in days, from what the person set (unset: a week).
+export const teamUpDays = (set: number | undefined): number => (Number.isFinite(set) ? Math.max(0, Math.round(set as number)) : TEAM_UP_DAYS)
 
 export interface Carried {
   name: string // who said it, as the person would read it
