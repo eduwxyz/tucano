@@ -115,12 +115,23 @@ export const PROJECTS_DIR = '/projetos'
 export type ComputerKind = 'linux' | 'mac'
 export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a.computer && a.computerKind === 'mac'
 
+// A channel an agent made by calling agents that weren't in the conversation it was answering in
+// (src/core/team-up.ts): it carries what was already done there, so the ones called in start with the
+// work. It is a channel like any other, and the person deletes it like any other.
+export interface TeamUp {
+  from: string // the conversation it came out of
+  title: string // that conversation's name at the time: "#ops", or the agent of a DM
+  by: string // the agent that called the others in
+  at: number
+}
+
 export interface Conversation {
   id: string
   kind: 'channel' | 'dm'
   name: string // channel name, or agent id for a DM
   topic?: string
   members: string[] // agent ids
+  teamUp?: TeamUp // set on a channel an agent opened to work with agents called in from elsewhere
   summary?: string // what the conversation covered before its recent messages
   summaryUntil?: number // `at` of the last message the summary covers
   summaryAt?: number

@@ -215,7 +215,7 @@ export function Sidebar(): ReactNode {
       onContextMenu={(e) => open(e, channelMenu(c))}
       {...dropOn({ group, before: c.id })}
     >
-      <ChannelItem id={c.id} name={c.name} unread={c.unread} />
+      <ChannelItem id={c.id} name={c.name} unread={c.unread} teamUp={!!c.teamUp} />
     </div>
   )
   // The wiki's curator reads every conversation; one can be kept out (a personal DM, say).
@@ -458,13 +458,13 @@ export function Sidebar(): ReactNode {
   )
 }
 
-const ChannelItem = memo(function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: number }): ReactNode {
+const ChannelItem = memo(function ChannelItem({ id, name, unread, teamUp }: { id: string; name: string; unread?: number; teamUp?: boolean }): ReactNode {
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
   const waiting = useWaitingTitle(id)
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
-      <Icon name="hash" />
+      {teamUp ? <span title={L('Equipe montada por um agente', 'A team an agent put together')}><Icon name="users" /></span> : <Icon name="hash" />}
       <span className="nav-item__label">{name}</span>
       {waiting ? <WaitingMark title={waiting} /> : <LiveDot working={working} />}
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}

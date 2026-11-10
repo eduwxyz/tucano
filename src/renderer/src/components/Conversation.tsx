@@ -167,6 +167,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
   const [showSummary, setShowSummary] = useState(false)
   const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
+  // Who opened this team-up: a channel an agent made to work with agents it called in.
+  const teamLead = useStore((s) => (conv?.teamUp ? agentById(s, conv.teamUp.by)?.name : undefined))
 
   if (!conv)
     return (
@@ -205,6 +207,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
             {dmAgent?.role && (
               <span className="tag topbar__role" title={dmAgent.role}>
                 {dmAgent.role}
+              </span>
+            )}
+            {conv.teamUp && (
+              <span className="tag" title={teamLead ? L(`Equipe montada por ${teamLead}`, `A team ${teamLead} put together`) : L('Equipe montada por um agente', 'A team an agent put together')}>
+                {L('Equipe', 'Team-up')}
               </span>
             )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}

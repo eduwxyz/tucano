@@ -6,7 +6,7 @@ import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, isTeam, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -25,6 +25,7 @@ import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
+import { carriedText, TEAM_UP_GUESTS, TEAM_UP_MESSAGES, TEAM_UP_REUSE_MS, teamUpName, teamUpTask, teamUpTopic } from './team-up'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
@@ -2445,6 +2446,10 @@ ${note}`,
         this.callPeople(conv, msg, agent.name)
         // On handed work, naming whoever asked ("@lia, pronto") calls no one: the answer already goes back to them.
         const next = this.mentions(agent, conv, msg).filter((a) => a.id !== handedNow?.from)
+        // Agents the reply calls that aren't in this conversation: this room can't take them, so they get
+        // one of their own, with what was already done here in front of them (team-up.ts).
+        const guests = this.guests(agent, conv, msg)
+        if (guests.length) this.openTeamUp(agent, conv, msg, guests, opts.depth, chainDepthCap(settings.chainDepth))
         if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
         else finished()
       }
@@ -3059,6 +3064,78 @@ ${note}`,
   private mentions(agent: Agent, conv: Conversation, msg: Message): Agent[] {
     if (this.paused) return []
     return mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+  }
+
+  // The agents a reply calls that aren't in this conversation: no turn to hand them here, so they get a
+  // team-up. Never the agent talking, the Tuca, an archived one, or one the person can't have.
+  private guests(agent: Agent, conv: Conversation, msg: Message): Agent[] {
+    if (this.paused) return []
+    const here = new Set(conv.members)
+    const elsewhere = this.deps.db.agents().filter((a) => a.id !== agent.id && isTeam(a) && !here.has(a.id))
+    return mentioned(msg.text, elsewhere).slice(0, TEAM_UP_GUESTS)
+  }
+
+  // A channel for the agents just called, carrying what was already done here: the calling agent posts
+  // it as its own hand-off, each guest is told why it's here, and this conversation gets one line
+  // saying where the work went. The same call again within the day is the room it already has.
+  private openTeamUp(agent: Agent, conv: Conversation, msg: Message, guests: Agent[], depth: number, limit: number): void {
+    const { db, emit } = this.deps
+    const said = msg.text.trim()
+    const source = conv.kind === 'dm' ? (db.agent(conv.name)?.name ?? L('uma conversa', 'a conversation')) : `#${conv.name}`
+    const handles = guests.map((g) => `@${g.handle}`)
+    const names = handles.join(L(' e ', ' and '))
+    if (depth >= limit) {
+      this.post(conv.id, msg.threadId, L(`${agent.name} chamou ${names}, mas parei aqui: já foram ${limit} respostas seguidas. Mande uma mensagem para continuar.`, `${agent.name} called ${names} in, but I stopped here: that was ${limit} replies in a row. Send a message to go on.`))
+      return
+    }
+    const now = Date.now()
+    const existing = db.conversations().find(
+      (c) => !!c.teamUp && c.teamUp.from === conv.id && now - c.teamUp.at < TEAM_UP_REUSE_MS && guests.every((g) => c.members.includes(g.id))
+    )
+    let team = existing
+    if (!team) {
+      const id = randomUUID()
+      db.createConversation({
+        id,
+        kind: 'channel',
+        name: teamUpName(guests, (n) => db.conversations().some((c) => c.kind === 'channel' && c.name === n)),
+        topic: teamUpTopic(agent.name, source),
+        // Everyone who was here, plus the ones called in: the room continues the work, it doesn't restart it.
+        members: [...new Set([...conv.members, agent.id, ...guests.map((g) => g.id)])],
+        // What agents say while they work together is theirs, not the wiki's to read afterwards.
+        wikiCapture: false,
+        teamUp: { from: conv.id, title: source, by: agent.id, at: now }
+      })
+      team = db.conversation(id)!
+      emit({ type: 'conversation', conversation: team })
+    }
+    // What was already said here, named as the person would read it: the guest's context, not a log.
+    const people = new Map(db.people({ removed: true }).map((p) => [p.id, p.name]))
+    const carried = db
+      .recentMessages(conv.id, TEAM_UP_MESSAGES * 3, msg.threadId ?? null)
+      .reverse()
+      .map((m) => ({
+        name: m.author.kind === 'agent' ? (db.agent(m.author.id)?.name ?? L('agente', 'agent')) : m.author.kind === 'person' ? (people.get(m.author.id) ?? L('a pessoa', 'the person')) : L('sistema', 'system'),
+        text: m.run?.status === 'failed' ? '' : m.text,
+        at: m.at
+      }))
+    const handoff: Message = {
+      id: randomUUID(),
+      conversationId: team.id,
+      author: { kind: 'agent', id: agent.id },
+      text: carriedText({ by: agent.name, guests: guests.map((g) => g.handle), source, messages: carried, said }),
+      at: Date.now()
+    }
+    db.saveMessage(handoff)
+    emit({ type: 'message', message: handoff })
+    this.post(conv.id, msg.threadId, L(`${agent.name} chamou ${names} em #${team.name}, com o que já foi feito aqui.`, `${agent.name} called ${names} into #${team.name}, with what was already done here.`))
+    // Only the ones just called work now: the rest are there to be read and called again.
+    const task = teamUpTask({ by: agent.name, source, channel: team.name, said })
+    for (const g of guests) {
+      const key = replyKey(g.id, team.id)
+      this.followups.reserve(key)
+      this.enqueue(() => this.execute(g, team!, { depth: depth + 1, work: msg.run?.work, task, reserved: true }))
+    }
   }
 
   // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
