@@ -5,81 +5,16 @@
 // winning. A role (code, review, plan, debug…) can own its own chain, so
 // planning and review never land on whatever the water carrier got.
 //
-// Everything here is pure except readPrompt, which is the only thing that talks
-// to TypeSafe: the renderer draws the reading, the core decides with it.
+// The shapes — pools, chains, roles, what may be saved, the trace — live in
+// src/shared/routing.ts, which the screen reads too. Everything here is pure
+// except readPrompt, the one thing that talks to TypeSafe: the core decides
+// with it, the renderer draws the reading from the trace it leaves behind.
 import { L } from '../shared/lang'
-import type { Effort, EngineId } from '../shared/types'
+import { normalizeRouting, POOLS, POOL_RANK, ROLE_KINDS, type Pool, type RouteAttempt, type RouteTarget, type RouteTrace, type RoleSetting, type RoutingConfig } from '../shared/routing'
 
-export type Pool = 'free' | 't1' | 't2' | 't3' | 't4' | 't5'
-export const POOLS: readonly Pool[] = ['free', 't1', 't2', 't3', 't4', 't5'] as const
-/** Where each pool sits: the free one below every paid tier, tiers 1 (cheap) to 5 (dearest). */
-export const POOL_RANK: Record<Pool, number> = { free: 0, t1: 1, t2: 2, t3: 3, t4: 4, t5: 5 }
+export * from '../shared/routing'
+
 const T5 = 5
-
-/** One entry of a chain: the harness, the model id its own --model takes, and how hard it thinks. */
-export interface RouteTarget {
-  engine: EngineId
-  model: string
-  effort: Effort
-}
-
-export interface PoolSetting {
-  descriptor: string // the person's own words for what this pool is for ("quick looks, no thinking")
-  chain: RouteTarget[]
-}
-
-export interface RoleSetting {
-  descriptor: string
-  chain: RouteTarget[]
-}
-
-export interface RoutingConfig {
-  enabled: boolean
-  pools: Record<Pool, PoolSetting>
-  roles: Record<string, RoleSetting>
-  /** The pool below which a role's own chain stops being consulted; unset: the role always is. */
-  roleFloor: Record<string, Pool>
-  /** Under this confidence about the role, the pool comes down to tier 2: an unsure read shouldn't cost. */
-  confidenceFloor: number
-  /** Cheap work may go to the free pool, when that pool has a chain. */
-  freeWhenCheap: boolean
-}
-
-// The four roles Apo named first; the rest are the kinds the plugin routes on,
-// so a person can add one without a new release.
-export const ROLE_KINDS: Record<string, string> = {
-  code: 'Writing or changing code, scripts or configuration until it works',
-  review: 'Auditing code, a diff, a document or a plan for problems and risks',
-  plan: 'Deciding what to build, sequencing work, designing an approach before any edit',
-  debug: 'Diagnosing a failure, an error or odd behaviour, and finding its cause',
-  research: 'Searching, reading and pulling together external information or unfamiliar APIs',
-  write: 'Producing prose, documentation or other non-code content from scratch',
-  explain: 'Answering a question, or explaining how something works',
-  operate: 'Running commands, tooling, git, deploys or setting up an environment',
-  chat: 'Small talk, an acknowledgement, or a request with no real work behind it'
-}
-
-export function defaultRouting(): RoutingConfig {
-  const pool = (descriptor: string): PoolSetting => ({ descriptor, chain: [] })
-  const role = (kind: string): RoleSetting => ({ descriptor: L(ROLE_KINDS[kind]!, ROLE_KINDS[kind]!), chain: [] })
-  const roles: Record<string, RoleSetting> = {}
-  for (const kind of Object.keys(ROLE_KINDS)) roles[kind] = role(kind)
-  return {
-    enabled: false, // the tab exists; nothing routes until the person turns it on
-    pools: {
-      free: pool(L('Só provedores gratuitos: para o que não vale gastar.', "Only free providers: for what isn't worth spending on.")),
-      t1: pool(L('Barato e rápido: uma pergunta, um ajuste de uma linha.', 'Cheap and fast: a question, a one-line fix.')),
-      t2: pool(L('O dia a dia: código e conversas de sempre.', 'Everyday work: ordinary code and conversations.')),
-      t3: pool(L('Trabalho de verdade: várias partes, escolhas a pesar.', 'Real work: several moving parts, tradeoffs to weigh.')),
-      t4: pool(L('Difícil: arquitetura, revisão séria, depuração teimosa.', 'Hard: architecture, a serious review, stubborn debugging.')),
-      t5: pool(L('O melhor que existe: quando errar custa mais que o token.', 'The best there is: when being wrong costs more than the tokens.'))
-    },
-    roles,
-    roleFloor: { plan: 't3', review: 't3' },
-    confidenceFloor: 0.34,
-    freeWhenCheap: true
-  }
-}
 
 // ---------- what Jev says ----------
 
@@ -255,29 +190,113 @@ export function poolFor(j: RouteJudgment, config: RoutingConfig): { pool: Pool; 
   return { pool, demand, notes }
 }
 
+/** Why a model can't run now, in the person's language; undefined when it can. */
+export type Availability = (t: RouteTarget) => string | undefined
+
+/**
+ * The whole chain walked: every model in the order it was tried, each with why it was passed
+ * over, and the one that ran. The pools next door are consulted nearest first, downwards before
+ * upwards, so a missing model never blocks a reply.
+ */
+export function walkRoute(
+  j: RouteJudgment,
+  config: RoutingConfig,
+  can: Availability
+): { pool: Pool; demand: number; notes: string[]; attempts: RouteAttempt[]; selected?: RouteTarget; roleSpecialised: boolean } {
+  const { pool, demand, notes } = poolFor(j, config)
+  const rank = POOL_RANK[pool]
+  const floor = POOL_RANK[config.roleFloor[j.role] ?? 't1']
+  const order: { target: RouteTarget; from: RouteAttempt['from']; specialist: boolean }[] = []
+  if (rank >= floor) {
+    for (const target of config.roles[j.role]?.chain ?? []) order.push({ target, from: { kind: 'role', role: j.role }, specialist: true })
+  }
+  for (const target of config.pools[pool].chain) order.push({ target, from: { kind: 'pool', pool }, specialist: false })
+  for (let distance = 1; distance <= T5; distance += 1) {
+    const down = POOLS[rank - distance]
+    const up = POOLS[rank + distance]
+    for (const p of [down, up]) if (p) for (const target of config.pools[p].chain) order.push({ target, from: { kind: 'pool', pool: p }, specialist: false })
+  }
+  const attempts: RouteAttempt[] = []
+  for (const entry of order) {
+    const skip = can(entry.target)
+    attempts.push({ ...entry.target, from: entry.from, ...(skip ? { skip } : {}) })
+    if (!skip) return { pool, demand, notes, attempts, selected: entry.target, roleSpecialised: entry.specialist }
+  }
+  return { pool, demand, notes, attempts, roleSpecialised: false }
+}
+
 /** The target to run, trying the role's chain, the pool's, then the pools next door. */
 export function pickRoute(
   j: RouteJudgment,
   config: RoutingConfig,
   available: (t: RouteTarget) => boolean = () => true
 ): { pool: Pool; target?: RouteTarget; roleSpecialised: boolean; notes: string[] } {
-  const { pool, notes } = poolFor(j, config)
-  const rank = POOL_RANK[pool]
-  const order: { target: RouteTarget; specialist: boolean }[] = []
-  const floor = POOL_RANK[config.roleFloor[j.role] ?? 't1']
-  if (rank >= floor) {
-    for (const target of config.roles[j.role]?.chain ?? []) order.push({ target, specialist: true })
+  const w = walkRoute(j, config, (t) => (available(t) ? undefined : L('não está disponível', "isn't available")))
+  return w.selected
+    ? { pool: w.pool, target: w.selected, roleSpecialised: w.roleSpecialised, notes: w.notes }
+    : { pool: w.pool, roleSpecialised: false, notes: [...w.notes, L('nenhum modelo dos pools está disponível', 'no model in the pools is available')] }
+}
+
+/** The judgment walked over the config, with the trace one routed turn leaves behind. */
+export function decideRoute(
+  j: RouteJudgment,
+  config: RoutingConfig,
+  can: Availability,
+  baseline: RouteTarget
+): { selected: RouteTarget; trace: RouteTrace } | undefined {
+  const w = walkRoute(j, config, can)
+  if (!w.selected) return undefined
+  const hit = w.attempts.find((a) => !a.skip)
+  const same = w.selected.engine === baseline.engine && w.selected.model === baseline.model && w.selected.effort === baseline.effort
+  // A first choice that couldn't run makes it a fallback, whether or not the one that did run is the baseline.
+  const trace: RouteTrace = {
+    at: Date.now(),
+    reading: {
+      role: j.role,
+      roleConfidence: j.roleConfidence,
+      ...(Object.keys(j.roleProbabilities).length > 0 ? { probabilities: j.roleProbabilities } : {}),
+      complexity: j.complexity,
+      capability: j.capability,
+      deepReasoning: j.deepReasoning,
+      ms: j.ms
+    },
+    demand: w.demand,
+    pool: w.pool,
+    ...(w.roleSpecialised ? { roleSpecialised: true } : {}),
+    ...(hit && hit.from.kind === 'pool' ? { effective: hit.from.pool } : {}),
+    notes: w.notes,
+    attempts: w.attempts,
+    selected: w.selected,
+    baseline,
+    state: same ? 'kept' : w.attempts.length > 1 ? 'fallback' : 'changed'
   }
-  for (const target of config.pools[pool].chain) order.push({ target, specialist: false })
-  // Nearest pool first, downwards before upwards: a missing model never blocks routing.
-  for (let distance = 1; distance <= T5; distance += 1) {
-    const down = POOLS[rank - distance]
-    const up = POOLS[rank + distance]
-    for (const p of [down, up]) if (p) for (const target of config.pools[p].chain) order.push({ target, specialist: false })
+  return { selected: w.selected, trace }
+}
+
+/** The trace of a turn routing couldn't decide for: the baseline ran, and the line says why. */
+export function unavailableTrace(j: RouteJudgment | undefined, config: RoutingConfig, error: string, baseline: RouteTarget): RouteTrace {
+  const w = j ? walkRoute(j, config, () => error) : undefined
+  return {
+    at: Date.now(),
+    reading: j
+      ? {
+          role: j.role,
+          roleConfidence: j.roleConfidence,
+          ...(Object.keys(j.roleProbabilities).length > 0 ? { probabilities: j.roleProbabilities } : {}),
+          complexity: j.complexity,
+          capability: j.capability,
+          deepReasoning: j.deepReasoning,
+          ms: j.ms
+        }
+      : { role: 'chat', roleConfidence: 0, complexity: 0, capability: 0, deepReasoning: 0, ms: 0 },
+    demand: w?.demand ?? 0,
+    pool: w?.pool ?? 't1',
+    notes: w?.notes ?? [],
+    attempts: w?.attempts ?? [],
+    baseline,
+    state: 'unavailable',
+    error
   }
-  const hit = order.find((o) => available(o.target))
-  if (!hit) return { pool, roleSpecialised: false, notes: [...notes, L('nenhum modelo dos pools está disponível', 'no model in the pools is available')] }
-  return { pool, target: hit.target, roleSpecialised: hit.specialist, notes }
 }
 
 // ---------- the line the person reads ----------
@@ -303,62 +322,3 @@ export function roleBars(j: RouteJudgment, limit = 3): { role: string; p: number
     .slice(0, limit)
 }
 
-// ---------- what a saved config may carry ----------
-
-const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh']
-const ENGINES: readonly string[] = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline']
-
-function cleanChain(value: unknown): RouteTarget[] {
-  if (!Array.isArray(value)) return []
-  const out: RouteTarget[] = []
-  for (const item of value) {
-    if (!isRecord(item)) continue
-    const { engine, model, effort } = item
-    if (typeof engine !== 'string' || !ENGINES.includes(engine)) continue
-    if (typeof model !== 'string' || !model.trim() || model.length > 200) continue
-    const level = typeof effort === 'string' && EFFORTS.includes(effort) ? (effort as Effort) : 'medium'
-    out.push({ engine: engine as EngineId, model: model.trim(), effort: level })
-    if (out.length >= 40) break // a chain longer than this is a mistake, not an intent
-  }
-  return out
-}
-
-/** Anything saved (or old) made fit to route with: unknown keys dropped, the defaults kept. */
-export function normalizeRouting(raw: unknown): RoutingConfig {
-  const base = defaultRouting()
-  if (!isRecord(raw)) return base
-  const pools = { ...base.pools }
-  const rawPools = isRecord(raw.pools) ? raw.pools : {}
-  for (const p of POOLS) {
-    const value = rawPools[p]
-    if (!isRecord(value)) continue
-    pools[p] = {
-      descriptor: typeof value.descriptor === 'string' ? value.descriptor.slice(0, 400) : base.pools[p].descriptor,
-      chain: cleanChain(value.chain)
-    }
-  }
-  const roles: Record<string, RoleSetting> = {}
-  const rawRoles = isRecord(raw.roles) ? raw.roles : {}
-  for (const [kind, value] of Object.entries(rawRoles)) {
-    if (!/^[a-z][a-z0-9_]{1,30}$/.test(kind) || !isRecord(value)) continue
-    roles[kind] = {
-      descriptor: typeof value.descriptor === 'string' ? value.descriptor.slice(0, 400) : (ROLE_KINDS[kind] ?? kind),
-      chain: cleanChain(value.chain)
-    }
-  }
-  for (const kind of Object.keys(ROLE_KINDS)) if (!roles[kind]) roles[kind] = { descriptor: base.roles[kind]!.descriptor, chain: [] }
-  const roleFloor: Record<string, Pool> = {}
-  const rawFloors = isRecord(raw.roleFloor) ? raw.roleFloor : {}
-  for (const [kind, value] of Object.entries(rawFloors)) {
-    if (Object.hasOwn(roles, kind) && typeof value === 'string' && (POOLS as readonly string[]).includes(value)) roleFloor[kind] = value as Pool
-  }
-  const confidence = num(raw.confidenceFloor)
-  return {
-    enabled: raw.enabled === true,
-    pools,
-    roles,
-    roleFloor,
-    confidenceFloor: confidence === undefined ? base.confidenceFloor : Math.min(1, Math.max(0, confidence)),
-    freeWhenCheap: raw.freeWhenCheap !== false
-  }
-}
