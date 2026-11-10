@@ -43,6 +43,11 @@ export class Followups {
     this.slot(key).reserved++
   }
 
+  // A place nobody holds any more: what was noted for later there goes with the mark.
+  reset(key: string): void {
+    this.slots.delete(key)
+  }
+
   busy(key: string): boolean {
     const s = this.slots.get(key)
     return !!s && (s.running > 0 || s.reserved > 0)

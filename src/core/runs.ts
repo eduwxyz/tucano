@@ -218,6 +218,11 @@ function cleanAnswer(question: Decision, raw: Answer): Answer | undefined {
   return { ...(chosen.length ? { chosen: chosen.sort((a, b) => a - b) } : {}), ...(other ? { other } : {}) }
 }
 
+// A routed reply waits for the reply already running where it goes, so it reads what that one said.
+// It waits for a reply, though, not for a mark: while something is really running there it keeps
+// waiting, and when nothing is, it answers anyway. How often that is looked at.
+export const ROUTED_STALE_MS = 30_000
+
 // How long a question to someone else waits before the requester is told (settings may say otherwise).
 export const QUESTION_DEADLINE_HOURS = 4
 
@@ -244,6 +249,7 @@ export interface RunnerDeps {
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
+  routeCheckMs?: number // how often a waiting routed reply checks whether a reply really holds the place (tests pass a short one)
 }
 
 // What the runner needs from the connector manager.
@@ -316,6 +322,10 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
+
+// A routed reply that couldn't start yet, by agent and place. `start` goes once, either when the
+// reply it waits for ends or when it turns out nothing holds the place; `timer` is that check.
+type Waiting = { trigger: string; queued: boolean; timer?: NodeJS.Timeout; start: () => void }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
@@ -342,7 +352,11 @@ export class Runner {
   // Routed replies not started yet, by agent and place: a newer routing that picks the same agent
   // there moves the reply's trigger to its message instead of queueing a second reply. One whose
   // agent is still replying there starts when that reply ends (it reads what that reply said).
-  private waiting = new Map<string, { trigger: string; queued: boolean; start: () => void }>()
+  private waiting = new Map<string, Waiting>()
+  // The places that have a reply running right now. `followups` remembers a place as busy, and a mark
+  // can be left behind (a start whose end never came, a reservation whose reply was dropped): this
+  // is what tells a place a reply is holding from one that is only marked.
+  private live = new Map<string, number>()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -833,26 +847,62 @@ export class Runner {
         waiting.trigger = trigger
         continue
       }
-      const slot = {
+      const slot: Waiting = {
         trigger,
         queued: false,
         start: (): void => {
+          if (slot.timer) clearTimeout(slot.timer)
+          slot.timer = undefined
           if (slot.queued) return
           slot.queued = true
           this.enqueue(() => {
             if (this.waiting.get(key) === slot) this.waiting.delete(key)
-            return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger })
+            return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger }).catch((e: unknown) => {
+              // A reply that never starts leaves the note as the only thing the person has: it says why.
+              const whyNot = e instanceof Error ? e.message : String(e)
+              this.update(note, { text: `${L('Chamei', 'Called')} **${agent.name}**${L(' e não consegui começar: ', " and couldn't start: ")}${whyNot}`, run: undefined })
+              throw e
+            })
           }, true)
         }
       }
       this.waiting.set(key, slot)
-      if (!this.followups.busy(key)) slot.start()
+      if (!this.followups.busy(key)) {
+        slot.start()
+        continue
+      }
+      // It waits for the reply already running there, which reads what that one said. But it waits
+      // for a reply, not for a mark: a place can be left marked busy by a reply that will never
+      // finish, or by a reservation whose reply never came, and then nothing would ever free it.
+      this.stale(key, note, slot)
     }
+  }
+
+  // While a reply really holds the place, this routed reply keeps waiting; once nothing does, the
+  // mark is cleared and it goes, saying so. Re-armed every `routeCheckMs` until it starts.
+  private stale(key: string, note: Message, slot: Waiting): void {
+    if (this.waiting.get(key) !== slot || slot.queued) return
+    slot.timer = setTimeout(() => {
+      slot.timer = undefined
+      if (this.waiting.get(key) !== slot || slot.queued) return
+      if (this.live.has(key)) return this.stale(key, note, slot)
+      this.followups.reset(key)
+      this.update(note, { text: `${note.text}${L(' · a resposta anterior parou sem terminar, indo agora', ' · the one before stopped without finishing, going now')}` })
+      slot.start()
+    }, this.deps.routeCheckMs ?? ROUTED_STALE_MS)
+    slot.timer.unref?.()
   }
 
   // A routed reply that waited for this agent to finish here goes now.
   private startWaiting(key: string): void {
     if (!this.followups.busy(key)) this.waiting.get(key)?.start()
+  }
+
+  // A reply started (`n` 1) or ended (`n` -1) in that place.
+  private hold(key: string, n: number): void {
+    const now = (this.live.get(key) ?? 0) + n
+    if (now > 0) this.live.set(key, now)
+    else this.live.delete(key)
   }
 
   // `urgent`: it answers something the person just did (see MAX_CONCURRENT_URGENT).
@@ -902,12 +952,14 @@ export class Runner {
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
     this.followups.start(key, reserved)
+    this.hold(key, 1)
     let msg: Message
     try {
       msg = await this.reply(agent, conv, rest)
     } catch (e) {
       this.followups.end(key)
       this.followups.take(key) // taken even when the reply threw: a stale follow-up must not wait for the next one
+      this.hold(key, -1)
       this.startWaiting(key)
       throw e
     }
@@ -917,6 +969,7 @@ export class Runner {
       this.followups.reserve(key)
       this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }))
     }
+    this.hold(key, -1)
     this.startWaiting(key)
     return msg
   }
