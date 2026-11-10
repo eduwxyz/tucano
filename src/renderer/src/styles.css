@@ -1431,6 +1431,39 @@ h3 {
   padding: 2px 0 2px 14px;
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
+  transition: border-color var(--dur-base) var(--ease-out);
+}
+/* The line beside the steps is a handle: a double-click on it folds them, from wherever the run has
+   scrolled to. Its hit area is 18 px over a 2 px line, centred on it, and it stops short of the step
+   icons (the list's own padding), so nothing a person reads is under it. */
+.steps__body {
+  position: relative;
+}
+.steps__rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  /* Above the list: it animates in with `rise`, and an animated transform makes a stacking context
+     of its own, which would otherwise sit over the handle and eat the double-click. */
+  z-index: 1;
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+/* Hovering or focusing the handle lights the line it sits on, so it reads as something to press. */
+.steps__rail:hover,
+.steps__rail:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.steps__rail:hover + .steps__list,
+.steps__rail:focus-visible + .steps__list {
+  border-left-color: var(--accent);
 }
 .step {
   display: flex;
