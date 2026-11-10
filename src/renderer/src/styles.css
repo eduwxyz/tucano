@@ -11973,7 +11973,9 @@ button.agent-card__now:hover {
 }
 .routing__body {
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
+  /* 184px, not 168: "Tier 5 · Ultra premium" needs 122px of label beside the 18px badge, and a
+     name that clips is worse than 16px of the editor's width. */
+  grid-template-columns: 184px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -11989,10 +11991,14 @@ button.agent-card__now:hover {
 }
 .routing__pool {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: 7px 10px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  /* One line per pool: the count lives in the badge at the right, not in a second row under the
+     name, so six pools and the editor beside them cost 36px a row instead of 52. */
+  height: 36px;
+  padding: 0 10px;
   border: 0;
   border-radius: 9px;
   background: transparent;
@@ -12017,19 +12023,48 @@ button.agent-card__now:hover {
   color: color-mix(in srgb, var(--accent) 72%, var(--text));
   font-weight: 600;
 }
-.routing__pool.is-active .routing__pool-count {
-  color: var(--text-2);
-}
 .routing__pool-name {
   font-size: 13px;
   font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+/* The count is a circle at the right end of the row: dial geometry fixed at 18px, so the badge
+   sits at the same x on every row and the label never has to be short to make room for it. */
 .routing__pool-count {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  /* Translucent, so it reads on the row's own background in all three states (idle, hover,
+     selected) without needing one fill per state. */
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  color: var(--text-2);
   font-size: 11px;
-  color: var(--text-3);
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
+/* An empty chain is a ring with a 0 in it: same footprint, quieter, and the number is not a lie. */
 .routing__pool-count.is-empty {
-  font-style: italic;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  /* Not --text-3: a 0 on the bare row measures 3.33:1 at 11px, under the floor. */
+  color: var(--text-2);
+  font-weight: 500;
+}
+.routing__pool:hover .routing__pool-count {
+  color: var(--text);
+}
+.routing__pool.is-active .routing__pool-count {
+  /* The badge keeps the raised surface instead of another tint of the wash: a number tinted into the
+     wash it sits on measured 4.37:1, and the count is 11px. Panel under the same accent mix is 5.7:1. */
+  background: var(--panel);
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
 }
 .routing__editor {
   display: flex;
@@ -12278,6 +12313,9 @@ button.agent-card__now:hover {
     gap: 4px;
     overflow-x: auto;
     padding-bottom: 2px;
+  }
+  .routing__pool {
+    flex: none;
   }
   .route-row,
   .route-add {
