@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { compareVersions, newsSince, parseChangelog, parsePt, shortItem } from '../src/shared/release-notes'
+import { compareVersions, newsPages, newsSince, parseChangelog, parsePt, shortItem, type ReleaseNotes } from '../src/shared/release-notes'
 
 const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
 
@@ -75,6 +75,21 @@ describe('release notes', () => {
     expect(parsePt(['**Em português:** chegaram as threads. Na conversa aparecem as que abriram uma.'])).toEqual({ intro: 'Chegaram as threads. Na conversa aparecem as que abriram uma.', points: [] })
     expect(parsePt(['**Em português:**', 'Nesta versão:', '- **A.** Um.', '- **B.** Dois.'])).toEqual({ intro: 'Nesta versão:', points: ['**A.** Um.', '**B.** Dois.'] })
     expect(parsePt(['**Em português:**'])).toBeUndefined()
+  })
+
+  it('turns the news into pages of a few topics, the summary text on its version’s first and last page', () => {
+    const big: ReleaseNotes = { version: '1.0.0', pt: { intro: 'Antes.', points: ['a', 'b', 'c', 'd', 'e', 'f'], outro: 'Obrigado!' }, sections: [{ kind: 'Added', items: ['x', 'y'] }, { kind: 'Fixed', items: ['z'] }] }
+    const small: ReleaseNotes = { version: '0.9.0', pt: { points: ['g'] }, sections: [{ kind: 'Fixed', items: ['w'] }] }
+    const pt = newsPages([big, small], true, 4)
+    expect(pt.map((p) => [p.release.version, p.groups.flatMap((g) => g.items), p.intro, p.outro])).toEqual([
+      ['1.0.0', ['a', 'b', 'c', 'd'], 'Antes.', undefined],
+      ['1.0.0', ['e', 'f'], undefined, 'Obrigado!'],
+      ['0.9.0', ['g'], undefined, undefined]
+    ])
+    // In English, each section's items, still under their section, across pages.
+    expect(newsPages([big], false, 2).map((p) => p.groups)).toEqual([[{ kind: 'Added', items: ['x', 'y'] }], [{ kind: 'Fixed', items: ['z'] }]])
+    // An old summary that is all text: one page with it.
+    expect(newsPages([{ version: '0.1.0', pt: { intro: 'Tudo.', points: [] }, sections: [] }], true)).toEqual([{ release: expect.anything(), intro: 'Tudo.', groups: [] }])
   })
 
   it('compares versions by number, not as text', () => {

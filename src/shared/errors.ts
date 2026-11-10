@@ -5,6 +5,9 @@ import { L } from "./lang";
 // An error already written for people (L('…', '…')): it goes through as it is.
 export class UserError extends Error {}
 
+// Our own guard (src/core/safe-fetch.ts) refused an address of the inside: loopback, the LAN, the cloud's metadata.
+export class InsideNetworkError extends UserError {}
+
 export interface Friendly {
   text: string;
   detail?: string; // the raw text, when it isn't the headline
@@ -13,6 +16,172 @@ export interface Friendly {
 export interface FriendlyContext {
   engine?: string; // the harness that failed, e.g. "Claude Code"
   doing?: string; // what was being done, for the fallback: "responder", "salvar"
+  host?: string; // the server being reached, when the error doesn't say it
+}
+
+// Why a connection failed, below the "fetch failed" Node says for all of them: undici puts the
+// real reason in `cause` (a TLS code, ENOTFOUND…), sometimes an AggregateError of one per address.
+export type NetKind =
+  | "tls"
+  | "expired"
+  | "proxy"
+  | "dns"
+  | "refused"
+  | "reset"
+  | "offline"
+  | "timeout"
+  | "inside";
+
+export interface NetProblem {
+  kind: NetKind;
+  host?: string;
+  status?: number; // a proxy's answer, 407 when it wants a login
+  detail: string; // each cause, outermost first: "fetch failed ← unable to verify the first certificate (UNABLE_TO_VERIFY_LEAF_SIGNATURE)"
+}
+
+// The error and every cause under it, outermost first (a cycle or a deep chain stops it).
+function chain(e: unknown): unknown[] {
+  const out: unknown[] = [];
+  const walk = (x: unknown, depth: number): void => {
+    if (x === undefined || x === null || depth > 6 || out.includes(x)) return;
+    out.push(x);
+    if (typeof x !== "object") return;
+    const errors = (x as { errors?: unknown }).errors;
+    if (Array.isArray(errors)) for (const y of errors) walk(y, depth + 1);
+    walk((x as { cause?: unknown }).cause, depth + 1);
+  };
+  walk(e, 0);
+  return out;
+}
+
+const prop = (x: unknown, k: string): string | undefined => {
+  const v =
+    x && typeof x === "object" ? (x as Record<string, unknown>)[k] : undefined;
+  return typeof v === "string" || typeof v === "number" ? String(v) : undefined;
+};
+
+const NET_KINDS: [NetKind, RegExp][] = [
+  ["expired", /\bCERT_(HAS_EXPIRED|NOT_YET_VALID)\b|certificate has expired|certificate is not yet valid/i],
+  [
+    "tls",
+    /\b(CERT_\w+|UNABLE_TO_\w+|SELF_SIGNED_CERT_IN_CHAIN|DEPTH_ZERO_SELF_SIGNED_CERT|ERR_TLS_\w+|ERR_SSL_\w+|ERR_OSSL_\w+|HOSTNAME_MISMATCH)\b|self[- ]signed certificate|unable to (verify|get) (the first|local issuer) certificate|certificate (verify failed|chain)|altnames|ssl routines|tlsv1 alert|wrong version number|net::ERR_(CERT_\w+|SSL_\w+)/i,
+  ],
+  [
+    "proxy",
+    /\bERR_PROXY_\w+\b|proxy (response|connection|authentication)|tunnel(ing)? (to|connection)|failed to establish tunnel|net::ERR_(PROXY_\w+|TUNNEL_CONNECTION_FAILED)/i,
+  ],
+  [
+    "dns",
+    /\b(ENOTFOUND|EAI_AGAIN|EAI_FAIL|EAI_NODATA|EAI_NONAME|ENODATA|ESERVFAIL)\b|getaddrinfo|net::ERR_NAME_(NOT_RESOLVED|RESOLUTION_FAILED)/i,
+  ],
+  ["refused", /\bECONNREFUSED\b|connection refused|net::ERR_CONNECTION_REFUSED/i],
+  [
+    "offline",
+    /\b(ENETUNREACH|EHOSTUNREACH|ENETDOWN|EHOSTDOWN|EADDRNOTAVAIL)\b|network is unreachable|net::ERR_(INTERNET_DISCONNECTED|ADDRESS_UNREACHABLE|NETWORK_CHANGED|NETWORK_ACCESS_DENIED)/i,
+  ],
+  [
+    "reset",
+    /\b(ECONNRESET|EPIPE|ECONNABORTED|UND_ERR_SOCKET|UND_ERR_CLOSED)\b|socket hang up|other side closed|net::ERR_CONNECTION_(RESET|CLOSED|ABORTED|FAILED)/i,
+  ],
+  [
+    "timeout",
+    /\b(ETIMEDOUT|ESOCKETTIMEDOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT)\b|connect timeout|net::ERR_(TIMED_OUT|CONNECTION_TIMED_OUT)/i,
+  ],
+];
+
+// The error and its causes in one line, for "details": "fetch failed ← self-signed certificate in
+// certificate chain (SELF_SIGNED_CERT_IN_CHAIN)".
+export function causeText(e: unknown): string {
+  const lines: string[] = [];
+  for (const x of chain(e)) {
+    const text = x instanceof Error ? x.message.trim() : typeof x === "string" ? x.trim() : "";
+    const code = prop(x, "code");
+    const line = code && /\D/.test(code) && !text.includes(code) ? `${text} (${code})`.trim() : text;
+    if (line && !lines.includes(line)) lines.push(line);
+  }
+  return lines.join(" ← ");
+}
+
+// What went wrong on the network, from the error and its causes; undefined when nothing says.
+export function netProblem(e: unknown): NetProblem | undefined {
+  const all = chain(e);
+  const detail = causeText(e);
+  const inside = all.some((x) => x instanceof InsideNetworkError);
+  const kind = inside
+    ? "inside"
+    : NET_KINDS.find(([, re]) => re.test(detail))?.[0];
+  if (!kind) return undefined;
+  // A proxy that wants a login answers 407, in a property or in its text ("Proxy response (407)").
+  const login =
+    kind === "proxy" &&
+    (all.some((x) => prop(x, "statusCode") === "407" || prop(x, "status") === "407") || /\b407\b/.test(detail));
+  const host =
+    all.map((x) => prop(x, "hostname") ?? prop(x, "host")).find(Boolean) ??
+    /\b(?:ENOTFOUND|EAI_AGAIN)\s+([\w.-]+\.[a-z]{2,})/i.exec(detail)?.[1];
+  return {
+    kind,
+    detail,
+    ...(host ? { host } : {}),
+    ...(login ? { status: 407 } : {}),
+  };
+}
+
+// A network problem in people's words: what happened and what to do about it.
+export function netText(p: NetProblem, host?: string): string {
+  const at = p.host ?? host;
+  const of = at ? ` (${at})` : "";
+  switch (p.kind) {
+    case "tls":
+      return L(
+        `O certificado do servidor${of} não foi aceito. Numa rede de empresa, um proxy ou antivírus que inspeciona HTTPS troca o certificado no caminho: instale no sistema o certificado raiz dele (a TI tem; o Tucano confia nos certificados do sistema) ou desligue a inspeção de HTTPS do antivírus. Fora disso, tente em outra rede.`,
+        `The server's certificate${of} wasn't accepted. On a company network, a proxy or antivirus that inspects HTTPS swaps the certificate on the way: install its root certificate in the system (IT has it; Tucano trusts the system's certificates) or turn off the antivirus's HTTPS scanning. Otherwise, try another network.`
+      );
+    case "expired":
+      return L(
+        `O certificado do servidor${of} está vencido ou ainda não vale. Confira a data e a hora do computador; numa rede de empresa, um proxy ou antivírus que inspeciona HTTPS pode estar no meio.`,
+        `The server's certificate${of} has expired or isn't valid yet. Check the computer's date and time; on a company network, a proxy or antivirus that inspects HTTPS may be in the way.`
+      );
+    case "proxy":
+      return p.status === 407
+        ? L(
+            "O proxy da rede pede login e recusou a conexão. Coloque o usuário e a senha no endereço do proxy (HTTPS_PROXY=http://usuário:senha@proxy:porta) ou peça à TI pra liberar o endereço.",
+            "The network's proxy asks for a sign-in and refused the connection. Put the user and password in the proxy's address (HTTPS_PROXY=http://user:password@proxy:port) or ask IT to allow the address."
+          )
+        : L(
+            "O proxy da rede recusou a conexão ou não respondeu. Confira o proxy do sistema (ou HTTPS_PROXY) com a TI.",
+            "The network's proxy refused the connection or didn't answer. Check the system's proxy (or HTTPS_PROXY) with IT."
+          );
+    case "dns":
+      return L(
+        `Não achei o endereço${of} na rede (DNS). Confira se ele está certo e se há internet; numa rede de empresa ou VPN, o DNS dela pode não conhecer esse endereço.`,
+        `Couldn't find the address${of} on the network (DNS). Check that it's right and that there's internet; on a company network or VPN, its DNS may not know that address.`
+      );
+    case "refused":
+      return L(
+        `O servidor${of} recusou a conexão. Confira o endereço; numa rede de empresa, um firewall pode estar bloqueando.`,
+        `The server${of} refused the connection. Check the address; on a company network, a firewall may be blocking it.`
+      );
+    case "reset":
+      return L(
+        `A conexão com o servidor${of} caiu no meio. Numa rede de empresa, um firewall, proxy ou antivírus pode estar cortando; tente de novo ou em outra rede.`,
+        `The connection to the server${of} dropped midway. On a company network, a firewall, proxy or antivirus may be cutting it; try again or on another network.`
+      );
+    case "offline":
+      return L(
+        "Sem conexão com a internet. Confira a rede e tente de novo.",
+        "No internet connection. Check the network and try again."
+      );
+    case "timeout":
+      return L(
+        "Demorou demais pra responder. Confira a internet e tente de novo.",
+        "It took too long to answer. Check the internet and try again."
+      );
+    case "inside":
+      return L(
+        "Esse endereço aponta pra rede interna desta máquina, e o Tucano não acessa ela por aqui.",
+        "That address points into this machine's internal network, and Tucano doesn't reach it from here."
+      );
+  }
 }
 
 // A status code counts only when the text says it is one: "API Error: 503", "HTTP 401",
@@ -93,8 +262,14 @@ export function friendly(e: unknown, ctx: FriendlyContext = {}): Friendly {
   const missing = MISSING.exec(raw)?.[1];
   if (missing) {
     const node = /^(npx|npm|node)(\.cmd|\.exe)?$/i.test(missing);
+    const uv = /^uvx?(\.exe)?$/i.test(missing);
     return mapped(
-      node
+      uv
+        ? L(
+            `O comando \`${missing}\` não foi encontrado. Instale o uv (docs.astral.sh/uv) e tente de novo.`,
+            `The \`${missing}\` command wasn't found. Install uv (docs.astral.sh/uv) and try again.`
+          )
+        : node
         ? L(
             `O comando \`${missing}\` não foi encontrado. Instale o Node.js (nodejs.org) e tente de novo.`,
             `The \`${missing}\` command wasn't found. Install Node.js (nodejs.org) and try again.`
@@ -105,6 +280,28 @@ export function friendly(e: unknown, ctx: FriendlyContext = {}): Friendly {
           )
     );
   }
+  // The network, by what's under "fetch failed": a certificate, a proxy, the DNS… Only the
+  // causes' detail goes under "details", not a stack.
+  const net = netProblem(e);
+  if (net)
+    return {
+      text: netText(net, ctx.host),
+      detail: net.detail || raw,
+    };
+  // "fetch failed" and nothing under it that says why: the server wasn't reached, no more is known.
+  if (/^fetch failed$/i.test(raw))
+    return {
+      text: ctx.host
+        ? L(
+            `Não consegui chegar ao servidor (${ctx.host}). Confira a rede e tente de novo.`,
+            `Couldn't reach the server (${ctx.host}). Check the network and try again.`
+          )
+        : L(
+            "Não consegui chegar ao servidor. Confira a rede e tente de novo.",
+            "Couldn't reach the server. Check the network and try again."
+          ),
+      detail: causeText(e) || raw,
+    };
   if (OFFLINE.test(raw))
     return mapped(
       L(
@@ -223,3 +420,25 @@ export const toolLabel = (name: string): string =>
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .toLowerCase()
     .trim();
+
+// What a caller reads of an error. The owner (it's their machine) gets it as `friendly` says; anyone
+// else never a path on the machine nor a system's raw text (a code, a stack): those stay in the
+// core's log. An error written for people goes through, less any path in it.
+export function errorFor(e: unknown, owner: boolean): string {
+  const f = friendly(e);
+  if (owner) return f.text;
+  const ours =
+    e instanceof UserError ||
+    typeof e === "string" ||
+    (e instanceof Error && e.constructor === Error && !("code" in e));
+  return ours
+    ? withoutPaths(f.text)
+    : L(
+        "Algo deu errado. Tente de novo; se continuar, avise quem cuida deste Tucano.",
+        "Something went wrong. Try again; if it keeps happening, tell whoever runs this Tucano."
+      );
+}
+
+// "/srv/tucano/x", "~/x", "C:\x": a place on the machine, said as "…".
+const withoutPaths = (text: string): string =>
+  text.replace(/(^|[\s"'`(=])(?:~?\/|[A-Za-z]:[\\/])[^\s"'`)]*/g, "$1…");

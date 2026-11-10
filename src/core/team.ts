@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
+import { overlongSkillNote } from '../shared/skills'
 import { describeSchedule, MAX_AGENT_ROUTINES, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
@@ -37,7 +38,9 @@ interface TeamFile {
   routines: { name: string; agent: string; where: string; prompt: string; schedule: Schedule; trigger?: { kind: 'poll'; connector: string; tool: string; args: Record<string, unknown>; everyMinutes: number } | { kind: 'webhook' } }[]
 }
 
-export function exportTeam(db: Db): string {
+// `by`: who exports (the owner when left out). A routine in a DM goes only when the DM is theirs:
+// no one takes another person's DM along (with one person, as always, every routine goes).
+export function exportTeam(db: Db, by = db.ownerId()): string {
   const agents = db.agents().filter((a) => !a.archived && a.kind !== 'tuca') // each install has its own Tuca
   const handle = (id: string): string | undefined => agents.find((a) => a.id === id)?.handle
   const connectors = db.connectors()
@@ -69,7 +72,8 @@ export function exportTeam(db: Db): string {
     channels: channels.map((c) => ({ name: c.name, topic: c.topic, members: c.members.flatMap((id) => handle(id) ?? []) })),
     routines: db.routines().flatMap((r) => {
       const agent = handle(r.agentId)
-      if (!agent) return []
+      const c = db.conversationOwner(r.conversationId)
+      if (!agent || !c || (c.kind === 'dm' && (c.owner ?? db.ownerId()) !== by)) return []
       const t = r.trigger
       const trigger = t?.kind === 'poll' ? (connectorName(t.connectorId) ? { kind: 'poll' as const, connector: connectorName(t.connectorId)!, tool: t.tool, args: t.args, everyMinutes: t.everyMinutes } : undefined) : t ? { kind: 'webhook' as const } : undefined
       return [{ name: r.name, agent, where: where(r.conversationId), prompt: r.prompt, schedule: r.schedule, ...(trigger ? { trigger } : {}) }]
@@ -113,7 +117,9 @@ export function exportTeam(db: Db): string {
 
 // Adds what isn't there yet (agents by handle, skills and channels by name).
 // Routines come in off; a grant or trigger whose connector doesn't exist here is left out.
-export function importTeam(db: Db, text: string, defaultLimit: number): string {
+// `by`: who imports (the owner when left out): a routine for a DM goes into their DM with that
+// agent, never into someone else's; what comes in is theirs.
+export function importTeam(db: Db, text: string, defaultLimit: number, by = db.ownerId()): string {
   const m = new RegExp('```json (?:' + FENCE + '|' + OLD_FENCE + ')\\n([\\s\\S]*?)\\n```').exec(text)
   if (!m) throw new Error(L('Esse arquivo não é um time exportado pelo Tucano.', "That file isn't a team exported by Tucano."))
   let data: TeamFile
@@ -126,6 +132,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
   const connectors = db.connectors()
   const connectorId = (name: string): string | undefined => connectors.find((c) => c.name === name)?.id
   const added = { agents: 0, skills: 0, channels: 0, routines: 0, skipped: [] as string[] }
+  const longSkills: string[] = []
 
   for (const a of data.agents ?? []) {
     if (db.agents().some((x) => x.handle === a.handle)) continue
@@ -156,6 +163,8 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
 
   for (const k of data.skills ?? []) {
     if (db.skills().some((x) => x.state === 'active' && x.name === k.name)) continue
+    const note = overlongSkillNote(k.name, k.body.length)
+    if (note) longSkills.push(note)
     const at = Date.now()
     db.saveSkill({ id: randomUUID(), name: k.name, description: k.description, body: k.body, agents: k.agents.flatMap((h) => byHandle(h) ?? []), state: 'active', createdAt: at, updatedAt: at })
     added.skills++
@@ -168,19 +177,23 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
       for (const id of members) if (!existing.members.includes(id)) db.setAgentChannels(id, [...db.conversations().filter((x) => x.kind === 'channel' && x.members.includes(id)).map((x) => x.id), existing.id])
       continue
     }
-    db.createConversation({ id: randomUUID(), kind: 'channel', name: c.name, topic: c.topic, members })
+    db.createConversation({ id: randomUUID(), kind: 'channel', name: c.name, topic: c.topic, members, createdBy: by })
     added.channels++
   }
 
   for (const r of data.routines ?? []) {
     const agentId = byHandle(r.agent)
-    if (!agentId || db.routines().some((x) => x.name === r.name && x.agentId === agentId)) continue
+    const mine = (id: string): boolean => {
+      const c = db.conversationOwner(id)
+      return !!c && (c.kind !== 'dm' || (c.owner ?? db.ownerId()) === by)
+    }
+    if (!agentId || db.routines().some((x) => x.name === r.name && x.agentId === agentId && mine(x.conversationId))) continue
     let conversationId: string | undefined
     if (r.where === 'dm') {
-      conversationId = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId)?.id
+      conversationId = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && (c.owner ?? db.ownerId()) === by)?.id
       if (!conversationId) {
         conversationId = randomUUID()
-        db.createConversation({ id: conversationId, kind: 'dm', name: agentId, members: [agentId] })
+        db.createConversation({ id: conversationId, kind: 'dm', name: agentId, members: [agentId], owner: by })
       }
     } else conversationId = db.conversations().find((c) => c.kind === 'channel' && `#${c.name}` === r.where)?.id
     let trigger: Trigger | undefined
@@ -193,7 +206,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
       trigger = { kind: 'poll', connectorId: id, tool: r.trigger.tool, args: r.trigger.args, everyMinutes: r.trigger.everyMinutes }
     } else if (r.trigger?.kind === 'webhook') trigger = { kind: 'webhook', token: randomUUID().replace(/-/g, '') }
     if (!conversationId) continue
-    const routine: Routine = { id: randomUUID(), name: r.name, agentId, conversationId, prompt: r.prompt, schedule: r.schedule, trigger, enabled: false, createdAt: Date.now() }
+    const routine: Routine = { id: randomUUID(), name: r.name, agentId, conversationId, prompt: r.prompt, schedule: r.schedule, trigger, enabled: false, createdAt: Date.now(), owner: by }
     db.saveRoutine(routine)
     added.routines++
   }
@@ -205,15 +218,23 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
     added.routines && L(`${added.routines} rotina${added.routines > 1 ? 's' : ''} (desligadas)`, `${added.routines} routine${added.routines > 1 ? 's' : ''} (off)`)
   ].filter(Boolean)
   const done = parts.length ? L(`Importei ${parts.join(', ')}.`, `Imported ${parts.join(', ')}.`) : L('Nada novo: tudo já existia aqui.', 'Nothing new: everything already existed here.')
-  return `${done}${added.skipped.length ? L(` Ficou de fora: ${added.skipped.join('; ')}.`, ` Left out: ${added.skipped.join('; ')}.`) : ''}`
+  const long = longSkills.length ? L(` Skills longas: ${longSkills.join('; ')}.`, ` Long skills: ${longSkills.join('; ')}.`) : ''
+  return `${done}${added.skipped.length ? L(` Ficou de fora: ${added.skipped.join('; ')}.`, ` Left out: ${added.skipped.join('; ')}.`) : ''}${long}`
 }
 
 // ---------- backups ----------
 
-// A copy of the database (secrets stay encrypted for this Mac's keychain).
-export function backup(db: Db, dir: string): string {
+// A copy of the database (secrets stay encrypted for this Mac's keychain), named by
+// when and then which workspace: names sort by date, so the oldest go first.
+export function backup(db: Db, dir: string, workspaceName?: string): string {
   mkdirSync(dir, { recursive: true })
-  const file = join(dir, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.db`)
+  const safe = (workspaceName ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+  const file = join(dir, `tucano-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}${safe ? `-${safe}` : ''}.db`)
   if (existsSync(file)) rmSync(file)
   db.backupTo(file)
   const old = readdirSync(dir)
@@ -225,7 +246,7 @@ export function backup(db: Db, dir: string): string {
 }
 
 // Once a day, at startup or while the app stays open.
-export function backupIfDue(db: Db, dir: string): void {
+export function backupIfDue(db: Db, dir: string, workspaceName?: string): void {
   const last = existsSync(dir)
     ? readdirSync(dir)
         .filter((f) => f.endsWith('.db'))
@@ -233,6 +254,6 @@ export function backupIfDue(db: Db, dir: string): void {
         .sort()
         .at(-1)
     : undefined
-  if (!last || Date.now() - last > DAY) backup(db, dir)
+  if (!last || Date.now() - last > DAY) backup(db, dir, workspaceName)
 }
 

@@ -1,10 +1,10 @@
 // Looking after the wiki: what's broken or missing (found by reading the pages, no model), and
 // what no longer adds up (a cheap model reads what changed since the last review, next to the
 // pages around it). Everything it finds waits for the person; nothing goes in on its own.
-import { L } from '../shared/lang'
+import { L, locale } from '../shared/lang'
 import type { Settings, WikiFinding, WikiOp, WikiPage, WikiReview } from '../shared/types'
 import { parseOps } from './wiki-curator'
-import { linksIn, type Wiki } from './wiki'
+import { linksIn, type Wiki, type WikiView } from './wiki'
 
 export interface ReviewDeps {
   wiki: Wiki
@@ -53,7 +53,7 @@ export function logSections(body: string): { section: string; items: number }[] 
 const readsLikeLog = (body: string): number => Math.max(0, ...logSections(body).map((s) => s.items))
 
 // What can be found without a model.
-export function lint(wiki: Wiki, owner?: string): Found[] {
+export function lint(wiki: WikiView, owner?: string): Found[] {
   const pages = wiki
     .list()
     .map((p) => wiki.page(p.title))
@@ -125,7 +125,7 @@ Reply with JSON only:
 
 const KINDS: Record<string, WikiFinding['kind']> = { contradicao: 'contradiction', contradiction: 'contradiction', desatualizada: 'stale', stale: 'stale', duplicada: 'duplicate', duplicate: 'duplicate', ligacao: 'link', link: 'link', registro: 'log', log: 'log' }
 
-export function parseReview(text: string, wiki: Wiki): Found[] {
+export function parseReview(text: string, wiki: Pick<WikiView, 'page'>): Found[] {
   const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
   let v: Record<string, unknown>
   try {
@@ -183,7 +183,8 @@ export class WikiReviewer {
   private found: Found[] = []
 
   private async run(): Promise<void> {
-    const { wiki } = this.deps
+    // A page held for one person (see Wiki.inherit) isn't read: what the review finds is everyone's.
+    const wiki = this.deps.wiki.view(this.deps.wiki.heldTitles())
     const owner = this.deps.settings().workspaceName
     this.error = undefined
     this.found = lint(wiki, owner)
@@ -209,8 +210,8 @@ export class WikiReviewer {
 
   // What changed since the last review, and the pages around it; the first review reads it all.
   private async ask(): Promise<Found[]> {
-    const { wiki } = this.deps
-    const since = Number(wiki.getMeta('reviewed_at') ?? 0)
+    const wiki = this.deps.wiki.view(this.deps.wiki.heldTitles())
+    const since = Number(this.deps.wiki.getMeta('reviewed_at') ?? 0)
     const all = wiki.list()
     const changed = all.filter((p) => p.updatedAt > since).sort((a, b) => b.updatedAt - a.updatedAt)
     // pages that read like a log go in even if nothing changed: the model proposes condensing them
@@ -235,7 +236,7 @@ export class WikiReviewer {
       size += Math.min(pg.body.length, PAGE_CHARS)
     }
     const orphans = shown.filter((p) => !p.backlinks.length).map((p) => link(p.title))
-    const date = (ms: number): string => new Date(ms).toLocaleDateString('pt-BR')
+    const date = (ms: number): string => new Date(ms).toLocaleDateString(locale())
     const prompt = [
       L('## Páginas', '## Pages'),
       ...shown.map((p) => `### [[${p.title}]] (${p.kind}, ${L('atualizada em', 'updated')} ${date(p.updatedAt)})\n${p.body.slice(0, PAGE_CHARS)}`),

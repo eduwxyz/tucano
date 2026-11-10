@@ -3,6 +3,7 @@
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
+import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import {
   agentById,
@@ -22,11 +23,15 @@ import {
   type SkillInput,
   type SkillReport,
   type SkillVersion,
-  isTeam
+  isTeam,
+  amAdmin
 } from '../store'
+import { RECOMMENDED_SKILL_BODY_LENGTH, skillLengthNote } from '../../../shared/skills'
 import { Card, Field, Sheet } from './Pages'
+import { AdminOnly } from './People'
 import { confirmDialog } from './Dialogs'
 import { ago, AgentAvatar, Icon, time } from './ui'
+import { Modal } from './Modal'
 
 type Place = { kind: 'list' } | { kind: 'skill'; id: string } | { kind: 'review' }
 
@@ -43,7 +48,12 @@ function result(r?: SkillReport): string {
 
 const from = (k: Skill): string => (k.source ? L(`do seu ${k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}`, `from your ${k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}`) : L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`))
 
+// Skills are the admins': a member reads them (what the agents follow), changes nothing.
 export function SkillsPage(): ReactNode {
+  return <Skills admin={useStore(amAdmin)} />
+}
+
+function Skills({ admin }: { admin: boolean }): ReactNode {
   const skills = useStore((s) => s.skills)
   const [place, setPlace] = useState<Place>({ kind: 'list' })
   const [draft, setDraft] = useState<SkillInput | null>(null)
@@ -51,8 +61,8 @@ export function SkillsPage(): ReactNode {
   const [showArchived, setShowArchived] = useState(false)
   const [stats, setStats] = useState<SkillReport[]>([])
   useEffect(() => {
-    void loadReport().then((r) => setStats(r.skills))
-  }, [skills.length])
+    if (admin) void loadReport().then((r) => setStats(r.skills), () => {})
+  }, [skills.length, admin])
 
   const pending = skills.filter((k) => k.state === 'pending')
   const active = skills.filter((k) => k.state === 'active')
@@ -62,11 +72,9 @@ export function SkillsPage(): ReactNode {
   const toList = (): void => setPlace({ kind: 'list' })
 
   const form = draft && (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setDraft(null)}>
-      <div className="form-modal">
-        <SkillForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
-      </div>
-    </div>
+    <Modal title={draft.id ? L('Editar skill', 'Edit skill') : L('Nova skill', 'New skill')} variant="form" onClose={() => setDraft(null)}>
+      <SkillForm key={draft.id ?? 'new'} draft={draft} onChange={setDraft} onClose={() => setDraft(null)} />
+    </Modal>
   )
 
   if (open)
@@ -91,17 +99,20 @@ export function SkillsPage(): ReactNode {
       title="Skills"
       lede={L('Receitas que os agentes seguem pra um tipo de tarefa.', 'Recipes the agents follow for a kind of task.')}
       actions={
-        <>
-          <button className="text-btn" onClick={() => setAdding(true)}>
-            {L('Buscar skills existentes', 'Find existing skills')}
-          </button>
-          <button className="btn btn--primary btn--sm" onClick={() => setDraft({ name: '', description: '', body: '', agents: [] })}>
-            <Icon name="plus" size={14} /> {L('Nova skill', 'New skill')}
-          </button>
-        </>
+        admin && (
+          <>
+            <button className="text-btn" onClick={() => setAdding(true)}>
+              {L('Buscar skills existentes', 'Find existing skills')}
+            </button>
+            <button className="btn btn--primary btn--sm" onClick={() => setDraft({ name: '', description: '', body: '', agents: [] })}>
+              <Icon name="plus" size={14} /> {L('Nova skill', 'New skill')}
+            </button>
+          </>
+        )
       }
     >
-      {pending.length > 0 && (
+      {!admin && <AdminOnly>{L('Só um admin cria, aprova ou muda skills.', 'Only an admin creates, approves or changes skills.')}</AdminOnly>}
+      {admin && pending.length > 0 && (
         <div className="notice-line">
           <span>
             <b>{pending.length}</b> {pending.length === 1 ? L('proposta dos agentes esperando você', 'proposal from the agents waiting for you') : L('propostas dos agentes esperando você', 'proposals from the agents waiting for you')}
@@ -133,7 +144,7 @@ export function SkillsPage(): ReactNode {
         </section>
       )}
 
-      {archived.length > 0 && (
+      {admin && archived.length > 0 && (
         <section className="read-group">
           <h2>
             <button onClick={() => setShowArchived(!showArchived)}>
@@ -177,6 +188,7 @@ export function SkillsPage(): ReactNode {
 // One skill as a page: when to use it, who does, how it's going, the recipe and its history.
 function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: SkillReport; onBack: () => void; onEdit: () => void }): ReactNode {
   const [picking, setPicking] = useState(false)
+  const admin = useStore(amAdmin)
   const setAgents = (agents: string[]): void => void saveSkill({ id: k.id, name: k.name, description: k.description, body: k.body, agents, source: k.source })
   const changed = stat?.changedAt && stat.before && stat.since && stat.before.replies + stat.since.replies > 0
   const pct = (r: { replies: number; ok: number }): string => (r.replies ? `${Math.round((r.ok / r.replies) * 100)}%` : '—')
@@ -186,14 +198,16 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
       title={k.name}
       lede={k.description}
       actions={
-        <>
-          <button className="text-btn" onClick={onEdit}>
-            {L('Editar', 'Edit')}
-          </button>
-          <button className="text-btn" onClick={() => (archiveSkill(k.id, true), onBack())}>
-            {L('Arquivar', 'Archive')}
-          </button>
-        </>
+        admin && (
+          <>
+            <button className="text-btn" onClick={onEdit}>
+              {L('Editar', 'Edit')}
+            </button>
+            <button className="text-btn" onClick={() => (archiveSkill(k.id, true), onBack())}>
+              {L('Arquivar', 'Archive')}
+            </button>
+          </>
+        )
       }
     >
       <dl className="skill-facts">
@@ -201,9 +215,11 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
           <dt>{L('Quem usa', 'Who uses it')}</dt>
           <dd>
             <Who ids={k.agents} />
-            <button className="text-btn" onClick={() => setPicking(!picking)}>
-              {picking ? L('pronto', 'done') : L('mudar', 'change')}
-            </button>
+            {admin && (
+              <button className="text-btn" onClick={() => setPicking(!picking)}>
+                {picking ? L('pronto', 'done') : L('mudar', 'change')}
+              </button>
+            )}
           </dd>
         </div>
         <div>
@@ -230,15 +246,16 @@ function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: Sk
       )}
       <section className="read-group">
         <h2>{L('Receita', 'Recipe')}</h2>
+        {k.source && k.body.length > RECOMMENDED_SKILL_BODY_LENGTH && <p className="hint hint--warn" role="status">{skillLengthNote(k.body.length)}</p>}
         {k.body.trim() ? (
           <article className="recipe">
-            <Markdown remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
+            <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{k.body}</Markdown>
           </article>
         ) : (
           <p className="read-empty">{L(`A receita é lida de ${k.source} a cada uso.`, `The recipe is read from ${k.source} on every use.`)}</p>
         )}
       </section>
-      {!k.source && (
+      {admin && !k.source && (
         <section className="read-group">
           <h2>{L('Histórico', 'History')}</h2>
           <History skill={k} />
@@ -324,6 +341,7 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
                       {on && <span className="tag tag--ok">{L('em uso', 'in use')}</span>}
                     </span>
                     <span className="skill-add__desc">{l.description}</span>
+                    {l.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <span className="warn-text small" role="status">{skillLengthNote(l.bodyLength)}</span>}
                   </button>
                 )
               })}
@@ -336,6 +354,7 @@ function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
             </button>
             <h3>{picked.name}</h3>
             <p>{picked.description}</p>
+            {picked.bodyLength > RECOMMENDED_SKILL_BODY_LENGTH && <p className="warn-text small" role="status">{skillLengthNote(picked.bodyLength)}</p>}
             {picked.scripts && <p className="warn-text small">{L('Tem scripts: só roda com um agente que tenha computador (Linux ou este computador).', 'It has scripts: it only runs with an agent that has a computer (Linux or this computer).')}</p>}
             <span className="skill-add__label">{L('Quem usa?', 'Who uses it?')}</span>
             <AgentPicker value={agents} onChange={setAgents} />
@@ -434,6 +453,7 @@ function Proposal({ proposal: p }: { proposal: Skill }): ReactNode {
         </span>
       </header>
       {p.reason && <p className="proposal__why">“{p.reason}”</p>}
+      {p.body.length > RECOMMENDED_SKILL_BODY_LENGTH && <p className="hint hint--warn" role="status">{skillLengthNote(p.body.length)}</p>}
       {current ? (
         <Diff before={`${current.description}\n\n${current.body}`} after={`${p.description}\n\n${p.body}`} />
       ) : (
@@ -442,7 +462,7 @@ function Proposal({ proposal: p }: { proposal: Skill }): ReactNode {
             <span>{L('Quando usar:', 'When to use:')}</span> {p.description}
           </p>
           <article className="recipe recipe--box">
-            <Markdown remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
+            <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
           </article>
           <p className="proposal__who">
             {L('Vale pra', 'For')} <Who ids={p.agents} />. {L('Depois de aprovar, dá pra liberar pra outros agentes.', 'After approving, you can open it to other agents.')}
@@ -513,9 +533,12 @@ function SkillForm({ draft, onChange, onClose }: { draft: SkillInput; onChange: 
             {L('Ligada a', 'Linked to')} <span className="mono">{draft.source}</span>: {L('a receita muda lá, e os agentes leem sempre a versão de agora. Aqui você escolhe quem usa.', 'the recipe changes there, and agents always read the current version. Here you pick who uses it.')}
           </p>
         ) : (
-          <Field label={L('Receita', 'Recipe')} hint={L('Os passos, em Markdown: comandos exatos, armadilhas, como conferir.', 'The steps, in Markdown: exact commands, pitfalls, how to check.')}>
-            <textarea rows={10} className="mono" value={draft.body} onChange={(e) => set({ body: e.target.value })} />
-          </Field>
+          <>
+            <Field label={L('Receita', 'Recipe')} hint={L('Os passos, em Markdown: comandos exatos, armadilhas, como conferir.', 'The steps, in Markdown: exact commands, pitfalls, how to check.')}>
+              <textarea rows={10} className="mono" value={draft.body} onChange={(e) => set({ body: e.target.value })} />
+            </Field>
+            {draft.body.length > RECOMMENDED_SKILL_BODY_LENGTH && <p className="hint hint--warn" role="status">{skillLengthNote(draft.body.length)}</p>}
+          </>
         )}
         <Field label={L('Quem usa', 'Who uses it')}>
           <AgentPicker value={draft.agents} onChange={(agents) => set({ agents })} />

@@ -53,14 +53,17 @@ export const browserTools = (): ToolDef[] => {
     {
       name: 'navegador_digitar',
       description: L(
-        'Escreve num campo (troca o que já tem nele) ou escolhe uma opção numa lista. Com enter: true, aperta Enter depois (ex.: pra buscar).',
-        'Types in a field (replacing what is in it) or picks an option in a list. With enter: true, presses Enter afterwards (e.g. to search).'
+        'Escreve num campo (troca o que já tem nele) ou escolhe uma opção numa lista. Com enter: true, aperta Enter depois (ex.: pra buscar). Onde Enter envia (um comentário, uma mensagem, um formulário que publica), o texto entra e o Enter vira pedido de aprovação.',
+        'Types in a field (replacing what is in it) or picks an option in a list. With enter: true, presses Enter afterwards (e.g. to search). Where Enter sends (a comment, a message, a form that publishes), the text goes in and the Enter becomes an approval request.'
       ),
       inputSchema: { type: 'object', properties: { alvo, texto: { type: 'string' }, enter: { type: 'boolean' } }, required: ['alvo', 'texto'] }
     },
     {
       name: 'navegador_tecla',
-      description: L(`Aperta uma tecla: ${KEYS.join(', ')}.`, `Presses a key: ${KEYS.join(', ')}.`),
+      description: L(
+        `Aperta uma tecla: ${KEYS.join(', ')}. Enter ou espaço num botão que publica, envia ou apaga (ou sem nome), ou Enter num campo que envia, vira pedido de aprovação, como o clique.`,
+        `Presses a key: ${KEYS.join(', ')}. Enter or space on a button that publishes, sends or deletes (or has no name), or Enter in a field that sends, becomes an approval request, like the click.`
+      ),
       inputSchema: { type: 'object', properties: { tecla: { type: 'string' } }, required: ['tecla'] }
     },
     {
@@ -118,9 +121,29 @@ export function bareTarget(target: string): string {
 
 // What buys, pays, publishes, sends, schedules, saves or deletes, by the words on it.
 const RISKY =
-  /\b(compr(ar|e|a)|finalizar (compra|pedido)|checkout|buy|purchase|pag(ar|ue)|pay|publi(car|que|sh)|postar|poste|post|enviar|envie|send|submit|confirm(ar|e)?|agend(ar|e)|schedule|salvar|save|coment(ar|e)|comment|responder|reply|exclu(ir|a)|apag(ar|ue)|delet(ar|e)|remov(er|a|e)|reserv(ar|e)|book|transferir|transfer|doar|donate|inscrever|subscribe|seguir|follow)\b/
+  /\b(compr(ar|e|a)|finalizar (compra|pedido)|checkout|buy|purchase|pag(ar|ue)|pay|publi(car|que|sh)|postar|poste|post|enviar|envie|send|submit|confirm(ar|e)?|agend(ar|e)|schedule|salvar|save|coment(ar|e)|comment|responder|reply|exclu(ir|a)|apag(ar|ue)|delet(ar|e)|remov(er|a|e)|reserv(ar|e)|book|transferir|transfer|doar|donate|inscrever|subscribe|seguir|follow|repost(ar|e)?|retweet(ar)?|tweet(ar)?|curt(ir|a)|like|compartilh(ar|e)|share)\b/
 
 export const risky = (...texts: string[]): boolean => texts.some((t) => RISKY.test(norm(t)))
+
+const SEARCH = /\b(busc|pesquis|procur|search|find|filtr|go\b|ir\b)/
+// What Enter in a field would do, when that could publish, send or delete: in a text area or an
+// editable block (a comment, a message, where Enter often sends), or in a form that sends with a
+// risky button, or with a nameless one unless the field is a search. A search box goes on.
+export function enterSends(f: Pick<BrowserElement, 'label' | 'multiline' | 'submits'>): boolean {
+  if (f.multiline) return true
+  if (f.submits === undefined) return false
+  return f.submits ? risky(f.submits) : !SEARCH.test(norm(f.label))
+}
+
+// Enter or Space on the focused element, when it could publish, send or delete: a field where Enter
+// sends (enterSends), or a button or link with a risky name or none at all. Toggles, tabs and
+// options only change what's on the page.
+export function keyActs(key: string, el: BrowserElement | undefined): boolean {
+  if (!el || (key !== 'enter' && key !== 'space')) return false
+  if (el.role === 'campo') return key === 'enter' && enterSends(el)
+  if (['checkbox', 'radio', 'chave', 'opção', 'aba', 'lista', 'controle'].includes(el.role)) return false
+  return !el.label || risky(el.label)
+}
 
 // The element named by number, by its exact text, or by the only text that contains it.
 export function findByText(target: string, elements: BrowserElement[]): BrowserElement | undefined {
@@ -278,7 +301,13 @@ export class Browser {
     if (!f.timer)
       f.timer = setTimeout(() => {
         f.timer = undefined
-        if (f.next && this.views.get(agentId)?.url) this.update(agentId, { frame: `data:image/jpeg;base64,${f.next}` })
+        const now = this.views.get(agentId)
+        // Only the picture goes out: the rest of the view is the same, and the page redraws just the screen.
+        if (f.next && now?.url) {
+          const frame = `data:image/jpeg;base64,${f.next}`
+          this.views.set(agentId, { ...now, frame })
+          this.deps.emit({ type: 'browser_frame', agentId, frame, ...(now.conversationId ? { conversationId: now.conversationId } : {}) })
+        }
         f.next = undefined
       }, 100)
     return true
@@ -367,7 +396,8 @@ export class Browser {
           true
         )
       }
-    this.update(id, { doing: { label: doing()[name] ?? step.label, detail: step.detail } })
+    // Whose conversation it works for now: only who sees that one sees the page (people.ts).
+    this.update(id, { doing: { label: doing()[name] ?? step.label, detail: step.detail }, conversationId: ctx.conversationId })
     try {
       switch (name) {
         case 'navegador_abrir': {
@@ -382,18 +412,14 @@ export class Browser {
           const page = await this.page(id, !!this.deps.jev?.on())
           const spot = await this.locate(target, page)
           if ('error' in spot) return { result: textResult(spot.error, true) }
-          const label = 'el' in spot ? spot.el.label : target
-          this.update(id, { doing: { label: L('Clicando em', 'Clicking'), detail: label || target } })
-          if (risky(label || target)) {
-            const shot = page.frame ? { frame: page.frame } : await this.deps.host(id, 'frame')
-            const artifact = shot.frame ? this.keep(id, ctx, Buffer.from(shot.frame, 'base64'), L(`Antes de clicar em "${label}"`, `Before clicking "${label}"`), page.url) : undefined
-            const why = typeof args['motivo'] === 'string' ? args['motivo'].trim() : ''
-            const callArgs: Record<string, unknown> = { url: page.url, alvo: label, ...('x' in spot && page.w && page.h ? { x: spot.x / page.w, y: spot.y / page.h } : {}) }
-            return {
-              result: textResult(L(`Esse clique ("${label}") precisa de aprovação.`, `This click ("${label}") needs approval.`)),
-              artifact,
-              approval: { args: callArgs, why: why || L(`Clicar em "${label}" em ${page.title || page.url}`, `Click "${label}" on ${page.title || page.url}`), detail: L(`Clicar em "${label}"`, `Click "${label}"`) }
-            }
+          // Judged by the page's own words only, never by how the agent named it: an element with
+          // no name, or a spot found only on the screen, can't be told safe, so it asks.
+          const label = 'el' in spot ? spot.el.label : ''
+          const named = label || L(`${target} (sem nome na página)`, `${target} (no name on the page)`)
+          this.update(id, { doing: { label: L('Clicando em', 'Clicking'), detail: named } })
+          if (!label || risky(label)) {
+            const callArgs: Record<string, unknown> = { url: page.url, alvo: label, ...('x' in spot && page.w && page.h ? { x: spot.x / page.w, y: spot.y / page.h } : {}), ...('el' in spot && !label ? { ref: spot.ref } : {}) }
+            return this.ask(id, ctx, page, args, callArgs, L(`Clicar em "${named}"`, `Click "${named}"`), L(`Esse clique ("${named}") precisa de aprovação.`, `This click ("${named}") needs approval.`))
           }
           const r = await this.deps.host(id, 'click', 'el' in spot ? { ref: spot.ref } : { x: spot.x, y: spot.y })
           return { result: await this.after(id, r, { ...step, detail: label || target }), detail: label || target }
@@ -407,12 +433,28 @@ export class Browser {
           if ('error' in spot) return { result: textResult(spot.error, true) }
           if (!('el' in spot)) return { result: textResult(L('Achei o lugar só pela imagem; clique nele com navegador_clicar e use o número do campo.', 'I found the spot only in the image; click it with navegador_clicar and use the field number.'), true) }
           this.update(id, { doing: { label: L('Escrevendo em', 'Typing in'), detail: spot.el.label || target } })
-          const r = await this.deps.host(id, 'type', { ref: spot.ref, text: String(args['texto'] ?? ''), enter: args['enter'] === true })
+          // Enter where it sends: the text goes in now, and the Enter waits for an approval.
+          const sends = args['enter'] === true && enterSends(spot.el)
+          const r = await this.deps.host(id, 'type', { ref: spot.ref, text: String(args['texto'] ?? ''), enter: args['enter'] === true && !sends })
+          if (sends) {
+            this.seen(id, r, { ...step, detail: spot.el.label || target })
+            const field = spot.el.label || L('o campo', 'the field')
+            return this.ask(id, ctx, { ...page, frame: undefined }, args, { url: page.url, tecla: 'enter', alvo: spot.el.label, ref: spot.ref }, L(`Apertar Enter em "${field}"`, `Press Enter in "${field}"`), L(`Escrevi em "${field}". Apertar Enter aí envia, então precisa de aprovação.`, `I typed in "${field}". Pressing Enter there sends it, so it needs approval.`))
+          }
           return { result: await this.after(id, r, { ...step, detail: spot.el.label || target }), detail: spot.el.label || target }
         }
         case 'navegador_tecla': {
           const key = String(args['tecla'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
           if (!KEYS.includes(key)) return { result: textResult(L(`Tecla desconhecida. Use uma destas: ${KEYS.join(', ')}.`, `Unknown key. Use one of these: ${KEYS.join(', ')}.`), true) }
+          if (key === 'enter' || key === 'space') {
+            const page = await this.page(id, false)
+            const focused = (page.elements ?? []).find((e) => e.focused)
+            if (keyActs(key, focused)) {
+              const what = focused!.label || L('um elemento sem nome', 'an element with no name')
+              const k = key === 'enter' ? 'Enter' : L('Espaço', 'Space')
+              return this.ask(id, ctx, page, args, { url: page.url, tecla: key, alvo: focused!.label, ref: focused!.ref }, L(`Apertar ${k} em "${what}"`, `Press ${k} on "${what}"`), L(`Apertar ${k} em "${what}" precisa de aprovação.`, `Pressing ${k} on "${what}" needs approval.`))
+            }
+          }
           return { result: await this.after(id, await this.deps.host(id, 'key', { key }), step) }
         }
         case 'navegador_rolar': {
@@ -461,7 +503,15 @@ export class Browser {
     }
   }
 
-  // An approved click: only on the same page, on the element with that text (or the same spot).
+  // An action that waits for me: the screen as it is now, kept with the request.
+  private async ask(id: string, ctx: Ctx, page: BrowserReply, args: Record<string, unknown>, callArgs: Record<string, unknown>, detail: string, said: string): Promise<BrowserOutcome> {
+    const shot = page.frame ? { frame: page.frame } : await this.deps.host(id, 'frame')
+    const artifact = shot.frame ? this.keep(id, ctx, Buffer.from(shot.frame, 'base64'), L(`Antes de: ${detail}`, `Before: ${detail}`), page.url) : undefined
+    const why = typeof args['motivo'] === 'string' ? args['motivo'].trim() : ''
+    return { result: textResult(said), artifact, approval: { args: callArgs, why: why || `${detail} ${L('em', 'on')} ${page.title || page.url}`, detail } }
+  }
+
+  // An approved click or key: only on the same page, on the element with that text (or the same spot).
   async approved(agent: Agent, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> {
     const url = String(args['url'] ?? '')
     const target = String(args['alvo'] ?? '')
@@ -470,12 +520,16 @@ export class Browser {
       const snap = await this.deps.host(agent.id, 'snapshot')
       if (!sameUrl(snap.url, url)) return { ok: false, text: L(`A página mudou desde o pedido (agora está em ${snap.url}). Nada foi clicado.`, `The page changed since the request (it's now at ${snap.url}). Nothing was clicked.`) }
       let r: BrowserReply
+      const key = typeof args['tecla'] === 'string' ? args['tecla'] : undefined
       if (typeof args['x'] === 'number' && typeof args['y'] === 'number' && snap.w && snap.h) r = await this.deps.host(agent.id, 'click', { x: args['x'] * snap.w, y: args['y'] * snap.h })
       else {
-        const same = (snap.elements ?? []).filter((e) => norm(e.label) === norm(target))
-        const el = same.find((e) => e.inView) ?? same[0]
-        if (!el) return { ok: false, text: L(`"${target}" não está mais na página. Nada foi clicado.`, `"${target}" is no longer on the page. Nothing was clicked.`) }
+        // An element with no name is the same one only at the same number, still with no name.
+        const same = target ? (snap.elements ?? []).filter((e) => norm(e.label) === norm(target)) : (snap.elements ?? []).filter((e) => e.ref === args['ref'] && !e.label)
+        const el = same.find((e) => e.ref === args['ref']) ?? same.find((e) => e.inView) ?? same[0]
+        if (!el) return { ok: false, text: L(`"${target || '#' + String(args['ref'])}" não está mais na página. Nada foi feito.`, `"${target || '#' + String(args['ref'])}" is no longer on the page. Nothing was done.`) }
+        // A key on a field: back in the field, then the key. On a button, Enter or Space is its click.
         r = await this.deps.host(agent.id, 'click', { ref: el.ref })
+        if (key && el.role === 'campo') r = await this.deps.host(agent.id, 'key', { key })
       }
       return { ok: true, text: await this.after(agent.id, r, { label: L('Clicou (aprovado)', 'Clicked (approved)'), detail: target }).then((x) => (x.content[0] as { text: string }).text) }
     } catch (e) {

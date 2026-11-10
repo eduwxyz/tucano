@@ -8,6 +8,19 @@ ipcRenderer.on('core:port', (event) => {
 })
 
 contextBridge.exposeInMainWorld('tucano', {
+  workspaces: {
+    list: () => ipcRenderer.invoke('workspaces:list'),
+    create: (name?: string) => ipcRenderer.invoke('workspaces:create', name),
+    delete: (id?: string) => ipcRenderer.invoke('workspaces:delete', id),
+    duplicate: (id: string, name?: string, parts?: object) => ipcRenderer.invoke('workspaces:duplicate', id, name, parts),
+    setPaused: (paused: boolean, id?: string) => ipcRenderer.invoke('workspaces:pause', paused, id),
+    switch: (id: string) => ipcRenderer.invoke('workspaces:switch', id),
+    subscribe: (cb: (list: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, list: unknown): void => cb(list)
+      ipcRenderer.on('workspaces', listener)
+      return () => ipcRenderer.removeListener('workspaces', listener)
+    }
+  },
   connect: (): void => ipcRenderer.send('core:connect'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
@@ -24,6 +37,8 @@ contextBridge.exposeInMainWorld('tucano', {
   onCoreDown: (cb: () => void): void => {
     ipcRenderer.on('core:down', () => cb())
   },
+  // Settings › General › Notifications: one now, to see that they come.
+  testNotify: (): Promise<unknown> => ipcRenderer.invoke('notify:test'),
   // The conversation on screen: the Mac doesn't notify about the one you're reading.
   viewing: (conversationId: string | null): void => ipcRenderer.send('viewing', conversationId),
   // The app's own updates.
@@ -32,5 +47,30 @@ contextBridge.exposeInMainWorld('tucano', {
     ipcRenderer.on('update', (_e, state: unknown) => cb(state))
   },
   checkUpdates: (): void => ipcRenderer.send('update:check'),
-  installUpdate: (): void => ipcRenderer.send('update:install')
+  installUpdate: (): void => ipcRenderer.send('update:install'),
+  // Seu iPhone: the app on the phone, over the home Wi-Fi (src/main/home-phone.ts).
+  phone: {
+    state: (): Promise<unknown> => ipcRenderer.invoke('home-phone:state'),
+    set: (on: boolean): Promise<unknown> => ipcRenderer.invoke('home-phone:set', on),
+    code: (): Promise<unknown> => ipcRenderer.invoke('home-phone:code'),
+    onChanged: (cb: (state: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('home-phone', listener)
+      return () => ipcRenderer.removeListener('home-phone', listener)
+    }
+  },
+  // Tucanos on servers, shown in this window over the app (Settings › Servers, the workspace list).
+  servers: {
+    list: (): Promise<unknown> => ipcRenderer.invoke('servers:list'),
+    pair: (link: string): Promise<unknown> => ipcRenderer.invoke('servers:pair', link),
+    open: (id: string): void => ipcRenderer.send('servers:open', id),
+    local: (): void => ipcRenderer.send('servers:local'),
+    forget: (id: string): Promise<unknown> => ipcRenderer.invoke('servers:forget', id),
+    // Returns how to stop listening: each screen showing the list listens while it's open.
+    onChanged: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('servers', listener)
+      return () => ipcRenderer.removeListener('servers', listener)
+    }
+  }
 })

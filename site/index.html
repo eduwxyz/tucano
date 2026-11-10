@@ -4,12 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>
-// Portuguese or English: the visitor's last choice, else the browser's language (English unless it is Portuguese).
+// Portuguese at /, English at /en/ (build.mjs makes it): the address decides, so search engines
+// find each language at its own page. A visitor who picked the other language before goes there.
+// Opened as a file there is only one page, so the language switches in place, as before.
 (function () {
   var l
   try { l = localStorage.getItem('tucano-lang') } catch (e) {}
-  if (l !== 'en' && l !== 'pt-BR') l = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase().indexOf('pt') === 0 ? 'pt-BR' : 'en'
-  document.documentElement.lang = l
+  if (location.protocol === 'file:') {
+    if (l !== 'en' && l !== 'pt-BR') l = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase().indexOf('pt') === 0 ? 'pt-BR' : 'en'
+    document.documentElement.lang = l
+  } else if ((l === 'en' || l === 'pt-BR') && l !== document.documentElement.lang) {
+    location.replace((l === 'en' ? '/en/' : '/') + location.search + location.hash)
+  }
 })()
 </script>
 <title>Tucano · Seu time de agentes de IA, com as suas regras</title>
@@ -22,7 +28,12 @@
 <meta property="og:image:alt" content="Tucano: Seu time de agentes de IA. Suas regras.">
 <meta property="og:url" content="https://tucano.sh/">
 <meta property="og:type" content="website">
+<meta property="og:locale" content="pt_BR">
+<meta property="og:locale:alternate" content="en_US">
 <link rel="canonical" href="https://tucano.sh/">
+<link rel="alternate" hreflang="pt-BR" href="https://tucano.sh/">
+<link rel="alternate" hreflang="en" href="https://tucano.sh/en/">
+<link rel="alternate" hreflang="x-default" href="https://tucano.sh/en/">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://tucano.sh/assets/brand/og.png">
 <meta name="twitter:site" content="@tucanosh">
@@ -103,21 +114,27 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* ---------- header ---------- */
 header.top { position: fixed; inset: 0 0 auto 0; z-index: 50; transition: background .3s, box-shadow .3s; }
 header.top.scrolled { background: rgba(243, 239, 230, .84); backdrop-filter: saturate(1.4) blur(16px); -webkit-backdrop-filter: saturate(1.4) blur(16px); box-shadow: 0 1px 0 var(--line); }
-header.top .wrap { display: flex; align-items: center; height: 72px; gap: 34px; }
-.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-.brand svg { width: 34px; height: 34px; }
+header.top .wrap { display: flex; align-items: center; height: 72px; gap: min(34px, 3vw); }
+/* with no room left the word drops to a second line, which the fixed height hides: what fits decides, in any language. nav.links only takes what the brand and the buttons leave, so the word stays while the links are on screen */
+.brand { --mark: 34px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; height: var(--mark); min-width: var(--mark); overflow: hidden; text-decoration: none; }
+.brand svg { flex: none; width: var(--mark); height: var(--mark); }
 .brand span { font: 800 25px/1 var(--display); letter-spacing: -.05em; }
-nav.links { display: flex; gap: 26px; }
+nav.links { flex: 1 1 0; min-width: 0; display: flex; gap: 26px; }
 nav.links a { text-decoration: none; color: var(--ink-2); font-size: 15px; font-weight: 500; }
 nav.links a:hover { color: var(--ink); }
-header .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-/* one language at a time: every text is written in both, side by side */
+header .right { flex: none; margin-left: auto; display: flex; align-items: center; gap: 10px; }
+/* one language at a time: every text is written in both, side by side. Those spans sit inside whatever is being styled, so style a label with ">": a plain "span" hits them too and draws it twice */
 html[lang="en"] [lang="pt-BR"], html[lang="pt-BR"] [lang="en"] { display: none !important; }
 .lang { display: flex; align-items: center; height: 36px; padding: 3px; border-radius: 99px; box-shadow: inset 0 0 0 1.5px var(--line); }
 .lang button { height: 30px; min-width: 38px; padding: 0 10px; border: 0; border-radius: 99px; background: none; font: 600 13px/1 var(--sans); letter-spacing: .03em; color: var(--ink-3); transition: background .2s, color .2s; }
 .lang button:hover { color: var(--ink); }
 .lang button.on { background: var(--ink); color: var(--cream); }
+.langhint { position: fixed; left: 16px; bottom: 16px; z-index: 60; display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 16px; border-radius: 99px; background: var(--ink); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.langhint a { color: var(--cream); font: 600 14px/1 var(--sans); text-decoration: none; }
+.langhint button { width: 30px; height: 30px; border: 0; border-radius: 99px; background: none; color: var(--ink-3); font: 400 18px/1 var(--sans); }
+.langhint button:hover { color: var(--cream); }
 header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
+header .btn--icon { width: 40px; padding: 0; justify-content: center; }
 
 /* ---------- hero ---------- */
 .hero { position: relative; padding: 150px 0 110px; overflow: hidden; }
@@ -252,8 +269,8 @@ header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
 .mem .new { margin-top: 6px; padding: 14px 16px; border-radius: 14px; background: #FFF6EC; box-shadow: inset 0 0 0 1.5px rgba(255,140,36,.45); font-size: 14.5px; }
 .mem .new small { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: .05em; color: var(--beak-3); margin-bottom: 4px; }
 .mem .new .row { display: flex; gap: 14px; margin-top: 10px; font-size: 13px; font-weight: 600; }
-.mem .new .row span:first-child { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--beak); }
-.mem .new .row span:last-child { color: var(--ink-3); }
+.mem .new .row > span:first-child { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--beak); }
+.mem .new .row > span:last-child { color: var(--ink-3); }
 
 /* browser */
 .brow { border-radius: 14px; overflow: hidden; background: #F5F1EA; box-shadow: inset 0 0 0 1px var(--line); }
@@ -315,7 +332,7 @@ header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
 .tools { margin-top: 20px; display: grid; gap: 8px; }
 .tool { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border-radius: 14px; background: rgba(255,255,255,.035); }
 .tool img { width: 20px; height: 20px; filter: invert(1) brightness(.92); }
-.tool span { font-weight: 600; font-size: 15px; }
+.tool > span { font-weight: 600; font-size: 15px; }
 .seg { display: flex; padding: 3px; border-radius: 11px; background: rgba(255,255,255,.06); }
 .seg button { height: 30px; padding: 0 11px; border: 0; border-radius: 8px; background: none; color: #A39A8E; font-size: 12.5px; font-weight: 600; transition: all .2s; }
 .seg button.on { background: #EDE7DA; color: var(--ink); }
@@ -335,13 +352,13 @@ header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
 .always { margin-top: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .always div { padding: 22px; border-radius: 22px; background: rgba(255,255,255,.035); }
 .always b { display: block; font-size: 16px; color: #fff; }
-.always span { display: block; margin-top: 6px; color: #A39A8E; font-size: 14px; line-height: 1.5; }
+.always div > span { display: block; margin-top: 6px; color: #A39A8E; font-size: 14px; line-height: 1.5; }
 
 /* ---------- engines ---------- */
 .engines { padding: 150px 0 140px; }
 .engines .grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 70px; align-items: center; }
 .eng { display: grid; gap: 10px; }
-.eng .e { display: grid; grid-template-columns: 46px 1fr auto; align-items: center; gap: 16px; padding: 16px 18px; border-radius: 20px; background: var(--paper); box-shadow: 0 0 0 1px rgba(20,15,5,.05), 0 20px 40px -30px rgba(40,25,5,.35); transition: transform .3s var(--spring); }
+.eng .e { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 16px 18px; border-radius: 20px; background: var(--paper); box-shadow: 0 0 0 1px rgba(20,15,5,.05), 0 20px 40px -30px rgba(40,25,5,.35); transition: transform .3s var(--spring); }
 .eng .e:hover { transform: translateX(6px); }
 .eng .logo { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: var(--cream); font: 800 18px/1 var(--display); }
 .eng .logo img { width: 24px; height: 24px; }
@@ -353,7 +370,7 @@ header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
 .gwcode { margin-top: 26px; padding: 20px 22px; border-radius: 18px; background: var(--ink); color: #E7E0D2; font: 500 13.5px/1.75 var(--mono); overflow-x: auto; }
 .gwcode .c { color: #7E766A; } .gwcode .k { color: var(--beak); } .gwcode .s { color: #6EE7A0; }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
-.pills span { padding: 9px 14px; border-radius: 99px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); font-size: 14px; }
+.pills > span { padding: 9px 14px; border-radius: 99px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); font-size: 14px; }
 .pills b { font-weight: 650; }
 
 /* ---------- tuca ---------- */
@@ -363,22 +380,22 @@ header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
 .tuca .lead { color: rgba(20, 15, 5, .75); margin-top: 22px; }
 .tuca .eyebrow::before { background: var(--ink); box-shadow: 9px 0 0 -3px var(--beak-2); }
 .tuca .bigmark { position: absolute; left: -90px; bottom: -150px; width: 460px; opacity: .14; }
-.chat { display: grid; gap: 14px; }
+.chat { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .tuca-face { width: 32px; height: 32px; flex: none; }
 .chat .m .body { font-size: 15px; }
 .chat .m.mine .body { background: rgba(255, 253, 248, .6); }
 .draft { margin-top: 8px; padding: 20px; border-radius: 22px; background: var(--paper); box-shadow: 0 40px 70px -40px rgba(80, 30, 0, .6); }
-.draft .hd { display: flex; align-items: center; gap: 14px; }
+.draft .hd { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .draft .hd .agent { --s: 46px; }
 .draft .hd b { display: block; font-size: 18px; }
 .draft .hd small { color: var(--ink-3); font-size: 13.5px; }
-.draft .hd .tag { margin-left: auto; padding: 4px 10px; border-radius: 99px; background: var(--cream); font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.draft .hd .tag { margin-left: auto; padding: 4px 10px; border-radius: 99px; background: var(--cream); font-size: 12px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .draft p { margin-top: 14px; font-size: 14.5px; color: var(--ink-2); }
 .draft .facts { margin-top: 14px; display: grid; gap: 7px; font-size: 13.5px; }
-.draft .facts span { display: flex; align-items: center; gap: 8px; }
-.draft .facts i { width: 6px; height: 6px; border-radius: 50%; background: var(--beak); }
-.draft .row { display: flex; gap: 8px; margin-top: 18px; }
-.draft .row span { height: 36px; padding: 0 14px; border-radius: 10px; display: grid; place-items: center; font-size: 13.5px; font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); }
+.draft .facts > span { display: flex; align-items: center; gap: 8px; }
+.draft .facts i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--beak); }
+.draft .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.draft .row > span { height: 36px; padding: 0 14px; border-radius: 10px; display: grid; place-items: center; font-size: 13.5px; font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
 .draft .row span.go { background: var(--ink); color: var(--cream); box-shadow: none; }
 
 /* ---------- install ---------- */
@@ -388,7 +405,7 @@ header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
 .install li { display: flex; gap: 16px; counter-increment: s; }
 .install li::before { content: counter(s); flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--ink); color: var(--cream); font: 700 15px var(--display); }
 .install li b { display: block; font-size: 17px; }
-.install li span { color: var(--ink-2); font-size: 15.5px; }
+.install li div > span { color: var(--ink-2); font-size: 15.5px; }
 .tty { border-radius: 22px; background: #161412; color: #E7E0D2; overflow: hidden; box-shadow: 0 60px 100px -50px rgba(40,25,5,.6); }
 .tty .tb { display: flex; gap: 8px; padding: 15px 17px; background: #201D1A; }
 .tty .tb i { width: 12px; height: 12px; border-radius: 50%; background: #3A3631; }
@@ -396,7 +413,7 @@ header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
 .tty .p { color: #7E766A; } .tty .g { color: #6EE7A0; } .tty .o { color: var(--beak); }
 .tty .cur { display: inline-block; width: 9px; height: 17px; vertical-align: -3px; background: #E7E0D2; animation: caret 1s steps(1) infinite; }
 .free { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 8px; }
-.free span { padding: 9px 15px; border-radius: 99px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); font-size: 14px; font-weight: 600; }
+.free > span { padding: 9px 15px; border-radius: 99px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); font-size: 14px; font-weight: 600; }
 
 /* ---------- faq ---------- */
 .faq { padding: 30px 0 140px; }
@@ -414,7 +431,7 @@ header .btn { height: 40px; padding: 0 18px; font-size: 14.5px; }
 .end .top2 { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
 .end .h2 { max-width: 640px; }
 .end .h2 em { color: var(--beak); }
-.end .acts { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.end .acts { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: 100%; }
 .end .cmd { background: #201D1A; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
 .word { position: relative; margin-top: 80px; display: flex; align-items: flex-end; gap: 2vw; }
 .word .big { font: 800 clamp(120px, 23vw, 340px)/.78 var(--display); letter-spacing: -.07em; color: var(--cream); margin-bottom: -.06em; }
@@ -446,7 +463,7 @@ footer a:hover { color: #EDE7DA; }
   .wrap { width: calc(100% - 32px); }
   header .btn--ghost { display: none; }
   .hero { padding: 110px 0 70px; }
-  .hero__art { max-width: 280px; }
+  .hero__art { max-width: min(280px, 72vw); }
   .mate { transform: scale(.85); }
   .cmd { font-size: 12px; }
   .app { height: 560px; }
@@ -465,6 +482,95 @@ footer a:hover { color: #EDE7DA; }
   .rv { opacity: 1; transform: none; }
   .hero h1 .swoosh svg path { stroke-dashoffset: 0; }
 }
+/* ---------- Tucano Pro (beta) ---------- */
+nav.links a .beta, .beta { display: inline-grid; place-items: center; height: 18px; padding: 0 7px; margin-left: 6px; border-radius: 99px; background: var(--beak); color: var(--ink); font: 700 10.5px/1 var(--sans); letter-spacing: .04em; vertical-align: 2px; }
+.hero .pro-line { margin-top: 10px; font-size: 14px; color: var(--ink-3); }
+.hero .pro-line a { color: var(--ink-2); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(20, 15, 5, .25); }
+.hero .pro-line a:hover { color: var(--ink); text-decoration-color: currentColor; }
+/* the email, alone: one field and the button, in a pill */
+.join { position: relative; display: flex; align-items: center; gap: 8px; max-width: 520px; height: 60px; padding: 6px 6px 6px 22px; border-radius: 99px; background: var(--paper); box-shadow: 0 0 0 1px rgba(20,15,5,.06), 0 24px 50px -24px rgba(20, 15, 5, .45); }
+.join input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; font: 500 16px/1 var(--sans); color: var(--ink); outline: none; }
+.join input::placeholder { color: var(--ink-3); }
+.join:focus-within { box-shadow: 0 0 0 2px var(--beak), 0 24px 50px -24px rgba(20, 15, 5, .45); }
+.join button { flex: none; height: 48px; padding: 0 22px; border: 0; border-radius: 99px; background: var(--beak); color: var(--ink); font: 600 15.5px/1 var(--sans); box-shadow: inset 0 -3px 0 rgba(0,0,0,.12); transition: transform .2s var(--spring), background .2s; }
+.join button:hover { background: #FF9A3D; transform: translateY(-1px); }
+.join button[disabled] { opacity: .6; transform: none; }
+.join-fine { margin-top: 14px; font-size: 13.5px; color: var(--ink-3); max-width: 520px; }
+.join-fine a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.join-msg { margin-top: 14px; font-size: 15px; font-weight: 600; max-width: 520px; }
+.join-msg.ok { display: flex; align-items: center; gap: 10px; }
+.join-msg.ok::before { content: '✓'; flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 14px; }
+.join-msg.no { color: var(--beak-2); }
+.join .cf-turnstile { position: absolute; left: 0; top: calc(100% + 10px); }
+@media (max-width: 640px) {
+  .join { height: auto; flex-direction: column; align-items: stretch; padding: 8px; border-radius: 22px; }
+  .join input { height: 48px; padding: 0 12px; }
+  .join button { width: 100%; }
+}
+
+/* the phone at 3 a.m.: the computer is off, the team isn't */
+.phone { position: relative; width: 300px; height: 600px; border-radius: 52px; padding: 12px; background: #0B0A09; box-shadow: 0 0 0 2px #2A2622, 0 60px 100px -40px rgba(0,0,0,.7); }
+.phone .scr { position: relative; height: 100%; border-radius: 41px; overflow: hidden; background: radial-gradient(120% 70% at 30% 0%, #3A2A1C 0%, #16120F 55%, #0E0C0A 100%); color: #fff; }
+.phone .isl { position: absolute; left: 50%; top: 11px; width: 92px; height: 27px; margin-left: -46px; border-radius: 20px; background: #000; }
+.phone .clock { margin-top: 64px; text-align: center; }
+.phone .clock small { display: block; font: 600 14px/1 var(--sans); color: rgba(255,255,255,.7); }
+.phone .clock b { display: block; margin-top: 6px; font: 300 78px/1 var(--sans); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.phone .notes { position: absolute; left: 10px; right: 10px; bottom: 26px; display: flex; flex-direction: column; gap: 8px; }
+.note { padding: 12px 13px; border-radius: 22px; background: rgba(245, 240, 232, .16); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); font-size: 13px; line-height: 1.35; color: #fff; animation: noteIn .55s var(--spring) both; }
+@keyframes noteIn { from { opacity: 0; transform: translateY(18px) scale(.96); } }
+.note .hd { display: flex; align-items: center; gap: 8px; font-size: 12px; color: rgba(255,255,255,.72); }
+.note .hd svg { width: 20px; height: 20px; border-radius: 6px; }
+.note .hd span { margin-left: auto; }
+.note b { display: block; margin-top: 6px; font-weight: 650; }
+.note p { color: rgba(255,255,255,.88); }
+.note .acts { display: flex; gap: 6px; margin-top: 10px; }
+.note .acts i { position: relative; flex: 1; height: 34px; border-radius: 12px; display: grid; place-items: center; font: 600 13px/1 var(--sans); font-style: normal; background: rgba(255,255,255,.14); }
+.note .acts i.yes { background: #fff; color: var(--ink); }
+.note .acts i.yes.tap::after { content: ''; position: absolute; inset: -5px; border-radius: 16px; border: 2px solid var(--beak); animation: nudge 1s ease-out infinite; }
+.note.ok { background: rgba(31, 157, 85, .32); }
+.note.gone { animation: noteOut .35s var(--ease) forwards; }
+@keyframes noteOut { to { opacity: 0; transform: scale(.96); } }
+.laptop { position: absolute; left: -12%; top: -3%; display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 10px; border-radius: 16px; background: var(--paper); color: var(--ink); box-shadow: 0 18px 40px -18px rgba(0,0,0,.6); white-space: nowrap; animation: bob 6s ease-in-out infinite; font-size: 13px; }
+.laptop svg { width: 34px; height: 24px; }
+.laptop b { display: block; font-size: 13.5px; line-height: 1.2; }
+.laptop small { display: block; font-size: 12px; color: var(--ink-3); line-height: 1.2; }
+.pro { position: relative; padding: 140px 0; background: var(--ink); color: #EDE7DA; border-radius: 48px; margin: 0 12px; overflow: hidden; }
+.pro .glow { position: absolute; left: -200px; bottom: -260px; width: 680px; height: 680px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 140, 36, .2), transparent 65%); pointer-events: none; }
+.pro .grid { position: relative; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 60px; align-items: center; }
+.pro .eyebrow { color: #CFC6B8; }
+.pro .h2 em { color: var(--beak); }
+.pro .lead { color: #A39A8E; margin-top: 22px; }
+.pro .join { margin-top: 38px; }
+.pro .join-fine { color: #8C8478; }
+.pro .join-msg.ok { color: #EDE7DA; }
+.pro .stage { position: relative; display: grid; place-items: center; }
+.profacts { margin-top: 44px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 640px; }
+.profacts div { padding: 16px 18px; border-radius: 20px; background: rgba(255,255,255,.04); font-size: 14px; color: #A39A8E; line-height: 1.45; }
+.profacts b { display: block; color: #fff; font-size: 15px; margin-bottom: 4px; }
+.plans3 small { display: inline-grid; place-items: center; height: 20px; padding: 0 8px; margin-bottom: 10px; border-radius: 99px; background: rgba(255,255,255,.08); color: #CFC6B8; font: 700 10.5px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; }
+.plans3 .on { background: rgba(255, 140, 36, .12); box-shadow: inset 0 0 0 1px rgba(255, 140, 36, .35); }
+.plans3 .on small { background: var(--beak); color: var(--ink); }
+.plans3 .price { display: block; margin-top: 10px; font: 700 20px/1 var(--display); letter-spacing: -.02em; color: #fff; }
+.plans3 .price small { all: unset; font: 500 13px/1 var(--sans); color: #A39A8E; letter-spacing: 0; }
+.plans-link { display: inline-block; margin-top: 18px; color: #EDE7DA; font-size: 15px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: rgba(237, 231, 218, .3); }
+.plans-link:hover { text-decoration-color: currentColor; }
+/* stacked, the column is the whole screen: shrink it to the phone so the laptop stays beside it */
+@media (max-width: 1080px) { .pro .grid { grid-template-columns: minmax(0, 1fr); gap: 70px; } .pro .stage { justify-self: center; } }
+@media (max-width: 640px) { .pro { border-radius: 30px; margin: 0 6px; padding: 90px 0; } .profacts { grid-template-columns: 1fr; } .phone { transform: scale(.88); } .laptop { left: 0; } }
+/* the Pro, where the page opens */
+.news { display: inline-flex; align-items: center; gap: 10px; height: 38px; padding: 0 5px 0 5px; border-radius: 99px; background: var(--paper); box-shadow: 0 0 0 1px var(--line), 0 12px 26px -16px rgba(40, 25, 5, .4); text-decoration: none; font: 600 14px/1 var(--sans); color: var(--ink); transition: transform .2s var(--spring), box-shadow .2s; }
+.news:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px var(--ink-3), 0 16px 30px -16px rgba(40, 25, 5, .45); }
+.news .beta { margin: 0; height: 28px; padding: 0 10px; font-size: 11px; vertical-align: 0; }
+.news .go { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 99px; background: var(--ink); color: var(--cream); font-size: 13px; }
+.hero .news + .eyebrow { margin-top: 22px; display: flex; }
+.btn.pro-btn { gap: 8px; background: var(--ink); color: var(--cream); }
+.btn.pro-btn .beta { margin: 0; vertical-align: 0; }
+.btn.pro-btn svg { width: 18px; height: 18px; }
+.hero-join { flex-basis: 100%; }
+.hero-join .join { margin-top: 4px; animation: rise .45s var(--ease) both; }
+.hero-join .join-fine { margin-top: 10px; }
+@media (max-width: 640px) { .news { padding: 0 16px 0 5px; font-size: 13.5px; } .news .go { display: none; } .news::after { content: "→"; } }
+.join .ts { position: absolute; left: 0; top: calc(100% + 10px); z-index: 3; }
 </style>
 <!-- Analytics (PostHog), only on tucano.sh. Nothing is stored in the visitor's browser
      (persistence: memory): no cookies, so no cookie banner. -->
@@ -510,11 +616,13 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
       <a href="#faz"><span lang="pt-BR">O que faz</span><span lang="en">What it does</span></a>
       <a href="#regras"><span lang="pt-BR">Suas regras</span><span lang="en">Your rules</span></a>
       <a href="#tuca"><span lang="pt-BR">O Tuca</span><span lang="en">Meet Tuca</span></a>
+      <a href="#pro">Pro<span class="beta">BETA</span></a>
       <a href="#perguntas"><span lang="pt-BR">Perguntas</span><span lang="en">FAQ</span></a>
     </nav>
     <div class="right">
       <div class="lang" role="group" aria-label="Idioma / Language"><button type="button" data-set="pt-BR">PT</button><button type="button" data-set="en">EN</button></div>
       <a class="btn btn--ghost" href="https://github.com/eduwxyz/tucano"><img src="assets/logos/github.svg" alt="">GitHub</a>
+      <a class="btn btn--ghost btn--icon" href="https://discord.gg/uQp4x7wUgT" aria-label="Discord" title="Discord"><img src="assets/logos/discord.svg" alt=""></a>
       <a class="btn btn--beak" href="#instalar"><span lang="pt-BR">Instalar</span><span lang="en">Install</span></a>
     </div>
   </div>
@@ -525,12 +633,23 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
 <section class="hero">
   <div class="wrap hero__grid">
     <div>
+      <a class="news rv" href="#pro" data-pro-where="pill"><span class="beta">BETA</span><span lang="pt-BR">Tucano Pro: seu time na nuvem</span><span lang="en">Tucano Pro: your team in the cloud</span><span class="go"><span lang="pt-BR">Entrar na lista →</span><span lang="en">Join the waitlist →</span></span></a>
       <div class="eyebrow rv"><span lang="pt-BR">Grátis, open source, no Mac, no Linux e no Windows</span><span lang="en">Free, open source, on Mac, Linux and Windows</span></div>
       <h1 class="display rv"><span lang="pt-BR">Seu time de agentes de IA. </span><span lang="en">Your AI agent team. </span><span class="swoosh"><span lang="pt-BR">Suas regras.</span><span lang="en">Your rules.</span><svg viewBox="0 0 300 30" preserveAspectRatio="none"><path pathLength="1" d="M4 22 C 80 6, 200 4, 296 14" stroke="#FF8C24" stroke-width="9" stroke-linecap="round" fill="none"/></svg></span></h1>
       <p class="lead rv"><span lang="pt-BR">Agentes que conversam em canais, programam, revisam um ao outro e usam as ferramentas do seu time. Eles fazem o trabalho; o que mexe no mundo espera o seu sim.</span><span lang="en">Agents that talk in channels, write code, review each other and use your team’s tools. They do the work; anything that touches the real world waits for your yes.</span></p>
       <div class="actions rv">
         <a class="btn btn--beak" data-dl href="https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg"><span lang="pt-BR">Baixar pro Mac</span><span lang="en">Download for Mac</span></a>
+        <button type="button" class="btn pro-btn" data-pro-open aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.34 9.5 4.75 4.75 0 0 0 6.75 19z"/></svg><span lang="pt-BR">Tucano Pro, na nuvem</span><span lang="en">Tucano Pro, in the cloud</span><span class="beta">BETA</span></button>
         <p class="also"><span lang="pt-BR">Também pra </span><span lang="en">Also for </span><a data-dl data-os="windows" href="https://github.com/eduwxyz/tucano/releases/latest/download/tucano-win-x64.exe">Windows</a><span lang="pt-BR"> e </span><span lang="en"> and </span><a data-dl data-os="linux" href="https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-amd64.deb">Linux</a></p>
+        <div class="hero-join" hidden><form class="join" novalidate>
+  <input type="email" name="email" autocomplete="email" aria-label="E-mail" required>
+  <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px">
+  <button type="submit"><span lang="pt-BR">Entrar na lista</span><span lang="en">Join the waitlist</span></button>
+  <div class="ts"></div>
+</form>
+<p class="join-msg" hidden></p>
+<p class="join-fine"><span lang="pt-BR">Acesso antecipado, pago e com vagas limitadas: quando chegar a sua vez, o convite traz o link pra assinar. 7 dias pra desistir com reembolso. Ao entrar, você concorda com os <a href="/pro/#termos">termos do beta</a> e a <a href="/privacidade/">privacidade</a>.</span><span lang="en">Paid early access, with limited spots: when it's your turn, the invite comes with the link to subscribe. 7 days to cancel for a full refund. By joining, you agree to the <a href="/en/pro/#termos">beta terms</a> and the <a href="/en/privacy/">privacy policy</a>.</span></p>
+</div>
         <div class="cmd"><code><b>curl</b> -fsSL <span>…/releases/latest/download/</span>install.sh | sh</code><button class="copy" data-copy="curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh">Copiar</button></div>
         <a class="btn btn--ghost" href="#ao-vivo"><span lang="pt-BR">Ver ao vivo ↓</span><span lang="en">Watch it live ↓</span></a>
       </div>
@@ -558,7 +677,7 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
       </div>
       <div class="mate" style="left:-14%;top:12%"><span class="agent violet"><span class="eyes"><i></i><i></i></span></span><div><b>Leo</b><small>Claude Code</small></div></div>
       <div class="mate" style="right:-6%;top:-2%"><span class="agent sky"><span class="eyes"><i></i><i></i></span></span><div><b>Bia</b><small>Pi</small></div></div>
-      <div class="mate" style="right:-10%;top:66%"><span class="agent teal"><span class="eyes"><i></i><i></i></span></span><div><b>Nico</b><small>Codex</small></div></div>
+      <div class="mate" style="right:-5%;top:66%"><span class="agent teal"><span class="eyes"><i></i><i></i></span></span><div><b>Nico</b><small>Codex</small></div></div>
       <div class="mate" style="left:-6%;top:84%"><span class="agent rose"><span class="eyes"><i></i><i></i></span></span><div><b>Pia</b><small>OpenCode</small></div></div>
     </div>
   </div>
@@ -755,6 +874,38 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
   </div>
 </section>
 
+<!-- ============ Tucano Pro (beta) ============ -->
+<section class="pro" id="pro">
+  <div class="glow" aria-hidden="true"></div>
+  <div class="stars" id="proStars" aria-hidden="true"></div>
+  <div class="wrap grid">
+    <div class="rv">
+      <div class="eyebrow"><span lang="pt-BR">Tucano Pro · beta</span><span lang="en">Tucano Pro · beta</span></div>
+      <h2 class="h2" style="margin-top:18px"><span lang="pt-BR">Feche o notebook. <em>O time continua.</em></span><span lang="en">Close the laptop. <em>The team keeps going.</em></span></h2>
+      <p class="lead"><span lang="pt-BR">No Tucano Pro, o seu Tucano roda na nuvem, 24 horas. Use a assinatura de IA que você já tem, ou deixe a IA com a gente. Sem instalar nada: você usa no navegador ou no iPhone, de qualquer lugar.</span><span lang="en">With Tucano Pro, your Tucano runs in the cloud, around the clock. Use the AI subscription you already have, or leave the AI to us. Nothing to install: use it in the browser or on your iPhone, from anywhere.</span></p>
+      <form class="join" novalidate>
+  <input type="email" name="email" autocomplete="email" aria-label="E-mail" required>
+  <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px">
+  <button type="submit"><span lang="pt-BR">Entrar na lista</span><span lang="en">Join the waitlist</span></button>
+  <div class="ts"></div>
+</form>
+<p class="join-msg" hidden></p>
+<p class="join-fine"><span lang="pt-BR">Acesso antecipado, pago e com vagas limitadas: quando chegar a sua vez, o convite traz o link pra assinar. 7 dias pra desistir com reembolso. Ao entrar, você concorda com os <a href="/pro/#termos">termos do beta</a> e a <a href="/privacidade/">privacidade</a>.</span><span lang="en">Paid early access, with limited spots: when it's your turn, the invite comes with the link to subscribe. 7 days to cancel for a full refund. By joining, you agree to the <a href="/en/pro/#termos">beta terms</a> and the <a href="/en/privacy/">privacy policy</a>.</span></p>
+
+      <div class="profacts plans3">
+        <div><small><span lang="pt-BR">Grátis</span><span lang="en">Free</span></small><b><span lang="pt-BR">No seu computador</span><span lang="en">On your computer</span></b><span lang="pt-BR">O Tucano de sempre, com a sua IA.</span><span lang="en">The Tucano you know, with your AI.</span><span class="price"><span lang="pt-BR">R$ 0<small>/mês</small></span><span lang="en">US$0<small>/mo</small></span></span></div>
+        <div><small>Beta</small><b><span lang="pt-BR">Na nuvem, com a sua IA</span><span lang="en">In the cloud, with your AI</span></b><span lang="pt-BR">Claude, ChatGPT, Gemini e outros: você conecta a que já paga.</span><span lang="en">Claude, ChatGPT, Gemini and more: connect the one you pay for.</span><span class="price"><span lang="pt-BR">R$ 79<small>/mês</small></span><span lang="en">US$15<small>/mo</small></span></span></div>
+        <div class="on"><small>Beta</small><b><span lang="pt-BR">Na nuvem, com a IA inclusa</span><span lang="en">In the cloud, AI included</span></b><span lang="pt-BR">Nada pra configurar: abre e usa.</span><span lang="en">Nothing to set up: open it and go.</span><span class="price"><span lang="pt-BR">R$ 169<small>/mês</small></span><span lang="en">US$32<small>/mo</small></span></span></div>
+      </div>
+      <a class="plans-link" href="/pro/#planos" data-en-href="/en/pro/#planos" data-pro-where="plans"><span lang="pt-BR">Ver os planos em detalhe →</span><span lang="en">See the plans in detail →</span></a>
+    </div>
+    <div class="stage rv" aria-hidden="true">
+      <div class="phone"><div class="scr"><div class="isl"></div><div class="clock"><small><span lang="pt-BR">quarta-feira, 12 de novembro</span><span lang="en">Wednesday, November 12</span></small><b id="proClock">3:12</b></div><div class="notes" id="proNotes"></div></div></div>
+      <div class="laptop"><svg viewBox="0 0 34 24"><rect x="4" y="16" width="26" height="3" rx="1.5" fill="#141210"/><rect x="6" y="13" width="22" height="3" rx="1" fill="#8C8478"/></svg><div><b><span lang="pt-BR">Seu notebook</span><span lang="en">Your laptop</span></b><small><span lang="pt-BR">fechado desde 23:40</span><span lang="en">closed since 11:40 p.m.</span></small></div></div>
+    </div>
+  </div>
+</section>
+
 <!-- ============ install ============ -->
 <section class="install" id="instalar">
   <div class="wrap grid">
@@ -779,7 +930,8 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
   <div class="wrap grid">
     <div class="rv"><div class="eyebrow"><span lang="pt-BR">Perguntas</span><span lang="en">FAQ</span></div><h2 class="h2" style="margin-top:18px"><span lang="pt-BR">O que todo mundo <em>pergunta primeiro.</em></span><span lang="en">What everyone <em>asks first.</em></span></h2></div>
     <div class="qa rv">
-      <details open><summary><span lang="pt-BR">Quanto custa?</span><span lang="en">How much does it cost?</span></summary><p><span lang="pt-BR">Nada. O Tucano é grátis, sem recurso trancado. Você usa o plano do Claude ou do ChatGPT que já paga, os seus provedores, ou o gateway da empresa.</span><span lang="en">Nothing. Tucano is free, with no locked features. You use the Claude or ChatGPT plan you already pay for, your own providers, or your company’s gateway.</span></p></details>
+      <details open><summary><span lang="pt-BR">Quanto custa?</span><span lang="en">How much does it cost?</span></summary><p><span lang="pt-BR">Nada. O Tucano é grátis, sem recurso trancado. Você usa o plano do Claude ou do ChatGPT que já paga, os seus provedores, ou o gateway da empresa. Se preferir na nuvem, sem deixar o computador ligado, o <a href="/pro/">Tucano Pro</a> custa R$ 79/mês com a sua IA, ou R$ 169/mês com a IA inclusa.</span><span lang="en">Nothing. Tucano is free, with no locked features. You use the Claude or ChatGPT plan you already pay for, your own providers, or your company’s gateway. If you’d rather run it in the cloud, without keeping your computer on, <a href="/en/pro/">Tucano Pro</a> is US$15/mo with your AI, or US$32/mo with the AI included.</span></p></details>
+      <details><summary><span lang="pt-BR">E se eu não quiser instalar nada?</span><span lang="en">What if I don’t want to install anything?</span></summary><p><span lang="pt-BR">Entre na lista do <a href="#pro">Tucano Pro</a>, em beta: a gente hospeda o seu Tucano, e você usa a assinatura de IA que já tem ou a IA inclusa. No navegador ou no iPhone, de qualquer lugar.</span><span lang="en">Join the waitlist for <a href="#pro">Tucano Pro</a>, in beta: we host your Tucano, and you use the AI subscription you already have or the AI included. In the browser or on your iPhone, from anywhere.</span></p></details>
       <details><summary><span lang="pt-BR">Preciso de chave de API?</span><span lang="en">Do I need an API key?</span></summary><p><span lang="pt-BR">Não. Ele roda o Claude Code, o Codex, o Cursor, o Gemini, o Grok, o OpenCode ou o Pi já configurados no seu computador. O app nunca vê nem guarda a sua senha.</span><span lang="en">No. It runs Claude Code, Codex, Cursor, Gemini, Grok, OpenCode or Pi as they’re already set up on your computer. The app never sees or stores your password.</span></p></details>
       <details><summary><span lang="pt-BR">É seguro deixar agentes mexendo nas coisas?</span><span lang="en">Is it safe to let agents touch things?</span></summary><p><span lang="pt-BR">Cada agente só usa o que recebeu, ações sensíveis pedem o seu sim (amarrado àquela ação exata) e os comandos rodam num Linux isolado, a não ser que você escolha dar o seu computador.</span><span lang="en">Each agent only uses what it was given, sensitive actions need your yes (tied to that exact action), and commands run on an isolated Linux machine, unless you choose to hand over your own computer.</span></p></details>
       <details><summary><span lang="pt-BR">Onde ficam os meus dados?</span><span lang="en">Where does my data live?</span></summary><p><span lang="pt-BR">No seu computador: conversas, memória, arquivos e logins. O modelo recebe só o que os agentes mandam pra ele, pelo caminho que o seu harness já usa.</span><span lang="en">On your computer: conversations, memory, files and logins. The model only receives what the agents send it, through the path your harness already uses.</span></p></details>
@@ -808,7 +960,7 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
     </div>
     <footer>
       <span><span lang="pt-BR">Feito no Brasil.</span><span lang="en">Made in Brazil.</span></span>
-      <nav><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://github.com/eduwxyz/tucano/releases"><span lang="pt-BR">Versões</span><span lang="en">Releases</span></a><a href="https://github.com/eduwxyz/tucano#readme"><span lang="pt-BR">Guia completo</span><span lang="en">Full guide</span></a><a href="https://github.com/eduwxyz/tucano/issues"><span lang="pt-BR">Problemas e ideias</span><span lang="en">Issues and ideas</span></a><a href="https://github.com/eduwxyz/tucano/blob/HEAD/LICENSE">Apache-2.0</a></nav>
+      <nav><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://discord.gg/uQp4x7wUgT">Discord</a><a href="https://github.com/eduwxyz/tucano/releases"><span lang="pt-BR">Versões</span><span lang="en">Releases</span></a><a href="https://github.com/eduwxyz/tucano#readme"><span lang="pt-BR">Guia completo</span><span lang="en">Full guide</span></a><a href="https://github.com/eduwxyz/tucano/issues"><span lang="pt-BR">Problemas e ideias</span><span lang="en">Issues and ideas</span></a><a href="https://github.com/eduwxyz/tucano/blob/HEAD/LICENSE">Apache-2.0</a><a href="/alternativa-grok-bot/" data-en-href="/en/grok-bot-alternative/"><span lang="pt-BR">Alternativa ao Grok Bot</span><span lang="en">Grok Bot alternative</span></a><a href="/alternativa-openclaw/" data-en-href="/en/openclaw-alternative/"><span lang="pt-BR">Alternativa ao OpenClaw</span><span lang="en">OpenClaw alternative</span></a><a href="/suporte/" data-en-href="/en/support/"><span lang="pt-BR">Suporte</span><span lang="en">Support</span></a><a href="/privacidade/" data-en-href="/en/privacy/"><span lang="pt-BR">Privacidade</span><span lang="en">Privacy</span></a></nav>
     </footer>
   </div>
 </section>
@@ -848,7 +1000,28 @@ function setLang(l, save) {
   $$('.copy').forEach((b) => { if (!b.classList.contains('done')) b.textContent = T('Copiar', 'Copy') })
   relabel.forEach((f) => f())
 }
-$$('.lang button').forEach((b) => b.addEventListener('click', () => b.dataset.set !== LANG && setLang(b.dataset.set, true)))
+$$('.lang button').forEach((b) => b.addEventListener('click', () => {
+  const l = b.dataset.set
+  if (l === LANG) return
+  if (location.protocol === 'file:') return setLang(l, true)
+  try { localStorage.setItem('tucano-lang', l) } catch {}
+  location.href = (l === 'en' ? '/en/' : '/') + location.search + location.hash
+}))
+// Someone whose browser speaks the other language, and who never picked one here, gets a link to it.
+;(() => {
+  let saved
+  try { saved = localStorage.getItem('tucano-lang') } catch {}
+  const pt = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase().startsWith('pt')
+  if (saved || location.protocol === 'file:' || pt === (LANG === 'pt-BR')) return
+  const hint = document.createElement('div')
+  hint.className = 'langhint'
+  hint.innerHTML = pt
+    ? '<a href="/" hreflang="pt-BR">Ver em português →</a><button type="button" aria-label="Fechar">×</button>'
+    : '<a href="/en/" hreflang="en">Read in English →</a><button type="button" aria-label="Close">×</button>'
+  hint.querySelector('a').addEventListener('click', () => { try { localStorage.setItem('tucano-lang', pt ? 'pt-BR' : 'en') } catch {} })
+  hint.querySelector('button').addEventListener('click', () => { hint.remove(); try { localStorage.setItem('tucano-lang', LANG) } catch {} })
+  document.body.append(hint)
+})()
 
 // Copy the install command.
 for (const b of $$('.copy')) b.addEventListener('click', async () => {
@@ -1131,6 +1304,7 @@ setLang(LANG)
     else if (el.matches('.copy')) ph.capture('install_command_copied', { location: where(el) })
     else if (el.matches('a[href^="https://github.com/eduwxyz/tucano"]')) ph.capture('github_clicked', { location: where(el) })
     else if (el.matches('a[href^="https://x.com/tucanosh"]')) ph.capture('x_clicked', { location: where(el) })
+    else if (el.matches('a[href^="https://discord.gg/"]')) ph.capture('discord_clicked', { location: where(el) })
     else if (el.matches('.lang button')) {
       ph.capture('language_changed', { to: el.dataset.set })
       ph.register({ site_lang: el.dataset.set })
@@ -1146,6 +1320,105 @@ setLang(LANG)
     }
   }, { rootMargin: '-45% 0px -45% 0px' })
   document.querySelectorAll('main > section, section.end').forEach((s) => io.observe(s))
+})()
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+<script>
+// ---------- Tucano Pro: the waitlist (only the email) and the phone at 3 a.m. ----------
+;(() => {
+  const T = (pt, en) => (document.documentElement.lang === 'en' ? en : pt)
+  // The anti-robot check (Cloudflare Turnstile), only when a form is sent: invisible unless Cloudflare asks.
+  const SITEKEY = '__TURNSTILE_SITE_KEY__'
+  const humanToken = (form) =>
+    new Promise((resolve) => {
+      const box = form.querySelector('.ts')
+      if (!window.turnstile || !box) return resolve('')
+      box.innerHTML = ''
+      const done = setTimeout(() => resolve(''), 20000)
+      window.turnstile.render(box, { sitekey: SITEKEY, appearance: 'interaction-only', callback: (t) => (clearTimeout(done), resolve(t)), 'error-callback': () => (clearTimeout(done), resolve('')) })
+    })
+  document.querySelectorAll('form.join input[type=email]').forEach((i) => (i.placeholder = T('seu@email.com', 'you@email.com')))
+  // The Pro where the page opens: the pill goes to the section; the button opens the email right there.
+  document.querySelectorAll('[data-pro-where]').forEach((a) => a.addEventListener('click', () => window.posthog?.capture?.('pro_hero_click', { where: a.dataset.proWhere })))
+  document.querySelectorAll('[data-pro-open]').forEach((b) => b.addEventListener('click', () => {
+    const box = document.querySelector('.hero-join')
+    box.hidden = false
+    b.setAttribute('aria-expanded', 'true')
+    box.querySelector('input[type=email]').focus()
+    window.posthog?.capture?.('pro_hero_click', { where: 'button' })
+  }))
+  const stars = document.getElementById('proStars')
+  if (stars) for (let i = 0; i < 40; i++) { const e = document.createElement('i'); e.style.left = Math.random() * 100 + '%'; e.style.top = Math.random() * 100 + '%'; e.style.animationDelay = -Math.random() * 3 + 's'; stars.append(e) }
+  document.querySelectorAll('form.join').forEach((form) => {
+    const msg = form.parentElement.querySelector('.join-msg')
+    const show = (kind, text) => { msg.className = `join-msg ${kind}`; msg.textContent = text; msg.hidden = false }
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const email = form.email.value.trim()
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return show('no', T('Confira o seu e-mail.', 'Check your email.'))
+      const button = form.querySelector('button')
+      button.disabled = true
+      try {
+        const p = new URLSearchParams(location.search)
+        const token = await humanToken(form)
+        const r = await fetch('/api/lista', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, consent: true, lang: document.documentElement.lang === 'en' ? 'en' : 'pt', source: p.get('ref') || p.get('utm_source') || 'home', website: form.website?.value || '', turnstile: token }) })
+        const out = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(out.error || '')
+        form.hidden = true
+        window.posthog?.capture?.('pro_waitlist_joined', { where: form.closest('.hero') ? 'hero' : 'section', lang: document.documentElement.lang })
+        show('ok', T('Pronto, você está na lista. A gente te chama por e-mail.', "Done, you're on the list. We'll email you."))
+      } catch (err) {
+        show('no', err.message || T('Não deu pra salvar agora. Tente de novo em um minuto.', "Couldn't save it right now. Try again in a minute."))
+        window.turnstile?.reset()
+      } finally {
+        button.disabled = false
+      }
+    })
+  })
+
+  // The phone: a trigger at night, the agent asks, you say yes from bed, it ships. Plays when seen.
+  const notes = document.getElementById('proNotes')
+  if (!notes) return
+  const clock = document.getElementById('proClock')
+  const still = /[?&]shot/.test(location.search) || matchMedia('(prefers-reduced-motion: reduce)').matches
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  const icon = '<svg><use href="#mark"/></svg>'
+  const note = (time, title, body, extra = '') => {
+    const n = document.createElement('div')
+    n.className = 'note'
+    n.innerHTML = `<div class="hd">${icon}TUCANO<span>${time}</span></div><b>${title}</b><p>${body}</p>${extra}`
+    notes.append(n)
+    return n
+  }
+  const steps = () => [
+    ['03:12', () => note(T('agora', 'now'), 'Leo', T('Erro novo no Pix. Achei a causa e escrevi a correção.', 'New error in Apple Pay. Found the cause and wrote the fix.'))],
+    ['03:12', () => note(T('agora', 'now'), T('Leo precisa do seu sim', 'Leo needs your yes'), T('Subir a correção do Pix pra produção?', 'Ship the Apple Pay fix to production?'), `<div class="acts"><i>${T('Recusar', 'Decline')}</i><i class="yes">${T('Aprovar', 'Approve')}</i></div>`)],
+  ]
+  async function play() {
+    for (;;) {
+      notes.innerHTML = ''
+      clock.textContent = '3:12'
+      const [first, ask] = steps()
+      if (still) {
+        first[1]()
+        const n = note(T('agora', 'now'), 'Leo', T('No ar. Zero erros desde 03:14.', 'Live. Zero errors since 3:14.'))
+        n.classList.add('ok')
+        return
+      }
+      await wait(900); first[1]()
+      await wait(1800); const a = ask[1]()
+      await wait(1400); a.querySelector('.yes').classList.add('tap')
+      await wait(1600)
+      a.classList.add('ok'); a.querySelector('.acts').outerHTML = `<p style="margin-top:8px;font-weight:600">${T('Aprovado por você', 'Approved by you')}</p>`
+      await wait(1700); clock.textContent = '3:14'
+      note(T('agora', 'now'), 'Leo', T('No ar. Zero erros desde 03:14.', 'Live. Zero errors since 3:14.')).classList.add('ok')
+      await wait(4200)
+      for (const n of notes.children) n.classList.add('gone')
+      await wait(500)
+    }
+  }
+  const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); play() } }, { threshold: .3 })
+  io.observe(notes)
 })()
 </script>
 </body>

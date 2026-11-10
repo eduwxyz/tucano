@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -36,6 +36,33 @@ describe('skills', () => {
     expect(skills.forAgent('a2')).toHaveLength(0)
     expect(skills.forAgent('a1')).toHaveLength(1)
     expect(() => skills.save({ ...recipe, body: 'outra' })).toThrow('Já existe uma skill chamada testes-do-core.')
+  })
+
+  it('keeps long recipes whole and recommends shortening without blocking proposals', () => {
+    const body = 'x'.repeat(32_345)
+    const saved = skills.save({ ...recipe, body })
+    expect(saved.body).toHaveLength(32_345)
+
+    const proposed = skills.propose(db.agent('a1')!, { nome: 'longa', quando_usar: 'Sempre', receita: body })
+    expect(proposed.skill?.body).toHaveLength(32_345)
+    expect(proposed.reply).toContain('Receita longa: 32.345 caracteres')
+    expect(proposed.reply).toContain('22.345 acima do recomendado de 10.000')
+    expect(skills.save({ ...recipe, name: 'outra', body }).body).toHaveLength(32_345)
+
+    const source = join(mkdtempSync(join(tmpdir(), 'ad-skill-')), 'SKILL.md')
+    writeFileSync(source, `---\nname: longa\ndescription: Sempre\n---\n${body}`)
+    const linked = skills.link(source, ['a1'])
+    expect(linked.body).toHaveLength(32_345)
+    expect(skills.read(db.agent('a1')!, { nome: 'longa' }).reply.endsWith(body)).toBe(true)
+  })
+
+  it('refuses only what is past a million characters: not a recipe at all', () => {
+    const huge = 'x'.repeat(1_000_001)
+    expect(() => skills.save({ ...recipe, body: huge })).toThrow('1.000.000')
+    expect(skills.propose(db.agent('a1')!, { nome: 'enorme', quando_usar: 'Sempre', receita: huge })).toMatchObject({ error: true })
+    const source = join(mkdtempSync(join(tmpdir(), 'ad-skill-')), 'SKILL.md')
+    writeFileSync(source, `---\nname: enorme\ndescription: Sempre\n---\n${huge}`)
+    expect(() => skills.link(source, ['a1'])).toThrow('1.000.000')
   })
 
   it("an agent's new skill waits for me, and only its proposer gets it once approved", () => {
@@ -81,7 +108,7 @@ describe('in a reply', () => {
   it('the agent sees its skills in the prompt, reads one, and proposes one', async () => {
     skills.save({ ...recipe, agents: ['a1'] })
     const ready = { installed: true, loggedIn: true }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, copilot: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, copilot: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     gateway = new Gateway()
     await gateway.start()
     const turns: Turn[] = []
@@ -97,13 +124,13 @@ describe('in a reply', () => {
         yield { type: 'done', text: 'feito', usage: { inputTokens: 10, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), copilot: fakeEngine('copilot') }
     const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), gateway, skills })
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     await r.send('d1', 'roda os testes')
     await r.idle()
-    expect(turns[0]!.system).toContain('## Suas skills')
-    expect(turns[0]!.system).toContain('- testes-do-core: Ao rodar ou consertar testes do Core')
+    expect(turns[0]!.prompt).toContain('## Suas skills')
+    expect(turns[0]!.prompt).toContain('- testes-do-core: Ao rodar ou consertar testes do Core')
     expect(replies[0]).toContain('swift test --package-path Core')
     expect(replies[1]).toContain('Ela só vale depois que o usuário aprovar')
     const steps = db.messages().find((m) => m.author.kind === 'agent')!.run!.steps.map((s) => `${s.label}: ${s.detail}`)

@@ -45,7 +45,17 @@ describe('Sessions', () => {
     const first = started(s)
     expect(first).toMatchObject({ resume: false, send: ['m1', 'm2'] })
     const next = s.begin('k', { config: cfg, shown: [...msgs('m1', 'm2'), { id: 'r1', block: '[Lia]\nresposta' }, ...msgs('m3', 'm4')] })
-    expect(next).toEqual({ id: first.id, token: first.token, resume: true, send: ['m3', 'm4'] })
+    expect(next).toEqual({ id: first.id, token: first.token, resume: true, send: ['m3', 'm4'], live: false })
+  })
+
+  it('goes on when only the live context changed, and sends it again only then', () => {
+    const s = store()
+    const p = s.begin('k', { config: cfg, shown: msgs('m1'), live: 'memórias: A' })!
+    s.end('k', p, { ok: true, config: cfg, shown: msgs('m1'), live: 'memórias: A', reply: 'r1', context: 1_000 })
+    expect(s.begin('k', { config: cfg, shown: [...msgs('m1'), { id: 'r1', block: 'x' }, ...msgs('m2')], live: 'memórias: A' })).toMatchObject({ id: p.id, resume: true, live: false })
+    s.end('k', p, { ok: true, config: cfg, shown: msgs('m1', 'm2'), live: 'memórias: A', reply: 'r2', context: 1_000 })
+    expect(s.begin('k', { config: cfg, shown: [...msgs('m1'), { id: 'r1', block: 'x' }, ...msgs('m2'), { id: 'r2', block: 'x' }, ...msgs('m3')], live: 'memórias: A, B' })).toMatchObject({ id: p.id, resume: true, send: ['m3'], live: true })
+    expect(forgot).toEqual([])
   })
 
   it('goes on after older messages leave the window', () => {
@@ -145,7 +155,7 @@ describe('a reply with a kept session', () => {
   const recorded = (e: Engine): Engine => ({ ...e, run: (t) => (turns.push(t), e.run(t)) })
   function runner(opts: { delayMs?: number; reply?: (t: Turn) => string; sessions?: boolean } = {}): Runner {
     const claude = recorded(fakeEngine('claude', { delayMs: opts.delayMs ?? 1, reply: opts.reply, sessions: opts.sessions ?? true, released }))
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), copilot: fakeEngine('copilot') }
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ks-work-')) })
   }
   const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
@@ -154,7 +164,7 @@ describe('a reply with a kept session', () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ks-db-')), 'test.db'))
     turns = []
     released = []
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, copilot: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, copilot: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(agent('a1', 'lia'))
     db.saveAgent(agent('a2', 'theo'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -209,7 +219,7 @@ describe('a reply with a kept session', () => {
     const r = runner()
     await r.send('d1', 'oi')
     await r.idle()
-    const mine = db.messages().find((m) => m.author.kind === 'me')!
+    const mine = db.messages().find((m) => m.author.kind === 'person')!
     db.saveMessage({ ...mine, text: 'olá' })
     await r.send('d1', 'de novo')
     await r.idle()
@@ -261,7 +271,7 @@ describe('a reply with a kept session', () => {
   it('finishes the reply when letting a session go fails', async () => {
     const claude = recorded(fakeEngine('claude', { delayMs: 1, sessions: true, released }))
     const failing: Engine = { ...claude, release: () => { throw new Error('EBUSY: resource busy or locked') } }
-    const engines: Record<EngineId, Engine> = { claude: failing, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), copilot: fakeEngine('copilot') }
+    const engines: Record<EngineId, Engine> = { claude: failing, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), copilot: fakeEngine('copilot') }
     const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ks-work-')) })
     await r.send('d1', 'oi')
     await r.idle()
@@ -349,6 +359,12 @@ describe('Claude Code with a session', () => {
   it('keeps its file under the config folder, by working folder', () => {
     expect(claudeProjectDir('/cfg', 'E:\\tucano-tmp\\probe-agent')).toBe(join('/cfg', 'projects', 'E--tucano-tmp-probe-agent'))
   })
+
+  it('names a long working folder as Claude Code does: cut at 200, then a hash of the whole path', () => {
+    // A real folder Claude Code made, for an agent of a second workspace under a long data folder.
+    const cwd = '/private/tmp/claude-501/-Users-eduardo-dev-agent-desk/a8f0d917-0489-4ee3-b90e-3ab79f9c8560/scratchpad/ws-leak-ySAaAW/workspaces/01a1ade8-40cc-79b7-bd30-8b0854d380d3/agents/9f3ef99c-7f51-4ea2-a06d-8cfbc28ee75c'
+    expect(claudeProjectDir('/cfg', cwd)).toBe(join('/cfg', 'projects', '-private-tmp-claude-501--Users-eduardo-dev-agent-desk-a8f0d917-0489-4ee3-b90e-3ab79f9c8560-scratchpad-ws-leak-ySAaAW-workspaces-01a1ade8-40cc-79b7-bd30-8b0854d380d3-agents-9f3ef99c-7f51-4ea2-a06d-8cfb-nrss68'))
+  })
 })
 
 // ---------- a process kept open between turns (a stand-in for Claude Code) ----------
@@ -418,7 +434,7 @@ describe('a Claude Code process kept open', () => {
     writeFileSync(file, '{}\n')
     mkdirSync(join(claudeProjectDir(cfg, dir), 's1', 'tool-results'), { recursive: true })
     engine.release!('s1')
-    for (let i = 0; i < 50 && existsSync(file); i++) await new Promise((r) => setTimeout(r, 100)) // once its process is gone
+    await engine.settle!() // once its process is gone
     expect(existsSync(file)).toBe(false)
     expect(existsSync(join(claudeProjectDir(cfg, dir), 's1'))).toBe(false)
     engine.dispose!()

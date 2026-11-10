@@ -65,7 +65,7 @@ const skills = {
 async function run(engine: EngineId, modelId: string): Promise<Step[]> {
   db.saveAgent({ id: 'theo', name: 'Theo', handle: 'theo', role: '', color: 'sky', instructions: '', modelId, effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: true, computerKind: 'mac', archived: false })
   db.createConversation({ id: 'dm', kind: 'dm', name: 'theo', members: ['theo'] })
-  const engines = Object.fromEntries((['claude', 'codex', 'opencode', 'pi', 'gemini', 'cursor'] as EngineId[]).map((e) => [e, e === engine ? scripted(e) : fakeEngine(e)])) as Record<EngineId, Engine>
+  const engines = Object.fromEntries((['claude', 'codex', 'opencode', 'pi', 'antigravity', 'cursor'] as EngineId[]).map((e) => [e, e === engine ? scripted(e) : fakeEngine(e)])) as Record<EngineId, Engine>
   const runner = new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ls-w-')), gateway, computers, skills })
   await runner.send('dm', 'quanto vendemos por região?')
   await runner.idle()
@@ -77,7 +77,7 @@ afterAll(() => setLang('pt'))
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ls-db-')), 'test.db'))
   events = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, copilot: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, copilot: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
   gateway = new Gateway()
   await gateway.start()
 })

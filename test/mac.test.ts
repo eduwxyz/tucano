@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, Conversation } from '../src/shared/types'
-import { systemPrompt } from '../src/core/context'
+import { liveContext, systemPrompt } from '../src/core/context'
 import { artifactKind, Computers, computerTools, linuxTools, stepFor } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { loginEnv, MacComputer, macPath } from '../src/core/mac'
@@ -162,8 +162,10 @@ describe('an agent whose computer is this Mac', () => {
     if (win) expect(prompt).not.toMatch(/\bMac\b/)
     if (win) expect(prompt).toMatch(/Git Bash|cmd\.exe/)
     expect(prompt).toContain(`Eles começam em ${work} (sua pasta de trabalho)`)
+    // The person's own things (a screenshot just taken on the Desktop) aren't the agent's to look through unasked.
+    expect(prompt).toContain('não abra nem liste por conta própria o que é pessoal dele (Mesa, Downloads, Documentos, prints de tela, fotos)')
     expect(prompt).not.toContain('A pasta de trabalho é /work')
-    const off = systemPrompt({ agent: me, settings: { workspaceName: 'Edu', context: '' }, conversation: conv, peers: [], offline: ['Linear'] })
+    const off = liveContext({ settings: { workspaceName: 'Edu', context: '' }, offline: ['Linear'] })
     expect(off).toContain('Você tem acesso a Linear, mas ele está desconectado agora')
   })
 })
@@ -175,7 +177,9 @@ describe("the user's shell environment", () => {
     delete process.env['TUCANO_SEGREDO']
     // Windows spells it Path, with C:\… directories.
     const path = Object.entries(env).find(([k]) => k.toUpperCase() === 'PATH')?.[1]
-    expect(path).toContain(win ? 'C:\\Windows' : '/usr/bin')
+    // Windows doesn't care how a directory is spelled, and this machine's PATH says C:\WINDOWS
+    // while another says C:\Windows: compared without case, the check holds on both.
+    expect(win ? (path ?? '').toLowerCase() : path).toContain(win ? 'c:\\windows' : '/usr/bin')
     expect(env['HOME']).toBe(homedir())
     expect(env['TUCANO_SEGREDO']).toBeUndefined()
   }, 20_000)

@@ -3,8 +3,11 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as KeyEvent, type ReactNode } from 'react'
-import { agentById, archiveAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
+import { agentById, amAdmin, archiveAgent, canEditChannel, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
+import { WorkspaceManager } from './WorkspaceManager'
+import { Modal } from './Modal'
+import { LoginHost } from './LoginTerminal'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
 
@@ -13,6 +16,7 @@ export function Dialogs(): ReactNode {
     <>
       <DialogBody />
       <ConfirmHost />
+      <LoginHost />
     </>
   )
 }
@@ -73,6 +77,7 @@ function DialogBody(): ReactNode {
   const dialog = useStore((s) => s.dialog)
   const conv = useStore((s) => (s.dialog && 'id' in s.dialog ? s.conversations.find((c) => c.id === (s.dialog as { id: string }).id) : undefined))
   const close = (): void => openDialog(null)
+  if (dialog?.kind === 'workspaces') return <WorkspaceManager onClose={close} create={dialog.create} />
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
@@ -86,6 +91,8 @@ function DialogBody(): ReactNode {
 function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () => void }): ReactNode {
   const dmName = useStore((s) => (conv?.kind === 'dm' && conv.members[0] ? agentById(s, conv.members[0])?.name : undefined))
   const channel = conv?.kind !== 'dm'
+  // Its name and topic are its maker's and the admins'; anyone else only sees them.
+  const editable = useStore((s) => !conv || canEditChannel(s, conv))
   const [name, setName] = useState(conv?.name ?? '')
   const [topic, setTopicText] = useState(conv?.topic ?? '')
   const [threads, setThreadsOn] = useState(!!conv?.threads)
@@ -98,9 +105,9 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
     const done = !conv
       ? createChannel(name, threads)
       : Promise.all([
-          channel && name.trim() !== conv.name ? renameChannel(conv.id, name) : undefined,
-          channel && topic.trim() !== (conv.topic ?? '') ? setTopic(conv.id, topic) : undefined,
-          threads !== !!conv.threads ? setThreads(conv.id, threads) : undefined
+          channel && editable && name.trim() !== conv.name ? renameChannel(conv.id, name) : undefined,
+          channel && editable && topic.trim() !== (conv.topic ?? '') ? setTopic(conv.id, topic) : undefined,
+          editable && threads !== !!conv.threads ? setThreads(conv.id, threads) : undefined
         ])
     done.then(onClose, (e: unknown) => setError(message(e)))
   }
@@ -117,7 +124,7 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
           <span className="field__label">{L('Nome', 'Name')}</span>
           <span className={`row row--center modal__input ${invalid ? 'is-invalid' : ''} ${shaking ? 'is-shaking' : ''}`} onAnimationEnd={() => setShaking(false)}>
             <span className="muted">#</span>
-            <input autoFocus className="grow" value={name} onChange={(e) => (setName(e.target.value), setInvalid(false))} onKeyDown={enter} />
+            <input autoFocus className="grow" value={name} readOnly={!editable} onChange={(e) => (setName(e.target.value), setInvalid(false))} onKeyDown={enter} />
           </span>
           <span className="hint">
             {conv
@@ -130,12 +137,16 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
         <label className="field">
           <span className="field__label">{L('Tema', 'Topic')}</span>
           <span className="row row--center modal__input">
-            <input className="grow" value={topic} onChange={(e) => setTopicText(e.target.value)} onKeyDown={enter} />
+            <input className="grow" value={topic} readOnly={!editable} onChange={(e) => setTopicText(e.target.value)} onKeyDown={enter} />
           </span>
-          <span className="hint">{L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')}</span>
+          <span className="hint">
+            {editable
+              ? L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')
+              : L('O nome, o tema e os agentes, quem muda é quem criou o canal ou um admin.', 'The name, topic and agents are changed by whoever created the channel or an admin.')}
+          </span>
         </label>
       )}
-      <div className="field">
+      {editable && <div className="field">
         <span className="field__label" id="answers-where">
           {L('Onde os agentes respondem', 'Where the agents answer')}
         </span>
@@ -148,7 +159,7 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
           ))}
         </div>
         <span className="hint">{L('Dá pra abrir uma thread numa mensagem quando quiser, nos dois jeitos.', 'You can open a thread on a message whenever you want, either way.')}</span>
-      </div>
+      </div>}
       {error && <p className="field__error">{error}</p>}
       <footer className="modal__foot">
         <span className="grow" />
@@ -160,58 +171,6 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
         </button>
       </footer>
     </Modal>
-  )
-}
-
-// Open windows, newest last: Esc and Tab belong to the one on top only.
-const openModals: object[] = []
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-
-// `className`: a card of another size (the news after an update).
-export function Modal({ title, onClose, children, className }: { title: string; onClose: () => void; children: ReactNode; className?: string }): ReactNode {
-  const card = useRef<HTMLDivElement>(null)
-  const close = useRef(onClose)
-  close.current = onClose
-  useEffect(() => {
-    const me = {}
-    openModals.push(me)
-    const before = document.activeElement as HTMLElement | null
-    if (!card.current?.contains(document.activeElement)) card.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus()
-    // Captured before the page's own keys, so an Esc here doesn't also close what's behind.
-    const keys = (e: KeyboardEvent): void => {
-      if (openModals[openModals.length - 1] !== me) return
-      if (e.key === 'Escape') {
-        e.stopImmediatePropagation()
-        e.preventDefault()
-        close.current()
-      } else if (e.key === 'Tab' && card.current) {
-        const all = [...card.current.querySelectorAll<HTMLElement>(FOCUSABLE)]
-        if (!all.length) return
-        const [first, last] = [all[0]!, all[all.length - 1]!]
-        const inside = card.current.contains(document.activeElement)
-        if (e.shiftKey && (document.activeElement === first || !inside)) (e.preventDefault(), last.focus())
-        else if (!e.shiftKey && (document.activeElement === last || !inside)) (e.preventDefault(), first.focus())
-      }
-    }
-    window.addEventListener('keydown', keys, true)
-    return () => {
-      window.removeEventListener('keydown', keys, true)
-      openModals.splice(openModals.indexOf(me), 1)
-      if (before?.isConnected) before.focus()
-    }
-  }, [])
-  return (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal__card ${className ?? ''}`} role="dialog" aria-modal="true" aria-label={title} ref={card}>
-        <header className="modal__head">
-          <strong>{title}</strong>
-          <button className="icon-btn icon-btn--sm" title={L('Fechar', 'Close')} onClick={onClose}>
-            <Icon name="x" size={14} />
-          </button>
-        </header>
-        {children}
-      </div>
-    </div>
   )
 }
 
@@ -273,6 +232,15 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
   const [pasted, setPasted] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // A server on its https address gets the provider's answer itself (src/server's /oauth/callback):
+  // nothing to paste, this closes when the connector is in.
+  const automatic = (() => {
+    try {
+      return !!new URL(url).searchParams.get('redirect_uri')?.startsWith(`${location.origin}/oauth/callback`)
+    } catch {
+      return false
+    }
+  })()
   const finish = (): void => {
     if (!pasted.trim() || busy) return
     setBusy(true)
@@ -292,27 +260,33 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
           {L('Abrir a página de autorização', 'Open the authorization page')}
         </a>
       </p>
-      <label className="field">
-        <span className="field__label">{L('2. Cole aqui o endereço em que ela terminou', '2. Paste the address it ended on')}</span>
-        <span className="row row--center modal__input">
-          <input autoFocus className="grow" placeholder="http://127.0.0.1:…/oauth/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && finish()} />
-        </span>
-        <span className="hint">
-          {L(
-            'Depois de permitir, o navegador vai pra um endereço que começa com http://127.0.0.1 e mostra que a página não abre. É normal: o Tucano está no servidor. Copie o endereço inteiro da barra e cole aqui.',
-            'After you allow it, the browser goes to an address starting with http://127.0.0.1 and says the page can’t be reached. That’s expected: Tucano is on the server. Copy the whole address from the bar and paste it here.'
-          )}
-        </span>
-      </label>
+      {automatic ? (
+        <p className="small muted">{L('2. Depois de permitir, volte pra cá: o Tucano conecta sozinho e esta janela fecha.', '2. After you allow it, come back here: Tucano connects on its own and this closes.')}</p>
+      ) : (
+        <label className="field">
+          <span className="field__label">{L('2. Cole aqui o endereço em que ela terminou', '2. Paste the address it ended on')}</span>
+          <span className="row row--center modal__input">
+            <input autoFocus className="grow" placeholder="http://127.0.0.1:…/oauth/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && finish()} />
+          </span>
+          <span className="hint">
+            {L(
+              'Depois de permitir, o navegador vai pra um endereço que começa com http://127.0.0.1 e mostra que a página não abre. É normal: o Tucano está no servidor. Copie o endereço inteiro da barra e cole aqui.',
+              'After you allow it, the browser goes to an address starting with http://127.0.0.1 and says the page can’t be reached. That’s expected: Tucano is on the server. Copy the whole address from the bar and paste it here.'
+            )}
+          </span>
+        </label>
+      )}
       {error && <p className="field__error">{error}</p>}
       <footer className="modal__foot">
         <span className="grow" />
         <button className="btn btn--ghost btn--sm" onClick={onClose}>
           {L('Cancelar', 'Cancel')}
         </button>
-        <button className="btn btn--primary btn--sm" disabled={!pasted.trim() || busy} onClick={finish}>
-          {L('Concluir', 'Finish')}
-        </button>
+        {!automatic && (
+          <button className="btn btn--primary btn--sm" disabled={!pasted.trim() || busy} onClick={finish}>
+            {L('Concluir', 'Finish')}
+          </button>
+        )}
       </footer>
     </Modal>
   )
@@ -368,14 +342,19 @@ const fold = (s: string): string =>
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
 
-const PAGES = (): { label: string; view: View; icon: IconName }[] => [
+// The report and the usage are the admins' screens, as in the sidebar.
+const PAGES = (admin = true): { label: string; view: View; icon: IconName }[] => [
   { label: L('Aprovações', 'Approvals'), view: { kind: 'approvals' }, icon: 'shield' },
   { label: L('Memória', 'Memory'), view: { kind: 'memory' }, icon: 'book' },
   { label: 'Wiki', view: { kind: 'wiki' }, icon: 'layers' },
   { label: L('Rotinas', 'Routines'), view: { kind: 'routines' }, icon: 'clock' },
   { label: 'Skills', view: { kind: 'skills' }, icon: 'layers' },
-  { label: L('Boletim', 'Report'), view: { kind: 'report' }, icon: 'report' },
-  { label: L('Uso e limites', 'Usage and limits'), view: { kind: 'usage' }, icon: 'chart' },
+  ...(admin
+    ? ([
+        { label: L('Boletim', 'Report'), view: { kind: 'report' }, icon: 'report' },
+        { label: L('Uso e limites', 'Usage and limits'), view: { kind: 'usage' }, icon: 'chart' }
+      ] as const)
+    : []),
   { label: L('Conectores', 'Connectors'), view: { kind: 'connectors' }, icon: 'plug' },
   { label: L('Configurações', 'Settings'), view: { kind: 'settings' }, icon: 'gear' }
 ]
@@ -386,10 +365,15 @@ function hits(s: State): Hit[] {
     ...s.conversations.filter((c) => c.kind === 'channel').map((c): Hit => ({ key: c.id, label: `#${c.name}`, detail: c.topic ?? L('canal', 'channel'), icon: 'hash', go: () => navigate({ kind: 'conversation', id: c.id }) })),
     ...agents.map((a): Hit => ({ key: `dm-${a.id}`, label: a.name, detail: `${L('conversa', 'conversation')}${a.role ? ` · ${a.role}` : ''}`, agent: a.id, go: () => void openDm(a.id) })),
     ...agents.map((a): Hit => ({ key: `agent-${a.id}`, label: L(`${a.name}: configurar`, `${a.name}: settings`), detail: `@${a.handle}`, icon: 'edit', go: () => navigate({ kind: 'agent', id: a.id }) })),
-    ...PAGES().map((p): Hit => ({ key: p.label, label: p.label, detail: L('tela', 'page'), icon: p.icon, go: () => navigate(p.view) })),
+    ...PAGES(amAdmin(s)).map((p): Hit => ({ key: p.label, label: p.label, detail: L('tela', 'page'), icon: p.icon, go: () => navigate(p.view) })),
     { key: 'new-channel', label: L('Novo canal', 'New channel'), detail: shortcut(getState().platform, 'N'), icon: 'plus', go: () => openDialog({ kind: 'new-channel' }) },
-    { key: 'tuca', label: L('Tuca: montar um agente', 'Tuca: build an agent'), detail: L('conversa', 'conversation'), icon: 'plus', go: openTuca },
-    { key: 'new-agent', label: L('Novo agente (formulário)', 'New agent (form)'), detail: L('ação', 'action'), icon: 'plus', go: () => navigate({ kind: 'new-agent' }) }
+    // Making agents is the admins'.
+    ...(amAdmin(s)
+      ? [
+          { key: 'tuca', label: L('Tuca: montar um agente', 'Tuca: build an agent'), detail: L('conversa', 'conversation'), icon: 'plus' as const, go: openTuca },
+          { key: 'new-agent', label: L('Novo agente (formulário)', 'New agent (form)'), detail: L('ação', 'action'), icon: 'plus' as const, go: () => navigate({ kind: 'new-agent' }) }
+        ]
+      : [])
   ]
 }
 

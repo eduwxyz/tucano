@@ -1,6 +1,6 @@
 {
   "name": "tucano",
-  "version": "0.2.11",
+  "version": "0.2.26",
   "private": true,
   "description": "Tucano: your team of AI agents on your computer, with scopes, approvals and budgets.",
   "homepage": "https://tucano.sh",
@@ -45,9 +45,11 @@
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/nunito": "^5.3.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "electron-updater": "^6.8.11",
     "gsap": "^3.14.2",
+    "qrcode-generator": "^2.0.4",
     "smol-toml": "^1.9.1"
   },
   "build": {
@@ -121,7 +123,7 @@
       "artifactName": "tucano-linux-${arch}.${ext}",
       "maintainer": "Eduardo da Silva <eduwxyz@users.noreply.github.com>",
       "synopsis": "A team of AI agents on your computer",
-      "description": "Tucano is a team of AI agents that lives on your computer. You talk to them in channels; they research, write, code and use your tools, and you decide how far each one goes. It runs on the Claude Code, Codex, Cursor CLI, Grok, OpenCode or Pi you already have."
+      "description": "Tucano is a team of AI agents that lives on your computer. You talk to them in channels; they research, write, code and use your tools, and you decide how far each one goes. It runs on the Claude Code, Codex, Cursor CLI, Grok, Cline, OpenCode or Pi you already have."
     },
     "deb": {
       "recommends": [
@@ -147,6 +149,14 @@
         "filter": [
           "**/*",
           "!VERSION"
+        ]
+      }
+    ],
+    "protocols": [
+      {
+        "name": "Tucano",
+        "schemes": [
+          "tucano"
         ]
       }
     ]

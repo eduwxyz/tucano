@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mentioned, systemPrompt, transcript } from '../src/core/context'
+import { mentioned, stamp, systemPrompt, transcript } from '../src/core/context'
 import type { Agent, Conversation, Message } from '../src/shared/types'
 
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({
@@ -71,8 +71,10 @@ describe('systemPrompt', () => {
 
 describe('transcript', () => {
   const at = new Date(2026, 9, 17, 14, 2).getTime()
+  const off = -new Date(at).getTimezoneOffset()
+  const stampZone = `UTC${off < 0 ? '-' : '+'}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`
   const messages: Message[] = [
-    { id: 'm1', conversationId: 'c1', author: { kind: 'me' }, text: 'Oi, time', at },
+    { id: 'm1', conversationId: 'c1', author: { kind: 'person', id: 'me' }, text: 'Oi, time', at },
     { id: 'm2', conversationId: 'c1', author: { kind: 'system' }, text: 'Router chamou Lia', at },
     { id: 'm3', conversationId: 'c1', author: { kind: 'agent', id: 'a2' }, text: 'Oi!', at },
     { id: 'm4', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Olá', at },
@@ -82,6 +84,22 @@ describe('transcript', () => {
   it('labels authors, marks the agent itself, skips system lines and empty messages', () => {
     const blocks = transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu' })
     expect(blocks).toEqual(['Conversa em #engenharia, das mais antigas pras mais novas:', '[Edu · sáb 17/10 14:02]\nOi, time', '[Theo · agente · sáb 17/10 14:02]\nOi!', '[Lia (você) · agente · sáb 17/10 14:02]\nOlá'])
+    // An agent whose tools filter by time gets the year, the offset and the Unix seconds too.
+    const when = `sáb 17/10/2026 14:02 (${stampZone}, unix ${Math.floor(at / 1000)})`
+    expect(transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu', unix: true })[1]).toBe(`[Edu · ${when}]\nOi, time`)
+  })
+
+  it('gives each message its time with the year, the UTC offset and the Unix seconds, for tools that filter by time', () => {
+    expect(stamp(at)).toMatch(/^sáb 17\/10\/2026 14:02 \(UTC[+-]\d\d:\d\d, unix \d{10}\)$/)
+    expect(Number(/unix (\d+)/.exec(stamp(at))![1])).toBe(Math.floor(at / 1000))
+  })
+
+  it('tells an agent with connectors to read only the window it needs, and not to wait with sleep', () => {
+    const s = systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '' }, conversation: dm, peers: [], connectors: true })
+    expect(s).toContain('oldest = (unix da última mensagem − 3600)')
+    expect(s).toContain('Não espere com sleep')
+    expect(s).toContain('Se o pedido é sobre algo de agora') // a table of open issues isn't read for the last hour only
+    expect(systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '' }, conversation: dm, peers: [] })).not.toContain('oldest')
   })
 
   it("keeps every block of a turn in the next one, so they come from the cache; a task goes last, with the time", () => {
@@ -89,5 +107,21 @@ describe('transcript', () => {
     const next = transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu', task: 'Edu aprovou o pedido.' })
     expect(next.slice(0, first.length)).toEqual(first)
     expect(next.at(-1)).toMatch(/^Edu aprovou o pedido\.\n\nAgora: .+\.$/)
+  })
+})
+
+describe('what waits for an approval, at the agent’s level', () => {
+  const at = (a: Agent, autonomy?: 'careful' | 'normal' | 'free') => systemPrompt({ agent: a, settings: { workspaceName: 'Edu', context: '', autonomy }, conversation: dm, peers: [] })
+  it('Normal (the default): sensitive actions become a request', () => {
+    expect(at(theo)).toContain('Ações sensíveis (enviar, apagar, publicar, pagar) não rodam na hora')
+  })
+  it('Careful: anything that changes something asks, from Settings or the agent', () => {
+    expect(at(theo, 'careful')).toContain('Edu quer aprovar tudo que muda algo')
+    expect(at({ ...theo, autonomy: 'careful' }, 'free')).toContain('Edu quer aprovar tudo que muda algo')
+  })
+  it('No guardrails: it acts without asking, and never hears that sensitive actions wait', () => {
+    const p = at({ ...theo, autonomy: 'free' })
+    expect(p).toContain('Edu deixou você agir sem pedir aprovação')
+    expect(p).not.toContain('Ações sensíveis')
   })
 })

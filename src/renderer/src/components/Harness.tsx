@@ -3,7 +3,7 @@
 // providers they have logins for. Here they pick which ones the agents use,
 // test them, and pick models from what each harness offers.
 import { L } from '../../../shared/lang'
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import {
   ACCOUNT_ENGINES,
   addAccount,
@@ -37,6 +37,8 @@ import {
   type Settings
 } from '../store'
 import { Icon } from './ui'
+import { EngineProblem } from './EngineProblem'
+import { Select } from './Select'
 
 // The harnesses agents may run on now: picked (or all, if never picked), ready, and runnable.
 export const usableEngines = (s: Settings): EngineId[] => ENGINE_IDS.filter((e) => s.engines[e].loggedIn)
@@ -85,10 +87,22 @@ export function useEngineModels(engine: EngineId | undefined): { options: ModelO
     return mine?.models.length
       ? { options: mine.models.map((slug) => ({ value: codexValue(slug), label: mine.labels?.[slug]?.label ?? slug, hint: L('', mine.labels?.[slug]?.hint ?? '') || undefined })), loading: false }
       : { options: app(), loading: false }
-  return { options: (mine?.models ?? []).map((m) => ({ value: customModel(engine, m), label: m })), loading: !!id && !mine, error: mine?.error }
+  // OpenCode's free models (opencode/…-free) run on its free tier, up to its usage limit.
+  const free = (m: string): string | undefined => (engine === 'opencode' && /^opencode\/.+-free$/.test(m) ? L('grátis', 'free') : undefined)
+  return { options: (mine?.models ?? []).map((m) => ({ value: customModel(engine, m), label: m, hint: free(m) })), loading: !!id && !mine, error: mine?.error }
 }
 
 const OTHER = '__outro__'
+
+// Provider of a model value: "<provider>/<model>" takes the part before "/",
+// otherwise "<engine>:<name>" takes the part before ":", else a fallback group.
+const providerOf = (value: string): string => {
+  const parts = value.split('/')
+  if (parts.length > 1) return parts[0]!
+  const colon = value.split(':')
+  if (colon.length > 1) return colon[0]!
+  return L('Outros', 'Others')
+}
 
 // A model to run with: the harness, then its model from the list, or another by name.
 // jev adds TypeSafe's Jev (the router). Engines limits the harnesses offered.
@@ -104,6 +118,22 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
   const other = value !== 'jev' && !!engine && (typing || (!!m?.id && m.engine === engine && !inList && !loading))
   const name = m && m.engine === engine && !MODELS.some((x) => x.id === value) ? m.id : ''
 
+  // Engine/harness choices for the first pick.
+  const engineOptions = useMemo(
+    () => [...choices.map((e) => ({ value: e, label: ENGINES[e].label })), ...(jev ? [{ value: 'jev', label: 'TypeSafe · Jev' }] : [])],
+    [choices, jev]
+  )
+  // The models, grouped by provider (part before "/", or before ":") when there's more than one;
+  // "Other model…" last either way.
+  const modelChoices = useMemo((): { groups?: Record<string, Record<string, string>>; options?: { value: string; label: string }[] } => {
+    const label = (o: (typeof options)[number]): string => (o.hint ? `${o.label} · ${o.hint}` : o.label)
+    const otherOne = { value: OTHER, label: L('Outro modelo…', 'Other model…') }
+    const byProvider: Record<string, Record<string, string>> = {}
+    for (const o of options) (byProvider[providerOf(o.value)] ??= {})[o.value] = label(o)
+    if (Object.keys(byProvider).length < 2) return { options: [...options.map((o) => ({ value: o.value, label: label(o) })), otherOne] }
+    return { groups: { ...byProvider, [otherOne.label]: { [OTHER]: otherOne.label } } }
+  }, [options])
+
   // A harness's own card passes just that harness: it's already chosen there, so no select.
   const fixed = engines?.length === 1 && !jev
   if (!engine && !jev)
@@ -118,55 +148,40 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
   return (
     <div className="model-picker">
       {!fixed && (
-        <select
+        <Select
           value={value === 'jev' ? 'jev' : engine}
-          onChange={(e) => {
+          onChange={(v) => {
             setTyping(false)
-            const v = e.target.value
+            const vv = v ?? ''
             // On a plan, the harness's first model; otherwise the person picks from its list.
-            const plan = v !== 'jev' && statuses[v as EngineId].route === 'plan' ? MODELS.find((x) => x.engine === v) : undefined
-            onChange(v === 'jev' ? 'jev' : (plan?.id ?? customModel(v as EngineId, '')))
+            const plan = vv !== 'jev' && statuses[vv as EngineId].route === 'plan' ? MODELS.find((x) => x.engine === vv) : undefined
+            onChange(vv === 'jev' ? 'jev' : (plan?.id ?? customModel(vv as EngineId, '')))
           }}
-        >
-          {choices.map((e) => (
-            <option key={e} value={e}>
-              {ENGINES[e].label}
-            </option>
-          ))}
-          {jev && <option value="jev">TypeSafe · Jev</option>}
-        </select>
+          options={engineOptions}
+        />
       )}
       {value !== 'jev' && engine && (
-        <select
-          className="grow"
-          value={other ? OTHER : inList ? value : ''}
-          onChange={(e) => {
-            const v = e.target.value
-            if (v === OTHER) {
-              setTyping(true)
-              onChange(customModel(engine, name))
-            } else {
+        <>
+          <Select
+            className="grow"
+            value={other ? OTHER : inList ? value : null}
+            searchable
+            {...modelChoices}
+            placeholder={loading ? L('Buscando os modelos…', 'Fetching the models…') : options.length ? L('Escolha um modelo…', 'Pick a model…') : L('Sem lista: use Outro modelo', 'No list: use Other model')}
+            onChange={(v) => {
+              if (v === OTHER) {
+                setTyping(true)
+                onChange(customModel(engine, name))
+                return
+              }
               setTyping(false)
-              onChange(v)
-            }
-          }}
-        >
-          {!inList && !other && (
-            <option value="" disabled>
-              {loading ? L('Buscando os modelos…', 'Fetching the models…') : options.length ? L('Escolha um modelo…', 'Pick a model…') : L('Sem lista: use Outro modelo', 'No list: use Other model')}
-            </option>
+              onChange(v ?? '')
+            }}
+          />
+          {other && (
+            <input className="model-name grow" autoFocus={typing && !name} value={name} spellCheck={false} placeholder={L('O nome exato do modelo', 'The exact model name')} onChange={(e) => onChange(customModel(engine, e.target.value))} />
           )}
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-              {o.hint ? ` · ${o.hint}` : ''}
-            </option>
-          ))}
-          <option value={OTHER}>{L('Outro modelo…', 'Other model…')}</option>
-        </select>
-      )}
-      {other && engine && (
-        <input className="model-name grow" autoFocus={typing && !name} value={name} spellCheck={false} placeholder={L('O nome exato do modelo', 'The exact model name')} onChange={(e) => onChange(customModel(engine, e.target.value))} />
+        </>
       )}
       {error && other && <span className="hint">{L('Não deu pra pegar a lista', 'Couldn’t get the list')}: {error}</span>}
     </div>
@@ -233,7 +248,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
         <label className="grow harness__name" htmlFor={checkId}>
           <strong>{ENGINES[engine].label}</strong>
           <span className="harness__account">
-            {!st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
+            {st.checking ? L('Conferindo…', 'Checking…') : !st.installed ? L('Não instalado', 'Not installed') : st.account ?? (st.loggedIn ? L('Pronto', 'Ready') : L('Falta entrar', 'Not signed in'))}
           </span>
         </label>
         {st.soon ? (
@@ -300,11 +315,14 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
               {L('Mandar teste', 'Send a test')}
             </button>
           </div>
-          {result && (
-            <p className={`note ${result.ok ? 'note--ok' : 'note--error'}`}>
-              <Icon name={result.ok ? 'check' : 'x'} size={14} /> {result.ok ? `${L('Funcionando.', 'Working.')} ${result.message}` : result.message}
-            </p>
-          )}
+          {result &&
+            (result.ok ? (
+              <p className="note note--ok">
+                <Icon name="check" size={14} /> {`${L('Funcionando.', 'Working.')} ${result.message}`}
+              </p>
+            ) : (
+              <EngineProblem engine={engine} message={result.message} onSignIn={() => void loginEngine(engine).then((r) => setManual(r.opened ? null : r.command))} onRetry={() => void test()} />
+            ))}
         </div>
       )}
     </div>
@@ -434,13 +452,12 @@ export function AccountsCard(): ReactNode {
         </div>
       ))}
       <div className="row row--center accounts__add">
-        <select value={engine} onChange={(e) => setEngine(e.target.value as AccountEngine)}>
-          {ACCOUNT_ENGINES.filter((e) => engines[e].installed).map((e) => (
-            <option key={e} value={e}>
-              {ENGINES[e].label}
-            </option>
-          ))}
-        </select>
+        <Select
+          value={engine}
+          onChange={(v) => { if (v) void setEngine(v as AccountEngine) }}
+          options={ACCOUNT_ENGINES.filter((e) => engines[e].installed).map((e) => ({ value: e, label: ENGINES[e].label }))}
+          placeholder={L('Motor', 'Engine')}
+        />
         <input className="grow" placeholder={L('Nome da conta (ex.: Trabalho)', 'Account name (e.g. Work)')} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
         <button className="btn btn--sm" disabled={!engines[engine].installed} onClick={() => void add()}>
           {L('Adicionar e entrar', 'Add and sign in')}
@@ -465,18 +482,19 @@ export function AccountPicker({ draft, patch }: { draft: Agent; patch: (p: Parti
   if (!accounts.length || !engine) return null
   const value = accounts.some((a) => a.id === draft.accountId) ? draft.accountId! : ''
   const chosen = accounts.find((a) => a.id === value)
+  const usualLabel = L(`A de sempre do ${ENGINES[engine].label}`, `${ENGINES[engine].label}’s usual one`)
   return (
     <label className="field">
       <span className="field__label">{L('Conta', 'Account')}</span>
-      <select value={value} onChange={(e) => patch({ accountId: e.target.value || undefined })}>
-        <option value="">{L(`A de sempre do ${ENGINES[engine].label}`, `${ENGINES[engine].label}’s usual one`)}</option>
-        {accounts.map((a) => (
-          <option key={a.id} value={a.id}>
-            {a.name}
-            {a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')}
-          </option>
-        ))}
-      </select>
+      <Select
+        value={value || null}
+        onChange={(v) => patch({ accountId: v || undefined })}
+        options={[
+          { value: '', label: usualLabel },
+          ...accounts.map((a) => ({ value: a.id, label: a.name + (a.loggedIn ? '' : L(' (falta entrar)', ' (not signed in)')) }))
+        ]}
+        placeholder={usualLabel}
+      />
       {chosen && !chosen.loggedIn && <span className="hint hint--warn">{L('Essa conta ainda não entrou: o agente não responde até você entrar nela em Configurações › Modelos.', 'This account isn’t signed in yet: the agent won’t reply until you sign in under Settings › Models.')}</span>}
     </label>
   )

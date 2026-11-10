@@ -85,9 +85,12 @@ describe("errors in people’s words", () => {
   it("tells no internet, a slow answer, a missing command and a busy database apart", () => {
     expect(
       friendly(sys("getaddrinfo ENOTFOUND api.anthropic.com", "ENOTFOUND")).text
-    ).toMatch(/^Sem conexão com a internet/);
-    expect(friendly(new TypeError("fetch failed")).text).toMatch(
+    ).toMatch(/^Não achei o endereço \(api\.anthropic\.com\) na rede \(DNS\)/);
+    expect(friendly(sys("connect ENETUNREACH 1.2.3.4:443", "ENETUNREACH")).text).toMatch(
       /^Sem conexão com a internet/
+    );
+    expect(friendly(new TypeError("fetch failed")).text).toMatch(
+      /^Não consegui chegar ao servidor/
     );
     expect(friendly("Request timed out").text).toMatch(/^Demorou demais/);
     expect(friendly(sys("spawn npx ENOENT", "ENOENT"))).toEqual({
@@ -95,7 +98,7 @@ describe("errors in people’s words", () => {
       detail: "spawn npx ENOENT",
     });
     expect(friendly(sys("spawn uvx ENOENT", "ENOENT")).text).toBe(
-      "O comando `uvx` não foi encontrado. Confira se ele está instalado."
+      "O comando `uvx` não foi encontrado. Instale o uv (docs.astral.sh/uv) e tente de novo."
     );
     expect(friendly(sys("database is locked", "SQLITE_BUSY")).text).toBe(
       "O Tucano está ocupado salvando. Tente de novo em instantes."

@@ -32,6 +32,7 @@ const PATHS: Record<string, ReactNode> = {
   ),
   x: <path d="M6 6l12 12M18 6 6 18" />,
   chevron: <path d="m9 6 6 6-6 6" />,
+  caret: <path d="m6 9 6 6 6-6" />,
   shield: <path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z" />,
   chart: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
   plug: <path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v5" />,
@@ -71,6 +72,7 @@ const PATHS: Record<string, ReactNode> = {
   ),
   layers: <path d="m12 3 9 5-9 5-9-5 9-5ZM3 13l9 5 9-5" />,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,
+  clip: <path d="m21 11.5-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
   globe: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -119,7 +121,8 @@ const PATHS: Record<string, ReactNode> = {
   volume: <path d="M4 9v6h4l5 4V5L8 9H4ZM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" />,
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />,
   archive: <path d="M3 4h18v4H3V4ZM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />,
-  thread: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM8 9h8M8 12h5" />
+  thread: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM8 9h8M8 12h5" />,
+  ask: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM10 8.6a2 2 0 0 1 3.9.6c0 1.4-1.9 1.7-1.9 3M12 14.2h.01" />
 }
 
 export type IconName = keyof typeof PATHS
@@ -322,10 +325,19 @@ export function time(at: number): string {
 }
 
 export function UsageBar({ used, limit }: { used: number; limit: number }): ReactNode {
-  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 100
-  const tone = pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
+  // No limit draws an empty bar: a full red one reads as "already spent it all".
+  const unlimited = !(limit > 0)
+  const pct = unlimited ? 0 : Math.min(100, (used / limit) * 100)
+  const tone = unlimited ? 'ok' : pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
   return (
-    <span className={`budget budget--${tone}`} role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+    <span
+      className={`budget budget--${tone}`}
+      role="meter"
+      aria-valuenow={Math.round(pct)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      {...(unlimited ? { 'aria-valuetext': L('sem limite', 'no limit') } : {})}
+    >
       <span className="budget__fill" style={{ transform: `scaleX(${pct / 100})` }} />
     </span>
   )

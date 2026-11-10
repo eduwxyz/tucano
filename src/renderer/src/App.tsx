@@ -12,16 +12,22 @@ import { RoutinesPage } from './components/Routines'
 import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
 import { Onboarding } from './components/Onboarding'
+import { GuestWelcome, guestWelcome, Intro } from './components/Intro'
+import { MissionsPage } from './components/Missions'
+import { CoachLayer } from './components/Coach'
 import { Dialogs } from './components/Dialogs'
+import { AgentCardLayer } from './components/AgentCard'
 import { WhatsNew } from './components/Update'
 import { CoreDown, Toasts } from './components/Toast'
 import { Icon } from './components/ui'
+import { NameModal } from './components/People'
 
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
+  const guest = useStore(guestWelcome)
   const mac = useStore((s) => s.platform === 'mac')
   const navOpen = useStore((s) => s.navOpen)
 
@@ -42,7 +48,7 @@ export function App(): ReactNode {
   useEffect(() => {
     const keys = (e: KeyboardEvent): void => {
       const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-      if (!mod || e.altKey || intro) return
+      if (!mod || e.altKey || intro || guest) return
       const s = getState()
       const channels = s.conversations.filter((c) => c.kind === 'channel')
       if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })
@@ -54,7 +60,7 @@ export function App(): ReactNode {
     }
     window.addEventListener('keydown', keys)
     return () => window.removeEventListener('keydown', keys)
-  }, [intro, mac])
+  }, [intro, guest, mac])
 
   // The core may stop before the app shows: the banner says so even then.
   if (!view)
@@ -64,10 +70,10 @@ export function App(): ReactNode {
       </div>
     )
   // Dialogs too: connecting a tool from the introduction may open one (on a server).
-  if (intro)
+  if (intro || guest)
     return (
       <>
-        <Onboarding />
+        {guest ? <GuestWelcome /> : <Intro />}
         <Dialogs />
         <Toasts />
         <CoreDown />
@@ -104,8 +110,12 @@ export function App(): ReactNode {
         {view.kind === 'skills' && <SkillsPage />}
         {view.kind === 'report' && <ReportPage />}
         {view.kind === 'settings' && <SettingsPage />}
+        {view.kind === 'missions' && <MissionsPage />}
       </main>
+      <CoachLayer />
+      <AgentCardLayer />
       <Dialogs />
+      <NameModal />
       <WhatsNew />
       <Lightbox />
       <Toasts />

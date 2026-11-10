@@ -43,9 +43,19 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
-      } else if (turn.mcpUrl && (turn.system.includes('## Pra montar agentes') || turn.system.includes('## For building agents'))) {
-        // The Tuca: asks once, then proposes a support agent.
-        if (/suporte|ticket|cliente|support|customer/i.test(last)) {
+      } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
+        // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
+        // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).
+        if (/migra/i.test(last)) {
+          const calls: [string, Record<string, unknown>][] = [
+            ['propor_agente', { nome: 'Léo', funcao: L('Financeiro', 'Finance'), cor: 'amber', instrucoes: L('Você cuida das contas do time.\nLê os gastos do dia e separa por categoria.\nResponde em tópicos curtos.\nNunca paga nada: pergunta antes.', "You look after the team's accounts.\nRead the day's expenses and sort them by category.\nAnswer in short bullet points.\nNever pay anything: ask first."), esforco: 'low', web: false, motivo: L('Alguém só pras contas.', 'Someone just for the accounts.') }],
+            ...['lia', 'theo', 'nina'].map((agente): [string, Record<string, unknown>] => ['propor_ajuste', { agente, limite: 345_000, motivo: L('Migração: o limite novo do time.', "Migration: the team's new limit.") }]),
+            ['propor_rotina', { agente: 'Léo', nome: L('Fechamento do dia', 'Daily close'), pedido: L('Resuma os gastos do dia.', "Sum up the day's expenses."), dias: [1, 2, 3, 4, 5], hora: '18:00' }],
+            ['propor_canal', { nome: L('financeiro', 'finance'), agentes: ['nina', 'Léo'], tema: L('Contas e fechamento', 'Accounts and closing') }]
+          ]
+          for (const [tool, args] of calls) await callTool(turn.mcpUrl, tool, args)
+          reply = L('Mandei tudo de uma vez: o Léo, o limite novo de cada um, a rotina dele e o canal. Dá pra aplicar um por um ou todos.', 'I sent it all at once: Léo, the new limit for each, his routine and the channel. You can apply them one by one or all together.')
+        } else if (/suporte|ticket|cliente|support|customer/i.test(last)) {
           const r = await callTool(turn.mcpUrl, 'propor_agente', {
             nome: 'Rafa',
             funcao: L('Suporte', 'Support'),
@@ -100,9 +110,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (turn.mcpUrl && /print de (\S+)/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'screenshot', { url: /print de (\S+)/i.exec(last)![1]! })
         reply = textOf(r)
-      } else if (turn.mcpUrl && /agend\w* `([^`]+)` às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.test(last)) {
-        const [, nome, horario, once, pedido] = /agend\w* `([^`]+)` às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.exec(last)!
-        const r = await callTool(turn.mcpUrl, 'agendar_rotina', { nome, horario, pedido, uma_vez: !!once })
+      } else if (turn.mcpUrl && /agend\w* `([^`]+)`(?: em (\d{4}-\d{2}-\d{2}))? às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.test(last)) {
+        const [, nome, data, horario, once, pedido] = /agend\w* `([^`]+)`(?: em (\d{4}-\d{2}-\d{2}))? às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.exec(last)!
+        const r = await callTool(turn.mcpUrl, 'agendar_rotina', { nome, horario, pedido, uma_vez: !!once, ...(data ? { data } : {}) })
         reply = textOf(r)
       } else if (turn.mcpUrl && /proponha a skill `([^`]+)` \(quando: ([^)]+)\): (.+)/is.test(last)) {
         const [, nome, quando_usar, receita] = /proponha a skill `([^`]+)` \(quando: ([^)]+)\): (.+)/is.exec(last)!
@@ -120,6 +130,25 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         await new Promise((r) => setTimeout(r, Number(/pergunte em (\d+) ?s/i.exec(last)![1]) * 1000))
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'
+      } else if (/decis(õ|o)es demais/i.test(last) && turn.mcpUrl) {
+        await callTool(turn.mcpUrl, 'ask_user', { questions: Array.from({ length: 5 }, (_, i) => ({ question: `Decisão ${i + 1}?`, kind: 'text' })) })
+        reply = 'Tentei perguntar demais.'
+      } else if (/ajuda a decidir|decida com/i.test(last) && turn.mcpUrl) {
+        // "me ajuda a decidir": decisions with options. "decida com a Bia": the same, to someone in
+        // particular (a Tucano with people). Not any "decidimos", which other tests say as a fact.
+        const para = /decida com (?:a |o )?(\p{L}+)/iu.exec(last)?.[1]
+        const r = await callTool(turn.mcpUrl, 'ask_user', {
+          questions: [
+            { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] },
+            { question: 'Pra quando?', kind: 'text' }
+          ],
+          ...(para ? { para } : {})
+        })
+        reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Te mandei duas decisões.'
+      } else if (turn.mcpUrl && /pergunte (?:a|à|pra|para) (\p{L}+)/iu.test(last)) {
+        // "pergunte a Bia": a question to someone in particular (a Tucano with people).
+        const r = await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?', para: /pergunte (?:a|à|pra|para) (\p{L}+)/iu.exec(last)![1]! })
+        reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Mandei a pergunta.'
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'
@@ -166,6 +195,12 @@ function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   const last = lastMessage(prompt)
   if (/^(bom dia|boa tarde|boa noite|obrigad|valeu|ok)\b/i.test(last.trim())) return { handles: [], reason: 'cumprimento, ninguém precisa responder' }
   const roster = [...prompt.matchAll(/^- ([a-z0-9_-]+): ([^·\n]*)/gim)].map((m) => ({ handle: m[1]!, about: m[2]! }))
+  // A short yes goes to the agent whose message above ended in a question (the router's rule).
+  if (/^(pode|sim|manda|yes|go ahead)\b/i.test(last.trim())) {
+    const asker = [...prompt.slice(0, prompt.lastIndexOf(last)).matchAll(/\[([^\]]+)\] [^\n]*\?(?= →|$)/gm)].map((m) => roster.find((r) => r.about.startsWith(`${m[1]!},`) || r.about.trim() === m[1]))
+    const who = asker.filter(Boolean).at(-1)
+    if (who) return { handles: [who.handle], reason: 'respondeu à pergunta dele' }
+  }
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
@@ -176,7 +211,7 @@ function fakeHandoff(prompt: string): { handles: string[]; reason: string } {
   const [head = '', rest = ''] = prompt.split('<reply>\n')
   const reply = rest.slice(0, rest.lastIndexOf('\n</reply>'))
   const body = reply.replace(/^(?:@[\w-]+|[\s,.!:;-])+/, '')
-  if (!body.includes('?') && /^(valeu|obrigad|combinado|ok\b|beleza|👍|thanks|got it)/i.test(body)) return { handles: [], reason: 'agradecimento, ninguém precisa responder' }
+  if (!body.includes('?') && /^(valeu|obrigad|combinado|ok\b|beleza|👍|thanks|got it|fico esperando|aguardo)/i.test(body)) return { handles: [], reason: 'agradecimento, ninguém precisa responder' }
   return { handles: [...head.matchAll(/^- ([a-z0-9_-]+): /gim)].map((m) => m[1]!), reason: 'pedido' }
 }
 
