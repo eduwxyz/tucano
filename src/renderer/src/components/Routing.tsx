@@ -549,8 +549,8 @@ export function RouteLine({ route }: { route: RouteTrace }): ReactNode {
       <button type="button" className="route-line__row" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="route-line__jev">Jev</span>
         {reading ? <span className="route-line__role">{roleName(reading.role)}</span> : <span className="route-line__role">{state}</span>}
-        {reading && <Bars reading={reading} />}
-        {reading && <span className="route-line__pool">{poolName(pool)}</span>}
+        {reading && <DemandBar value={route.rawDemand} />}
+        {reading && <span className="route-line__pool">{poolName(route.policy ?? pool)}</span>}
         {route.effective === 'free' && <span className="route-line__state">{L('grátis', 'free')}</span>}
         <span className="route-line__arrow" aria-hidden="true">→</span>
         <span className="route-line__model">
@@ -568,6 +568,8 @@ export function RouteLine({ route }: { route: RouteTrace }): ReactNode {
           {reading && (
             <div className="route-line__group">
               <span className="route-line__label">{L('Julgamento', 'Judgment')}</span>
+              {/* The three criteria, each with its own bar, and the one weight they add up to. */}
+              <Scores reading={reading} combined={route.rawDemand} />
               <ul>
                 <li>
                   {L('Papel', 'Role')}: <strong>{roleName(reading.role)}</strong>
@@ -581,18 +583,9 @@ export function RouteLine({ route }: { route: RouteTrace }): ReactNode {
                       {roleName(r.role)} · {Math.round(r.p * 100)}%
                     </li>
                   ))}
-                <li>
-                  {L('Complexidade', 'Complexity')}: {reading.complexity.toFixed(1)}/3
-                </li>
-                <li>
-                  {L('Capacidade', 'Capability')}: {reading.capability.toFixed(1)}/3
-                </li>
-                <li>
-                  {L('Raciocínio estendido', 'Extended reasoning')}: {Math.round(reading.deepReasoning * 100)}%
-                </li>
-                {route.demand !== undefined && (
+                {route.demand !== undefined && Math.abs(route.demand - route.rawDemand) > 0.05 && (
                   <li>
-                    {L('Exigência', 'Demand')}: {route.demand.toFixed(2)}/3
+                    {L('Exigência em vigor', 'Demand in force')}: {route.demand.toFixed(2)}/3
                   </li>
                 )}
                 {reading.ms > 0 && <li className="muted small">{reading.ms} ms</li>}
@@ -647,22 +640,40 @@ export function RouteLine({ route }: { route: RouteTrace }): ReactNode {
   )
 }
 
-function Bars({ reading }: { reading: NonNullable<RouteTrace['reading']> }): ReactNode {
-  const items = [
+// The read as one weight, for the thin line: complexity and capability, with the scale tipped by
+// whether the work needs deep reasoning — the same sum the core turns into a tier, so the bar and the
+// tier name beside it never disagree. The three bars behind it are in the opened line.
+function DemandBar({ value }: { value: number }): ReactNode {
+  const v = Number.isFinite(value) ? Math.min(3, Math.max(0, value)) : 0
+  const share = Math.max(5, Math.round((v / 3) * 100))
+  const said = L(`Exigência ${v.toFixed(1)} de 3`, `Demand ${v.toFixed(1)} of 3`)
+  return (
+    <span className="route-demand" role="meter" aria-valuemin={0} aria-valuemax={3} aria-valuenow={v} aria-label={said} title={said}>
+      <span className="route-demand__fill" style={{ width: `${share}%` }} />
+    </span>
+  )
+}
+
+// What Jev read, criterion by criterion, and the weight they add up to: shown only when the line is
+// opened, where there is room for the bars, the numbers and the words.
+function Scores({ reading, combined }: { reading: NonNullable<RouteTrace['reading']>; combined: number }): ReactNode {
+  const rows = [
     { key: 'complexity', label: L('Complexidade', 'Complexity'), value: reading.complexity / 3, text: `${reading.complexity.toFixed(1)}/3` },
     { key: 'capability', label: L('Capacidade', 'Capability'), value: reading.capability / 3, text: `${reading.capability.toFixed(1)}/3` },
-    { key: 'reasoning', label: L('Raciocínio', 'Reasoning'), value: reading.deepReasoning, text: `${Math.round(reading.deepReasoning * 100)}%` }
+    { key: 'reasoning', label: L('Raciocínio', 'Reasoning'), value: reading.deepReasoning, text: `${Math.round(reading.deepReasoning * 100)}%` },
+    { key: 'demand', label: L('Exigência', 'Demand'), value: combined / 3, text: `${combined.toFixed(1)}/3`, sum: true }
   ]
   return (
-    <span className="route-bars" aria-label={items.map((i) => `${i.label} ${i.text}`).join(', ')}>
-      {items.map((i) => (
-        <span key={i.key} className="route-bar" title={`${i.label} ${i.text}`}>
-          <span className="route-bar__fill" style={{ width: `${Math.max(6, Math.round(i.value * 100))}%` }} />
-        </span>
+    <div className="route-scores">
+      {rows.map((r) => (
+        <div key={r.key} className={`route-scores__row ${r.sum ? 'route-scores__row--sum' : ''}`}>
+          <span className="route-scores__label">{r.label}</span>
+          <span className="route-scores__track">
+            <span className="route-scores__fill" style={{ width: `${Math.max(4, Math.round(Math.min(1, Math.max(0, r.value)) * 100))}%` }} />
+          </span>
+          <span className="route-scores__value">{r.text}</span>
+        </div>
       ))}
-      <span className="route-bars__values">
-        {reading.complexity.toFixed(1)}/{reading.capability.toFixed(1)}/{Math.round(reading.deepReasoning * 100)}%
-      </span>
-    </span>
+    </div>
   )
 }
