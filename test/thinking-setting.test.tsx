@@ -1,7 +1,7 @@
 // The model's reasoning, on screen only when the person asked for it: off by default, one switch
 // in Settings, and each person's own (it does not come with the workspace).
 import { renderToStaticMarkup } from 'react-dom/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Message, Settings } from '../src/shared/types'
 import type { State } from '../src/renderer/src/store'
 
@@ -69,5 +69,48 @@ describe('the switch that turns it on', () => {
     expect(owner.showThinking).toBe(true)
     const member = people.settingsFor({ id: 'bia', role: 'member' }, { showThinking: true } as Settings)
     expect(member.showThinking).toBeUndefined()
+  })
+})
+
+// The window's store, driven as the core drives it: with the switch off nothing of the reasoning is
+// kept, so it cannot be read back later even by the panel that draws it.
+describe('what the window keeps', () => {
+  let store: typeof import('../src/renderer/src/store')
+  let emit: (e: import('../src/shared/rpc').CoreEvent) => void
+  beforeAll(async () => {
+    let listener: ((e: unknown) => void) | null = null
+    let settings: Settings = { workspaceName: 'Edu', language: 'pt', engines: {}, theme: 'system', routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1_000_000, approvalTtlHours: 24 } as Settings
+    const port = {
+      onmessage: null as ((m: { data: unknown }) => void) | null,
+      postMessage(req: { id: number; method: string; params?: { patch?: Partial<Settings> } }) {
+        if (req.method === 'updateSettings' && req.params?.patch) settings = { ...settings, ...req.params.patch }
+        const result =
+          req.method === 'snapshot'
+            ? { settings, agents: [], conversations: [], messages: [], since: {}, connectors: [], approvals: [], memories: [], artifacts: [], computers: [], browsers: [], routines: [], skills: [], platform: 'mac', packaged: false, isolatedComputers: true, people: [], you: '' }
+            : undefined
+        queueMicrotask(() => port.onmessage!({ data: { id: req.id, result } }))
+      }
+    }
+    const win: Record<string, unknown> = {
+      addEventListener: (_: string, l: (e: unknown) => void) => (listener = l),
+      removeEventListener: () => {},
+      tucano: { onNavigate: () => {}, viewing: () => {}, connect: () => queueMicrotask(() => listener!({ source: win, data: 'core:port', ports: [port] })) }
+    }
+    ;(globalThis as Record<string, unknown>).window = win
+    store = await import('../src/renderer/src/store')
+    await store.start()
+    emit = (event) => port.onmessage!({ data: { event } })
+  })
+
+  it('off: the stream never lands in memory', () => {
+    emit({ type: 'thinking', id: 'm-off', text: 'o pedido tem duas partes' })
+    expect(store.liveThought('m-off')).toBeUndefined()
+  })
+
+  it('on: it does, and it stays after the turn', () => {
+    emit({ type: 'settings', settings: { ...store.getState().settings, showThinking: true } })
+    emit({ type: 'thinking', id: 'm-on', text: 'primeiro a conta. ' })
+    emit({ type: 'thinking', id: 'm-on', text: 'depois o texto.' })
+    expect(store.liveThought('m-on')).toBe('primeiro a conta. depois o texto.')
   })
 })
