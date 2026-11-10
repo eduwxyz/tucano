@@ -121,7 +121,8 @@ describe('Jev and the steps', () => {
 
   it('never empties the list: when every step can wait, all of them stay ticked', async () => {
     const { run } = ask(['later', 'later', 'later', 'later'])
-    expect('ticked' in (await run) && (await run).ticked).toEqual([0, 1, 2, 3])
+    const r = await run
+    expect('ticked' in r && r.ticked).toEqual([0, 1, 2, 3])
   })
 
   it('a failure is an error the caller can ignore, not a list with nothing ticked', async () => {
