@@ -296,6 +296,9 @@ const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unk
 const enginesReady = pathReady.then(detect)
 // The window waits only for the database, open by now, and the gateway.
 const ready = gateway.start()
+// What the runner waits for before handing a reply its tools (see RunnerDeps.gatewayReady): a failure to
+// listen is already logged by the gateway, and must not take every reply down with it.
+const gatewayReady = ready.catch((e: unknown) => console.error('[gateway]', e))
 
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
@@ -950,6 +953,7 @@ const runner = new Runner({
   workDir: join(dataDir, 'agents'),
   dataDir,
   gateway,
+  gatewayReady,
   connectors,
   memory,
   computers,
