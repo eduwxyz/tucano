@@ -31,7 +31,9 @@ function remote(files: Record<string, string | Buffer> = {}, hook?: string): { b
     git(mac, 'commit', '--quiet', '-m', 'vault')
     git(mac, 'push', '--quiet', 'origin', 'main')
   }
-  if (hook) (writeFileSync(join(bare, 'hooks', 'pre-receive'), hook), chmodSync(join(bare, 'hooks', 'pre-receive'), 0o755))
+  // The hook has to run on whoever's machine this is: a global core.hooksPath (a person's own hooks
+  // folder) would shadow the repository's, so it's set here, where it wins over the global one.
+  if (hook) (writeFileSync(join(bare, 'hooks', 'pre-receive'), hook), chmodSync(join(bare, 'hooks', 'pre-receive'), 0o755), execFileSync('git', ['-C', bare, 'config', 'core.hooksPath', 'hooks']))
   return { bare, url: `file://${bare}`, mac, root }
 }
 // What the Mac does with Obsidian Git: edit, commit, push.

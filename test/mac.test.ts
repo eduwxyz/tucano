@@ -175,9 +175,10 @@ describe("the user's shell environment", () => {
     process.env['TUCANO_SEGREDO'] = 'nao-pode-vazar'
     const env = await loginEnv()
     delete process.env['TUCANO_SEGREDO']
-    // Windows spells it Path, with C:\… directories.
-    const path = Object.entries(env).find(([k]) => k.toUpperCase() === 'PATH')?.[1]
-    expect(path).toContain(win ? 'C:\\Windows' : '/usr/bin')
+    // Windows spells it Path, with C:\… directories — and in whatever case %SystemRoot% carries,
+    // since PATH is case-insensitive there (a machine can have C:\WINDOWS and be perfectly right).
+    const path = (Object.entries(env).find(([k]) => k.toUpperCase() === 'PATH')?.[1] ?? '').toLowerCase()
+    expect(path).toContain(win ? 'c:\\windows' : '/usr/bin')
     expect(env['HOME']).toBe(homedir())
     expect(env['TUCANO_SEGREDO']).toBeUndefined()
   }, 20_000)
