@@ -1125,6 +1125,9 @@ export interface Report {
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read' | 'write' // 'write': reads it and writes pages too, through wiki_escrever
+// The three, so reading one back from the database can't quietly lose the last one added.
+export const WIKI_ACCESS: readonly WikiAccess[] = ['none', 'read', 'write']
+export const isWikiAccess = (v: unknown): v is WikiAccess => WIKI_ACCESS.includes(v as WikiAccess)
 export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
 export interface WikiPageInfo {
   title: string

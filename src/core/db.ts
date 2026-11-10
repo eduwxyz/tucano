@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 import {
   CACHE_READ_WEIGHT,
   nextRun,
+  isWikiAccess,
   routineCap,
   type Agent,
   type AgentApp,
@@ -739,7 +740,7 @@ export class Db {
       ...(r['custom_color'] ? { customColor: str(r['custom_color']) } : {}),
       ...(r['picture'] ? { picture: str(r['picture']) } : {}),
       ...(r['avatar'] ? { avatar: JSON.parse(str(r['avatar'])) as Agent['avatar'] } : {}),
-      ...(r['wiki'] === 'none' || r['wiki'] === 'read' ? { wiki: r['wiki'] } : {}),
+      ...(isWikiAccess(r['wiki']) ? { wiki: r['wiki'] } : {}),
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       ...(str(r['action_rules']) && str(r['action_rules']) !== '{}' ? { actionRules: cleanRules(JSON.parse(str(r['action_rules']))) } : {}),
       ...(isAutonomy(r['autonomy']) ? { autonomy: r['autonomy'] } : {}),
