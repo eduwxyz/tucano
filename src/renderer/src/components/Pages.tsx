@@ -414,6 +414,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const globalRules = useStore((s) => s.settings.actionRules)
   const globalAutonomy = useStore((s) => s.settings.autonomy)
   const globalGuard = useStore((s) => s.settings.outsideGuard)
+  const routing = useStore((s) => s.settings.routing)
 
   const memberOf = (agentId: string): string[] => channels.filter((c) => c.members.includes(agentId)).map((c) => c.id)
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
@@ -740,6 +741,16 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <Row label={L('Modelo', 'Model')} className="lrow--wide">
                 <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
               </Row>
+              {/* Settings › Routing, once it's on: this agent may let Jev pick the model for each prompt.
+                  An explicit model above stays the baseline it runs on when routing is off. */}
+              {routing?.enabled && (
+                <Row
+                  label={L('Roteamento inteligente', 'Smart routing')}
+                  sub={L('O Jev escolhe dos seus pools de roteamento a cada prompt. O modelo acima é a base, quando o roteamento está desligado.', 'Jev chooses from your routing pools for each prompt. The model above is the baseline, for when routing is off.')}
+                >
+                  <Toggle on={!!draft.smartRouting} onChange={(smartRouting) => patch({ smartRouting })} />
+                </Row>
+              )}
               <div className="lrow lrow--picker">
                 <AccountPicker draft={draft} patch={patch} />
               </div>
