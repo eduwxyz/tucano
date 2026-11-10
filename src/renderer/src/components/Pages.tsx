@@ -775,6 +775,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   the global one can be off while a bot or two still route. An explicit model above stays the
                   baseline it runs on whenever routing decides nothing. */}
               <Row
+                className="lrow--switch"
                 label={L('Roteamento inteligente', 'Smart routing')}
                 sub={
                   draft.smartRouting === true
