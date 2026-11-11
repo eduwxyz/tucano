@@ -28,6 +28,7 @@ import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
+import { silentOf } from '../shared/silent'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -745,6 +746,10 @@ export class Runner {
       L(
         `${me} pode não estar olhando agora: faça o que a última mensagem pede, do começo ao fim, e responda com o resultado. Só pergunte se for impossível continuar sem ${me}.`,
         `${me} may not be looking right now: do what the last message asks, start to finish, and reply with the result. Only ask if it's impossible to go on without ${me}.`
+      ),
+      L(
+        `Se, ao terminar, não houver nada que valha contar a ${me} — porque nada mudou, nada atrasou, nada chegou, ou está tudo como ${me} deixou —, responda só [SILENT], sozinho, sem mais nenhuma palavra: aí o app não te mostra como resposta, não notifica e não marca a conversa como não lida. Isso é legítimo, e é o certo quando a rotina não trouxe nada. Não use quando houver qualquer coisa que ${me} precise saber, mesmo pequena, nem junto de um texto: ou você tem o que contar, e conta, ou responde só [SILENT].`,
+        `If, when you finish, there is nothing worth telling ${me} — because nothing changed, nothing is late, nothing came in, or everything is as ${me} left it —, answer exactly [SILENT], alone, with no other word: the app then doesn't show you as a reply, doesn't notify and doesn't mark the conversation unread. That's a legitimate outcome, and the right one when the routine brought nothing. Don't use it when there is anything ${me} needs to know, however small, and not alongside text: either you have something to tell, and tell it, or you answer just [SILENT].`
       ),
       event &&
         L(
@@ -1534,7 +1539,7 @@ ${note}`,
               failures: db.recentFailures(now - 7 * 24 * 3_600_000).filter((m) => seen.canSeeFrom(requester, m.conversationId)),
               lastRun: (r) => {
                 const run = r.lastMessageId ? db.message(r.lastMessageId)?.run : undefined
-                return run && { status: run.status, ...(run.error ? { error: run.error } : {}) }
+                return run && { status: run.status, ...(run.error ? { error: run.error } : {}), ...(run.silent ? { silent: true as const } : {}) }
               },
               now
             })
@@ -2425,10 +2430,24 @@ ${note}`,
       const up = question && handedNow && askedTo.id === requester.id ? handedNow : undefined
       if (question && !up) this.asked(agent, msg, question, askedTo, requester, confirming, settings)
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
+      const spoken = msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '') // said it all before its last tool
+      // A routine that found nothing to report answers with the marker: what it says then is nothing
+      // at all, and nobody is told. Anything the run brought that stands on its own — a question, an
+      // approval, a file, a card, a service — is not silence, so the marker only silences a reply with
+      // nothing else on it (the marker itself still goes: it's never read as the answer).
+      const quiet = opts.routine ? silentOf(spoken) : { silent: false, text: spoken }
+      const alone = !approval && !question && !questions && !artifactIds.length && !services.length && !msg.run?.agentDraft && !msg.run?.proposal && !msg.run?.proposals?.length
+      const silent = quiet.silent && alone
+      // The run already made itself unread while it was working: a reply with nothing to say takes that back.
+      if (silent) db.forgetActivity(msg.id)
       save({
-        text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+        text: quiet.text,
+        run: { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')), ...(silent ? { silent: true as const } : {}) }
       })
+      if (silent) {
+        const back = db.conversation(conv.id)
+        if (back) emit({ type: 'conversation', conversation: back }) // the badge in the sidebar is a count again
+      }
       // The inbox shows a question's decisions from its message, which has them only now.
       if (question) emit({ type: 'inbox' })
       if (question && up) this.askedUp(up, agent, msg, question)

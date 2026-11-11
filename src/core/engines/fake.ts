@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { L, locale } from '../../shared/lang'
+import { SILENT } from '../../shared/silent'
 import { memorySystem } from '../memory'
 import { curatorSystem } from '../wiki-curator'
 import { handoffSystem, routerSystem } from '../router'
@@ -179,6 +180,14 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         // "pergunte a Bia": a question to someone in particular (a Tucano with people).
         const r = await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?', para: /pergunte (?:a|à|pra|para) (\p{L}+)/iu.exec(last)![1]! })
         reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Mandei a pergunta.'
+      } else if (/\[silent\]/i.test(last)) {
+        // "se não houver nada, responda apenas [SILENT]": a routine with nothing to report, to see one.
+        // With "lembre que …" in it, it does one thing first, so the run has a step to show.
+        const lembre = /lembr[ae] que (.+)/i.exec(last) ?? /remember that (.+)/i.exec(last)
+        // The memory is the sentence the "remember" opened: what follows it is the routine's rule, not the fact.
+        const texto = (lembre?.[1] ?? '').split(/[.!?]\s/)[0]!.trim()
+        if (texto && turn.mcpUrl) await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
+        reply = SILENT
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'

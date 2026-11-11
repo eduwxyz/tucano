@@ -1010,6 +1010,12 @@ export class Db {
     return Number(row.n)
   }
 
+  // A reply that ended telling nobody (a routine's [SILENT]): what its running had already made
+  // unread goes back to nothing, for everyone. The notification row stays: it was weighed once.
+  forgetActivity(messageId: string): void {
+    this.db.prepare('DELETE FROM unread WHERE message_id = ?').run(messageId)
+  }
+
   // Who reads a conversation: a DM's person; a channel's, everyone with access.
   private readers(conversationId: string): string[] {
     const c = this.conversationOwner(conversationId)
@@ -1026,7 +1032,11 @@ export class Db {
   // who reads the conversation and isn't looking at it. `viewing`: the owner's open conversation
   // (a desktop), or each person's.
   recordActivity(message: Message, viewing: string | null | Map<string, string | null>): boolean {
-    if (message.author.kind !== 'agent' && message.author.kind !== 'routine') return false
+    // A routine's request is the app asking its agent to work; what the person reads is the answer.
+    // And an answer with nothing to report (a routine's [SILENT]) is news to nobody: it's in the
+    // conversation, one quiet line, for whoever goes looking, and it never counts as unread.
+    if (message.author.kind !== 'agent') return false
+    if (message.run?.silent) return false
     const phase = message.run?.status ?? 'message'
     if (phase !== 'message' && !['working', 'done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(phase)) return false
     return this.tx(() => {

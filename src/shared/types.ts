@@ -199,6 +199,7 @@ export interface Run {
   proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
   delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back
   delegations?: DelegationRef[] // the work this reply handed to the agents below its author
+  silent?: true // a routine's run that had nothing to report ([SILENT]): an empty reply, no notification, no unread
 }
 
 // Where a piece of handed work lives, for a message to point at it: the thread `rootId` opened.

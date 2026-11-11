@@ -442,6 +442,9 @@ export class Routines {
         if (!reply) return
         const latest = this.deps.db.routine(id)
         if (latest) this.store({ ...latest, lastAt: this.now(), lastMessageId: reply.id })
+        // Nothing to report is nothing to tell: no notification, no badge (the run is in the
+        // conversation, one quiet line, for whoever goes looking).
+        if (reply.run?.silent) return
         const title = `${agentName(this.deps.db, r.agentId)} · ${r.name}`
         const fullText = reply.run?.status === 'done' ? reply.text.trim() : ''
         // A person's routine tells them; the team's, only who asked to be told.
