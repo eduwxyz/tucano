@@ -1,7 +1,7 @@
 import { L } from '../../../shared/lang'
 import { usedShare } from '../../../shared/limits'
 import { isWaiting, mineIn, waitingIn, waitingTitle, type Waiting } from './waiting'
-import { memo, useCallback, useId, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { memo, useCallback, useId, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
   archiveAgent,
@@ -34,7 +34,7 @@ import {
   type View
 } from '../store'
 import type { SidebarPart } from '../../../shared/onboarding'
-import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
+import { addGroup, arrange, moveChannel, moveChannelTo, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { moveBefore, nudge, ordered } from '../../../shared/list-order'
 import { useHoldReorder } from '../reorder'
 import { call } from '../rpc'
@@ -191,42 +191,27 @@ export function Sidebar(): ReactNode {
   // keyboard is on. Both start from the list as it is shown, so what's on screen is what's saved.
   const dmsSort = useHoldReorder({ onDrop: (id, before) => saveDmOrder(moveBefore(dms, settings.dmOrder, id, before)), onNudge: (id, by) => saveDmOrder(nudge(dms, settings.dmOrder, id, by)) })
   const agentsSort = useHoldReorder({ onDrop: (id, before) => saveAgentOrder(moveBefore(teamAgents, settings.agentOrder, id, before)), onNudge: (id, by) => saveAgentOrder(nudge(teamAgents, settings.agentOrder, id, by)) })
+  // Channels sort the same way the DMs and the agents do: a hold picks the row up and the row under
+  // the pointer draws the line it will land on. What it was let go on says where it goes, so a
+  // channel dropped on another joins that one's group.
+  const channelsSort = useHoldReorder({
+    onDrop: (id, at) => {
+      const next = moveChannelTo(channels, layout, id, at)
+      if (next) saveLayout(next)
+    },
+    onNudge: (id, by) => saveLayout(nudgeChannel(channels, layout, id, by))
+  })
   const rowClass = (sort: typeof dmsSort, id: string): string => `nav-row${sort.picked === id ? ' is-picked' : ''}${sort.over === id && sort.picked !== id ? ' is-over' : ''}`
+  // A place that only takes a drop (the end of a list) says so the same way a row does.
+  const zoneClass = (sort: typeof dmsSort, id: string): string => `channel-drop${sort.over === id && sort.picked ? ' is-over' : ''}`
   const [naming, setNaming] = useState<string | null>(null)
   const newGroup = (channelId: string): void => {
     const id = crypto.randomUUID()
     saveLayout(moveChannel(channels, addGroup(layout, { id, name: L('Novo grupo', 'New group') }), channelId, { group: id }))
     setNaming(id)
   }
-  const dragged = useRef<string | null>(null)
-  const accept = (e: React.DragEvent): void => {
-    if (dragged.current) e.preventDefault()
-  }
-  const dropOn = (to: { group?: string; before?: string }) => ({
-    onDragEnter: accept,
-    onDragOver: accept,
-    onDrop: (e: React.DragEvent): void => {
-      const id = dragged.current
-      if (!id) return
-      e.preventDefault()
-      e.stopPropagation()
-      dragged.current = null
-      saveLayout(moveChannel(channels, layout, id, to))
-    }
-  })
-  const channelRow = (c: (typeof channels)[number], group?: string): ReactNode => (
-    <div
-      key={c.id}
-      draggable
-      onDragStart={(e) => {
-        dragged.current = c.id
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/plain', c.name)
-      }}
-      onDragEnd={() => (dragged.current = null)}
-      onContextMenu={(e) => open(e, channelMenu(c))}
-      {...dropOn({ group, before: c.id })}
-    >
+  const channelRow = (c: (typeof channels)[number]): ReactNode => (
+    <div key={c.id} className={rowClass(channelsSort, c.id)} {...channelsSort.rowProps(c.id)} onContextMenu={(e) => open(e, channelMenu(c))}>
       <ChannelItem id={c.id} name={c.name} unread={c.unread} />
     </div>
   )
@@ -377,8 +362,8 @@ export function Sidebar(): ReactNode {
           }
         >
           {arranged.loose.map((c) => channelRow(c))}
-          {/* Dropped here, a channel goes last among those in no group. */}
-          <div className="channel-drop" {...dropOn({})} />
+          {/* Let go here, a channel goes last among those in no group. */}
+          <div className={zoneClass(channelsSort, 'end:loose')} {...channelsSort.zoneProps('end:loose')} />
           {arranged.groups.map((g) => (
             <GroupFold
               key={g.id}
@@ -387,7 +372,7 @@ export function Sidebar(): ReactNode {
               unread={g.channels.reduce((n, c) => n + (c.unread ?? 0), 0)}
               waiting={waitingGroups.includes(g.id)}
               head={{
-                ...dropOn({ group: g.id }),
+                ...channelsSort.zoneProps(`grp:${g.id}`),
                 onContextMenu: (e) =>
                   open(e, [
                     { label: L('Renomear', 'Rename'), icon: 'edit', onClick: () => setNaming(g.id) },
@@ -414,7 +399,8 @@ export function Sidebar(): ReactNode {
                 )
               }
             >
-              {g.channels.map((c) => channelRow(c, g.id))}
+              {g.channels.map((c) => channelRow(c))}
+              <div className={zoneClass(channelsSort, `end:${g.id}`)} {...channelsSort.zoneProps(`end:${g.id}`)} />
             </GroupFold>
           ))}
         </Section>

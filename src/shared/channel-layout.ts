@@ -58,6 +58,28 @@ export function moveChannel(channels: { id: string }[], layout: ChannelLayout | 
   return { ...rest, groups: rest.groups.map((g) => (g.id === to.group ? { ...g, channels: inserted(g.channels, channelId, to.before) } : g)) }
 }
 
+// Where a picked-up channel was let go: a channel row (before it, inside that channel's own group),
+// a group's name (into the group, last), or the end of the loose list or of a group. The value is
+// what the row carries in `data-order-id`; one place decides, so the sidebar keeps no mapping.
+export function moveChannelTo(
+  channels: { id: string }[],
+  layout: ChannelLayout | undefined,
+  channelId: string,
+  at: string
+): ChannelLayout | null {
+  const now = arrange(channels, layout)
+  if (at.startsWith('end:')) {
+    const where = at.slice(4)
+    return moveChannel(channels, layout, channelId, where === 'loose' ? {} : { group: where })
+  }
+  if (at.startsWith('grp:')) return moveChannel(channels, layout, channelId, { group: at.slice(4) })
+  if (at === channelId) return null
+  const group = now.groups.find((g) => g.channels.some((c) => c.id === at))
+  const loose = now.loose.some((c) => c.id === at)
+  if (!group && !loose) return null
+  return moveChannel(channels, layout, channelId, { ...(group ? { group: group.id } : {}), before: at })
+}
+
 // One place up or down, among its neighbors.
 export function nudgeChannel(channels: { id: string }[], layout: ChannelLayout | undefined, channelId: string, by: -1 | 1): ChannelLayout {
   const now = arrange(channels, layout)

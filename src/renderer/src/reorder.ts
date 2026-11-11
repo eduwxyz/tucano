@@ -13,6 +13,7 @@ const HOLD_MS = 350
 export interface HoldReorder {
   picked: string | null // the row the pointer picked up
   over: string | null // the row it would land before
+  // A row that can be picked up and that a drop lands on (or before).
   rowProps: (id: string) => {
     'data-order-id': string
     onPointerDown: (e: ReactPointerEvent) => void
@@ -23,6 +24,8 @@ export interface HoldReorder {
     onClickCapture: (e: ReactMouseEvent) => void
     style?: { touchAction: 'none' }
   }
+  // A place that only receives a drop: a section's end, a group's name. Nothing to pick up there.
+  zoneProps: (id: string) => { 'data-order-id': string }
 }
 
 export function useHoldReorder({ onDrop, onNudge }: { onDrop: (id: string, before: string) => void; onNudge: (id: string, by: -1 | 1) => void }): HoldReorder {
@@ -89,6 +92,7 @@ export function useHoldReorder({ onDrop, onNudge }: { onDrop: (id: string, befor
         e.preventDefault()
         e.stopPropagation()
       }
-    })
+    }),
+    zoneProps: (id) => ({ 'data-order-id': id })
   }
 }
