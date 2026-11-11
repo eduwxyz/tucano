@@ -44,7 +44,7 @@ beforeEach(() => {
 
 describe("a finding's card", () => {
   it('offers only the agents that write on the wiki', () => {
-    fake = { ...fake, agents: [agent('a1', 'herald', 'write'), agent('a2', 'steward', 'read'), agent('a3', 'wrench')] }
+    fake = { ...fake, agents: [agent('a1', 'herald', 'read_write'), agent('a2', 'steward', 'read'), agent('a3', 'wrench')] }
     const html = card(finding({ kind: 'broken', name: 'Construtora Alpha' }))
     expect(html).toContain('@herald')
     expect(html).not.toContain('@steward')
@@ -53,14 +53,14 @@ describe("a finding's card", () => {
   })
 
   it('leaves the Tuca and archived agents out, even with write access', () => {
-    fake = { ...fake, agents: [agent('t', 'tuca', 'write', 'tuca'), { ...agent('a2', 'steward', 'write'), archived: true }] }
+    fake = { ...fake, agents: [agent('t', 'tuca', 'read_write', 'tuca'), { ...agent('a2', 'steward', 'read_write'), archived: true }] }
     expect(card(finding({ kind: 'broken', name: 'Alpha' }))).toContain(L('Nenhum agente escreve na wiki ainda', 'No agent writes on the wiki yet'))
   })
 
   it('says what to turn on when nobody in the team writes', () => {
     fake = { ...fake, agents: [agent('a2', 'steward', 'read')] }
     const html = card(finding({ kind: 'broken', name: 'Alpha' }))
-    expect(html).toContain(L('Escreve na wiki', 'Writes the wiki'))
+    expect(html).toContain(L('Lê e escreve', 'Read and write'))
     expect(html).not.toContain(L('Escrever a página', 'Write the page'))
   })
 })
