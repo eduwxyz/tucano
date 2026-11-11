@@ -74,6 +74,8 @@ describe('a row of the asks history', () => {
     expect(html).toContain('aria-expanded="false"')
     // The date keeps its own line: wrapped, it made the row three lines tall (styles.css ask-row__when).
     expect(html).toContain('muted small ask-row__when')
+    // The pill is a reserved cell too, so the date starts at the same place on every row.
+    expect(html).toContain('tag ask-row__state')
   })
 
   it('opens into a bullet per question and a bullet per option under it', () => {

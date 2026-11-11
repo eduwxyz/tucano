@@ -130,6 +130,24 @@ describe('the words and the layout a person reads (round 2, 13)', () => {
     expect(html).toContain('class="history-row__what"')
   })
 
+  it('both history tables reserve one width for the state pill and one for the date', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const css = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'styles.css'), 'utf8')
+    // One pair of widths for both tables, centred inside the cell: without them each row's label
+    // width moved the column by a few pixels and the dates never lined up.
+    expect(css).toMatch(/\.history-row,\s*\.ask-row__head \{[^}]*--history-state: 96px;[^}]*--history-when: 104px;/)
+    expect(css).toMatch(/\.history-row__state,\s*\.ask-row__state \{[^}]*flex: 0 0 var\(--history-state\);[^}]*justify-content: center;/)
+    expect(css).toMatch(/\.history-row__when,\s*\.ask-row__when \{[^}]*flex: 0 0 var\(--history-when\);[^}]*text-align: center;/)
+    // The outcome cell keeps its place on a row that reported nothing, so the columns still line up.
+    fake = { ...fake, approvals: [{ id: 'ap', hash: 'h', agentId: 'a1', conversationId: 'ch', messageId: 'm', connectorName: 'GitLab', tool: 'write', args: {}, why: '', highRisk: false, state: 'approved', createdAt: 1, expiresAt: 2, decidedAt: 3 } as never] }
+    const { HistoryRow } = await import('../src/renderer/src/components/Pages')
+    const html = renderToStaticMarkup(<HistoryRow id="ap" />)
+    expect(html).toContain('history-row__outcome')
+    expect(html).toContain('history-row__state')
+    expect(html).toContain('history-row__when')
+  })
+
   it("a removed person's browser reads that they no longer have access, and nothing about the Tucano", async () => {
     const { NO_ACCESS_PAGE } = await import('../src/server/people')
     expect(NO_ACCESS_PAGE).toContain('Você não tem mais acesso a este Tucano.')

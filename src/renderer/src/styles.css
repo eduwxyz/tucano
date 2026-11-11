@@ -2207,11 +2207,13 @@ h3 {
   white-space: nowrap;
 }
 .history-row__outcome {
-  flex: 0 1 auto;
+  /* The action's own line ("Delete · Computer"): a reserved column that wraps onto a second line
+     rather than being cut, and gives the width back on a narrow window. */
+  flex: 0 1 160px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 32%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .table > .table__row {
   animation: rise var(--dur-enter) var(--ease-out) backwards;
@@ -2271,6 +2273,30 @@ h3 {
 .ask-row:last-child .ask-row__head,
 .ask-row:last-child .ask-row__body {
   border-bottom: 0;
+}
+
+/* Both history tables give the state pill and the date the same reserved width, centred, so the
+   columns line up from row to row instead of each row drifting by the width of its own label. */
+.history-row,
+.ask-row__head {
+  --history-state: 96px;
+  --history-when: 104px;
+}
+.history-row__state,
+.ask-row__state {
+  flex: 0 0 var(--history-state);
+  width: var(--history-state);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.history-row__when,
+.ask-row__when {
+  flex: 0 0 var(--history-when);
+  width: var(--history-when);
+  text-align: center;
+  white-space: nowrap;
 }
 .connector {
   padding: 0;

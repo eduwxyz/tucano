@@ -1381,7 +1381,7 @@ export function AskedRow({
         <span className="ask-row__text" title={line}>
           {line}
         </span>
-        <span className={`tag ${q.state === 'answered' ? 'tag--ok' : ''}`}>{ended}</span>
+        <span className={`tag ask-row__state ${q.state === 'answered' ? 'tag--ok' : ''}`}>{ended}</span>
         <span className="muted small ask-row__when">{time(q.answeredAt ?? q.createdAt)}</span>
         <span className={`ask-row__chev ${open ? 'is-open' : ''}`}>
           <Icon name="chevron" size={12} />
@@ -1581,9 +1581,13 @@ export function HistoryRow({ id }: { id: string }): ReactNode {
       <span className="history-row__what">
         {a.connectorId === COMPUTADOR ? shellActions(String(a.args['command'] ?? '')).map(kindLabel).join(', ') || toolWords(a.tool) : toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
       </span>
-      {a.outcome && <span className="muted small history-row__outcome" title={a.outcome}>{a.outcome}</span>}
-      <span className={`tag ${a.state === 'approved' ? 'tag--ok' : a.state === 'refused' ? 'tag--danger' : ''}`}>{a.state === 'approved' ? L('aprovado', 'approved') : a.state === 'refused' ? L('recusado', 'refused') : L('expirado', 'expired')}</span>
-      <span className="muted small">{a.decidedAt ? time(a.decidedAt) : ''}</span>
+      {/* Always a cell, empty when the approval reported nothing, so every row's columns start at
+          the same place. */}
+      <span className="muted small history-row__outcome" title={a.outcome ?? ''}>
+        {a.outcome ?? ''}
+      </span>
+      <span className={`tag history-row__state ${a.state === 'approved' ? 'tag--ok' : a.state === 'refused' ? 'tag--danger' : ''}`}>{a.state === 'approved' ? L('aprovado', 'approved') : a.state === 'refused' ? L('recusado', 'refused') : L('expirado', 'expired')}</span>
+      <span className="muted small history-row__when">{a.decidedAt ? time(a.decidedAt) : ''}</span>
     </div>
   )
 }
