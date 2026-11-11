@@ -63,6 +63,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   removeConnector: { id: 's' },
   reconnectConnector: { id: 's' },
   setConnectorToken: { id: 's', token: 's' },
+  setConnectorIcon: { id: 's', icon: 's' },
   connectorCatalog: {},
   addCatalogConnector: { id: 's', values: 'o?' },
   ownAppGuide: { provider: '[google,slack]' },

@@ -325,3 +325,27 @@ describe('a secret kept in 1Password', () => {
     await mine.closeAll()
   })
 })
+
+// A server added by hand wore a terminal or a globe: the mark came from the store's entry, and it has
+// none. Now it can wear a picture of its own, kept in the database as a data URL so a backup carries it.
+describe('the picture a connector wears', () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+  it('keeps an image on the connector and gives it back, and takes it away again', async () => {
+    const id = await connectors.add({ name: 'Google Services', kind: 'remote', url: `${base}/mcp`, auth: 'none' })
+    await connectors.connect(id) // the add already started one: this waits for the server's answer
+    await connectors.setIcon(id, png)
+    expect(connectors.get(id)!.icon).toBe(png)
+    await connectors.setIcon(id, '') // back to the store's mark, or the icon of its kind
+    expect(connectors.get(id)!.icon).toBeUndefined()
+  })
+
+  it('refuses what is not an image, and a picture too big to be a tile', async () => {
+    const id = await connectors.add({ name: 'Google Services', kind: 'remote', url: `${base}/mcp`, auth: 'none' })
+    await connectors.connect(id)
+    await expect(connectors.setIcon(id, 'https://example.com/logo.png')).rejects.toThrow(/imagem|image/)
+    await expect(connectors.setIcon(id, 'data:text/html;base64,PHNjcmlwdD4=')).rejects.toThrow(/imagem|image/)
+    await expect(connectors.setIcon(id, `data:image/png;base64,${'A'.repeat(32_001)}`)).rejects.toThrow(/grande|big/)
+    expect(connectors.get(id)!.icon).toBeUndefined()
+  })
+})

@@ -756,6 +756,9 @@ export interface Connector {
   args?: string[]
   envKeys?: string[] // names only; values are secrets
   auth: ConnectorAuth
+  // The picture this connector wears in the app, as a data URL (an image picked by the person): a
+  // server added by hand is otherwise a terminal or a globe. Empty: the store's mark, or its kind's icon.
+  icon?: string
   status: ConnectorStatus
   error?: string
   errorDetail?: string // the raw error and its causes (a certificate's code, the DNS's), under "Ver detalhes"

@@ -207,6 +207,7 @@ export const NEEDS: Record<Method, Need> = {
   removeConnector: 'admin',
   reconnectConnector: 'admin',
   setConnectorToken: 'admin',
+  setConnectorIcon: 'admin',
   connectorCatalog: 'admin',
   addCatalogConnector: 'admin',
   ownAppGuide: 'admin',

@@ -544,7 +544,10 @@ const COLUMNS: [string, string, string][] = [
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
-  ['agents', 'reports_to', 'TEXT']
+  ['agents', 'reports_to', 'TEXT'],
+  // The picture a connector wears: a small image as a data URL (src/renderer/src/connector-icon.ts).
+  // Empty: the store's mark, or the icon of its kind.
+  ['connectors', 'icon', 'TEXT']
 ]
 
 
@@ -1303,8 +1306,14 @@ export class Db {
       args: JSON.parse(str(r['args']) || '[]') as string[],
       envKeys: JSON.parse(str(r['env_keys']) || '[]') as string[],
       auth: str(r['auth']) as ConnectorAuth,
+      icon: r['icon'] ? str(r['icon']) : undefined,
       tools: this.tools(id).map(({ inputSchema: _, ...t }) => t)
     }
+  }
+
+  // The picture a connector wears; null goes back to the store's mark (or the icon of its kind).
+  setConnectorIcon(id: string, icon: string | null): void {
+    this.db.prepare('UPDATE connectors SET icon = ? WHERE id = ?').run(icon, id)
   }
 
   saveConnector(c: { id: string; name: string; kind: Connector['kind']; url?: string; command?: string; args?: string[]; envKeys?: string[]; auth: ConnectorAuth }): void {
