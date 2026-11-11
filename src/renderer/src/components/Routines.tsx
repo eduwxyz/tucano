@@ -99,6 +99,19 @@ type Repeat = 'week' | 'once' | 'date' | 'month'
 
 type Draft = RoutineInput & { conversationId: string } // '' while the agent's DM doesn't exist yet: created on save
 
+// A fresh copy to open in the form: same content, but no id (saves as new) and no owner (it's yours).
+function duplicateDraft(r: Routine): Draft {
+  return {
+    name: `${r.name} ${L('(cópia)', '(copy)')}`,
+    prompt: r.prompt,
+    agentId: r.agentId,
+    conversationId: r.conversationId,
+    schedule: { ...r.schedule, days: [...r.schedule.days] },
+    enabled: r.enabled,
+    trigger: r.trigger ? { ...r.trigger } : undefined
+  }
+}
+
 export function RoutinesPage(): ReactNode {
   const routines = useStore((s) => s.routines)
   const agents = useStore((s) => s.agents.filter(isTeam))
@@ -266,7 +279,7 @@ export function RoutinesPage(): ReactNode {
         </div>
       )}
 
-      {open && <Popover occ={open.occ} rect={open.rect} now={now} onClose={() => setOpen(null)} onEdit={(r) => (setOpen(null), setDraft({ ...r }))} />}
+      {open && <Popover occ={open.occ} rect={open.rect} now={now} onClose={() => setOpen(null)} onEdit={(r) => (setOpen(null), setDraft({ ...r }))} onDuplicate={(r) => (setOpen(null), setDraft(duplicateDraft(r)))} />}
 
       {draft && (
         <Modal title={draft.id ? L('Editar rotina', 'Edit routine') : L('Nova rotina', 'New routine')} variant="form" onClose={() => setDraft(null)}>
@@ -549,7 +562,7 @@ function Hook({ token }: { token: string }): ReactNode {
 const OK = new Set<RunStatus>(['done', 'waiting_input', 'waiting_approval'])
 
 // A routine's card, next to the block: what it does, how it's been going, and what to do with it.
-function Popover({ occ, rect, now, onClose, onEdit }: { occ: Occ; rect: DOMRect; now: number; onClose: () => void; onEdit: (r: Routine) => void }): ReactNode {
+function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; rect: DOMRect; now: number; onClose: () => void; onEdit: (r: Routine) => void; onDuplicate: (r: Routine) => void }): ReactNode {
   const r = useStore((s) => (occ.routine ? s.routines.find((x) => x.id === occ.routine!.id) : undefined))
   const agent = useStore((s) => agentById(s, occ.agentId))
   const conv = useStore((s) => s.conversations.find((c) => c.id === (r?.conversationId ?? occ.conversationId)))
@@ -659,6 +672,9 @@ function Popover({ occ, rect, now, onClose, onEdit }: { occ: Occ; rect: DOMRect;
             <span className="grow" />
             {r && (
               <>
+                <button className="icon-btn" title={L('Duplicar', 'Duplicate')} onClick={() => onDuplicate(r)}>
+                  <Icon name="copy" size={14} />
+                </button>
                 <button className="icon-btn" title={L('Editar', 'Edit')} onClick={() => onEdit(r)}>
                   <Icon name="edit" size={14} />
                 </button>
