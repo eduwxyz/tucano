@@ -82,8 +82,11 @@ describe('dismissing an ask', () => {
     await act(async () => {})
     const text = document.body.textContent ?? ''
     expect(text).toContain('Histórico')
-    expect(text).toContain('Respondida por você')
-    expect(text).toContain('Fechada sem resposta')
+    // The history is a table now: a short tag per row, the wording that fits a column.
+    expect(text).toContain('por você')
+    expect(text).toContain('sem resposta')
+    expect(text).toContain('Publico o post hoje?')
+    expect(text).toContain('Fecho o mês assim?')
   })
 
   it('still answers the ask from the page instead', async () => {

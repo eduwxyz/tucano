@@ -2219,6 +2219,59 @@ h3 {
 .table__row--btn:hover {
   background: var(--hover);
 }
+
+/* The Asks history: a row of the approvals table whose text is one clipped line, and whose click
+   opens the ask itself under it. */
+.ask-row__head {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  cursor: pointer;
+}
+/* Each column keeps its own height and sits on the row's middle line: a wrapping date made the row
+   three lines tall, which read as a table whose cells were not lined up. */
+.ask-row__head > * {
+  flex: 0 0 auto;
+}
+.ask-row__when {
+  white-space: nowrap;
+}
+.ask-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-row__chev {
+  display: inline-flex;
+  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.ask-row__chev.is-open {
+  transform: rotate(90deg);
+}
+.ask-row__body {
+  padding: 2px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ask-row__body > div > :first-child {
+  margin-top: 0;
+}
+.ask-row__body > div > :last-child {
+  margin-bottom: 0;
+}
+.ask-row__body .hint {
+  margin-top: 8px;
+}
+.ask-row:last-child .ask-row__head,
+.ask-row:last-child .ask-row__body {
+  border-bottom: 0;
+}
 .connector {
   padding: 0;
 }

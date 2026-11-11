@@ -2,6 +2,9 @@ import { L, locale, type Lang } from '../../../shared/lang'
 import { hasMonthlyLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { parseQuestionsText } from '../../../shared/questions'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
@@ -1228,9 +1231,10 @@ export function AsksPage(): ReactNode {
   // Which one is being dismissed, and the two steps it takes: an ask left unanswered is gone for
   // good, and the only list that showed it was this one.
   const [dropping, setDropping] = useState<string | null>(null)
+  // The one history row whose text is open. One at a time: the list is for scanning, the text for
+  // reading the one you picked.
+  const [opened, setOpened] = useState<string | null>(null)
   const [past, setPast] = useState<AskEntry[]>([])
-  const you = useStore((s) => s.you)
-  const people = useStore((s) => s.people)
   const questions = inbox.questions
   // What left the list: answered and closed asks, newest first. Reloaded when the open ones change,
   // which is exactly when one of them moved down here.
@@ -1311,34 +1315,87 @@ export function AsksPage(): ReactNode {
       {past.length > 0 && (
         <>
           <h3 className="section-title">{L('Histórico', 'History')}</h3>
-          <div className="stack-list">
-            {past.map((q) => {
-              const who = agents.find((x) => x.id === q.agentId)?.name
-              const by = q.answeredBy ? people.find((p) => p.id === q.answeredBy) : undefined
-              const label =
-                q.state !== 'answered'
-                  ? L('Fechada sem resposta', 'Closed without an answer')
-                  : q.answeredBy === you
-                    ? L('Respondida por você', 'Answered by you')
-                    : by
-                      ? L(`Respondida por ${by.name}`, `Answered by ${by.name}`)
-                      : L('Respondida', 'Answered')
-              return (
-                <div className="question is-answered" key={q.id}>
-                  <span className="question__label">
-                    {who ?? L('O agente', 'The agent')} · {label}
-                  </span>
-                  <p>{q.text}</p>
-                  <span className="hint">
-                    {where(q.conversationId, q.agentId)} · {time(q.answeredAt ?? q.createdAt)}
-                  </span>
-                </div>
-              )
-            })}
+          <div className="table">
+            {past.map((q) => (
+              <AskedRow
+                key={q.id}
+                q={q}
+                place={where(q.conversationId, q.agentId)}
+                open={opened === q.id}
+                onToggle={() => setOpened(opened === q.id ? null : q.id)}
+              />
+            ))}
           </div>
         </>
       )}
     </Page>
+  )
+}
+
+// One answered or closed ask, in the same table the approvals keep their history in: the agent, the
+// ask flattened to a single line, how it ended, when. Clicking the row opens the ask itself, which
+// is stored as numbered lines whose options sit behind pipes and reads as a wall of text unshaped.
+const askSummary = (text: string): string =>
+  parseQuestionsText(text)
+    .map((q) => q.question)
+    .join(' · ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+// The same text as markdown: one bullet per question, and one under it per option it offered.
+const askMarkdown = (text: string): string =>
+  parseQuestionsText(text)
+    .map((q) =>
+      q.options && q.options.length > 0 ? [`- ${q.question}`, ...q.options.map((o) => `  - ${o.label}`)].join('\n') : `- ${q.question}`
+    )
+    .join('\n')
+
+export function AskedRow({
+  q,
+  place,
+  open,
+  onToggle
+}: {
+  q: AskEntry
+  place: string
+  open: boolean
+  onToggle: () => void
+}): ReactNode {
+  const agent = useStore((s) => s.agents.find((x) => x.id === q.agentId))
+  const you = useStore((s) => s.you)
+  const people = useStore((s) => s.people)
+  const by = q.answeredBy ? people.find((p) => p.id === q.answeredBy) : undefined
+  const ended =
+    q.state !== 'answered'
+      ? L('sem resposta', 'no answer')
+      : q.answeredBy === you
+        ? L('por você', 'by you')
+        : by
+          ? L(`por ${by.name}`, `by ${by.name}`)
+          : L('respondida', 'answered')
+  const line = askSummary(q.text)
+  return (
+    <div className="ask-row">
+      <button type="button" className="table__row table__row--btn ask-row__head" onClick={onToggle} aria-expanded={open}>
+        {agent && <AgentAvatar agent={agent} size={22} />}
+        <span className="ask-row__text" title={line}>
+          {line}
+        </span>
+        <span className={`tag ${q.state === 'answered' ? 'tag--ok' : ''}`}>{ended}</span>
+        <span className="muted small ask-row__when">{time(q.answeredAt ?? q.createdAt)}</span>
+        <span className={`ask-row__chev ${open ? 'is-open' : ''}`}>
+          <Icon name="chevron" size={12} />
+        </span>
+      </button>
+      {open && (
+        <div className="ask-row__body">
+          <Markdown remarkPlugins={[remarkGfm]}>{askMarkdown(q.text)}</Markdown>
+          <span className="hint">
+            {agent?.name ?? L('O agente', 'The agent')} · {place} · {time(q.createdAt)}
+          </span>
+        </div>
+      )}
+    </div>
   )
 }
 
