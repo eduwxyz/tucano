@@ -367,3 +367,38 @@ export function NumberInput({ value, onChange, ...rest }: { value: number; onCha
     />
   )
 }
+
+// A row of buttons where one is chosen: a setting's options, or the views of one page. The arrows
+// move the choice, as in any radio group. `wide` fills the line; `tabs` is the bigger one that picks
+// between a page's views.
+export function ButtonGroup<T extends string | boolean>({ options, value, onChange, label, wide, tabs, disabled, className }: { options: { value: T; label: ReactNode; icon?: IconName }[]; value: T; onChange: (v: T) => void; label: string; wide?: boolean; tabs?: boolean; disabled?: boolean; className?: string }): ReactNode {
+  const at = options.findIndex((o) => o.value === value)
+  const move = (step: number): void => {
+    const next = options[(Math.max(0, at) + step + options.length) % options.length]!
+    onChange(next.value)
+  }
+  return (
+    <div
+      className={['segmented', wide && 'segmented--wide', tabs && 'segmented--tabs', className].filter(Boolean).join(' ')}
+      role="radiogroup"
+      aria-label={label}
+      onKeyDown={(e) => {
+        if (disabled || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return
+        e.preventDefault()
+        const group = e.currentTarget
+        move(e.key === 'ArrowRight' ? 1 : -1)
+        requestAnimationFrame(() => (group.querySelector('[aria-checked="true"]') as HTMLElement | null)?.focus())
+      }}
+    >
+      {options.map((o) => {
+        const on = o.value === value
+        return (
+          <button key={String(o.value)} type="button" role="radio" aria-checked={on} tabIndex={on || (at < 0 && o === options[0]) ? 0 : -1} className={on ? 'is-active' : ''} disabled={disabled} onClick={() => !on && onChange(o.value)}>
+            {o.icon && <Icon name={o.icon} size={14} />}
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}

@@ -82,6 +82,7 @@ import { ActivityPane, AdminOnly, PeoplePane } from './People'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
+import { ImageModelsCard, LocalModelsIntro } from './LocalModels'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
@@ -93,7 +94,7 @@ import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Convers
 import { ProposalCard } from './Tuca'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
-import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { AgentAvatar, AVATARS, ButtonGroup, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import type { NotifyState } from '../rpc'
@@ -574,19 +575,16 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
 
           {pane('ferramentas') && (
             <Card title="Web" lead={`${L('Pesquisa e lê páginas com a ferramenta do próprio Claude Code ou Codex, na sua assinatura. Cada busca aparece nos passos da resposta.', 'Searches and reads pages with Claude Code’s or Codex’s own tool, on your subscription. Every search shows up in the reply’s steps.')}${isNew || !admin ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}>
-              <div className="segmented segmented--wide" role="radiogroup" aria-label="Web">
-                {[false, true].map((v) => (
-                  <button
-                    key={String(v)}
-                    role="radio"
-                    aria-checked={(draft.web !== false) === v}
-                    className={(draft.web !== false) === v ? 'is-active' : ''}
-                    onClick={() => (isNew ? patch({ web: v }) : (setDraft((d) => ({ ...d, web: v })), patchAgent(draft.id, { web: v })))}
-                  >
-                    {v ? L('Ligada', 'On') : L('Desligada', 'Off')}
-                  </button>
-                ))}
-              </div>
+              <ButtonGroup
+                wide
+                label="Web"
+                value={draft.web !== false}
+                onChange={(v) => (isNew ? patch({ web: v }) : (setDraft((d) => ({ ...d, web: v })), patchAgent(draft.id, { web: v })))}
+                options={[
+                  { value: false, label: L('Desligada', 'Off') },
+                  { value: true, label: L('Ligada', 'On') }
+                ]}
+              />
             </Card>
           )}
 
@@ -595,19 +593,16 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               title={L('Navegador', 'Browser')}
               lead={`${L('Um Chrome só dele: abre páginas, clica, preenche e lê como uma pessoa, com logins separados dos seus (você entra pelo Assumir). Clique que compra, publica, envia ou apaga pede sua aprovação.', 'A Chrome of its own: opens pages, clicks, fills in and reads like a person, with logins separate from yours (you sign in via Take over). A click that buys, publishes, sends or deletes asks for your approval.')}${isNew || !admin ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
             >
-              <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador', 'Browser')}>
-                {[false, true].map((v) => (
-                  <button
-                    key={String(v)}
-                    role="radio"
-                    aria-checked={!!draft.browser === v}
-                    className={!!draft.browser === v ? 'is-active' : ''}
-                    onClick={() => (isNew ? patch({ browser: v }) : (setDraft((d) => ({ ...d, browser: v })), patchAgent(draft.id, { browser: v })))}
-                  >
-                    {v ? L('Ligado', 'On') : L('Desligado', 'Off')}
-                  </button>
-                ))}
-              </div>
+              <ButtonGroup
+                wide
+                label={L('Navegador', 'Browser')}
+                value={!!draft.browser}
+                onChange={(v) => (isNew ? patch({ browser: v }) : (setDraft((d) => ({ ...d, browser: v })), patchAgent(draft.id, { browser: v })))}
+                options={[
+                  { value: false, label: L('Desligado', 'Off') },
+                  { value: true, label: L('Ligado', 'On') }
+                ]}
+              />
               {!isNew && draft.browser && (
                 <div className="row computer__actions">
                   <button className="btn btn--sm btn--ghost" title={L('Abre a janela do navegador dele pra você entrar nas contas', 'Opens its browser window so you can sign in to accounts')} onClick={() => browserAction(draft.id, 'show')}>
@@ -694,23 +689,20 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               title="Wiki"
               lead={L('A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas.', 'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages.')}
             >
-              <div className="segmented segmented--wide" role="radiogroup" aria-label="Wiki">
-                {([['read', L('Lê a wiki', 'Reads the wiki')], ['none', L('Sem acesso', 'No access')]] as const).map(([value, label]) => (
-                  <button
-                    key={value}
-                    role="radio"
-                    aria-checked={(draft.wiki ?? 'read') === value}
-                    className={(draft.wiki ?? 'read') === value ? 'is-active' : ''}
-                    onClick={() => {
-                      if (isNew) return patch({ wiki: value })
-                      setDraft((d) => ({ ...d, wiki: value }))
-                      patchAgent(draft.id, { wiki: value })
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <ButtonGroup
+                wide
+                label="Wiki"
+                value={draft.wiki ?? 'read'}
+                onChange={(value) => {
+                  if (isNew) return patch({ wiki: value })
+                  setDraft((d) => ({ ...d, wiki: value }))
+                  patchAgent(draft.id, { wiki: value })
+                }}
+                options={[
+                  { value: 'read', label: L('Lê a wiki', 'Reads the wiki') },
+                  { value: 'none', label: L('Sem acesso', 'No access') }
+                ]}
+              />
               <p className="muted small">
                 <button className="link" onClick={() => navigate({ kind: 'wiki' })}>
                   {L('Abrir a wiki', 'Open the wiki')}
@@ -1935,8 +1927,8 @@ export function ModelSelect(p: { value: string; onChange: (v: string) => void; j
   return <ModelPicker {...p} />
 }
 
-export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
-  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />
+export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }): ReactNode {
+  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} disabled={disabled} aria-label={label} onClick={() => onChange(!on)} />
 }
 
 // ---------- Settings ----------
@@ -2400,7 +2392,11 @@ function VoiceCard(): ReactNode {
   const choice = (id: VoiceModelId) => VOICE_CHOICES().find((c) => c.id === id)!
   const other = status?.ownModel === 'recommended' ? 'light' : 'recommended'
   return (
-    <Card title={L('Ditado', 'Dictation')} lead={L('Fale em vez de digitar: clique no microfone do campo de mensagem, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros, e clique de novo para terminar. O áudio vira texto neste computador, sem internet, e o texto fica no campo para você revisar antes de enviar.', 'Speak instead of typing: click the microphone in the message field, or ⌥ Space on a Mac and Ctrl+Space elsewhere, and click again to finish. The audio becomes text on this computer, offline, and the text stays in the field for you to review before sending.')}>
+    <Card
+      title={L('Áudio', 'Audio')}
+      lead={L('Fale em vez de digitar: clique no microfone do campo de mensagem, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros. O texto fica no campo para você revisar.', 'Speak instead of typing: click the microphone in the message field, or ⌥ Space on a Mac and Ctrl+Space elsewhere. The text stays in the field for you to review.')}
+      action={<span className="local-tag">Whisper</span>}
+    >
       {status && !status.ready && <VoiceSetup status={status} />}
       <div className="voice-prefs">
         {status?.ready && (
@@ -2462,6 +2458,10 @@ export function SettingsPage(): ReactNode {
   const tabs = SETTINGS_TABS(team, admin, owner)
   const tab = useTab('settings', tabs)
   const pane = (t: string): boolean => tab === t
+  // Models has two views: the agents' (the default) and the ones that run on this computer.
+  const modelsView = useStore((s) => s.tabs['settings-models']) === 'locais' && admin ? 'locais' : 'agentes'
+  const agentModels = pane('modelos') && modelsView === 'agentes'
+  const local = pane('modelos') && modelsView === 'locais'
   return (
     <Page title={L('Configurações', 'Settings')}>
       <Tabs page="settings" tabs={tabs} />
@@ -2478,13 +2478,16 @@ export function SettingsPage(): ReactNode {
             </div>
             <div className="field">
               <span className="field__label">{L('Tema', 'Theme')}</span>
-              <div className="segmented" role="radiogroup" aria-label={L('Tema', 'Theme')}>
-                {(['system', 'light', 'dark'] as const).map((t) => (
-                  <button key={t} type="button" role="radio" aria-checked={settings.theme === t} className={settings.theme === t ? 'is-active' : ''} onClick={() => updateSettings({ theme: t })}>
-                    {t === 'system' ? L('Do sistema', 'System') : t === 'light' ? L('Claro', 'Light') : L('Escuro', 'Dark')}
-                  </button>
-                ))}
-              </div>
+              <ButtonGroup
+                label={L('Tema', 'Theme')}
+                value={settings.theme}
+                onChange={(theme) => updateSettings({ theme })}
+                options={[
+                  { value: 'system', label: L('Do sistema', 'System') },
+                  { value: 'light', label: L('Claro', 'Light') },
+                  { value: 'dark', label: L('Escuro', 'Dark') }
+                ]}
+              />
             </div>
             <AdminOnly>{L('Só um admin muda os modelos, os agentes, o contexto e as outras configurações do Tucano.', 'Only an admin changes the models, the agents, the context and the Tucano’s other settings.')}</AdminOnly>
           </Card>
@@ -2529,7 +2532,25 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('geral') && admin && <VoiceCard />}
+        {pane('modelos') && admin && (
+          <ButtonGroup
+            tabs
+            label={L('Modelos', 'Models')}
+            value={modelsView}
+            onChange={(v) => setTab('settings-models', v)}
+            options={[
+              { value: 'agentes', label: L('Modelos dos agentes', 'Agents’ models'), icon: 'spark' },
+              { value: 'locais', label: L('Modelos locais', 'Local models'), icon: 'laptop' }
+            ]}
+          />
+        )}
+        {local && (
+          <>
+            <LocalModelsIntro />
+            <VoiceCard />
+            <ImageModelsCard />
+          </>
+        )}
 
         {pane('geral') && (
           <Card title={L('Notificações', 'Notifications')}>
@@ -2551,9 +2572,9 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('modelos') && admin && <AgentModelsPanel />}
+        {agentModels && admin && <AgentModelsPanel />}
 
-        {pane('modelos') && (
+        {agentModels && (
           <Card
             title="Harnesses"
             lead={L(
@@ -2570,7 +2591,7 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('modelos') && (
+        {agentModels && (
           <Card
             title={L('Contas', 'Accounts')}
             lead={L(
@@ -2582,7 +2603,7 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('modelos') && (
+        {agentModels && (
           <Card title={L('Roteador', 'Router')} lead={L('Modelo pequeno que lê a conversa e decide quem responde nos canais. Não concede permissão nenhuma.', 'A small model that reads the conversation and decides who replies in channels. It grants no permissions at all.')}>
             <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', 'Go for a fast model: it runs before every reply in a channel.')}>
               <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
@@ -2606,13 +2627,16 @@ export function SettingsPage(): ReactNode {
 
         {pane('agentes') && (
           <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
-            <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
-              {[false, true].map((v) => (
-                <button key={String(v)} role="radio" aria-checked={!!settings.browserJev === v} className={!!settings.browserJev === v ? 'is-active' : ''} onClick={() => updateSettings({ browserJev: v })}>
-                  {v ? 'Jev (TypeSafe)' : L('Só pelo texto da página', 'Only by the page’s text')}
-                </button>
-              ))}
-            </div>
+            <ButtonGroup
+              wide
+              label={L('Navegador dos agentes', 'Agents’ browser')}
+              value={!!settings.browserJev}
+              onChange={(v) => updateSettings({ browserJev: v })}
+              options={[
+                { value: false, label: L('Só pelo texto da página', 'Only by the page’s text') },
+                { value: true, label: 'Jev (TypeSafe)' }
+              ]}
+            />
             {settings.browserJev && work && <OutsideGateway what={L('a lista de elementos das páginas, e às vezes o print delas, vai pra TypeSafe.', 'the pages’ element list, and sometimes their screenshot, goes to TypeSafe.')} />}
             {settings.browserJev && (
               <JevKey
@@ -2630,7 +2654,7 @@ export function SettingsPage(): ReactNode {
         {pane('integracoes') && window.tucano.phone && <HomePhoneCard />}
         {pane('integracoes') && (defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />)}
 
-        {pane('modelos') && (
+        {agentModels && (
           <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', 'A small model summarizes what leaves each conversation’s window and, from the same stretch, picks what’s worth remembering about you.')}>
             <div className="grid2">
               <Field label={L('Modelo da memória', 'Memory model')} hint={L('Roda a cada ~20 mensagens numa conversa longa.', 'Runs every ~20 messages in a long conversation.')}>

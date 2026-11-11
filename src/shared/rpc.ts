@@ -2,7 +2,7 @@
 import type { Answer } from './questions'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
+import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, LocalModelId, LocalModelsStatus, ProposalsResult } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -67,6 +67,10 @@ export interface Api {
   voiceDownload(p: { model: VoiceModelId }): void // in the background; 'voice' events say how it goes
   voiceCancelDownload(): void
   voiceRemoveModel(p: { model: VoiceModelId }): void
+  localModelsStatus(): Promise<LocalModelsStatus> // the image models: which are here (for every workspace), downloading, in the queue
+  localModelDownload(p: { model: LocalModelId }): void // in the background; 'local_models' events say how it goes
+  localModelCancelDownload(p: { model?: LocalModelId }): void // that model's (waiting or going on); none named: all
+  localModelRemove(p: { model: LocalModelId }): void // from this computer: every workspace loses it
   localPath(p: { messageId: string; path: string }): LocalInfo | null // what a path this agent cited can do; null: it stays text
   openLocal(p: { messageId: string; path: string; how: 'open' | 'reveal' }): void
   // not opened: no terminal to open, the person runs the command. screen: the caller can show the
@@ -224,6 +228,7 @@ export type Result<M extends Method> = Awaited<ReturnType<Api[M]>>
 
 export type CoreEvent =
   | { type: 'voice' } // dictation's model: downloading, done, removed
+  | { type: 'local_models' } // the image models: downloading, done, removed, the queue
   | { type: 'message'; message: Message }
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
   | { type: 'agent'; agent: Agent }
@@ -249,7 +254,7 @@ export type CoreEvent =
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'local_models', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

@@ -30,8 +30,9 @@ Nos dois jeitos dá pra abrir uma thread numa mensagem com **Responder na thread
 O botão **Resumo** no topo mostra o que a conversa já cobriu. As últimas 30 mensagens vão inteiras; passando de 50, o que sai da janela vira resumo. Dá pra **Resumir agora** e editar.
 
 ## Anexos e ditado
-- Até 10 imagens e 5 arquivos por mensagem (clipe, arrastar ou colar). De PDF, Word, planilha e texto, o agente recebe o que está escrito, mesmo sem computador; depois relê com ler_anexo.
-- Ditado: o microfone do campo, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros. O áudio vira texto no próprio computador, sem internet. Ative em **Configurações › Geral** › **Ditado**.
+- Até 10 imagens e 5 arquivos por mensagem (clipe, arrastar ou colar). AVIF, BMP e TIFF, e imagens grandes demais, vão ao agente como WebP. De PDF, Word, planilha e texto, o agente recebe o que está escrito, mesmo sem computador; depois relê com ler_anexo.
+- Ditado: o microfone do campo, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros. O áudio vira texto no próprio computador, sem internet. Ative em **Configurações › Modelos › Modelos locais** › **Áudio**.
+- Modelos locais de imagem (**Configurações › Modelos › Modelos locais** › **Imagens e PDFs**, desligados até ativar): **Ler texto** (PP-OCRv6, lê PDF escaneado), **Elementos de tela** (OmniParser v2, licença AGPL-3.0: botões, campos, cartões, com posição) e **Objetos** (DEIMv2-N). Ativados, o agente recebe o texto lido no lugar da imagem (ver_imagem mostra ela). Se nada for lido, a imagem vai; com **Nunca enviar imagens para a IA** (exige um modelo ativo), nunca vai, e ver_imagem fica bloqueada. Lê JPG, PNG, WebP e PDF; AVIF, GIF, BMP e TIFF se adicionados em **Tipos lidos aqui**. CPU ou GPU, baixados uma vez para todos os workspaces; desativar apaga o modelo. **Avançado**: modelo próprio (.onnx).
 
 ## Quando dá errado
 - "Interrompido: o app fechou no meio da resposta": **Tentar de novo**.

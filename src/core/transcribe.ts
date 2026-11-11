@@ -3,13 +3,13 @@
 // when the person turns dictation on. One already installed (Homebrew, a path in Settings) is
 // used as is. The audio leaves no file behind.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { L } from '../shared/lang'
 import type { VoiceModelId, VoiceSettings, VoiceStatus } from '../shared/types'
 import { encodeWav } from '../shared/wav'
+import { fetchPinned } from './pinned-file'
 import { executableNames, isWin, killTree } from './platform'
 
 export const MAX_AUDIO_BASE64 = 30_000_000 // about 15 minutes of 16 kHz mono
@@ -27,7 +27,8 @@ const MODEL_DIRS = (home: string): string[] => [join(home, '.cache', 'whisper-cp
 
 export interface VoicePlaces {
   bundled?: string // the folder with the whisper-cli that came with the app
-  models: string // where the app keeps the models it downloads
+  models: string // where the app keeps the models it downloads: one folder every workspace shares
+  legacy?: string // this workspace's own folder, where they went before: one there is still used
 }
 
 const findBin = (path: string | undefined, bundled?: string): string | undefined =>
@@ -42,20 +43,21 @@ const modelsIn = (dir: string): string[] => {
 }
 
 // The best one there: the app's own first, and turbo before the rest, since it's what's fast enough to dictate with.
-function findModel(home: string, own?: string): string | undefined {
-  const mine = own ? modelsIn(own) : []
+function findModel(home: string, own?: string, legacy?: string): string | undefined {
+  const mine = [...(own ? modelsIn(own) : []), ...(legacy ? modelsIn(legacy) : [])]
   const all = [...mine, ...MODEL_DIRS(home).flatMap(modelsIn)]
   return all.find((f) => f.includes('turbo')) ?? all.sort().at(-1)
 }
 
 // Which of the app's models is downloaded, if any.
-export const downloaded = (dir: string): VoiceModelId[] => (Object.keys(VOICE_MODELS) as VoiceModelId[]).filter((id) => existsSync(join(dir, VOICE_MODELS[id].file)))
+export const downloaded = (...dirs: string[]): VoiceModelId[] => (Object.keys(VOICE_MODELS) as VoiceModelId[]).filter((id) => dirs.some((dir) => existsSync(join(dir, VOICE_MODELS[id].file))))
 
 export function voiceStatus(voice: VoiceSettings | undefined, env: NodeJS.ProcessEnv = process.env, home = homedir(), places?: VoicePlaces): VoiceStatus {
   const bin = voice?.bin ? (existsSync(voice.bin) ? voice.bin : undefined) : findBin(env['PATH'] ?? env['Path'], places?.bundled)
-  const model = voice?.model ? (existsSync(voice.model) ? voice.model : undefined) : findModel(home, places?.models)
-  const ownModel = places ? (Object.keys(VOICE_MODELS) as VoiceModelId[]).find((id) => model === join(places.models, VOICE_MODELS[id].file)) : undefined
-  return { bin, model, ready: !!bin && !!model, ...(ownModel ? { ownModel } : {}), ...(places ? { downloaded: downloaded(places.models) } : {}) }
+  const model = voice?.model ? (existsSync(voice.model) ? voice.model : undefined) : findModel(home, places?.models, places?.legacy)
+  const own = places ? [places.models, ...(places.legacy ? [places.legacy] : [])] : []
+  const ownModel = (Object.keys(VOICE_MODELS) as VoiceModelId[]).find((id) => own.some((dir) => model === join(dir, VOICE_MODELS[id].file)))
+  return { bin, model, ready: !!bin && !!model, ...(ownModel ? { ownModel } : {}), ...(places ? { downloaded: downloaded(...own) } : {}) }
 }
 
 // The model, fetched once: to a .part file, hashed on the way, and moved into place only if it's
@@ -70,7 +72,8 @@ export class ModelDownload {
     private changed: () => void,
     private fetcher: typeof fetch = fetch,
     private models: Record<VoiceModelId, { file: string; bytes: number; sha256: string }> = VOICE_MODELS, // tests use small ones
-    private downloaded: () => void = () => {}
+    private downloaded: () => void = () => {},
+    private legacy?: string
   ) {}
 
   async start(id: VoiceModelId): Promise<void> {
@@ -79,35 +82,18 @@ export class ModelDownload {
     const abort = new AbortController()
     this.abort = abort
     this.error = null
-    this.progress = { model: id, received: 0, total: m.bytes }
+    const progress = { model: id, received: 0, total: m.bytes }
+    this.progress = progress
     this.changed()
-    mkdirSync(this.dir, { recursive: true })
-    const part = join(this.dir, `${m.file}.part`)
     let last = 0
     try {
-      const res = await this.fetcher(MODEL_URL(m.file), { signal: abort.signal, redirect: 'follow' })
-      if (!res.ok || !res.body) throw new Error(L(`O download respondeu ${res.status}.`, `The download answered ${res.status}.`))
-      const hash = createHash('sha256')
-      const out = createWriteStream(part)
-      const reader = res.body.getReader()
-      try {
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          hash.update(value)
-          if (!out.write(value)) await new Promise((r) => out.once('drain', r))
-          this.progress.received += value.length
-          // a few updates a second are enough for a bar
-          if (Date.now() - last > 250) (last = Date.now()), this.changed()
-        }
-      } finally {
-        await new Promise<void>((r) => out.end(r))
-      }
-      if (this.progress.received !== m.bytes || hash.digest('hex') !== m.sha256) throw new Error(L('O arquivo baixado não é o esperado. Tente de novo.', "The downloaded file isn't the expected one. Try again."))
-      renameSync(part, join(this.dir, m.file))
+      await fetchPinned(this.fetcher, { url: MODEL_URL(m.file), bytes: m.bytes, sha256: m.sha256 }, join(this.dir, m.file), abort.signal, (n) => {
+        progress.received += n
+        // a few updates a second are enough for a bar
+        if (Date.now() - last > 250) (last = Date.now()), this.changed()
+      })
       this.downloaded()
     } catch (e) {
-      rmSync(part, { force: true })
       if (!abort.signal.aborted) this.error = e instanceof Error ? e.message : String(e)
     } finally {
       if (this.abort === abort) {
@@ -122,9 +108,10 @@ export class ModelDownload {
     this.abort?.abort()
   }
 
-  // A model the app downloaded, gone; one installed some other way isn't the app's to delete.
+  // A model the app downloaded, gone (from the shared folder, and from this workspace's own, where
+  // the app used to keep them); one installed some other way isn't the app's to delete.
   remove(id: VoiceModelId): void {
-    rmSync(join(this.dir, this.models[id].file), { force: true })
+    for (const dir of [this.dir, ...(this.legacy ? [this.legacy] : [])]) rmSync(join(dir, this.models[id].file), { force: true })
     this.changed()
   }
 }
@@ -151,7 +138,7 @@ export class Transcriber {
   private running = new Map<string, { proc: ChildProcess; cancelled: boolean }>()
 
   async transcribe(id: string, base64: string, status: VoiceStatus, language: string | undefined): Promise<string> {
-    if (!status.bin || !status.model) throw new Error(L('O ditado ainda não está ativado. Veja em Configurações › Geral.', "Dictation isn't turned on yet. See Settings › General."))
+    if (!status.bin || !status.model) throw new Error(L('O ditado ainda não está ativado. Veja em Configurações › Modelos › Modelos locais.', "Dictation isn't turned on yet. See Settings › Models › Local models."))
     if (base64.length > MAX_AUDIO_BASE64) throw new Error(L('Esse áudio é longo demais.', 'That recording is too long.'))
     const dir = mkdtempSync(join(tmpdir(), 'tucano-voz-'))
     try {

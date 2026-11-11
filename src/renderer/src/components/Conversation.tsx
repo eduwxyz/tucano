@@ -70,6 +70,7 @@ import { canEditChannel,
   type Message,
   type Step,
   IMAGE_MIMES,
+  IMAGE_INPUT_MIMES,
   MAX_IMAGES_PER_MESSAGE,
   MAX_FILE_BYTES,
   MAX_FILES_PER_MESSAGE,
@@ -1655,6 +1656,7 @@ function ApprovalRoute({ approval, agent, requester, decider, you }: { approval:
 // (longest side MAX_SIDE) and re-encoded, so any screenshot or photo fits.
 const MAX_SIDE = 2000
 const MAX_RAW = 3_700_000 // base64 under the models' 5 MB
+const MAX_IMAGE_INPUT = 20 * 1024 * 1024 // a format sent as it is, for the core to convert
 
 // An image (with what shows it) or, in the app, any other file: `url` empty, its text goes to the agents.
 type Attached = ImageUpload & { url: string; size?: number }
@@ -1679,13 +1681,24 @@ async function prepareFile(file: File): Promise<Attached | string> {
   }
 }
 
+// What stands for an image this window can't show (a TIFF): the core still reads and converts it.
+const NO_PREVIEW = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="160" height="120" fill="#8882"/><path d="M58 78l16-20 12 14 8-9 14 15z" fill="#8888"/></svg>')}`
+
 async function prepareImage(file: File): Promise<Attached | string> {
   if (!file.type.startsWith('image/')) return L(`${file.name} não é imagem.`, `${file.name} isn't an image.`)
   try {
     const src = await dataUrlOf(file) // the page's CSP takes data: images, not blob:
     const img = new Image()
     img.src = src
-    await img.decode()
+    const shown = await img.decode().then(
+      () => true,
+      () => false
+    )
+    // A format the core converts but this window doesn't show: it goes as it is.
+    if (!shown) {
+      if (!IMAGE_INPUT_MIMES.includes(file.type) || file.size > MAX_IMAGE_INPUT) throw new Error('unreadable')
+      return { name: file.name || L('imagem', 'image'), mime: file.type, data: src.slice(src.indexOf(',') + 1), url: NO_PREVIEW }
+    }
     const side = Math.max(img.naturalWidth, img.naturalHeight)
     let blob: Blob = file
     if (!IMAGE_MIMES.includes(file.type) || side > MAX_SIDE || file.size > MAX_RAW) {
@@ -1695,8 +1708,10 @@ async function prepareImage(file: File): Promise<Attached | string> {
       canvas.height = Math.round(img.naturalHeight * k)
       canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
       const encode = (type: string, q?: number): Promise<Blob | null> => new Promise((ok) => canvas.toBlob(ok, type, q))
-      blob = (file.type === 'image/png' && (await encode('image/png'))) || file
-      if (blob === file || blob.size > MAX_RAW) blob = (await encode('image/jpeg', 0.88)) ?? file
+      // WebP: the lightest the window makes. A browser that can't (it gives a PNG back) sends JPEG.
+      const webp = await encode('image/webp', 0.88)
+      blob = webp?.type === 'image/webp' ? webp : ((await encode('image/jpeg', 0.88)) ?? file)
+      if (blob.size > MAX_RAW) blob = (await encode('image/webp', 0.7).then((b) => (b?.type === 'image/webp' ? b : null))) ?? (await encode('image/jpeg', 0.7)) ?? blob
     }
     if (blob.size > MAX_RAW) return L(`${file.name} é grande demais.`, `${file.name} is too big.`)
     const url = blob === file ? src : await dataUrlOf(blob)
@@ -2036,8 +2051,8 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     // On a server, a file that isn't an image goes up to it (~/Enviados) and the message says where:
     // an agent on that computer opens it there, and the link brings it back down.
     const upload = window.tucano.upload
-    const files = upload ? all.filter((f) => IMAGE_MIMES.includes(f.type)) : all
-    const others = upload ? all.filter((f) => !IMAGE_MIMES.includes(f.type)) : []
+    const files = upload ? all.filter((f) => IMAGE_INPUT_MIMES.includes(f.type)) : all
+    const others = upload ? all.filter((f) => !IMAGE_INPUT_MIMES.includes(f.type)) : []
     if (others.length && upload) {
       setNote(L(`Enviando ${others.length === 1 ? others[0]!.name : `${others.length} arquivos`}…`, `Sending ${others.length === 1 ? others[0]!.name : `${others.length} files`}…`))
       const sent = await Promise.allSettled(others.map((f) => upload(f, 'message')))
