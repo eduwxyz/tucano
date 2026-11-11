@@ -981,7 +981,7 @@ function ComputerCard({ agentId, kind, sandbox, onSandboxChange, onChange }: { a
   )
 }
 
-function SandboxCard({ sandbox, enabled, onChange }: { sandbox?: SandboxConfig; enabled: boolean; onChange: (sandbox: SandboxConfig) => void }): ReactNode {
+export function SandboxCard({ sandbox, enabled, onChange }: { sandbox?: SandboxConfig; enabled: boolean; onChange: (sandbox: SandboxConfig) => void }): ReactNode {
   const provider = sandbox?.provider ?? 'none'
   const update = (patch: Partial<SandboxConfig>): void => onChange({ ...sandbox, provider: 'ai-jail', ...patch })
   const chooseFolder = async (key: 'readOnlyPaths' | 'readWritePaths' | 'overlayPaths' | 'maskPaths' | 'maskExceptPaths' | 'denyPaths' | 'denyExceptPaths'): Promise<void> => {

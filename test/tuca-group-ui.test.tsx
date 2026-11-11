@@ -183,6 +183,18 @@ describe("the Tuca's builder screen", () => {
     expect(store.ensureTuca).toHaveBeenLastCalledWith(undefined, true)
   })
 
+  it('shows sandbox settings in the computer step before creating the agent', async () => {
+    fake = state({ messages: { t1: [] } })
+    await render(<Onboarding build />)
+    await click(/Prefiro montar eu mesmo/)
+    await click(/^Continuar$/)
+    await click(/^Este computador$/)
+    await click(/^ai-jail$/)
+    expect(text()).toContain('Sandbox do computador')
+    expect(text()).toContain('Escolher .ai-jail')
+    expect(text()).toContain('Caminhos somente leitura')
+  })
+
   it('"Nova conversa" with nothing left to apply starts over at once', async () => {
     const said = { id: 'p1', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'oi', at: 5 } as Message
     fake = state({ messages: { t1: [said] } })
