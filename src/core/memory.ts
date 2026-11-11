@@ -178,26 +178,44 @@ export interface ThreadDigest {
   last?: Message // its newest reply with something said
   replies: number
   agents: string[] // who answered in it
-  working: { agentId: string; status: RunStatus }[]
+  working: AgentOnIt[]
   at: number // its latest activity
+}
+
+export interface AgentOnIt {
+  agentId: string
+  status: RunStatus
+  doing?: string // its latest step
 }
 
 export const MAX_DIGESTS = 12
 const BUSY: RunStatus[] = ['working', 'waiting_input', 'waiting_approval']
 
+const isBusy = (m: Message): boolean => m.author.kind === 'agent' && !!m.run && BUSY.includes(m.run.status)
+
+// The replies still running among these messages.
+export function agentsOnIt(messages: Message[]): AgentOnIt[] {
+  return messages.flatMap((m) => {
+    if (m.author.kind !== 'agent' || !m.run || !isBusy(m)) return []
+    const step = m.run.steps.at(-1)
+    return [{ agentId: m.author.id, status: m.run.status, ...(step ? { doing: step.detail ? `${step.label}: ${step.detail}` : step.label } : {}) }]
+  })
+}
+
 // The other threads active in `recent`, oldest activity first, the newest MAX_DIGESTS.
-function digests(db: Pick<Db, 'message'>, recent: Message[], except?: string): ThreadDigest[] {
+// `threadsOnly`: leaves out the messages nobody replied to in a thread.
+function digests(db: Pick<Db, 'message'>, recent: Message[], except?: string, threadsOnly = false): ThreadDigest[] {
   const groups = new Map<string, Message[]>()
   for (const m of recent) {
     const key = m.threadId ?? m.id
     if (key !== except) groups.set(key, [...(groups.get(key) ?? []), m])
   }
   return [...groups]
+    .filter(([, ms]) => !threadsOnly || ms.some((m) => m.threadId))
     .map(([id, ms]): ThreadDigest => {
       const said = ms.filter((m) => m.id !== id && m.author.kind !== 'system' && m.text.trim())
       const agents = [...new Set(ms.flatMap((m) => (m.id !== id && m.author.kind === 'agent' ? [m.author.id] : [])))]
-      const working = ms.flatMap((m) => (m.author.kind === 'agent' && m.run && BUSY.includes(m.run.status) ? [{ agentId: m.author.id, status: m.run.status }] : []))
-      return { id, root: ms.find((m) => m.id === id) ?? db.message(id), last: said.at(-1), replies: said.length, agents, working, at: Math.max(...ms.map((m) => m.at)) }
+      return { id, root: ms.find((m) => m.id === id) ?? db.message(id), last: said.at(-1), replies: said.length, agents, working: agentsOnIt(ms), at: Math.max(...ms.map((m) => m.at)) }
     })
     .sort((a, b) => a.at - b.at)
     .slice(-MAX_DIGESTS)
@@ -218,8 +236,8 @@ export function contextWindow(
   until = 0
 ): { messages: Message[]; threads: ThreadDigest[]; summary?: string; before?: Message[] } {
   const here = (m: Message): boolean => m.id !== before.id && m.at <= before.at && m.at > until
-  if (!before.threadId) return { messages: db.recentMessages(before.conversationId, limit + 40, null).filter(here).slice(-limit), threads: [] }
   const recent = db.recentMessages(before.conversationId, limit + 40).filter(here)
+  if (!before.threadId) return { messages: db.recentMessages(before.conversationId, limit + 40, null).filter(here).slice(-limit), threads: digests(db, recent, undefined, true) }
   const root = db.message(before.threadId)
   const replies = db.recentMessages(before.conversationId, limit + 2, before.threadId).filter((m) => m.id !== before.id && m.at <= before.at)
   const omitted = replies.length > limit
@@ -253,18 +271,21 @@ export interface ThreadHit {
   root?: Message
   last?: Message
   at: number
+  working: AgentOnIt[]
 }
 
 // buscar_threads: the threads of these conversations that best match the words, by what was
-// said in them and their summaries (a thread just opened has none yet). `except`: the thread
-// the search is made from.
+// said in them and their summaries (a thread just opened has none yet); with no words, the
+// latest ones. Threads with replies come before single messages, which are short and would
+// otherwise outrank them. `except`: what the search is made from (a thread or a message).
 // `keep`: what the one asking may read (a message left out is as if it weren't there).
-export function searchThreads(db: Pick<Db, 'message' | 'recentMessages'>, conversationIds: string[], query: string, except?: string, limit = 5, keep: (m: Message) => boolean = () => true): ThreadHit[] {
+export function searchThreads(db: Pick<Db, 'message' | 'recentMessages'>, conversationIds: string[], query: string, except: (string | undefined)[] = [], limit = 5, keep: (m: Message) => boolean = () => true): ThreadHit[] {
+  const skip = new Set(except)
   const groups = new Map<string, Message[]>()
   for (const c of conversationIds)
     for (const m of db.recentMessages(c, 400)) {
       const key = m.threadId ?? m.id
-      if (key === except || m.author.kind === 'system' || !m.text.trim() || !keep(m)) continue
+      if (skip.has(key) || skip.has(m.id) || m.author.kind === 'system' || (!m.text.trim() && !isBusy(m)) || !keep(m)) continue
       groups.set(key, [...(groups.get(key) ?? []), m])
     }
   const docs = [...groups].map(([id, ms]) => {
@@ -272,9 +293,14 @@ export function searchThreads(db: Pick<Db, 'message' | 'recentMessages'>, conver
     const root = ms.find((m) => m.id === id) ?? (found && keep(found) ? found : undefined)
     const replies = ms.filter((m) => m.id !== id)
     const text = [root?.text ?? '', root?.threadSummary?.text ?? '', ...replies.map((m) => m.text)].join('\n')
-    return { hit: { id, conversationId: ms[0]!.conversationId, root, last: replies.at(-1), at: ms.at(-1)!.at }, text }
+    return { hit: { id, conversationId: ms[0]!.conversationId, root, last: replies.filter((m) => m.text.trim()).at(-1), at: ms.at(-1)!.at, working: agentsOnIt(ms) }, text, thread: replies.length > 0 }
   })
-  return rank(docs, (d) => d.text, query, limit, (a, b) => b.hit.at - a.hit.at).map((d) => d.hit)
+  const newestFirst = (a: (typeof docs)[number], b: (typeof docs)[number]): number => b.hit.at - a.hit.at
+  const threads = docs.filter((d) => d.thread)
+  if (!words(query).length) return threads.sort(newestFirst).slice(0, Math.min(Math.max(1, Math.floor(limit)), 10)).map((d) => d.hit)
+  const found = rank(threads, (d) => d.text, query, limit, newestFirst)
+  const room = limit - found.length
+  return [...found, ...(room > 0 ? rank(docs.filter((d) => !d.thread), (d) => d.text, query, room, newestFirst) : [])].map((d) => d.hit)
 }
 
 // Lowercase, no accents, words of letters and digits separated by single spaces.

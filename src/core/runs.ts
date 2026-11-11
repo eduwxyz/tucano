@@ -7,7 +7,7 @@ import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
-import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
+import { agentsOnIt, BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type AgentOnIt, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
@@ -309,6 +309,16 @@ export interface RoutineEvent {
   source: string // "Linear · list_issues", "chamada local"
   title: string // the new item, in a line
   body: string // the item itself, clipped
+}
+
+// Who is on a thread right now, in words, for an agent asked how it's going.
+function onItNow(working: AgentOnIt[], name: (id: string) => string): string {
+  return working
+    .map((w) => {
+      const state = w.status === 'waiting_input' ? L('esperando resposta', 'waiting for an answer') : w.status === 'waiting_approval' ? L('esperando aprovação', 'waiting for approval') : L('trabalhando', 'working')
+      return `${name(w.agentId)} ${state}${w.doing ? ` (${snip(w.doing, 120)})` : ''}`
+    })
+    .join(', ')
 }
 
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
@@ -1474,12 +1484,13 @@ ${note}`,
 
         if (name === BUSCAR_THREADS.name && canSeekThreads) {
           const busca = typeof args['busca'] === 'string' ? args['busca'].trim() : ''
-          if (!busca) return textResult(L('Faltou o que buscar.', 'Missing what to search for.'), true)
           const convs = myConversations()
-          const hits = searchThreads(db, convs.map((c) => c.id), busca, msg.threadId, typeof args['limite'] === 'number' ? args['limite'] : 5, (m) => sees.visibleAt(requester, m))
-          addSteps({ id: randomUUID(), label: L('Buscou nas threads', 'Searched threads'), detail: `${busca} · ${hits.length === 1 ? L('1 achada', '1 found') : L(`${hits.length} achadas`, `${hits.length} found`)}`, status: 'done' })
-          if (!hits.length) return textResult(L(`Nenhuma thread com "${busca}". Tente outras palavras; se não achar, o assunto não foi tratado nas conversas recentes.`, `No thread with "${busca}". Try other words; if nothing turns up, the subject wasn't covered in the recent conversations.`))
-          const who = (m: Message): string => (m.author.kind === 'person' ? (named.find((p) => m.author.kind === 'person' && p.id === m.author.id)?.name ?? settings.workspaceName) : m.author.kind === 'agent' ? (db.agent(m.author.id)?.name ?? L('agente', 'agent')) : L('rotina', 'routine'))
+          // Not the message being answered: it has the very words searched for.
+          const hits = searchThreads(db, convs.map((c) => c.id), busca, [msg.threadId, msg.id, asked?.id], typeof args['limite'] === 'number' ? args['limite'] : 5, (m) => sees.visibleAt(requester, m))
+          addSteps({ id: randomUUID(), label: L('Buscou nas threads', 'Searched threads'), detail: `${busca || L('recentes', 'recent')} · ${hits.length === 1 ? L('1 achada', '1 found') : L(`${hits.length} achadas`, `${hits.length} found`)}`, status: 'done' })
+          if (!hits.length) return textResult(busca ? L(`Nenhuma thread com "${busca}". Tente outras palavras, ou busque sem palavras pra ver as mais recentes; se não achar, o assunto não foi tratado nas conversas recentes.`, `No thread with "${busca}". Try other words, or search with none to see the latest ones; if nothing turns up, the subject wasn't covered in the recent conversations.`) : L('Nenhuma thread nas conversas recentes.', 'No threads in the recent conversations.'))
+          const agentName = (id: string): string => db.agent(id)?.name ?? L('agente', 'agent')
+          const who = (m: Message): string => (m.author.kind === 'person' ? (named.find((p) => m.author.kind === 'person' && p.id === m.author.id)?.name ?? settings.workspaceName) : m.author.kind === 'agent' ? agentName(m.author.id) : L('rotina', 'routine'))
           const lines = hits.map((h) => {
             const c = convs.find((x) => x.id === h.conversationId)
             const where = c?.kind === 'dm' ? L('DM', 'DM') : `#${c?.name ?? '?'}`
@@ -1489,7 +1500,8 @@ ${note}`,
               : h.last
                 ? `${L('última resposta', 'last reply')} (${who(h.last)}): "${snip(h.last.text, 300)}"`
                 : L('sem resposta', 'no reply')
-            return `- [${h.id}] ${where} · ${clock(h.at)} · ${opened} · ${gist}`
+            const now = onItNow(h.working, agentName)
+            return `- [${h.id}] ${where} · ${clock(h.at)} · ${opened} · ${gist}${now ? ` · ${L('agora', 'now')}: ${now}` : ''}`
           })
           return textResult(lines.join('\n'))
         }
@@ -1505,11 +1517,13 @@ ${note}`,
           const older = replies.length > HISTORY_LIMIT && root.threadSummary?.text.trim()
           const where = c.kind === 'dm' ? L(`DM com ${settings.workspaceName}`, `DM with ${settings.workspaceName}`) : `#${c.name}`
           addSteps({ id: randomUUID(), label: L('Leu uma thread', 'Read a thread'), detail: snip(root.text, 80), status: 'done' })
+          const now = onItNow(agentsOnIt(replies), (a) => db.agent(a)?.name ?? L('agente', 'agent'))
           return textResult(
             [
               L(`Thread em ${where}:`, `Thread in ${where}:`),
               ...(older ? [`${L('Resumo do começo dela', 'Summary of its beginning')}:\n${root.threadSummary!.text.trim()}`] : []),
-              ...transcript({ agent, conversation: c, messages: [root, ...replies.slice(-HISTORY_LIMIT)], agents: db.agents(), me: settings.workspaceName, people: named }).slice(1)
+              ...transcript({ agent, conversation: c, messages: [root, ...replies.slice(-HISTORY_LIMIT)], agents: db.agents(), me: settings.workspaceName, people: named }).slice(1),
+              ...(now ? [`${L('Agora', 'Now')}: ${now}`] : [])
             ].join('\n\n')
           )
         }

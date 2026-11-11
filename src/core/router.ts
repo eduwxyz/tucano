@@ -95,7 +95,15 @@ export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: s
     L('Agentes no canal:', 'Agents in the channel:'),
     ...roster,
     '',
-    ...(others.length ? [L('Antes, no canal (outras threads e mensagens, das mais antigas pras mais novas: quem respondeu cada uma e como terminou):', 'Earlier in the channel (other threads and messages, oldest to newest: who answered each and how it ended):'), ...others, ''] : []),
+    ...(others.length
+      ? [
+          thread
+            ? L('Antes, no canal (outras threads e mensagens, das mais antigas pras mais novas: quem respondeu cada uma e como terminou):', 'Earlier in the channel (other threads and messages, oldest to newest: who answered each and how it ended):')
+            : L('Threads recentes do canal (das mais antigas pras mais novas: quem respondeu cada uma e como terminou; se a última mensagem for sobre uma delas, chame quem respondeu):', 'Recent threads in the channel (oldest to newest: who answered each and how it ended; if the last message is about one of them, call whoever answered it):'),
+          ...others,
+          ''
+        ]
+      : []),
     thread
       ? L('Thread (a primeira mensagem abriu a thread; a última é a que precisa de resposta):', 'Thread (the first message started it; the last one is the one that needs an answer):')
       : L('Conversa (a última é a que precisa de resposta):', 'Conversation (the last one is the one that needs an answer):'),
