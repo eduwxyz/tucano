@@ -10,6 +10,7 @@ import {
   navigate,
   newAgentDraft,
   openDm,
+  patchAgent,
   refreshEngines,
   saveAgent,
   settleDraft,
@@ -62,6 +63,7 @@ import {
   type MemoryMode,
   type Skill,
   type ToolClass,
+  type WikiAccess,
   isTeam,
   reachable,
   voiceDownload,
@@ -278,6 +280,20 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
   { value: 'auto', label: L('Grava sozinho', 'Saves on its own'), hint: L('Guarda e avisa na mensagem, com Desfazer.', 'Keeps it and says so in the message, with Undo.') },
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
   { value: 'read', label: L('Só lê', 'Read only'), hint: L('Usa as memórias, mas não guarda novas.', 'Uses memories but doesn’t keep new ones.') }
+]
+// What an agent may do with the wiki: read it, or keep it (its own write tools, on the Tools tab).
+const WIKI_LEVELS = (): { value: WikiAccess; label: string; hint: string }[] => [
+  { value: 'none', label: L('Sem acesso', 'No access'), hint: L('A wiki não entra na conversa: ele nem sabe que ela existe.', 'The wiki isn’t part of the conversation: it doesn’t even know it’s there.') },
+  {
+    value: 'read',
+    label: L('Só lê', 'Read only'),
+    hint: L('Ele procura e cita as páginas antes de responder, e o curador da wiki continua sendo quem escreve.', 'It looks pages up and cites them before replying, and the wiki curator is still the one who writes.')
+  },
+  {
+    value: 'read_write',
+    label: L('Lê e escreve', 'Read and write'),
+    hint: L('Ele cria páginas e corrige trechos (wiki_escrever, wiki_editar). Cada escrita fica no histórico da página, com Desfazer; as páginas guardadas pra uma pessoa não são tocadas fora da DM dela.', 'It creates pages and corrects passages (wiki_escrever, wiki_editar). Every write stays in the page’s history, with Undo; pages held for one person aren’t touched outside their own DM.')
+  }
 ]
 const LEVELS = (): { value: GrantLevel; label: string }[] => [
   { value: 'none', label: L('Sem acesso', 'No access') },
@@ -996,33 +1012,34 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             </Section>
           )}
 
-          {pane('memoria') && (
+          {pane('ferramentas') && (
             <Section
               title="Wiki"
-              help={L(
-                'A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas. Com escrita, ele também cria páginas e acrescenta trechos; mexer numa que já existe espera a sua aprovação.',
-                'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages. With writing, it also creates pages and adds stretches; changing one that exists waits for your approval.'
-              )}
+              help={`${L(
+                'A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas; lendo e escrevendo, ele também cria e corrige páginas por conta própria.',
+                'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages; reading and writing, it also creates and corrects pages on its own.'
+              )}${isNew || !admin ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
             >
               <Row label={L('Acesso à wiki', 'Wiki access')}>
                 <div className="segmented segmented--quiet" role="radiogroup" aria-label="Wiki">
-                  {([
-                    ['write', L('Escreve na wiki', 'Writes the wiki')],
-                    ['read', L('Lê a wiki', 'Reads the wiki')],
-                    ['none', L('Sem acesso', 'No access')]
-                  ] as const).map(([value, label]) => (
+                  {WIKI_LEVELS().map((l) => (
                     <button
-                      key={value}
+                      key={l.value}
                       role="radio"
-                      aria-checked={(draft.wiki ?? 'read') === value}
-                      className={(draft.wiki ?? 'read') === value ? 'is-active' : ''}
-                      onClick={() => patch({ wiki: value }, true)}
+                      aria-checked={(draft.wiki ?? 'read') === l.value}
+                      className={(draft.wiki ?? 'read') === l.value ? 'is-active' : ''}
+                      onClick={() => {
+                        if (isNew) return patch({ wiki: l.value })
+                        setDraft((d) => ({ ...d, wiki: l.value }))
+                        patchAgent(draft.id, { wiki: l.value })
+                      }}
                     >
-                      {label}
+                      {l.label}
                     </button>
                   ))}
                 </div>
               </Row>
+              <p className="hint">{WIKI_LEVELS().find((l) => l.value === (draft.wiki ?? 'read'))?.hint}</p>
               <Row label={L('Páginas', 'Pages')}>
                 <button className="link link--quiet" onClick={() => navigate({ kind: 'wiki' })}>
                   {L('Abrir a wiki ›', 'Open the wiki ›')}
