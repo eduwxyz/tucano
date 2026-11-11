@@ -62,6 +62,7 @@ import {
   type MemoryMode,
   type Skill,
   type ToolClass,
+  type WikiAccess,
   isTeam,
   reachable,
   voiceDownload,
@@ -278,6 +279,20 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
   { value: 'auto', label: L('Grava sozinho', 'Saves on its own'), hint: L('Guarda e avisa na mensagem, com Desfazer.', 'Keeps it and says so in the message, with Undo.') },
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
   { value: 'read', label: L('Só lê', 'Read only'), hint: L('Usa as memórias, mas não guarda novas.', 'Uses memories but doesn’t keep new ones.') }
+]
+// What an agent may do with the wiki: read it, or keep it (its own write tools, on the Tools tab).
+const WIKI_LEVELS = (): { value: WikiAccess; label: string; hint: string }[] => [
+  { value: 'none', label: L('Sem acesso', 'No access'), hint: L('A wiki não entra na conversa: ele nem sabe que ela existe.', 'The wiki isn’t part of the conversation: it doesn’t even know it’s there.') },
+  {
+    value: 'read',
+    label: L('Só lê', 'Read only'),
+    hint: L('Ele procura e cita as páginas antes de responder, e o curador da wiki continua sendo quem escreve.', 'It looks pages up and cites them before replying, and the wiki curator is still the one who writes.')
+  },
+  {
+    value: 'read_write',
+    label: L('Lê e escreve', 'Read and write'),
+    hint: L('Ele cria páginas e corrige trechos (wiki_escrever, wiki_editar). Cada escrita fica no histórico da página, com Desfazer; as páginas guardadas pra uma pessoa não são tocadas fora da DM dela.', 'It creates pages and corrects passages (wiki_escrever, wiki_editar). Every write stays in the page’s history, with Undo; pages held for one person aren’t touched outside their own DM.')
+  }
 ]
 const LEVELS = (): { value: GrantLevel; label: string }[] => [
   { value: 'none', label: L('Sem acesso', 'No access') },
@@ -876,6 +891,50 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
 
           {pane('ferramentas') && (
             <Section
+              title="Wiki"
+              help={
+                <>
+                  <p>
+                    {L(
+                      'A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas; lendo e escrevendo, ele também cria e corrige páginas por conta própria.',
+                      'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages; reading and writing, it also creates and corrects pages on its own.'
+                    )}
+                  </p>
+                  <p>
+                    {L(
+                      'Páginas guardadas pra uma pessoa só são lidas e escritas na DM dela: fora dali o agente não as vê.',
+                      'Pages held for one person are read and written only in their own DM: anywhere else the agent doesn’t see them.'
+                    )}
+                  </p>
+                  {!isNew && <p>{L('Muda na hora, sem precisar salvar.', 'Takes effect right away, no need to save.')}</p>}
+                </>
+              }
+            >
+              <Row label={L('Acesso à wiki', 'Wiki access')} sub={WIKI_LEVELS().find((l) => l.value === (draft.wiki ?? 'read'))?.hint}>
+                <div className="segmented segmented--quiet" role="radiogroup" aria-label="Wiki">
+                  {WIKI_LEVELS().map((l) => (
+                    <button
+                      key={l.value}
+                      role="radio"
+                      aria-checked={(draft.wiki ?? 'read') === l.value}
+                      className={(draft.wiki ?? 'read') === l.value ? 'is-active' : ''}
+                      onClick={() => patch({ wiki: l.value }, true)}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+              </Row>
+              <Row label={L('Páginas', 'Pages')}>
+                <button className="link link--quiet" onClick={() => navigate({ kind: 'wiki' })}>
+                  {L('Abrir a wiki ›', 'Open the wiki ›')}
+                </button>
+              </Row>
+            </Section>
+          )}
+
+          {pane('ferramentas') && (
+            <Section
               title={L('Autonomia', 'Autonomy')}
               help={L(
                 `Até onde ${name} vai sozinho e o que pede sua aprovação antes, com um botão na conversa. Ler e investigar nunca pede.`,
@@ -993,19 +1052,6 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   </button>
                 </Row>
               )}
-            </Section>
-          )}
-
-          {pane('memoria') && (
-            <Section title="Wiki" help={L('A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas.', 'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages.')}>
-              <Row label={L('Lê a wiki', 'Reads the wiki')}>
-                <Toggle label={L('Lê a wiki', 'Reads the wiki')} on={(draft.wiki ?? 'read') === 'read'} onChange={(v) => patch({ wiki: v ? 'read' : 'none' }, true)} />
-              </Row>
-              <Row label={L('Páginas', 'Pages')}>
-                <button className="link link--quiet" onClick={() => navigate({ kind: 'wiki' })}>
-                  {L('Abrir a wiki ›', 'Open the wiki ›')}
-                </button>
-              </Row>
             </Section>
           )}
         </div>
