@@ -185,6 +185,35 @@ export function callError(e: unknown, timeoutMs = CALL_TIMEOUT_MS): string {
   return message || L('A chamada falhou sem mensagem.', 'The call failed with no message.')
 }
 
+// The image a connector wears in the grid, in one of two shapes, put in line: an image file is scaled down
+// by the screen and kept as a data: URI with the connector; an address is kept as the https URL it is.
+// (index.html allows img-src 'self' data: tucano: https:, so a link shows and an http one never would.)
+// Anything else is refused here, with what's allowed, before it reaches the database.
+export const MAX_ICON_CHARS = 96_000 // ~70 kB of image: an icon, not a wallpaper, since it rides in every snapshot
+export const MAX_ICON_URL = 2_048 // an address long enough for any CDN, short enough to stay a line
+const ICON_DATA = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/
+export function connectorIcon(value: string | undefined | null): string | undefined {
+  const icon = (value ?? '').trim()
+  if (!icon) return undefined
+  if (!icon.startsWith('data:')) return iconUrl(icon)
+  if (icon.length > MAX_ICON_CHARS) throw new Error(L('A imagem é grande demais para um ícone (até 70 kB). Escolha uma menor.', 'That image is too big for an icon (70 kB at most). Pick a smaller one.'))
+  if (!ICON_DATA.test(icon)) throw new Error(L('Escolha um arquivo de imagem: PNG, JPEG, WebP ou GIF.', 'Choose an image file: PNG, JPEG, WebP or GIF.'))
+  return icon
+}
+
+// An image address: https only, since the app's policy has no room for an image fetched over http.
+function iconUrl(icon: string): string {
+  let url: URL
+  try {
+    url = new URL(icon)
+  } catch {
+    throw new Error(L('Cole um endereço de imagem que comece em https://, ou escolha um arquivo.', 'Paste an image address that starts with https://, or choose a file.'))
+  }
+  if (url.protocol !== 'https:') throw new Error(L('O endereço da imagem precisa começar em https://.', 'The image address must start with https://.'))
+  if (icon.length > MAX_ICON_URL) throw new Error(L('Esse endereço é longo demais para um ícone.', 'That address is too long for an icon.'))
+  return icon
+}
+
 export interface ConnectorDeps {
   db: Db
   secrets: Secrets
@@ -344,22 +373,30 @@ export class ConnectorManager {
   async add(input: ConnectorInput, interactive = false): Promise<string> {
     const name = input.name.trim()
     if (!name) throw new Error(L('Dê um nome ao conector.', 'Give the connector a name.'))
+    const icon = connectorIcon(input.icon)
     const id = randomUUID()
     if (input.kind === 'remote') {
       const url = new URL(input.url ?? '') // throws on an invalid URL
       if (url.protocol !== 'https:' && url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') throw new Error(L('Use uma URL https.', 'Use an https URL.'))
-      this.deps.db.saveConnector({ id, name, kind: 'remote', url: url.toString(), auth: input.auth ?? 'none' })
+      this.deps.db.saveConnector({ id, name, kind: 'remote', url: url.toString(), auth: input.auth ?? 'none', icon })
       if (input.auth === 'token' && input.token) await this.deps.secrets.set(key(id, 'token'), input.token.trim())
     } else {
       const command = input.command?.trim()
       if (!command) throw new Error(L('Informe o comando.', 'Enter the command.'))
       const env = input.env ?? {}
-      this.deps.db.saveConnector({ id, name, kind: 'stdio', command, args: input.args ?? [], envKeys: Object.keys(env), auth: 'none' })
+      this.deps.db.saveConnector({ id, name, kind: 'stdio', command, args: input.args ?? [], envKeys: Object.keys(env), auth: 'none', icon })
       if (Object.keys(env).length) await this.deps.secrets.setJson(key(id, 'env'), env)
     }
     this.emitConnector(id)
     void this.connect(id, interactive)
     return id
+  }
+
+  // The tile's image: set, replaced or taken off. No reconnect: nothing of the connection changes.
+  setIcon(id: string, icon: string | undefined | null): void {
+    if (!this.deps.db.connector(id)) throw new Error(L('Esse conector não existe mais.', 'That connector no longer exists.'))
+    this.deps.db.setConnectorIcon(id, connectorIcon(icon))
+    this.emitConnector(id)
   }
 
   // The person's app for a provider, and the address its sign-in comes back to (Slack's app registers it).

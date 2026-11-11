@@ -705,6 +705,7 @@ export interface Connector {
   command?: string // stdio
   args?: string[]
   envKeys?: string[] // names only; values are secrets
+  icon?: string // the image the person gave it: a data: URI (a file, scaled down by the screen) or an https address
   auth: ConnectorAuth
   status: ConnectorStatus
   error?: string
@@ -721,6 +722,7 @@ export interface ConnectorInput {
   command?: string
   args?: string[]
   env?: Record<string, string>
+  icon?: string // a data: URI or an https address, as setConnectorIcon takes it
 }
 
 // An MCP server found in a harness's own setup (Claude Code, Codex,

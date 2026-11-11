@@ -21,6 +21,7 @@ import {
   authorizeConnector,
   reconnectConnector,
   setConnectorToken,
+  setConnectorIcon,
   removeConnector,
   updateTool,
   updateSettings,
@@ -83,7 +84,7 @@ import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
-import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
+import { ConnectorGrid, IconPicker, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
 import { perCallTool } from '../../../shared/composio'
 import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
@@ -1489,6 +1490,25 @@ export function ConnectorsPage(): ReactNode {
   )
 }
 
+// The image the connector wears, changed from its own window: saved at once, no reconnect, since
+// nothing of the connection changes.
+function ConnectorIconRow({ c }: { c: Connector }): ReactNode {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = (icon?: string): void => {
+    setBusy(true)
+    setError(null)
+    setConnectorIcon(c.id, icon)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '').replace(/^Error: /, '') : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="connector-modal__icon">
+      <IconPicker value={c.icon} onChange={save} busy={busy} error={error} />
+    </div>
+  )
+}
+
 // A connector's state, who uses it and its tools, in a window over the page.
 function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void }): ReactNode {
   const users = useStore((s) => s.agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none'))
@@ -1502,6 +1522,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
           <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
           <span className="muted small mono truncate grow">{address(c)}</span>
         </div>
+        <ConnectorIconRow c={c} />
         <p className="muted small">
           {users.length ? (
             <>
@@ -1619,6 +1640,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
   const [command, setCommand] = useState('')
   const [args, setArgs] = useState('')
   const [env, setEnv] = useState('')
+  const [icon, setIcon] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -1634,7 +1656,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
           .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()])
       )
       const id = await addConnector(
-        kind === 'remote' ? { kind, name, url, auth, token: auth === 'token' ? token : undefined } : { kind, name, command, args: splitArgs(args), env: envMap }
+        kind === 'remote' ? { kind, name, url, auth, token: auth === 'token' ? token : undefined, icon } : { kind, name, command, args: splitArgs(args), env: envMap, icon }
       )
       onDone(id)
     } catch (e) {
@@ -1656,6 +1678,9 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
       </div>
       <Field label={L('Nome', 'Name')}>
         <input value={name} placeholder={kind === 'remote' ? L('Ex.: Linear', 'E.g. Linear') : L('Ex.: Postgres', 'E.g. Postgres')} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field label={L('Ícone (opcional)', 'Icon (optional)')} hint={L('A imagem que ele veste na grade de conectores, no lugar do ícone de terminal.', 'The image it wears in the connectors grid, in place of the terminal icon.')}>
+        <IconPicker value={icon} onChange={setIcon} />
       </Field>
       {kind === 'remote' ? (
         <>

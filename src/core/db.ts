@@ -513,7 +513,9 @@ const COLUMNS: [string, string, string][] = [
   ['person_keys', 'push', 'TEXT'],
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
   ['routines', 'date', 'TEXT'],
-  ['routines', 'month_day', 'INTEGER']
+  ['routines', 'month_day', 'INTEGER'],
+  // The image a connector wears in the grid: a data: URI (small, downscaled by the screen) or an https URL.
+  ['connectors', 'icon', 'TEXT']
 ]
 
 
@@ -1268,19 +1270,25 @@ export class Db {
       command: r['command'] ? str(r['command']) : undefined,
       args: JSON.parse(str(r['args']) || '[]') as string[],
       envKeys: JSON.parse(str(r['env_keys']) || '[]') as string[],
+      ...(r['icon'] ? { icon: str(r['icon']) } : {}),
       auth: str(r['auth']) as ConnectorAuth,
       tools: this.tools(id).map(({ inputSchema: _, ...t }) => t)
     }
   }
 
-  saveConnector(c: { id: string; name: string; kind: Connector['kind']; url?: string; command?: string; args?: string[]; envKeys?: string[]; auth: ConnectorAuth }): void {
+  saveConnector(c: { id: string; name: string; kind: Connector['kind']; url?: string; command?: string; args?: string[]; envKeys?: string[]; auth: ConnectorAuth; icon?: string }): void {
     this.db
       .prepare(
-        `INSERT INTO connectors (id, name, kind, url, command, args, env_keys, auth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO connectors (id, name, kind, url, command, args, env_keys, auth, icon, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, url = excluded.url, command = excluded.command,
-           args = excluded.args, env_keys = excluded.env_keys, auth = excluded.auth`
+           args = excluded.args, env_keys = excluded.env_keys, auth = excluded.auth, icon = excluded.icon`
       )
-      .run(c.id, c.name, c.kind, c.url ?? null, c.command ?? null, JSON.stringify(c.args ?? []), JSON.stringify(c.envKeys ?? []), c.auth, Date.now())
+      .run(c.id, c.name, c.kind, c.url ?? null, c.command ?? null, JSON.stringify(c.args ?? []), JSON.stringify(c.envKeys ?? []), c.auth, c.icon ?? null, Date.now())
+  }
+
+  // The image a connector wears. Its own write, so changing it touches nothing else (no reconnect).
+  setConnectorIcon(id: string, icon: string | undefined): void {
+    this.db.prepare('UPDATE connectors SET icon = ? WHERE id = ?').run(icon ?? null, id)
   }
 
   removeConnector(id: string): void {
