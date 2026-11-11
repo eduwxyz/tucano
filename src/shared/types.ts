@@ -231,6 +231,7 @@ export interface Run {
   delegations?: DelegationRef[] // the work this reply handed to the agents below its author
   routineAsk?: string // a routine's run: the message the routine posted, which this reply answers
   noNews?: true // a routine's run that found nothing new (it answered only noNewsPhrase): the conversation folds these into one line
+  silent?: true // a routine's run that had nothing to report ([SILENT]): an empty reply, no notification, no unread
 }
 
 // Where a piece of handed work lives, for a message to point at it: the thread `rootId` opened.
