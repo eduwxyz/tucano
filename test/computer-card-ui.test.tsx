@@ -32,6 +32,10 @@ const render = async (agent: Agent, computer?: ComputerInfo): Promise<void> => {
   fake = { ...getState(), ready: true, people: [ana], you: 'ana', agents: [agent], connectors: [], tabs: { agent: 'ferramentas' }, computers: computer ? [computer] : [], isolatedComputers: true }
   await act(async () => root.render(<AgentPage id="a1" />))
 }
+const renderNew = async (): Promise<void> => {
+  fake = { ...getState(), ready: true, people: [ana], you: 'ana', agents: [], connectors: [], tabs: { agent: 'ferramentas' }, computers: [], isolatedComputers: true }
+  await act(async () => root.render(<AgentPage />))
+}
 const card = (): Element => [...document.querySelectorAll('.card')].find((c) => c.textContent?.startsWith('Computador'))!
 const text = (): string => card().textContent ?? ''
 const picked = (): string => [...card().querySelector('[aria-label="Computador"]')!.querySelectorAll('[role="radio"]')].filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.textContent).join()
@@ -47,6 +51,15 @@ afterEach(async () => {
 })
 
 describe('the Computador card, on its first render', () => {
+  it('shows computer and sandbox configuration while creating an agent', async () => {
+    await renderNew()
+    expect(document.body.textContent ?? '').toContain('Computador')
+    await click('Este computador')
+    expect(text()).toContain('Liberar o computador pra ele')
+    await click('Liberar o computador pra ele')
+    expect(text()).toContain('Sandbox do computador')
+    expect(text()).toContain('Este computador')
+  })
   it('none: just the choice', async () => {
     await render(lia({ computer: false }))
     expect(picked()).toBe('Nenhum')
