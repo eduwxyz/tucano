@@ -33,6 +33,12 @@ const ctx = {
 }
 
 describe("the Tuca's proposals for what exists", () => {
+  it('keeps proposed instructions over the recommendation exactly as provided', () => {
+    const instructions = ` ${'x'.repeat(32_000)} END\n`
+    const result = proposalFrom('propor_ajuste', { agente: 'lia', instrucoes: instructions }, ctx)
+    expect(result.proposal?.kind === 'agent' && result.proposal.changes.instructions).toBe(instructions)
+  })
+
   it('proposes only what changes in an agent, checked like the screens check it', () => {
     const r = proposalFrom('propor_ajuste', { agente: '@lia', modelo: 'haiku', esforco: 'low', instrucoes: 'Você tria tickets.', conectores: [{ conector: 'linear', nivel: 'escrita' }], limite: 200000, motivo: 'Mais barato' }, ctx)
     expect(r.proposal).toEqual({ kind: 'agent', agentId: 'a1', changes: { modelId: 'haiku', grants: { 'c-lin': 'read_write' }, limit: 200000 }, before: { modelId: 'sonnet', grants: { 'c-lin': 'read' }, limit: 100000 }, reason: 'Mais barato' })
@@ -300,6 +306,7 @@ describe("the Tuca's prompt, for several changes", () => {
       expect(text).toMatch(lang === 'pt' ? /todas as propostas de uma vez, na mesma resposta/ : /all the proposals at once, in the same reply/)
       expect(text).toMatch(lang === 'pt' ? /Nunca uma por mensagem/ : /Never one per message/)
       expect(builderGuide({ me: 'Edu' })).toMatch(lang === 'pt' ? /não uma por mensagem/ : /not one per message/)
+      expect(builderGuide({ tuca: true })).toMatch(lang === 'pt' ? /32\.000 caracteres.*recomendação, não um limite/ : /32,000 characters.*recommendation, not a limit/)
     }
     setLang('pt')
   })

@@ -8,6 +8,7 @@ import { channelName, codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCa
 import type { ToolDef } from './gateway'
 import { guideIndex } from './guide'
 import { SCREENS } from '../shared/screens'
+import { RECOMMENDED_INSTRUCTION_LENGTH } from '../shared/instructions'
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
 const EFFORTS: Effort[] = ['low', 'medium', 'high']
@@ -135,7 +136,7 @@ export const PROPOR_AGENTE: ToolDef = {
         nome: { type: 'string', description: L('Um nome de gente, curto (ex.: "Rafa").', 'A short, human name (e.g. "Rafa").') },
         funcao: { type: 'string', description: L('Em uma ou duas palavras (ex.: "Suporte").', 'In one or two words (e.g. "Support").') },
         cor: { type: 'string', enum: COLORS },
-        instrucoes: { type: 'string', description: L('O que ele faz, como entrega, o que evita e quando pergunta. De 4 a 8 linhas, falando com ele.', 'What it does, how it delivers, what it avoids and when it asks. 4 to 8 lines, talking to it.') },
+        instrucoes: { type: 'string', description: L(`O que ele faz, como entrega, o que evita e quando pergunta. Mire em até ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('pt-BR')} caracteres (recomendação, não limite); preserve prompts existentes maiores, sem truncar.`, `What it does, how it delivers, what it avoids and when it asks. Aim for at most ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('en-US')} characters (recommendation, not limit); preserve longer existing prompts without truncating.`) },
         modelo: { type: 'string', description: L('O id de um modelo da lista "Modelos que dá pra usar".', 'The id of a model from the "Models you can use" list.') },
         esforco: { type: 'string', enum: EFFORTS },
         web: { type: 'boolean', description: L('Se busca e lê páginas da web.', 'Whether it searches and reads web pages.') },
@@ -217,11 +218,15 @@ export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Re
 // with (models, connectors, the team) changes, and goes in the live context: builderSection.
 export function builderGuide(ctx: { tuca?: boolean; me?: string }): string {
   const me = ctx.me ?? L('a pessoa', 'the person')
+  const sizeGuidance = L(
+    `Mire em até ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('pt-BR')} caracteres nas instruções novas; é uma recomendação, não um limite. Preserve prompts existentes maiores sem truncar.`,
+    `Aim for at most ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('en-US')} characters in new instructions; this is a recommendation, not a limit. Preserve longer existing prompts without truncating.`
+  )
   return ctx.tuca
-    ? L('## Pra montar agentes', '## For building agents')
+    ? L(`## Pra montar agentes\n${sizeGuidance}`, `## For building agents\n${sizeGuidance}`)
     : L(
-          `## Pra propor agentes, times, rotinas e canais\nVocê pode propor, num card que ${me} aplica: um agente novo (propor_agente), um time de agentes com um canal (propor_time), mudar um agente (propor_ajuste), uma rotina de outro agente (propor_rotina; as suas, agende com agendar_rotina) e um canal (propor_canal). Proponha quando ${me} pedir, ou quando for claramente o que resolve o pedido; não no meio de outra tarefa. Nada existe ou muda até ${me} aplicar. Várias mudanças pedidas juntas vão todas na mesma resposta, uma chamada por mudança (viram um grupo de cards com "Aplicar todos"), não uma por mensagem; uma rotina ou um canal pra um agente proposto nessa resposta vem depois dele, com o nome dele. Num agente novo: instruções de 4 a 8 linhas falando com ele, conectores só em leitura se a tarefa não pede escrita, o modelo mais simples que dá conta. Dúvida de como usar o Tucano (telas, configurações, por que algo não funciona) é com o Tuca: diga pra perguntar a ele. Ele não muda o seu acesso nem as suas permissões: se faltar uma, diga a ${me} qual, sem mandar pedir ao Tuca.`,
-          `## For proposing agents, teams, routines and channels\nYou can propose, as a card ${me} applies: a new agent (propor_agente), a team of agents with a channel (propor_time), changing an agent (propor_ajuste), a routine for another agent (propor_rotina; your own you schedule with agendar_rotina) and a channel (propor_canal). Propose when ${me} asks, or when it's clearly what solves the request; not in the middle of another task. Nothing exists or changes until ${me} applies it. Several changes asked together all go in the same reply, one call per change (they become a group of cards with "Apply all"), not one per message; a routine or channel for an agent proposed in that reply comes after it, with its name. For a new agent: 4 to 8 lines of instructions talking to it, connectors read-only unless the task needs writing, the simplest model that does the job. Questions about how to use Tucano (screens, settings, why something isn't working) are for the Tuca: say to ask him. He doesn't change your access or permissions: if one is missing, tell ${me} which, without sending them to the Tuca.`
+          `## Pra propor agentes, times, rotinas e canais\nVocê pode propor, num card que ${me} aplica: um agente novo (propor_agente), um time de agentes com um canal (propor_time), mudar um agente (propor_ajuste), uma rotina de outro agente (propor_rotina; as suas, agende com agendar_rotina) e um canal (propor_canal). Proponha quando ${me} pedir, ou quando for claramente o que resolve o pedido; não no meio de outra tarefa. Nada existe ou muda até ${me} aplicar. Várias mudanças pedidas juntas vão todas na mesma resposta, uma chamada por mudança (viram um grupo de cards com "Aplicar todos"), não uma por mensagem; uma rotina ou um canal pra um agente proposto nessa resposta vem depois dele, com o nome dele. Num agente novo: ${sizeGuidance} Conectores só em leitura se a tarefa não pede escrita, o modelo mais simples que dá conta. Dúvida de como usar o Tucano (telas, configurações, por que algo não funciona) é com o Tuca: diga pra perguntar a ele. Ele não muda o seu acesso nem as suas permissões: se faltar uma, diga a ${me} qual, sem mandar pedir ao Tuca.`,
+          `## For proposing agents, teams, routines and channels\nYou can propose, as a card ${me} applies: a new agent (propor_agente), a team of agents with a channel (propor_time), changing an agent (propor_ajuste), a routine for another agent (propor_rotina; your own you schedule with agendar_rotina) and a channel (propor_canal). Propose when ${me} asks, or when it's clearly what solves the request; not in the middle of another task. Nothing exists or changes until ${me} applies it. Several changes asked together all go in the same reply, one call per change (they become a group of cards with "Apply all"), not one per message; a routine or channel for an agent proposed in that reply comes after it, with its name. For a new agent: ${sizeGuidance} Connectors read-only unless the task needs writing, the simplest model that does the job. Questions about how to use Tucano (screens, settings, why something isn't working) are for the Tuca: say to ask him. He doesn't change your access or permissions: if one is missing, tell ${me} which, without sending them to the Tuca.`
         )
 }
 
@@ -246,8 +251,8 @@ export function builderSection(s: Pick<Settings, 'engines'>, ctx: { models: { id
 export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId: string) => boolean; fallbackModel: string; connectors: Connector[] }): { draft?: AgentDraft; error?: string } {
   const text = (k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
   const name = text('nome', 40)
-  const instructions = text('instrucoes', 4000)
-  if (!name || !instructions) return { error: L('Faltou nome ou instrucoes.', 'Missing nome or instrucoes.') }
+  const instructions = typeof args['instrucoes'] === 'string' ? (args['instrucoes'] as string) : ''
+  if (!name || !instructions.trim()) return { error: L('Faltou nome ou instrucoes.', 'Missing nome or instrucoes.') }
   const grants: Record<string, GrantLevel> = {}
   const unknown: string[] = []
   for (const c of Array.isArray(args['conectores']) ? (args['conectores'] as unknown[]) : []) {
