@@ -119,10 +119,55 @@ export type ComputerKind = 'linux' | 'mac'
 export type SandboxProviderId = 'none' | 'ai-jail'
 export interface SandboxConfig {
   provider: SandboxProviderId
+  configFile?: string
   network?: boolean
+  allowHosts?: string[]
   readOnlyPaths?: string[]
   readWritePaths?: string[]
+  overlayPaths?: string[]
+  hideDotDirs?: string[]
+  maskPaths?: string[]
+  maskExceptPaths?: string[]
+  denyPaths?: string[]
+  denyExceptPaths?: string[]
   environment?: string[]
+  envFromFiles?: string[]
+  privateHome?: boolean
+  lockdown?: boolean
+  landlock?: boolean
+  seccomp?: boolean
+  rlimits?: boolean
+  agentState?: boolean
+  inheritEnv?: boolean
+  github?: boolean
+  aws?: boolean
+  kube?: boolean
+  gcloud?: boolean
+  dockerConfig?: boolean
+  ssh?: boolean
+  pictures?: boolean
+  browser?: 'hard' | 'soft' | 'none'
+  docker?: boolean
+  tailscale?: boolean
+  terminalPassthrough?: boolean
+  systemdUser?: boolean
+  gpu?: boolean
+  display?: boolean
+  audio?: boolean
+  kvm?: boolean
+  macosHostIpc?: boolean
+  x11?: boolean
+  hostShm?: boolean
+  updateCheck?: boolean
+  worktree?: boolean
+  mise?: boolean
+  toolchains?: boolean
+  saveConfig?: boolean
+  hideConfig?: boolean
+  exec?: boolean
+  claudeDir?: string
+  auditLog?: boolean
+  statusBar?: boolean
 }
 
 export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a.computer && a.computerKind === 'mac'

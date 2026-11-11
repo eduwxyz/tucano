@@ -34,7 +34,7 @@ const render = async (agent: Agent, computer?: ComputerInfo): Promise<void> => {
 }
 const card = (): Element => [...document.querySelectorAll('.card')].find((c) => c.textContent?.startsWith('Computador'))!
 const text = (): string => card().textContent ?? ''
-const picked = (): string => [...card().querySelectorAll('[role="radio"]')].filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.textContent).join()
+const picked = (): string => [...card().querySelector('[aria-label="Computador"]')!.querySelectorAll('[role="radio"]')].filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.textContent).join()
 const click = async (name: string): Promise<void> => {
   const b = [...card().querySelectorAll('button')].find((x) => x.textContent === name)!
   await act(async () => void b.dispatchEvent(new window.Event('click', { bubbles: true })))
@@ -51,6 +51,7 @@ describe('the Computador card, on its first render', () => {
     await render(lia({ computer: false }))
     expect(picked()).toBe('Nenhum')
     expect(text()).not.toContain('Liberar o computador pra ele')
+    expect(text()).not.toContain('Sandbox do computador')
     expect(text()).not.toContain('Emprestar pasta')
   })
 
@@ -64,7 +65,7 @@ describe('the Computador card, on its first render', () => {
   it('this computer, let: what it means, its folder and services, and nothing of Linux nor the confirmation', async () => {
     await render(lia({ computer: true, computerKind: 'mac' }), info('mac', 'running'))
     expect(picked()).toBe('Este computador')
-    for (const t of ['no seu computador', 'Liberado: os comandos rodam direto no seu computador', 'alcança as suas pastas sem emprestar e não precisa do Docker', 'Abrir pasta dele', 'Parar serviços']) expect(text()).toContain(t)
+    for (const t of ['no seu computador', 'Liberado: os comandos rodam direto no seu computador', 'alcança as suas pastas sem emprestar e não precisa do Docker', 'Sandbox do computador', 'Nenhum', 'ai-jail', 'Abrir pasta dele', 'Parar serviços']) expect(text()).toContain(t)
     for (const t of ['Liberar o computador pra ele', 'Emprestar pasta', 'sem Docker', 'Verificar de novo', 'Apagar computador']) expect(text()).not.toContain(t)
   })
 })

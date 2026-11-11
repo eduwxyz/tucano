@@ -37,7 +37,7 @@ export async function* runCli(opts: {
   const input = opts.stdinFile ? openSync(opts.stdinFile, 'r') : undefined
   let child: ChildProcess
   try {
-    child = spawn(s.file, s.args, { cwd: opts.cwd, stdio: [input ?? 'pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+    child = spawn(s.file, s.args, { cwd: command.cwd ?? opts.cwd, stdio: [input ?? 'pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
   } finally {
     if (input !== undefined) closeSync(input) // the child has its own copy
   }

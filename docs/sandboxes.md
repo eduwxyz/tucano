@@ -13,12 +13,18 @@ A selected provider is fail-closed. If `ai-jail` is not installed or cannot be l
 
 The provider contract accepts:
 
-- `network`: whether the sandbox may use the network. This is needed by hosted model CLIs.
-- `readOnlyPaths`: host paths mounted read-only.
-- `readWritePaths`: host paths mounted read-write.
-- `environment`: environment variable names explicitly passed through.
+- `configFile`: an optional `.ai-jail` file selected by the user. It must be named `.ai-jail`; its containing directory becomes the project configuration directory while the agent workdir remains the child process's working directory.
+- `network` and `allowHosts`: unrestricted or filtered egress.
+- `readOnlyPaths`, `readWritePaths`, and `overlayPaths`: host mounts.
+- `hideDotDirs`, `maskPaths`, `maskExceptPaths`, `denyPaths`, and `denyExceptPaths`: path hardening rules.
+- `environment` and `envFromFiles`: explicitly passed environment values or files. Environment files are chosen with the native file picker.
+- `privateHome`, `lockdown`, `landlock`, `seccomp`, `rlimits`, `agentState`, `inheritEnv`, `systemdUser`, `gpu`, `display`, `audio`, `kvm`, `macosHostIpc`, `x11`, and `hostShm`: isolation, device, and process policy.
+- `github`, `aws`, `kube`, `gcloud`, `dockerConfig`, `ssh`, `pictures`, `docker`, `tailscale`, `terminalPassthrough`, `worktree`, `mise`, and `toolchains`: explicit host integrations.
+- `updateCheck`, `saveConfig`, `hideConfig`, `exec`, and `claudeDir`: launch and configuration behavior.
+- `browser`, `auditLog`, and `statusBar`: browser and observability settings.
+- Filtered egress uses `allowHosts`; Tucano never emits `--network` together with `--allow-host`.
 
-The agent settings UI exposes provider selection, network access, read-only mounts, read-write mounts, and explicit environment variables. The agent work directory is always mounted read-write for the selected local run.
+The agent settings UI exposes these settings only inside the `This computer` section. Path fields include a native Finder/file-picker action; the selected paths remain visible as editable text so they can also be pasted or adjusted. The agent work directory is always mounted read-write for the selected local run.
 
 ## Process behavior
 
