@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
+import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -69,8 +70,9 @@ const USAGE_ALERT = 0.8
 const NO_LIMIT_REPLY_BASE = 1_000_000
 
 // The month's ceiling for an agent: 0 (or anything that isn't a positive
-// number) is no ceiling, so every comparison against it is false.
-export const monthlyCeiling = (limit: number): number => (limit > 0 ? limit : Infinity)
+// number) is no ceiling, so every comparison against it is false. The rule
+// lives in shared/limits.ts, where the screens read it too.
+export { monthlyCeiling }
 
 // How many tokens a single reply may spend. With a ceiling it is a share of it;
 // without one the share is taken over NO_LIMIT_REPLY_BASE, so a reply still has

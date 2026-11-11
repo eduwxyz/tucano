@@ -31,7 +31,7 @@ import {
   proposalKey,
   proposalsOf
 } from '../store'
-import { AgentAvatar, Icon, tokens } from './ui'
+import { AgentAvatar, Icon, monthlyLimitText } from './ui'
 import { describeRoutine } from './Routines'
 
 const EFFORT = (): Record<AgentDraft['effort'], string> => ({ low: L('esforço baixo', 'low effort'), medium: L('esforço médio', 'medium effort'), high: L('esforço alto', 'high effort'), xhigh: L('esforço máximo', 'max effort') })
@@ -196,7 +196,8 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
       if (c.effort !== undefined) rows.push([L('Esforço', 'Effort'), level(was.effort ?? agent.effort), level(c.effort)])
       if (c.web !== undefined) rows.push(['Web', was.web !== false ? L('ligada', 'on') : L('desligada', 'off'), c.web ? L('ligada', 'on') : L('desligada', 'off')])
       if (c.grants !== undefined) rows.push([L('Conectores', 'Connectors'), grantList(was.grants ?? {}), grantList(c.grants)])
-      if (c.limit !== undefined) rows.push([L('Limite do mês', "Month's limit"), tokens(was.limit ?? agent.limit), tokens(c.limit)])
+      // 0 is no limit, so the card says that instead of a figure that reads as "set it to zero".
+      if (c.limit !== undefined) rows.push([L('Limite do mês', "Month's limit"), monthlyLimitText(was.limit ?? agent.limit), monthlyLimitText(c.limit)])
     }
     head = (
       <>
