@@ -1,4 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { hasMonthlyLimit } from '../../../shared/limits'
 import { examples, type AvatarDefinition } from 'open-bot-avatar'
 import { mountAvatar, type AvatarOptions, type MountedAvatar } from 'open-bot-avatar/dom'
 import { useEffect, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react'
@@ -272,6 +273,9 @@ export const tokens = (n: number): string =>
     : n >= 1000
       ? `${(n / 1000).toLocaleString(locale(), { maximumFractionDigits: n >= 100_000 ? 0 : 1 })}k`
       : String(n)
+
+/** A month's limit as it reads to a person: a figure, or "no limit" when there isn't one (0). */
+export const monthlyLimitText = (limit: number): string => (hasMonthlyLimit(limit) ? tokens(limit) : L('sem limite', 'no limit'))
 
 export function duration(ms: number): string {
   if (ms < 1000) return `${ms} ms`

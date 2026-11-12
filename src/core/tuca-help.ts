@@ -3,6 +3,8 @@
 // card with Aplicar and Descartar, like his new agents: nothing changes until the person applies it.
 // He sees settings, statuses and error messages, never what was said in a conversation.
 import { L } from '../shared/lang'
+import { usedShare } from '../shared/limits'
+import { RECOMMENDED_INSTRUCTION_LENGTH } from '../shared/instructions'
 import { channelName, dateAt, ENGINES, modelInfo, nextRun, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { dateArg } from './routines'
@@ -78,9 +80,11 @@ export function workspaceState(area: unknown, x: StateInput): string {
     const lines = x.agents.map((a) => {
       const m = modelInfo(a.modelId)
       const grants = Object.entries(a.grants).map(([id, g]) => `${x.connectors.find((c) => c.id === id)?.name ?? id} (${g === 'read_write' ? L('escrita', 'write') : g === 'read' ? L('leitura', 'read') : g})`)
-      const pct = a.limit ? Math.round((a.used / a.limit) * 100) : 0
+      // With no monthly limit (0) there is no month to be a percentage of: say so, rather than "0%".
+      const share = usedShare(a.used, a.limit)
+      const pct = share === undefined ? undefined : Math.round(share * 100)
       const pending = x.approvals.filter((p) => p.agentId === a.id && p.state === 'pending').length
-      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
+      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
     })
     out.push(`## ${L('Agentes', 'Agents')}\n${lines.join('\n') || L('nenhum ainda', 'none yet')}`)
   }
@@ -122,7 +126,7 @@ export const PROPOR_AJUSTE: ToolDef = {
         ...agentProp(),
         nome: { type: 'string' },
         funcao: { type: 'string' },
-        instrucoes: { type: 'string', description: L('As instruções novas, inteiras.', 'The new instructions, whole.') },
+        instrucoes: { type: 'string', description: L(`As instruções novas, inteiras. Até ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('pt-BR')} caracteres é a recomendação, não um limite.`, `The new instructions, whole. ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('en-US')} characters is a recommendation, not a limit.`) },
         modelo: { type: 'string', description: L('O id de um modelo da lista "Modelos que dá pra usar".', 'The id of a model from the "Models you can use" list.') },
         esforco: { type: 'string', enum: EFFORTS },
         web: { type: 'boolean' },
@@ -196,6 +200,7 @@ export interface ProposalCtx {
 }
 
 const text = (args: Record<string, unknown>, k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
+const instructionsText = (args: Record<string, unknown>): string => (typeof args['instrucoes'] === 'string' ? (args['instrucoes'] as string) : '')
 const findAgent = (ctx: ProposalCtx, raw: unknown): Agent | undefined => {
   const h = String(raw ?? '').trim().replace(/^@/, '').toLowerCase()
   return ctx.agents.find((a) => a.handle.toLowerCase() === h) ?? ctx.agents.find((a) => a.name.toLowerCase() === h)
@@ -239,7 +244,7 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
     if (name && name !== agent.name) changes.name = name
     const role = text(args, 'funcao', 40)
     if (role && role !== agent.role) changes.role = role
-    const instructions = text(args, 'instrucoes', 8000)
+    const instructions = instructionsText(args)
     if (instructions && instructions !== agent.instructions) changes.instructions = instructions
     const model = text(args, 'modelo', 200)
     if (model && model !== agent.modelId) {
