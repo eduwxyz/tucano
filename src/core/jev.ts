@@ -78,6 +78,7 @@ export async function routeJev(opts: {
   ]
   const answers = await ask({ target, key: opts.key, state, questions, timeoutMs: TIMEOUT_MS, fetch: opts.fetch })
   if (failed(answers)) return { error: answers.error, ms: ms() }
+<<<<<<< HEAD
 
   const who = answers['who']
   if (typeof who?.choice !== 'string') return { error: badFormat(target.provider), ms: ms() }
@@ -202,6 +203,23 @@ export async function listenJev(opts: {
   // in the room that question was never asked: the listener it picked is the only one who can answer.
   if (answering.length > 0 && needed?.choice !== LISTEN_NO) return { agents: [], reason: L(`o ${picked.name} caberia, mas quem está no canal dá conta`, `${picked.name} would fit, but whoever is in the channel handles it`), ms: ms() }
   return { agents: [picked], reason: `${picked.name}, ${pct(picked.handle)}`, ms: ms() }
+=======
+
+  const who = answers['who']
+  if (typeof who?.choice !== 'string') return { error: badFormat(target.provider), ms: ms() }
+  const probs = who.probabilities ?? {}
+  const pct = (h: string): string => `${Math.round((probs[h] ?? 0) * 100)}%`
+  if (who.choice === NOBODY) return { agents: [], reason: `${target.name}, ${pct(NOBODY)}`, ms: ms() }
+  if (who.choice === EVERYONE) return { agents: [...agents], reason: `${target.name}, ${pct(EVERYONE)}`, ms: ms() }
+
+  const first = agents.find((a) => a.handle === who.choice)
+  if (!first) return { error: L(`${inSentence(target).pt} escolheu alguém fora do canal`, `${inSentence(target).en} picked someone outside the channel`), ms: ms() }
+  const second = agents
+    .filter((a) => a !== first && (probs[a.handle] ?? 0) >= SECOND_AT)
+    .sort((a, b) => (probs[b.handle] ?? 0) - (probs[a.handle] ?? 0))[0]
+  const picked = [first, ...(second ? [second] : [])].slice(0, MAX_ROUTED)
+  return { agents: picked, reason: `${target.name}, ${picked.map((a) => pct(a.handle)).join(L(' e ', ' and '))}`, ms: ms() }
+>>>>>>> 9489fbf5 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
 }
 
 // ---------- the browser (spec §24) ----------

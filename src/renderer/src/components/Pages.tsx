@@ -1,6 +1,5 @@
 import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, jobNotice, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
-import { L, locale, type Lang } from '../../../shared/lang'
-import { nodeOf } from '../../../shared/node-link'
+import { L, locale, type Lang } from '../../../shared/lang'import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
@@ -3266,7 +3265,6 @@ function ClassifierNotice({ job, classifier, work }: { job: ClassifierJob; class
     </p>
   )
 }
-
 // Settings › Classifiers: the model pairs that answer typed questions, and which job each one
 // serves. TypeSafe's Jev was the only one; Luna (OpenAI's Decisions API) and Gemini Decision 1 do
 // the same job, and Jev is also sold through OpenRouter, on the same key as the other models there.
@@ -3318,8 +3316,7 @@ export function ClassifiersCard(): ReactNode {
     if (!ok) return
     const left = Object.fromEntries(Object.entries(jobs).filter(([, v]) => v !== c.id)) as Partial<Record<ClassifierJob, string>>
     updateSettings({ classifiers: list.filter((x) => x.id !== c.id), classifierJobs: left })
-    if (open === c.id) setOpen(null)
-  }
+    if (open === c.id) setOpen(null)  }
   const saveKey = (id: string, value: string | null): void => {
     setBusy(true)
     setError('')
@@ -3333,8 +3330,7 @@ export function ClassifiersCard(): ReactNode {
   }
   const serves = (id: string): string =>
     CLASSIFIER_JOBS.filter((j) => jobs[j] === id)
-      .map((j) => jobLabel(j))
-      .join(', ')
+      .map((j) => jobLabel(j))      .join(', ')
 
   return (
     <>
@@ -3397,8 +3393,7 @@ export function ClassifiersCard(): ReactNode {
                 </div>
               )}
             </div>
-            <button className="btn btn--sm btn--ghost" title={L('Remover este classificador', 'Remove this classifier')} aria-label={L(`Remover ${c.name}`, `Remove ${c.name}`)} onClick={() => void remove(c)}>
-              ×
+            <button className="btn btn--sm btn--ghost" title={L('Remover este classificador', 'Remove this classifier')} aria-label={L(`Remover ${c.name}`, `Remove ${c.name}`)} onClick={() => void remove(c)}>              ×
             </button>
           </div>
         )
@@ -3428,8 +3423,7 @@ export function ClassifiersCard(): ReactNode {
               </div>
             </div>
           </div>
-          <span className="key-row__glyph" aria-hidden="true" />
-        </div>
+          <span className="key-row__glyph" aria-hidden="true" />        </div>
       ) : (
         <div className="row">
           <button className="btn btn--sm" onClick={startAdd}>
@@ -3469,8 +3463,7 @@ export function ClassifierUsesCard(): ReactNode {
             <Field key={job} label={jobLabel(job)} hint={jobAbout(job)}>
               <Select
                 value={jobs[job] ?? ''}
-                onChange={(v) => assign(job, v)}
-                options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
+                onChange={(v) => assign(job, v)}                options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
               />
             </Field>
           ))}
@@ -3485,8 +3478,7 @@ export function ClassifierUsesCard(): ReactNode {
                     {L(`${jobLabel(job)}: falta a chave de ${c.name}. Até ela entrar, nada vai para ${providerSpec(c.provider).label}.`, `${jobLabel(job)}: ${c.name} has no key yet. Until it does, nothing goes to ${providerSpec(c.provider).label}.`)}
                   </p>
                 )}
-              </div>
-            )
+              </div>            )
           })}
         </>
       )}
@@ -3550,7 +3542,6 @@ export function BrowserClickCard(): ReactNode {
     </Card>
   )
 }
-
 function VoiceCard(): ReactNode {
   const voice = useStore((s) => s.settings.voice)
   const status = useVoice()
@@ -3822,8 +3813,7 @@ export function SettingsPage(): ReactNode {
                   <Icon name="ask" />
                   <div className="grow">
                     <strong>{L('Pesquisas', 'Surveys')}</strong>
-                    <p className="muted small">{L('De vez em quando, uma linha discreta no pé da barra com uma pergunta rápida. Pra isso o Tucano consulta tucano.sh algumas vezes por dia. Não manda nada seu.', 'Occasionally shows a sidebar survey. Tucano checks tucano.sh a few times a day and sends none of your data.')}</p>
-                  </div>
+                    <p className="muted small">{L('De vez em quando, uma linha discreta no pé da barra com uma pergunta rápida. Pra isso o Tucano consulta tucano.sh algumas vezes por dia. Não manda nada seu.', 'Occasionally shows a sidebar survey. Tucano checks tucano.sh a few times a day and sends none of your data.')}</p>                  </div>
                   <Toggle on={settings.surveys !== false} onChange={(v) => updateSettings({ surveys: v })} label={L('Pesquisas', 'Surveys')} />
                 </div>
               )}

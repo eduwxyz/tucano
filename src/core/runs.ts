@@ -35,10 +35,17 @@ import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
+<<<<<<< HEAD
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
 import { JEV_MODEL, listenJev, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router' 
+=======
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
+import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
+import { JEV_MODEL, routeJev } from './jev'
+import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
+>>>>>>> 9489fbf5 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
 import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
@@ -326,7 +333,12 @@ export interface RunnerDeps {
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
   // The classifier that picks who replies, when one is chosen in Settings › Classifiers. `key` and
+<<<<<<< HEAD
   // `target` are asked per job: a job with no classifier is off.
+=======
+  // `target` are asked per job, so the same seam serves the jobs Apo's own branches add (listening,
+  // the recommended option, the next steps): a job with no classifier is off.
+>>>>>>> 9489fbf5 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
   jev?: { key(job?: ClassifierJob): Promise<string | undefined>; target?(job?: ClassifierJob): ClassifierConfig | undefined; fetch?: typeof fetch }
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
@@ -1299,9 +1311,14 @@ export class Runner {
         const key = await this.deps.jev?.key('routing')
         const missing = routing.provider === 'typesafe' ? L('falta a chave do TypeSafe', 'the TypeSafe key is missing') : L(`falta a chave do ${providerSpec(routing.provider).label}`, `the ${providerSpec(routing.provider).label} key is missing`)
         const j = key ? await routeJev({ ...input, key, target: this.deps.jev?.target?.('routing') ?? routing, fetch: this.deps.jev?.fetch }) : { error: missing }
+<<<<<<< HEAD
         if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s${heardWhy}`, parallel)
         fellBack = L(` · o ${routing.name} falhou (${j.error}), o Haiku decidiu`, ` · ${routing.name} failed (${j.error}), Haiku decided`)
 
+=======
+        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
+        fellBack = L(` · o ${routing.name} falhou (${j.error}), o Haiku decidiu`, ` · ${routing.name} failed (${j.error}), Haiku decided`)
+>>>>>>> 9489fbf5 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
       }
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
