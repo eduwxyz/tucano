@@ -1,6 +1,7 @@
-// Frames for the steer pill (#330 / this PR): at the bottom of a reply's steps while the agent
-// works, a small dim pill opens a field, and what the person writes goes to the running reply —
-// which says so in the chain, in their words, and carries on.
+// Frames for the steer pill (#330 / this PR): while the agent works, a small dim pill sits under the
+// run's box and outside it, so the steps and anything they stream below them — the thinking block —
+// stay above it. It opens a field, and what the person writes goes to the running reply, which says
+// so in the chain, in their words, and carries on.
 // The fake engine holds between two tool calls (TUCANO_FAKE_HOLD_MS) because a real one answers in
 // milliseconds: that pause is the only way to shoot a reply that is still working.
 import { _electron as electron } from 'playwright'
@@ -62,13 +63,20 @@ const waitWorking = async (win, want = true) => {
 // small, and out of the steps' way.
 const pillLook = (win) =>
   win.evaluate(() => {
-    const steps = [...document.querySelectorAll('.steps')].filter((s) => s.querySelector('.steps__toggle')).pop()
-    const pill = steps?.querySelector('.steps__steer-pill')
-    const list = steps?.querySelector('.steps__list')
-    if (!steps || !pill) return { pill: false }
+    const msgs = [...document.querySelectorAll('.msg--agent')]
+    const msg = msgs[msgs.length - 1]
+    const steps = msg?.querySelector('.steps')
+    const holder = msg?.querySelector('.steps__steer')
+    const pill = holder?.querySelector('.steps__steer-pill')
+    if (!steps || !pill) return { pill: false, steps: !!steps, holder: !!holder }
     const p = pill.getBoundingClientRect()
+    const b = steps.getBoundingClientRect()
+    const list = steps.querySelector('.steps__list')
     const l = list?.getBoundingClientRect()
+    const thought = steps.querySelector('.thought')
+    const th = thought?.getBoundingClientRect()
     const st = getComputedStyle(pill)
+    const hs = getComputedStyle(holder)
     return {
       pill: true,
       tag: pill.tagName,
@@ -78,8 +86,15 @@ const pillLook = (win) =>
       radius: st.borderRadius,
       fontSize: st.fontSize,
       color: st.color,
-      chainAbove: l ? Math.round(p.top - l.bottom) : null,
-      under: l ? p.top >= l.bottom - 1 : null,
+      holder: holder.className,
+      holderPaddingLeft: hs.paddingLeft,
+      insideTheBox: steps.contains(pill),
+      underTheBox: Math.round(p.top) >= Math.round(b.bottom) - 1,
+      gapBelowTheBox: Math.round(p.top - b.bottom),
+      belowTheList: l ? Math.round(p.top - l.bottom) : null,
+      leftAgainstTheBox: Math.round(p.left - b.left),
+      thoughtInTheBox: !!thought,
+      thoughtAboveThePill: th ? Math.round(p.top - th.bottom) : null,
       rows: steps.querySelectorAll('.step').length,
       working: !!steps.querySelector('.steps__stop'),
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
@@ -149,7 +164,7 @@ await channel(win, 'engineering')
 await ask(win, "Lia, sem pressa com a skill `steer-demo`: leia e faça o trabalho")
 await win.waitForTimeout(1200)
 console.log('while it works, the pill:', JSON.stringify(await pillLook(win)))
-await win.screenshot({ path: `${out}/01-the-pill-under-the-chain.png` })
+await win.screenshot({ path: `${out}/01-the-pill-under-the-box.png` })
 
 // Opening it: a field, nothing sent, the send asleep while it's empty.
 await win.locator('.steps__steer-pill').click()
