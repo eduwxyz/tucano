@@ -1304,7 +1304,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
   const failed = run.steps.filter((st) => st.status === 'error').length
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
-  const currentTarget = working && !open ? (current?.detail || current?.input)?.split(/\r?\n/)[0]?.slice(0, 200) : undefined
+  const currentTarget = working && !open && current?.kind !== 'thinking' ? (current?.detail || current?.input)?.split(/\r?\n/)[0]?.slice(0, 200) : undefined
   const count = `${run.steps.length} ${L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}`
 
   const line = (

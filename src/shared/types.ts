@@ -155,6 +155,7 @@ export interface Step {
   output?: string // what came back, in a few words ("120 rows")
   status: StepStatus
   ms?: number
+  kind?: 'thinking' // the wait for the model, not an action: it has no target to show
 }
 
 export interface Receipt {

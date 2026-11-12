@@ -1012,7 +1012,7 @@ export class Runner {
     const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
     const started = Date.now()
     let stepStarted = started
-    const thinking = (): Step => ({ id: randomUUID(), label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' })
+    const thinking = (): Step => ({ id: randomUUID(), label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running', kind: 'thinking' })
     msg.text = ''
     // "Try again" passes no task: it repeats the one of the reply it's redoing.
     const task = opts.task ?? opts.existing?.run?.task
