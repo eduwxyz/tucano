@@ -2811,8 +2811,8 @@ export function SettingsPage(): ReactNode {
               <Field
                 label={L('Um novo prompt com uma resposta em curso', 'A new prompt while a reply is running')}
                 hint={L(
-                  'O que o Enter faz quando o agente já está respondendo ali. Shift+Enter enfileira, Alt+Enter entrega no meio do trabalho, Shift+Alt+Enter interrompe, seja qual for o ajuste. Ctrl+Enter quebra a linha.',
-                  'What Enter does while the agent is already replying there. Shift+Enter queues, Alt+Enter hands it over mid-work, Shift+Alt+Enter interrupts, whatever the setting says. Ctrl+Enter breaks the line.'
+                  'O que o Enter faz quando o agente já está respondendo ali. Ctrl+Enter põe na fila, Alt+Enter entrega no meio do trabalho, Shift+Alt+Enter interrompe, seja qual for o ajuste. Shift+Enter continua quebrando a linha.',
+                  'What Enter does while the agent is already replying there. Ctrl+Enter queues, Alt+Enter hands it over mid-work, Shift+Alt+Enter interrupts, whatever the setting says. Shift+Enter still breaks the line.'
                 )}
               >
                 <Select
