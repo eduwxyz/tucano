@@ -2545,6 +2545,8 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
+        {pane('geral') && <RoutinePromptsCard />}
+
         {pane('geral') && admin && (
           <Card title={L('Atualizações', 'Updates')}>
             <UpdateSettings />
@@ -2756,6 +2758,31 @@ export function notifyHint(state: NotifyState | 'shown', mac: boolean): string |
       ? L('Mandei uma. Se não apareceu, confira Ajustes do Sistema › Notificações › Tucano (permitir, e o estilo Faixas ou Alertas) e se um modo Foco está ligado.', 'Sent one. If it didn’t show, check System Settings › Notifications › Tucano (allowed, with Banners or Alerts) and whether a Focus is on.')
       : L('Mandei uma. Se não apareceu, confira as notificações do sistema e do navegador para o Tucano, e o modo Não perturbe.', 'Sent one. If it didn’t show, check the system’s and the browser’s notification settings for Tucano, and Do Not Disturb.')
   return null
+}
+
+// How the request a routine posts in a conversation shows: whole, folded to a line, or left out (the reply says "via the routine").
+function RoutinePromptsCard(): ReactNode {
+  const mode = useStore((s) => s.settings.routinePrompts) ?? 'full'
+  const options = [
+    { value: 'full', label: L('Inteiro', 'Full') },
+    { value: 'compact', label: L('Compacto', 'Compact') },
+    { value: 'hidden', label: L('Oculto', 'Hidden') }
+  ] as const
+  return (
+    <Card title={L('Rotinas nas conversas', 'Routines in conversations')}>
+      <div className="field">
+        <span className="field__label">{L('Pedido das rotinas', 'Routine prompts')}</span>
+        <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Pedido das rotinas', 'Routine prompts')}>
+          {options.map((o) => (
+            <button key={o.value} type="button" role="radio" aria-checked={mode === o.value} className={mode === o.value ? 'is-active' : ''} onClick={() => updateSettings({ routinePrompts: o.value })}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <span className="hint">{L('A mensagem que a rotina posta antes de rodar. Compacto dobra numa linha; oculto deixa só “via rotina” na resposta. Muda só pra você.', 'The message a routine posts before it runs. Compact folds it to one line; hidden leaves only “via routine” on the reply. It changes only for you.')}</span>
+      </div>
+    </Card>
+  )
 }
 
 function NotifyTest(): ReactNode {
