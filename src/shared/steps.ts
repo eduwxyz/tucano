@@ -1,5 +1,5 @@
 // How a reply's steps read while it works: every step, only the latest few with the older
-// ones fading out, or one line saying how many there are. Unset anywhere: every step, which is
+// ones fading out, or one line showing the current activity. Unset anywhere: every step, which is
 // what the app has always done and what nobody's view changes to without asking.
 import type { Agent, Settings, Step, StepsMode } from './types'
 

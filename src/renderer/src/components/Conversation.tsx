@@ -1273,17 +1273,17 @@ function useNow(on: boolean): number {
 }
 
 // One quiet line: what the agent is doing now (and for how long), or how many
-// steps it took. The steps themselves open on a click — unless the person asked for
-// one line only, or for just the latest few (Settings › General, or one agent's own).
+// steps it took. Every mode lets the person open the steps on a click.
 export function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
-  // Every step (what the app has always done), the latest few, or one line with the count: the
+  // Every step (what the app has always done), the latest few, or one line of current activity: the
   // agent's own setting over the workspace's (src/shared/steps.ts).
   const mode = useStore((s) => stepsModeFor(s.settings, message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const keep = useStore((s) => s.settings.stepsLatest)
   // Open while the agent works, so its steps read as they go, unless the person closes it or turned
   // that off in Settings (several agents at once would fill the screen); closed after.
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
+  // A manual choice lasts through completion: finishing must not close what someone is reading.
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
   // One line is the whole point of 'one-line': there is nothing to open.
@@ -1304,33 +1304,30 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
   const failed = run.steps.filter((st) => st.status === 'error').length
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
+  const currentTarget = working && !open ? (current?.detail || current?.input)?.split(/\r?\n/)[0]?.slice(0, 200) : undefined
   const count = `${run.steps.length} ${L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}`
 
   const line = (
     <>
+      <span className="steps__chev">
+        <Icon name="chevron" size={12} />
+      </span>
       {working ? (
         <span className="steps__pulse" />
       ) : justDone ? (
         <span className="steps__done">
           <Icon name="check" size={12} />
         </span>
-      ) : (
-        <span className="steps__chev">
-          <Icon name="chevron" size={12} />
-        </span>
-      )}
+      ) : null}
       {working ? (
-        <span className="shimmer">
-          {/* One line: what it's doing is the count going up, not the label of the step. */}
-          {mode === 'one-line'
-            ? `${count}…`
-            : current
-              ? `${current.label}…`
-              : now - message.at > 60_000
-                ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
-                : run.steps.length === 0
-                  ? L('Lendo o pedido…', 'Reading the request…')
-                  : L('Pensando…', 'Thinking…')}
+        <span className="shimmer steps__activity">
+          {current
+            ? `${current.label}…`
+            : now - message.at > 60_000
+              ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
+              : run.steps.length === 0
+                ? L('Lendo o pedido…', 'Reading the request…')
+                : L('Pensando…', 'Thinking…')}
         </span>
       ) : (
         <span className="steps__summary">
@@ -1339,34 +1336,24 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
           {total > 0 && ` · ${duration(total)}`}
         </span>
       )}
+      {currentTarget && <code className="steps__now" title={currentTarget}>{currentTarget}</code>}
       {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
       {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
-      {working && (
-        <span
-          className="btn btn--xs btn--ghost steps__stop"
-          role="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            stopRun(message.id)
-          }}
-        >
-          <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
-        </span>
-      )}
     </>
   )
 
   return (
     <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''} steps--${mode}`}>
-      {opens ? (
-        <button className="steps__toggle" onClick={() => setOpen(!open)}>
+      <div className="steps__header">
+        <button type="button" className="steps__toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
           {line}
         </button>
-      ) : (
-        <div className="steps__toggle steps__toggle--line">
-          {line}
-        </div>
-      )}
+        {working && (
+          <button type="button" className="btn btn--xs btn--ghost steps__stop" onClick={() => stopRun(message.id)}>
+            <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
+          </button>
+        )}
+      </div>
       {open && (
         <ol ref={list} className="steps__list">
           {hidden > 0 && (

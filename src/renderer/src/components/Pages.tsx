@@ -268,7 +268,7 @@ const STEPS_CHOICES = (keep: number): { value: StepsMode; label: string; hint: s
   {
     value: 'one-line',
     label: L('Uma linha', 'One line'),
-    hint: L('Uma linha animada com a contagem de passos, sem os passos. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'One animated line with the step count, without the steps. Good for a busy channel with several agents at once.')
+    hint: L('Uma linha com o passo atual e seu alvo. Clique para abrir os detalhes. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'One line with the current step and its target. Click to open the details. Good for a busy channel with several agents at once.')
   }
 ]
 
@@ -634,8 +634,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             <Card
               title={L('Passos na resposta', 'Steps in a reply')}
               lead={`${L(
-                'Como as respostas deste agente mostram os passos: todos, só os últimos, ou uma linha com a contagem. O padrão é a configuração do app.',
-                'How this agent’s replies show their steps: all of them, only the latest few, or one line with the count. The default is the app’s setting.'
+                'Como as respostas deste agente mostram os passos: todos, só os últimos, ou uma linha com a atividade atual. O padrão é a configuração do app.',
+                'How this agent’s replies show their steps: all of them, only the latest few, or one line with the current activity. The default is the app’s setting.'
               )}${isNew || !admin ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
             >
               <StepsModePick
