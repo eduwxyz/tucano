@@ -21,7 +21,7 @@ Ou na página do agente, em **Canais e skills**: **Responde a**.
 1. Você pede ao agente de cima.
 2. Ele passa a parte de cada um: cada pedido vira uma thread no canal de quem faz (ou na DM dele), em nome de quem pediu.
 3. Na resposta dele aparece **Pediu a …**, com **Abrir a thread**.
-4. Quando a thread termina, a resposta volta pra conversa do pedido, em nome de quem fez.
+4. Quando a thread termina, a conversa do pedido ganha um aviso (**respondeu**), com **Ver resposta**.
 5. Quem pediu responde de novo, uma vez, quando tudo voltou. Um pedido parado numa aprovação sua não segura os outros.
 
 Onde fica: no canal do agente cujo **Tema** cobre o assunto. O que não é de canal nenhum (um recado, algo sobre ele), ou um agente sem canal, vai pra DM dele com você. Na dúvida, o primeiro canal. Você pode dizer onde.

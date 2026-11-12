@@ -163,7 +163,7 @@ export interface Returned {
 export function returnTask(returned: Returned[], open: { d: Delegation; to: string; channel: string; parked?: boolean }[], me: string): string {
   const line = (r: Returned): string => {
     const head = `- [${codeOf(r.d)}] ${r.to}, ${r.channel}`
-    if (r.what === 'done') return `${head}: ${L(`terminou. A resposta é a mensagem dele acima: ${me} já a vê inteira, aqui e na thread do pedido`, `finished. The answer is their message above: ${me} already sees it whole, here and in the request's thread`)}.`
+    if (r.what === 'done') return `${head}: ${L(`terminou. A resposta é a mensagem dele acima. ${me} vê aqui só um aviso de que ele respondeu, com um atalho pra abrir a resposta`, `finished. The answer is their message above. ${me} sees here only a note that they answered, with a shortcut to open the answer`)}.`
     if (r.what === 'failed') return `${head}: ${L(`não terminou${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}. Diga isso a ${me}, e peça de novo se fizer sentido`, `did not finish${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}. Tell ${me} so, and ask again if it makes sense`)}.`
     if (r.what === 'cancelled') return `${head}: ${L('foi parado antes de terminar', 'was stopped before it finished')}.`
     if (r.what === 'late') return `${head}: ${L(`passou do prazo e ainda não terminou. Diga a ${me}; pra desistir, use cancelar_pedido`, `is past its deadline and has not finished. Tell ${me}; to give up, use cancelar_pedido`)}.`
@@ -176,8 +176,8 @@ export function returnTask(returned: Returned[], open: { d: Delegation; to: stri
   const close = returned.some((r) => r.what === 'asking')
     ? ''
     : `\n\n${L(
-        `${open.length ? `Diga a ${me} o que já voltou, em poucas linhas, e o que ainda está andando${open.some((o) => o.parked) ? ` (e o que espera uma aprovação dele, na thread do pedido)` : ''}.` : `Feche o assunto com ${me}: o que resultou, em poucas linhas, e o que precisa de decisão. Não copie nem cite as respostas, que ${me} já tem na tela, e não diga que elas não chegaram.`}`,
-        `${open.length ? `Tell ${me} what has come back, in a few lines, and what is still going${open.some((o) => o.parked) ? ` (and what waits for their approval, in the request's thread)` : ''}.` : `Close the subject with ${me}: what came of it, in a few lines, and what needs a decision. Do not copy or quote the answers, which ${me} already has on screen, and do not say they did not arrive.`}`
+        `${open.length ? `Diga a ${me} o que já voltou, em poucas linhas, e o que ainda está andando${open.some((o) => o.parked) ? ` (e o que espera uma aprovação dele, na thread do pedido)` : ''}.` : `Feche o assunto com ${me}: diga o resultado em poucas linhas, com o que importa de cada resposta, e o que precisa de decisão. Não copie as respostas inteiras: ${me} abre cada uma pelo atalho. Não diga que elas não chegaram. Se falta ${me} escolher algo pra você seguir, pergunte com ask_user (com as opções), não no texto.`}`,
+        `${open.length ? `Tell ${me} what has come back, in a few lines, and what is still going${open.some((o) => o.parked) ? ` (and what waits for their approval, in the request's thread)` : ''}.` : `Close the subject with ${me}: say the result in a few lines, with what matters from each answer, and what needs a decision. Do not copy the answers whole: ${me} opens each one by the shortcut. Do not say they did not arrive. If ${me} has to choose something for you to go on, ask with ask_user (with the options), not in the text.`}`
       )}`
   return `${L('Voltou do que você pediu ao seu time', 'Back from what you asked of your team')}:\n${returned.map(line).join('\n')}${still}${close}`
 }

@@ -462,6 +462,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
 
   if (message.author.kind === 'routine') return <RoutineMessage message={message} replies={replies} />
 
+  // What came back from handed work, where it was asked: a line, not a voice. Whoever did it speaks in
+  // its own channel; here only whoever I asked does.
+  const from = message.run?.delegation
+  if (agent && from && from.to === agent.id && message.conversationId !== from.conversationId) return <ReturnedLine message={message} at={from} agent={agent} text={text} components={agentMarkdown} />
+
   const name = agent ? agent.name : (other ?? me.name)
   return (
     // Someone else's message reads like any other voice in the conversation: on the left, with their name.
@@ -495,9 +500,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </div>
         )}
         {message.run && <RunSteps message={message} />}
-        {text && message.run?.delegation?.back === 'result' && message.conversationId !== message.run.delegation.conversationId ? (
-          <ReturnedAnswer text={text} components={agentMarkdown} />
-        ) : text ? (
+        {text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
               <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={agentMarkdown}>{wikiLinks(text)}</MessageMarkdown>
@@ -995,21 +998,37 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
   )
 }
 
-// An answer that came back from handed work, where it was asked: one line until it's opened. Whoever
-// asked says what came of it right after, so the whole of it twice in a row would only be in the way.
-function ReturnedAnswer({ text, components }: { text: string; components: ComponentProps<typeof MessageMarkdown>['components'] }): ReactNode {
+// What came back from handed work, where it was asked: a line saying who answered (or asks), with the
+// whole of it one click away and a way to its thread. Whoever asked says what came of it right after.
+function ReturnedLine({ message, at, agent, text, components }: { message: Message; at: DelegationRef; agent: Agent; text: string; components: ComponentProps<typeof MessageMarkdown>['components'] }): ReactNode {
   const [open, setOpen] = useState(false)
+  const seen = useStore((s) => s.conversations.some((c) => c.id === at.conversationId))
+  const answer = at.back === 'result'
   const cut = text.indexOf(':\n\n') // after "Sobre o pedido em #canal:"
   const body = cut < 0 ? text : text.slice(cut + 3)
-  const line = body.replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
   return (
-    <div className="returned">
-      <button className="fold-toggle returned__toggle" aria-expanded={open} title={open ? L('Recolher', 'Fold') : L('Ver a resposta inteira', 'See the whole answer')} onClick={() => setOpen(!open)}>
-        <Icon name="chevron" size={12} />
-        <span>{open ? L('Resposta do pedido', 'The request’s answer') : line.length > 140 ? `${line.slice(0, 139)}…` : line}</span>
+    <div className={`system-line returned-line ${open ? 'is-open' : ''}`} data-id={message.id}>
+      <AgentAvatar agent={agent} size={16} />
+      <p>
+        <strong>{agent.name}</strong> {answer ? L('respondeu', 'answered') : L('tem uma pergunta', 'has a question')}
+      </p>
+      <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? L('Recolher', 'Fold') : answer ? L('Ver resposta', 'See the answer') : L('Ver pergunta', 'See the question')}
       </button>
+      {seen && (
+        <button
+          className="link"
+          onClick={() => {
+            navigate({ kind: 'conversation', id: at.conversationId, message: at.rootId })
+            openThread(at.rootId)
+          }}
+        >
+          {L('Abrir a thread', 'Open the thread')}
+        </button>
+      )}
+      <span className="muted">{time(message.at)}</span>
       {open && (
-        <div className="md">
+        <div className="returned-line__body md">
           <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={components}>{wikiLinks(body)}</MessageMarkdown>
         </div>
       )}

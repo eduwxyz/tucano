@@ -11713,28 +11713,31 @@ button.agent-card__now:hover {
 }
 
 /* An answer back from handed work, where it was asked: a line until it's opened. */
-.returned {
-  margin: 2px 0 4px;
+/* What came back from handed work, where it was asked: a line, with the whole of it folded under. */
+.returned-line {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  /* In line with what the messages say: their column, past the face. */
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 6px 28px 6px 74px;
 }
-.returned__toggle {
-  display: flex;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--text-2);
-  cursor: pointer;
+.returned-line p strong {
+  font-weight: 600;
+  color: var(--text);
 }
-.returned__toggle span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.returned__toggle[aria-expanded='true'] {
-  margin-bottom: 6px;
+.returned-line .link {
   font-size: 12.5px;
-  color: var(--text-3);
+}
+.returned-line__body {
+  flex: 0 0 100%;
+  margin: 4px 0 6px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border);
+  color: var(--text);
+  font-size: 14px;
 }
 
 /* Under a request, where it was delivered: how it stands and where its answer goes. */
