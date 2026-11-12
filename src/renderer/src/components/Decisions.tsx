@@ -309,7 +309,7 @@ function DecisionStep({ draftId, question, answer, recommended, last, takeFocus,
     question.kind === 'text'
       ? L('Enter confirma · Shift+Enter quebra a linha', 'Enter confirms · Shift+Enter for a new line')
       : steps
-        ? L(`Marque ou desmarque com 1 a ${options.length + 1} · todas começam marcadas`, `Tick or untick with 1 to ${options.length + 1} · all start ticked`)
+        ? L(`Marque quantos quiser com 1 a ${options.length + 1} · nada começa marcado`, `Tick as many as you like with 1 to ${options.length + 1} · nothing starts ticked`)
         : multiple
           ? L(`Marque quantas quiser com 1 a ${options.length + 1}`, `Tick as many as you like with 1 to ${options.length + 1}`)
           : L(`Escolha com 1 a ${options.length + 1}`, `Pick with 1 to ${options.length + 1}`)

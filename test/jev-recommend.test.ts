@@ -11,6 +11,7 @@ import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { RECOMMEND_NONE, recommendOptions } from '../src/core/jev'
+import { JEV_CLASSIFIER } from '../src/shared/classifiers'
 import { People } from '../src/core/people'
 import { Runner } from '../src/core/runs'
 
@@ -144,7 +145,7 @@ describe('the pill on the card', () => {
     return () => gateway.stop()
   })
 
-  const runner = (api: ReturnType<typeof typesafe>, key: string | undefined): Runner =>
+  const runner = (api: ReturnType<typeof typesafe>, key: string | undefined, target?: typeof JEV_CLASSIFIER): Runner =>
     new Runner({
       db,
       engines: engines(fakeEngine('claude', { delayMs: 1 })),
@@ -152,7 +153,7 @@ describe('the pill on the card', () => {
       emit: () => {},
       workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
       gateway,
-      jev: { key: async () => key, fetch: api.f }
+      jev: { key: async () => key, target: () => target, fetch: api.f }
     })
 
   it('lands on the reply afterwards, so asking never waits on TypeSafe', async () => {
@@ -208,8 +209,9 @@ describe('the pill on the card', () => {
     expect(api.requests).toHaveLength(0)
   })
 
-  it('with the steps question on too, the card is answered once: by its ticks', async () => {
-    settings = { ...settings, jevRecommend: true, jevNextSteps: true }
+  it('with a classifier on the steps job too, the card is answered once: by its ticks', async () => {
+    // The steps job is the classifier that ticks the card (Settings › Classifiers), the same Jev here.
+    settings = { ...settings, jevRecommend: true }
     const seen: { instructions: string; state: string }[] = []
     // A step is answered do/later by where it sits in the list; a decision, with its second option.
     const f = (async (_url: string, init: RequestInit) => {
@@ -221,7 +223,7 @@ describe('the pill on the card', () => {
       }
       return Response.json({ answers: { pick: { type: 'choice', choice: 'o1', probabilities: {} } } })
     }) as unknown as typeof fetch
-    const r = runner({ ...typesafe(), f } as ReturnType<typeof typesafe>, 'ts-key')
+    const r = runner({ ...typesafe(), f } as ReturnType<typeof typesafe>, 'ts-key', JEV_CLASSIFIER)
     await r.send('d1', '@lia me dá os próximos passos')
     await r.idle()
     const q = asked()
