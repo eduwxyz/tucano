@@ -12,8 +12,8 @@ const REPLY = (wide: boolean): string => `
   <article class="msg msg--agent"><div class="msg__gutter"></div><div class="msg__body">
     <div class="md"><p>${wide ? 'A resposta que terminou, com o texto que ela deixou na conversa.' : 'Resposta.'}</p></div>
     <div class="msg__meta">
-      <div class="steps__ask steps__ask--down steps__ask--reply">
-        <button class="steps__ask-pill" aria-expanded="false">Follow Up</button>
+      <div class="steps__steer steps__steer--down steps__steer--reply">
+        <button class="steps__steer-pill" aria-expanded="false">Follow Up</button>
       </div>
       <div class="receipt"><button class="receipt__line">Sonnet · 6.4k tokens · 5s</button></div>
       <span class="wiki-keep"><button class="link">Keep in the wiki</button></span>
@@ -32,7 +32,7 @@ it.skipIf(!existsSync(chromium.executablePath()))('puts the Follow Up pill on th
     })
 
     // One row: the pill and the receipt line share their vertical band, the pill on its left.
-    const pill = await box('.steps__ask-pill')
+    const pill = await box('.steps__steer-pill')
     const receipt = await box('.receipt__line')
     const keep = await box('.msg__meta .wiki-keep')
     expect(Math.abs(pill.mid - receipt.mid)).toBeLessThan(6)
@@ -41,27 +41,27 @@ it.skipIf(!existsSync(chromium.executablePath()))('puts the Follow Up pill on th
     expect(receipt.right).toBeLessThanOrEqual(keep.left + 1)
     // And first in the line, not somewhere after the numbers.
     const order = await page.locator('.msg__meta > *').evaluateAll((els) => els.map((el) => el.className.split(' ')[0]))
-    expect(order).toEqual(['steps__ask', 'receipt', 'wiki-keep'])
+    expect(order).toEqual(['steps__steer', 'receipt', 'wiki-keep'])
 
     // It comes in with the line it sits on: gone until the reply is hovered, there while hovered.
-    expect(await page.locator('.steps__ask--reply').evaluate((el) => getComputedStyle(el).opacity)).toBe('0')
+    expect(await page.locator('.steps__steer--reply').evaluate((el) => getComputedStyle(el).opacity)).toBe('0')
     await page.locator('.msg').hover()
-    await expect.poll(() => page.locator('.steps__ask--reply').evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
+    await expect.poll(() => page.locator('.steps__steer--reply').evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
     await page.locator('.md').hover()
-    expect(await page.locator('.steps__ask--reply').evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
+    expect(await page.locator('.steps__steer--reply').evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
 
     // Open, it stays seen even with the pointer away, and the field it opens sits under the pill.
-    await page.locator('.steps__ask-pill').evaluate((el) => el.setAttribute('aria-expanded', 'true'))
-    await page.locator('.steps__ask--reply').evaluate((el) => {
+    await page.locator('.steps__steer-pill').evaluate((el) => el.setAttribute('aria-expanded', 'true'))
+    await page.locator('.steps__steer--reply').evaluate((el) => {
       const note = document.createElement('div')
-      note.className = 'steps__ask-note'
+      note.className = 'steps__steer-note'
       note.innerHTML = '<textarea placeholder="What next?"></textarea>'
       el.append(note)
     })
     await page.mouse.move(5, 5)
-    await expect.poll(() => page.locator('.steps__ask--reply').evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
-    const field = await box('.steps__ask-note textarea')
-    const opened = await box('.steps__ask--reply')
+    await expect.poll(() => page.locator('.steps__steer--reply').evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
+    const field = await box('.steps__steer-note textarea')
+    const opened = await box('.steps__steer--reply')
     expect(field.top).toBeGreaterThan(pill.bottom)
     expect(opened.left).toBeCloseTo(pill.left, 0)
     expect(field.w).toBeLessThanOrEqual(520.5)
@@ -75,17 +75,17 @@ it.skipIf(!existsSync(chromium.executablePath()))('keeps the open field inside a
   try {
     const page = await browser.newPage({ viewport: { width: 420, height: 800 } })
     await page.setContent(`<style>${css}</style>${REPLY(false)}`)
-    await page.locator('.steps__ask-pill').evaluate((el) => el.setAttribute('aria-expanded', 'true'))
-    await page.locator('.steps__ask--reply').evaluate((el) => {
+    await page.locator('.steps__steer-pill').evaluate((el) => el.setAttribute('aria-expanded', 'true'))
+    await page.locator('.steps__steer--reply').evaluate((el) => {
       const note = document.createElement('div')
-      note.className = 'steps__ask-note'
+      note.className = 'steps__steer-note'
       note.innerHTML = '<textarea placeholder="What next?"></textarea>'
       el.append(note)
     })
     const measured = await page.evaluate(() => ({
       page: document.documentElement.scrollWidth,
       window: window.innerWidth,
-      field: document.querySelector('.steps__ask-note textarea')!.getBoundingClientRect().width
+      field: document.querySelector('.steps__steer-note textarea')!.getBoundingClientRect().width
     }))
     expect(measured.page).toBeLessThanOrEqual(measured.window)
     expect(measured.field).toBeGreaterThan(200)

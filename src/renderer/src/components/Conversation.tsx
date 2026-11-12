@@ -1429,12 +1429,12 @@ function PillPrompt(p: { icon: IconName; label: string; title: string; aria: str
     close()
   }
   return (
-    <div className={`steps__ask steps__ask--${p.icon}${p.place === 'reply' ? ' steps__ask--reply' : ''}`}>
-      <button className="steps__ask-pill" aria-expanded={open} title={p.title} onClick={() => (open ? close() : setOpen(true))}>
+    <div className={`steps__steer steps__steer--${p.icon}${p.place === 'reply' ? ' steps__steer--reply' : ''}`}>
+      <button className="steps__steer-pill" aria-expanded={open} title={p.title} onClick={() => (open ? close() : setOpen(true))}>
         <Icon name={p.icon} size={11} /> {p.label}
       </button>
       {open && (
-        <div className="steps__ask-note">
+        <div className="steps__steer-note">
           <textarea
             aria-label={p.aria}
             placeholder={p.placeholder}
@@ -1447,7 +1447,7 @@ function PillPrompt(p: { icon: IconName; label: string; title: string; aria: str
               if (e.key === 'Escape') close()
             }}
           />
-          <div className="steps__ask-row">
+          <div className="steps__steer-row">
             <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => go(typed)}>
               {p.label}
             </button>

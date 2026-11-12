@@ -1441,7 +1441,7 @@ h3 {
 }
 /* The pill under the chain: a steer while the agent works, a follow up once the reply has ended.
    Small, dim, out of the way until it's wanted, and lined up with the steps' own rail above it. */
-.steps__ask {
+.steps__steer {
   display: grid;
   gap: 8px;
   margin: 2px 0 4px 3px;
@@ -1450,7 +1450,7 @@ h3 {
 /* The follow up pill rides the reply's own footer — the line that fades in under a finished answer,
    first in it, before the receipt. So it comes in with that line: a reply that has ended shows its
    answer, not a button, and a hover (or a tab to it) brings the way to go on with the numbers. */
-.msg__meta .steps__ask--reply {
+.msg__meta .steps__steer--reply {
   flex: 0 0 auto;
   margin: 0;
   padding: 0;
@@ -1458,22 +1458,22 @@ h3 {
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
-.msg:hover .msg__meta .steps__ask--reply,
-.msg__meta .steps__ask--reply:focus-within,
-.msg__meta .steps__ask--reply:has(.steps__ask-pill[aria-expanded='true']) {
+.msg:hover .msg__meta .steps__steer--reply,
+.msg__meta .steps__steer--reply:focus-within,
+.msg__meta .steps__steer--reply:has(.steps__steer-pill[aria-expanded='true']) {
   opacity: 1;
 }
 /* Open, the field needs the row: the pill keeps its place and the receipt goes under it. */
-.msg__meta .steps__ask--reply:has(.steps__ask-pill[aria-expanded='true']) {
+.msg__meta .steps__steer--reply:has(.steps__steer-pill[aria-expanded='true']) {
   flex: 1 1 100%;
 }
 /* Nothing to hover with: no fade to depend on, so it is simply there. */
 @media (hover: none) {
-  .msg__meta .steps__ask--reply {
+  .msg__meta .steps__steer--reply {
     opacity: 1;
   }
 }
-.steps__ask-pill {
+.steps__steer-pill {
   justify-self: start;
   display: inline-flex;
   align-items: center;
@@ -1486,22 +1486,22 @@ h3 {
   font-size: 11.5px;
   transition: var(--transition-ui);
 }
-.steps__ask-pill:hover {
+.steps__steer-pill:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--hover);
 }
-.steps__ask-note {
+.steps__steer-note {
   display: grid;
   gap: 8px;
   max-width: 520px;
 }
-.steps__ask-note textarea {
+.steps__steer-note textarea {
   width: 100%;
   min-height: 54px;
   resize: vertical;
 }
-.steps__ask-row {
+.steps__steer-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

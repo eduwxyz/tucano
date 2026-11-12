@@ -42,7 +42,7 @@ const pillLook = (win) =>
   win.evaluate(() => {
     const msg = [...document.querySelectorAll('.msg--agent')].at(-1)
     const body = msg?.querySelector('.msg__body')
-    const pill = body?.querySelector('.steps__ask-pill')
+    const pill = body?.querySelector('.steps__steer-pill')
     const steps = body?.querySelector('.steps')
     const md = body?.querySelector('.md')
     const meta = body?.querySelector('.msg__meta')
@@ -50,7 +50,7 @@ const pillLook = (win) =>
     const p = pill.getBoundingClientRect()
     const t = md?.getBoundingClientRect()
     const m = meta?.getBoundingClientRect()
-    const block = pill.closest('.steps__ask')
+    const block = pill.closest('.steps__steer')
     const b = block.getBoundingClientRect()
     const st = getComputedStyle(pill)
     const kids = [...body.children]
@@ -100,7 +100,7 @@ const pillLook = (win) =>
 
 const fieldLook = (win) =>
   win.evaluate(() => {
-    const note = document.querySelector('.steps__ask-note')
+    const note = document.querySelector('.steps__steer-note')
     if (!note) return { open: false }
     const ta = note.querySelector('textarea')
     const send = [...note.querySelectorAll('button')].find((b) => b.className.includes('btn--primary'))
@@ -112,7 +112,7 @@ const fieldLook = (win) =>
       width: Math.round(t.width),
       height: Math.round(t.height),
       belowPill: (() => {
-        const p = document.querySelector('.msg__meta .steps__ask-pill')?.getBoundingClientRect()
+        const p = document.querySelector('.msg__meta .steps__steer-pill')?.getBoundingClientRect()
         return p ? Math.round(t.top - p.bottom) : null
       })(),
       sendDisabled: !!send?.disabled,
@@ -189,21 +189,21 @@ console.log('hovered, the footer line:', JSON.stringify(await pillLook(win)))
 await win.screenshot({ path: `${out}/02-hovered-the-pill-on-the-footer-line.png` })
 
 // Opening it: a field, nothing sent, the send asleep while it's empty.
-await win.locator('.steps__ask-pill').last().click()
+await win.locator('.steps__steer-pill').last().click()
 await win.waitForTimeout(250)
 console.log('the field it opens:', JSON.stringify({ ...(await fieldLook(win)), replies: await replies(win) }))
 await win.screenshot({ path: `${out}/03-the-field-it-opens.png` })
 
 // What the person wants next.
 const INSTRUCTION = 'Add the two fixes from today as their own entries'
-await win.locator('.steps__ask-note textarea').fill(INSTRUCTION)
+await win.locator('.steps__steer-note textarea').fill(INSTRUCTION)
 await win.waitForTimeout(150)
 console.log('typed:', JSON.stringify(await fieldLook(win)))
 await win.screenshot({ path: `${out}/04-what-they-write.png` })
 
 // Sending it: the field closes and the same reply goes on working — the pill becomes a steer again.
 const before = await replies(win)
-await win.locator('.steps__ask-note button.btn--primary').click()
+await win.locator('.steps__steer-note button.btn--primary').click()
 await win.waitForTimeout(500)
 console.log('after sending:', JSON.stringify({ field: await fieldLook(win), pill: await pillLook(win), replies: await replies(win), before }))
 
@@ -224,7 +224,7 @@ await win.screenshot({ path: `${out}/06-the-same-reply-carried-on.png` })
 await win.setViewportSize({ width: 420, height: 880 })
 await win.waitForTimeout(500)
 console.log('420, the pill:', JSON.stringify(await pillLook(win)))
-await win.locator('.steps__ask-pill').last().click()
+await win.locator('.steps__steer-pill').last().click()
 await win.waitForTimeout(300)
 console.log('420, the field:', JSON.stringify(await fieldLook(win)))
 await win.screenshot({ path: `${out}/07-at-420.png` })
