@@ -52,7 +52,11 @@ import { ConnectorManager, notAuthorized } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
+<<<<<<< HEAD
 import { classifierFor, classifierJobsOf, classifierList, cleanClassifierJobs, cleanClassifiers, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
+=======
+import { classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
+>>>>>>> 8ed96fe6 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
 import { checkClassifierKey, classifierSecret } from './classifiers'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
@@ -323,6 +327,7 @@ const classifierKeySaved = (c: ClassifierConfig): boolean =>
   db.getSecret(classifierSecret(c.id)) !== undefined || (c.id === JEV_CLASSIFIER.id && db.getSecret(JEV_SECRET) !== undefined)
 const classifierKeyOf = async (c: ClassifierConfig): Promise<string | undefined> =>
   (await secrets.get(classifierSecret(c.id))) ?? (c.id === JEV_CLASSIFIER.id ? await secrets.get(JEV_SECRET) : undefined)
+<<<<<<< HEAD
 // The stored settings as the classifier helpers read them: whether Jev has a key lives in the secret
 // store, and an install whose only trace of Jev is that key still gets its row.
 const classifierSettings = (s: Omit<Settings, 'engines'> = db.getSettings(DEFAULTS)): Omit<Settings, 'engines'> => ({ ...s, jevKey: classifierKeySaved(JEV_CLASSIFIER) })
@@ -348,16 +353,26 @@ const settleClassifiers = (patch: Partial<Settings>): ClassifierConfig[] => {
   if (next.routerModel === JEV_MODEL && !classifierFor(next, 'routing')) patch.routerModel = 'haiku'
   return gone
 }
+=======
+>>>>>>> 8ed96fe6 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
 
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
+<<<<<<< HEAD
   const stored = classifierSettings(s)
   const classifiers = classifierList(stored)
   return {
     ...s,
     classifiers,
     classifierJobs: classifierJobsOf(stored),
+=======
+  const classifiers = classifierList(s)
+  return {
+    ...s,
+    classifiers,
+    classifierJobs: classifierJobsOf(s),
+>>>>>>> 8ed96fe6 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
     classifierKeys: Object.fromEntries(classifiers.map((c) => [c.id, classifierKeySaved(c)])),
     engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses),
     ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}),
@@ -1168,9 +1183,13 @@ const runner = new Runner({
   },
   jev: {
     key: (job) => {
+<<<<<<< HEAD
       // A job reads the classifier chosen for it; with no job, Jev's own classifier, which is also
       // what an install from before the classifiers keeps using.
       const c = job ? classifierFor(settings(), job) : JEV_CLASSIFIER
+=======
+      const c = classifierFor(settings(), job ?? 'routing')
+>>>>>>> 8ed96fe6 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
       return c ? classifierKeyOf(c) : Promise.resolve(undefined)
     },
     target: (job) => classifierFor(settings(), job ?? 'routing')
@@ -2493,7 +2512,11 @@ const api: Handlers = {
     if (k) await checkJevKey(k)
     await secrets.set(classifierSecret(JEV_CLASSIFIER.id), k || undefined)
     await secrets.set(JEV_SECRET, undefined) // the old name is retired the first time the key is saved here
+<<<<<<< HEAD
     if (!k) stopRoutingOn(JEV_CLASSIFIER.id)
+=======
+    if (!k && settings().routerModel === JEV_MODEL) db.setSettings({ routerModel: 'haiku' })
+>>>>>>> 8ed96fe6 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -2524,6 +2547,17 @@ const api: Handlers = {
       const chosen = db.getSettings(DEFAULTS).harnesses
       if (chosen && !chosen.includes('endpoint')) db.setSettings({ harnesses: [...chosen, 'endpoint'] })
     }
+    emit({ type: 'settings', settings: settings() })
+  },
+  // A classifier's key, checked with its own provider before it's saved; null removes it. Each
+  // classifier keeps its own key, so two accounts of one provider never share one.
+  setClassifierKey: async ({ id, key }) => {
+    const c = classifierList(db.getSettings(DEFAULTS)).find((x) => x.id === id)
+    if (!c) throw new Error(L('Esse classificador não existe mais.', 'That classifier no longer exists.'))
+    const k = key?.trim()
+    if (k) await checkClassifierKey(c, k)
+    await secrets.set(classifierSecret(c.id), k || undefined)
+    if (c.id === JEV_CLASSIFIER.id) await secrets.set(JEV_SECRET, undefined) // one home for the key
     emit({ type: 'settings', settings: settings() })
   },
 

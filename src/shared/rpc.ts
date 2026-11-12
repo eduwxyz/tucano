@@ -147,6 +147,7 @@ export interface Api {
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
+  setClassifierKey(p: { id: string; key: string | null }): Promise<void> // checks the key with that classifier's provider before saving; null removes it
   probeEndpoint(p: { baseUrl: string; key?: string }): Promise<{ models: string[]; error?: string }> // an OpenAI-format address tried: what it lists, or why not
   setEndpoint(p: { baseUrl: string; models: string[]; key?: string | null }): Promise<void> // saved; key undefined keeps the saved one, null removes it
   nodeInfo(): Promise<NodeInfo> // this computer lent to servers (core/node-server.ts, core/node-link.ts)
