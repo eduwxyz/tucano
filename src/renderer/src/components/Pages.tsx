@@ -298,7 +298,7 @@ const STEPS_CHOICES = (keep: number): { value: StepsMode; label: string; hint: s
   {
     value: 'one-line',
     label: L('Uma linha', 'One line'),
-    hint: L('Uma linha animada com a contagem de passos, sem os passos. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'One animated line with the step count, without the steps. Good for a busy channel with several agents at once.')
+    hint: L('Uma linha com o passo atual e seu alvo. Clique para abrir os detalhes. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'One line with the current step and its target. Click to open the details. Good for a busy channel with several agents at once.')
   }
 ]
 

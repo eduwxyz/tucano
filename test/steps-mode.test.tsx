@@ -1,5 +1,5 @@
 // A reply's steps: every one (what the app has always done), the latest few in a window that
-// fades the oldest out, or one line with the count. Chosen in Settings › General, per reply by
+// fades the oldest out, or one line of current activity. Chosen in Settings › General, per reply by
 // agent over workspace, and nothing changes unless someone picks one.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -106,13 +106,14 @@ describe('a reply drawn in each mode', () => {
     expect(html).toContain('opacity:0.84')
   })
 
-  it('one line: no list at all, a count that keeps up, and the stop still there', () => {
+  it('one line: the current action, a disclosure, and the stop still there', () => {
     fake = { ...fake, settings: settings({ steps: 'one-line' }) }
     const html = drawn(7)
     expect(html).toContain('steps--one-line')
     expect(html).not.toContain('steps__list')
-    expect(html).not.toContain('steps__chev')
-    expect(html).toContain('7 steps')
+    expect(html).toContain('steps__chev')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('passo 7')
     expect(html).toContain('Stop')
   })
 
