@@ -20,8 +20,8 @@ import { Runner } from '../src/core/runs'
 const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-round2-'))
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const ready = { installed: true, loggedIn: true }
-const settings = (name = 'Ana'): Settings => ({ workspaceName: name, context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' })
-const enginesWith = (claude: Engine): Record<EngineId, Engine> => ({ claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }) as Record<EngineId, Engine>
+const settings = (name = 'Ana'): Settings => ({ workspaceName: name, context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' })
+const enginesWith = (claude: Engine): Record<EngineId, Engine> => ({ claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }) as Record<EngineId, Engine>
 
 // Ana (owner), Bruno (member), Carla (admin).
 function team(file = ':memory:'): { db: Db; people: People; ana: Person; bruno: Person; carla: Person } {

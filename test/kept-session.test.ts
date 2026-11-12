@@ -155,7 +155,7 @@ describe('a reply with a kept session', () => {
   const recorded = (e: Engine): Engine => ({ ...e, run: (t) => (turns.push(t), e.run(t)) })
   function runner(opts: { delayMs?: number; reply?: (t: Turn) => string; sessions?: boolean } = {}): Runner {
     const claude = recorded(fakeEngine('claude', { delayMs: opts.delayMs ?? 1, reply: opts.reply, sessions: opts.sessions ?? true, released }))
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ks-work-')) })
   }
   const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
@@ -164,7 +164,7 @@ describe('a reply with a kept session', () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ks-db-')), 'test.db'))
     turns = []
     released = []
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(agent('a1', 'lia'))
     db.saveAgent(agent('a2', 'theo'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -271,7 +271,7 @@ describe('a reply with a kept session', () => {
   it('finishes the reply when letting a session go fails', async () => {
     const claude = recorded(fakeEngine('claude', { delayMs: 1, sessions: true, released }))
     const failing: Engine = { ...claude, release: () => { throw new Error('EBUSY: resource busy or locked') } }
-    const engines: Record<EngineId, Engine> = { claude: failing, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+    const engines: Record<EngineId, Engine> = { claude: failing, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ks-work-')) })
     await r.send('d1', 'oi')
     await r.idle()
