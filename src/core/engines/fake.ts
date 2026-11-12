@@ -52,7 +52,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
         // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
         // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).
-        if (/migra/i.test(last)) {
+        // "organiza o time": Theo and Nina answer to Lia. "time de dados": a team where one answers to the other.
+        if (/organiza o time|organize the team/i.test(last)) {
+          for (const agente of ['theo', 'nina']) await callTool(turn.mcpUrl, 'propor_ajuste', { agente, responde_a: 'lia', motivo: L('A Lia coordena.', 'Lia coordinates.') })
+          reply = L('Propus a Lia no topo, com o Theo e a Nina abaixo dela.', 'I proposed Lia at the top, with Theo and Nina under her.')
+        } else if (/time de dados|data team/i.test(last)) {
+          const one = (nome: string, funcao: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ nome, funcao, instrucoes: L(`Você é ${nome}, de ${funcao}.\nEntrega em tópicos.`, `You're ${nome}, in ${funcao}.\nDeliver in bullet points.`), ...extra })
+          const r = await callTool(turn.mcpUrl, 'propor_time', { agentes: [one('Duda', L('Dados', 'Data'), { responde_a: 'lia' }), one('Caio', L('Análise', 'Analysis'), { responde_a: 'Duda' })], motivo: L('Um time de dados sob a Lia.', 'A data team under Lia.') })
+          reply = textOf(r)
+        } else if (/migra/i.test(last)) {
           const calls: [string, Record<string, unknown>][] = [
             ['propor_agente', { nome: 'Léo', funcao: L('Financeiro', 'Finance'), cor: 'amber', instrucoes: L('Você cuida das contas do time.\nLê os gastos do dia e separa por categoria.\nResponde em tópicos curtos.\nNunca paga nada: pergunta antes.', "You look after the team's accounts.\nRead the day's expenses and sort them by category.\nAnswer in short bullet points.\nNever pay anything: ask first."), esforco: 'low', web: false, motivo: L('Alguém só pras contas.', 'Someone just for the accounts.') }],
             ...['lia', 'theo', 'nina'].map((agente): [string, Record<string, unknown>] => ['propor_ajuste', { agente, limite: 345_000, motivo: L('Migração: o limite novo do time.', "Migration: the team's new limit.") }]),

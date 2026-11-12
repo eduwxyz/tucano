@@ -94,6 +94,7 @@ export interface Agent {
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
   owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
   reportsTo?: string // the agent it answers to (src/shared/org.ts): that one, and whoever is above it, may hand it work in its own channel; unset: no one
+  manager?: boolean // organizes the team: it may propose, for the person to apply, whom each agent answers to
 }
 
 // One of the person's apps given to an agent, by the name the system shows.
@@ -251,10 +252,13 @@ export interface AgentDraft {
   reason?: string
   state?: 'created' | 'dismissed'
   agentId?: string // once created
+  reportsTo?: string // the agent that exists it will answer to (src/shared/org.ts)
+  reportsToName?: string // in a team's card: the name of another agent of the same card it will answer to
 }
 
-// What the Tuca may propose to change in an agent that exists.
-export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
+// What the Tuca may propose to change in an agent that exists. `reportsTo` ('' for no one): only the
+// Tuca and an agent that organizes the team (Agent.manager) propose it.
+export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit' | 'reportsTo'>>
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,

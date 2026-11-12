@@ -8,8 +8,101 @@ import { channelName, codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCa
 import type { ToolDef } from './gateway'
 import { guideIndex } from './guide'
 import { SCREENS } from '../shared/screens'
+import { bossOf, loops, MAX_LINE, overLine, rankOf } from '../shared/org'
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
+
+// ---------- the org chart in proposals ----------
+
+const NOBODY = /^(ningu[eé]m|nenhum|nobody|no one|none|-)$/i
+
+// Only the Tuca and an agent that organizes the team (Agent.manager) propose whom an agent answers to.
+// Said to an agent without it: a refusal it passes on, not a failure to retry (it counted toward
+// ERRORS_STOP, and an agent asked to organize the team tried eight ways before the reply stopped).
+export const organizeOnly = (me = L('a pessoa', 'the person')): string =>
+  L(
+    `Você não tem permissão pra mudar o organograma (a quem cada agente responde). Não tente de novo nem por outro caminho. Diga a ${me}, em uma frase, que pra isso é só ligar **Organiza o time** na sua página, em Canais e skills, ou montar na tela Time; o resto do pedido você pode fazer.`,
+    `You don't have permission to change the org chart (whom each agent answers to). Don't try again or another way. Tell ${me}, in one sentence, that for that they turn on **Organizes the team** on your page, under Channels and skills, or set it up on the Time screen; the rest of the request you can do.`
+  )
+
+// What an agent that doesn't organize the team is told, so it says so instead of looking for a way.
+export const notOrganizerGuide = (me: string): string =>
+  L(
+    `Você não organiza o organograma (a quem cada agente responde). Se ${me} pedir pra montar ou mudar quem responde a quem, não tente: diga que é só ligar **Organiza o time** na sua página, em Canais e skills, ou montar na tela Time.`,
+    `You don't organize the org chart (whom each agent answers to). If ${me} asks to set up or change who answers to whom, don't try: say they can turn on **Organizes the team** on your page, under Channels and skills, or set it up on the Time screen.`
+  )
+
+// A proposal tool as an agent that doesn't organize the team sees it: without responde_a, so it
+// isn't offered what it may not use.
+export function withoutBoss(t: ToolDef): ToolDef {
+  const strip = (props: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+    if (!props) return props
+    const { responde_a: _boss, ...rest } = props
+    const agentes = rest['agentes'] as { items?: { properties?: Record<string, unknown> } } | undefined
+    return agentes?.items ? { ...rest, agentes: { ...agentes, items: { ...agentes.items, properties: strip(agentes.items.properties) } } } : rest
+  }
+  return {
+    name: t.name,
+    get description() {
+      return t.description
+    },
+    get inputSchema() {
+      const s = t.inputSchema
+      return { ...s, properties: strip(s.properties) }
+    }
+  }
+}
+
+// `responde_a`: the agent `id` will answer to ('' for no one), by @handle or name, checked against the
+// org chart's rules (src/shared/org.ts). `id` may be one not made yet ('' for a new agent).
+export function bossArg(raw: unknown, agents: Agent[], id: string): { id?: string; error?: string } {
+  const h = String(raw ?? '').trim().replace(/^@/, '')
+  if (!h || NOBODY.test(h)) return { id: '' }
+  const key = h.toLowerCase()
+  const boss = agents.find((a) => a.handle.toLowerCase() === key) ?? agents.find((a) => a.name.toLowerCase() === key)
+  if (!boss || boss.archived || boss.kind === 'tuca') return { error: L(`Não existe o agente "${h}" pra ser o chefe. Use um @handle da lista do time, ou "ninguém".`, `There's no agent "${h}" to answer to. Use a @handle from the team list, or "ninguém".`) }
+  if (id && loops(agents, id, boss.id)) return { error: L(`${boss.name} está abaixo dele (ou é ele mesmo): isso fecharia um ciclo.`, `${boss.name} is below it (or is itself): that would close a loop.`) }
+  if (overLine(agents, id, boss.id)) return { error: L(`A linha passaria de ${MAX_LINE} agentes do topo até a base. Ponha-o sob alguém mais acima.`, `The line would go past ${MAX_LINE} agents from top to bottom. Put it under someone higher up.`) }
+  return { id: boss.id }
+}
+
+// A team's card: each `reportsToName` (another agent of the same card) must exist there, and the whole
+// tree, with the agents that exist, must close no loop and keep every line within MAX_LINE.
+function teamTreeError(agents: Agent[], drafts: AgentDraft[]): string | undefined {
+  const key = (n: string): string => n.trim().replace(/^@/, '').toLowerCase()
+  const ids = drafts.map((_, i) => `new:${i}`)
+  const nodes = [...agents.map((a) => ({ id: a.id, reportsTo: a.reportsTo, archived: a.archived, kind: a.kind })), ...drafts.map((d, i) => ({ id: ids[i]!, reportsTo: d.reportsTo }))]
+  for (const [i, d] of drafts.entries()) {
+    if (!d.reportsToName) continue
+    const j = drafts.findIndex((x) => key(x.name) === key(d.reportsToName!))
+    if (j < 0) return L(`${d.name}: não existe "${d.reportsToName}" no time nem neste card.`, `${d.name}: there's no "${d.reportsToName}" in the team or in this card.`)
+    if (j === i) return L(`${d.name} não pode responder a si mesmo.`, `${d.name} can't answer to itself.`)
+    nodes[agents.length + i]!.reportsTo = ids[j]
+  }
+  for (const [i, d] of drafts.entries()) {
+    const seen = new Set<string>([ids[i]!])
+    for (let up = nodes.find((n) => n.id === ids[i])?.reportsTo; up; up = nodes.find((n) => n.id === up)?.reportsTo) {
+      if (seen.has(up)) return L(`${d.name} entraria num ciclo de quem responde a quem.`, `${d.name} would be in a loop of who answers to whom.`)
+      seen.add(up)
+    }
+    if (rankOf(nodes, ids[i]!) > MAX_LINE) return L(`A linha de ${d.name} passaria de ${MAX_LINE} agentes do topo até a base.`, `${d.name}'s line would go past ${MAX_LINE} agents from top to bottom.`)
+  }
+  return undefined
+}
+
+// The org chart as an agent that organizes it reads it: who answers to whom, and who answers to no one.
+export function orgLines(agents: Agent[]): string {
+  const live = agents.filter((a) => !a.archived && a.kind !== 'tuca')
+  return live.map((a) => `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''}) → ${bossOf(live, a) ? L(`responde a @${bossOf(live, a)!.handle}`, `answers to @${bossOf(live, a)!.handle}`) : L('responde só à pessoa', 'answers to the person only')}${a.manager ? L(' · organiza o time', ' · organizes the team') : ''}`).join('\n')
+}
+
+// How an agent that organizes the team (or the Tuca) proposes the org chart. Stable: the chart itself is in builderSection.
+export function organizerGuide(me: string): string {
+  return L(
+    `## O organograma\nVocê pode propor a quem cada agente responde, num card que ${me} aplica: propor_ajuste com responde_a (o @handle do novo chefe, ou "ninguém" pra ele responder só a ${me}); ao criar, responde_a em propor_agente e em cada agente de propor_time (aí também vale o nome de outro agente do mesmo time). Quem está acima passa trabalho a quem está abaixo e recebe a resposta de volta; quem responde ao mesmo chefe pode pedir trabalho um ao outro. Uma linha tem no máximo ${MAX_LINE} agentes do topo até a base, e ninguém responde a quem está abaixo dele. Pra reorganizar vários de uma vez, mande um propor_ajuste por agente: ${me} aplica um por um ou todos. Explique em motivo o porquê de cada mudança.`,
+    `## The org chart\nYou can propose whom each agent answers to, as a card ${me} applies: propor_ajuste with responde_a (the new boss's @handle, or "ninguém" for it to answer to ${me} only); when creating, responde_a in propor_agente and in each agent of propor_time (there the name of another agent of the same team works too). Whoever is above hands work to those below and gets the answer back; those answering to the same boss can ask each other for work. A line holds at most ${MAX_LINE} agents from top to bottom, and no one answers to someone below it. To reorganize several at once, send one propor_ajuste per agent: ${me} applies them one by one or all together. Say why in motivo for each change.`
+  )
+}
 const EFFORTS: Effort[] = ['low', 'medium', 'high']
 
 // In the app's language when the Tuca is made (saved with him, like any agent's; brought up to date on start).
@@ -144,6 +237,7 @@ export const PROPOR_AGENTE: ToolDef = {
           description: L('Os sistemas que ele usa, da lista "Conectores". Leitura por padrão.', 'The systems it uses, from the "Connectors" list. Read-only by default (nivel "escrita" to write).'),
           items: { type: 'object', properties: { conector: { type: 'string' }, nivel: { type: 'string', enum: ['leitura', 'escrita'] } }, required: ['conector'] }
         },
+        responde_a: { type: 'string', description: L('Opcional: o @handle do agente que já existe a quem ele vai responder no organograma. Só o Tuca e um agente que organiza o time.', 'Optional: the @handle of the existing agent it will answer to in the org chart. Only the Tuca and an agent that organizes the team.') },
         primeira_tarefa: { type: 'string', description: L('Um pedido curto pra testar o agente assim que ele existir.', 'A short request to test the agent as soon as it exists.') },
         motivo: { type: 'string', description: L('Por que esse desenho, em uma frase. Aparece no card.', 'Why this design, in one sentence. It shows on the card.') }
       },
@@ -164,6 +258,7 @@ export const PROPOR_TIME: ToolDef = {
   get inputSchema() {
     const one = PROPOR_AGENTE.inputSchema
     const { primeira_tarefa: _task, motivo: _why, ...each } = (one.properties ?? {}) as Record<string, unknown>
+    each['responde_a'] = { type: 'string', description: L('Opcional: a quem ele vai responder no organograma, o nome de outro agente deste time ou o @handle de um que já existe. Só o Tuca e um agente que organiza o time.', 'Optional: whom it will answer to in the org chart, the name of another agent of this team or the @handle of one that exists. Only the Tuca and an agent that organizes the team.') }
     return {
       type: 'object' as const,
       properties: {
@@ -176,17 +271,20 @@ export const PROPOR_TIME: ToolDef = {
   }
 }
 
-export function teamFrom(args: Record<string, unknown>, ctx: Parameters<typeof draftFrom>[1] & { channels: string[] }): { proposal?: Proposal; error?: string } {
+export function teamFrom(args: Record<string, unknown>, ctx: Parameters<typeof draftFrom>[1] & { channels: string[] }): { proposal?: Proposal; error?: string; denied?: boolean } {
   const list = Array.isArray(args['agentes']) ? (args['agentes'] as unknown[]) : []
   if (list.length < 2 || list.length > 8) return { error: L('Um time tem de 2 a 8 agentes. Pra um só, use propor_agente.', 'A team has 2 to 8 agents. For one, use propor_agente.') }
   const agents: AgentDraft[] = []
   for (const [i, raw] of list.entries()) {
-    const r = draftFrom((raw ?? {}) as Record<string, unknown>, ctx)
+    const r = draftFrom((raw ?? {}) as Record<string, unknown>, { ...ctx, team: true })
+    if (r.denied) return r
     if (!r.draft) return { error: L(`Agente ${i + 1}: ${r.error}`, `Agent ${i + 1}: ${r.error}`) }
     if (agents.some((a) => a.name.toLowerCase() === r.draft!.name.toLowerCase())) return { error: L(`Dois agentes com o nome ${r.draft.name}.`, `Two agents named ${r.draft.name}.`) }
     const { task: _task, reason: _reason, ...draft } = r.draft
     agents.push(draft)
   }
+  const tree = teamTreeError(ctx.agents ?? [], agents)
+  if (tree) return { error: tree }
   const raw = (args['canal'] ?? undefined) as Record<string, unknown> | undefined
   let channel: { name: string; topic?: string; threads?: boolean } | undefined
   if (raw && typeof raw === 'object') {
@@ -225,7 +323,8 @@ export function builderGuide(ctx: { tuca?: boolean; me?: string }): string {
         )
 }
 
-export function builderSection(s: Pick<Settings, 'engines'>, ctx: { models: { id: string; label: string }[]; connectors: Connector[]; team: Agent[]; own: string }): string {
+// `organizes`: the Tuca, or an agent that organizes the team: it reads the org chart too.
+export function builderSection(s: Pick<Settings, 'engines'>, ctx: { models: { id: string; label: string }[]; connectors: Connector[]; team: Agent[]; own: string; organizes?: boolean }): string {
   const gateway = (Object.keys(s.engines) as (keyof Settings['engines'])[]).filter((e) => s.engines[e].loggedIn && s.engines[e].route === 'gateway')
   return [
     L('## Pra propor: o que existe agora', '## For proposing: what there is now'),
@@ -236,18 +335,30 @@ export function builderSection(s: Pick<Settings, 'engines'>, ctx: { models: { id
         `Through the company gateway you can also use any model it serves, with the id "${gateway[0]}:<exact name>". When in doubt, use yours: ${ctx.own}.`
       ),
     `${L('Conectores (pra "conectores")', 'Connectors (for "conectores")')}: ${ctx.connectors.map((c) => c.name).join(', ') || L('nenhum ainda. Se a tarefa precisar de um sistema, diga que dá pra conectar em Conectores depois.', 'none yet. If the task needs a system, say it can be connected in Connectors later.')}`,
-    `${L('O time hoje', 'The team today')}: ${ctx.team.map((a) => `${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})`).join(', ') || L('ninguém ainda: este é o primeiro agente.', 'no one yet: this is the first agent.')} ${L('Não proponha alguém que repete um desses.', "Don't propose someone who repeats one of these.")}`
+    `${L('O time hoje', 'The team today')}: ${ctx.team.map((a) => `${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})`).join(', ') || L('ninguém ainda: este é o primeiro agente.', 'no one yet: this is the first agent.')} ${L('Não proponha alguém que repete um desses.', "Don't propose someone who repeats one of these.")}`,
+    ctx.organizes && ctx.team.length > 0 && `${L('O organograma hoje', 'The org chart today')}:\n${orgLines(ctx.team)}`
   ]
     .filter(Boolean)
     .join('\n\n')
 }
 
 // A propor_agente call as a draft, or what to fix.
-export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId: string) => boolean; fallbackModel: string; connectors: Connector[] }): { draft?: AgentDraft; error?: string } {
+// `agents`: the team as it is (for responde_a); `organizes`: whoever proposes may set it; `team`: a team's
+// card, where responde_a may also name another agent of the same card (checked by teamFrom).
+export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId: string) => boolean; fallbackModel: string; connectors: Connector[]; agents?: Agent[]; organizes?: boolean; team?: boolean; me?: string }): { draft?: AgentDraft; error?: string; denied?: boolean } {
   const text = (k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
   const name = text('nome', 40)
   const instructions = typeof args['instrucoes'] === 'string' ? (args['instrucoes'] as string) : ''
   if (!name || !instructions.trim()) return { error: L('Faltou nome ou instrucoes.', 'Missing nome or instrucoes.') }
+  let boss: Pick<AgentDraft, 'reportsTo' | 'reportsToName'> = {}
+  const bossRaw = text('responde_a', 60)
+  if (bossRaw && !NOBODY.test(bossRaw)) {
+    if (!ctx.organizes) return { error: organizeOnly(ctx.me), denied: true }
+    const b = bossArg(bossRaw, ctx.agents ?? [], '')
+    if (b.id) boss = { reportsTo: b.id }
+    else if (ctx.team && !(ctx.agents ?? []).some((a) => a.handle.toLowerCase() === bossRaw.replace(/^@/, '').toLowerCase())) boss = { reportsToName: bossRaw.replace(/^@/, '') }
+    else return { error: b.error }
+  }
   const grants: Record<string, GrantLevel> = {}
   const unknown: string[] = []
   for (const c of Array.isArray(args['conectores']) ? (args['conectores'] as unknown[]) : []) {
@@ -273,6 +384,7 @@ export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId
       effort,
       web: args['web'] === true,
       grants,
+      ...boss,
       ...(text('primeira_tarefa', 500) ? { task: text('primeira_tarefa', 500) } : {}),
       ...(text('motivo', 300) ? { reason: text('motivo', 300) } : {})
     }
@@ -310,7 +422,9 @@ export function agentFromDraft(d: AgentDraft, taken: string[], limit: number): A
     memory: 'auto',
     computer: false,
     web: d.web,
-    archived: false
+    archived: false,
+    // Whom it answers to, when it's an agent that exists (one of the same team's card comes after: see applyOne).
+    ...(d.reportsTo ? { reportsTo: d.reportsTo } : {})
   }
 }
 

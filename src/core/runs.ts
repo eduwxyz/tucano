@@ -16,7 +16,7 @@ import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Compute
 import { extractFile } from './wiki-extract'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
+import { availableModels, builderGuide, builderSection, draftFrom, helperSection, notOrganizerGuide, organizerGuide, PROPOR_AGENTE, PROPOR_TIME, teamFrom, withoutBoss } from './tuca'
 import { LER_GUIA, readGuide } from './guide'
 import { pendingAgents, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
@@ -1140,6 +1140,8 @@ export class Runner {
     // Tuca helps with Tucano itself, with the guide and a look at the workspace.
     const proposes = !!this.deps.gateway
     const helps = proposes && agent.kind === 'tuca'
+    // The Tuca, and an agent set to organize the team, may also propose whom each agent answers to.
+    const organizes = proposes && (agent.kind === 'tuca' || !!agent.manager)
     // Its team (src/shared/org.ts): those answering to it and those answering to the same agent as it
     // does. It hands them work (src/core/delegations.ts).
     // And when this reply is itself such work (in the thread a request opened), whose request it is:
@@ -1325,7 +1327,8 @@ ${note}`,
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
       ...(canSeeImages ? [VER_IMAGEM] : []),
       ...(canReadFiles ? [LER_ANEXO] : []),
-      ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
+      // Only one that organizes the team is offered responde_a; the others don't see it.
+      ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()].map((t) => (organizes ? t : withoutBoss(t))) : []),
       ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(team.length ? DELEGATION_TOOLS : []),
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
@@ -1540,8 +1543,14 @@ ${note}`,
           const usable = (id: string): boolean => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn }
           const r =
             name === PROPOR_TIME.name
-              ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
-              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
+              ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), organizes, me: settings.workspaceName, channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
+              : proposalFrom(name, args, { organizes, me: settings.workspaceName, agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
+          // Asked for what this agent may not do (the org chart): it says so, and the person sees why. Not a
+          // failure: eight in a row stopped the reply (ERRORS_STOP) while it looked for another way.
+          if (r.denied) {
+            addSteps({ id: randomUUID(), label: L('Sem permissão', 'No permission'), detail: L('Organiza o time está desligado pra este agente', 'Organizes the team is off for this agent'), status: 'error' })
+            return textResult(r.error!)
+          }
           if (!r.proposal) return textResult(r.error!, true)
           // Several in one reply, each its own card; one about the same thing as an earlier one replaces it.
           const list = proposalsOf(msg.run)
@@ -1566,8 +1575,17 @@ ${note}`,
           const r = draftFrom(args, {
             usable: (id) => { const m = modelInfo(id); return !!m?.id && now.engines[m.engine].loggedIn },
             fallbackModel: (db.agent(agent.id) ?? agent).modelId,
-            connectors: this.deps.connectors?.list() ?? []
+            connectors: this.deps.connectors?.list() ?? [],
+            agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'),
+            organizes,
+            me: settings.workspaceName
           })
+          // Asked for what this agent may not do (the org chart): it says so, and the person sees why. Not a
+          // failure: eight in a row stopped the reply (ERRORS_STOP) while it looked for another way.
+          if (r.denied) {
+            addSteps({ id: randomUUID(), label: L('Sem permissão', 'No permission'), detail: L('Organiza o time está desligado pra este agente', 'Organizes the team is off for this agent'), status: 'error' })
+            return textResult(r.error!)
+          }
           if (!r.draft) return textResult(r.error!, true)
           msg.run = { ...msg.run!, agentDraft: r.draft }
           addSteps({ id: randomUUID(), label: L('Propôs um agente', 'Proposed an agent'), detail: `${r.draft.name}${r.draft.role ? ` · ${r.draft.role}` : ''}`, status: 'done' })
@@ -2205,9 +2223,9 @@ ${note}`,
       people,
       team: team.length ? teamSection({ agent, agents: db.agents(), conversations: db.conversations().filter((c) => sees.canSeeConversation(requester, c)), connectors: this.deps.connectors?.list() ?? [], open: db.openDelegations(), me: settings.workspaceName }) : undefined,
       builder: proposes
-        ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })
+        ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId, organizes })
         : undefined,
-      builderGuide: proposes ? [builderGuide({ tuca: helps, me: settings.workspaceName }), helps && helperSection()].filter(Boolean).join('\n\n') : undefined
+      builderGuide: proposes ? [builderGuide({ tuca: helps, me: settings.workspaceName }), organizes ? organizerGuide(settings.workspaceName) : notOrganizerGuide(settings.workspaceName), helps && helperSection()].filter(Boolean).join('\n\n') : undefined
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
