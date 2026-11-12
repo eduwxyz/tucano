@@ -1,5 +1,5 @@
 // Uso e limites: this month at a glance (by day, by agent, by model), the
-// Claude subscription's windows, and where each agent will end the month.
+// Claude and Codex subscriptions' windows, and where each agent will end the month.
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { agentById, amAdmin, countedTokens, ENGINES, isTeam, loadUsage, messageById, modelInfo, navigate, receipts, useStore, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
@@ -90,6 +90,7 @@ export function UsagePage(): ReactNode {
         <>
           <Month u={u} claude={billing.find((b) => b.id === 'claude')?.status} />
           {billing.find((b) => b.id === 'claude')?.status.route === 'plan' && <Quota />}
+          {billing.find((b) => b.id === 'codex')?.status.route === 'plan' && <CodexQuota />}
           <Agents u={u} />
           <div className="usage-grid">
             <Models u={u} />
@@ -234,7 +235,7 @@ function ApiCost({ usd: v, claude }: { usd: number; claude: EngineStatus }): Rea
 
 // ---------- the Claude subscription ----------
 
-// Its own windows, as the last reply reported them (the Codex CLI doesn't tell).
+// Its own windows, as the last reply reported them.
 function Quota(): ReactNode {
   const q = useStore((s) => s.settings.quota)
   if (!q || (!q.fiveHour && !q.sevenDay)) return null
@@ -242,7 +243,7 @@ function Quota(): ReactNode {
   return (
     <section className="read-group">
       <h2>
-        {L('Sua assinatura do Claude', 'Your Claude subscription')}<span>{L(`segundo o Claude Code às ${at} · o Codex não informa`, `per Claude Code at ${at} · Codex doesn't report it`)}</span>
+        {L('Sua assinatura do Claude', 'Your Claude subscription')}<span>{L(`segundo o Claude Code às ${at}`, `per Claude Code at ${at}`)}</span>
       </h2>
       <div className="usage-quota">
         {q.fiveHour && <Ring label={L('Janela de 5 horas', '5-hour window')} w={q.fiveHour} />}
@@ -251,6 +252,39 @@ function Quota(): ReactNode {
     </section>
   )
 }
+
+// ---------- the Codex subscription ----------
+
+// Its windows, as Codex told when this page asked: how many and how long depends on the plan.
+function CodexQuota(): ReactNode {
+  const q = useStore((s) => s.settings.codexQuota)
+  if (!q?.windows.length) return null
+  const at = new Date(q.at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  const plan = q.plan ? ` ${cap(q.plan)}` : ''
+  return (
+    <section className="read-group">
+      <h2>
+        {L(`Sua assinatura do Codex${plan}`, `Your Codex${plan} subscription`)}<span>{L(`segundo o Codex às ${at}`, `per Codex at ${at}`)}</span>
+      </h2>
+      <div className="usage-quota">
+        {q.windows.map((w) => (
+          <Ring key={w.minutes} label={windowLabel(w.minutes)} w={w} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+const windowLabel = (minutes: number): string =>
+  minutes === 10_080
+    ? L('Semana', 'Week')
+    : minutes === 1440
+      ? L('Dia', 'Day')
+      : minutes % 1440 === 0
+      ? L(`Janela de ${minutes / 1440} dias`, `${minutes / 1440}-day window`)
+      : minutes % 60 === 0
+        ? L(`Janela de ${minutes / 60} horas`, `${minutes / 60}-hour window`)
+        : L(`Janela de ${minutes} min`, `${minutes}-minute window`)
 
 function Ring({ label, w }: { label: string; w: { utilization: number; resetsAt: number } }): ReactNode {
   const pct = Math.min(1, Math.max(0, w.utilization))
