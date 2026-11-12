@@ -56,11 +56,16 @@ await shot('02-dm-what-theo-said-before-asking')
 
 const dm = await said()
 const lines = await win.locator('.returned-line').allInnerTexts().catch(() => [])
-console.log('--- returned lines (folded) ---')
+console.log('--- returned lines, as they arrive ---')
 for (const t of lines) console.log(JSON.stringify(t.trim()))
-// The answer came back folded, as handed work always does: opened, it says what was done before the question.
-for (const label of ['See the answer', 'See the question']) {
-  const b = win.locator(`.returned-line button:has-text("${label}")`).last()
+// How each came: an answer folded, a question open by itself (that is the one waiting on the person).
+const state = async () =>
+  win.locator('.returned-line button.link:not(:has-text("thread"))').evaluateAll((bs) =>
+    bs.map((b) => ({ label: b.textContent, open: b.getAttribute('aria-expanded') }))
+  )
+console.log('fold state on arrival:', JSON.stringify(await state()))
+// Whatever is still folded, open it: opened, the question line says what it wrote before asking.
+for (const b of await win.locator('.returned-line button.link[aria-expanded="false"]').all()) {
   if (await b.count()) await b.click()
 }
 await win.waitForTimeout(500)
@@ -70,6 +75,7 @@ await shot('02b-dm-answer-opened')
 const opened = await win.locator('.returned-line').allInnerTexts().catch(() => [])
 console.log('--- returned lines (opened) ---')
 for (const t of opened) console.log(JSON.stringify(t.trim().slice(0, 300)))
+console.log('fold state once opened:', JSON.stringify(await state()))
 console.log('so-far text on screen:', opened.some((t) => /So far, on the request|Até agora, sobre o pedido/.test(t)))
 console.log('question text on screen:', opened.some((t) => /Paginação|scroll|Quando|When/.test(t)))
 console.log('--- in Lia\'s DM ---')
