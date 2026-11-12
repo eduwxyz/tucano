@@ -87,6 +87,16 @@ const render = async (node: React.ReactNode): Promise<void> => {
 }
 
 describe('several proposals in one reply, on screen', () => {
+  it('shows the recommendation for long proposed instructions and keeps the full text on the card', async () => {
+    const instructions = `${'x'.repeat(32_000)} END`
+    const m = reply([{ kind: 'agent', agentId: 'lia', changes: { instructions }, before: { instructions: 'x' } }, migration()[2]!])
+    await render(<Proposals message={m} />)
+    await click(/^→$/)
+    expect(text()).toContain('Prompt longo')
+    expect(text()).toContain('32.004')
+    expect(text()).toContain(instructions)
+  })
+
   it('one group: "1 de 5", the new agent first, and each card with its own Aplicar', async () => {
     const m = reply(migration())
     fake = state({ messages: { t1: [m] } })
