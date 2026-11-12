@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, Conversation, Message } from '../src/shared/types'
-import { carriedText, pickCarried, staleTeamUps, teamUpDays, teamUpName, teamUpTask, teamUpTopic, TEAM_UP_CHARS, TEAM_UP_LINE, TEAM_UP_MESSAGES } from '../src/core/team-up'
+import { carriedText, fitTeamUpName, pickCarried, staleTeamUps, teamUpDays, teamUpName, teamUpTask, teamUpTopic, TEAM_UP_CHARS, TEAM_UP_LINE, TEAM_UP_MESSAGES, TEAM_UP_NAME_MAX } from '../src/core/team-up'
 import { Db } from '../src/core/db'
 import { TEAM_UP_DAYS } from '../src/shared/types'
 import { setLang } from '../src/shared/lang'
@@ -22,6 +22,38 @@ describe('team-up: the plan', () => {
     expect(teamUpName(guests)).toBe('team-up-tinker-auditor')
     const taken = new Set(['team-up-tinker-auditor', 'team-up-tinker-auditor-2'])
     expect(teamUpName(guests, (n) => taken.has(n))).toBe('team-up-tinker-auditor-3')
+  })
+
+  it('takes the name the agent chose for the channel, not the handles', () => {
+    const guests = [{ handle: 'tinker' }, { handle: 'auditor' }]
+    expect(teamUpName(guests, () => false, 'Retry path audit')).toBe('retry-path-audit')
+    // In whatever language the agent thinks in: accents go, the words stay.
+    expect(teamUpName(guests, () => false, 'Auditoria do Retry')).toBe('auditoria-do-retry')
+    // Nothing usable said: the handles, as before.
+    expect(teamUpName(guests, () => false, '!!!')).toBe('team-up-tinker-auditor')
+  })
+
+  it('keeps a name inside what the sidebar shows, and cuts it between words', () => {
+    expect(TEAM_UP_NAME_MAX).toBe(22)
+    // Inside the cap, untouched.
+    expect(fitTeamUpName('retry-path-audit')).toBe('retry-path-audit')
+    // 23 characters is one past what the sidebar shows whole with a badge: the last word goes, not half of it.
+    expect(fitTeamUpName('audit-of-the-retry-path')).toBe('audit-of-the-retry')
+    expect(fitTeamUpName('audit-of-the-retry-path-end')).toBe('audit-of-the-retry')
+    // Nothing to break on: it is cut at the cap, which the sidebar still shows whole.
+    expect(fitTeamUpName('retrypathauditsessionextended')).toHaveLength(TEAM_UP_NAME_MAX)
+    expect(fitTeamUpName('  Ação  de Retry!! ')).toBe('acao-de-retry')
+    expect(fitTeamUpName('---')).toBe('')
+  })
+
+  it('a taken name gets a suffix and still fits the sidebar', () => {
+    const guests = [{ handle: 'tinker' }]
+    const taken = new Set(['retry-path-audit'])
+    expect(teamUpName(guests, (n) => taken.has(n), 'retry-path-audit')).toBe('retry-path-audit-2')
+    // A name already at the cap loses a word rather than half of one, so the suffix fits.
+    const got = teamUpName(guests, (n) => n === 'audit-of-the-retry', 'audit-of-the-retry-path-end')
+    expect(got).toBe('audit-of-the-retry-2')
+    expect(got.length).toBeLessThanOrEqual(TEAM_UP_NAME_MAX)
   })
 
   it('says where it came from, under the name', () => {
@@ -191,6 +223,53 @@ describe('team-up: through the core', () => {
 
     // And she gets to work there.
     await until(async () => (await snap()).messages.some((m) => m.conversationId === team.id && m.author.kind === 'agent' && m.author.id === lia.id))
+  })
+
+  it('an agent that calls the team by tool gets a channel named for the work', async () => {
+    const content = (await snap()).conversations.find((c) => c.kind === 'channel' && /conteudo|content/.test(c.name))!
+    const lia = (await snap()).agents.find((a) => a.handle === 'lia')!
+    const nina = (await snap()).agents.find((a) => a.handle === 'nina')!
+    await ana.call('sendMessage', { conversationId: content.id, text: 'chame @lia num time chamado auditar-retry' })
+    await until(async () => (await snap()).conversations.some((c) => c.teamUp?.from === content.id))
+    const team = (await snap()).conversations.find((c) => c.teamUp?.from === content.id)!
+    // The name says what the work is: no "team-up-", no handles.
+    expect(team.name).toBe('auditar-retry')
+    expect(team.name.length).toBeLessThanOrEqual(TEAM_UP_NAME_MAX)
+    // The same room a mention makes: everyone who was here, plus the one called in.
+    expect(team.members.sort()).toEqual([lia.id, nina.id].sort())
+    expect(team.wikiCapture).toBe(false)
+    // The hand-off carries the work into it, and the step names the channel by the name it was given.
+    const handoff = (await snap()).messages.find((m) => m.conversationId === team.id)
+    expect(handoff?.text).toContain('@lia')
+    expect(handoff?.text).toContain('auditar-retry')
+    const reply = (await snap()).messages.filter((m) => m.conversationId === content.id && m.author.kind === 'agent').at(-1)
+    expect(reply?.run?.steps?.some((st) => /^(Called the team|Chamou o time)$/.test(st.label) && (st.detail ?? '').includes('#auditar-retry'))).toBe(true)
+  })
+
+  it('a name longer than the sidebar shows is cut to fit, on a word', async () => {
+    const content = (await snap()).conversations.find((c) => c.kind === 'channel' && /conteudo|content/.test(c.name))!
+    const theo = (await snap()).agents.find((a) => a.handle === 'theo')!
+    await ana.call('sendMessage', { conversationId: content.id, text: 'chame @theo num time chamado audit-of-the-retry-path-end-to-end' })
+    await until(async () => (await snap()).conversations.some((c) => c.teamUp?.from === content.id && c.members.includes(theo.id)))
+    const team = (await snap()).conversations.find((c) => c.teamUp?.from === content.id && c.members.includes(theo.id))!
+    expect(team.name).toBe('audit-of-the-retry')
+    expect(team.name.length).toBeLessThanOrEqual(TEAM_UP_NAME_MAX)
+  })
+
+  it('names one that is already in the room, and opens nothing', async () => {
+    const engenharia = (await snap()).conversations.find((c) => c.kind === 'channel' && /engenharia|engineering/.test(c.name))!
+    const theo = (await snap()).agents.find((a) => a.handle === 'theo')!
+    const before = (await snap()).conversations.filter((c) => c.teamUp?.from === engenharia.id).length
+    await ana.call('sendMessage', { conversationId: engenharia.id, text: '@theo chame @lia num time chamado auditar-retry' })
+    const mine = async (): Promise<Message | undefined> =>
+      (await snap()).messages.filter((m) => m.conversationId === engenharia.id && m.author.kind === 'agent' && m.author.id === theo.id).at(-1)
+    await until(async () => {
+      const m = await mine()
+      return !!m && m.run?.status !== 'working'
+    })
+    // Said in the reply instead of opening a channel nobody needed: that one is an ordinary @.
+    expect((await mine())!.text).toMatch(/already in this conversation|já está nesta conversa/)
+    expect((await snap()).conversations.filter((c) => c.teamUp?.from === engenharia.id)).toHaveLength(before)
   })
 
   it('the same call again is the room it already has, not a second channel', async () => {
