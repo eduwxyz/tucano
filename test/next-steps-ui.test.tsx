@@ -64,4 +64,10 @@ describe('the next-steps card', () => {
     expect(html).toContain('Publicar as capturas')
     expect(html).toContain('Próximos passos')
   })
+
+  it('reads a step written by hand as another step, on the card as in the message', () => {
+    const html = renderToStaticMarkup(<AskCard id="m1" questions={steps()} saved={[{ chosen: [0], other: 'Escrever a nota de lançamento' }]} mode="done" badge="Respondida" />)
+    expect(html).toContain('Outro passo: Escrever a nota de lançamento')
+    expect(html).not.toContain('Outra coisa')
+  })
 })
