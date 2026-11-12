@@ -561,10 +561,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
               <div className="msg__anchor-pin">
                 <ThreadButton message={message} />
               </div>
-              <RunSteps message={message} />
+              <RunBlock message={message} />
             </div>
           ) : (
-            <RunSteps message={message} />
+            <RunBlock message={message} />
           )
         ) : null}
         {text && quiet && !showSaid ? (
@@ -1679,8 +1679,19 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
           ))}
         </ol>
       )}
-      {working && <SteerPill message={message} />}
     </div>
+  )
+}
+
+// One reply's run as the conversation draws it: the line of steps it took, and, under that box and
+// outside it, whatever the reply offers while it still works. Anything the run says about itself —
+// its steps, and the thinking it streams under them — stays above that, never under it.
+export function RunBlock({ message }: { message: Message }): ReactNode {
+  return (
+    <>
+      <RunSteps message={message} />
+      {message.run?.status === 'working' && <SteerPill message={message} />}
+    </>
   )
 }
 
