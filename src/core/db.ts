@@ -1234,7 +1234,7 @@ export class Db {
       n++
       this.saveMessage({
         ...m,
-        run: { ...m.run, status: 'interrupted', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
+        run: { ...m.run, status: 'interrupted', restartPending: true, steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
       })
     }
     return n
