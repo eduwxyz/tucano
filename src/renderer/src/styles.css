@@ -1451,13 +1451,20 @@ h3 {
 }
 .steps__now {
   flex: 0 1 320px;
-  min-width: 3ch;
+  /* Never three characters: a target is worth reading down to eight, and the label above
+     gives the room for them. */
+  min-width: 8ch;
   max-width: 320px;
   font-size: 11.5px;
   color: var(--text-3);
 }
+/* The label gives way before the target does: whole when the row has room ("Ran…", "Thinking…"
+   always are), trimmed when it doesn't, and never under six characters. Unshrinkable, a long
+   label — "Still working: long tasks do take a while" — pushed the target to three characters
+   and spilled the row out of its toggle on a narrow window. */
 .steps__activity {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 6ch;
 }
 .steps__list {
   list-style: none;
