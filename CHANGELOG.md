@@ -10,6 +10,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **Duplicate a routine.** A routine's card has a copy button next to Edit: it opens the form with the same agent, place, schedule and instructions, named "(copy)", to change what differs and save as a new routine of your own. The copy starts off, so it doesn't run next to the original until you turn it on, and a webhook routine's copy gets its own address. Thanks, jonatas-caram-ifood! (#362)
 
+- **Keenable in the connector store.** Web search and pages read as Markdown, from [Keenable](https://docs.keenable.ai/mcp-server)'s official server, in Research next to Exa. It needs no account or key, so one click connects it; the searches and the pages an agent asks for go to Keenable. Thanks, ilya-bogin-keenable! (#291)
+
 ### Fixed
 
 - **The wiki map holds together as the wiki grows.** The map settles its pages by a little physics: pages push each other away, links pull. The pull of a link grows with how far its pages are, with no ceiling, and two pages that come too close keep swinging through each other — so past a hundred pages or so the forces fed on themselves, positions ran past any number and turned into NaN, and the SVG drew every page on the same spot: the map came up empty with one page stuck in the corner, no matter how many pages and links it said it had. A step of the physics now caps how fast a page may move, and a wiki of any size settles spread out. (A wiki of 358 pages was the one that showed it; the same change tested from 10 to 358 pages.) Thanks, brunolellis! (#357)
