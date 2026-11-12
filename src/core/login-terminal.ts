@@ -29,6 +29,8 @@ export function loginCommand(engine: EngineId): { args: string[]; env: Record<st
       return { args: ['auth', 'login'], env: {} }
     case 'codex':
       return { args: ['login', '--device-auth'], env: {} }
+    case 'hermes':
+      return { args: ['setup'], env: {}, hint: L('Escolha o provedor com as setas e toque em Enter; a chave vai no prompt seguinte.', 'Pick the provider with the arrows and tap Enter; the key goes in the next prompt.') }
     case 'grok':
       return { args: ['login', '--device-auth'], env: {} }
     case 'cursor':

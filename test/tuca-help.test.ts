@@ -17,7 +17,7 @@ import { proposalFrom, workspaceState } from '../src/core/tuca-help'
 import { screenOf } from '../src/shared/screens'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: { installed: true, loggedIn: false }, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: { installed: true, loggedIn: false }, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 const linear: Connector = { id: 'c-lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth', status: 'needs_auth', error: 'O Linear pediu pra entrar de novo.', tools: [] }
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: 'Você tria tickets.', modelId: 'sonnet', effort: 'low', limit: 100_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const lia = agent('a1', 'lia', { grants: { 'c-lin': 'read' } })
@@ -33,6 +33,12 @@ const ctx = {
 }
 
 describe("the Tuca's proposals for what exists", () => {
+  it('keeps proposed instructions over the recommendation exactly as provided', () => {
+    const instructions = ` ${'x'.repeat(32_000)} END\n`
+    const result = proposalFrom('propor_ajuste', { agente: 'lia', instrucoes: instructions }, ctx)
+    expect(result.proposal?.kind === 'agent' && result.proposal.changes.instructions).toBe(instructions)
+  })
+
   it('proposes only what changes in an agent, checked like the screens check it', () => {
     const r = proposalFrom('propor_ajuste', { agente: '@lia', modelo: 'haiku', esforco: 'low', instrucoes: 'Você tria tickets.', conectores: [{ conector: 'linear', nivel: 'escrita' }], limite: 200000, motivo: 'Mais barato' }, ctx)
     expect(r.proposal).toEqual({ kind: 'agent', agentId: 'a1', changes: { modelId: 'haiku', grants: { 'c-lin': 'read_write' }, limit: 200000 }, before: { modelId: 'sonnet', grants: { 'c-lin': 'read' }, limit: 100000 }, reason: 'Mais barato' })
@@ -182,7 +188,7 @@ describe('the Tuca helping, in a conversation', () => {
     turns.length = 0
     results.length = 0
     calls = []
-    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [] }) } })
     db.saveAgent(lia)
     const tuca = tucaAgent('sonnet', ['lia'], 1000)
