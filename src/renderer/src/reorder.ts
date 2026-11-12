@@ -35,8 +35,21 @@ export function useHoldReorder({ onDrop, onNudge }: { onDrop: (id: string, befor
   const swallow = useRef(false) // the click that follows a drop must not navigate
   const target = useRef<string | null>(null) // the row under the pointer, without waiting for a render
   const carrying = useRef<string | null>(null) // the same, for the handlers that run before a render
+  const pressedOn = useRef<HTMLElement | null>(null) // the row the pointer went down on
+  const pressedWith = useRef<number | null>(null) // and its pointer
 
   const cancel = useCallback((): void => {
+    if (pressedOn.current && pressedWith.current !== null) {
+      // Capture is only ever taken once a row is carried; letting go of it here keeps a later press
+      // from arriving at an element that is no longer listening.
+      try {
+        pressedOn.current.releasePointerCapture?.(pressedWith.current)
+      } catch {
+        /* the pointer was already released */
+      }
+    }
+    pressedOn.current = null
+    pressedWith.current = null
     if (timer.current) clearTimeout(timer.current)
     timer.current = null
     carrying.current = null
@@ -57,13 +70,23 @@ export function useHoldReorder({ onDrop, onNudge }: { onDrop: (id: string, befor
       ...(picked ? { style: { touchAction: 'none' as const } } : {}),
       onPointerDown: (e) => {
         if (e.button !== 0) return
-        // The press can't be lost to a boundary event while the row re-renders under it.
-        e.currentTarget.setPointerCapture?.(e.pointerId)
+        // No capture yet. Taking it on every press retargets the click that follows to this row, so
+        // the button inside it never opens — and a row that never opens reads as a dead sidebar.
+        // It is taken once the row is actually being carried, below.
+        pressedOn.current = e.currentTarget as HTMLElement
+        pressedWith.current = e.pointerId
         if (timer.current) clearTimeout(timer.current)
         timer.current = setTimeout(() => {
           swallow.current = true
           carrying.current = id
           setPicked(id)
+          // Now that the row is picked up, keep the gesture even if it leaves the row or the row
+          // re-renders under the pointer.
+          try {
+            pressedOn.current?.setPointerCapture?.(pressedWith.current ?? 0)
+          } catch {
+            /* the pointer is gone: nothing to carry */
+          }
         }, HOLD_MS)
       },
       onPointerMove: (e) => {
@@ -76,7 +99,11 @@ export function useHoldReorder({ onDrop, onNudge }: { onDrop: (id: string, befor
       onPointerUp: () => {
         const to = target.current
         const id2 = carrying.current
-        if (id2 && to && to !== id2) onDrop(id2, to)
+        const dropped = !!(id2 && to && to !== id2)
+        if (dropped) onDrop(id2!, to!)
+        // A row held long enough to be picked up and then let go where it was is still a click: it
+        // opens, exactly like a quick one. Only a drop eats the click that follows it.
+        swallow.current = dropped
         cancel()
       },
       onPointerCancel: () => cancel(),
