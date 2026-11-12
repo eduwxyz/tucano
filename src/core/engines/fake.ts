@@ -151,6 +151,37 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/gaste (\d+) tokens/i.test(last)) {
         spend = Number(/gaste (\d+) tokens/i.exec(last)![1])
         reply = 'Instalei o Swift e li o módulo de sorteio. Falta rodar os testes do Core e conferir o filtro de questões recentes.'
+      } else if (turn.mcpUrl && /(quem (?:é|e) o time|liste o time|who'?s on the team)/i.test(last)) {
+        // The team an agent looks at: a DM's prompt names only itself, so the tool is how it finds the rest.
+        const r = await callTool(turn.mcpUrl, 'equipe', {})
+        reply = textOf(r)
+      } else if (turn.mcpUrl && /chame (.+?) num time(?: chamado ([\w-]+))?/i.test(last)) {
+        // A team-up asked for by tool, with the name the agent chose for the channel.
+        const m = /chame (.+?) num time(?: chamado ([\w-]+))?/i.exec(last)!
+        const quem = m[1]!.match(/@[\w-]+/g) ?? []
+        const r = await callTool(turn.mcpUrl, 'chamar_time', { quem, ...(m[2] ? { nome: m[2] } : {}) })
+        reply = textOf(r)
+      } else if (/\b(?:was cut when the app closed|was cut by a failure|was cut before it finished|foi cortada quando|foi cortada por uma falha)/i.test(turn.prompt)) {
+        // A reply the app cut, continued: the steps it already took are in its task, so it says how
+        // many there were and goes on instead of redoing them (src/core/runs.ts, continue()).
+        const told = /(?:The steps you took|Os passos que você fez):\n([\s\S]*?)\n\n/.exec(turn.prompt)?.[1] ?? ''
+        const done = told
+          .split('\n')
+          .filter((l) => l.trim().startsWith('-'))
+          .map((l) => l.trim().slice(2).split(':')[0]!.trim())
+        reply = L(
+          `Continuei dali: ${done.join(', ')} já estavam prontos, e não refiz nenhum.`,
+          `I went on from there: ${done.join(', ')} were already done, and I redid none of them.`
+        )
+      } else if (turn.mcpUrl && /lembre e procure:/i.test(last)) {
+        // A memory written and then searched, then a hold: two real steps behind a reply, and a pause
+        // long enough for the app to be killed between them (scripts/e2e-kill-restart.mjs). Neither
+        // call needs a computer, so this runs on any host the app runs on.
+        const texto = /lembre e procure:\s*(.+)/is.exec(last)![1]!.trim()
+        await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
+        await callTool(turn.mcpUrl, 'buscar_memorias', { busca: texto })
+        await new Promise((ok) => setTimeout(ok, Number(process.env['TUCANO_FAKE_HOLD_MS'] ?? 6000)))
+        reply = L('Guardei e procurei de volta.', 'I saved it and searched it back.')
       } else if (turn.mcpUrl && /lembr[ae] que (.+)/i.test(last)) {
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
