@@ -168,16 +168,17 @@ describe('a prompt that arrives while a reply is running', () => {
     expect(other[0]?.run?.status).toBe('done') // d2 was left alone
   })
 
-  it('steer: with a reply running there, it starts no new one; the message is in the conversation', async () => {
+  it('steer: with a reply running there, no other one starts while it runs; the message says where it went', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const r = runnerWith(fakeEngine('claude', { delayMs: 15 }))
-    await r.send('d1', 'conte uma história, demore 1 s')
+    await r.send('d1', 'conte uma história, demore 2 s')
     await r.send('d1', 'mude de plano', [], undefined, undefined, { mode: 'steer' })
-    await r.idle()
     expect(agentMessages()).toHaveLength(1) // no second reply: it went into the one running
     expect(mine()).toHaveLength(2)
     expect(mine()[1]?.text).toBe('mude de plano')
+    expect(mine()[1]?.sendMode).toBe('steer') // and the conversation says so, so it never looks unanswered
+    await r.idle()
   })
 })
 
@@ -245,5 +246,51 @@ describe('a steer reaches the agent between two tool calls', () => {
     expect(allText(results[1])).toContain('escreveu isto enquanto você trabalhava')
     const reply = agentMessages()[0]!
     expect(reply.run?.steps.some((s) => s.label === 'Recebeu o que você escreveu')).toBe(true)
+  })
+})
+
+describe('a steer the reply ended without taking', () => {
+  // An engine that records what each reply was told, so a test can say "this text did reach the agent".
+  function told(rec: string[]): Engine {
+    const base = fakeEngine('claude', { delayMs: 1 })
+    return {
+      id: 'claude',
+      async *run(turn: Turn) {
+        rec.push(turn.prompt)
+        yield* base.run(turn)
+      }
+    }
+  }
+
+  it('is answered by a reply of its own, in the place it was written', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const rec: string[] = []
+    const r = runnerWith(told(rec))
+    await r.send('d1', 'conte uma história, demore 1 s')
+    await new Promise((res) => setTimeout(res, 120)) // the reply is running, with no tool call ahead of it
+    await r.send('d1', 'mude de plano', [], undefined, undefined, { mode: 'steer' })
+    const steered = mine()[1]!
+    expect(steered.sendMode).toBe('steer') // it went into the reply that was running, and says so
+    await r.idle()
+    const replies = agentMessages()
+    expect(replies).toHaveLength(2) // the one it went into, and the one that answers it: nothing is left silent
+    expect(replies[1]?.run?.replyTo).toBe(steered.id) // that reply answers my steered message, not another
+    expect(rec[1]).toContain('mude de plano') // the agent did read it, in the end
+    expect(db.message(steered.id)?.sendMode).toBeUndefined() // answered, so it no longer says it went into the reply above
+  })
+
+  it('never goes into a reply running in another thread, nor a thread, seen from the channel', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'channel', name: 'time', members: ['a1'], threads: true })
+    const r = runnerWith(fakeEngine('claude', { delayMs: 1 }))
+    await r.send('d1', 'comece uma thread, demore 1 s')
+    await new Promise((res) => setTimeout(res, 120)) // a reply is running, inside that thread
+    await r.send('d1', 'outra coisa, no canal', [], undefined, undefined, { mode: 'steer' })
+    const second = mine()[1]!
+    expect(second.sendMode).toBeUndefined() // not handed over: it isn't the reply's place
+    await r.idle()
+    expect(agentMessages()).toHaveLength(2) // it got a reply of its own
+    expect(agentMessages()[1]?.run?.replyTo).toBe(second.id)
   })
 })

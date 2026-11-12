@@ -52,6 +52,7 @@ import { canEditChannel,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
+  updateSettings,
   typing,
   setTab,
   stopRun,
@@ -526,6 +527,13 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {message.sendMode === 'queue' && (
           <span className="tag msg__queued" title={L('Chega quando a resposta acima terminar', 'Goes when the reply above ends')}>
             {L('Na fila, esperando a resposta acima', 'Queued, waiting for the reply above')}
+          </span>
+        )}
+        {/* A prompt handed into the reply above, which reads it between two tool calls (runs.ts). It's
+            said here, so a message that gets no reply of its own never looks lost. */}
+        {message.sendMode === 'steer' && (
+          <span className="tag msg__queued" title={L('A resposta acima leu isto no meio do trabalho dela', 'The reply above read this in the middle of its work')}>
+            {L('Entregue à resposta acima', 'Handed to the reply above')}
           </span>
         )}
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
@@ -2361,6 +2369,18 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
             {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
+          {sendMode !== 'parallel' ? (
+            <button
+              className="btn btn--sm btn--ghost composer__mode"
+              onClick={() => updateSettings({ sendMode: 'parallel' })}
+              title={L(
+                'Enquanto uma resposta corre aqui, o Enter manda assim. Clique para voltar ao normal; os atalhos continuam valendo uma vez cada (Shift+Enter fila, Alt+Enter entrega, Shift+Alt+Enter interrompe).',
+                'While a reply runs here, Enter sends like this. Click to go back to the plain one; the keys still work once each (Shift+Enter queues, Alt+Enter hands it over, Shift+Alt+Enter interrupts).'
+              )}
+            >
+              {sendMode === 'queue' ? L('Enter: na fila', 'Enter: queued') : sendMode === 'steer' ? L('Enter: entregue à resposta', 'Enter: into the reply') : L('Enter: interrompe', 'Enter: interrupts')}
+            </button>
+          ) : null}
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
