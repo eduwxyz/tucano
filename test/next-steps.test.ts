@@ -1,11 +1,12 @@
-// Next steps: an agent proposes the work that comes after its reply as a card of checkboxes, every
-// box ticked — the opposite of a question, where nothing is picked. With Jev turned on in the
-// settings, only the steps it would do now keep their tick.
+// Next steps: an agent proposes the work that comes after its reply as a card of checkboxes, none of
+// them ticked — the same as a question. The only boxes that come ticked are the ones a classifier
+// assigned to that job in Settings › Classifiers says are worth doing now.
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { MAX_STEPS, parseNextSteps, startsTicked, type Decision } from '../src/shared/questions'
+import { JEV_CLASSIFIER, type ClassifierConfig } from '../src/shared/classifiers'
 import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
@@ -68,7 +69,7 @@ describe('what next_steps takes', () => {
     expect(d).toMatchObject({ question: 'O que vem agora?', kind: 'multiple', nextSteps: true })
     expect(d.options?.map((o) => o.label)).toEqual(['Rodar a suíte inteira', 'Traduzir os rótulos novos', 'Escrever o teste do card', 'Publicar as capturas'])
     expect(d.options?.[0]?.description).toBe('o que já está escrito')
-    // Nothing says which side of the list is ticked: with no subset, every box starts ticked.
+    // Nothing says which side of the list is ticked: with no subset, no box starts ticked.
     expect(d.ticked).toBeUndefined()
   })
 
@@ -88,22 +89,38 @@ describe('what next_steps takes', () => {
 })
 
 describe('which boxes start ticked', () => {
-  it('all of them on a next-steps list, none on a question', () => {
-    expect(startsTicked(four())).toEqual([0, 1, 2, 3])
+  it('none of them, on a next-steps list as on a question', () => {
+    expect(startsTicked(four())).toEqual([])
     expect(startsTicked({ question: 'Qual?', kind: 'multiple', options: [{ label: 'a' }, { label: 'b' }] })).toEqual([])
   })
 
-  it('only the ones ticked says, when Jev picked a subset', () => {
+  it('only the ones ticked says, when the classifier picked a subset', () => {
     expect(startsTicked({ ...four(), ticked: [0, 2] })).toEqual([0, 2])
+    // The classifier found nothing worth doing now: the card opens exactly as it does on its own.
+    expect(startsTicked({ ...four(), ticked: [] })).toEqual([])
     // An index that no longer exists (a shorter list) is dropped rather than drawn.
     expect(startsTicked({ ...four(), ticked: [0, 9] })).toEqual([0])
   })
 })
 
-describe('Jev and the steps', () => {
-  const ask = (picks: ('do' | 'later')[], status?: number) => {
+// A stand-in for OpenAI's Decisions API: the step is the last numbered line of `input`, and the
+// answer comes back as an array, in the order the questions were asked.
+function luna(picks: ('do' | 'later')[]) {
+  const requests: { url: string; input: string }[] = []
+  const f = (async (url: string, init: RequestInit) => {
+    const body = JSON.parse(init.body as string) as { input: string }
+    requests.push({ url, input: body.input })
+    const last = [...body.input.matchAll(/^(\d+)\. /gm)].pop()
+    const i = Number(last?.[1] ?? 1) - 1
+    return Response.json({ answers: [{ type: 'choice', name: 'pick', choice: picks[i] ?? 'do' }] })
+  }) as unknown as typeof fetch
+  return { f, requests }
+}
+
+describe('the classifier and the steps', () => {
+  const ask = (picks: ('do' | 'later')[], status?: number, target: ClassifierConfig = JEV_CLASSIFIER) => {
     const api = typesafe(picks, status)
-    return { api, run: stepsWorthDoing({ key: 'ts-key', decision: four(), context: 'Terminei a issue #286.', fetch: api.f }) }
+    return { api, run: stepsWorthDoing({ target, key: 'ts-key', decision: four(), context: 'Terminei a issue #286.', fetch: api.f }) }
   }
 
   it('asks one question per step, each carrying the whole list and the step itself', async () => {
@@ -119,15 +136,23 @@ describe('Jev and the steps', () => {
     expect(api.bodies.every((b) => b.questions.pick?.criteria['do'] && b.questions.pick?.criteria['later'])).toBe(true)
   })
 
-  it('never empties the list: when every step can wait, all of them stay ticked', async () => {
+  it('when every step can wait, nothing is ticked: the card opens as it does on its own', async () => {
     const { run } = ask(['later', 'later', 'later', 'later'])
     const r = await run
-    expect('ticked' in r && r.ticked).toEqual([0, 1, 2, 3])
+    expect('ticked' in r && r.ticked).toEqual([])
   })
 
-  it('a failure is an error the caller can ignore, not a list with nothing ticked', async () => {
+  it('a failure is an error the caller can ignore, not a list of ticks nobody asked for', async () => {
     const { run } = ask(['do', 'do', 'do', 'do'], 500)
     expect(await run).toMatchObject({ error: expect.any(String) })
+  })
+
+  it('runs on whichever classifier the job is set to, not on TypeSafe by name', async () => {
+    const api = luna(['do', 'later', 'do', 'later'])
+    const r = await stepsWorthDoing({ target: { id: 'luna', name: 'Luna', provider: 'openai', model: 'gpt-6-luna' }, key: 'sk-o', decision: four(), fetch: api.f })
+    expect('ticked' in r && r.ticked).toEqual([0, 2])
+    expect(api.requests).toHaveLength(4)
+    expect(api.requests.every((q) => q.url === 'https://api.openai.com/v1/decisions')).toBe(true)
   })
 })
 
@@ -159,7 +184,8 @@ describe('the card an agent gets', () => {
     return () => gateway.stop()
   })
 
-  const runner = (api: ReturnType<typeof typesafe>, key: string | undefined): Runner =>
+  // The classifier the next-steps job is set to in Settings › Classifiers; none assigned, nothing is asked.
+  const runner = (api: ReturnType<typeof typesafe>, target: ClassifierConfig | undefined): Runner =>
     new Runner({
       db,
       engines: engines(fakeEngine('claude', { delayMs: 1 })),
@@ -167,12 +193,12 @@ describe('the card an agent gets', () => {
       emit: () => {},
       workDir: mkdtempSync(join(tmpdir(), 'steps-work-')),
       gateway,
-      jev: { key: async () => key, fetch: api.f }
+      jev: { key: async () => (target ? 'ts-key' : undefined), target: () => target, fetch: api.f }
     })
 
-  it('leaves every box ticked when Jev is off, and sends no step to TypeSafe', async () => {
+  it('opens every box clear with no classifier on the job, and sends no step anywhere', async () => {
     const api = typesafe(['do', 'later', 'do', 'later'])
-    const r = runner(api, 'ts-key')
+    const r = runner(api, undefined)
     await r.send('d1', '@lia me dá os próximos passos')
     await r.idle()
     const q = asked()
@@ -183,10 +209,9 @@ describe('the card an agent gets', () => {
     expect(api.bodies).toHaveLength(0)
   })
 
-  it('with Jev on, only the steps worth doing now start ticked', async () => {
-    settings = { ...settings, jevNextSteps: true }
+  it('with a classifier on the job, only the steps worth doing now start ticked', async () => {
     const api = typesafe(['do', 'later', 'do', 'later'])
-    const r = runner(api, 'ts-key')
+    const r = runner(api, JEV_CLASSIFIER)
     await r.send('d1', '@lia me dá os próximos passos')
     await r.idle()
     expect(asked()?.run?.questions?.[0]?.ticked).toEqual([0, 2])
@@ -195,19 +220,17 @@ describe('the card an agent gets', () => {
     expect(asked()?.run?.status).toBe('waiting_input')
   })
 
-  it('a TypeSafe failure leaves every box ticked', async () => {
-    settings = { ...settings, jevNextSteps: true }
+  it('a classifier failure leaves every box clear', async () => {
     const api = typesafe(['do', 'later', 'do', 'later'], 500)
-    const r = runner(api, 'ts-key')
+    const r = runner(api, JEV_CLASSIFIER)
     await r.send('d1', '@lia me dá os próximos passos')
     await r.idle()
     expect(asked()?.run?.questions?.[0]?.ticked).toBeUndefined()
   })
 
   it('what stays ticked comes back as the next message, and nothing else does', async () => {
-    settings = { ...settings, jevNextSteps: true }
     const api = typesafe(['do', 'later', 'do', 'later'])
-    const r = runner(api, 'ts-key')
+    const r = runner(api, JEV_CLASSIFIER)
     await r.send('d1', '@lia me dá os próximos passos')
     await r.idle()
     const q = asked()!

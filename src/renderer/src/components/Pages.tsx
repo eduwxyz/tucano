@@ -2535,7 +2535,7 @@ export function ClassifiersCard(): ReactNode {
     <>
       {list.length === 0 && (
         <p className="muted small">
-          {L('Nenhum classificador ainda. Adicione um para o roteador escolher quem responde, ou para o navegador achar o que clicar.', 'No classifier yet. Add one so the router can pick who replies, or the browser can find what to click.')}
+          {L('Nenhum classificador ainda. Adicione um para o roteador escolher quem responde, para o navegador achar o que clicar, ou para marcar os próximos passos que já vêm marcados.', 'No classifier yet. Add one so the router can pick who replies, the browser can find what to click, or the next steps can open with the ones worth doing now already ticked.')}
         </p>
       )}
       {list.map((c) => {
@@ -2649,7 +2649,9 @@ export function ClassifiersCard(): ReactNode {
                 what={
                   job === 'routing'
                     ? L(`cada mensagem sem @menção vai pro ${providerSpec(c.provider).label} escolher quem responde.`, `every message without an @mention goes to ${providerSpec(c.provider).label} to pick who replies.`)
-                    : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
+                    : job === 'nextSteps'
+                      ? L(`cada passo de um card de próximos passos vai pro ${providerSpec(c.provider).label} dizer se vale fazer agora, com o que o agente disse antes.`, `every step of a next-steps card goes to ${providerSpec(c.provider).label} to say whether it's worth doing now, with what the agent said before it.`)
+                      : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
                 }
               />
             )
@@ -2898,8 +2900,8 @@ export function SettingsPage(): ReactNode {
           <Card
             title="Classifiers"
             lead={L(
-              'Modelos que respondem perguntas fechadas — uma opção entre várias, um sim/não, uma nota — em menos de um segundo e com a probabilidade de cada resposta. O Jev, do TypeSafe, foi o primeiro; a Luna, da OpenAI, e a Decision 1, do Google, fazem o mesmo trabalho, e o Jev também é vendido pelo OpenRouter. Cada um serve um trabalho: quem responde num canal, o que o agente clica numa página.',
-              'Models that answer closed questions — one option out of several, a yes/no, a score — in under a second and with each answer’s probability. TypeSafe’s Jev was the first; OpenAI’s Luna and Google’s Decision 1 do the same job, and Jev is also sold through OpenRouter. Each one serves a job: who replies in a channel, what an agent clicks in a page.'
+              'Modelos que respondem perguntas fechadas — uma opção entre várias, um sim/não, uma nota — em menos de um segundo e com a probabilidade de cada resposta. O Jev, do TypeSafe, foi o primeiro; a Luna, da OpenAI, e a Decision 1, do Google, fazem o mesmo trabalho, e o Jev também é vendido pelo OpenRouter. Cada um serve um trabalho: quem responde num canal, o que o agente clica numa página, e quais próximos passos do agente já vêm marcados.',
+              'Models that answer closed questions — one option out of several, a yes/no, a score — in under a second and with each answer’s probability. TypeSafe’s Jev was the first; OpenAI’s Luna and Google’s Decision 1 do the same job, and Jev is also sold through OpenRouter. Each one serves a job: who replies in a channel, what an agent clicks in a page, and which of an agent’s next steps start ticked.'
             )}
           >
             <ClassifiersCard />
@@ -2957,19 +2959,6 @@ export function SettingsPage(): ReactNode {
                 </p>
               </div>
               <Toggle on={!!settings.jevRecommend} onChange={(v) => updateSettings({ jevRecommend: v })} />
-            </div>
-            <div className="key-row">
-              <Icon name="spark" />
-              <div className="grow">
-                <strong>{L('Marcar só os próximos passos que importam', 'Tick only the next steps worth doing')}</strong>
-                <p className="muted small">
-                  {L(
-                    'Desligado por padrão. Ligado, cada passo de um card de próximos passos vai pro TypeSafe com o que o agente disse antes, e só os que ele consideraria pra agora começam marcados; o resto espera no card, a um clique. Nunca deixa a lista vazia: se nenhum for marcado, todos ficam.',
-                    'Off by default. On, every step of a next-steps card goes to TypeSafe with what the agent said before it, and only the ones it would do now start ticked; the rest waits in the card, one click away. It never empties the list: if none is picked, all of them stay ticked.'
-                  )}
-                </p>
-              </div>
-              <Toggle on={!!settings.jevNextSteps} onChange={(v) => updateSettings({ jevNextSteps: v })} />
             </div>
             {settings.jevRecommend && work && (
               <OutsideGateway what={L('cada pergunta de agente com opções, com o texto da pergunta e das opções, vai pro TypeSafe.', "every agent question with options, with the question's and the options' text, goes to TypeSafe.")} />

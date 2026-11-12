@@ -5,14 +5,15 @@
 // Luna (Decisions API), Google's Gemini Decision 1, and Jev itself through OpenRouter.
 //
 // One classifier is chosen per job (src/shared/classifiers.ts `ClassifierJob`): who replies in a
-// channel, what an agent should click in a page, and the ones Apo's own branches add on top.
+// channel, what an agent should click in a page, which of an agent's next steps are worth doing now,
+// and the ones Apo's own branches add on top.
 import { L } from './lang'
 import type { Settings } from './types'
 
 export type ClassifierProvider = 'typesafe' | 'openrouter' | 'openai' | 'gemini'
 
 // Where a classifier is used. A job has at most one classifier, and unassigned means off.
-export type ClassifierJob = 'routing' | 'browser'
+export type ClassifierJob = 'routing' | 'browser' | 'nextSteps'
 
 export interface ClassifierConfig {
   id: string
@@ -87,12 +88,13 @@ export const providerSpec = (p: ClassifierProvider): ProviderSpec => PROVIDERS.f
 // The classifier an install from before this section had: one TypeSafe Jev.
 export const JEV_CLASSIFIER: ClassifierConfig = { id: 'jev', name: 'Jev', provider: 'typesafe', model: 'jev-latest' }
 
-export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser']
+export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser', 'nextSteps']
 
 export const jobLabel = (job: ClassifierJob): { pt: string; en: string } =>
   ({
     routing: { pt: 'Quem responde no canal', en: 'Who replies in a channel' },
-    browser: { pt: 'O que o agente clica na página', en: 'What an agent clicks in a page' }
+    browser: { pt: 'O que o agente clica na página', en: 'What an agent clicks in a page' },
+    nextSteps: { pt: 'Quais próximos passos já vêm marcados', en: 'Which next steps start ticked' }
   })[job]
 
 export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
@@ -104,6 +106,10 @@ export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
     browser: {
       pt: 'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',
       en: 'Finds the element the agent asked for (“the Search button”). The screenshot, which handles the cases without text, only TypeSafe reads.'
+    },
+    nextSteps: {
+      pt: 'Lê os passos que o agente propôs, um por pergunta, e marca no card os que valem fazer agora — que é o mesmo que já vêm marcados. O resto abre desmarcado, a um clique. Sem ninguém aqui, o card abre todo desmarcado.',
+      en: 'Reads the steps an agent proposed, one question each, and marks on the card the ones worth doing now — which are the ones that open ticked. The rest open clear, one click away. With nobody here, the card opens with every box clear.'
     }
   })[job]
 

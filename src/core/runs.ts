@@ -1563,18 +1563,20 @@ ${note}`,
           if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
           let decision = parsed.decision
           const count = decision.options?.length ?? 0
-          // Turned on in the settings: Jev says which of these are worth doing now and only those
-          // start ticked. Unlike the pill on a question, this one waits: the ticks are the card, and
-          // it's a couple of small calls, not a turn.
-          if (settings.jevNextSteps && count > 1) {
-            const key = await this.deps.jev?.key()
+          // The card opens with every box clear. When a classifier is assigned to this job in
+          // Settings › Classifiers, it says which of these are worth doing now and only those open
+          // ticked. Unlike the pill on a question, this one waits: the ticks are the card, and it's a
+          // couple of small calls, not a turn.
+          const stepsClassifier = count > 1 ? this.deps.jev?.target?.('nextSteps') : undefined
+          if (stepsClassifier) {
+            const key = await this.deps.jev?.key('nextSteps')
             if (key) {
               try {
-                const r = await stepsWorthDoing({ key, decision, context: msg.text, fetch: this.deps.jev?.fetch })
-                // None worth doing is not a card with nothing ticked: that would throw the whole list away.
-                if (!('error' in r) && r.ticked.length > 0 && r.ticked.length < count) decision = { ...decision, ticked: r.ticked }
+                const r = await stepsWorthDoing({ target: stepsClassifier, key, decision, context: msg.text, fetch: this.deps.jev?.fetch })
+                // Nothing worth doing now is a card with nothing ticked, which is how it opens anyway.
+                if (!('error' in r)) decision = { ...decision, ticked: r.ticked }
               } catch {
-                // every step stays ticked
+                // nothing ticked, as with no classifier at all
               }
             }
           }
@@ -1584,8 +1586,8 @@ ${note}`,
           addSteps({ id: randomUUID(), label: L('Propôs os próximos passos', 'Proposed the next steps'), detail: `${count} · ${startsTicked(decision).length} ${L('marcados', 'ticked')}`, status: 'done' })
           return textResult(
             L(
-              `Os próximos passos estão no card, com as caixas já marcadas. Encerre sua resposta agora com no máximo uma frase, sem repetir os passos. O que ficar marcado volta como a sua próxima tarefa, na próxima mensagem.`,
-              `The next steps are in the card, with the boxes already ticked. End your reply now with one sentence at most, without repeating the steps. Whatever stays ticked comes back as your next task, in the next message.`
+              `Os próximos passos estão no card, com as caixas em branco pra pessoa marcar o que quer. Encerre sua resposta agora com no máximo uma frase, sem repetir os passos. O que ficar marcado volta como a sua próxima tarefa, na próxima mensagem.`,
+              `The next steps are in the card, with the boxes clear for the person to tick what they want. End your reply now with one sentence at most, without repeating the steps. Whatever gets ticked comes back as your next task, in the next message.`
             )
           )
         }
