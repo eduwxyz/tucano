@@ -530,19 +530,23 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS delegations_by_root ON delegations (root_id);
   CREATE INDEX IF NOT EXISTS delegations_open ON delegations (state) WHERE state = 'open';
   `,
-  // What a reply changed in a repository of the person's (src/core/changes.ts): its two snapshots,
-  // kept in that repository, and every file it touched, for the diff opened from the chat.
+  // What a reply changed in a folder of the person's (src/core/changes.ts): its two snapshots, kept
+  // in that repository (git_dir: in Tucano's own, for a folder without git), and every file it
+  // touched, for the diff opened from the chat. Not tied to the message: when that goes, the row
+  // stays until the daily sweep has taken its snapshots out of the repository.
   `
   CREATE TABLE IF NOT EXISTS changesets (
     id TEXT PRIMARY KEY,
-    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
     root TEXT NOT NULL,
     shown TEXT NOT NULL,
+    git_dir TEXT,
     before TEXT NOT NULL,
     after TEXT NOT NULL,
     files TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    expired INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS changesets_by_message ON changesets (message_id);
   `
@@ -558,6 +562,9 @@ const COLUMNS: [string, string, string][] = [
   ['agents', 'outside_guard', 'INTEGER'],
   // A phone's push handle (src/core/push.ts), on its device key: {"handle", "tag"} as JSON.
   ['person_keys', 'push', 'TEXT'],
+  // A folder without git's changesets, and the ones past the days they're kept (src/core/changes.ts).
+  ['changesets', 'git_dir', 'TEXT'],
+  ['changesets', 'expired', 'INTEGER NOT NULL DEFAULT 0'],
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
@@ -1578,20 +1585,27 @@ export class Db {
 
   saveChangeSet(c: ChangeSetRow): void {
     this.db
-      .prepare('INSERT OR REPLACE INTO changesets (id, message_id, agent_id, root, shown, before, after, files, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(c.id, c.messageId, c.agentId, c.root, c.shown, c.before, c.after, JSON.stringify(c.files), c.createdAt)
+      .prepare('INSERT OR REPLACE INTO changesets (id, message_id, agent_id, root, shown, git_dir, before, after, files, created_at, expired) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(c.id, c.messageId, c.agentId, c.root, c.shown, c.gitDir ?? null, c.before, c.after, JSON.stringify(c.files), c.createdAt, c.expired ? 1 : 0)
   }
 
   changeSet(id: string): ChangeSetRow | undefined {
     const r = this.db.prepare('SELECT * FROM changesets WHERE id = ?').get(id) as Row | undefined
-    if (!r) return undefined
-    let files: FileChange[] = []
-    try {
-      files = JSON.parse(str(r['files'])) as FileChange[]
-    } catch {
-      // kept by hand or cut: no files to show
-    }
-    return { id: str(r['id']), messageId: str(r['message_id']), agentId: str(r['agent_id']), root: str(r['root']), shown: str(r['shown']), before: str(r['before']), after: str(r['after']), files, createdAt: Number(r['created_at']) }
+    return r ? changeSetRow(r) : undefined
+  }
+
+  // The changesets whose snapshots are due to go: kept past `before`, or their message deleted.
+  staleChangeSets(before: number): { row: ChangeSetRow; orphan: boolean }[] {
+    const rows = this.db
+      .prepare('SELECT c.*, m.id IS NULL AS orphan FROM changesets c LEFT JOIN messages m ON m.id = c.message_id WHERE m.id IS NULL OR (c.expired = 0 AND c.created_at < ?)')
+      .all(before) as Row[]
+    return rows.map((r) => ({ row: changeSetRow(r), orphan: Number(r['orphan']) === 1 }))
+  }
+
+  // Its snapshots taken out: gone with its message, or kept as expired (its counts still shown).
+  dropChangeSet(id: string, orphan: boolean): void {
+    if (orphan) this.db.prepare('DELETE FROM changesets WHERE id = ?').run(id)
+    else this.db.prepare('UPDATE changesets SET expired = 1 WHERE id = ?').run(id)
   }
 
   // ---------- services (what runs on an agent's computer) ----------
@@ -2166,4 +2180,15 @@ export class Db {
       ...(r['detail'] ? { detail: JSON.parse(str(r['detail'])) as Record<string, unknown> } : {})
     }))
   }
+}
+
+function changeSetRow(r: Row): ChangeSetRow {
+  let files: FileChange[] = []
+  try {
+    files = JSON.parse(str(r['files'])) as FileChange[]
+  } catch {
+    // kept by hand or cut: no files to show
+  }
+  const gitDir = r['git_dir'] == null ? undefined : str(r['git_dir'])
+  return { id: str(r['id']), messageId: str(r['message_id']), agentId: str(r['agent_id']), root: str(r['root']), shown: str(r['shown']), ...(gitDir ? { gitDir } : {}), before: str(r['before']), after: str(r['after']), files, createdAt: Number(r['created_at']), ...(Number(r['expired']) ? { expired: true } : {}) }
 }

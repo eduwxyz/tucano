@@ -11918,11 +11918,23 @@ button.agent-card__now:hover {
 .changes__item + .changes__item {
   border-top: 1px solid var(--border);
 }
+.changes__row {
+  display: flex;
+  align-items: center;
+}
+.changes__item.is-open .changes__row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
 .changes__file {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 6px 12px;
   border: 0;
   background: transparent;
@@ -11934,13 +11946,6 @@ button.agent-card__now:hover {
 }
 .changes__file:hover {
   background: var(--hover);
-}
-.changes__item.is-open .changes__file {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
 }
 .changes__chev {
   display: inline-flex;
@@ -12012,6 +12017,84 @@ button.agent-card__now:hover {
   font-size: 12.5px;
 }
 .changes__note--error {
+  color: var(--danger);
+}
+.changes__item.is-undone .changes__path {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.changes__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+}
+.changes__act {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.changes__act:hover {
+  background: var(--hover);
+  color: var(--ok);
+}
+.changes__act--undo:hover {
+  color: var(--danger);
+}
+.changes__act:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.changes__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.changes__state--kept {
+  color: var(--ok);
+}
+.changes__state--undone {
+  padding-right: 14px;
+  color: var(--text-3);
+}
+.changes__plain {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--text-3);
+  font-size: 12px;
+}
+.changes__problem {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+.changes__review {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--hover);
+  font-size: 12.5px;
+}
+.changes__review-left {
+  flex: 1;
+  color: var(--text-3);
+}
+.changes__review-error {
   color: var(--danger);
 }
 .changes__more {

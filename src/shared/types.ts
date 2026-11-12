@@ -177,7 +177,16 @@ export interface ChangeSet {
   added: number
   removed: number
   files: FileChange[] // the first CHANGE_FILES_SHOWN
+  plain?: boolean // a folder without git: its snapshots are kept in Tucano's own repository
+  review?: Record<string, FileReview> // what the person decided of each file, by path
+  expired?: boolean // past the days its snapshots are kept: the counts stay, the diffs and undo don't
 }
+
+// A reply's snapshots are kept this long; then its diffs and undo go (its counts stay).
+export const CHANGES_KEEP_DAYS = 30
+
+// A file the person looked at: kept as the reply left it, or put back as it was before.
+export type FileReview = 'kept' | 'undone'
 
 export interface Receipt {
   model: string

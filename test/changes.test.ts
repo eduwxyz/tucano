@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -115,7 +115,7 @@ describe('a reply’s changes', () => {
     expect(changes.files(set!.id, CHANGE_FILES_SHOWN)).toHaveLength(7)
   })
 
-  it('leaves alone a folder without git, and a repository around the agent’s folder', async () => {
+  it('leaves alone a repository around the agent’s folder, and a folder without git when there’s nowhere to keep its versions', async () => {
     const outer = mkdtempSync(join(tmpdir(), 'tucano-outer-'))
     try {
       sh(outer, 'init', '-q')
@@ -139,6 +139,143 @@ describe('a reply’s changes', () => {
     sh(repo, 'init', '-q')
     expect(await changes.diff(set!.id, 'old.txt')).toEqual({ error: 'gone' })
     expect(readFileSync(join(repo, 'old.txt'), 'utf8')).toBe('new\n')
+  })
+})
+
+describe('a folder without git', () => {
+  let plain: string
+  let data: string
+  let kept: Changes
+  const plainScope = (): ChangeScope => ({ bases: [plain], toHost: (p) => join(plain, p), shown: (h) => h.replace(plain, '/work') })
+
+  beforeEach(() => {
+    plain = join(base, 'notes')
+    data = join(base, 'data')
+    mkdirSync(join(plain, 'docs'), { recursive: true })
+    writeFileSync(join(plain, 'docs', 'plan.md'), '# Plan\n- one\n- two\n')
+    writeFileSync(join(plain, 'todo.txt'), 'buy milk\n')
+    kept = new Changes({ saveChangeSet: (r) => rows.set(r.id, r), changeSet: (id) => rows.get(id), dir: data })
+  })
+
+  it('is followed from Tucano’s own repository, leaving the folder as it is', async () => {
+    // A repository inside it is its own, and what's big or installed is left out.
+    mkdirSync(join(plain, 'lib'))
+    sh(join(plain, 'lib'), 'init', '-q')
+    writeFileSync(join(plain, 'lib', 'a.txt'), 'a\n')
+    mkdirSync(join(plain, 'node_modules'))
+    writeFileSync(join(plain, 'node_modules', 'x.js'), 'x')
+    writeFileSync(join(plain, 'video.bin'), Buffer.alloc(6 * 1024 * 1024))
+    const turn = kept.turn(plainScope())
+    await turn.prepare('write_file', { path: 'docs/plan.md' })
+    writeFileSync(join(plain, 'docs', 'plan.md'), '# Plan\n- one\n- three\n')
+    writeFileSync(join(plain, 'new.txt'), 'hi\n')
+    rmSync(join(plain, 'todo.txt'))
+    writeFileSync(join(plain, 'lib', 'a.txt'), 'b\n')
+    writeFileSync(join(plain, 'node_modules', 'x.js'), 'y')
+    writeFileSync(join(plain, 'video.bin'), Buffer.alloc(6 * 1024 * 1024, 1))
+    const sets = await turn.finish('m1', 'a1')
+    const set = sets.find((s) => s.plain)!
+    expect(set).toMatchObject({ root: '/work', plain: true, total: 3 })
+    expect(set.branch).toBeUndefined()
+    expect(set.files.map((f) => f.path).sort()).toEqual(['docs/plan.md', 'new.txt', 'todo.txt'])
+    const diff = await kept.diff(set.id, 'docs/plan.md')
+    expect('patch' in diff && diff.patch).toContain('-- two\n+- three')
+    expect(existsSync(join(plain, '.git'))).toBe(false)
+  })
+
+  it('isn’t followed when it’s the home folder, or has no room in Tucano', async () => {
+    const turn = changes.turn(plainScope())
+    await turn.prepare('write_file', { path: 'todo.txt' })
+    writeFileSync(join(plain, 'todo.txt'), 'x\n')
+    expect(await turn.finish('m1', 'a1')).toEqual([])
+  })
+
+  it('has its files undone too', async () => {
+    const turn = kept.turn(plainScope())
+    await turn.prepare('bash', { command: 'make' })
+    writeFileSync(join(plain, 'todo.txt'), 'buy bread\n')
+    writeFileSync(join(plain, 'docs', 'deep.md'), 'x\n')
+    const [set] = await turn.finish('m1', 'a1')
+    expect(await kept.undo(set!.id, set!.files.map((f) => f.path))).toEqual({ undone: ['docs/deep.md', 'todo.txt'], changed: [], failed: [] })
+    expect(readFileSync(join(plain, 'todo.txt'), 'utf8')).toBe('buy milk\n')
+    expect(existsSync(join(plain, 'docs', 'deep.md'))).toBe(false)
+  })
+})
+
+describe('undoing a reply’s files', () => {
+  const change = async (): Promise<string> => {
+    const turn = changes.turn(scope())
+    await turn.prepare('bash', { command: 'cd /work/app && x' })
+    writeFileSync(join(repo, 'src', 'checkout.ts'), 'export const total = 9\n')
+    mkdirSync(join(repo, 'src', 'refunds'))
+    writeFileSync(join(repo, 'src', 'refunds', 'refund.ts'), 'a\n')
+    rmSync(join(repo, 'old.txt'))
+    sh(repo, 'mv', 'utils.ts', 'lib.ts')
+    const [set] = await turn.finish('m1', 'a1')
+    return set!.id
+  }
+
+  it('puts each file back as it was, and leaves the person’s staging area alone', async () => {
+    const id = await change()
+    const staged = sh(repo, 'diff', '--cached', '--no-renames', '--name-only')
+    const r = await changes.undo(id, ['src/checkout.ts', 'src/refunds/refund.ts', 'old.txt', 'lib.ts'])
+    expect(r).toEqual({ undone: ['src/checkout.ts', 'src/refunds/refund.ts', 'old.txt', 'lib.ts'], changed: [], failed: [] })
+    expect(readFileSync(join(repo, 'src', 'checkout.ts'), 'utf8')).toBe('export const total = 1\nexport const tax = 2\n')
+    expect(existsSync(join(repo, 'src', 'refunds'))).toBe(false) // the folder it made, empty, goes too
+    expect(readFileSync(join(repo, 'old.txt'), 'utf8')).toBe('legacy\nlines\n')
+    expect(existsSync(join(repo, 'lib.ts'))).toBe(false)
+    expect(existsSync(join(repo, 'utils.ts'))).toBe(true)
+    expect(sh(repo, 'diff', '--cached', '--no-renames', '--name-only')).toBe(staged)
+  })
+
+  it('leaves a file that changed again since, unless asked to', async () => {
+    const id = await change()
+    writeFileSync(join(repo, 'src', 'checkout.ts'), 'export const total = 10\n') // the person, after the reply
+    expect(await changes.undo(id, ['src/checkout.ts'])).toEqual({ undone: [], changed: ['src/checkout.ts'], failed: [] })
+    expect(readFileSync(join(repo, 'src', 'checkout.ts'), 'utf8')).toBe('export const total = 10\n')
+    expect(await changes.undo(id, ['src/checkout.ts'], true)).toEqual({ undone: ['src/checkout.ts'], changed: [], failed: [] })
+    expect(readFileSync(join(repo, 'src', 'checkout.ts'), 'utf8')).toBe('export const total = 1\nexport const tax = 2\n')
+    // A deleted file made again counts as changed too.
+    writeFileSync(join(repo, 'old.txt'), 'mine\n')
+    expect(await changes.undo(id, ['old.txt', 'nope.txt'])).toEqual({ undone: [], changed: ['old.txt'], failed: ['nope.txt'] })
+  })
+})
+
+describe('the daily sweep', () => {
+  it('takes old snapshots out of the repositories, and those of deleted messages', async () => {
+    const dropped: [string, boolean][] = []
+    const now = Date.now()
+    const swept = new Changes({
+      saveChangeSet: (r) => rows.set(r.id, r),
+      changeSet: (id) => rows.get(id),
+      dir: join(base, 'data'),
+      staleChangeSets: (before) => [...rows.values()].filter((r) => r.messageId === 'deleted' || (!r.expired && r.createdAt < before)).map((row) => ({ row, orphan: row.messageId === 'deleted' })),
+      dropChangeSet: (id, orphan) => (dropped.push([id, orphan]), orphan ? rows.delete(id) : rows.set(id, { ...rows.get(id)!, expired: true }))
+    })
+    const make = async (messageId: string): Promise<string> => {
+      const turn = swept.turn(scope())
+      await turn.prepare('bash', { command: 'x' })
+      writeFileSync(join(repo, 'old.txt'), `${messageId}\n`)
+      writeFileSync(join(base, 'loose.txt'), `${messageId}\n`) // the agent's folder itself has no git
+      const sets = await turn.finish(messageId, 'a1')
+      expect(sets).toHaveLength(2)
+      return sets.find((s) => !s.plain)!.id
+    }
+    const old = await make('old')
+    const gone = await make('deleted')
+    const fresh = await make('fresh')
+    for (const r of rows.values()) if (r.messageId === 'old') rows.set(r.id, { ...r, createdAt: now - 31 * 86_400_000 })
+    const expired = await swept.sweep(now)
+    expect(expired.map((e) => e.messageId)).toEqual(['old', 'old'])
+    const refs = sh(repo, 'for-each-ref', '--format=%(refname)', 'refs/tucano')
+    expect(refs).not.toContain(old)
+    expect(refs).not.toContain(gone)
+    expect(refs).toContain(fresh)
+    expect(rows.get(old)?.expired).toBe(true)
+    expect(rows.has(gone)).toBe(false)
+    expect(await swept.diff(old, 'old.txt')).toEqual({ error: 'gone' })
+    expect(await swept.undo(old, ['old.txt'])).toEqual({ error: 'gone' })
+    expect(await swept.sweep(now)).toEqual([]) // once is enough
   })
 })
 

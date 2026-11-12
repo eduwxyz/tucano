@@ -85,6 +85,7 @@ export const NEEDS: Record<Method, Need> = {
   artifactText: 'anyone',
   changeFiles: 'anyone',
   changeDiff: 'anyone',
+  reviewChange: 'target', // the agent's person (with whoever covers for them) and the admins, like its approvals
   sendMessage: 'anyone',
   typing: 'anyone',
   olderMessages: 'anyone',

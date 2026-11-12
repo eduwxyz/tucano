@@ -12,6 +12,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   artifactText: { id: 's' },
   changeFiles: { id: 's', offset: 'n' },
   changeDiff: { id: 's', path: 's' },
+  reviewChange: { id: 's', decision: '[keep,undo]', paths: 'S?', force: 'b?' },
   sendMessage: { conversationId: 's', text: 's', images: 'a?', files: 'a?', threadId: 's?' },
   typing: { conversationId: 's', threadId: 's?', opened: 'b?' },
   olderMessages: { conversationId: 's', before: 'n', through: 's?' },
