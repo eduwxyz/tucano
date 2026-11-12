@@ -25,7 +25,7 @@ export interface Client {
 export interface TestCore {
   dataDir: string
   toMain: Record<string, unknown>[] // what the core sent its parent
-  connect: (person?: string) => Client
+  connect: (person?: string, device?: string) => Client
   ask: <T>(msg: Record<string, unknown>, type: string) => Promise<T>
 }
 
@@ -47,7 +47,7 @@ export async function bootCore(opts: { server?: boolean; seed?: boolean } = {}):
   await import('../../src/core/index')
   let seq = 0
   let n = 0
-  const connect = (person?: string): Client => {
+  const connect = (person?: string, device?: string): Client => {
     const events: CoreEvent[] = []
     const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
     const port = new Port((msg) => {
@@ -60,7 +60,7 @@ export async function bootCore(opts: { server?: boolean; seed?: boolean } = {}):
         else p?.resolve(m.result)
       }
     })
-    parent.emit('message', { data: person ? { person } : null, ports: [port] })
+    parent.emit('message', { data: person || device ? { ...(person ? { person } : {}), ...(device ? { device } : {}) } : null, ports: [port] })
     return {
       events,
       call: <T,>(method: string, params?: unknown) =>

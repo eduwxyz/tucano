@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
-import { agentById, amAdmin, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
+import { agentById, amAdmin, amOwner, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 import { PanelResize } from './SidebarResize'
@@ -458,15 +458,17 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
       return (
         <>
           <p className="empty">{L('Sem visualização pra esse tipo de arquivo', 'No preview for this kind of file')} ({artifact.name}, {bytes(artifact.size)}).</p>
-          {!windowless() && <RevealArtifact artifactId={artifact.id} />}
+          <RevealArtifact artifactId={artifact.id} />
         </>
       )
   }
 }
 
-// On a server the file is there, not on this computer: nothing to show here.
+// Only the owner at the computer's own window: a member or a web page would open a Finder on a screen it can't see.
 function RevealArtifact({ artifactId }: { artifactId: string }): ReactNode {
   const platform = useStore((s) => s.platform)
+  const local = useStore((s) => amOwner(s) && !windowless())
+  if (!local) return null
   const label =
     platform === 'mac'
       ? L('Mostrar no Finder', 'Show in Finder')

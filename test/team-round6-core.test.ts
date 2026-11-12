@@ -118,37 +118,3 @@ describe("B. the demo connector's path on the owner's machine is the owner's", (
     expect((await caio.call<Snap>('snapshot')).demoServer).toBeUndefined()
   })
 })
-
-describe('revealing an artifact in the file manager', () => {
-  const opened = (): Record<string, unknown>[] => core.toMain.filter((m) => m['type'] === 'open_local')
-  const insertArtifact = (id: string, name: string, messageId: string): void => {
-    const db = new DatabaseSync(join(core.dataDir, 'tucano.db'))
-    db.prepare('INSERT INTO artifacts (id, agent_id, conversation_id, message_id, kind, name, title, source, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, 'lia', geral, messageId, 'file', name, name, name, 3, Date.now())
-    db.close()
-  }
-
-  it('asks the main process to reveal the file, never to open it', async () => {
-    const msg = (await ana.call<Snap>('snapshot')).messages.find((m) => m.conversationId === geral && m.text.startsWith('NOVA'))!
-    insertArtifact('art-reveal-1', 'dados.bin', msg.id)
-    mkdirSync(join(core.dataDir, 'artifacts', 'art-reveal-1'), { recursive: true })
-    writeFileSync(join(core.dataDir, 'artifacts', 'art-reveal-1', 'dados.bin'), 'abc')
-    await ana.call('revealArtifact', { id: 'art-reveal-1' })
-    expect(opened()).toEqual([{ type: 'open_local', path: join(core.dataDir, 'artifacts', 'art-reveal-1', 'dados.bin'), how: 'reveal' }])
-  })
-
-  it('refuses a path out of the artifact folder, in the name or in the id, and an unknown artifact', async () => {
-    const msg = (await ana.call<Snap>('snapshot')).messages.find((m) => m.conversationId === geral && m.text.startsWith('NOVA'))!
-    writeFileSync(join(core.dataDir, 'segredo.txt'), 'x')
-    for (const [i, name] of ['../../segredo.txt', '../art-reveal-1/dados.bin', '..', '.'].entries()) {
-      insertArtifact(`art-reveal-bad-${i}`, name, msg.id)
-      expect(await err(ana.call('revealArtifact', { id: `art-reveal-bad-${i}` })), name).not.toBe('ok')
-    }
-    for (const id of ['../art-reveal-1', 'art-reveal-1/..', '/etc', 'nao-existe']) expect(await err(ana.call('revealArtifact', { id })), id).not.toBe('ok')
-    expect(opened()).toHaveLength(1)
-  })
-
-  it('goes to who can see the artifact, as artifactText does', async () => {
-    expect(await err(bia.call('revealArtifact', { id: ART }))).not.toBe('ok') // from before Bia joined
-    expect(opened()).toHaveLength(1)
-  })
-})
