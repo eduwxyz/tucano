@@ -30,6 +30,7 @@ import { canEditChannel,
   timelineOf,
   useLiveText,
   workingIds,
+  allWorkingIds,
   openDialog,
   decideApproval,
   decideMemory,
@@ -162,8 +163,13 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const older = useStore((s) => !!s.history[id])
   const focus = useStore((s) => (s.view?.kind === 'conversation' && s.view.id === id ? s.view.message : undefined))
   // A press in the work drawer: the same scroll-and-flash as `focus`, but it has to happen again for
-  // a message already jumped to, hence the count.
-  const [jump, setJump] = useState<{ id: string; n: number } | null>(null)
+  // a message already jumped to, hence the count. A reply that lives in a thread is reached by
+  // opening that thread and handing it the press.
+  const [jump, setJump] = useState<{ id: string; rootId?: string; n: number } | null>(null)
+  const jumpTo = (messageId: string, threadId?: string): void => {
+    if (threadId) openThread(threadId)
+    setJump((j) => ({ id: messageId, ...(threadId ? { rootId: threadId } : {}), n: (j?.n ?? 0) + 1 }))
+  }
   // Opened on a message from before what's here (a routine's run, a report): it comes first.
   const focusHere = !!focus && timeline.some((m) => m.id === focus)
   useEffect(() => {
@@ -243,15 +249,25 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 
         {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
-        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={jump?.id ?? focus} focusKey={jump?.n} />
+        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={jump?.rootId ? focus : jump?.id ?? focus} focusKey={jump?.n} />
         <Composer
           conversationId={id}
           members={members}
           placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)}
-          onJump={(messageId) => setJump((j) => ({ id: messageId, n: (j?.n ?? 0) + 1 }))}
+          onJump={jumpTo}
         />
       </section>
-      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
+      {thread ? (
+        <ThreadPanel
+          rootId={thread}
+          conv={conv}
+          title={conv.kind === 'channel' ? `#${title}` : title}
+          members={members}
+          {...(jump && jump.rootId === thread ? { focus: jump.id, focusKey: jump.n } : {})}
+        />
+      ) : (
+        <SidePanel />
+      )}
     </div>
   )
 }
@@ -763,7 +779,9 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
-function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
+// `focus` / `focusKey`: a press in the work drawer for a reply that lives in this thread — the reply
+// to scroll to and flash, and a count so pressing the same row again moves again.
+function ThreadPanel({ rootId, conv, title, members, focus, focusKey }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focus?: string; focusKey?: number }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
   // A thread from before what's here comes from the core; only then is it gone if it isn't there.
@@ -831,7 +849,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
       {root?.conversationId === conv.id ? (
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
-          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
+          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} {...(focus ? { focus, focusKey } : {})} />
           <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
       ) : looked === rootId || root ? (
@@ -2031,12 +2049,13 @@ const ENDED = ['done', 'stopped', 'interrupted', 'failed', 'limit_reached', 'pau
 // The work this conversation is carrying, attached above the field: the replies running right now,
 // each with the prompt that started it and a way to stop it, the prompts marked as queued waiting
 // their turn, and the replies that already ended here — kept, marked with how they ended, so they
-// can still be jumped to until their row is taken off. It opens by itself when it gains something
-// to show — a queued prompt, or a second reply running at once — and can be closed; with nothing in
-// it, it isn't there at all. Each conversation has its own drawer.
-export function WorkDrawer({ conversationId, onJump }: { conversationId: string; onJump?: (messageId: string) => void }): ReactNode {
+// can still be jumped to until their row is taken off. A reply inside one of this conversation's
+// threads counts as work here too: its row says which thread it is in and opens that thread on it.
+// It opens by itself when it gains something to show — a queued prompt, or a second reply running at
+// once — and can be closed; with nothing in it, it isn't there at all. Each conversation has its own.
+export function WorkDrawer({ conversationId, onJump }: { conversationId: string; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   // Ids, not the messages: a step streaming into one reply shouldn't redraw the list around it.
-  const ids = useStore((s) => workingIds(s, conversationId))
+  const ids = useStore((s) => allWorkingIds(s, conversationId))
   const messages = useStore((s) => messagesIn(s, conversationId))
   const remember = drawerFor(conversationId)
   const running = messages.filter((m) => ids.includes(m.id))
@@ -2047,6 +2066,20 @@ export function WorkDrawer({ conversationId, onJump }: { conversationId: string;
   const oneLine = (text: string, max: number): string => {
     const flat = text.replace(/\s+/g, ' ').trim()
     return flat.length > max ? `${flat.slice(0, max)}…` : flat
+  }
+  // Which thread a row belongs to: the message that started it, in its own words. Nothing outside
+  // threads has one, and those rows say nothing about threads.
+  const threadRoot = (m: Message): Message | undefined => (m.threadId ? messages.find((x) => x.id === m.threadId) : undefined)
+  const where = (m: Message, max: number): ReactNode => {
+    const root = threadRoot(m)
+    if (!root) return null
+    const label = oneLine(root.text, max) || L('numa thread', 'in a thread')
+    return (
+      <span className="work-row__thread" title={L(`Numa thread desta conversa: ${oneLine(root.text, 120) || 'sem texto'}`, `In a thread here: ${oneLine(root.text, 120) || 'no text'}`)}>
+        <Icon name="thread" size={10} />
+        <span className="work-row__thread-text">{label}</span>
+      </span>
+    )
   }
   // What it says about a reply: the prompt it answers, not its own words.
   const asked = (m: Message): string => {
@@ -2098,9 +2131,10 @@ export function WorkDrawer({ conversationId, onJump }: { conversationId: string;
         <div className="work-drawer__list">
           {running.map((m) => (
             <div className="work-row" key={m.id}>
-              <button className="work-row__go" onClick={() => onJump?.(m.id)} title={L('Ir para esta resposta', 'Go to this reply')}>
+              <button className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
                 <span className="work-row__dot" aria-hidden />
                 <span className="work-row__text">{asked(m)}</span>
+                {where(m, 24)}
               </button>
               <button
                 className="icon-btn icon-btn--sm work-row__stop"
@@ -2117,9 +2151,10 @@ export function WorkDrawer({ conversationId, onJump }: { conversationId: string;
               <div className="work-drawer__group">{L('Na fila', 'Queued')}</div>
               {queued.map((m) => (
                 <div className="work-row work-row--queued" key={m.id}>
-                  <button className="work-row__go" onClick={() => onJump?.(m.id)} title={L('Ir para este pedido', 'Go to this prompt')}>
+                  <button className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para este pedido', 'Go to this prompt')}>
                     <Icon name="clock" size={11} />
                     <span className="work-row__text">{oneLine(m.text, 90) || L('sem texto', 'no text')}</span>
+                    {where(m, 24)}
                   </button>
                 </div>
               ))}
@@ -2132,11 +2167,12 @@ export function WorkDrawer({ conversationId, onJump }: { conversationId: string;
                 const how = endedAs(m.run?.status ?? 'done')
                 return (
                   <div className="work-row work-row--done" key={m.id}>
-                    <button className="work-row__go" onClick={() => onJump?.(m.id)} title={L('Ir para esta resposta', 'Go to this reply')}>
+                    <button className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
                       <span className={`work-row__state work-row__state--${how.tone}`} title={how.said}>
                         <Icon name={how.icon} size={11} />
                       </span>
                       <span className="work-row__text">{asked(m)}</span>
+                      {where(m, 24)}
                     </button>
                     <button
                       className="icon-btn icon-btn--sm work-row__remove"
@@ -2157,7 +2193,7 @@ export function WorkDrawer({ conversationId, onJump }: { conversationId: string;
   )
 }
 
-export function Composer({ conversationId, threadId, members, placeholder, onJump }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; onJump?: (messageId: string) => void }): ReactNode {
+export function Composer({ conversationId, threadId, members, placeholder, onJump }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.

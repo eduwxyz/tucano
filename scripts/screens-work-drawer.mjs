@@ -137,5 +137,74 @@ await step('tirar', async () => {
   await shot('08-limpa')
 })
 
+// A reply that lives in a thread is work the conversation is carrying too: it has its own row in the
+// DM's drawer, saying which thread in the thread's own words, and pressing it opens that thread on
+// the reply. Laid out over the whole conversation, not only its room.
+await step('thread', async () => {
+  await say('demore 20 s e organize os anexos do mes')
+  await win.waitForSelector('.work-drawer__count:has-text("replying")', { timeout: 15_000 })
+  const last = win.locator('.msg.msg--me').last() // the thread is opened on my own prompt, which has words
+  await last.hover()
+  await last.locator('.msg__reply').click({ force: true })
+  await win.waitForSelector('.side-panel--thread .composer textarea', { timeout: 10_000 })
+  await win.fill('.side-panel--thread .composer textarea', 'demore 20 s e conte as linhas do anexo')
+  await win.keyboard.press('Enter')
+  await win.waitForTimeout(1500)
+  await openIt()
+  const chips = win.locator('.work-drawer .work-row__thread')
+  console.log(`head with one reply in the room and one in a thread: ${JSON.stringify(await head())}`)
+  console.log(`rows: ${await rows()}, thread chips: ${await chips.count()}, chip says: ${JSON.stringify(await chips.first().innerText())}`)
+  // The chip has to be readable and the row has to fit, wide and narrow, like the rest of the drawer.
+  const look = async (tag) => {
+    const seen = await win.evaluate(() => {
+      const chip = document.querySelector('.work-row__thread')
+      const drawer = document.querySelector('.work-drawer')
+      const row = chip && chip.closest('.work-row')
+      if (!chip || !drawer || !row) return null
+      const cs = getComputedStyle(chip)
+      const word = chip.querySelector('.work-row__thread-text')
+      return {
+        color: cs.color,
+        bg: getComputedStyle(drawer).backgroundColor,
+        font: cs.fontSize,
+        chip: Math.round(chip.getBoundingClientRect().width),
+        word: word ? Math.round(word.getBoundingClientRect().width) : 0,
+        clipped: word ? word.scrollWidth - word.clientWidth : 0,
+        rowsOverflowing: [...document.querySelectorAll('.work-row')].filter((r) => r.scrollWidth > r.clientWidth + 1).length,
+        drawer: Math.round(drawer.getBoundingClientRect().width),
+        composer: Math.round(document.querySelector('.composer').getBoundingClientRect().width),
+        sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth
+      }
+    })
+    if (!seen) return console.log(`${tag}: no chip to measure`)
+    // WCAG 2.1 relative luminance, on the colours the chip is actually drawn in.
+    const lum = (css) => {
+      const [r, g, b] = css.match(/[\d.]+/g).slice(0, 3).map((n) => {
+        const v = Number(n) / 255
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const [a, b] = [lum(seen.color), lum(seen.bg)].sort((x, y) => y - x)
+    console.log(`${tag}: ${JSON.stringify(seen)}, contrast ${((a + 0.05) / (b + 0.05)).toFixed(2)}:1`)
+  }
+  await look('chip at 1280')
+  await shot('09-thread-na-gaveta')
+  await win.setViewportSize({ width: 420, height: 860 })
+  await win.waitForTimeout(500)
+  await look('chip at 420')
+  await shot('09b-thread-na-gaveta-aperto')
+  await win.setViewportSize({ width: 1280, height: 860 })
+  await win.waitForTimeout(400)
+  await win.locator('.side-panel--thread button[title*="Close"]').first().click()
+  await win.waitForTimeout(500)
+  console.log(`thread closed: ${await win.locator('.side-panel--thread').count()} panels`)
+  await win.locator('.work-row:has(.work-row__thread) .work-row__go').first().click()
+  await win.waitForSelector('.side-panel--thread', { timeout: 10_000 })
+  await win.waitForTimeout(700)
+  console.log(`opened by the drawer: ${await win.locator('.side-panel--thread').count()} panel, ${await win.locator('.side-panel--thread .msg.is-flash').count()} reply flashed inside it`)
+  await shot('10-pulo-pra-dentro-da-thread')
+})
+
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no console errors')
 await app.close()

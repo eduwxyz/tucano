@@ -45,8 +45,12 @@ const nextConv = (): string => `conv${++n}`
 let root: Root
 const render = async (conversationId: string, messages: Message[]): Promise<void> => {
   fake = { ...getState(), ready: true, you: 'ana', people: [{ id: 'ana', name: 'Ana', role: 'owner', about: '' }], messages: { [conversationId]: messages } } as State
-  await act(async () => root.render(<WorkDrawer key={conversationId} conversationId={conversationId} onJump={(id) => void stopped.push(`jump:${id}`)} />))
+  await act(async () =>
+    root.render(<WorkDrawer key={conversationId} conversationId={conversationId} onJump={(id, threadId) => void stopped.push(`jump:${id}${threadId ? `@${threadId}` : ''}`)} />)
+  )
 }
+// A message inside a thread: `threadId` is the id of the message that started it.
+const inThread = (m: Message, threadId: string): Message => ({ ...m, threadId })
 const text = (): string => document.body.textContent ?? ''
 const button = (label: string): HTMLElement => {
   const hit = [...document.querySelectorAll('button')].find((b) => b.getAttribute('title') === label || b.textContent?.trim() === label)
@@ -161,6 +165,59 @@ describe('the work drawer', () => {
     // Back in the DM: what it remembered, as it was left.
     await render(dm, [said('m1', 'pedido do dm', 1), reply('r1', 'm1', 'done')])
     expect(text()).toContain('1 terminada')
+  })
+
+  it('a reply at work inside a thread is work here too: its row says which thread, and opens it', async () => {
+    const conv = nextConv()
+    await render(conv, [
+      said('m1', 'primeiro pedido', 1),
+      said('t1', 'a thread do orçamento', 2),
+      inThread(said('t2', 'segue o anexo', 3), 't1'),
+      reply('r1', 'm1'),
+      inThread(reply('r2', 't2'), 't1')
+    ])
+    expect(text()).toContain('2 respondendo') // the one outside, and the one in the thread
+    expect(text()).toContain('primeiro pedido')
+    expect(text()).toContain('segue o anexo')
+    const chips = document.querySelectorAll('.work-row__thread')
+    expect(chips.length).toBe(1) // only the row that lives in a thread carries one
+    expect(chips[0]!.textContent).toContain('a thread do orçamento') // the thread, in its own words
+    // Pressing it jumps into the thread, not to a message in the room.
+    const go = [...document.querySelectorAll('.work-row__go')].find((b) => b.textContent?.includes('segue o anexo')) as HTMLElement
+    await act(async () => go.click())
+    expect(stopped).toEqual(['jump:r2@t1'])
+  })
+
+  it('stops a reply that lives in a thread like any other, without touching the rest', async () => {
+    const conv = nextConv()
+    await render(conv, [said('t1', 'a thread do orçamento', 1), inThread(reply('r2', 't1'), 't1')])
+    expect(text()).toContain('1 respondendo')
+    await act(async () => button('1 respondendo').click())
+    await act(async () => button('Parar esta resposta').click())
+    expect(stopped).toEqual(['r2'])
+  })
+
+  it('a reply that ended inside a thread stays as a finished row, with its thread, and still jumps', async () => {
+    const conv = nextConv()
+    const messages = (status: 'working' | 'done'): Message[] => [said('t1', 'a thread do orçamento', 1), inThread(reply('r2', 't1', status), 't1')]
+    await render(conv, messages('working'))
+    await render(conv, messages('done'))
+    expect(text()).toContain('1 terminada')
+    await act(async () => button('1 terminada').click())
+    expect(document.querySelectorAll('.work-row--done .work-row__thread').length).toBe(1)
+    await act(async () => button('Ir para esta resposta').click())
+    expect(stopped).toEqual(['jump:r2@t1'])
+  })
+
+  it('a prompt queued inside a thread waits here too, marked with its thread', async () => {
+    const conv = nextConv()
+    await render(conv, [said('t1', 'a thread do orçamento', 1), inThread({ ...said('t2', 'isto pode esperar', 2), sendMode: 'queue' }, 't1')])
+    expect(text()).toContain('1 na fila')
+    expect(text()).toContain('isto pode esperar')
+    expect(document.querySelectorAll('.work-row__thread').length).toBe(1)
+    const go = [...document.querySelectorAll('.work-row__go')].find((b) => b.textContent?.includes('isto pode esperar')) as HTMLElement
+    await act(async () => go.click())
+    expect(stopped).toEqual(['jump:t2@t1'])
   })
 
   it('stays closed once a person closes it, until it has something new to show', async () => {

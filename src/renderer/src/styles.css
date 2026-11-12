@@ -1851,6 +1851,29 @@ h3 {
   background: var(--accent);
   animation: fade-pulse 1.6s ease-in-out infinite;
 }
+/* The rows of a reply that lives in one of this conversation's threads: a quiet chip saying which
+   thread, in the thread's own words, where the press opens it. */
+.work-row__thread {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  max-width: 46%;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+.work-row__thread-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-row__go:hover .work-row__thread {
+  border-color: var(--border-strong);
+}
 .work-drawer__group {
   padding: 4px 6px 2px;
   color: var(--text-2);
