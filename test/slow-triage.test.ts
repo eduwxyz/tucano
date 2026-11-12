@@ -143,7 +143,7 @@ function triageAgent(): Engine {
 }
 
 function runner(connectors: ReturnType<typeof world>, engine: Engine = triageAgent()): Runner {
-  const engines: Record<EngineId, Engine> = { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  const engines: Record<EngineId, Engine> = { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   const computers = {
     call: async (_a: Agent, name: string, args: Record<string, unknown>) => {
       const command = String(args['command'] ?? '')
@@ -170,7 +170,7 @@ async function triage(connectors = world()) {
 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'st-db-')), 'test.db'))
-  settings = { workspaceName: 'Gabriel', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Gabriel', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent({ id: 'ops', name: 'Ops', handle: 'ops', role: 'Plantão', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 50_000_000, used: 0, grants: { slack: 'read', dbx: 'read' }, memory: 'auto', computer: true, archived: false })
   db.createConversation({ id: 'dm', kind: 'dm', name: 'ops', members: ['ops'] })
   clock = Date.now()

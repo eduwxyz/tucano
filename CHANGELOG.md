@@ -4,6 +4,16 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Your Codex subscription's limits on Usage and limits.** The page showed the Claude subscription's 5-hour and weekly windows, and said Codex doesn't report its own. Codex's app-server does (`account/rateLimits/read`): when Codex is signed in with a ChatGPT plan, the page now asks it, at most once a minute, while it's open and after each reply, and shows each window the plan has (Plus has only the week) with how much is used and when it resets, plus the plan's name.
+
+### Fixed
+
+- **An agent answers one message at a time in a conversation or thread, whatever started it.** Only routed messages and hand-offs waited for the agent's reply in progress in the same place; an @mention, a DM, a routine, a retry or an approval's outcome started a second reply next to it, so the same agent could answer twice at once and the two replies stepped on each other. Every reply now waits its turn in that place. Thanks, eialanjones! (#358)
+
+- **An agent that only reads through Composio can link an account.** The first time an agent needs an app on Composio (Google Calendar, Gmail…), it calls `COMPOSIO_MANAGE_CONNECTIONS` for the sign-in link. That tool is sensitive, so an agent with read access never saw it: it found the app's actions, then failed because no account was linked, though reading was all it wanted. A read grant now sees that tool too, and every call to it asks for approval, at every level and whatever the rules; read-and-write is unchanged.
+
 ## [0.2.27] - 2026-11-10
 
 > **Em português:**
