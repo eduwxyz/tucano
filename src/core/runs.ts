@@ -29,7 +29,7 @@ import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, M
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
-import { innerActions, perCallTool } from '../shared/composio'
+import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
 import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
@@ -1163,7 +1163,7 @@ export class Runner {
       // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
       // (a refused token, a sign-in to finish) takes them away.
       if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
-      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id], perCallTool(c.url, t.name)) && gate(kindsOf(t), policy).mode !== 'off') exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
+      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id], forReaders(c.url, t.name)) && gate(kindsOf(t), policy).mode !== 'off') exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     // GitHub through its connector, as this turn has it: the prompt says how to publish and what waits (context.ts).
     const github = githubAccess(this.deps.connectors?.list() ?? [], agent, exposed, policy)
@@ -1853,13 +1853,15 @@ ${note}`,
         const current = db.tools(hit.connector.id).find((t) => t.name === hit.tool.name)
         const grant = db.agent(agent.id)?.grants[hit.connector.id]
         const perCall = perCallTool(hit.connector.url, hit.tool.name)
-        if (!current || !allowed(current, grant, perCall)) return textResult(L(`Ferramenta não permitida agora: ${name}`, `Tool not allowed right now: ${name}`), true)
+        // A reader linking an app's account on Composio: allowed, but it asks every time, whatever the rules.
+        const readerLink = grant === 'read' && linksAccounts(hit.connector.url, hit.tool.name)
+        if (!current || !allowed(current, grant, forReaders(hit.connector.url, hit.tool.name))) return textResult(L(`Ferramenta não permitida agora: ${name}`, `Tool not allowed right now: ${name}`), true)
         const detail = `${hit.connector.name} · ${current.name}`
         // What runs is exactly what was judged: these arguments, classified here, go to the server (or into the approval) as they are.
         const { [REASON_PARAM]: why, ...callArgs } = args
         // A runner (Composio's) counts as what this call runs; any other tool, as its class.
         const cls = callClass(current, hit.connector.url, callArgs)
-        if (!permits(cls, grant))
+        if (!permits(cls, grant) && !readerLink)
           return textResult(
             L(
               `Recusada: esta chamada ${cls === 'sensitive' ? 'tem uma ação sensível' : 'muda algo'} e precisa de acesso de leitura e escrita ao ${hit.connector.name}; você só tem leitura. Use só ações de leitura, ou peça acesso com ${ACCESS_REQUEST}.`,
@@ -1877,7 +1879,7 @@ ${note}`,
         const kinds = inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : kindsOf({ cls, name: current.name })
         const unplaced = perCall && cls === 'sensitive' && !runnerRules(hit.connector.id, current.name, callArgs)
         // How far it goes on its own, read now: the rules may have changed since the turn started.
-        const judgedNow = verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced, alwaysAllowed: always, outside })
+        const judgedNow = verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced || readerLink, alwaysAllowed: always, outside })
         if (judgedNow.off) return textResult(L(`Não rodei: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} está desligado pra você agora.`, `I didn't run it: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} is turned off for you now.`), true)
         if (!judgedNow.run) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -2439,7 +2441,7 @@ ${note}`,
       const tool = db.tools(ap.connectorId).find((t) => t.name === ap.tool)
       const connector = this.deps.connectors?.list().find((c) => c.id === ap.connectorId)
       const grant = agent?.grants[ap.connectorId]
-      if (!agent || !connector || !tool || !allowed(tool, grant, runner) || !permits(callClass(tool, connector.url, ap.args), grant)) {
+      if (!agent || !connector || !tool || !allowed(tool, grant, forReaders(connector.url, tool.name)) || !(permits(callClass(tool, connector.url, ap.args), grant) || (grant === 'read' && linksAccounts(connector.url, tool.name)))) {
         outcome = L('Não executou: o acesso mudou depois do pedido.', "Didn't run: access changed after the request.")
         task = L(
           `${me} aprovou o seu pedido ${call}, mas o app não executou: o seu acesso a essa ferramenta mudou depois do pedido. Avise ${me} em uma frase.`,
