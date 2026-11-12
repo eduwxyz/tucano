@@ -371,6 +371,44 @@ describe('one reply at a time per agent and thread', () => {
     expect(t.max()).toBe(2)
   })
 
+  // Theo is replying in #time: waits until his reply is running.
+  const replying = async (): Promise<void> => {
+    for (let i = 0; i < 200 && by('a2')[0]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
+  }
+
+  it("a person's mention while the agent replies waits for it, and the ones that pile up are one reply", async () => {
+    const t = slowTheo(400)
+    const r = runner(t.engine)
+    await r.send('c3', '@theo um')
+    await replying()
+    await r.send('c3', '@theo dois')
+    await r.send('c3', '@theo três')
+    await r.idle()
+    expect(by('a2').map((m) => m.run?.status)).toEqual(['done', 'done'])
+    expect(t.max()).toBe(1)
+  })
+
+  it('a routine in the same chat waits for the reply running there', async () => {
+    const t = slowTheo(400)
+    const r = runner(t.engine)
+    await r.send('c3', '@theo um')
+    await replying()
+    const done = r.runRoutine({ id: 'rt', name: 'R', agentId: 'a2', conversationId: 'c3', prompt: 'rotina', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 1 }, { scheduledAt: 1, late: false })
+    await r.idle()
+    expect((await done)?.run?.status).toBe('done')
+    expect(by('a2')).toHaveLength(2)
+    expect(t.max()).toBe(1)
+  })
+
+  it('two routines that fire together in one chat run one after the other', async () => {
+    const t = slowTheo(200)
+    const r = runner(t.engine)
+    const routine = (id: string) => ({ id, name: id, agentId: 'a2', conversationId: 'c3', prompt: 'rotina', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 1 })
+    const runs = await Promise.all([r.runRoutine(routine('r1'), { scheduledAt: 1, late: false }), r.runRoutine(routine('r2'), { scheduledAt: 1, late: false })])
+    expect(runs.map((m) => m?.run?.status)).toEqual(['done', 'done'])
+    expect(t.max()).toBe(1)
+  })
+
   it('drops the follow-up when the reply it waited for was stopped', async () => {
     const t = slowTheo(2000)
     const r = runner(t.engine)

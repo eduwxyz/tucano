@@ -296,12 +296,12 @@ const mdLinks = (missing?: Set<string>) => ({ a: (p: { href?: string; children?:
 
 type Pos = { x: number; y: number }
 type Cam = { x: number; y: number; k: number }
-type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
+export type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
 const SPREAD = 1.6 // from the simulation's units to the map's
 
 // One step of the forces: pages push each other away, links pull, the middle holds them.
 // A page being dragged stays under the pointer and pulls its neighbors along.
-function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
+export function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
   const n = bodies.length
   for (let i = 0; i < n; i++)
     for (let j = i + 1; j < n; j++) {
@@ -334,6 +334,14 @@ function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16A
     const g = deg[i]! ? 0.009 : 0.03
     b.vx -= b.x * g
     b.vy -= b.y * g * 1.6
+    // no force may fling a page away: the spring's pull grows with the distance and two
+    // pages too close oscillate through each other, so together they'd fly to infinity
+    // (a wiki big enough starts landing every page on the same spot). A step is capped.
+    const sp = Math.hypot(b.vx, b.vy)
+    if (sp > 40) {
+      b.vx = (b.vx / sp) * 40
+      b.vy = (b.vy / sp) * 40
+    }
     if (b.held) {
       b.vx = 0
       b.vy = 0
