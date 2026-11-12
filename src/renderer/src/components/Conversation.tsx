@@ -584,7 +584,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </div>
         )}
         {replies && <ThreadLink message={message} replies={replies} />}
-        {agent && message.run && message.run.status !== 'working' && <DeleteSession message={message} />}
+        {agent && message.run && <DeleteSession message={message} />}
       </div>
     </article>
   )
@@ -674,10 +674,11 @@ const ARM_MS = 4000
 // A session's reply can be deleted from the room: the trash under the thread button, in two presses.
 // The first arms it — the glyph goes red and says what the next press does — and the second deletes
 // the reply, with the thread it started and the answers it got there. A press anywhere else, Esc, or
-// four seconds without the second press disarms it. A reply still at work has no trash: the work
-// drawer's x stops it, and stopping is what that one needs first.
+// four seconds without the second press disarms it. A reply still at work goes too: the press stops
+// it first, and the words it had written go with it, so the glyph says so.
 function DeleteSession({ message }: { message: Message }): ReactNode {
   const [armed, setArmed] = useState(false)
+  const at = message.run?.status === 'working' // stopping is part of it, so say so before the second press
   useEffect(() => {
     if (!armed) return
     const timer = setTimeout(() => setArmed(false), ARM_MS)
@@ -698,7 +699,13 @@ function DeleteSession({ message }: { message: Message }): ReactNode {
   return (
     <button
       className={`icon-btn icon-btn--sm msg__delete ${armed ? 'is-armed' : ''}`}
-      title={armed ? L('Clique de novo para apagar a sessão', 'Click again to delete the session') : L('Apagar esta sessão', 'Delete this session')}
+      title={
+        armed
+          ? at
+            ? L('Clique de novo para parar e apagar a sessão', 'Click again to stop and delete the session')
+            : L('Clique de novo para apagar a sessão', 'Click again to delete the session')
+          : L('Apagar esta sessão', 'Delete this session')
+      }
       aria-label={armed ? L('Confirmar: apagar a sessão', 'Confirm: delete the session') : L('Apagar esta sessão', 'Delete this session')}
       aria-pressed={armed}
       onClick={() => (armed ? deleteMessage(message.id) : setArmed(true))}

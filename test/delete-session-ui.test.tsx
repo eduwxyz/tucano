@@ -1,6 +1,6 @@
 // Deleting a session from the room: the trash under the thread button takes two presses — the first
 // arms it (the glyph goes red and says what the next press does), the second deletes the reply and
-// the thread it started. A reply still at work has no trash: the drawer's x stops it first.
+// the thread it started. A reply still at work goes too, saying that the press stops it first.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -90,9 +90,15 @@ describe('the trash that deletes a session', () => {
     expect(deleted).toEqual([]) // armed again, not deleted
   })
 
-  it('a reply still at work has no trash: the drawer stops it first', async () => {
+  it('a reply still at work has one too, and the second press is said to stop it first', async () => {
     await render([said('m1', 'corrige o login'), reply('r1', 'working')])
-    expect(trash()).toBeNull()
+    const button = trash()!
+    expect(button).toBeTruthy()
+    await act(async () => button.click())
+    expect(button.getAttribute('title')).toBe('Clique de novo para parar e apagar a sessão')
+    expect(deleted).toEqual([])
+    await act(async () => button.click())
+    expect(deleted).toEqual(['r1'])
   })
 
   it('a prompt of mine has none either: only a reply is a session', async () => {

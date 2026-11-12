@@ -1441,14 +1441,14 @@ const api: Handlers = {
 
   // The session behind a reply goes, and with it the thread that reply started (the answers it
   // got) and any approval asked under it. Who may is whoever may manage the conversation: a DM's
-  // person, a channel's maker and the admins. A reply still at work isn't deleted from under the
-  // run writing to it — that one is stopped first. What it spent stays in the receipts.
+  // person, a channel's maker and the admins. A reply still at work is stopped first, and nothing
+  // it had written lands afterwards: it goes whole. What it spent stays in the receipts.
   deleteMessage: ({ messageId }, ctx) => {
     reachMessage(ctx, messageId)
     const m = db.message(messageId)
     if (!m || m.author.kind !== 'agent' || !m.run) return []
     manage(ctx, m.conversationId)
-    if (m.run.status === 'working') throw new Error(L('Pare a resposta antes de apagar a sessão.', 'Stop the reply before deleting the session.'))
+    if (m.run.status === 'working') runner.drop(messageId) // stopped here, so it isn't written to while it goes
     const gone = db.deleteMessage(messageId)
     for (const id of gone) emit({ type: 'message_removed', id, conversationId: m.conversationId })
     record(ctx, 'session.deleted', m.conversationId, { message: messageId, agent: m.author.id, went: gone.length })

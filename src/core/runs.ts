@@ -325,7 +325,7 @@ export interface RoutineEvent {
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping'; deleted?: boolean }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
 // it (what was already said, its own earlier one too), and its message last.
@@ -344,6 +344,8 @@ export class Runner {
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
+  // The replies deleted from under their own run: whatever that run still tries to write is dropped.
+  private gone = new Set<string>()
   private held = new Map<string, Promise<void>>() // by agent: its replies on an engine that keeps the MCP connection
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
@@ -647,6 +649,18 @@ export class Runner {
     c.ctl.abort()
   }
 
+  // A session deleted while its reply was still at work: the run stops here and nothing of it lands
+  // afterwards — not the words it had written, not a note that it stopped. What it spent stays in the
+  // receipts, since the tokens went out either way.
+  drop(messageId: string): void {
+    this.gone.add(messageId)
+    const c = this.controllers.get(messageId)
+    if (!c) return
+    c.deleted = true
+    c.reason = 'stopped'
+    c.ctl.abort()
+  }
+
   // Runs the same agent again in place of a reply that didn't finish.
   retry(messageId: string): void {
     const { db } = this.deps
@@ -787,6 +801,7 @@ export class Runner {
   }
 
   private update(m: Message, patch: Partial<Message>): void {
+    if (this.gone.has(m.id)) return // deleted while it ran: it doesn't come back as a half reply
     Object.assign(m, patch)
     this.deps.db.saveMessage(m)
     this.deps.emit({ type: 'message', message: { ...m } })
@@ -2349,6 +2364,9 @@ ${note}`,
         ? { model: modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
+    // Deleted from under the run: the receipt is all that's left of it, and nothing else it was about to
+    // say (the answer, a stop note, a word to whoever asked) goes anywhere.
+    if (control.deleted) return msg
     const usedNow = db.usedThisMonth(agent.id)
     // Only an agent with a ceiling has a share of it to warn about.
     if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {

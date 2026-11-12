@@ -1,7 +1,7 @@
 // Deleting a session from the room: the reply goes, and with it the thread it started (the answers
 // it got there) and any approval asked under it. The prompt it answered stays, and what it spent
-// stays in the receipts: the tokens went out either way. A reply still at work is stopped first,
-// never deleted from under the run writing to it.
+// stays in the receipts: the tokens went out either way. A reply still at work is stopped first and
+// deleted whole: nothing it had written comes back.
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -80,7 +80,6 @@ describe('deleting a session over the API', () => {
       await new Promise((r) => setTimeout(r, 20))
     }
   }
-  const err = async (p: Promise<unknown>): Promise<string> => p.then(() => 'ok', (e: Error) => e.message)
 
   it('an ended reply leaves the conversation, and every screen hears of it', async () => {
     core = await bootCore()
@@ -109,23 +108,23 @@ describe('deleting a session over the API', () => {
     expect((await ana.call<Snap>('snapshot')).messages.some((m) => m.id === prompt.id)).toBe(true)
   })
 
-  it('a reply still at work is stopped first, not deleted from under the run writing to it', async () => {
+  it('a reply still at work goes too: it is stopped first, and what it had written goes with it', async () => {
     // The core writes a reply as it runs, so one at work is put here directly (as team-round6 does
-    // with its artifacts): the door refuses it until it has ended.
+    // with its artifacts). The door takes it: the run is dropped, so nothing of it lands afterwards.
     const agent = (await ana.call<{ agents: { id: string }[] }>('snapshot')).agents[0]!.id
     const db = new DatabaseSync(join(core.dataDir, 'tucano.db'))
     try {
-      db.prepare('INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run) VALUES (?, ?, ?, ?, ?, ?, ?)').run('w1', dm, 'agent', agent, '', Date.now(), JSON.stringify({ status: 'working', steps: [] }))
+      db.prepare('INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run) VALUES (?, ?, ?, ?, ?, ?, ?)').run('w1', dm, 'agent', agent, 'estou olhando', Date.now(), JSON.stringify({ status: 'working', steps: [] }))
     } finally {
       db.close()
     }
-    expect(await err(ana.call('deleteMessage', { messageId: 'w1' }))).toMatch(/Pare a resposta antes/)
+    expect(await ana.call<string[]>('deleteMessage', { messageId: 'w1' })).toEqual(['w1'])
     const after = new DatabaseSync(join(core.dataDir, 'tucano.db'))
     try {
-      expect(after.prepare('SELECT id FROM messages WHERE id = ?').get('w1')).toBeTruthy() // still there, waiting to be stopped
-      after.prepare('DELETE FROM messages WHERE id = ?').run('w1')
+      expect(after.prepare('SELECT id FROM messages WHERE id = ?').get('w1')).toBeUndefined()
     } finally {
       after.close()
     }
+    expect(ana.events.some((e: CoreEvent) => e.type === 'message_removed' && e.id === 'w1')).toBe(true)
   })
 })
