@@ -989,6 +989,22 @@ export class Runner {
     }
   }
 
+  // A prompt whose reply hasn't started yet says so in the conversation (Conversation.tsx, `sendMode`)
+  // and is picked up again when the app opens (`queuedMessages`, resumeQueued): no prompt of mine sits
+  // in no one's hands, neither while it waits nor after a restart. The mark goes the moment its reply
+  // starts, and with the message whose reply takes it over.
+  private waitingMark(messageId: string | undefined): void {
+    const m = messageId ? this.deps.db.message(messageId) : undefined
+    if (!m || m.sendMode) return
+    this.update(m, { sendMode: 'queue' })
+  }
+
+  private clearWaiting(messageId: string | undefined): void {
+    const m = messageId ? this.deps.db.message(messageId) : undefined
+    if (m?.sendMode !== 'queue') return
+    this.update(m, { sendMode: undefined })
+  }
+
   // Each reply answers the message that was routed (`trigger`), not whatever came in while it
   // waited. One already waiting for the same agent there takes the newer message instead: one reply.
   // `parallel`: it goes beside whatever is running there, two at once, as the person asked of their
@@ -1001,6 +1017,8 @@ export class Runner {
       const key = replyKey(agent.id, conv.id, note.threadId)
       const waiting = this.waiting.get(key)
       if (waiting) {
+        // This message takes over the one already waiting for this reply: one prompt, one mark.
+        this.clearWaiting(waiting.trigger)
         waiting.trigger = trigger
         continue
       }
@@ -1019,6 +1037,7 @@ export class Runner {
       }
       this.waiting.set(key, slot)
       if (parallel || (!this.followups.busy(key) && !this.parked.has(key))) slot.start()
+      else this.waitingMark(trigger)
     }
   }
 
@@ -1050,8 +1069,12 @@ export class Runner {
       if (how.parallel) return this.launch(key, p)
       const line = this.parked.get(key)
       if (!line && !this.followups.busy(key)) return this.launch(key, p)
+      // It waits for the reply running there: it says so in the conversation, and a restart picks it up.
+      this.waitingMark(opts.replyTo)
       const same = p.merge ? line?.find((x) => x.merge) : undefined
       if (same) {
+        // One reply answers both: the mark of the message it takes over goes, so nothing starts twice.
+        this.clearWaiting(same.opts.replyTo)
         // The newer message, keeping what an earlier one asked of the agent (an answer given for someone).
         same.opts = { ...opts, task: opts.task ?? same.opts.task }
         same.done.push(resolve)
@@ -1062,6 +1085,9 @@ export class Runner {
 
   private launch(key: string, p: Parked): void {
     this.followups.reserve(key)
+    // It is waiting until its reply takes its first step (executeReply clears it): with nothing holding
+    // it back that is the same tick, and the mark never reaches the screen.
+    this.waitingMark(p.opts.replyTo)
     const done = (m: Message | undefined): void => p.done.forEach((d) => d(m))
     this.enqueue(
       () =>
@@ -1129,6 +1155,8 @@ export class Runner {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
+    // Its reply is starting: the waiting mark goes in the same step, so a restart can't start it twice.
+    this.clearWaiting(opts.replyTo)
     this.followups.start(key, reserved)
     let msg: Message
     try {

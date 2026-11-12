@@ -424,3 +424,37 @@ describe('a steer the reply ended without taking', () => {
     expect(agentMessages()[1]?.run?.replyTo).toBe(second.id)
   })
 })
+
+// A prompt whose reply never starts at once is in no one's hands until it does: it says so in the
+// conversation, and a window closed while it waited must not lose it. See `waitingMark` in runs.ts.
+describe('a prompt whose reply has not started yet', () => {
+  it('says it waits, and the mark goes the moment its reply starts', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const r = runnerWith(fakeEngine('claude', { delayMs: 40 }))
+    await r.send('d1', 'primeira mensagem')
+    await r.send('d1', 'segunda, na fila', [], undefined, undefined, { mode: 'queue' })
+    expect(mine().map((m) => m.sendMode)).toEqual([undefined, 'queue'])
+    await r.idle()
+    expect(mine().map((m) => m.sendMode)).toEqual([undefined, undefined]) // started, so it stops saying it
+    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
+  })
+
+  it('is answered when the app opens again, since no reply ever started for it', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const now = Date.now()
+    // What a window closed mid-reply leaves behind: its reply still marked working, and mine waiting.
+    db.saveMessage({ id: 'p1', conversationId: 'd1', author: { kind: 'person', id: db.ownerId() }, text: 'primeira', at: now - 3000 })
+    db.saveMessage({ id: 'old', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: '', at: now - 2000, run: { status: 'working', steps: [] } })
+    db.saveMessage({ id: 'p2', conversationId: 'd1', author: { kind: 'person', id: db.ownerId() }, text: 'segunda', at: now - 1000, sendMode: 'queue' })
+    db.interruptStaleRuns()
+    const r = runnerWith(fakeEngine('claude', { delayMs: 1 }))
+    r.resumeQueued()
+    await r.idle()
+    const replies = agentMessages().filter((m) => m.run?.status === 'done')
+    expect(replies).toHaveLength(1)
+    expect(replies[0]?.run?.replyTo).toBe('p2') // the prompt that waited is the one answered
+    expect(db.message('p2')?.sendMode).toBeUndefined() // and it no longer says it's waiting
+  })
+})
