@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
+import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -69,8 +70,9 @@ const USAGE_ALERT = 0.8
 const NO_LIMIT_REPLY_BASE = 1_000_000
 
 // The month's ceiling for an agent: 0 (or anything that isn't a positive
-// number) is no ceiling, so every comparison against it is false.
-export const monthlyCeiling = (limit: number): number => (limit > 0 ? limit : Infinity)
+// number) is no ceiling, so every comparison against it is false. The rule
+// lives in shared/limits.ts, where the screens read it too.
+export { monthlyCeiling }
 
 // How many tokens a single reply may spend. With a ceiling it is a share of it;
 // without one the share is taken over NO_LIMIT_REPLY_BASE, so a reply still has
@@ -316,6 +318,8 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
+// A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
+type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
@@ -344,6 +348,9 @@ export class Runner {
   // there moves the reply's trigger to its message instead of queueing a second reply. One whose
   // agent is still replying there starts when that reply ends (it reads what that reply said).
   private waiting = new Map<string, { trigger: string; queued: boolean; start: () => void }>()
+  // Every other reply asked for while the agent replies there (a person's mention or DM, a routine,
+  // an approval's outcome, a retry), in the order they came: they wait here, off the queue (startReply).
+  private parked = new Map<string, Parked[]>()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -388,6 +395,8 @@ export class Runner {
     this.paused = true
     this.queue.length = 0
     this.followups = new Followups() // the places the dropped queue held, and what was noted for later
+    for (const line of this.parked.values()) for (const p of line) p.done.forEach((d) => d(undefined))
+    this.parked.clear()
     for (const c of this.controllers.values()) {
       c.reason = 'stopped'
       c.ctl.abort()
@@ -577,7 +586,7 @@ export class Runner {
         return
       }
     }
-    for (const agent of responders) this.enqueue(() => this.execute(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }), true)
+    for (const agent of responders) void this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -637,7 +646,7 @@ export class Runner {
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }), true)
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }, { urgent: true })
   }
 
   // A reply paused at its budget goes on in a new reply that knows what it did:
@@ -667,7 +676,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }), true)
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }, { urgent: true })
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -692,14 +701,7 @@ export class Runner {
     db.saveMessage(ask)
     emit({ type: 'message', message: ask })
 
-    return new Promise((resolve) =>
-      this.enqueue(() =>
-        this.execute(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true }).then(resolve, (e: unknown) => {
-          resolve(undefined)
-          throw e
-        })
-      )
-    )
+    return this.startReply(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true })
   }
 
   // A routine's reply that failed, run again in place with the same request.
@@ -711,14 +713,7 @@ export class Runner {
     const agent = db.agent(r.agentId)
     if (!msg?.run || msg.run.status !== 'failed' || !conv || !agent || agent.archived) return undefined
     const me = (await this.deps.settings()).workspaceName
-    return new Promise((resolve) =>
-      this.enqueue(() =>
-        this.execute(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true }).then(resolve, (e: unknown) => {
-          resolve(undefined)
-          throw e
-        })
-      )
-    )
+    return this.startReply(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true })
   }
 
   // `me`: the owner, by the workspace's name; a person's routine reads with theirs, and the team's as the channel's.
@@ -858,20 +853,59 @@ export class Runner {
         start: (): void => {
           if (slot.queued) return
           slot.queued = true
+          this.followups.reserve(key) // taken now: what comes meanwhile waits for this reply
           this.enqueue(() => {
             if (this.waiting.get(key) === slot) this.waiting.delete(key)
-            return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger })
+            return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger, reserved: true })
           }, true)
         }
       }
       this.waiting.set(key, slot)
-      if (!this.followups.busy(key)) slot.start()
+      if (!this.followups.busy(key) && !this.parked.has(key)) slot.start()
     }
   }
 
-  // A routed reply that waited for this agent to finish here goes now.
+  // The agent is free here: the next reply that waited goes now, first what was parked, then a routed one.
   private startWaiting(key: string): void {
-    if (!this.followups.busy(key)) this.waiting.get(key)?.start()
+    if (this.followups.busy(key)) return
+    const line = this.parked.get(key)
+    const next = line?.shift()
+    if (line?.length === 0) this.parked.delete(key)
+    if (next) this.launch(key, next)
+    else this.waiting.get(key)?.start()
+  }
+
+  // A reply not routed nor handed off (those wait in routed and handOff): one at a time per agent and
+  // thread (replyKey), wherever it comes from. While the agent replies there it waits, off the queue,
+  // and starts when that reply ends; a person's newer message there takes over theirs (`merge`).
+  // Resolves with the reply, or undefined when it failed or was dropped.
+  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; merge?: boolean } = {}): Promise<Message | undefined> {
+    const key = replyKey(agent.id, conv.id, opts.existing ? opts.existing.threadId : opts.threadId)
+    return new Promise((resolve) => {
+      const p: Parked = { agent, conv, opts, urgent: !!how.urgent, merge: !!how.merge, done: [resolve] }
+      const line = this.parked.get(key)
+      if (!line && !this.followups.busy(key)) return this.launch(key, p)
+      const same = p.merge ? line?.find((x) => x.merge) : undefined
+      if (same) {
+        // The newer message, keeping what an earlier one asked of the agent (an answer given for someone).
+        same.opts = { ...opts, task: opts.task ?? same.opts.task }
+        same.done.push(resolve)
+      } else if (line) line.push(p)
+      else this.parked.set(key, [p])
+    })
+  }
+
+  private launch(key: string, p: Parked): void {
+    this.followups.reserve(key)
+    const done = (m: Message | undefined): void => p.done.forEach((d) => d(m))
+    this.enqueue(
+      () =>
+        this.execute(p.agent, p.conv, { ...p.opts, reserved: true }).then(done, (e: unknown) => {
+          done(undefined)
+          throw e
+        }),
+      p.urgent
+    )
   }
 
   // `urgent`: it answers something the person just did (see MAX_CONCURRENT_URGENT).
@@ -2521,7 +2555,8 @@ ${note}`,
         }
       })
     }
-    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }), true)
+    // Decided while the agent is still replying: this one starts when that reply ends.
+    if (agent && conv && !agent.archived) void this.startReply(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }, { urgent: true })
   }
 
   // ---------- questions to people ----------
@@ -2580,14 +2615,16 @@ ${note}`,
     const conv = db.conversation(q.conversationId)
     if (!agent || agent.archived || !conv || this.paused) return
     const who = target?.name ?? L('essa pessoa', 'that person')
-    this.enqueue(() =>
-      this.execute(agent, conv, {
+    void this.startReply(
+      agent,
+      conv,
+      {
         depth: 1,
         work: asked?.run?.work,
         threadId: q.threadId,
         task: L(`${by.name} não autorizou perguntar a ${who}. Siga sem essa resposta ou pergunte a ${by.name} o que fazer.`, `${by.name} didn't allow asking ${who}. Go on without that answer or ask ${by.name} what to do.`)
-      }),
-      true
+      },
+      { urgent: true }
     )
   }
 
@@ -2723,14 +2760,16 @@ ${note}`,
       this.deps.emit({ type: 'inbox' })
     }
     const { workspaceName } = await this.deps.settings()
-    this.enqueue(() =>
-      this.execute(agent, conv, {
+    void this.startReply(
+      agent,
+      conv,
+      {
         depth: 1,
         work: asked.run?.work,
         threadId: asked.threadId,
         task: L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
-      }),
-      true
+      },
+      { urgent: true }
     )
   }
 
