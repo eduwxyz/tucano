@@ -3154,7 +3154,8 @@ body.is-resizing webview {
   box-shadow: var(--shadow-panel);
   animation: none;
 }
-.thread__lead > .msg .msg__reply {
+.thread__lead > .msg .msg__reply,
+.thread__lead > .msg .msg__delete {
   display: none;
 }
 /* Mine too reads as the thread's heading here: my face and name, no bubble. */
@@ -3269,6 +3270,34 @@ body.is-resizing webview {
 }
 @media (hover: none) {
   .msg__reply {
+    opacity: 1;
+  }
+}
+/* The trash that deletes a session, right under the thread button: quiet until the row is hovered,
+   and red from the first press on, which is what says the second one deletes. */
+.msg__delete {
+  position: absolute;
+  top: 28px;
+  right: 4px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: var(--transition-ui);
+}
+.msg__delete.is-armed {
+  color: var(--danger);
+  background: var(--danger-soft);
+  opacity: 1;
+}
+.msg__delete.is-armed:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.msg:hover .msg__delete,
+.msg__delete:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .msg__delete {
     opacity: 1;
   }
 }

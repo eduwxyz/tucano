@@ -1191,6 +1191,21 @@ export class Db {
     return r && this.toMessage(r)
   }
 
+  // A session's reply leaves the conversation: the message, the replies in the thread it started,
+  // and the approvals that were asked under it. What the session spent stays in the receipts — the
+  // tokens went out either way. The ids that went come back, so every screen can take them off.
+  deleteMessage(id: string): string[] {
+    return this.tx(() => {
+      const inThread = (this.db.prepare('SELECT id FROM messages WHERE thread_id = ?').all(id) as Row[]).map((r) => str(r['id']))
+      const gone = [id, ...inThread]
+      for (const one of gone) {
+        this.db.prepare('DELETE FROM approvals WHERE message_id = ?').run(one)
+        this.db.prepare('DELETE FROM messages WHERE id = ?').run(one)
+      }
+      return gone
+    })
+  }
+
   saveMessage(m: Message): void {
     this.db
       .prepare(

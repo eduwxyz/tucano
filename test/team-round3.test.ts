@@ -134,6 +134,7 @@ describe('G. every event reaches only who may see what it is about', () => {
     const cases: Record<CoreEvent['type'], { event: CoreEvent; is: 'hidden' | 'shown' | 'own' }> = {
       voice: { event: { type: 'voice' }, is: 'shown' },
       message: { event: { type: 'message', message }, is: 'hidden' },
+      message_removed: { event: { type: 'message_removed', id: 'm-dm', conversationId: 'dm-ana' }, is: 'hidden' },
       delta: { event: { type: 'delta', id: 'm-dm', text: 'segredo' }, is: 'hidden' },
       agent: { event: { type: 'agent', agent: db.agent('a1')! }, is: 'shown' },
       conversation: { event: { type: 'conversation', conversation: db.conversation('dm-ana')! }, is: 'hidden' },
