@@ -1,6 +1,7 @@
 // What agents make on their computers, in the chat: artifact cards and
 // service cards inside messages, and the side panel that opens them.
 import { L, locale } from '../../../shared/lang'
+import { timeOpts } from '../../../shared/clock'
 import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -114,7 +115,7 @@ const LOG_ICON: Record<string, IconName> = {
   Waited: 'clock'
 }
 const logIcon = (label: string): IconName => LOG_ICON[label] ?? (/assumiu|devolveu|took over|handed/i.test(label) ? 'hand' : 'spark')
-const clock = (at: number): string => new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const clock = (at: number): string => new Date(at).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit', second: '2-digit' }))
 
 // Live while the agent is answering with it, or while I drive it.
 function useLive(agentId: string): boolean {
