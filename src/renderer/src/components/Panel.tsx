@@ -456,10 +456,16 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
       return <pre className="side-panel__text">{text}</pre>
     default:
       return (
-        <>
-          <p className="empty">{L('Sem visualização pra esse tipo de arquivo', 'No preview for this kind of file')} ({artifact.name}, {bytes(artifact.size)}).</p>
-          <RevealArtifact artifactId={artifact.id} />
-        </>
+        <div className="side-panel__empty">
+          <div className="empty">
+            <Icon name="clip" size={22} />
+            <p>{L('Sem visualização pra esse tipo de arquivo', 'No preview for this kind of file')}</p>
+            <p className="muted">
+              {artifact.name} · {bytes(artifact.size)}
+            </p>
+            <RevealArtifact artifactId={artifact.id} />
+          </div>
+        </div>
       )
   }
 }
@@ -476,11 +482,9 @@ function RevealArtifact({ artifactId }: { artifactId: string }): ReactNode {
         ? L('Mostrar no Explorador', 'Show in Explorer')
         : L('Mostrar na pasta', 'Show in folder')
   return (
-    <p className="empty">
-      <button className="btn btn--sm btn--ghost" onClick={() => revealArtifact(artifactId)}>
-        {label}
-      </button>
-    </p>
+    <button className="btn btn--sm side-panel__reveal" onClick={() => revealArtifact(artifactId)}>
+      <Icon name="folder" size={14} /> {label}
+    </button>
   )
 }
 
