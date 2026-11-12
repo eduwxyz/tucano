@@ -8,6 +8,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **Your Codex subscription's limits on Usage and limits.** The page showed the Claude subscription's 5-hour and weekly windows, and said Codex doesn't report its own. Codex's app-server does (`account/rateLimits/read`): when Codex is signed in with a ChatGPT plan, the page now asks it, at most once a minute, while it's open and after each reply, and shows each window the plan has (Plus has only the week) with how much is used and when it resets, plus the plan's name.
 
+- **Duplicate a routine.** A routine's card has a copy button next to Edit: it opens the form with the same agent, place, schedule and instructions, named "(copy)", to change what differs and save as a new routine of your own. The copy starts off, so it doesn't run next to the original until you turn it on, and a webhook routine's copy gets its own address. Thanks, jonatas-caram-ifood! (#362)
+
 ### Fixed
 
 - **The wiki map holds together as the wiki grows.** The map settles its pages by a little physics: pages push each other away, links pull. The pull of a link grows with how far its pages are, with no ceiling, and two pages that come too close keep swinging through each other — so past a hundred pages or so the forces fed on themselves, positions ran past any number and turned into NaN, and the SVG drew every page on the same spot: the map came up empty with one page stuck in the corner, no matter how many pages and links it said it had. A step of the physics now caps how fast a page may move, and a wiki of any size settles spread out. (A wiki of 358 pages was the one that showed it; the same change tested from 10 to 358 pages.) Thanks, brunolellis! (#357)
@@ -33,6 +35,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **A message in a channel that answers in threads opens its thread.** There, each message you write in the channel starts a thread of its own, where the answers go, and you had to find its link under the message to follow them. Now the thread opens on the side as soon as your message is sent (full screen on a phone). A reply written in a thread, a channel that answers in the conversation, or a message from another of your devices leaves the panel as it was. Thanks, b7s! (#347)
+
+- **Your own memories are named "You" on the Memory page.** The tab read "About you" ("Sobre você"), which wrapped to two lines once a few agents had notes of their own and the tab strip got crowded. It now reads "You" ("Você"), and so does the heading inside it. Only the name changed: the memories and where they're kept are the same. Thanks, apoapostolov! (#296)
 
 ## [0.2.27] - 2026-11-10
 
