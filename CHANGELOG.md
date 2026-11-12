@@ -10,6 +10,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A monthly limit of 0 reads as no limit on every screen.** The runner already treated 0 as no ceiling, but the screens didn't: every agent without a limit had a red *Hit the monthly limit* dot in the sidebar, a reply stopped at the limit offered to raise a limit that doesn't exist instead of *Try again*, the agent page said "of 0 tokens", and the Tuca's change card and workspace summary printed 0 and 0%. They now say there is no monthly limit, and the dots and *Raise the limit* only come for an agent with a real one. Thanks, apoapostolov! (#351)
 - **An agent that only reads through Composio can link an account.** The first time an agent needs an app on Composio (Google Calendar, Gmail…), it calls `COMPOSIO_MANAGE_CONNECTIONS` for the sign-in link. That tool is sensitive, so an agent with read access never saw it: it found the app's actions, then failed because no account was linked, though reading was all it wanted. A read grant now sees that tool too, and every call to it asks for approval, at every level and whatever the rules; read-and-write is unchanged.
 
 ## [0.2.27] - 2026-11-10
