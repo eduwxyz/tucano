@@ -1181,6 +1181,10 @@ export class Runner {
     const handed = this.handedIn(msg)
     const boss = handed ? db.agent(handed.from) : undefined
     const delegated: DelegationRef[] = []
+    // A `pedir` this reply was refused (the target is out of reach, the channel isn't theirs, the chain is
+    // full): the reply explains a failure, it doesn't invite anyone. Marked from the tool result itself, never
+    // from the reply's words, and it turns off the mention path for what is left of the reply.
+    let refusedHandOff = false
     let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
     // why, so it says so in a sentence instead of spending a call on each tool to find out.
@@ -2220,6 +2224,8 @@ ${note}`,
         sign()
         try {
           const r = await runTool(name, args)
+          // A refused hand-off is a failure being explained, not an invitation (see refusedHandOff).
+          if (name === PEDIR.name && r.isError) refusedHandOff = true
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0
@@ -2516,7 +2522,11 @@ ${note}`,
         // Agents the reply calls that aren't in this conversation: this room can't take them, so they get
         // one of their own, with what was already done here in front of them (team-up.ts).
         const called = teamUpCall?.guests ?? []
-        const guests = [...called, ...this.guests(agent, conv, msg).filter((g) => !called.some((c) => c.id === g.id))].slice(0, TEAM_UP_GUESTS)
+        // A reply that was refused a hand-off opens no room from a mention: the handles it lists in the
+        // refusal ("who you reach: @clara, @bento") name people to ask with `pedir`, not guests. The tool's
+        // own call is a deliberate team-up and stays untouched.
+        const implicit = refusedHandOff ? [] : this.guests(agent, conv, msg)
+        const guests = [...called, ...implicit.filter((g) => !called.some((c) => c.id === g.id))].slice(0, TEAM_UP_GUESTS)
         if (guests.length) this.openTeamUp(agent, conv, msg, guests, opts.depth, chainDepthCap(settings.chainDepth), teamUpCall?.name)
         if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
         else finished()
