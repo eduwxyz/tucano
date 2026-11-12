@@ -135,6 +135,7 @@ export interface Api {
   addNodeFolder(p: { path: string }): Promise<NodeInfo> // lends a folder to the server's agents; throws why not (outside home, Library, a dot folder, Tucano's data)
   removeNodeFolder(p: { path: string }): Promise<NodeInfo>
   nodeLog(p: { limit?: number }): Promise<NodeLogEntry[]> // what the server ran here, newest first (up to 500)
+  setClassifierKey(p: { id: string; key: string | null }): Promise<void> // checks the key with that classifier's provider before saving; null removes it
   engineModels(p: { engine: EngineId }): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
   testEngine(p: { model: string }): Promise<{ ok: boolean; message: string; seconds?: number }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form

@@ -105,6 +105,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   addNodeFolder: { path: 's' },
   removeNodeFolder: { path: 's' },
   nodeLog: { limit: 'n?' },
+  setClassifierKey: { id: 's', key: 's|null' },
   engineModels: { engine: 's' },
   testEngine: { model: 's' },
   saveSkill: { skill: 'o' },

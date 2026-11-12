@@ -253,6 +253,7 @@ export const NEEDS: Record<Method, Need> = {
   addNodeFolder: 'owner',
   removeNodeFolder: 'owner',
   nodeLog: 'owner',
+  setClassifierKey: 'admin',
   voiceDownload: 'admin',
   voiceCancelDownload: 'admin',
   voiceRemoveModel: 'admin',
