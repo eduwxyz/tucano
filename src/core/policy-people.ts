@@ -131,6 +131,10 @@ export const NEEDS: Record<Method, Need> = {
   // the team's knowledge: anyone reads and writes pages; the curator's decisions and the wiki's place are the admins'
   wiki: 'anyone',
   wikiPage: 'anyone',
+  // What an agent keeps for itself can be anything it read (a client's data): those who manage agents see it.
+  agentTables: 'admin',
+  agentRows: 'admin',
+  agentTableCsv: 'admin',
   wikiSearch: 'anyone',
   wikiSave: 'anyone',
   wikiRemove: 'anyone',

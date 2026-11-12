@@ -83,6 +83,11 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /(?:nos seus dados|in your data):[^`]*`/i.test(last)) {
+        // Its own tables: each SQL in backticks, in order; a query reads, anything else changes.
+        let r: unknown
+        for (const [, sql] of last.matchAll(/`([^`]+)`/g)) r = await callTool(turn.mcpUrl, /^\s*(select|with)\b/i.test(sql!) ? 'dados_consultar' : 'dados_alterar', { sql, _motivo: L('Você pediu pra recomeçar a tabela.', 'You asked to start the table over.') })
+        reply = textOf(r)
       } else if (turn.mcpUrl && /(?:consulte|run the sql) `([^`]+)`/i.test(last)) {
         // A SQL connector's tool (Databricks' execute_sql_read_only), to see its steps and errors.
         const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!

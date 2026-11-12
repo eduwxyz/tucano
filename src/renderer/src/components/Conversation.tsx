@@ -1327,7 +1327,10 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const onComputer = approval.connectorId === COMPUTADOR
   const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
-  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && (!onComputer || kinds.length > 0)
+  // SQL on the agent's own tables that destroys data (core/agent-data.ts): the statement shows whole, like a command.
+  const onData = approval.connectorId === 'dados'
+  const sqlParams = onData && Array.isArray(approval.args['parametros']) && approval.args['parametros'].length ? (approval.args['parametros'] as unknown[]) : undefined
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !onData && !runner && (!onComputer || kinds.length > 0)
   const alwaysTitle = onComputer
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
     : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)
@@ -1349,6 +1352,10 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         ) : onComputer ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{kinds.length ? kinds.map(actionVerb).join(L(' e ', ' and ')) : L('rodar um comando', 'run a command')}</strong> {L('no computador dele', 'on its computer')}
+          </>
+        ) : onData ? (
+          <>
+            {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{L('apagar dados', 'delete data')}</strong> {L('das tabelas dele', 'from its tables')}
           </>
         ) : approval.tool === 'abrir_pr' ? (
           <>
@@ -1402,7 +1409,13 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
       {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}
-      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !runner && !onComputer && summary.shown.length > 0 && (
+      {onData && <pre className="approval__command">{String(approval.args['sql'] ?? '')}</pre>}
+      {sqlParams && (
+        <p className="approval__args small">
+          <span className="muted">{L('Valores:', 'Values:')}</span> {sqlParams.map((v) => JSON.stringify(v)).join(', ')}
+        </p>
+      )}
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !runner && !onComputer && !onData && summary.shown.length > 0 && (
         <div className="approval__args small">
           {summary.shown.map(([k, v], i) => (
             <p key={i}>

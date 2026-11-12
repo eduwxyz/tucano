@@ -50,6 +50,7 @@ import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
+import { AgentData } from './agent-data'
 import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
 import { COPY_SUFFIX, WikiGit } from './wiki-git'
 import { settingsPatchError } from './settings-patch'
@@ -921,6 +922,9 @@ setInterval(() => {
   if (reviewer.due()) void reviewer.review().then(() => emit({ type: 'wiki' }))
 }, 3600_000).unref()
 
+// Each agent's own tables, one file per agent: a short path, since Windows still caps a path at 260.
+const agentData = new AgentData(join(dataDir, 'data'))
+
 const runner = new Runner({
   db,
   engines: engineImpls,
@@ -938,6 +942,7 @@ const runner = new Runner({
   skills,
   wiki,
   wikiCurator: curator,
+  data: agentData,
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
   notify: (title, body, conversationId, kind, threadId, to) => {
@@ -2007,6 +2012,15 @@ const api: Handlers = {
     }
   },
   wikiPage: ({ title }, ctx) => wikiFor(ctx).page(title) ?? null,
+  agentTables: ({ agentId }) => (db.agent(agentId) ? agentData.tables(agentId) : []),
+  agentRows: ({ agentId, table }) => {
+    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe.', "That agent doesn't exist."))
+    return agentData.rows(agentId, table)
+  },
+  agentTableCsv: ({ agentId, table }) => {
+    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe.', "That agent doesn't exist."))
+    return agentData.csv(agentId, table)
+  },
   wikiSearch: ({ q }, ctx) => wikiFor(ctx).search(q, 20),
   // A page held for someone else is as good as taken: its name isn't free, and it isn't there to change.
   wikiSave: ({ title, body, kind, expectedHash, rename }, ctx) => {
