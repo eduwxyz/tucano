@@ -11919,6 +11919,9 @@ button.agent-card__now:hover {
   overflow-y: auto;
   padding: 1px 0 2px;
   white-space: pre-wrap;
+  /* A path or an address in the model's thinking has no space to break at: it wraps onto the next
+     line instead of pushing the column wider and leaving a horizontal scrollbar in a thread. */
+  overflow-wrap: anywhere;
   opacity: 0.85;
   scrollbar-width: thin;
   /* The newest line never sits against the edge of the box: it fades in from the bottom. */

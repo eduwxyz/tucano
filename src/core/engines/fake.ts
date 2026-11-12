@@ -201,6 +201,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           'Before answering, worth seeing where the request comes from ',
           'and what was already said in this conversation. ',
           'The short path is reading the file it names, ',
+          'src/renderer/src/components/Conversation.tsx:11799 ',
           'checking the version in the repository ',
           'and only then saying what to do. ',
           'If the test fails the same on a clean main, it is not the build. ',
