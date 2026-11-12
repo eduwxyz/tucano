@@ -14,23 +14,20 @@ export interface RoutineTimeline {
 
 const hasThread = (message: Message, replies?: Map<string, Message[]>): boolean => (replies?.get(message.id)?.length ?? 0) > 0
 
-// A routine's request posts first and its agent answers right after, on its own: the reply is the
-// first agent message after it that doesn't answer a person (no replyTo), before the next routine's.
+// A routine's request is left out only once a reply that runs it (run.routineMessage) is in the
+// conversation, so nothing disappears without its attribution. `conversation`: every loaded
+// message, not just the page shown, so a reply finds its request across the history cutoff.
 // A request that opens a thread stays, so the thread is never left without its root.
-export function hideRoutinePrompts(messages: Message[], replies?: Map<string, Message[]>): RoutineTimeline {
+export function hideRoutinePrompts(shown: Message[], conversation: Message[], replies?: Map<string, Message[]>): RoutineTimeline {
+  const requests = new Map<string, Message & { author: { kind: 'routine'; id: string } }>()
+  for (const m of conversation) if (m.author.kind === 'routine') requests.set(m.id, m as Message & { author: { kind: 'routine'; id: string } })
   const via = new Map<string, RoutineVia>()
   const repliesOf = new Map<string, string>()
-  const hidden = new Set<string>()
-  messages.forEach((m, i) => {
-    if (m.author.kind !== 'routine' || hasThread(m, replies)) return
-    hidden.add(m.id)
-    for (const next of messages.slice(i + 1)) {
-      if (next.author.kind === 'routine') break
-      if (next.author.kind !== 'agent' || next.threadId || next.run?.replyTo) continue
-      via.set(next.id, { routineId: m.author.id, run: m.routine ?? { name: '', scheduledAt: m.at, late: false } })
-      repliesOf.set(m.id, next.id)
-      break
-    }
-  })
-  return { messages: messages.filter((m) => !hidden.has(m.id)), via, repliesOf }
+  for (const reply of conversation) {
+    const request = reply.run?.routineMessage ? requests.get(reply.run.routineMessage) : undefined
+    if (!request || repliesOf.has(request.id) || hasThread(request, replies)) continue
+    repliesOf.set(request.id, reply.id)
+    via.set(reply.id, { routineId: request.author.id, run: request.routine ?? { name: '', scheduledAt: request.at, late: false } })
+  }
+  return { messages: shown.filter((m) => !repliesOf.has(m.id)), via, repliesOf }
 }

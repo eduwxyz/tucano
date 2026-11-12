@@ -259,7 +259,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
   const shown = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
   const hideRoutines = useStore((s) => s.settings.routinePrompts === 'hidden')
-  const { messages, via, repliesOf } = useMemo(() => (hideRoutines ? hideRoutinePrompts(shown, replies) : { messages: shown, via: NO_VIA, repliesOf: NO_VIA_REPLIES }), [hideRoutines, shown, replies])
+  const { messages, via, repliesOf } = useMemo(() => (hideRoutines ? hideRoutinePrompts(shown, everything, replies) : { messages: shown, via: NO_VIA, repliesOf: NO_VIA_REPLIES }), [hideRoutines, shown, everything, replies])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)

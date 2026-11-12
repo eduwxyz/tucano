@@ -43,6 +43,7 @@ const PROMPT = 'Summarise the news and list three links'
 
 const ask = (p: Partial<Message> = {}): Message => ({ id: 'ask', conversationId: 'd1', author: { kind: 'routine', id: 'r1' }, text: PROMPT, at: 1_000, routine: { name: 'Morning digest', scheduledAt: 1_000, late: false }, ...p })
 const answer = (p: Partial<Message> = {}): Message => ({ id: 'ans', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'Here is the digest.', at: 2_000, run: { status: 'done', steps: [] }, ...p })
+const linkedAnswer = (p: Partial<Message> = {}): Message => answer({ run: { status: 'done', steps: [], routineMessage: 'ask' }, ...p })
 const threadReply = (): Message => ({ id: 'tr', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'In the thread.', at: 3_000, threadId: 'ask', run: { status: 'done', steps: [] } })
 
 let root: Root | undefined
@@ -135,13 +136,13 @@ describe('hidden', () => {
     const scrolled = vi.fn()
     Object.assign(window.HTMLElement.prototype, { scrollIntoView: scrolled })
     fake = { ...fake, view: { kind: 'conversation', id: 'd1', message: 'ask' } as State['view'] }
-    await show('hidden', [ask(), answer()])
+    await show('hidden', [ask(), linkedAnswer()])
     expect(scrolled).toHaveBeenCalledTimes(1)
     expect(scrolled.mock.contexts[0]).toBe(document.querySelector('[data-id="ans"]'))
   })
 
   it('leaves the routine message out and tags the reply with the routine', async () => {
-    await show('hidden', [ask(), answer()])
+    await show('hidden', [ask(), linkedAnswer()])
     expect(document.querySelector('.msg--routine')).toBeNull()
     expect(document.body.textContent).not.toContain(PROMPT)
     expect(document.body.textContent).toContain('Here is the digest.')
@@ -150,26 +151,32 @@ describe('hidden', () => {
   })
 
   it('adds the lightning bolt when an event started the run', async () => {
-    await show('hidden', [ask({ routine: { name: 'Morning digest', scheduledAt: 1_000, late: false, event: { source: 'GitHub', title: 'Issue opened' } } }), answer()])
+    await show('hidden', [ask({ routine: { name: 'Morning digest', scheduledAt: 1_000, late: false, event: { source: 'GitHub', title: 'Issue opened' } } }), linkedAnswer()])
     expect(via()?.querySelector('svg')).not.toBeNull()
     expect(via()?.getAttribute('title')).toBe('GitHub: Issue opened')
   })
 
   it('opens the routines screen from the tag while the routine exists', async () => {
-    await show('hidden', [ask(), answer()])
+    await show('hidden', [ask(), linkedAnswer()])
     expect(via()?.tagName).toBe('BUTTON')
     await act(async () => (via() as HTMLElement).click())
     expect(navigate).toHaveBeenCalledWith({ kind: 'routines' })
   })
 
   it('is plain text once the routine was deleted', async () => {
-    await show('hidden', [ask(), answer()], [])
+    await show('hidden', [ask(), linkedAnswer()], [])
     expect(via()?.tagName).toBe('SPAN')
     expect(via()?.textContent).toContain('via Morning digest')
   })
 
+  it('shows the request compact when its reply carries no link (older data)', async () => {
+    await show('hidden', [ask(), answer()])
+    expect(document.querySelector('.msg--routine')!.classList.contains('msg--routine-compact')).toBe(true)
+    expect(via()).toBeNull()
+  })
+
   it('falls back to compact for a request that opens a thread, so the thread keeps its root', async () => {
-    await show('hidden', [ask(), answer(), threadReply()])
+    await show('hidden', [ask(), linkedAnswer(), threadReply()])
     const article = document.querySelector('.msg--routine')!
     expect(article.classList.contains('msg--routine-compact')).toBe(true)
     expect(toggle().getAttribute('aria-expanded')).toBe('false')
@@ -177,20 +184,43 @@ describe('hidden', () => {
 })
 
 describe('which reply belongs to a hidden request', () => {
-  const personAsk: Message = { id: 'p1', conversationId: 'd1', author: { kind: 'person', id: 'ana' }, text: 'hi', at: 1_500 }
-  const toPerson = answer({ id: 'to-person', at: 1_600, run: { status: 'done', steps: [], replyTo: 'p1' } })
+  const linked = (request: string, p: Partial<Message> = {}): Message => answer({ run: { status: 'done', steps: [], routineMessage: request }, ...p })
+  const askB = (): Message => ask({ id: 'askB', at: 1_100, author: { kind: 'routine', id: 'r2' }, routine: { name: 'Evening wrap', scheduledAt: 1_100, late: false } })
 
-  it('skips a reply that answers a person and a reply in a thread', () => {
-    const { via: found, repliesOf } = hideRoutinePrompts([ask(), personAsk, toPerson, answer()])
-    expect([...found.keys()]).toEqual(['ans'])
-    expect(repliesOf.get('ask')).toBe('ans')
+  it('tags each reply with its own routine when two fire together', () => {
+    const replyA = linked('ask', { id: 'ansA', at: 2_000 })
+    const replyB = linked('askB', { id: 'ansB', at: 3_000 })
+    const all = [ask(), askB(), replyA, replyB]
+    const { via: found, repliesOf, messages } = hideRoutinePrompts(all, all)
+    expect(found.get('ansA')).toMatchObject({ routineId: 'r1', run: { name: 'Morning digest' } })
+    expect(found.get('ansB')).toMatchObject({ routineId: 'r2', run: { name: 'Evening wrap' } })
+    expect(repliesOf.get('ask')).toBe('ansA')
+    expect(repliesOf.get('askB')).toBe('ansB')
+    expect(messages.map((m) => m.id)).toEqual(['ansA', 'ansB'])
   })
 
-  it('stops at the next routine request, so a run with no reply yet claims nobody else’s', () => {
-    const next = ask({ id: 'ask2', at: 5_000 })
-    const { via: found } = hideRoutinePrompts([ask(), next, answer({ id: 'later', at: 6_000 })])
-    expect([...found.keys()]).toEqual(['later'])
-    expect(found.get('later')?.routineId).toBe('r1')
+  it('is not fooled by an earlier run that finished after the request', () => {
+    const autonomous = answer({ id: 'auto', at: 1_500, run: { status: 'done', steps: [] } })
+    const mine = linked('ask', { id: 'ansA', at: 2_000 })
+    const all = [ask(), autonomous, mine]
+    const { via: found, repliesOf } = hideRoutinePrompts(all, all)
+    expect([...found.keys()]).toEqual(['ansA'])
+    expect(repliesOf.get('ask')).toBe('ansA')
+  })
+
+  it('finds the request outside the shown page', () => {
+    const mine = linked('ask')
+    const { via: found, messages } = hideRoutinePrompts([mine], [ask(), mine])
+    expect(found.get('ans')?.routineId).toBe('r1')
+    expect(messages.map((m) => m.id)).toEqual(['ans'])
+  })
+
+  it('keeps a request with no reply linked to it, and a reply without the link claims nothing', () => {
+    const all = [ask(), answer()]
+    const { via: found, repliesOf, messages } = hideRoutinePrompts(all, all)
+    expect(found.size).toBe(0)
+    expect(repliesOf.size).toBe(0)
+    expect(messages).toHaveLength(2)
   })
 })
 
