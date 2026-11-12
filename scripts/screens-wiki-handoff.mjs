@@ -1,5 +1,5 @@
 // Frames for the wiki hand-off: a missing page offers an agent with write access (#255 / PR #258),
-// and the agent's own settings say "Writes the wiki".
+// and the agent's Tools tab offers the same "Read and write" access as PR #355.
 import { _electron as electron } from 'playwright'
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,7 +13,7 @@ const data = mkdtempSync(join(tmpdir(), 'tucano-'))
 const env = { ...process.env, TUCANO_DATA: data, TUCANO_SEED: '1', TUCANO_FAKE_ENGINES: '1', TUCANO_LOCALE: 'en-US' }
 
 const launch = async () => {
-  const app = await electron.launch({ args: ['.'], env })
+  const app = await electron.launch({ args: ['.', `--user-data-dir=${join(data, 'electron')}`], env, ...(process.env.TUCANO_ELECTRON ? { executablePath: process.env.TUCANO_ELECTRON } : {}) })
   const win = await app.firstWindow()
   await win.setViewportSize({ width: 1280, height: 880 })
   await win.waitForSelector('.sidebar')
@@ -29,7 +29,7 @@ const launch = async () => {
 // 2. give two agents write access, and put the finding in the wiki
 {
   const db = new DatabaseSync(join(data, 'tucano.db'))
-  db.prepare("UPDATE agents SET wiki = 'write' WHERE handle IN ('lia', 'theo')").run()
+  db.prepare("UPDATE agents SET wiki = 'read_write' WHERE handle IN ('lia', 'theo')").run()
   db.close()
 }
 
@@ -140,12 +140,12 @@ if (await action.count()) {
 
 
 
-// The agent's own settings: the Wiki card now offers "Writes the wiki".
-await w.locator('.nav-item:has-text("Lia")').first().click()
+// The agent's own settings, rather than her DM.
+await w.locator('.nav-item', { has: w.locator('.nav-item__role') }).filter({ hasText: 'Lia' }).first().click()
 await w.waitForTimeout(600)
-await w.locator('.tabs button[role="tab"]:has-text("Memory")').first().click()
+await w.locator('.tabs button[role="tab"]:has-text("Tools")').first().click()
 await w.waitForTimeout(500)
-const card = w.locator('.card:has-text("Writes the wiki")').first()
+const card = w.locator('.card:has-text("Read and write")').first()
 if (await card.count()) {
   await card.scrollIntoViewIfNeeded()
   await w.waitForTimeout(300)
