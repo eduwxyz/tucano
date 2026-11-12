@@ -81,7 +81,7 @@ describe('a reply’s changes', () => {
     await turn.prepare('edit_file', { path: 'app/old.txt' })
     writeFileSync(join(repo, 'old.txt'), 'changed\n')
     const [set] = await turn.finish('m1', 'a1')
-    expect(set).toMatchObject({ root: join('/work', 'app'), total: 1 })
+    expect(set).toMatchObject({ root: join(named, 'app').replace(named, '/work'), total: 1 })
     rmSync(dirname(named), { recursive: true, force: true })
   })
 
