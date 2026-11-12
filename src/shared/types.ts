@@ -168,7 +168,8 @@ export interface Step {
   ms?: number
   // Not a tool call: something the person wrote. `steer` was handed to the reply while it ran,
   // between two calls, and its row carries their words (src/core/runs.ts, `steerIn`).
-  kind?: 'steer'
+  // 'thinking' is the wait for the model, not an action: it has no target to show.
+  kind?: 'steer' | 'thinking'
 }
 
 export interface Receipt {
