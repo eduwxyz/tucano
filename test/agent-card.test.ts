@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { parseHTML } from 'linkedom'
 import { chromium } from 'playwright'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { agentChannels, agentNow, cardState, HOVER_CLOSE_MS, HOVER_OPEN_MS, placeCard } from '../src/renderer/src/agent-card'
+import { agentChannels, agentNow, cardState, HOVER_CLOSE_MS, HOVER_OPEN_MS, placeCard, scrollMovesAnchor } from '../src/renderer/src/agent-card'
 import type { Conversation, Message, Run } from '../src/shared/types'
 
 const agent = { id: 'lia', archived: false, used: 0, limit: 1000 }
@@ -217,4 +218,28 @@ it.skipIf(!existsSync(chromium.executablePath()))('keeps a long name, handle and
   } finally {
     await browser.close()
   }
+})
+
+describe('scrollMovesAnchor', () => {
+  const { document, window } = parseHTML('<body><header><button id="name"></button></header><div id="list"><img id="avatar"></div></body>')
+  const anchorIn = (id: string): Node => document.getElementById(id) as unknown as Node
+  const list = document.getElementById('list') as unknown as EventTarget
+
+  it('keeps a header card open while the message list scrolls', () => {
+    expect(scrollMovesAnchor(list, anchorIn('name'))).toBe(false)
+  })
+
+  it('closes a card anchored inside the scrolled list', () => {
+    expect(scrollMovesAnchor(list, anchorIn('avatar'))).toBe(true)
+  })
+
+  it('closes on a scroll of the whole page', () => {
+    expect(scrollMovesAnchor(document as unknown as EventTarget, anchorIn('name'))).toBe(true)
+    expect(scrollMovesAnchor(window as unknown as EventTarget, anchorIn('name'))).toBe(true)
+  })
+
+  it('closes when the anchor is gone', () => {
+    const gone = document.createElement('button') as unknown as Node
+    expect(scrollMovesAnchor(list, gone)).toBe(true)
+  })
 })
