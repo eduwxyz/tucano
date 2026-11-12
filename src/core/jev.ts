@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import type { ClassifierConfig } from '../shared/classifiers'
 import { JEV_CLASSIFIER, providerSpec } from '../shared/classifiers'
 import { L } from '../shared/lang'
-import { MAX_STEPS, type Decision } from '../shared/questions'
+import { isNextSteps, MAX_STEPS, type Decision } from '../shared/questions'
 import type { Agent, Connector, Message, Person } from '../shared/types'
 import { ask, badFormat, checkClassifierKey, failure, noAnswer, type ClassifierAnswers, type ClassifierQuestion } from './classifiers'
 import type { ThreadDigest } from './memory'
@@ -161,7 +161,9 @@ export async function recommendOptions(opts: {
 }): Promise<{ picks: Suggested[]; ms: number } | { error: string; ms: number }> {
   const started = Date.now()
   const ms = (): number => Date.now() - started
-  const worth = opts.questions.map((q) => (q.options?.length ?? 0) >= 2)
+  // A next-steps card already says which of its steps are worth doing now; asking which option is
+  // best on the same list would be a second answer to it, and a disagreeing one.
+  const worth = opts.questions.map((q) => !isNextSteps(q) && (q.options?.length ?? 0) >= 2)
   if (!worth.some(Boolean)) return { picks: opts.questions.map(() => null), ms: ms() }
   const context = (opts.context ?? '').replace(/\s+/g, ' ').trim().slice(0, CONTEXT_MAX)
   const picks = await Promise.all(

@@ -1159,7 +1159,10 @@ export class Runner {
   // written on the reply after the card is already on screen — so asking never waits on TypeSafe.
   // A failure, or no pick at all, leaves the card exactly as it was: a suggestion is a nice-to-have.
   private async recommend(msg: Message, questions: Decision[], settings: Settings): Promise<void> {
-    if (!settings.jevRecommend || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
+    // A next-steps card is answered by its own toggles: a pick there would be a second answer to the
+    // same list, and a disagreeing one. Only questions are recommended on.
+    const askable = (q: Decision): boolean => !isNextSteps(q) && (q.options?.length ?? 0) >= 2
+    if (!settings.jevRecommend || !questions.some(askable)) return
     const key = await this.deps.jev?.key()
     if (!key) return
     try {
