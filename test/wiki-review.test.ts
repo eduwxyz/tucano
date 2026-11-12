@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Settings } from '../src/shared/types'
 import { Wiki } from '../src/core/wiki'
-import { lint, logSections, parseReview, WikiReviewer } from '../src/core/wiki-review'
+import { lint, logSections, namesIn, parseReview, WikiReviewer } from '../src/core/wiki-review'
 
 function wiki(): Wiki {
   const root = mkdtempSync(join(tmpdir(), 'tucano-wiki-'))
@@ -27,6 +27,56 @@ describe('a review of the wiki', () => {
     expect(found.filter((f) => f.kind === 'orphan').map((f) => [...f.pages].sort())).toEqual([['Valor do m² de projeto', 'Viagem a Morretes']])
     // the owner's own name isn't a missing page
     expect(found.some((f) => f.name?.includes('Ana'))).toBe(false)
+  })
+
+  it('a sentence that starts with a date is not a name, and a real name still is', () => {
+    const root = mkdtempSync(join(tmpdir(), 'tucano-wiki-'))
+    const w = new Wiki({ dir: join(root, 'wiki'), indexPath: join(root, 'wiki.db') })
+    w.init(false)
+    const save = (title: string, body: string): void => void w.save({ title, body, kind: 'Projeto', by: 'me', byName: 'Ana' })
+    save('Reforma do apto 302', 'On Nov 10 Apo decided the Farm prep was rebuilt, with the Construtora Alpha e a Rosa Argentis. The Foundry runs the campaign.')
+    save('Orçamento da obra', 'On Nov 10 Apo decided the Farm prep was rebuilt. A Construtora Alpha mandou o orçamento, com a Rosa Argentis. The Foundry hosts it.')
+    save('Diário de obra', 'On Nov 10 Apo decided the Farm prep was rebuilt. A Rosa Argentis acompanha a obra da Construtora Alpha. The Foundry is the source.')
+    save('Campanha de verão', 'Campanha Fev 2026 começa agora.')
+    save('Campanha de inverno', 'Campanha Fev 2026 tem três lojas.')
+    save('Campanha de outono', 'Campanha Fev 2026 fecha em dezembro.')
+    const names = lint(w, 'Apo')
+      .filter((f) => f.kind === 'missing')
+      .map((f) => f.name)
+      .sort()
+    // the real names stay; the date that opens a sentence, the function word and the month don't
+    expect(names).toEqual(['Construtora Alpha', 'Rosa Argentis'])
+    expect(names).not.toContain('On Nov')
+    expect(names).not.toContain('The Foundry')
+    expect(names).not.toContain('Campanha Fev')
+  })
+
+  it('drops a candidate that opens with a function word or carries a month, and keeps the rest', () => {
+    // the pair a sentence opens with is a date, not a name, in either language
+    expect([...namesIn('On Nov 10 Apo decided the Farm prep was rebuilt.')]).toEqual([])
+    expect([...namesIn('Em Dez 2026 a obra fecha.')]).toEqual([])
+    expect([...namesIn('The Foundry runs on 30005.')]).toEqual([])
+    expect([...namesIn('Whether Steward gets the receipt is still open.')]).toEqual([])
+    // a month anywhere in the pair drops it too ("Campanha Fev"), in English and Portuguese
+    expect([...namesIn('Campanha Fev 2026 começa. A Campanha March fecha.')]).toEqual([])
+    // real names next to them stay
+    expect([...namesIn('A Construtora Alpha e a Rosa Argentis fecharam com a Celaena Sardothien.')]).toEqual(['Construtora Alpha', 'Rosa Argentis', 'Celaena Sardothien'])
+  })
+
+  it('a dismissed finding the review no longer finds stops being carried', async () => {
+    const w = wiki()
+    const r = new WikiReviewer({ wiki: w, settings: () => ({ workspaceName: 'Ana Ribeiro' }) as Settings, llm: async () => JSON.stringify({ achados: [] }) })
+    await r.review()
+    w.dismissFinding(r.status().findings.find((f) => f.kind === 'missing')!.id)
+    expect(r.status().findings.some((f) => f.kind === 'missing')).toBe(false)
+    // the page gets written: the review no longer finds that name, so the silence goes with it
+    w.save({ title: 'Construtora Alpha', body: 'Do [[Marcos Lima]].', kind: 'Empresa', by: 'me', byName: 'Ana' })
+    await r.review()
+    expect(r.status().findings.some((f) => f.kind === 'missing')).toBe(false)
+    // taken away again, the name is a finding again: the dismissal didn't outlive the problem
+    w.remove('Construtora Alpha', 'me', 'Ana')
+    await r.review()
+    expect(r.status().findings.find((f) => f.kind === 'missing')).toMatchObject({ name: 'Construtora Alpha' })
   })
 
   it("keeps the model's findings whose fix fits the pages", () => {
