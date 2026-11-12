@@ -43,12 +43,46 @@ export interface Carried {
   at: number
 }
 
-// "team-up-tinker-auditor": the agents it was opened for, in a name that reads in the sidebar. `taken`
-// says which channel names already exist, so two team-ups never collide.
-export function teamUpName(guests: { handle: string }[], taken: (name: string) => boolean = () => false): string {
-  const base = channelName(`team-up ${guests.map((g) => g.handle).join(' ')}`) || 'team-up'
+// How much of a channel name the sidebar shows whole. Measured in the built app on this box: the
+// sidebar is 248 px, a channel row leaves its name 179 px, and 143.9 px once the row carries an
+// unread badge — which is what a channel has the moment it opens. In the sidebar's own font
+// (Inter Variable, 14 px, weight 500) that is 27 characters of an ordinary lowercase slug, 22 with
+// the badge. Past that the sidebar cuts the name with an ellipsis, so 22 is what keeps it whole in
+// the state it is born in.
+export const TEAM_UP_NAME_MAX = 22
+
+// The name an agent chose for its team-up, made into a channel name that fits: lower case, no
+// accents, one word per hyphen, and cut back to a whole word instead of in the middle of one.
+// Cut to `max`, on a word boundary when there is one late enough to be a name rather than a stub:
+// "audit-of-the-retry-path" loses "path", not "pat".
+function cutTo(slug: string, max: number): string {
+  if (slug.length <= max) return slug
+  const cut = slug.slice(0, max)
+  const brk = Math.max(cut.lastIndexOf('-'), cut.lastIndexOf('_'))
+  const whole = brk >= 4 ? cut.slice(0, brk) : cut
+  return whole.replace(/^[-_]+|[-_]+$/g, '')
+}
+
+export function fitTeamUpName(wanted: string, max: number = TEAM_UP_NAME_MAX): string {
+  return cutTo(channelName(wanted).replace(/^[-_]+|[-_]+$/g, ''), max)
+}
+
+// The channel's name: the one the agent gave it when it called the team (that is the whole point —
+// "audit-do-retry" says what the work is, "team-up-auditor-tinker" says who was in it), and the
+// fallback from the handles when it gave none. `taken` says which channel names already exist, so two
+// team-ups never collide; a suffix still has to fit the sidebar.
+export function teamUpName(guests: { handle: string }[], taken: (name: string) => boolean = () => false, wanted?: string): string {
+  const chosen = wanted ? fitTeamUpName(wanted) : ''
+  const fallback = channelName(`team-up ${guests.map((g) => g.handle).join(' ')}`) || 'team-up'
+  const base = chosen || fallback
   if (!taken(base)) return base
-  for (let n = 2; n < 100; n++) if (!taken(`${base}-${n}`)) return `${base}-${n}`
+  for (let n = 2; n < 100; n++) {
+    const tail = `-${n}`
+    // A name the agent chose stays inside what the sidebar shows even with the suffix: the tail eats
+    // into it, and a whole word goes before half of one does.
+    const room = chosen ? cutTo(base, Math.max(1, TEAM_UP_NAME_MAX - tail.length)) || base.slice(0, 1) : base
+    if (!taken(`${room}${tail}`)) return `${room}${tail}`
+  }
   return `${base}-${Date.now()}`
 }
 

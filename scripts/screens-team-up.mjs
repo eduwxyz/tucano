@@ -216,6 +216,106 @@ if (await card.count()) {
   await win.waitForTimeout(500)
 }
 
+// ---------- 7. the name the agent gives the channel ----------
+// The whole point of the naming: the room is called what the work is, not after the handles. Driven
+// through the core with the fake engine, so the channel is made the way an agent makes it.
+await win.keyboard.press('Escape')
+await win.waitForTimeout(400)
+const room = win.locator('.sidebar .nav-item').filter({ hasText: seeded.dados }).first()
+await room.click()
+await win.waitForSelector('.composer textarea')
+await win.waitForTimeout(500)
+const send = async (text) => {
+  await win.locator('.composer textarea').first().fill(text)
+  await win.locator('.composer textarea').first().press('Enter')
+}
+const waitRow = async (name, ms = 25_000) => {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    if (await win.locator(`.sidebar .nav-item:has-text("${name}")`).count()) return true
+    await win.waitForTimeout(250)
+  }
+  return false
+}
+// What the sidebar gives a name, in its own font: the number the cap comes from.
+const roomFor = async (withBadge) =>
+  win.evaluate((badge) => {
+    // The channel row itself, by its name: an agent's DM row carries its role and is narrower.
+    const row = [...document.querySelectorAll('.sidebar .nav-item')].find((r) => /^(data|dados)$/.test((r.querySelector('.nav-item__label') || {}).innerText || ''))
+    const label = row.querySelector('.nav-item__label')
+    const before = label.getBoundingClientRect().width
+    let withB = before
+    let badgeW = 0
+    if (badge) {
+      const b = document.createElement('span')
+      b.className = 'badge'
+      b.textContent = '99'
+      row.appendChild(b)
+      withB = label.getBoundingClientRect().width
+      badgeW = b.getBoundingClientRect().width
+      b.remove()
+    }
+    const cs = getComputedStyle(label)
+    const c = document.createElement('canvas').getContext('2d')
+    c.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+    const fit = (room, unit) => {
+      let n = 1
+      let str = ''
+      while (n < 60) {
+        str = unit.repeat(Math.ceil((n + 1) / unit.length)).slice(0, n + 1)
+        if (c.measureText(str).width > room) break
+        n++
+      }
+      return n
+    }
+    return {
+      sidebar: Math.round(document.querySelector('.sidebar').getBoundingClientRect().width),
+      font: `${cs.fontSize} ${cs.fontWeight} ${cs.fontFamily.split(',')[0]}`,
+      room: Math.round(before * 10) / 10,
+      roomWithBadge: Math.round(withB * 10) / 10,
+      badge: Math.round(badgeW * 10) / 10,
+      chars: fit(before, 'audit-retry'),
+      charsWithBadge: fit(withB, 'audit-retry')
+    }
+  }, withBadge)
+
+report('the sidebar gives a name', JSON.stringify(await roomFor(true)))
+await send('chame @nina num time chamado auditar-retry')
+report('the channel the agent named', await waitRow('auditar-retry'))
+await win.waitForTimeout(600)
+const named = await win.evaluate(() => {
+  const row = [...document.querySelectorAll('.sidebar .nav-item')].find((r) => r.innerText.includes('auditar-retry'))
+  if (!row) return null
+  const label = row.querySelector('.nav-item__label')
+  return { label: label.innerText, cut: label.scrollWidth > label.clientWidth + 0.5, width: Math.round(label.getBoundingClientRect().width), chars: label.innerText.length }
+})
+report('its row in the sidebar', JSON.stringify(named))
+const how = await win.locator('.msg').last().innerText().catch(() => '')
+report('the reply that opened it', how.split(String.fromCharCode(10)).filter(Boolean).join(' / ').slice(0, 220))
+await shot('07-the-name-it-chose')
+
+// And a name longer than the sidebar shows: cut between words, never in the middle of one.
+await send('chame @lia num time chamado audit-of-the-retry-path-end-to-end')
+report('the long name, cut to fit', await waitRow('audit-of-the-retry'))
+await win.waitForTimeout(600)
+const long = await win.evaluate(() => {
+  const row = [...document.querySelectorAll('.sidebar .nav-item')].find((r) => r.innerText.includes('audit-of-the-retry'))
+  if (!row) return null
+  const label = row.querySelector('.nav-item__label')
+  return { label: label.innerText, cut: label.scrollWidth > label.clientWidth + 0.5, width: Math.round(label.getBoundingClientRect().width), chars: label.innerText.length }
+})
+report('the long one, as it reads', JSON.stringify(long))
+await shot('08-long-name-cut')
+
+// Both rooms, side by side with the old style, in the sidebar at once.
+const rows = await win.evaluate(() =>
+  [...document.querySelectorAll('.sidebar .nav-item')]
+    .map((r) => r.querySelector('.nav-item__label')?.innerText ?? '')
+    .filter((t) => /team-up|auditar|audit-of/.test(t))
+)
+report('names in the sidebar', JSON.stringify(rows))
+await shot('09-names-in-the-sidebar')
+
 report('page errors', errors.length ? errors.join(' ;; ') : 'none')
 await app.close()
 console.log(`\nframes in ${out}`)

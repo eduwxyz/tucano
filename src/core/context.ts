@@ -121,16 +121,16 @@ export function systemPrompt(opts: PromptOpts): string {
       replyLanguage(me),
       peers.length > 0 &&
         L(
-          '- Se outro agente do canal for mais indicado pra uma parte, mencione-o com @handle na sua resposta: ele responde em seguida. Mencione também um agente que não está aqui, se ele for o certo pra isso: a conversa vira um canal de equipe que leva o que já foi feito aqui. Só mencione quando precisar mesmo: pra falar de alguém sem chamar (num resumo, por exemplo), escreva só o nome, sem @.',
-          '- If another agent in the channel is better suited for a part, mention them with @handle in your reply: they answer next. Mention an agent who is not here too, if that one is right for it: the conversation becomes a team-up channel that carries what was already done here. Only mention when you really need to: to talk about someone without calling them in (in a summary, say), write just the name, without @.'
+          '- Se outro agente do canal for mais indicado pra uma parte, mencione-o com @handle na sua resposta: ele responde em seguida. Pra um agente que não está aqui, use chamar_time com o handle e um nome curto pro canal: vira um time-up, um canal de equipe que leva o que já foi feito aqui, e esse nome é o que a pessoa lê na barra lateral, então nomeie o trabalho ("auditar-retry"), não os agentes. Só chame quando precisar mesmo: pra falar de alguém sem chamar (num resumo, por exemplo), escreva só o nome, sem @.',
+          '- If another agent in the channel is better suited for a part, mention them with @handle in your reply: they answer next. For an agent who is not here, use chamar_time with their handle and a short name for the channel: it becomes a team-up carrying what was already done here, and the name is what the person reads in the sidebar, so name the work ("retry-audit"), not the agents. Only call one when you really need to: to talk about someone without calling them in (in a summary, say), write just the name, without @.'
         ),
       // A DM has no other agent in it, so nothing above told it the team exists: the tool is the only way
       // it knows who could be called, and this line is what tells it to look.
       peers.length === 0 &&
         roster &&
         L(
-          '- Numa DM você está sozinho com a pessoa. Se o trabalho precisar de outro agente (um caro, pra uma auditoria ou um plano, por exemplo), chame-o escrevendo @handle na sua resposta: a conversa vira um canal de equipe que leva o que já foi feito aqui, e ele trabalha lá com você. A ferramenta equipe lista o time e os handles. Só chame quando precisar mesmo.',
-          '- In a DM you are alone with the person. If the work needs another agent (an expensive one, for an audit or a plan, say), call it by writing @handle in your reply: the conversation becomes a team-up channel that carries what was already done here, and it works there with you. The equipe tool lists the team and its handles. Only call one when you really need to.'
+          '- Numa DM você está sozinho com a pessoa. Se o trabalho precisar de outro agente (um caro, pra uma auditoria ou um plano, por exemplo), chame-o com chamar_time: abre um time-up que leva o que já foi feito aqui, e ele trabalha lá com você. Dê a esse canal um nome curto do que é o trabalho ("auditar-retry", não os nomes dos agentes): é o que a pessoa lê na barra lateral. A ferramenta equipe lista o time e os handles. Só chame quando precisar mesmo.',
+          '- In a DM you are alone with the person. If the work needs another agent (an expensive one, for an audit or a plan, say), call it with chamar_time: a team-up channel opens carrying what was already done here, and it works there with you. Give that channel a short name saying what the work is about ("retry-audit", not the names of the agents): that is what the person reads in the sidebar. The equipe tool lists the team and its handles. Only call one when you really need to.'
         ),
       L(
         `- Se precisar de uma informação de ${me} pra continuar, use a ferramenta ask_user com uma pergunta curta e encerre a resposta. A resposta chega na próxima mensagem.`,

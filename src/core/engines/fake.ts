@@ -155,6 +155,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         // The team an agent looks at: a DM's prompt names only itself, so the tool is how it finds the rest.
         const r = await callTool(turn.mcpUrl, 'equipe', {})
         reply = textOf(r)
+      } else if (turn.mcpUrl && /chame (.+?) num time(?: chamado ([\w-]+))?/i.test(last)) {
+        // A team-up asked for by tool, with the name the agent chose for the channel.
+        const m = /chame (.+?) num time(?: chamado ([\w-]+))?/i.exec(last)!
+        const quem = m[1]!.match(/@[\w-]+/g) ?? []
+        const r = await callTool(turn.mcpUrl, 'chamar_time', { quem, ...(m[2] ? { nome: m[2] } : {}) })
+        reply = textOf(r)
       } else if (turn.mcpUrl && /lembr[ae] que (.+)/i.test(last)) {
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
