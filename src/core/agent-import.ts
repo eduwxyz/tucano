@@ -54,7 +54,6 @@ export interface ForeignTeam {
 
 const MAX_MANIFEST = 20_000_000
 const MAX_TEXT = 1_000_000
-const MAX_INSTRUCTIONS_FILE = 20_000_000
 const MAX_PICTURE_BYTES = 145_000 // as a data URL it stays under cleanLook's cap
 const MAX_MEMORY = 300
 // What one file brings at most; the rest is counted in the summary.
@@ -183,7 +182,7 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
   // The standing rules live in the workspace's AGENTS.md (or CLAUDE.md), only there when the export took the files.
   const files = inside(a['files'], prefix)
   const fromFile = files
-    ? attempt(() => ['AGENTS.md', 'CLAUDE.md'].map((f) => zip.read(`${files}/${f}`, MAX_INSTRUCTIONS_FILE)).find(Boolean)?.toString('utf8') ?? '', '', L('o AGENTS.md (não deu pra ler)', "AGENTS.md (it couldn't be read)"), notes)
+    ? attempt(() => ['AGENTS.md', 'CLAUDE.md'].map((f) => zip.read(`${files}/${f}`, MAX_TEXT)).find(Boolean)?.toString('utf8') ?? '', '', L('o AGENTS.md (não deu pra ler)', "AGENTS.md (it couldn't be read)"), notes)
     : ''
   const description = typeof a['description'] === 'string' ? a['description'] : ''
   const instructions = fromFile || description

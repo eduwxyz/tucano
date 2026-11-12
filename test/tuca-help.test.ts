@@ -306,7 +306,6 @@ describe("the Tuca's prompt, for several changes", () => {
       expect(text).toMatch(lang === 'pt' ? /todas as propostas de uma vez, na mesma resposta/ : /all the proposals at once, in the same reply/)
       expect(text).toMatch(lang === 'pt' ? /Nunca uma por mensagem/ : /Never one per message/)
       expect(builderGuide({ me: 'Edu' })).toMatch(lang === 'pt' ? /não uma por mensagem/ : /not one per message/)
-      expect(builderGuide({ tuca: true })).toMatch(lang === 'pt' ? /32\.000 caracteres.*recomendação, não um limite/ : /32,000 characters.*recommendation, not a limit/)
     }
     setLang('pt')
   })

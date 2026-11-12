@@ -275,8 +275,8 @@ describe('importing agents from Grok Bot, through our skill', () => {
     expect(readForeignZip(zipFromBuffer(zip(source))).agents[0]?.instructions).toBe(instructions)
   })
 
-  it('imports OpenBot instructions over one megabyte whole', () => {
-    const instructions = ` ${'x'.repeat(1_000_001)} END\n`
+  it('imports OpenBot instructions over the recommendation whole', () => {
+    const instructions = ` ${'x'.repeat(40_000)} END\n`
     const source = files()
     source['agents/lia/workspace/AGENTS.md'] = instructions
     source['openbot-transfer.json'] = transfer([{ ...lia, description: 'Fallback description', files: 'agents/lia/workspace' }])
