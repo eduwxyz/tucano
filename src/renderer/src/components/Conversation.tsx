@@ -91,6 +91,7 @@ import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
+import { ChangesCard, Counts } from './Changes'
 import { when } from './Routines'
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
@@ -536,6 +537,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {message.run?.delegation && message.conversationId !== message.run.delegation.conversationId && <DelegationChip at={message.run.delegation} />}
         {message.run?.delegation && message.id === message.run.delegation.rootId && <RequestNote at={message.run.delegation} from={agent?.name} />}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
+        {message.run?.changes?.map((set) => <ChangesCard key={set.id} set={set} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">
             {message.run.artifactIds.map((aid) => (
@@ -1349,6 +1351,7 @@ function StepRow({ step }: { step: Step }): ReactNode {
       </span>
       <span className="step__label">{step.label}</span>
       {step.note ? <span className="step__note">{step.note}</span> : step.detail && <code className="step__detail">{step.detail}</code>}
+      {step.change && <Counts added={step.change.added} removed={step.change.removed} />}
       {step.ms !== undefined && <span className="step__ms">{duration(step.ms)}</span>}
       {step.input && (
         // What it asked (the SQL, the path): two lines, the whole of it on a click.

@@ -68,6 +68,7 @@ import { Browser, type BrowserHost } from './browser'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
+import { Changes } from './changes'
 import { Memories } from './memory'
 import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
@@ -795,6 +796,7 @@ gateway.route('/oauth/callback', oauthCallback)
 const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 
 const computers = new Computers({ db, dataDir, emit, shoot })
+const changes = new Changes({ saveChangeSet: (c) => db.saveChangeSet(c), changeSet: (id) => db.changeSet(id), log: (line) => console.log(line) })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
@@ -949,6 +951,7 @@ const runner = new Runner({
   connectors,
   memory,
   computers,
+  changes,
   browser,
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
@@ -1416,6 +1419,21 @@ const api: Handlers = {
     // Past the heritage, to a member, there's nothing more to read.
     return { messages, since: messages.length < page.messages.length ? 0 : page.since }
   },
+  // What a reply changed in a repository: the files past the first ones its message carries, and
+  // one file's diff, read from the repository when it's opened.
+  changeFiles: ({ id, offset }, ctx) => {
+    const set = db.changeSet(id)
+    if (!set) return []
+    reachMessage(ctx, set.messageId)
+    return changes.files(id, offset) ?? []
+  },
+  changeDiff: async ({ id, path }, ctx) => {
+    const set = db.changeSet(id)
+    if (!set) return { error: 'gone' as const }
+    reachMessage(ctx, set.messageId)
+    return changes.diff(id, path)
+  },
+
   threadMessages: ({ rootId }, ctx) => {
     const root = db.message(rootId)
     if (!root) return []

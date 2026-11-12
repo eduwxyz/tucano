@@ -11795,3 +11795,241 @@ button.agent-card__now:hover {
 .orgb:has(.org-undo) .org-hint {
   visibility: hidden;
 }
+
+/* ---------- what a reply changed in the code (Changes.tsx) ---------- */
+.counts {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.counts__add {
+  color: var(--ok);
+}
+.counts__del {
+  color: var(--danger);
+}
+.step .counts {
+  margin-left: 8px;
+}
+.changes {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+  max-width: 100%;
+}
+.changes__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--hover);
+  color: var(--text-2);
+  font-size: 13px;
+}
+.changes__title {
+  font-weight: 600;
+  color: var(--text);
+}
+.changes__where {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.changes__repo,
+.changes__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  max-width: 45%;
+  white-space: nowrap;
+}
+.changes__repo {
+  color: var(--text);
+  font-weight: 600;
+}
+.changes__branch {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.changes__branch-name,
+.changes__branch-from {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.changes__branch-from {
+  opacity: 0.75;
+}
+.changes__root {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: 12px;
+  direction: rtl; /* a long path keeps its end, the repository, in view */
+  text-align: left;
+}
+.changes__layout {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.changes__layout-btn {
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.changes__layout-btn + .changes__layout-btn {
+  border-left: 1px solid var(--border);
+}
+.changes__layout-btn.is-on {
+  background: var(--active);
+  color: var(--text);
+}
+.changes__files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.changes__item + .changes__item {
+  border-top: 1px solid var(--border);
+}
+.changes__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.changes__file:hover {
+  background: var(--hover);
+}
+.changes__item.is-open .changes__file {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.changes__chev {
+  display: inline-flex;
+  color: var(--text-3);
+  transition: transform 0.12s;
+}
+.changes__item.is-open .changes__chev {
+  transform: rotate(90deg);
+}
+.changes__kind {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+.changes__kind--added {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.changes__kind--modified {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.changes__kind--deleted {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.changes__kind--renamed {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.changes__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.changes__from {
+  color: var(--text-3);
+}
+.changes__binary {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.changes__diff {
+  font-size: 12px;
+}
+/* The diff's own scroller: a big one draws only the rows in view of it (DiffView.tsx). */
+.diffscroll {
+  max-height: 560px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.diffview {
+  --diffs-font-family: var(--mono);
+  --diffs-font-size: 12px;
+}
+.changes__note {
+  padding: 10px 12px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.changes__note--error {
+  color: var(--danger);
+}
+.changes__more {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.changes__more:hover {
+  background: var(--hover);
+}
+.changes__more:disabled {
+  color: var(--text-3);
+  cursor: default;
+}

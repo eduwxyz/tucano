@@ -83,6 +83,8 @@ export const NEEDS: Record<Method, Need> = {
   markRead: 'anyone',
   snapshot: 'anyone',
   artifactText: 'anyone',
+  changeFiles: 'anyone',
+  changeDiff: 'anyone',
   sendMessage: 'anyone',
   typing: 'anyone',
   olderMessages: 'anyone',

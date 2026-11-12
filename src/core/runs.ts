@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
@@ -13,6 +13,7 @@ import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
+import { lineChange, type Changes, type ChangeScope } from './changes'
 import { extractFile } from './wiki-extract'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
@@ -87,6 +88,18 @@ const NARRATION_MAX = 600 // longer text before a tool call is an answer, and st
 const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
 const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
 const THOUGHT = (): string => L('Pensou', 'Thought') // the thinking step, closed
+
+// What a file held before write_file replaces it, for the step's count of lines; '' when it's new.
+// Only a file of the person's (where the snapshots look) and small enough to count.
+function priorText(scope: ChangeScope | undefined, path: unknown): string | undefined {
+  const host = scope && typeof path === 'string' ? scope.toHost(path) : undefined
+  if (!host) return undefined
+  try {
+    return statSync(host).size <= 2_000_000 ? readFileSync(host, 'utf8') : undefined
+  } catch {
+    return ''
+  }
+}
 
 // An image I attached to an earlier message: it went to the model as an image in the turn it was
 // sent; later turns only name it, and the agent looks again with this when it needs to.
@@ -238,7 +251,8 @@ export interface RunnerDeps {
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
-  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
+  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable' | 'changeScope'>> // without it, no agent has a computer
+  changes?: Pick<Changes, 'turn'> // without it, a reply doesn't show what it changed in the person's code
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
@@ -1153,6 +1167,9 @@ export class Runner {
     // why, so it says so in a sentence instead of spending a call on each tool to find out.
     const computerOff = computers ? await computers.unavailable?.(agent) : undefined
     if (computerOff) computers = undefined
+    // What this reply changes in the person's repositories: snapshots before its first command or write, and at its end.
+    const scope = computers?.changeScope?.(agent)
+    const changeTurn = scope && this.deps.changes ? this.deps.changes.turn(scope) : undefined
     let computerDown: string | undefined // found off in the middle of the turn: what the person has to do
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
     const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
@@ -1770,6 +1787,8 @@ ${note}`,
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
+          await changeTurn?.prepare(name, args)
+          const before = name === 'write_file' ? priorText(scope, args['path']) : undefined
           const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
           const failed = !!out.result.isError
           const end: Pick<Step, 'output' | 'error'> = command
@@ -1780,6 +1799,7 @@ ${note}`,
                 ? { output: resultSummary(resultText(out.result)) }
                 : {}
           if (end.error && end.error.length > STEP_ERROR_MAX) end.error = `${end.error.slice(0, STEP_ERROR_MAX)}…`
+          const change = failed ? undefined : name === 'write_file' ? lineChange(before ?? '', String(args['content'] ?? '')) : name === 'edit_file' ? lineChange(String(args['old_text'] ?? ''), String(args['new_text'] ?? '')) : undefined
           // No tool of the computer can work: the turn ends here, before the model tries the next one.
           if (out.down) {
             computerDown = out.down
@@ -1791,7 +1811,7 @@ ${note}`,
             ...msg.run!,
             artifactIds: artifactIds.length ? [...artifactIds] : undefined,
             services: services.length ? [...services] : undefined,
-            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...end, status: failed ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
+            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...end, ...(change ? { change } : {}), status: failed ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
           }
           stepStarted = Date.now()
           save()
@@ -2341,6 +2361,7 @@ ${note}`,
       this.controllers.delete(msg.id)
     }
 
+    const changes = changeTurn ? await changeTurn.finish(msg.id, agent.id).catch(() => []) : []
     const endedAt = Date.now()
     const ms = endedAt - started
     const receipt: Receipt | undefined = result
@@ -2372,7 +2393,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, ...(changes.length ? { changes } : {}), question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {

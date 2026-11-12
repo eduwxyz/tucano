@@ -10,6 +10,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   markRead: { conversationId: 's' },
   snapshot: {},
   artifactText: { id: 's' },
+  changeFiles: { id: 's', offset: 'n' },
+  changeDiff: { id: 's', path: 's' },
   sendMessage: { conversationId: 's', text: 's', images: 'a?', files: 'a?', threadId: 's?' },
   typing: { conversationId: 's', threadId: 's?', opened: 'b?' },
   olderMessages: { conversationId: 's', before: 'n', through: 's?' },

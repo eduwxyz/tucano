@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
 import { dirname, join } from 'node:path'
+import type { ChangeSetRow } from './changes'
 import {
   CACHE_READ_WEIGHT,
   nextRun,
@@ -14,6 +15,7 @@ import {
   type Approval,
   type ApprovalState,
   type Artifact,
+  type FileChange,
   type ArtifactKind,
   type Author,
   type Connector,
@@ -527,6 +529,22 @@ export const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS delegations_by_root ON delegations (root_id);
   CREATE INDEX IF NOT EXISTS delegations_open ON delegations (state) WHERE state = 'open';
+  `,
+  // What a reply changed in a repository of the person's (src/core/changes.ts): its two snapshots,
+  // kept in that repository, and every file it touched, for the diff opened from the chat.
+  `
+  CREATE TABLE IF NOT EXISTS changesets (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    shown TEXT NOT NULL,
+    before TEXT NOT NULL,
+    after TEXT NOT NULL,
+    files TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS changesets_by_message ON changesets (message_id);
   `
 ]
 
@@ -1554,6 +1572,26 @@ export class Db {
     this.db
       .prepare('INSERT INTO artifacts (id, agent_id, conversation_id, message_id, kind, name, title, source, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(a.id, a.agentId, a.conversationId, a.messageId, a.kind, a.name, a.title, a.source, a.size, a.createdAt)
+  }
+
+  // ---------- changesets (what a reply changed in the person's code) ----------
+
+  saveChangeSet(c: ChangeSetRow): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO changesets (id, message_id, agent_id, root, shown, before, after, files, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(c.id, c.messageId, c.agentId, c.root, c.shown, c.before, c.after, JSON.stringify(c.files), c.createdAt)
+  }
+
+  changeSet(id: string): ChangeSetRow | undefined {
+    const r = this.db.prepare('SELECT * FROM changesets WHERE id = ?').get(id) as Row | undefined
+    if (!r) return undefined
+    let files: FileChange[] = []
+    try {
+      files = JSON.parse(str(r['files'])) as FileChange[]
+    } catch {
+      // kept by hand or cut: no files to show
+    }
+    return { id: str(r['id']), messageId: str(r['message_id']), agentId: str(r['agent_id']), root: str(r['root']), shown: str(r['shown']), before: str(r['before']), after: str(r['after']), files, createdAt: Number(r['created_at']) }
   }
 
   // ---------- services (what runs on an agent's computer) ----------
