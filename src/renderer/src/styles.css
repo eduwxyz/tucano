@@ -1336,11 +1336,15 @@ h3 {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+/* A notice sits in the column the messages above the field sit in: its text starts where their
+   bodies start, its time ends where they end, instead of running to the window's two edges. */
 .system-line {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 24px 6px 70px;
+  padding: 6px 28px 6px 74px;
+  max-width: 860px;
+  margin: 0 auto;
   color: var(--text-2);
   font-size: 12.5px;
 }

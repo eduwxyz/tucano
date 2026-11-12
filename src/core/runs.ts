@@ -3224,7 +3224,7 @@ ${note}`,
     }
     db.saveMessage(handoff)
     emit({ type: 'message', message: handoff })
-    this.post(conv.id, msg.threadId, L(`${agent.name} chamou ${names} em #${team.name}, com o que já foi feito aqui.`, `${agent.name} called ${names} into #${team.name}, with what was already done here.`))
+    this.post(conv.id, msg.threadId, L(`${agent.name} chamou ${names} em #${team.name}.`, `${agent.name} called ${names} into #${team.name}.`))
     // Only the ones just called work now: the rest are there to be read and called again.
     const task = teamUpTask({ by: agent.name, source, channel: team.name, said })
     for (const g of guests) {
