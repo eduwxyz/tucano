@@ -4,6 +4,42 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Your Codex subscription's limits on Usage and limits.** The page showed the Claude subscription's 5-hour and weekly windows, and said Codex doesn't report its own. Codex's app-server does (`account/rateLimits/read`): when Codex is signed in with a ChatGPT plan, the page now asks it, at most once a minute, while it's open and after each reply, and shows each window the plan has (Plus has only the week) with how much is used and when it resets, plus the plan's name.
+
+- **Duplicate a routine.** A routine's card has a copy button next to Edit: it opens the form with the same agent, place, schedule and instructions, named "(copy)", to change what differs and save as a new routine of your own. The copy starts off, so it doesn't run next to the original until you turn it on, and a webhook routine's copy gets its own address. Thanks, jonatas-caram-ifood! (#362)
+
+- **Keenable in the connector store.** Web search and pages read as Markdown, from [Keenable](https://docs.keenable.ai/mcp-server)'s official server, in Research next to Exa. It needs no account or key, so one click connects it; the searches and the pages an agent asks for go to Keenable. Thanks, ilya-bogin-keenable! (#291)
+
+### Fixed
+
+- **The wiki map holds together as the wiki grows.** The map settles its pages by a little physics: pages push each other away, links pull. The pull of a link grows with how far its pages are, with no ceiling, and two pages that come too close keep swinging through each other — so past a hundred pages or so the forces fed on themselves, positions ran past any number and turned into NaN, and the SVG drew every page on the same spot: the map came up empty with one page stuck in the corner, no matter how many pages and links it said it had. A step of the physics now caps how fast a page may move, and a wiki of any size settles spread out. (A wiki of 358 pages was the one that showed it; the same change tested from 10 to 358 pages.) Thanks, brunolellis! (#357)
+
+- **A monthly limit of 0 reads as no limit on every screen.** The runner already treated 0 as no ceiling, but the screens didn't: every agent without a limit had a red *Hit the monthly limit* dot in the sidebar, a reply stopped at the limit offered to raise a limit that doesn't exist instead of *Try again*, the agent page said "of 0 tokens", and the Tuca's change card and workspace summary printed 0 and 0%. They now say there is no monthly limit, and the dots and *Raise the limit* only come for an agent with a real one. Thanks, apoapostolov! (#351)
+
+- **Long agent instructions are kept whole.** An agent's instructions were cut without a word when the Tuca proposed a new agent (at 4,000 characters), proposed a change to one (at 8,000, so proposing any change could shorten a long prompt that was already there), or when a team was imported (at 32,000). They now come through whole, and a prompt over 32,000 characters gets a warning instead. Thanks, GianCdM! (#364)
+
+- **An agent answers one message at a time in a conversation or thread, whatever started it.** Only routed messages and hand-offs waited for the agent's reply in progress in the same place; an @mention, a DM, a routine, a retry or an approval's outcome started a second reply next to it, so the same agent could answer twice at once and the two replies stepped on each other. Every reply now waits its turn in that place. Thanks, eialanjones! (#358)
+
+- **An agent that only reads through Composio can link an account.** The first time an agent needs an app on Composio (Google Calendar, Gmail…), it calls `COMPOSIO_MANAGE_CONNECTIONS` for the sign-in link. That tool is sensitive, so an agent with read access never saw it: it found the app's actions, then failed because no account was linked, though reading was all it wanted. A read grant now sees that tool too, and every call to it asks for approval, at every level and whatever the rules; read-and-write is unchanged.
+
+- **Tucano in a browser opens where you left it.** On a phone, putting the tab away and coming back reloads the page, and it always opened on the first channel. Now the screen you're on rides in the page's address (`#/c/<conversation>`, `#/settings`, `#/wiki/page/<title>`…), so a reload, a bookmark or a pasted link opens that screen; a conversation or agent that's gone falls back to the first channel. The desktop app is unchanged.
+
+- **On Linux, an agent given Chrome in Apps can read and use it.** Chrome only joins the accessibility bus when started with `ACCESSIBILITY_ENABLED=1` (GNOME keeps `org.a11y.Status IsEnabled` off without a screen reader), so its window was invisible; Chromium apps are now started with it. A launcher script under another name (Arch's `google-chrome-stable` starts `chrome`) is followed to the program it runs, so the app is found and an open one is brought forward instead of opened again. The agents' own headless Chrome, which sits on the bus under the same name, is left out, so reads, keys and focus go to the person's window.
+
+- **Big web pages in Apps read whole on Linux.** A snapshot gets 15 seconds instead of agent-desktop's 3, so a page with a thousand elements is read before its elements are judged unique; a list longer than one screen has pages (`pagina`) with the same numbers; an area is numbered after the list it came from, which stays good; and an area that repeats in the window (a table row) is read from the last whole read instead of failing.
+
+- **Keys on Wayland say what to do.** No program can bring a window forward there: a key now goes only when the app's window is in front, and otherwise the agent is told to ask the person to click it.
+
+- **The keyboard stays down when you open a conversation on a phone.** Opening a conversation or a thread, attaching a file or dictating put the focus in the message field, and on a touch screen that raised the keyboard over the messages you came to read. On a phone or tablet the field now takes the focus only when you tap it. On a computer it still does, as before.
+
+### Changed
+
+- **A message in a channel that answers in threads opens its thread.** There, each message you write in the channel starts a thread of its own, where the answers go, and you had to find its link under the message to follow them. Now the thread opens on the side as soon as your message is sent (full screen on a phone). A reply written in a thread, a channel that answers in the conversation, or a message from another of your devices leaves the panel as it was. Thanks, b7s! (#347)
+
+- **Your own memories are named "You" on the Memory page.** The tab read "About you" ("Sobre você"), which wrapped to two lines once a few agents had notes of their own and the tab strip got crowded. It now reads "You" ("Você"), and so does the heading inside it. Only the name changed: the memories and where they're kept are the same. Thanks, apoapostolov! (#296)
+
 ## [0.2.27] - 2026-11-10
 
 > **Em português:**

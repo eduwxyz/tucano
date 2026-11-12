@@ -63,7 +63,7 @@ const { Dialogs } = await import('../src/renderer/src/components/Dialogs')
 const { askBody, askTitle } = await import('../src/renderer/src/components/Coach')
 
 const off = (): EngineStatus => ({ installed: false, loggedIn: false })
-const engines = (p: Partial<Record<EngineId, EngineStatus>> = {}): Settings['engines'] => ({ claude: off(), codex: off(), opencode: off(), pi: off(), antigravity: off(), cursor: off(), grok: off(), cline: off(), ...p })
+const engines = (p: Partial<Record<EngineId, EngineStatus>> = {}): Settings['engines'] => ({ claude: off(), codex: off(), opencode: off(), pi: off(), antigravity: off(), cursor: off(), grok: off(), cline: off(), hermes: off(), ...p })
 
 let root: Root
 const base = (await vi.importActual<typeof import('../src/renderer/src/store')>('../src/renderer/src/store')).getState()
