@@ -156,8 +156,9 @@ export function launcherDirs(program: string, fs: { real: (p: string) => string;
   const script = fs.script(real)
   // A script's own folder is just where launchers sit: the program it starts is elsewhere.
   const dirs = script === undefined ? [dirname(real)] : [...script.matchAll(/(?:^|[\s"'=])(\/(?:opt|usr|snap|var\/lib\/flatpak)\/[^\s"'$;]+)/gm)].map((m) => dirname(m[1]!))
-  // Folders every program shares say nothing about which one it is (gnome-shell is in /usr/bin too).
-  return [...new Set(dirs)].filter((d) => !SHARED_BIN.has(d))
+  // Folders every program shares say nothing about which one it is (gnome-shell is in /usr/bin too),
+  // nor do the shared library folders a script may name (/usr/lib/x86_64-linux-gnu/libfoo.so).
+  return [...new Set(dirs)].filter((d) => !SHARED_BIN.has(d) && !/^\/usr\/(lib(32|64|exec)?|share)(\/[^/]+-linux-gnu[^/]*)?$/.test(d))
 }
 const SHARED_BIN = new Set(['/bin', '/sbin', '/usr/bin', '/usr/sbin', '/usr/local/bin', '/usr/local/sbin'])
 const smallScript = (p: string): string | undefined => {

@@ -468,5 +468,8 @@ describe('launcher folders', () => {
     // A program that is itself in /usr/bin: no folder to tell it by.
     expect(launcherDirs('/usr/bin/gnome-text-editor', { real: (p) => p, script: () => undefined })).toEqual([])
     expect(launcherDirs('/usr/bin/google-chrome', { real: () => '/opt/google/chrome/google-chrome', script: () => undefined })).toEqual(['/opt/google/chrome'])
+    // Shared library folders a script names don't tell its program either.
+    const wrapper = '#!/bin/sh\nexport LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/nss\nLD_PRELOAD=/usr/lib/x86_64-linux-gnu/libfoo.so /usr/lib/libbar.so exec /usr/lib/chromium/chromium "$@"\n'
+    expect(launcherDirs('/usr/bin/chromium', { real: (p) => p, script: () => wrapper })).toEqual(['/usr/lib/chromium'])
   })
 })
