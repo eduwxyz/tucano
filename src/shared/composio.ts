@@ -6,6 +6,7 @@
 export const MULTI_EXECUTE = 'COMPOSIO_MULTI_EXECUTE_TOOL'
 export const EXECUTE = 'COMPOSIO_EXECUTE_TOOL' // the older single one: tool_slug and arguments at the top
 export const PROXY_EXECUTE = 'COMPOSIO_PROXY_EXECUTE'
+export const MANAGE_CONNECTIONS = 'COMPOSIO_MANAGE_CONNECTIONS' // links an app's account: the sign-in link
 const RUNNERS = new Set([MULTI_EXECUTE, EXECUTE, PROXY_EXECUTE])
 
 // One action a call runs: an app's tool by its slug ("GMAIL_FETCH_EMAILS"), or a raw request to an app's API.
@@ -22,6 +23,11 @@ export const isComposio = (url: string | undefined): boolean => {
 
 // A runner whose every call is judged by what it runs: only on Composio's own servers, by its exact name.
 export const perCallTool = (url: string | undefined, name: string): boolean => isComposio(url) && RUNNERS.has(name)
+// Linking an app's account (Gmail, Calendar…) on Composio's own servers: what even reading needs the first
+// time, so a reader sees it too, and each call asks.
+export const linksAccounts = (url: string | undefined, name: string): boolean => isComposio(url) && name === MANAGE_CONNECTIONS
+// What a read grant sees besides read tools: the runners, for their read-only calls, and the linking.
+export const forReaders = (url: string | undefined, name: string): boolean => perCallTool(url, name) || linksAccounts(url, name)
 // The same by name only, for the approval card, which shows what a call runs.
 export const isRunner = (name: string): boolean => RUNNERS.has(name)
 

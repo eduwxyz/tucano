@@ -32,6 +32,14 @@ const page = (tab: string, you: string): string => {
 }
 
 describe("an agent's page a member only looks at", () => {
+  it('shows the character recommendation for a long existing prompt without restricting the textarea', () => {
+    fake = { ...fake, agents: [{ ...lia, instructions: `${'x'.repeat(32_000)} END` }] }
+    const html = page('perfil', 'ana')
+    expect(html).toContain('Prompt longo')
+    expect(html).toContain('32.004')
+    expect(html).not.toMatch(/<textarea[^>]*maxlength=/i)
+  })
+
   it('has no "takes effect right away" and no "authorize in the browser"', () => {
     for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'ana')).toContain('Muda na hora, sem precisar salvar.')
     expect(page('ferramentas', 'ana')).toContain('Autorizar no navegador')
