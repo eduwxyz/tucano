@@ -3299,7 +3299,7 @@ export function ClassifiersCard(): ReactNode {
     <>
       {list.length === 0 && (
         <p className="muted small">
-          {L('Nenhum classificador ainda. Adicione um para o roteador escolher quem responde, ou para o navegador achar o que clicar.', 'No classifier yet. Add one so the router can pick who replies, or the browser can find what to click.')}
+          {L('Nenhum classificador ainda. Adicione um para o roteador escolher quem responde, para o navegador achar o que clicar, ou para marcar os próximos passos que já vêm marcados.', 'No classifier yet. Add one so the router can pick who replies, the browser can find what to click, or the next steps can open with the ones worth doing now already ticked.')}
         </p>
       )}
       {list.map((c) => {

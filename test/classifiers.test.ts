@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, type ClassifierConfig } from '../src/shared/classifiers'
+import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, type ClassifierConfig } from '../src/shared/classifiers'
 import type { Settings } from '../src/shared/types'
 import { ask, checkClassifierKey } from '../src/core/classifiers'
 import { jevBox, routeJev } from '../src/core/jev'
@@ -54,6 +54,16 @@ describe('the classifiers a workspace has', () => {
   it('a row deleted from the list leaves no job pointing at it', () => {
     const s = settingsWith({ classifiers: [luna], routerModel: 'jev' })
     expect(classifierFor(s, 'routing')).toBeUndefined()
+  })
+
+  it('the next steps are a job like the others: whoever is set there says which boxes open ticked', () => {
+    expect(CLASSIFIER_JOBS).toContain('nextSteps')
+    const s = settingsWith({ classifiers: [luna], classifierJobs: { nextSteps: 'luna' } })
+    expect(classifierFor(s, 'nextSteps')).toEqual(luna)
+    // Left out, it is off: the card opens with every box clear.
+    expect(classifierFor(settingsWith({ classifiers: [luna], classifierJobs: {} }), 'nextSteps')).toBeUndefined()
+    expect(jobLabel('nextSteps').en).toBe('Which next steps start ticked')
+    expect(jobAbout('nextSteps').en).toContain('every box clear')
   })
 })
 
