@@ -2239,7 +2239,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
       threadId,
       images.filter(isFile).map(({ name, data }) => ({ name, data })),
-      (mode ?? sendMode) === 'parallel' ? undefined : (mode ?? sendMode)
+      mode ?? sendMode
     )
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
