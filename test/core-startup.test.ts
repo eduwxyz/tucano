@@ -20,7 +20,7 @@ vi.mock('../src/core/engines/detect', async (original) => ({
     detection.calls++
     await detection.held
     const no: EngineStatus = { installed: false, loggedIn: false }
-    const engines: Record<EngineId, EngineStatus> = { claude: signedIn, codex: no, opencode: no, pi: no, antigravity: no, cursor: no, grok: no, cline: no }
+    const engines: Record<EngineId, EngineStatus> = { claude: signedIn, codex: no, opencode: no, pi: no, antigravity: no, cursor: no, grok: no, cline: no, hermes: no }
     return { engines, listed: {}, codexCatalog: [] }
   }
 }))
@@ -62,10 +62,12 @@ describe('the core starting', () => {
     Object.assign(process.env, { TUCANO_DATA: dataDir, TUCANO_DEFAULT_WORKSPACE: '0', TUCANO_SEED: '0', TUCANO_WEBHOOK_PORT: '47967', TUCANO_GIT_PORT: '47968', TUCANO_WIKI: join(dataDir, 'wiki') })
     delete process.env['TUCANO_FAKE_ENGINES']
     ;(process as unknown as { parentPort: typeof parent }).parentPort = parent
-    const started = Date.now()
     await import('../src/core/index')
-    await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: 'ready' }), { timeout: 5_000 })
-    expect(Date.now() - started).toBeLessThan(5_000)
+    // Only that "ready" arrives while the harnesses are still being checked, which the two
+    // asserts below state. The boot's wall-clock time is a different claim and not this one's:
+    // it measures the test's own poll latency as much as the core, and a starved CI runner took
+    // 5.7 s on an unchanged commit, so the assert turned a busy machine into a red shard.
+    await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: 'ready' }), { timeout: 15_000 })
     expect(detection.calls).toBe(1) // started, and still running
 
     const window = connect()

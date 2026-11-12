@@ -3,8 +3,8 @@
 // it, and the next one runs behind. A check takes seconds and starts a dozen processes, so
 // whoever asks while one runs shares it instead of starting another.
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
-import type { EngineId, EngineStatus } from '../shared/types'
-import { codexModels, detectClaude, detectCodex, detectCursor, detectAntigravity, detectGrok, detectCline, detectOpenCode, detectPi, type CodexModel } from './engines/detect'
+import { ENGINE_IDS, type EngineId, type EngineStatus } from '../shared/types'
+import { codexModels, detectClaude, detectCodex, detectCursor, detectAntigravity, detectGrok, detectCline, detectHermes, detectOpenCode, detectPi, type CodexModel } from './engines/detect'
 import { withInstallDirs } from './platform'
 
 export interface AccountLogin {
@@ -26,7 +26,9 @@ export interface OneFinding {
   codexCatalog?: CodexModel[]
 }
 
-const IDS: EngineId[] = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline']
+// Every harness this version knows: a list written out by hand here left the newest one out, and the
+// screens read a status that wasn't there until the first check ended.
+const IDS: EngineId[] = ENGINE_IDS
 
 // Before the first check ever: nothing known yet, and the screens can say so.
 export const checkingFindings = (): EngineFindings => ({
@@ -144,6 +146,8 @@ export async function detectEngine(engine: EngineId, codexHome: string, clineLog
       return found(await detectGrok())
     case 'cline':
       return found(await detectCline(clineLogin))
+    case 'hermes':
+      return found(await detectHermes())
   }
 }
 const found = (r: { status: EngineStatus; models: string[] }): OneFinding => ({ status: r.status, listed: r.models })

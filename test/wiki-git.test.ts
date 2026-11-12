@@ -4,14 +4,14 @@
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { classify, GitFailure, isReadOnly, KEY_SECRET, makeKeyPair, parseRepoUrl, redact, WikiGit } from '../src/core/wiki-git'
 import { pageKey, Wiki } from '../src/core/wiki'
 import { WikiCurator } from '../src/core/wiki-curator'
 import type { Message, Settings } from '../src/shared/types'
 
-vi.setConfig({ testTimeout: 30_000 })
+vi.setConfig({ testTimeout: process.platform === 'win32' ? 60_000 : 30_000 })
 
 // names byte for byte (an NFD name stays NFD, on a Mac too), and no identity of the machine's needed
 const git = (cwd: string, ...args: string[]): string => execFileSync('git', ['-c', 'core.precomposeunicode=false', '-c', 'core.quotepath=false', ...args], { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Eduardo', GIT_AUTHOR_EMAIL: 'e@x', GIT_COMMITTER_NAME: 'Eduardo', GIT_COMMITTER_EMAIL: 'e@x' } })
@@ -31,7 +31,9 @@ function remote(files: Record<string, string | Buffer> = {}, hook?: string): { b
     git(mac, 'commit', '--quiet', '-m', 'vault')
     git(mac, 'push', '--quiet', 'origin', 'main')
   }
-  if (hook) (writeFileSync(join(bare, 'hooks', 'pre-receive'), hook), chmodSync(join(bare, 'hooks', 'pre-receive'), 0o755))
+  // The repository's own hooks, even on a machine whose gitconfig points core.hooksPath somewhere
+  // else: without this the hook is written and never run, and the push it must refuse goes through.
+  if (hook) (writeFileSync(join(bare, 'hooks', 'pre-receive'), hook), chmodSync(join(bare, 'hooks', 'pre-receive'), 0o755), git(bare, 'config', 'core.hooksPath', join(bare, 'hooks')))
   return { bare, url: `file://${bare}`, mac, root }
 }
 // What the Mac does with Obsidian Git: edit, commit, push.
@@ -358,7 +360,7 @@ describe('a refused key', () => {
   // file it was given: none of it may reach the status, the errors or the log.
   const fakeSsh = (): string => {
     const f = join(mkdtempSync(join(tmpdir(), 'tucano-ssh-')), 'ssh')
-    writeFileSync(f, '#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ "$1" = "-i" ]; then cat "$2" >&2; echo "using $2" >&2; fi; shift; done\necho "git@github.com: Permission denied (publickey)." >&2\nexit 255\n')
+    writeFileSync(f, '#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ "$1" = "-i" ]; then printf "%s" "$2" > "$0.used-key"; cat "$2" >&2; echo "using $2" >&2; fi; shift; done\necho "git@github.com: Permission denied (publickey)." >&2\nexit 255\n')
     chmodSync(f, 0o755)
     return f
   }
@@ -367,7 +369,8 @@ describe('a refused key', () => {
     const data = mkdtempSync(join(tmpdir(), 'tucano-data-'))
     const secrets = memSecrets()
     let meta: string | undefined
-    const g = new WikiGit({ dataDir: data, secrets, load: () => meta, store: (j) => void (meta = j), privatePaths: () => new Set(), quiet: () => {}, refresh: async () => {}, notice: () => {}, changed: () => {}, currentPages: () => 0, ssh: fakeSsh() })
+    const ssh = fakeSsh()
+    const g = new WikiGit({ dataDir: data, secrets, load: () => meta, store: (j) => void (meta = j), privatePaths: () => new Set(), quiet: () => {}, refresh: async () => {}, notice: () => {}, changed: () => {}, currentPages: () => 0, ssh })
     await g.setup('git@github.com:edu/vault.git')
     const e = await g.test().then(() => null, (x: unknown) => x)
     expect(e).toBeInstanceOf(GitFailure)
@@ -376,8 +379,11 @@ describe('a refused key', () => {
     expect((e as Error).message).not.toContain('PRIVATE KEY')
     for (const line of key.split('\n').filter((l) => l.length > 20)) expect((e as Error).message).not.toContain(line)
     expect(meta).not.toContain('PRIVATE KEY')
-    // and the key file is gone once git is done
-    expect(execFileSync('sh', ['-c', `ls -d ${tmpdir()}/tucano-key-* 2>/dev/null || true`], { encoding: 'utf8' }).trim()).toBe('')
+    // Check this call's key, even while another workspace has a git operation in flight.
+    const usedKey = readFileSync(`${ssh}.used-key`, 'utf8')
+    expect(usedKey).toContain('tucano-key-')
+    expect(existsSync(usedKey)).toBe(false)
+    expect(existsSync(dirname(usedKey))).toBe(false)
   })
 
   it('a key revoked after connecting: an auth status, a retry time, and a log with no key', async () => {

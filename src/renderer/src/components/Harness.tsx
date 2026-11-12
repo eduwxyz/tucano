@@ -87,7 +87,9 @@ export function useEngineModels(engine: EngineId | undefined): { options: ModelO
     return mine?.models.length
       ? { options: mine.models.map((slug) => ({ value: codexValue(slug), label: mine.labels?.[slug]?.label ?? slug, hint: L('', mine.labels?.[slug]?.hint ?? '') || undefined })), loading: false }
       : { options: app(), loading: false }
-  return { options: (mine?.models ?? []).map((m) => ({ value: customModel(engine, m), label: m })), loading: !!id && !mine, error: mine?.error }
+  // OpenCode's free models (opencode/…-free) run on its free tier, up to its usage limit.
+  const free = (m: string): string | undefined => (engine === 'opencode' && /^opencode\/.+-free$/.test(m) ? L('grátis', 'free') : undefined)
+  return { options: (mine?.models ?? []).map((m) => ({ value: customModel(engine, m), label: m, hint: free(m) })), loading: !!id && !mine, error: mine?.error }
 }
 
 const OTHER = '__outro__'

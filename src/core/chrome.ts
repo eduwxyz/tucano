@@ -19,6 +19,14 @@ export const CHROME = findChrome()
 
 const W = 1280
 const H = 800
+// How long a first open gets before it's called failed. Generous on purpose: a cold Chrome
+// on a slow or loaded machine (a server, CI) is the slowest thing here, and a person only
+// ever waits on a Chrome that is never going to answer.
+const OPEN_TIMEOUT_MS = 90_000
+const COMMAND_MS = 30_000 // for the work of the day: a page that isn't coming back, said soon
+// How long the next command gets. The handshake may be slow to start — a cold Chrome on a loaded
+// machine — and everything after it isn't, so only the handshake borrows the open deadline.
+export const commandDeadline = (starting: boolean): number => (starting ? OPEN_TIMEOUT_MS : COMMAND_MS)
 const FRAME_MS = 150 // at most ~6 frames a second while someone watches
 const IDLE_MS = 2000 // and one every 2 s otherwise: an animated page left open costs little
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -75,6 +83,9 @@ class Tab {
   private world: number | undefined // our isolated world in the tab's main frame
   closedAll?: () => void // every tab is gone (I closed the window)
   remote = false // I'm driving it from the panel (no window: Tucano as a server)
+  // True from the first byte of the handshake to the last: Chrome answering its first command on a
+  // loaded machine is the slow part, and it gets the same generous deadline as the open itself.
+  private starting = false
 
   constructor(
     readonly proc: ChildProcess,
@@ -88,6 +99,7 @@ class Tab {
   }
 
   async connect(): Promise<void> {
+    this.starting = true
     const output = this.proc.stdio[4] as Readable
     let buffered = ''
     output.setEncoding('utf8')
@@ -104,10 +116,14 @@ class Tab {
     output.on('close', gone)
     output.on('error', gone)
     this.input.on('error', gone)
-    await this.send('Target.setDiscoverTargets', { discover: true })
-    const { targetInfos } = (await this.send('Target.getTargets')) as { targetInfos: { targetId: string; type: string; url: string }[] }
-    const page = targetInfos.find((t) => t.type === 'page')
-    await this.follow(page ? page.targetId : ((await this.send('Target.createTarget', { url: 'about:blank' })) as { targetId: string }).targetId)
+    try {
+      await this.send('Target.setDiscoverTargets', { discover: true })
+      const { targetInfos } = (await this.send('Target.getTargets')) as { targetInfos: { targetId: string; type: string; url: string }[] }
+      const page = targetInfos.find((t) => t.type === 'page')
+      await this.follow(page ? page.targetId : ((await this.send('Target.createTarget', { url: 'about:blank' })) as { targetId: string }).targetId)
+    } finally {
+      this.starting = false
+    }
   }
 
   send(method: string, params: Record<string, unknown> = {}, session = ''): Promise<Record<string, unknown>> {
@@ -116,7 +132,15 @@ class Tab {
       if (this.closed) return reject(new Error(L('o Chrome fechou', 'Chrome closed')))
       this.pending.set(id, { resolve, reject })
       this.input.write(JSON.stringify({ id, method, params, ...(session ? { sessionId: session } : {}) }) + '\0')
-      setTimeout(() => this.pending.get(id) && (this.pending.delete(id), reject(new Error(L(`o Chrome não respondeu (${method})`, `Chrome didn't answer (${method})`)))), 30_000).unref()
+      // 30 s for the work of the day; the handshake gets the open deadline instead, because a cold
+      // Chrome on a loaded runner answered its first command after the 30 s it used to be given
+      // (GitHub's ubuntu-latest, chrome-close and chrome-windowless, four runs out of six), while the
+      // very next command on the same machine came back in milliseconds.
+      const deadline = commandDeadline(this.starting)
+      setTimeout(
+        () => this.pending.get(id) && (this.pending.delete(id), reject(new Error(L(`o Chrome não respondeu (${method}) em ${deadline / 1000} s`, `Chrome didn't answer (${method}) within ${deadline / 1000} s`)))),
+        deadline
+      ).unref()
     })
   }
 
@@ -299,7 +323,10 @@ export class ChromeBrowsers {
     const failed = new Promise<never>((_, reject) => {
       proc.once('exit', () => reject(new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))))
       // The first open on a computer can be slow, with nothing of Chrome in memory yet. As long as any other answer gets (see send).
-      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 30 s', "Chrome didn't open in 30 s"))), 30_000)
+      // 90 s, not 30: a cold Chrome with a brand-new profile took 22 s on GitHub's Windows runner and
+      // more than 30 s on its Ubuntu one, while the very next open on the same machine took 6 s.
+      // Nothing is waited on here that a person sees: the first answer returns the moment Chrome speaks.
+      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 90 s', "Chrome didn't open in 90 s"))), OPEN_TIMEOUT_MS)
     })
     try {
       await Promise.race([tab.connect(), failed])

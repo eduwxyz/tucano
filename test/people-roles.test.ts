@@ -24,7 +24,7 @@ const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-roles-'))
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const approval = (id: string, conversationId: string, requestedBy: string, agentId = 'a1'): Approval => ({ id, hash: id, agentId, conversationId, messageId: 'x', connectorId: 'c', connectorName: 'Linear', tool: 'create_issue', args: {}, why: '', highRisk: false, state: 'pending', createdAt: 1, expiresAt: Date.now() + 60_000, requestedBy })
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 
 class FakePort implements PortLike {
   got: CoreEvent[] = []
@@ -124,7 +124,7 @@ describe('approvals: who decides', () => {
     const turns: Turn[] = []
     const base = fakeEngine('claude', { delayMs: 1 })
     const claude: Engine = { id: 'claude', async *run(t) { turns.push(t); yield* base.run(t) } }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
     const runner = new Runner({ db, engines, settings: async () => ({ ...settings, language: 'en' }), emit: () => {}, workDir: dir() })
     db.saveAgent({ ...agent('a1', 'lia'), owner: bia.id })
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1'] })
@@ -301,7 +301,7 @@ describe('questions, mentions and memory between people', () => {
     events = []
     const base = fakeEngine('claude', { delayMs: 1 })
     const claude: Engine = { id: 'claude', async *run(t) { turns.push(t); yield* base.run(t) } }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
     runner = new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: dir(), gateway, notify: (title, _b, conversationId, _k, _t, to) => void notes.push({ title, conversationId, to }) })
     db.saveAgent(agent('a1', 'lia'))
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1'] })

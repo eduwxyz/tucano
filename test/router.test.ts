@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { handoffPrompt, handoffSystem, parseRoute, replyExcerpt, routerPrompt } from '../src/core/router'
+import { handoffPrompt, handoffSystem, parseRoute, replyExcerpt, routerPrompt, routerSystem } from '../src/core/router'
 import type { Agent, Connector, Message } from '../src/shared/types'
 
 const agent = (id: string, handle: string, role: string, instructions = ''): Agent => ({
@@ -63,6 +63,27 @@ describe('routerPrompt', () => {
     expect(p).toContain('[Edu] o build quebrou')
     expect(p).toContain('[Lia] olhando')
     expect(p).not.toContain('Chamei')
+  })
+
+  it('keeps the end of a long message, where a question usually is', () => {
+    const long = `Relatório. ${'O build travou no prerender. '.repeat(80)}Posso disparar agora?`
+    const messages: Message[] = [
+      { id: 'm1', conversationId: 'c', author: { kind: 'agent', id: 'a2' }, text: long, at: 1 },
+      { id: 'm2', conversationId: 'c', author: { kind: 'person', id: 'me' }, text: 'pode disparar agora', at: 2 }
+    ]
+    const p = routerPrompt({ messages, agents: team, me: 'Edu' })
+    expect(p).toContain('[Nina] Relatório. O build travou')
+    expect(p).toContain('[…]')
+    expect(p).toContain('Posso disparar agora?\n[Edu] pode disparar agora')
+    expect(p.length).toBeLessThan(long.length)
+  })
+
+  it('shows how an agent last ended another thread, and says a short yes goes to whoever asked', () => {
+    const root: Message = { id: 't1', conversationId: 'c', author: { kind: 'person', id: 'me' }, text: 'revisa o PR', at: 1 }
+    const last: Message = { id: 't2', conversationId: 'c', author: { kind: 'agent', id: 'a1' }, text: `${'Revisei tudo. '.repeat(40)}Posso fazer o merge?`, at: 2, threadId: 't1' }
+    const p = routerPrompt({ messages: [], agents: team, me: 'Edu', threads: [{ id: 't1', root, last, replies: 1, agents: ['a1'], working: [], at: 2 }] })
+    expect(p).toMatch(/- \[Edu\] revisa o PR → Lia · por último \[Lia\] Revisei tudo\..*Posso fazer o merge\?/)
+    expect(routerSystem()).toContain('Uma resposta curta a uma pergunta ou pedido de um agente')
   })
 
   it('says which connectors each agent can use', () => {

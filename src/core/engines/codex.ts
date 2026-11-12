@@ -1,18 +1,41 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { parse } from 'smol-toml'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
-import { CodexApp, Unsupported, type Launch } from './codex-app'
+import { AppServer, CodexApp, Unsupported, type Launch } from './codex-app'
 import type { Engine, EngineEvent, Turn, TurnShape } from './types'
+import type { CodexQuota } from '../../shared/types'
 import { L } from '../../shared/lang'
 
 // Codex reads AGENTS.md, skills, plugins and memories from the user's home no
 // matter which flags are passed, so Tucano runs it with a home of its
 // own. The user logs into Codex once more, for the app, through Codex itself.
-export function codexEnv(home: string): NodeJS.ProcessEnv {
-  return { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex') }
+export function asdfEnv(bin?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  // An asdf shim needs its install directory and selected tool version: HOME
+  // and the working directory both belong to Tucano when it checks the login.
+  if (bin) {
+    try {
+      const shim = readFileSync(bin, 'utf8')
+      const match = /^# asdf-plugin:\s+([\w-]+)\s+([^\s]+)/m.exec(shim)
+      if (match) {
+        env['ASDF_DATA_DIR'] = dirname(dirname(bin))
+        const versionKey = `ASDF_${match[1]!.replaceAll('-', '_').toUpperCase()}_VERSION`
+        if (!process.env[versionKey]) env[versionKey] = match[2]
+        return env
+      }
+    } catch {
+      // Native harness installs do not need an asdf data directory.
+    }
+  }
+  if (process.env['ASDF_DATA_DIR']) env['ASDF_DATA_DIR'] = process.env['ASDF_DATA_DIR']
+  return env
+}
+
+export function codexEnv(home: string, bin?: string): NodeJS.ProcessEnv {
+  return { ...process.env, ...asdfEnv(bin), HOME: home, CODEX_HOME: join(home, '.codex') }
 }
 
 // How the user's own Codex reaches the model, from their config.toml: the
@@ -238,6 +261,22 @@ export function codexThread(turn: TurnShape): Record<string, unknown> {
 // app-server loads nothing exec wouldn't. With either there, Codex runs as exec.
 export const codexIsolated = (codexHome: string): boolean => !existsSync(join(codexHome, 'config.toml')) && !existsSync(join(codexHome, 'rules'))
 
+// account/rateLimits/read's answer as the subscription's windows; undefined when it has none (an API key).
+export function codexQuota(r: unknown, at = Date.now()): CodexQuota | undefined {
+  const snap = ((r ?? {}) as Record<string, unknown>)['rateLimits'] as Record<string, unknown> | undefined
+  if (!snap) return undefined
+  const windows = [snap['primary'], snap['secondary']].flatMap((w) => {
+    const o = (w ?? {}) as Record<string, unknown>
+    const used = o['usedPercent']
+    const minutes = o['windowDurationMins']
+    if (typeof used !== 'number' || typeof minutes !== 'number' || minutes <= 0) return []
+    return [{ minutes, utilization: Math.min(1, Math.max(0, used / 100)), resetsAt: num(o['resetsAt']) * 1000 }]
+  })
+  if (!windows.length) return undefined
+  windows.sort((a, b) => a.minutes - b.minutes)
+  return { windows, ...(typeof snap['planType'] === 'string' ? { plan: snap['planType'] } : {}), at }
+}
+
 // Each turn as one `codex exec` (the CLI before the app-server, or a home that has its own
 // config): it gets the whole conversation every time.
 const EXEC_ONLY = 'TUCANO_CODEX_EXEC'
@@ -261,7 +300,7 @@ export function codexEngine(
     const p = await provider()
     const shell = await shellEnv() // read once per launch
     const keys = Object.fromEntries(p.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
-    const env = { ...codexEnv(t.account ?? home), ...keys, ...p.env }
+    const env = { ...codexEnv(t.account ?? home, bin()), ...keys, ...p.env }
     return { env, config: p.config, launch: { key: JSON.stringify([t.account ?? home, p.config, keys, p.env ?? {}]), home: codexHome(t.account), args: codexAppArgs(p.config), env, cwd: t.account ?? home } }
   }
   const app = new CodexApp({ thread: codexThread })
@@ -326,7 +365,22 @@ export function codexEngine(
       app.release(bin(), id, appLaunch)
     },
     clean(workDir, accountDirs = []) {
-      app.clean(bin(), workDir, [home, ...accountDirs].map((h) => codexHome(h)), (h) => ({ key: JSON.stringify(['clean', h]), home: h, args: codexAppArgs(), env: codexEnv(join(h, '..')), cwd: join(h, '..') }))
+      app.clean(bin(), workDir, [home, ...accountDirs].map((h) => codexHome(h)), (h) => ({ key: JSON.stringify(['clean', h]), home: h, args: codexAppArgs(), env: codexEnv(join(h, '..'), bin()), cwd: join(h, '..') }))
+    },
+    // A short-lived app-server of the usual login, asked once: the turns' own processes may be busy or gone.
+    async planUsage() {
+      const path = bin()
+      if (!path || !app.supports(path)) return undefined
+      const { launch: l } = await launch({})
+      const server = new AppServer({ bin: path, args: l.args, cwd: l.cwd, env: l.env })
+      try {
+        await server.ready
+        return codexQuota(await server.request('account/rateLimits/read', undefined, 15_000))
+      } catch {
+        return undefined
+      } finally {
+        server.kill()
+      }
     },
     settle: () => app.settle(),
     dispose: () => app.dispose()

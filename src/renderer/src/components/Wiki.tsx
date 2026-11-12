@@ -296,12 +296,12 @@ const mdLinks = (missing?: Set<string>) => ({ a: (p: { href?: string; children?:
 
 type Pos = { x: number; y: number }
 type Cam = { x: number; y: number; k: number }
-type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
+export type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
 const SPREAD = 1.6 // from the simulation's units to the map's
 
 // One step of the forces: pages push each other away, links pull, the middle holds them.
 // A page being dragged stays under the pointer and pulls its neighbors along.
-function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
+export function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
   const n = bodies.length
   for (let i = 0; i < n; i++)
     for (let j = i + 1; j < n; j++) {
@@ -334,6 +334,14 @@ function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16A
     const g = deg[i]! ? 0.009 : 0.03
     b.vx -= b.x * g
     b.vy -= b.y * g * 1.6
+    // no force may fling a page away: the spring's pull grows with the distance and two
+    // pages too close oscillate through each other, so together they'd fly to infinity
+    // (a wiki big enough starts landing every page on the same spot). A step is capped.
+    const sp = Math.hypot(b.vx, b.vy)
+    if (sp > 40) {
+      b.vx = (b.vx / sp) * 40
+      b.vy = (b.vy / sp) * 40
+    }
     if (b.held) {
       b.vx = 0
       b.vy = 0
@@ -1078,13 +1086,13 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
           <div className="wk-setting">
             <span>
               <b>{L('Mudar uma página que já existe', 'Changing a page that exists')}</b>
-              <small>{L('Páginas novas sempre entram direto. Tudo fica no histórico, com Desfazer.', 'New pages always go in right away. It all stays in the history, with Undo.')}</small>
+              <small>{L('Páginas novas sempre entram direto. No automático, o que já estava esperando entra junto. Tudo fica no histórico, com Desfazer.', 'New pages always go in right away. On automatic, what was already waiting goes in too. It all stays in the history, with Undo.')}</small>
             </span>
             <div className="segmented">
               <button className={edits === 'approve' ? 'is-active' : ''} onClick={() => updateSettings({ wikiEdits: 'approve' })}>
                 {L('Pede aprovação', 'Asks first')}
               </button>
-              <button className={edits === 'auto' ? 'is-active' : ''} onClick={() => updateSettings({ wikiEdits: 'auto' })}>
+              <button className={edits === 'auto' ? 'is-active' : ''} onClick={() => (updateSettings({ wikiEdits: 'auto' }), void call('wikiApplyWaiting').catch((e: Error) => setError(e.message)))}>
                 {L('Automático', 'Automatic')}
               </button>
             </div>
@@ -1534,12 +1542,21 @@ function WikiPending(): ReactNode {
   const [list, setList] = useState<WikiChange[] | null>(null)
   const [recent, setRecent] = useState<WikiChange[]>([])
   const [showRecent, setShowRecent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   useEffect(() => void Promise.all([call('wikiChanges', { state: 'pending' }), call('wikiChanges', { state: 'conflict' })]).then(([a, b]) => setList([...a, ...b].filter((c) => c.by !== 'review'))), [rev])
   useEffect(() => void call('wikiChanges', {}).then((all) => setRecent(all.filter((c) => c.state !== 'pending' && c.state !== 'conflict' && c.by !== 'review').slice(0, 12))), [rev])
   if (!list) return null
   return (
     <div className="wk-pane">
-      <PaneHead icon="hand" title={L('Esperando você', 'Waiting for you')} lede={L('O que o curador quer mudar em páginas que já existem. Aprove, recuse, ou mude o jeito nos ajustes.', 'What the curator wants to change in pages that already exist. Approve, refuse, or change how it works in the settings.')} />
+      <PaneHead icon="hand" title={L('Esperando você', 'Waiting for you')} lede={L('O que o curador quer mudar em páginas que já existem. Aprove, recuse, ou mude o jeito nos ajustes.', 'What the curator wants to change in pages that already exist. Approve, refuse, or change how it works in the settings.')}>
+        {list.length > 1 && (
+          <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => (setBusy(true), setError(''), void call('wikiApplyWaiting').then((r) => r.left && setError(L(`${r.left} não deu pra aprovar sozinha: a página mudou demais. Refaça cada uma abaixo.`, `${r.left} couldn't be approved on their own: the page changed too much. Redo each one below.`)), (e: Error) => setError(e.message)).finally(() => setBusy(false)))}>
+            <Icon name="check" size={13} /> {L(`Aprovar todas (${list.length})`, `Approve all (${list.length})`)}
+          </button>
+        )}
+      </PaneHead>
+      {error && <p className="field__error">{error}</p>}
       {list.length === 0 ? (
         <div className="wk-calm">
           <Icon name="check" size={18} />

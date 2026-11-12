@@ -6,7 +6,7 @@ import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from '.
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { userInfo } from 'node:os'
+import { homedir, userInfo } from 'node:os'
 import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
 import { basename, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -19,9 +19,10 @@ import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type Proposals
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
+import { possibleBosses } from '../shared/org'
 import { listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
-import { Db } from './db'
+import { Db, MIGRATIONS } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
 import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
@@ -30,10 +31,11 @@ import { antigravityAppDir, antigravityEngine } from './engines/antigravity'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engines/cline'
+import { hermesAppDir, hermesEngine } from './engines/hermes'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
-import { codexEnv } from './engines/codex'
+import { asdfEnv, codexEnv } from './engines/codex'
 import { CATALOG, CATEGORIES, catalogInput, catalogView, entryOf, ownAppGuide } from '../shared/connector-catalog'
 import { LoginTerminal, type LoginKey } from './login-terminal'
 import { Push, pushUrl } from './push'
@@ -57,6 +59,7 @@ import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
+import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
 import { applyForeignTeam, readForeignZip } from './agent-import'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
@@ -90,6 +93,17 @@ const defaultWorkspace = process.env['TUCANO_DEFAULT_WORKSPACE'] !== '0'
 mkdirSync(dataDir, { recursive: true })
 
 const db = new Db(join(dataDir, 'tucano.db'))
+// This app's version: the desktop says it; a server reads its package.json.
+const appVersion = process.env['TUCANO_VERSION'] || (() => {
+  try {
+    return String((JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')) as { version?: string }).version ?? '')
+  } catch {
+    return ''
+  }
+})()
+// A backup restored at this start (src/server applied it): what only worked on the other computer goes.
+const restored = finishRestore(db, dataDir)
+if (restored !== undefined) console.log(`[core] a backup was restored; ${restored} routine(s) left off`)
 const codexHome = join(dataDir, 'codex-home')
 mkdirSync(join(codexHome, '.codex'), { recursive: true })
 // Cline's own login for the app (see cline.ts), and where its turns run.
@@ -137,7 +151,7 @@ const fakeBrokenOpencode = fake && process.env['TUCANO_FAKE_BROKEN_OPENCODE'] ==
 const OPENCODE_CRASH = "TypeError: Cannot read properties of undefined (reading 'providers')\n    at loadConfig (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/config.js:212:30)\n    at async main (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/index.js:18:3)"
 const PI_EXPIRED = 'OAuth refresh failed for anthropic: 400 {"type":"error","error":{"type":"invalid_grant","message":"Refresh token expired"}}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/oauth.js:88:11)\n    at async refreshAnthropic (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/anthropic.js:41:5)\n    at async getAuth (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/index.js:23:12)'
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false } },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
   listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'], ...(fakeBrokenPi ? { pi: ['anthropic/claude-haiku-4-5'] } : {}) },
   codexCatalog: []
 })
@@ -243,9 +257,9 @@ const loginTerminal = new LoginTerminal({
   env: (e, account) => {
     if (account) {
       const dir = accountDir(dataDir, account)
-      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir)
+      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir, engines.codex.path)
     }
-    return e === 'codex' ? codexEnv(codexHome) : e === 'cline' ? { ...process.env, ...clineLoginEnv(clineLogin) } : { ...process.env, DISABLE_AUTOUPDATER: '1' }
+    return e === 'codex' ? codexEnv(codexHome, engines.codex.path) : e === 'cline' ? { ...process.env, ...clineLoginEnv(clineLogin) } : { ...process.env, DISABLE_AUTOUPDATER: '1' }
   },
   signedIn: async (e, account) => {
     if (!account) return (await engineCheck.recheck(e)).engines[e].loggedIn
@@ -319,13 +333,27 @@ function watchAccount(id: string): void {
 }
 
 
+// The Codex subscription's windows, read again when the usage page asks (it does when it opens and
+// after each reply), at most once a minute, and only for a login on a ChatGPT plan.
+let codexQuotaAt = 0
+function refreshCodexQuota(): void {
+  const s = engines.codex
+  if (!s.loggedIn || s.route !== 'plan' || Date.now() - codexQuotaAt < 60_000) return
+  codexQuotaAt = Date.now()
+  void engineImpls.codex.planUsage?.().then((codexQuota) => {
+    if (!codexQuota) return
+    db.setSettings({ codexQuota })
+    emit({ type: 'settings', settings: settings() })
+  }, () => {})
+}
+
 // A harness that moved since it was found (an update to another folder) is looked for again.
 function moved(id: EngineId): Parameters<typeof relocating>[1] {
   return { path: () => engines[id].path, label: ENGINES[id].label, redetect: () => detect().then(() => undefined) }
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
@@ -334,7 +362,8 @@ const engineImpls: Record<EngineId, Engine> = fake
       antigravity: relocating(antigravityEngine(() => engines.antigravity.path, antigravityAppDir(dataDir), loginEnv), moved('antigravity')),
       cursor: relocating(cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv), moved('cursor')),
       grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok')),
-      cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline'))
+      cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline')),
+      hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes'))
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
@@ -459,6 +488,7 @@ type ToMain =
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
+  | { type: 'restart' } // a server: start again, to restore a backup (src/server)
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; to?: string[] } // to: the people it's for (a server delivers it only to them); unset: everyone
   | { type: 'auth-result'; id: string; person?: Person; removed?: true } // removed: a key of someone removed since
   | { type: 'join-result'; id: string; data: { key?: string; person?: Person; error?: string } }
@@ -996,11 +1026,14 @@ void ready.then(async () => {
   toMain({ type: 'ready' })
   workspaceSummary()
   await runner.expireApprovals()
+  const settled = await runner.settleDecidedRuns()
+  if (settled) console.log(`[core] ${settled} reply(ies) closed: their approval was decided without them`)
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   // A thread that went quiet gets its own summary, and the memories in it.
   setInterval(() => void memory.sweep().catch((e: unknown) => console.error('[memory]', e)), 60_000).unref()
   // A question to someone that waited past its deadline: its requester hears of it.
   setInterval(() => runner.sweepQuestions(), 60_000).unref()
+  setInterval(() => runner.sweepDelegations(), 60_000).unref()
   if (!fake) {
     // A port taken (another Tucano open, say) is logged and the rest goes on: a call there reaches
     // a server that doesn't know its token, never this workspace's data.
@@ -1390,9 +1423,9 @@ const api: Handlers = {
     return people.pageFor(ctx.person, [root, ...db.recentMessages(root.conversationId, 100_000, rootId)])
   },
 
-  sendMessage: ({ conversationId, text, images, threadId }, ctx) => {
+  sendMessage: ({ conversationId, text, images, files, threadId }, ctx) => {
     reach(ctx, conversationId)
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id), 'sendMessage')
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, files?.length ? { files } : {}), 'sendMessage')
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {
@@ -1443,6 +1476,9 @@ const api: Handlers = {
     clean.actionRules = cleanRules(clean.actionRules)
     if (!isAutonomy(clean.autonomy)) delete clean.autonomy
     if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
+    // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
+    // One that already answered to the same agent keeps doing so: only a change is checked.
+    if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -1686,12 +1722,44 @@ const api: Handlers = {
     }
   },
   backupNow: () => backup(db, backups, workspaceLabel(db.getSettings(DEFAULTS))),
+  // Everything in one .zip in Downloads, shown in the Finder: to take to a server, which restores it.
+  exportBackup: () => {
+    if (serverMode) throw new Error(L('O backup completo sai do app do computador.', 'The full backup comes from the desktop app.'))
+    const downloads = join(homedir(), 'Downloads')
+    const dir = existsSync(downloads) ? downloads : backups
+    const day = new Date().toISOString().slice(0, 10)
+    let out = join(dir, `Tucano-backup-${day}.zip`)
+    for (let n = 2; existsSync(out); n++) out = join(dir, `Tucano-backup-${day} (${n}).zip`)
+    const summary = writeBackup({ db, dataDir, wikiDir: wiki.dir, wikiIndex: wikiIndex(wiki.dir), out, app: appVersion })
+    toMain({ type: 'open_local', path: out, how: 'reveal' })
+    return { path: out, ...summary }
+  },
+  // On a server: a backup the owner sent up, only from the uploads folder; checked and set apart.
+  restoreCheck: ({ path }) => {
+    const uploads = join(dataDir, 'uploads')
+    if (!serverMode || typeof path !== 'string' || !resolve(path).startsWith(uploads + sep)) throw new Error(L('Envie o backup pelo navegador, no Tucano do servidor.', 'Send the backup through the browser, on the server’s Tucano.'))
+    return stageRestore({ file: path, dataDir, schemaMax: MIGRATIONS.length, app: appVersion })
+  },
+  // The swap happens at the next start (src/server applies it before the core opens anything).
+  restoreApply: () => {
+    if (!serverMode) throw new Error(L('Só um Tucano num servidor restaura um backup.', 'Only a Tucano on a server restores a backup.'))
+    markRestoreReady(dataDir)
+    setTimeout(() => toMain({ type: 'restart' }), 500)
+  },
+  restoreCancel: () => cancelRestore(dataDir),
+  restoreInfo: () => {
+    const at = Number(db.meta('restoredAt') ?? 0)
+    return at ? { at, routines: Number(db.meta('restoredRoutines') ?? 0) } : null
+  },
   openBackups: () => {
     mkdirSync(backups, { recursive: true })
     toMain({ type: 'open_path', path: backups })
   },
   report: ({ week }) => report(db, Date.now(), week),
-  usage: () => usage(db),
+  usage: () => {
+    refreshCodexQuota()
+    return usage(db)
+  },
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
   // Checked with TypeSafe before it's saved; null removes it.
@@ -2008,6 +2076,7 @@ const api: Handlers = {
   },
   wikiApplyChange: ({ id }, ctx) => (changeInReach(ctx, id), wiki.applyChange(id, nameOf(ctx))),
   wikiRefuseChange: ({ id }, ctx) => (changeInReach(ctx, id), wiki.refuseChange(id)),
+  wikiApplyWaiting: (_, ctx) => wiki.applyWaiting(nameOf(ctx), (c) => seesChange(ctx, c)),
   // Undoing puts back what the pages were: from before the heritage, that's the owner's history to restore.
   wikiUndoChange: ({ id }, ctx) => {
     // Said in so many words (before the reach check hides the change as the owner's history).
@@ -2259,7 +2328,7 @@ const api: Handlers = {
     if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
     // The sign-in happens in a terminal: check again until it lands, wherever the person is.
     watchEngine(engine, (s) => s.loggedIn)
-    return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex') } : engine === 'cline' ? clineLoginEnv(clineLogin) : {})
+    return openLogin(engine, engine === 'codex' ? { HOME: codexHome, CODEX_HOME: join(codexHome, '.codex'), ...asdfEnv(engines.codex.path) } : engine === 'cline' ? clineLoginEnv(clineLogin) : {})
   },
 
   // The introduction's setup with no terminal: Codex or Claude Code downloaded into the app's folder,
@@ -2302,7 +2371,7 @@ const api: Handlers = {
     if (shown) return { opened: true, command: ENGINES[a.engine].login, screen: shown }
     const dir = accountDir(dataDir, a.id)
     watchAccount(a.id)
-    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex') })
+    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) })
   },
   // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
   removeAccount: ({ id }) => {

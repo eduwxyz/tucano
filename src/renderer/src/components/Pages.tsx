@@ -1,4 +1,6 @@
 import { L, locale, type Lang } from '../../../shared/lang'
+import { hasMonthlyLimit } from '../../../shared/limits'
+import { instructionLengthNote } from '../../../shared/instructions'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
@@ -67,7 +69,14 @@ import {
   type VoiceSettings,
   amAdmin,
   amOwner,
-  teamMode
+  teamMode,
+  windowless,
+  exportBackup,
+  restoreCheck,
+  restoreApply,
+  restoreCancel,
+  restoreInfo,
+  type BackupSummary
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
 import { voiceRefusal } from '../../../shared/voice'
@@ -78,6 +87,7 @@ import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
+import { directReports, possibleBosses } from '../../../shared/org'
 import { perCallTool } from '../../../shared/composio'
 import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
@@ -411,6 +421,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 onChange={(e) => patch({ instructions: e.target.value })}
               />
               <p className="hint">{L('O contexto do workspace já entra em toda conversa. Aqui vai só o que é deste agente.', 'The workspace context already goes into every conversation. Here goes only what’s specific to this agent.')}</p>
+              {instructionLengthNote(draft.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(draft.instructions.length)}</p>}
             </Card>
           )}
 
@@ -434,6 +445,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <p className="hint">{L(`Fora desses canais, chame com @${draft.handle || 'handle'} ou mande DM.`, `Outside these channels, call it with @${draft.handle || 'handle'} or send a DM.`)}</p>
             </Card>
           )}
+
+          {pane('canais') && draft.kind !== 'tuca' && <ReportsTo draft={draft} patch={patch} />}
 
           {!isNew && pane('canais') && <AgentSkills agentId={draft.id} name={draft.name} />}
 
@@ -742,7 +755,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                     />
                   </Field>
                 )}
-                <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you.`)}>
+                <Field label={L('Limite mensal (milhões de tokens)', 'Monthly limit (millions of tokens)')} hint={L(`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa. Zero é sem limite.`, `Checked before every turn. At the limit, ${draft.name || 'the agent'} stops and tells you. Zero means no limit.`)}>
                   <NumberInput
                     min={0}
                     step={0.5}
@@ -793,7 +806,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <div className="profile-card__budget">
                 <span className="muted small">{L('Uso em', 'Usage in')} {new Date().toLocaleDateString(locale(), { month: 'long' })}</span>
                 <span>
-                  <strong>{tokens(draft.used)}</strong> <span className="muted">{L(`de ${tokens(draft.limit)} tokens`, `of ${tokens(draft.limit)} tokens`)}</span>
+                  <strong>{tokens(draft.used)}</strong>{' '}
+                  <span className="muted">
+                    {/* No limit set: "of 0 tokens" would read as a cap spent, so say there isn't one. */}
+                    {hasMonthlyLimit(draft.limit) ? L(`de ${tokens(draft.limit)} tokens`, `of ${tokens(draft.limit)} tokens`) : L('sem limite no mês', 'no monthly limit')}
+                  </span>
                 </span>
                 <UsageBar used={draft.used} limit={draft.limit} />
               </div>
@@ -1802,6 +1819,49 @@ function Tabs({ page, tabs }: { page: string; tabs: TabList }): ReactNode {
   )
 }
 
+// Whom the agent answers to (src/shared/org.ts). With that set, the one above hands it work in its own
+// channel and gets the answer back; with no one answering to anyone, nothing changes.
+function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const bosses = possibleBosses(agents, draft.id)
+  const below = directReports(agents, draft.id)
+  const boss = bosses.find((a) => a.id === draft.reportsTo)
+  const none = L('Ninguém', 'No one')
+  return (
+    <Card
+      title={L('Time', 'Team')}
+      lead={L(
+        'Quem está acima passa trabalho a quem está abaixo, no canal de cada um, e recebe a resposta de volta. Sem ninguém marcado, tudo funciona como sempre.',
+        'Whoever is above hands work to those below, in each one’s channel, and gets the answer back. With no one set, everything works as it always did.'
+      )}
+    >
+      <label className="field">
+        <span className="field__label">{L('Responde a', 'Answers to')}</span>
+        <Select
+          value={boss?.id ?? null}
+          onChange={(v) => patch({ reportsTo: v || undefined })}
+          options={[{ value: '', label: none }, ...bosses.map((a) => ({ value: a.id, label: a.role ? `${a.name} · ${a.role}` : a.name }))]}
+          placeholder={none}
+        />
+        {boss && (
+          <span className="hint">
+            {L(
+              `${boss.name} pode pedir trabalho a ${draft.name || 'este agente'}. O pedido vira uma thread no primeiro canal marcado acima, e a resposta volta pra ${boss.name}.`,
+              `${boss.name} can ask ${draft.name || 'this agent'} for work. The request becomes a thread in the first channel checked above, and the answer goes back to ${boss.name}.`
+            )}
+          </span>
+        )}
+      </label>
+      {below.length > 0 && (
+        <p className="hint">
+          {L('Respondem a ', 'Answering to ')}
+          {draft.name || L('este agente', 'this agent')}: {below.map((a) => a.name).join(', ')}.
+        </p>
+      )}
+    </Card>
+  )
+}
+
 // A model to run with, from what each harness in use offers, or another by name.
 // Where the agent's replies go when its model's subscription is out (a 5-hour or weekly limit, a 429).
 // Off by default. Turned on, it starts on another login of the same harness when there is one (the
@@ -1991,6 +2051,163 @@ function TeamCard(): ReactNode {
           {L('Skill pro Grok Bot (experimental)', 'Skill for Grok Bot (experimental)')}
         </button>
       </div>
+      {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
+    </Card>
+  )
+}
+
+// A whole Tucano, taken somewhere else: the desktop app exports it in one .zip, and a Tucano on a
+// server (its owner) restores it, replacing what's there (src/core/restore.ts).
+export function BackupCard(): ReactNode {
+  const owner = useStore(amOwner)
+  const web = windowless()
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [found, setFound] = useState<BackupSummary | null>(null)
+  const [info, setInfo] = useState<{ at: number; routines: number } | null>(null)
+  useEffect(() => {
+    if (web && owner) void restoreInfo().then(setInfo).catch(() => {})
+  }, [web, owner])
+  if (!owner) return null
+  const failed = (e: unknown): void => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
+  const n = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`
+  const what = (s: BackupSummary): string =>
+    L(
+      `${n(s.agents, 'agente', 'agentes')}, ${n(s.channels, 'canal', 'canais')}, ${n(s.messages, 'mensagem', 'mensagens')}, ${n(s.memories, 'memória', 'memórias')}, ${n(s.wikiPages, 'página da wiki', 'páginas da wiki')} e ${n(s.files, 'arquivo', 'arquivos')}`,
+      `${n(s.agents, 'agent', 'agents')}, ${n(s.channels, 'channel', 'channels')}, ${n(s.messages, 'message', 'messages')}, ${n(s.memories, 'memory', 'memories')}, ${n(s.wikiPages, 'wiki page', 'wiki pages')} and ${n(s.files, 'file', 'files')}`
+    )
+  const day = (at: number): string => new Date(at).toLocaleDateString(L('pt-BR', 'en'))
+  const exportAll = (): void => {
+    setBusy(true)
+    setNote(L('Preparando o arquivo…', 'Preparing the file…'))
+    exportBackup()
+      .then((r) => {
+        const name = r.path.split(/[\\/]/).pop() ?? r.path
+        const left = r.filesLeftOut ? L(` ${r.filesLeftOut === 1 ? '1 arquivo dos agentes ficou' : `${r.filesLeftOut} arquivos dos agentes ficaram`} de fora pra caber num envio só.`, ` ${r.filesLeftOut === 1 ? '1 of the agents’ files was' : `${r.filesLeftOut} of the agents' files were`} left out to fit in one upload.`) : ''
+        setNote(
+          L(
+            `Pronto: ${name}, em Downloads, com ${what(r)}.${left} No Tucano do servidor, abra Configurações › Geral › Restaurar um backup e escolha esse arquivo.`,
+            `Done: ${name}, in Downloads, with ${what(r)}.${left} On the server's Tucano, open Settings › General › Restore a backup and pick that file.`
+          )
+        )
+      })
+      .catch(failed)
+      .finally(() => setBusy(false))
+  }
+  const pick = (file?: File): void => {
+    const upload = window.tucano.upload
+    if (!file || !upload) return
+    setFound(null)
+    setBusy(true)
+    setNote(L(`Enviando ${file.name} (${Math.max(1, Math.round(file.size / 1e6))} MB)…`, `Sending ${file.name} (${Math.max(1, Math.round(file.size / 1e6))} MB)…`))
+    upload(file)
+      .then((path) => restoreCheck(path))
+      .then((s) => {
+        setFound(s)
+        setNote('')
+      })
+      .catch(failed)
+      .finally(() => setBusy(false))
+  }
+  // The server restarts with the backup; the page comes back once it answers again.
+  const back = (): void => {
+    void fetch('./', { cache: 'no-store' })
+      .then((r) => (r.ok ? location.reload() : setTimeout(back, 2000)))
+      .catch(() => setTimeout(back, 2000))
+  }
+  const apply = async (): Promise<void> => {
+    const ok = await confirmDialog({
+      title: L('Trocar tudo por este backup?', 'Replace everything with this backup?'),
+      body: L(
+        'Os agentes, conversas, memórias, a wiki e os arquivos deste Tucano dão lugar aos do backup. O que está aqui agora fica guardado no servidor, mas só volta com ajuda do suporte. Você continua conectado.',
+        "This Tucano's agents, conversations, memories, wiki and files give way to the backup's. What's here now is kept on the server, but only comes back with support's help. You stay signed in."
+      ),
+      confirm: L('Restaurar', 'Restore'),
+      danger: true
+    })
+    if (!ok) return
+    setBusy(true)
+    try {
+      await restoreApply()
+      setNote(L('Restaurando… o Tucano reinicia, e esta página volta sozinha em alguns segundos.', 'Restoring… Tucano restarts, and this page comes back on its own in a few seconds.'))
+      setTimeout(back, 4000)
+    } catch (e) {
+      failed(e)
+      setBusy(false)
+    }
+  }
+  return (
+    <Card
+      title={L('Backup completo', 'Full backup')}
+      lead={
+        web
+          ? L(
+              'Trouxe o Tucano do seu computador? No app do computador, use Exportar tudo (Configurações › Geral) e envie o arquivo aqui: agentes, conversas, memórias, wiki e arquivos substituem os deste Tucano. Um backup diário (.db, da pasta de backups) também serve, só com o banco.',
+              "Bringing the Tucano from your computer? In the desktop app, use Export everything (Settings › General) and send the file here: agents, conversations, memories, wiki and files replace this Tucano's. A daily backup (.db, from the backups folder) works too, with the database only."
+            )
+          : L(
+              'Tudo deste Tucano num arquivo .zip: agentes, conversas, memórias, wiki e arquivos, pra levar pra um Tucano num servidor (como o Tucano Pro). As senhas dos conectores e os logins de IA não vão: eles ficam presos a este computador.',
+              "Everything of this Tucano in one .zip: agents, conversations, memories, wiki and files, to take to a Tucano on a server (such as Tucano Pro). Connector passwords and AI logins don't go: they're tied to this computer."
+            )
+      }
+    >
+      {web && info && (
+        <p className="small" style={{ whiteSpace: 'pre-line' }}>
+          {L(
+            `Backup restaurado em ${new Date(info.at).toLocaleString('pt-BR')}. Falta:\n• conferir se a sua IA está conectada aqui (Configurações › Modelos)\n• reconectar os conectores (Conectores)${info.routines ? `\n• ligar as rotinas que quiser aqui (${info.routines} chegaram desligadas, pra não rodarem em dobro com o computador)` : ''}`,
+            `Backup restored on ${new Date(info.at).toLocaleString('en')}. Left to do:\n• check that your AI is signed in here (Settings › Models)\n• reconnect the connectors (Connectors)${info.routines ? `\n• turn on the routines you want here (${info.routines} came in off, so they don't run twice with your computer)` : ''}`
+          )}
+        </p>
+      )}
+      {!web && (
+        <div className="row">
+          <button className="btn btn--sm" disabled={busy} onClick={exportAll}>
+            {L('Exportar tudo', 'Export everything')}
+          </button>
+        </div>
+      )}
+      {web && window.tucano.upload && !found && (
+        <div className="row">
+          <label className="btn btn--sm">
+            {L('Restaurar um backup…', 'Restore a backup…')}
+            <input
+              type="file"
+              accept=".zip,.db,application/zip"
+              hidden
+              disabled={busy}
+              onChange={(e) => {
+                pick(e.target.files?.[0])
+                e.target.value = ''
+              }}
+            />
+          </label>
+        </div>
+      )}
+      {found && (
+        <>
+          <p className="small">
+            {L(
+              `Esse backup${found.workspace ? ` (“${found.workspace}”` : ' ('}${found.app ? `, Tucano ${found.app}` : ''}, de ${day(found.madeAt)}) tem ${what(found)}.`,
+              `This backup${found.workspace ? ` (“${found.workspace}”` : ' ('}${found.app ? `, Tucano ${found.app}` : ''}, from ${day(found.madeAt)}) has ${what(found)}.`
+            )}
+          </p>
+          <div className="row">
+            <button className="btn btn--sm btn--danger" disabled={busy} onClick={() => void apply()}>
+              {L('Restaurar este backup', 'Restore this backup')}
+            </button>
+            <button
+              className="btn btn--sm btn--ghost"
+              disabled={busy}
+              onClick={() => {
+                setFound(null)
+                void restoreCancel()
+              }}
+            >
+              {L('Cancelar', 'Cancel')}
+            </button>
+          </div>
+        </>
+      )}
       {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
     </Card>
   )
@@ -2503,6 +2720,7 @@ export function SettingsPage(): ReactNode {
 
 
         {pane('geral') && admin && <TeamCard />}
+        {pane('geral') && <BackupCard />}
         {pane('servidores') && <ServersCard />}
 
         {pane('agentes') && (

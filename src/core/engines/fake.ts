@@ -15,6 +15,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
   const delay = opts.delayMs ?? 25
   return {
     id,
+    ...(id === 'codex' ? { planUsage: async () => ({ windows: [{ minutes: 300, utilization: 0.12, resetsAt: Date.now() + 3 * 3_600_000 }, { minutes: 10_080, utilization: 0.09, resetsAt: Date.now() + 5 * 86_400_000 }], plan: 'plus', at: Date.now() }) } : {}),
     ...(opts.sessions
       ? {
           sessions: true,
@@ -24,7 +25,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         }
       : {}),
     async *run(turn): AsyncIterable<EngineEvent> {
-      const last = lastMessage(turn.prompt)
+      let last = lastMessage(turn.prompt)
+      // Work handed down (src/core/delegations.ts): what was asked is the line after "um pedido:", and
+      // what came back to whoever asked is in the task at the end, not in a message.
+      const handed = /A mensagem acima é um pedido de|The message above is a request from/.test(turn.prompt) ? [...turn.prompt.matchAll(/(?:um pedido|a request):\n\n([^\n]+)/g)].at(-1)?.[1] : undefined
+      if (handed) last = handed
+      const back = /(?:Voltou do que você pediu ao seu time|Back from what you asked of your team):[\s\S]*$/.exec(turn.prompt)?.[0]
       // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
       // harness, or another account of Claude, whose limit is still there).
       if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== handoffSystem() && turn.system !== memorySystem()) {
@@ -71,6 +77,30 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           })
           reply = textOf(r).includes('card') ? L('Montei o Rafa. Dá pra criar, editar antes ou me pedir ajustes.', 'I put Rafa together. You can create it, edit it first or ask me for changes.') : textOf(r)
         } else reply = L('Legal! Que tipo de tarefa você quer delegar? Me dá um exemplo de algo que você fez essa semana.', 'Nice! What kind of task do you want to delegate? Give me an example of something you did this week.')
+      } else if (turn.mcpUrl && back) {
+        // What came back from its team: a question left there is answered ("responda a dúvida com `x`", in
+        // what the person wrote first) or taken to the person; an end is told in a line.
+        const waiting = /\[([0-9a-f]{8})\][^\n]*(?:deixou uma pergunta|left a question)/.exec(back)
+        const known = /respond[ae] (?:a d[úu]vida|the question) com `([^`]+)`/i.exec(turn.prompt)
+        if (waiting && known) {
+          await callTool(turn.mcpUrl, 'responder_pedido', { id: waiting[1]!, resposta: known[1]! })
+          reply = 'Respondi a dúvida dele.'
+        } else if (waiting) {
+          await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
+          reply = 'Ele precisa de uma decisão sua.'
+        } else reply = /passou do prazo|past its deadline/.test(back) ? 'Passou do prazo e ainda não terminou.' : /: não terminou|did not finish/.test(back) ? 'Não deu certo: o pedido não terminou.' : 'Pronto: o time terminou o que pedi.'
+      } else if (turn.mcpUrl && /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/i.test(last)) {
+        // "delegue a clara: responda o Fulano" (several lines: several requests), "delegue a clara em #vendas: …".
+        const out: string[] = []
+        for (const m of last.matchAll(/(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/gi)) out.push(textOf(await callTool(turn.mcpUrl, 'pedir', { para: m[1]!, pedido: m[3]!, ...(m[2] ? { canal: m[2] } : {}), ...(/prazo de (\d+) ?h/i.test(m[3]!) ? { prazo_horas: Number(/prazo de (\d+) ?h/i.exec(m[3]!)![1]) } : {}) })))
+        reply = out.join('\n')
+      } else if (turn.mcpUrl && /^repasse: (.+)/i.test(last)) {
+        // The person's answer to a question that came up from the team, passed on to whoever waits for it.
+        const code = /\[([0-9a-f]{8})\][^\n]*(?:esperando uma resposta sua|waiting for an answer from you)/.exec(turn.prompt)?.[1] ?? ''
+        reply = textOf(await callTool(turn.mcpUrl, 'responder_pedido', { id: code, resposta: /^repasse: (.+)/i.exec(last)![1]! }))
+      } else if (turn.mcpUrl && /cancele o pedido/i.test(last)) {
+        const code = [...turn.prompt.matchAll(/\[([0-9a-f]{8})\]/g)].at(-1)?.[1] ?? ''
+        reply = textOf(await callTool(turn.mcpUrl, 'cancelar_pedido', { id: code, motivo: 'mudou o plano' }))
       } else if (/pe[çc]a pr[oa] (\w+)/i.test(last)) {
         reply = `@${/pe[çc]a pr[oa] (\w+)/i.exec(last)![1]!.toLowerCase()}, pode ajudar aqui?`
       } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
@@ -159,7 +189,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       const inputTokens = Math.ceil((turn.system.length + turn.prompt.length) / 4)
       yield { type: 'progress', tokens: inputTokens + spend }
       // "demore 8 s": a reply that takes its time, to see one at work.
-      const slow = /demore (\d+) ?s/i.exec(last)
+      const slow = /^\s*(?:delegue|hand) /i.test(last) ? null : /demore (\d+) ?s/i.exec(last) // what it hands down is the other's to take its time on
       if (slow) await new Promise((r) => setTimeout(r, Number(slow[1]) * 1000))
       if (id === 'claude') yield { type: 'quota', quota: { fiveHour: { utilization: 0.34, resetsAt: Date.now() + 2 * 3_600_000 }, sevenDay: { utilization: 0.21, resetsAt: Date.now() + 4 * 86_400_000 }, at: Date.now() } }
       let text = ''
@@ -195,6 +225,12 @@ function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   const last = lastMessage(prompt)
   if (/^(bom dia|boa tarde|boa noite|obrigad|valeu|ok)\b/i.test(last.trim())) return { handles: [], reason: 'cumprimento, ninguém precisa responder' }
   const roster = [...prompt.matchAll(/^- ([a-z0-9_-]+): ([^·\n]*)/gim)].map((m) => ({ handle: m[1]!, about: m[2]! }))
+  // A short yes goes to the agent whose message above ended in a question (the router's rule).
+  if (/^(pode|sim|manda|yes|go ahead)\b/i.test(last.trim())) {
+    const asker = [...prompt.slice(0, prompt.lastIndexOf(last)).matchAll(/\[([^\]]+)\] [^\n]*\?(?= →|$)/gm)].map((m) => roster.find((r) => r.about.startsWith(`${m[1]!},`) || r.about.trim() === m[1]))
+    const who = asker.filter(Boolean).at(-1)
+    if (who) return { handles: [who.handle], reason: 'respondeu à pergunta dele' }
+  }
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
