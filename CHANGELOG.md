@@ -4,13 +4,21 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.28] - 2026-11-12
+
 > **Em português:**
-> - **Novo:** a tela **Time**, com o organograma dos seus agentes. Um agente pode **responder a** outro: você fala com um só, ele divide o pedido entre quem está abaixo dele e junta as respostas. Cada pedido vira uma thread no canal de quem faz (ou na DM dele, quando o assunto não é de canal nenhum), e quando ele termina a conversa onde você pediu ganha um aviso com a resposta a um clique; quem você pediu fecha o assunto. Quem responde ao mesmo agente também pode pedir um ao outro. A tela **Time**, na barra lateral, é um quadro: puxe uma linha de um cartão a outro pra ligar, arraste pra arrumar, e veja a linha acender enquanto um pedido anda. Uma linha tem no máximo três agentes, e toda mudança tem **Desfazer**. O guia tem a página "Time".
+> - **Novo:** a tela **Time**, com o organograma dos seus agentes. Um agente pode **responder a** outro: você fala com um só, ele divide o pedido entre quem está abaixo dele e fecha o assunto com você. Cada pedido vira uma thread no canal de quem faz (ou na DM dele, quando o assunto não é de canal nenhum); onde você pediu aparece um aviso de que ele respondeu, com a resposta a um clique. Quem responde ao mesmo agente também pode pedir um ao outro. A tela é um quadro: puxe uma linha de um cartão a outro pra ligar, arraste pra arrumar, e veja a linha acender enquanto um pedido anda. Uma linha tem no máximo três agentes, e toda mudança tem **Desfazer**. O guia tem a página "Time".
+> - **Novo:** o **Hermes** entra como motor, ao lado de Claude Code, Codex e os outros.
+> - **Novo:** os limites da sua assinatura do Codex aparecem em **Uso e limites**; uma rotina ganha o botão **Duplicar**; o **Keenable** (busca na web) entra na loja de conectores.
+> - **Correção:** um agente responde uma mensagem por vez numa conversa ou thread, venha ela de onde vier. Instruções longas de um agente não são mais cortadas. Limite mensal 0 aparece como "sem limite" em todas as telas. O mapa da wiki não desmonta quando a wiki cresce. Um agente que só lê pelo Composio consegue ligar uma conta. O Tucano no navegador reabre onde você estava, e no celular o teclado não sobe sozinho ao abrir uma conversa. No Linux, o agente lê e usa o Chrome dado em Apps.
+> - **Mudou:** num canal que responde em threads, a mensagem que você manda já abre a thread dela. Na página Memória, as suas memórias se chamam "Você".
 
 ### Added
 
 - **An org chart: agents that answer to other agents.** Agents only talked to each other inside a channel they shared, so a person with several agents had to carry each piece of a job to the right one and bring the answers together. Now an agent can **answer to** another. The one above hands work to anyone below it: each request becomes a thread in the channel of whoever does it, in the asker's name, and when that thread ends the conversation where it was asked gets a line saying who answered, with the whole answer one click away; the asker then replies once, when everything has come back, saying what came of it. Agents that answer to the same agent can ask each other too; nobody asks upward, across branches, or back to whoever is waiting on the same work. A request goes to the channel whose topic covers the subject, or to the agent's DM with you when it belongs to no channel (or the agent is in none). Questions from whoever does the work go to the asker, not to you; approvals stay each agent's own, and a request held on one of yours does not hold the others back. Requests can be cancelled, have deadlines, and report failures to whoever asked. Limits: a line holds three agents, a reply makes five requests, an agent keeps twelve open, and one piece of work stacks three.
 - **The Time screen** (Team, in English), in the sidebar with two or more agents: a board that pans and zooms, one card per agent. Pull a line from one card to another to say who answers to whom, click a line to remove it, drag cards where you want them (**Organizar** tidies them again), and ask an agent from the box at the bottom. Open requests are listed under **Agora** and light the line they travel. Every change shows **Desfazer** (⌘Z). The same setting is on each agent's page, under **Responde a**, and travels in a team file.
+
+- **Hermes as a harness.** [Hermes](https://hermes-agent.nousresearch.com) (0.22.0 or later) joins Claude Code, Codex and the others: install it, run `hermes setup`, and pick one of its models for an agent.
 
 - **Your Codex subscription's limits on Usage and limits.** The page showed the Claude subscription's 5-hour and weekly windows, and said Codex doesn't report its own. Codex's app-server does (`account/rateLimits/read`): when Codex is signed in with a ChatGPT plan, the page now asks it, at most once a minute, while it's open and after each reply, and shows each window the plan has (Plus has only the week) with how much is used and when it resets, plus the plan's name.
 
@@ -649,6 +657,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.28]: https://github.com/eduwxyz/tucano/compare/v0.2.27...v0.2.28
 [0.2.27]: https://github.com/eduwxyz/tucano/compare/v0.2.26...v0.2.27
 [0.2.26]: https://github.com/eduwxyz/tucano/compare/v0.2.25...v0.2.26
 [0.2.25]: https://github.com/eduwxyz/tucano/compare/v0.2.24...v0.2.25
