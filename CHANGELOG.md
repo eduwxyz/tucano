@@ -30,6 +30,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **The keyboard stays down when you open a conversation on a phone.** Opening a conversation or a thread, attaching a file or dictating put the focus in the message field, and on a touch screen that raised the keyboard over the messages you came to read. On a phone or tablet the field now takes the focus only when you tap it. On a computer it still does, as before.
 
+- **Your own memories are named "You" on the Memory page.** The tab read "About you" ("Sobre você"), which wrapped to two lines once a few agents had notes of their own and the tab strip got crowded. It now reads "You" ("Você"), and so does the heading inside it. Only the name changed: the memories and where they're kept are the same. Thanks, apoapostolov! (#296)
+
 ## [0.2.27] - 2026-11-10
 
 > **Em português:**
