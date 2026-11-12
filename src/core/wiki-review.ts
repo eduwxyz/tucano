@@ -1,7 +1,7 @@
 // Looking after the wiki: what's broken or missing (found by reading the pages, no model), and
 // what no longer adds up (a cheap model reads what changed since the last review, next to the
 // pages around it). Everything it finds waits for the person; nothing goes in on its own.
-import { L } from '../shared/lang'
+import { L, locale } from '../shared/lang'
 import type { Settings, WikiFinding, WikiOp, WikiPage, WikiReview } from '../shared/types'
 import { parseOps } from './wiki-curator'
 import { linksIn, type Wiki, type WikiView } from './wiki'
@@ -236,7 +236,7 @@ export class WikiReviewer {
       size += Math.min(pg.body.length, PAGE_CHARS)
     }
     const orphans = shown.filter((p) => !p.backlinks.length).map((p) => link(p.title))
-    const date = (ms: number): string => new Date(ms).toLocaleDateString('pt-BR')
+    const date = (ms: number): string => new Date(ms).toLocaleDateString(locale())
     const prompt = [
       L('## Páginas', '## Pages'),
       ...shown.map((p) => `### [[${p.title}]] (${p.kind}, ${L('atualizada em', 'updated')} ${date(p.updatedAt)})\n${p.body.slice(0, PAGE_CHARS)}`),

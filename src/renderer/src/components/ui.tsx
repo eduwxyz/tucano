@@ -72,6 +72,7 @@ const PATHS: Record<string, ReactNode> = {
   ),
   layers: <path d="m12 3 9 5-9 5-9-5 9-5ZM3 13l9 5 9-5" />,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,
+  clip: <path d="m21 11.5-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
   globe: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -324,10 +325,19 @@ export function time(at: number): string {
 }
 
 export function UsageBar({ used, limit }: { used: number; limit: number }): ReactNode {
-  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 100
-  const tone = pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
+  // No limit draws an empty bar: a full red one reads as "already spent it all".
+  const unlimited = !(limit > 0)
+  const pct = unlimited ? 0 : Math.min(100, (used / limit) * 100)
+  const tone = unlimited ? 'ok' : pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
   return (
-    <span className={`budget budget--${tone}`} role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+    <span
+      className={`budget budget--${tone}`}
+      role="meter"
+      aria-valuenow={Math.round(pct)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      {...(unlimited ? { 'aria-valuetext': L('sem limite', 'no limit') } : {})}
+    >
       <span className="budget__fill" style={{ transform: `scaleX(${pct / 100})` }} />
     </span>
   )

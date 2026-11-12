@@ -107,7 +107,7 @@ describe("a member's read-only pages", () => {
         let body = src.slice(i, j + 1)
         // An effect that runs a function of the component (`useEffect(check, [])`, `() => load()`): its body too.
         for (const f of body.matchAll(/\b(\w+)(?:\(\)|\s*,\s*\[)/g)) body += new RegExp(`(?:const|function) ${f[1]}\\b[^\\n]*(?:\\n(?!  (?:const|function|useEffect))[^\\n]*){0,8}`).exec(src)?.[0] ?? ''
-        if (/\badmin\b/.test(body)) continue
+        if (/\b(admin|owner)\b/.test(body)) continue // gated: only an admin (or the owner) runs it
         for (const [helper, method] of helpers) if (new RegExp(`\\b${helper}\\(`).test(body) && !ADMIN_SCREENS.has(`${file}:${method}`)) found.push(`${file}:${src.slice(0, i).split('\n').length} ${method}`)
       }
     }

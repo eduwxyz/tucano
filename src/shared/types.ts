@@ -853,6 +853,15 @@ export const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // what the models take per image
 export const MAX_IMAGES_PER_MESSAGE = 10
 
+// A file I attach to a message that isn't an image (a PDF, a Word doc, a spreadsheet, text): kept with
+// the message, and what it says goes to the agents as text (any engine, with a computer or not).
+export interface FileUpload {
+  name: string
+  data: string // base64
+}
+export const MAX_FILE_BYTES = 20 * 1024 * 1024 // as the wiki takes
+export const MAX_FILES_PER_MESSAGE = 5
+
 // In a browser (Tucano as a server) the server itself serves them, under /artifact.
 export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string =>
   `${(globalThis as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? './artifact/' : 'tucano://artifact/'}${a.id}/${encodeURIComponent(a.name)}`
@@ -1241,4 +1250,21 @@ export interface WikiReview {
   running: boolean
   error?: string // the last review failed
   findings: WikiFinding[] // still open
+}
+
+// A whole Tucano in one .zip (Settings › General › Export everything), and what a server finds in
+// one before restoring it (src/core/restore.ts).
+export interface BackupSummary {
+  version: 1
+  madeAt: number
+  app: string
+  workspace: string
+  schema: number
+  agents: number
+  channels: number
+  messages: number
+  memories: number
+  wikiPages: number
+  files: number
+  filesLeftOut: number // the agents' files that didn't fit in one upload
 }

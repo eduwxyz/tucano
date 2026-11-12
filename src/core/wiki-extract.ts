@@ -3,7 +3,7 @@
 // a web page through Readability, so only its main content comes along. All in the core,
 // nothing leaves the computer except the fetch of the link itself.
 import { extname } from 'node:path'
-import { L } from '../shared/lang'
+import { L, locale } from '../shared/lang'
 import { MAX_WIKI_FILE } from '../shared/rpc-shapes'
 import { safeFetch } from './safe-fetch'
 
@@ -78,7 +78,7 @@ export async function extractFile(name: string, data: Buffer): Promise<string> {
       const rows: string[][] = []
       sheet.eachRow({ includeEmpty: false }, (row) => {
         const values = (row.values as unknown[]).slice(1)
-        rows.push(values.map((v) => (v == null ? '' : typeof v === 'object' && v && 'text' in v ? String((v as { text: unknown }).text) : typeof v === 'object' && v && 'result' in v ? String((v as { result: unknown }).result) : v instanceof Date ? v.toLocaleDateString('pt-BR') : String(v))))
+        rows.push(values.map((v) => (v == null ? '' : typeof v === 'object' && v && 'text' in v ? String((v as { text: unknown }).text) : typeof v === 'object' && v && 'result' in v ? String((v as { result: unknown }).result) : v instanceof Date ? v.toLocaleDateString(locale()) : String(v))))
       })
       if (rows.length) parts.push(`## ${sheet.name}\n\n${table(rows)}`)
     })

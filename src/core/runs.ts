@@ -5,13 +5,14 @@ import { L, locale } from '../shared/lang'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_WRITE_TOOL_NAMES, wikiCall, wikiToolsFor, wikiWrite, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
-import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
+import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
+import { extractFile } from './wiki-extract'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
@@ -62,6 +63,19 @@ const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
+// An agent with no monthly ceiling (limit 0) still keeps a per-reply cap, or a
+// reply that keeps making progress would never be cut. The percentage then has
+// no month to apply to, so it is taken over this base instead.
+const NO_LIMIT_REPLY_BASE = 1_000_000
+
+// The month's ceiling for an agent: 0 (or anything that isn't a positive
+// number) is no ceiling, so every comparison against it is false.
+export const monthlyCeiling = (limit: number): number => (limit > 0 ? limit : Infinity)
+
+// How many tokens a single reply may spend. With a ceiling it is a share of it;
+// without one the share is taken over NO_LIMIT_REPLY_BASE, so a reply still has
+// a top even when the month doesn't.
+export const replyBudget = (limit: number, pct: number): number => Math.round(((limit > 0 ? limit : NO_LIMIT_REPLY_BASE) * pct) / 100)
 const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
 const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
 const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
@@ -83,6 +97,41 @@ export const VER_IMAGEM: ToolDef = {
       properties: { nome: { type: 'string', description: L('O nome, como aparece em [imagem anexada: nome]. Sem nome: a mais recente.', 'The name, as in [attached image: name]. No name: the newest.') } }
     }
   }
+}
+
+// A file I attached (a PDF, a Word doc, a spreadsheet, text): its text goes in with the reply to the
+// message that brought it; later turns only name it, and the agent reads it again with this.
+export const LER_ANEXO: ToolDef = {
+  name: 'ler_anexo',
+  get description() {
+    return L(
+      'Lê o texto de um arquivo anexado numa mensagem desta conversa (PDF, Word, planilha, texto). O texto de cada arquivo vai pra você junto da mensagem que o trouxe, só na resposta a ela; depois o arquivo aparece só pelo nome, como [arquivo anexado: nome]. Use pra ler de novo, ou pra continuar de onde o texto foi cortado (de: a posição, em caracteres).',
+      'Reads the text of a file attached to a message of this conversation (PDF, Word doc, spreadsheet, text). Each file\'s text goes to you with the message that brought it, only in the reply to it; after that the file shows only by name, as [attached file: name]. Use it to read it again, or to go on from where the text was cut (de: the position, in characters).'
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        nome: { type: 'string', description: L('O nome, como aparece em [arquivo anexado: nome]. Sem nome: o mais recente.', 'The name, as in [attached file: name]. No name: the newest.') },
+        de: { type: 'number', description: L('De que caractere começar (0 no início).', 'Which character to start from (0 at the start).') }
+      }
+    }
+  }
+}
+
+// How much of attached files' text goes in at once (characters): per file, and per reply.
+const FILE_TEXT_INLINE = 100_000
+const FILES_TEXT_TURN = 150_000
+const FILE_TEXT_NAME = '.texto.json' // beside the file in its artifact folder: { text } or { error }
+
+// A file's text from `de`, at most `max` characters, saying where it goes on when cut.
+export function fileChunk(name: string, text: string, de = 0, max = FILE_TEXT_INLINE): string {
+  const part = text.slice(de, de + max)
+  const end = de + part.length
+  const head = de > 0 ? L(`[arquivo anexado: ${name}, a partir do caractere ${de} de ${text.length}]`, `[attached file: ${name}, from character ${de} of ${text.length}]`) : L(`[arquivo anexado: ${name}]`, `[attached file: ${name}]`)
+  const tail = end < text.length ? L(`[o texto continua: ${text.length - end} caracteres a mais. Leia com ler_anexo, de: ${end}]`, `[the text goes on: ${text.length - end} more characters. Read them with ler_anexo, de: ${end}]`) : L(`[fim de ${name}]`, `[end of ${name}]`)
+  return `${head}\n${part}\n${tail}`
 }
 
 export const ASK_USER: ToolDef = {
@@ -410,11 +459,12 @@ export class Runner {
   // `by`: the person writing (the Tucano's owner when left out: the phone, older callers).
   // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
   // wherever the person writes from). The caller checked that they may answer it.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string } = {}): Promise<void> {
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[] } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const typed = text.trim()
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
+    const docs = this.deps.dataDir ? (opts.files ?? []).filter((f) => typeof f?.name === 'string' && typeof f.data === 'string' && f.data.length > 0).slice(0, MAX_FILES_PER_MESSAGE) : []
     if (!conv) return
     const writer = (by ? db.person(by) : undefined) ?? db.owner()
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
@@ -440,13 +490,14 @@ export class Runner {
     // written in the field. Only by whoever answers the question: anyone else's message is just theirs.
     const fromCard = asked ? formatAnswers(questionsOf(asked.run), asked.run?.answers) : ''
     const body = [fromCard, typed].filter(Boolean).join('\n\n')
-    if (!body && pictures.length === 0) return
+    if (!body && pictures.length === 0 && docs.length === 0) return
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
     for (const img of pictures) this.keepImage(mine, img)
+    const reading = docs.map((f) => this.keepFile(mine, f))
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
@@ -465,7 +516,7 @@ export class Runner {
       }
       // The message keeps the answers for the agent; the card, which shows them, says which one it is (and
       // what it had beyond them), so the conversation shows them once. With images, it shows whole.
-      const link = fromCard && pictures.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
+      const link = fromCard && pictures.length === 0 && docs.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
       this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
       const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
       if (asker && responders.length === 0) responders = [asker]
@@ -479,6 +530,9 @@ export class Runner {
           )
         }
     }
+
+    // What the files say, before anyone answers (after the question is taken: nothing else waits here).
+    if (reading.length) await Promise.all(reading)
 
     if (members.length === 0) {
       this.post(conv.id, replyIn, L('Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.', "No one is in this channel yet. Add agents on each one's page (Channels) and send it again."))
@@ -521,6 +575,31 @@ export class Runner {
     const artifact: Artifact = { id, agentId: '', conversationId: message.conversationId, messageId: message.id, kind: 'image', name, title: name, source: 'anexo', size: data.length, createdAt: message.at }
     this.deps.db.saveArtifact(artifact)
     this.deps.emit({ type: 'artifact', artifact })
+  }
+
+  // A file I attached that isn't an image, kept with my message; what it says is read once, here,
+  // and kept beside it for the agents (or why it couldn't be read, which they tell me).
+  private async keepFile(message: Message, file: FileUpload): Promise<void> {
+    const data = Buffer.from(file.data, 'base64')
+    if (data.length === 0 || data.length > MAX_FILE_BYTES) return
+    const id = randomUUID()
+    const name = file.name.replace(/[/\\]/g, '_').replace(/[^\p{L}\p{N}._ ()-]+/gu, '').replace(/^\.+/, '').trim().slice(-120) || L('arquivo', 'file')
+    const dir = join(this.deps.dataDir!, 'artifacts', id)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, name), data)
+    const kind = artifactKind(name)
+    const artifact: Artifact = { id, agentId: '', conversationId: message.conversationId, messageId: message.id, kind: kind === 'image' ? 'file' : kind, name, title: name, source: 'anexo', size: data.length, createdAt: message.at }
+    this.deps.db.saveArtifact(artifact)
+    this.deps.emit({ type: 'artifact', artifact })
+    let read: { text: string } | { error: string }
+    try {
+      read = { text: await extractFile(name, data) }
+    } catch (e) {
+      // Not a kind the wiki reads: plain text (code, a config, a log) still is, as it is.
+      const head = data.subarray(0, 8192)
+      read = !head.includes(0) && !head.toString('utf8').includes('\uFFFD') ? { text: data.toString('utf8') } : { error: e instanceof Error ? e.message : String(e) }
+    }
+    writeFileSync(join(dir, FILE_TEXT_NAME), JSON.stringify(read))
   }
 
   stop(messageId: string): void {
@@ -882,8 +961,11 @@ export class Runner {
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
+    // A limit of 0 is no ceiling at all: comparing against it would stop the
+    // agent on its first turn, so every check below goes through `ceiling`.
     const used = db.usedThisMonth(agent.id)
-    if (used >= agent.limit) {
+    const ceiling = monthlyCeiling(agent.limit)
+    if (used >= ceiling) {
       save({
         text: L('Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.', "I stopped: I've used all my tokens for this month. It can be raised on my page."),
         run: { status: 'limit_reached', endedAt: Date.now(), depth: opts.depth, steps: [], ...again }
@@ -934,7 +1016,7 @@ export class Runner {
     const members = this.members(conv)
     const peers = members.filter((a) => a.id !== agent.id)
     const memory = this.deps.memory
-    const { summary, messages: windowAll } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
+    const { summary, messages: windowAll, before: beforeAll = [] } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // Whom this reply is for: the person every "ask", "tell" and "approve" in its prompt and tools
     // means. The owner reads by the workspace's name, so one person's prompts stay as they were.
     const requester = requesterOf(db, conv, windowAll)
@@ -942,6 +1024,7 @@ export class Runner {
     // what a channel held before the Tucano had more people (the owner's: see People.visibleAt).
     const sees = new People(db)
     const windowed = windowAll.filter((m) => sees.visibleAt(requester, m))
+    const above = beforeAll.filter((m) => sees.visibleAt(requester, m)) // what was on screen when a person opened this thread
     // A routed reply answers its message, and its transcript ends there: what people wrote after it
     // is another reply's. Replies that came in since to what was before it (its own earlier one,
     // say) are what was already said: they go before it. Replies to it or to later ones, none.
@@ -1017,7 +1100,7 @@ export class Runner {
 
     // Guards (spec §3). Long work that keeps going somewhere is never cut: a loop
     // repeats itself, a stuck turn goes quiet, and a costly one pauses to ask.
-    const budget = Math.round((agent.limit * (settings.runBudgetPct ?? RUN_BUDGET_PCT)) / 100)
+    const budget = replyBudget(agent.limit, settings.runBudgetPct ?? RUN_BUDGET_PCT)
     const stallMs = (settings.runStallMinutes ?? RUN_STALL_MINUTES) * 60_000
     const seen = new Map<string, { result: string; n: number }>()
     let failing = 0 // tool calls failing in a row
@@ -1073,7 +1156,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1146,6 +1229,18 @@ ${note}`,
     const unanswered = new Set(history.slice(answered + 1).map((m) => m.id))
     const fresh = attached.filter((a) => unanswered.has(a.messageId))
     const canSeeImages = !!this.deps.gateway && attached.length > 0
+    // Files I attached, the same way: their text goes in until this agent has answered them; then by name.
+    const filed = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind !== 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
+    const fileNames = new Map<string, string[]>()
+    for (const a of filed) fileNames.set(a.messageId, [...(fileNames.get(a.messageId) ?? []), a.name])
+    const fileText = (a: Artifact): { text: string } | { error: string } => {
+      try {
+        return JSON.parse(readFileSync(join(this.deps.dataDir!, 'artifacts', a.id, FILE_TEXT_NAME), 'utf8')) as { text: string } | { error: string }
+      } catch {
+        return { error: L('o texto dele não foi lido', "its text wasn't read") }
+      }
+    }
+    const canReadFiles = !!this.deps.gateway && filed.length > 0
     // The app's own tools stay in the prompt; the connectors' wait behind tool search (ALWAYS_LOAD).
     const others = db.people()
     const ownTools: ToolDef[] = [
@@ -1155,6 +1250,7 @@ ${note}`,
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
       ...(canSeekThreads ? [BUSCAR_THREADS, LER_THREAD] : []),
       ...(canSeeImages ? [VER_IMAGEM] : []),
+      ...(canReadFiles ? [LER_ANEXO] : []),
       ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
       ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
@@ -1368,6 +1464,17 @@ ${note}`,
           if (!found || !data) return textResult(L(`Não achei a imagem "${nome}" nesta conversa. Use o nome como aparece em [imagem anexada: nome]: ${attached.map((a) => a.name).join(', ')}.`, `I couldn't find the image "${nome}" in this conversation. Use the name as in [attached image: name]: ${attached.map((a) => a.name).join(', ')}.`), true)
           addSteps({ id: randomUUID(), label: L('Viu uma imagem anexada', 'Looked at an attached image'), detail: found.name, status: 'done' })
           return { content: [{ type: 'image', data: data.toString('base64'), mimeType: mimeOf(found.name) }, { type: 'text', text: L(`${found.name}, anexada antes nesta conversa.`, `${found.name}, attached earlier in this conversation.`) }] }
+        }
+
+        if (name === LER_ANEXO.name && canReadFiles) {
+          const nome = typeof args['nome'] === 'string' ? args['nome'].trim().replace(/^\[?(?:arquivo anexado|attached file):\s*/i, '').replace(/\]$/, '') : ''
+          const found = nome ? (filed.findLast((a) => a.name === nome) ?? filed.findLast((a) => a.name.toLowerCase() === nome.toLowerCase())) : filed.at(-1)
+          if (!found) return textResult(L(`Não achei o arquivo "${nome}" nesta conversa. Use o nome como aparece em [arquivo anexado: nome]: ${filed.map((a) => a.name).join(', ')}.`, `I couldn't find the file "${nome}" in this conversation. Use the name as in [attached file: name]: ${filed.map((a) => a.name).join(', ')}.`), true)
+          const read = fileText(found)
+          if ('error' in read) return textResult(L(`Não deu pra ler ${found.name}: ${read.error}`, `${found.name} couldn't be read: ${read.error}`), true)
+          const de = typeof args['de'] === 'number' && args['de'] > 0 ? Math.floor(args['de']) : 0
+          addSteps({ id: randomUUID(), label: L('Leu um arquivo anexado', 'Read an attached file'), detail: found.name, status: 'done' })
+          return textResult(fileChunk(found.name, read.text, de))
         }
 
         if (name === BUSCAR_THREADS.name && canSeekThreads) {
@@ -1972,10 +2079,22 @@ ${note}`,
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
     const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
+    // The text of the files not answered yet goes after its message's block, in what is sent only:
+    // the blocks a kept session compares stay as they are. The newest first, while there's room.
+    const withFiles = [...blocks]
+    let room = FILES_TEXT_TURN
+    for (const a of filed.filter((f) => unanswered.has(f.messageId)).reverse()) {
+      const at = blockOf.get(a.messageId)
+      if (at === undefined || room <= 0) continue
+      const read = fileText(a)
+      const part = 'error' in read ? L(`[arquivo anexado: ${a.name}. Não deu pra ler o texto dele: ${read.error}]`, `[attached file: ${a.name}. Its text couldn't be read: ${read.error}]`) : fileChunk(a.name, read.text, 0, Math.min(FILE_TEXT_INLINE, room))
+      room -= part.length
+      withFiles[at] = `${withFiles[at]}\n\n${part}`
+    }
 
     // A kept session: the reply goes on from this agent's last one here (this conversation, or this
     // thread) with only what's new since. Not while another agent is still writing a message this
@@ -1988,14 +2107,14 @@ ${note}`,
     let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
     let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
     const session = this.deps.gateway?.open(tools, plan?.token)
-    const whole = { prompt: blocks.join('\n\n'), blocks, images }
+    const whole = { prompt: withFiles.join('\n\n'), blocks: withFiles, images }
     // Resumed: the live context if it changed, the new messages' blocks, then the task's, with their images.
     const since = (p: SessionPlan): typeof whole => {
       const at = p.send.map((id) => blockOf.get(id)!)
       if (task) at.push(blocks.length - 1)
       const lead = p.live ? [live || NO_LIVE()] : []
       const pos = new Map(at.map((b, i) => [b, lead.length + i]))
-      const sent = [...lead, ...at.map((i) => blocks[i]!)]
+      const sent = [...lead, ...at.map((i) => withFiles[i]!)]
       return { prompt: sent.join('\n\n'), blocks: sent, images: images.flatMap((img) => (pos.has(img.block) ? [{ ...img, block: pos.get(img.block)! }] : [])) }
     }
     let input = plan?.resume ? since(plan) : whole
@@ -2023,7 +2142,7 @@ ${note}`,
             } else if (ev.type === 'progress') {
               progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
               const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
-              if (used + counted > agent.limit) halt('limit')
+              if (used + counted > ceiling) halt('limit')
               else if (counted > budget) {
                 if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
                 overBudget = true
@@ -2088,7 +2207,8 @@ ${note}`,
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
     const usedNow = db.usedThisMonth(agent.id)
-    if (used < agent.limit * USAGE_ALERT && usedNow >= agent.limit * USAGE_ALERT && usedNow < agent.limit) {
+    // Only an agent with a ceiling has a share of it to warn about.
+    if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {
       const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
       this.post(
         conv.id,
@@ -2193,6 +2313,13 @@ ${note}`,
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason, decider)) return
     // Everyone who sees the card learns it's decided (and by whom) now, not after the call it allowed.
     emit({ type: 'approval', approval: db.approval(id)! })
+    // The reply the decision was holding is over: it asked, and it got an answer. Closing it here
+    // rather than after the call means a quit in the middle of that call can't leave it saying
+    // "waiting for you" with nothing left to wake it. A live reply keeps its run, which ends itself.
+    if (!this.controllers.has(ap.messageId)) {
+      const waiting = db.message(ap.messageId)
+      if (waiting?.run?.status === 'waiting_approval') this.update(waiting, { run: { ...waiting.run, status: 'done' } })
+    }
     if (decider) db.addActivity({ personId: decider, kind: 'approval.decided', target: id, detail: { decision, agentId: ap.agentId, connector: ap.connectorName, tool: ap.tool } })
     const owner = db.agent(ap.agentId)
     // A runner (Composio's) is never allowed for good itself: "always" allows the inner tools that asked, each on its own.
@@ -2490,6 +2617,32 @@ ${note}`,
 
   async expireApprovals(): Promise<void> {
     for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
+  }
+
+  // A decision written while the app was quitting (or while the approved call was running) leaves
+  // the reply at waiting_approval for good: the approval is no longer pending, so decide() ignores
+  // it, expireApprovals() skips it and nothing else looks. Closing those at every start is the only
+  // way the "?" on the DM can come off again.
+  async settleDecidedRuns(): Promise<number> {
+    const { db } = this.deps
+    let n = 0
+    for (const m of db.messagesWithRun(['waiting_approval'])) {
+      if (m.run?.status !== 'waiting_approval' || this.controllers.has(m.id)) continue
+      const ap = db.approvalForMessage(m.id)
+      if (!ap || ap.state === 'pending') continue // still the person's to answer
+      const label = ap.state === 'approved' ? L('Aprovado', 'Approved') : ap.state === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
+      const detail = ap.outcome ?? L('A decisão ficou salva, mas a resposta nunca terminou de ser gravada.', 'The decision was saved, but the reply never finished saving.')
+      this.update(m, {
+        run: {
+          ...m.run,
+          status: 'done',
+          steps: [...m.run.steps, { id: randomUUID(), label, detail, status: ap.state === 'approved' ? 'done' : 'error' }]
+        }
+      })
+      n++
+      this.deps.emit({ type: 'approval', approval: db.approval(ap.id)! })
+    }
+    return n
   }
 
   // A question whose decisions `by` may answer on the card now: theirs (or one they may answer for
