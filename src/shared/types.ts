@@ -445,6 +445,7 @@ export interface Settings {
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
   quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)
+  codexQuota?: CodexQuota // the Codex subscription's, read when the usage page is open
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
@@ -538,6 +539,14 @@ export interface BrowserView {
 export interface Quota {
   fiveHour?: { utilization: number; resetsAt: number } // 0..1, ms
   sevenDay?: { utilization: number; resetsAt: number }
+  at: number
+}
+
+// The Codex subscription's windows, as its app-server tells (account/rateLimits/read): how long
+// each is depends on the plan (Plus has only the week).
+export interface CodexQuota {
+  windows: { minutes: number; utilization: number; resetsAt: number }[] // 0..1, ms
+  plan?: string // "plus", "pro"…
   at: number
 }
 
