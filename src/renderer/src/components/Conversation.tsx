@@ -1,3 +1,4 @@
+import { canContinue } from '../../../shared/run-progress'
 import { L, lang, locale } from '../../../shared/lang'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
@@ -567,6 +568,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
               {L('Continuar', 'Continue')}
             </button>
           </>
+        )}
+        {/* A reply the app cut with work behind it goes on before it starts over: what it read,
+            wrote and ran is still true, and starting again would throw it away. With nothing but the
+            thinking step there is nothing to go on with, and only "Try again" is offered. */}
+        {message.run && message.run.status !== 'paused' && canContinue(message.run) && (
+          <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
+            {L('Continuar', 'Continue')}
+          </button>
         )}
         {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
             With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
