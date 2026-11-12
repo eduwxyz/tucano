@@ -89,7 +89,7 @@ it('keeps unread counts and memory data in the owning database with identical ID
   expect(a.memories().map((m) => m.text)).toEqual(['Only in A'])
   expect(b.memories()).toEqual([])
   const agent: Agent = { id: 'same-agent', name: 'Agent', handle: 'agent', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
-  const memory = (db: Db): Memories => new Memories({ db, engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }, settings: async () => { throw new Error('Prompt lookup must not invoke a model') }, emit: () => {}, workDir: '' })
+  const memory = (db: Db): Memories => new Memories({ db, engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => { throw new Error('Prompt lookup must not invoke a model') }, emit: () => {}, workDir: '' })
   expect(memory(a).forPrompt(agent).aboutMe.map((m) => m.text)).toEqual(['Only in A'])
   expect(memory(b).forPrompt(agent).aboutMe).toEqual([])
   a.deleteConversation('same-channel')

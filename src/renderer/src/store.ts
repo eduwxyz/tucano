@@ -50,13 +50,16 @@ import {
   type UsageReport,
   type Trigger,
   type ImageUpload,
+  type FileUpload,
   type Os,
   type LocalInfo,
   type VoiceModelId,
   type VoiceStatus,
-  type ProposalsResult
+  type ProposalsResult,
+  type BackupSummary
 } from '../../shared/types'
 import { call, connect, disconnect } from './rpc'
+import { hashToView, viewToHash } from './address'
 
 export * from '../../shared/types'
 
@@ -164,7 +167,7 @@ let state: State = {
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -585,6 +588,10 @@ function apply(e: CoreEvent): void {
   if (e.type === 'browser') showFrame(e.view.agentId, e.view.frame)
 }
 
+// A screen from the address, only if it's still there (a conversation that was removed, an agent gone).
+const stillThere = (view: View | undefined, s: Pick<State, 'conversations' | 'agents'>): View | undefined =>
+  !view || (view.kind === 'conversation' && !s.conversations.some((c) => c.id === view.id)) || (view.kind === 'agent' && !s.agents.some((a) => a.id === view.id)) ? undefined : view
+
 export async function start(): Promise<void> {
   window.tucano.onNavigate((id, thread) => {
     navigate({ kind: 'conversation', id })
@@ -603,12 +610,31 @@ export async function start(): Promise<void> {
       if (id && state.ready) void call('markRead', { conversationId: id })
     }
   })
+  // In a browser the screen rides in the address, so a reload (a phone bringing the tab back)
+  // opens where it was. The desktop keeps it in memory, as before.
+  const web = windowless()
+  if (web) {
+    const write = (): void => {
+      const hash = state.view && viewToHash(state.view)
+      if (hash && location.hash !== hash) history.replaceState(history.state, '', `${location.pathname}${location.search}${hash}`)
+    }
+    let last: View | null = null
+    subscribe(() => state.view !== last && ((last = state.view), write()))
+    // An address typed or pasted while the page is open: there, or back to where it is.
+    window.addEventListener('hashchange', () => {
+      if (!state.ready) return
+      const view = stillThere(hashToView(location.hash), state)
+      if (view && viewToHash(view) !== (state.view && viewToHash(state.view))) navigate(view)
+      else write()
+    })
+  }
   await connect(apply)
   const snap = await call('snapshot')
   for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
-    const view = s.view ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
+    const there = web ? stillThere(hashToView(location.hash), snap) : undefined
+    const view = s.view ?? there ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
     return {
       ...withSettings({ ...s, you: snap.you, people: snap.people }, snap.settings),
       ready: true,
@@ -891,8 +917,8 @@ export const deleteConversation = (id: string): Promise<void> => call('deleteCon
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
 // `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string): void => {
-  if (text.trim() || images.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(threadId ? { threadId } : {}) })
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
+  if (text.trim() || images.length || files.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
@@ -997,6 +1023,11 @@ export const setTelegramToken = (token: string | null): Promise<void> => call('s
 export const unpairTelegram = (): void => void fire(L('Não consegui desconectar o Telegram.', "I couldn't disconnect Telegram."), 'unpairTelegram')
 export const exportTeam = (): Promise<string> => call('exportTeam')
 export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
+export const exportBackup = (): Promise<{ path: string } & BackupSummary> => call('exportBackup')
+export const restoreCheck = (path: string): Promise<BackupSummary> => call('restoreCheck', { path })
+export const restoreApply = (): Promise<void> => call('restoreApply')
+export const restoreCancel = (): Promise<void> => call('restoreCancel')
+export const restoreInfo = (): Promise<{ at: number; routines: number } | null> => call('restoreInfo')
 export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)
 export const backupNow = (): Promise<string> => call('backupNow')
 export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')

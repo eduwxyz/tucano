@@ -69,8 +69,8 @@ describe('replies that overlap', () => {
         yield* (isLia(t) ? slow : fast).run(t)
       }
     }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ro-work-')) })
   }
 
@@ -137,7 +137,9 @@ describe('replies that overlap', () => {
   })
 
   it('marks the end of a reply that never got to run', async () => {
-    db.saveAgent(agent('lia', 'lia', { limit: 0 }))
+    // Past the limit is a ceiling it really has and use it really made: a limit of 0 is no limit.
+    db.saveAgent(agent('lia', 'lia', { limit: 1_000 }))
+    db.addReceipt({ messageId: 'before', agentId: 'lia', engine: 'claude', model: 'sonnet', inputTokens: 1_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, at: Date.now() })
     const r = runner()
     await r.send('c', '@lia bom dia')
     await r.idle()

@@ -21,8 +21,8 @@ const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-fixes-'))
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const approval = (id: string, conversationId: string, requestedBy: string, agentId = 'a1'): Approval => ({ id, hash: id, agentId, conversationId, messageId: 'x', connectorId: 'c', connectorName: 'GitLab', tool: 'create_merge_request', args: {}, why: '', highRisk: false, state: 'pending', createdAt: 1, expiresAt: Date.now() + 60_000, requestedBy })
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
-const engines = (): Record<EngineId, Engine> => ({ claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') })
+const settings: Settings = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const engines = (): Record<EngineId, Engine> => ({ claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') })
 
 // Ana (owner), Bia (member), Dani (admin).
 function team(file = ':memory:'): { db: Db; people: People; ana: Person; bia: Person; dani: Person } {
@@ -107,7 +107,7 @@ describe("a member's read-only pages", () => {
         let body = src.slice(i, j + 1)
         // An effect that runs a function of the component (`useEffect(check, [])`, `() => load()`): its body too.
         for (const f of body.matchAll(/\b(\w+)(?:\(\)|\s*,\s*\[)/g)) body += new RegExp(`(?:const|function) ${f[1]}\\b[^\\n]*(?:\\n(?!  (?:const|function|useEffect))[^\\n]*){0,8}`).exec(src)?.[0] ?? ''
-        if (/\badmin\b/.test(body)) continue
+        if (/\b(admin|owner)\b/.test(body)) continue // gated: only an admin (or the owner) runs it
         for (const [helper, method] of helpers) if (new RegExp(`\\b${helper}\\(`).test(body) && !ADMIN_SCREENS.has(`${file}:${method}`)) found.push(`${file}:${src.slice(0, i).split('\n').length} ${method}`)
       }
     }

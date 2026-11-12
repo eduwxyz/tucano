@@ -35,7 +35,7 @@ function runner(opts: { reply?: (t: Turn) => string; memory?: boolean; onTurn?: 
       yield* base.run(t)
     }
   }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
   memory = new Memories({ db, engines, settings: async () => settings, emit: () => {}, workDir })
   return new Runner({
@@ -65,7 +65,7 @@ beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   turns = []
   notes = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia', { role: 'Engenharia' }))
   db.saveAgent(agent('a2', 'theo', { role: 'Dados' }))
   // Both answer in threads; a conversation that answers in it is made where it's tested.
@@ -301,11 +301,68 @@ describe('who answers in a thread', () => {
 
     const routed = turns.find((t) => t.system === routerSystem())!.prompt
     const thread = routed.slice(routed.indexOf('Thread (a primeira mensagem'))
-    expect(routed).toContain('- [Edu] OUTRA THREAD: e o post? → Lia')
-    expect(routed).not.toContain('RESPOSTA NA OUTRA')
-    expect(routed.indexOf('Outras threads recentes')).toBeLessThan(routed.indexOf('Thread (a primeira mensagem'))
+    expect(routed).toContain('- [Edu] OUTRA THREAD: e o post? → Lia · por último [Lia] RESPOSTA NA OUTRA')
+    expect(routed.indexOf('Antes, no canal')).toBeLessThan(routed.indexOf('Thread (a primeira mensagem'))
     expect(thread).not.toContain('OUTRA')
     expect(thread.split('\n').slice(1, 3)).toEqual(['[Edu] RAIZ: precisamos da métrica de retenção', '[Edu] qual a média da semana?'])
+  })
+})
+
+// A routine's agent posts a long report in the channel that ends "posso disparar agora?", and
+// the person answers by writing in the channel: their message opens a thread of its own. The
+// router saw only the opening of the other messages and called someone else, who couldn't see
+// the question either ("não achei nada pra disparar aqui").
+describe('an answer written in the channel to a question at the end of an agent’s message', () => {
+  const report = `Relatório da rotina de pré-render. ${'O build travou no passo do prerender e o lint não confirmou. '.repeat(30)}Posso disparar agora?`
+  const said = (id: string, author: Author, text: string, at: number): Message => {
+    const m: Message = { id, conversationId: 'c1', author, text, at }
+    db.saveMessage(m)
+    return m
+  }
+
+  it('goes to the agent that asked, which reads its question above the thread the answer opened', async () => {
+    said('q0', { kind: 'agent', id: 'a1' }, 'Deploy da landing feito.', Date.now() - 120_000)
+    said('q1', { kind: 'agent', id: 'a2' }, report, Date.now() - 60_000)
+    const r = runner()
+    await r.send('c1', 'pode disparar agora')
+    await r.idle()
+
+    const routed = turns.find((t) => t.system === routerSystem())!.prompt
+    expect(routed).toContain('Posso disparar agora?')
+    const answer = mine().at(-1)!
+    expect(replies().filter((m) => !['q0', 'q1'].includes(m.id)).map((m) => [(m.author as { id: string }).id, m.threadId])).toEqual([['a2', answer.id]])
+    const prompt = agentTurns().at(-1)!.prompt
+    expect(prompt).toContain('Antes desta thread, as últimas mensagens de #lancamento fora de threads')
+    expect(prompt).toContain('Deploy da landing feito.')
+    expect(prompt.indexOf('Posso disparar agora?')).toBeLessThan(prompt.indexOf('pode disparar agora'))
+  })
+
+  it('reads the same blocks on its next reply in that thread, so a kept session goes on', async () => {
+    said('q1', { kind: 'agent', id: 'a2' }, report, Date.now() - 60_000)
+    const r = runner()
+    await r.send('c1', '@theo pode disparar agora')
+    await r.idle()
+    const thread = mine().at(-1)!.id
+    await r.send('c1', '@theo e aí, rodou?', [], thread)
+    await r.idle()
+    const [first, second] = agentTurns()
+    const above = first!.blocks!.filter((b) => b.includes('Posso disparar agora?') || b.startsWith('Antes desta thread'))
+    expect(above).toHaveLength(2)
+    expect(second!.blocks).toEqual(expect.arrayContaining(above))
+  })
+
+  it('reads nothing from before a thread opened on another message, or from more than 12 hours before', async () => {
+    const old = said('q1', { kind: 'agent', id: 'a2' }, `ANTIGA ${report}`, Date.now() - 13 * 60 * 60 * 1000)
+    const r = runner()
+    await r.send('c1', '@theo pode disparar agora')
+    await r.idle()
+    await r.send('c1', '@theo e essa?', [], old.id)
+    await r.idle()
+    const [fresh, onIt] = agentTurns()
+    expect(fresh!.prompt).not.toContain('Antes desta thread')
+    expect(fresh!.prompt).not.toContain('ANTIGA')
+    expect(onIt!.prompt).not.toContain('Antes desta thread')
+    expect(onIt!.prompt).toContain('ANTIGA') // it's the message that opened the thread
   })
 })
 

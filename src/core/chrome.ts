@@ -19,6 +19,10 @@ export const CHROME = findChrome()
 
 const W = 1280
 const H = 800
+// How long a first open gets before it's called failed. Generous on purpose: a cold Chrome
+// on a slow or loaded machine (a server, CI) is the slowest thing here, and a person only
+// ever waits on a Chrome that is never going to answer.
+const OPEN_TIMEOUT_MS = 90_000
 const FRAME_MS = 150 // at most ~6 frames a second while someone watches
 const IDLE_MS = 2000 // and one every 2 s otherwise: an animated page left open costs little
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -299,7 +303,10 @@ export class ChromeBrowsers {
     const failed = new Promise<never>((_, reject) => {
       proc.once('exit', () => reject(new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))))
       // The first open on a computer can be slow, with nothing of Chrome in memory yet. As long as any other answer gets (see send).
-      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 30 s', "Chrome didn't open in 30 s"))), 30_000)
+      // 90 s, not 30: a cold Chrome with a brand-new profile took 22 s on GitHub's Windows runner and
+      // more than 30 s on its Ubuntu one, while the very next open on the same machine took 6 s.
+      // Nothing is waited on here that a person sees: the first answer returns the moment Chrome speaks.
+      timer = setTimeout(() => reject(new Error(L('o Chrome não abriu em 90 s', "Chrome didn't open in 90 s"))), OPEN_TIMEOUT_MS)
     })
     try {
       await Promise.race([tab.connect(), failed])

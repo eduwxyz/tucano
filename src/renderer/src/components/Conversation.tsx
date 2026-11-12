@@ -1,4 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
@@ -69,6 +70,8 @@ import { canEditChannel,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
+  MAX_FILE_BYTES,
+  MAX_FILES_PER_MESSAGE,
   isTeam,
   cancelTranscribe,
   transcribe,
@@ -83,6 +86,7 @@ import { canEditChannel,
   type Person
 } from '../store'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
@@ -242,6 +246,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 }
 
 const NO_REPLIES: Message[] = []
+// A phone or a tablet: focusing the message field there raises the keyboard over the
+// conversation, so it only takes the focus when the person taps it.
+const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
@@ -545,13 +552,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             </button>
           </>
         )}
-        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
+        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
+            With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
+        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             {L('Tentar de novo', 'Try again')}
           </button>
         )}
-        {message.run?.status === 'limit_reached' && agent && agent.used >= agent.limit && (
+        {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
           <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
@@ -763,6 +771,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   )
   return (
     <aside className="side-panel side-panel--thread">
+      <PanelResize />
       <header className="side-panel__head">
         <Icon name="thread" size={14} />
         <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
@@ -1303,17 +1312,20 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const actions = runner ? innerActions(approval.tool, approval.args) : undefined
   // What "always allow" covers there: each inner tool that asked, on its own (none for a raw request or code).
   const forGood = runner ? runnerRules(approval.connectorId, approval.tool, approval.args)?.map((r) => r.slice(r.indexOf(':') + 1)) : undefined
-  // Hold to approve: CSS fills the button in 1.5s (.is-holding); the approval goes when
-  // that fill ends while still held. Letting go drains it back. Space or Enter hold too.
+  // Hold to approve: CSS fills the button in 1.5s (.is-holding) and this timer approves, so the
+  // approval no longer depends on a transitionend that a re-render or a throttled window can drop.
+  // Letting go drains the fill back and clears the timer. Space or Enter hold too.
   const [holding, setHolding] = useState(false)
   const startHold = (): void => setHolding(true)
   const cancelHold = (): void => setHolding(false)
-  const holdFilled = (e: React.TransitionEvent<HTMLButtonElement>): void => {
-    if (holding && e.propertyName === 'transform' && e.pseudoElement === '::before') {
+  useEffect(() => {
+    if (!holding) return
+    const t = setTimeout(() => {
       setHolding(false)
       decideApproval(approval.id, 'approved')
-    }
-  }
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [holding, approval.id])
 
   const decided = approval.state !== 'pending'
   // A command on the agent's computer: what it does, in words, and the command itself.
@@ -1459,17 +1471,24 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
       ) : (
         <div className="row">
           {approval.highRisk ? (
+            // The hold can't depend on the pointer staying inside the button: taking capture makes
+            // the browser fire pointerout/pointerleave on the button at once, and a cursor that drifts
+            // off fires them too. Capture keeps the release, and pointercancel is the real interruption.
             <button
               className={`btn btn--primary btn--hold ${holding ? 'is-holding' : ''}`}
-              onPointerDown={startHold}
+              onPointerDown={(e) => {
+                e.currentTarget.setPointerCapture(e.pointerId)
+                startHold()
+              }}
               onPointerUp={cancelHold}
-              onPointerLeave={cancelHold}
+              onPointerCancel={cancelHold}
               onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && !e.repeat && (e.preventDefault(), startHold())}
               onKeyUp={(e) => (e.key === ' ' || e.key === 'Enter') && cancelHold()}
               onBlur={cancelHold}
-              onTransitionEnd={holdFilled}
             >
-              <span>{holding ? L('Segure…', 'Hold…') : L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
+              {/* One label for both states: swapping it to "Hold…" shrank the button under the
+                  cursor, and the fill from ::before is the feedback anyway. */}
+              <span>{L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
             </button>
           ) : (
             <>
@@ -1533,7 +1552,9 @@ function ApprovalRoute({ approval, agent, requester, decider, you }: { approval:
 const MAX_SIDE = 2000
 const MAX_RAW = 3_700_000 // base64 under the models' 5 MB
 
-type Attached = ImageUpload & { url: string }
+// An image (with what shows it) or, in the app, any other file: `url` empty, its text goes to the agents.
+type Attached = ImageUpload & { url: string; size?: number }
+const isFile = (a: Attached): boolean => !a.url
 
 const dataUrlOf = (blob: Blob): Promise<string> =>
   new Promise((ok, fail) => {
@@ -1542,6 +1563,17 @@ const dataUrlOf = (blob: Blob): Promise<string> =>
     r.onerror = () => fail(r.error)
     r.readAsDataURL(blob)
   })
+
+async function prepareFile(file: File): Promise<Attached | string> {
+  if (file.size === 0) return L(`${file.name} está vazio.`, `${file.name} is empty.`)
+  if (file.size > MAX_FILE_BYTES) return L(`${file.name} passa de ${MAX_FILE_BYTES / 1024 / 1024} MB.`, `${file.name} is over ${MAX_FILE_BYTES / 1024 / 1024} MB.`)
+  try {
+    const url = await dataUrlOf(file)
+    return { name: file.name || L('arquivo', 'file'), mime: file.type || 'application/octet-stream', data: url.slice(url.indexOf(',') + 1), url: '', size: file.size }
+  } catch {
+    return L(`Não deu pra abrir ${file.name}.`, `${file.name} couldn't be opened.`)
+  }
+}
 
 async function prepareImage(file: File): Promise<Attached | string> {
   if (!file.type.startsWith('image/')) return L(`${file.name} não é imagem.`, `${file.name} isn't an image.`)
@@ -1887,7 +1919,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     setText(draft?.text ?? '')
     setImages(draft?.images ?? [])
     setNote('')
-    ref.current?.focus()
+    if (!touchScreen()) ref.current?.focus()
     return () => {
       const { text, images } = live.current
       if (text.trim() || images.length) drafts.set(key, { text, images })
@@ -1909,19 +1941,23 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       if (paths.length) setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${paths.map((p) => L(`Arquivo enviado: \`${p}\``, `File sent: \`${p}\``)).join('\n')}`)
       const failed = sent.find((r): r is PromiseRejectedResult => r.status === 'rejected')
       setNote(failed ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason) : '')
-      if (!files.length) return void ref.current?.focus()
+      if (!files.length) return void (touchScreen() || ref.current?.focus())
     }
     if (!files.length) return
-    const done = await Promise.all(files.map(prepareImage))
+    // In the app, a file that isn't an image goes with the message, and its text to the agents.
+    const done = await Promise.all(files.map((f) => (f.type.startsWith('image/') ? prepareImage(f) : prepareFile(f))))
     const ok = done.filter((d): d is Attached => typeof d !== 'string')
     const errors = done.filter((d): d is string => typeof d === 'string')
-    let over = false
+    let over = ''
     setImages((cur) => {
-      over = cur.length + ok.length > MAX_IMAGES_PER_MESSAGE
-      return [...cur, ...ok].slice(0, MAX_IMAGES_PER_MESSAGE)
+      const all = [...cur, ...ok]
+      const pics = all.filter((a) => !isFile(a))
+      const docs = all.filter(isFile)
+      over = pics.length > MAX_IMAGES_PER_MESSAGE ? L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`) : docs.length > MAX_FILES_PER_MESSAGE ? L(`Até ${MAX_FILES_PER_MESSAGE} arquivos por mensagem.`, `Up to ${MAX_FILES_PER_MESSAGE} files per message.`) : ''
+      return [...pics.slice(0, MAX_IMAGES_PER_MESSAGE), ...docs.slice(0, MAX_FILES_PER_MESSAGE)]
     })
-    setNote([...errors, over ? L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`) : ''].filter(Boolean).join(' '))
-    ref.current?.focus()
+    setNote([...errors, over].filter(Boolean).join(' '))
+    if (!touchScreen()) ref.current?.focus()
   }
 
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
@@ -2057,7 +2093,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       const glue = before && !/\s$/.test(before) ? ' ' : ''
       return `${before}${glue}${said}${cur.slice(end)}`
     })
-    el?.focus()
+    if (!touchScreen()) el?.focus()
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
@@ -2066,8 +2102,9 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     sendMessage(
       conversationId,
       text,
-      images.map(({ name, mime, data }) => ({ name, mime, data })),
-      threadId
+      images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
+      threadId,
+      images.filter(isFile).map(({ name, data }) => ({ name, data }))
     )
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
@@ -2084,7 +2121,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           <div className="drop-overlay__card">
             <Icon name="image" size={28} />
             <strong>{L('Solte pra anexar', 'Drop to attach')}</strong>
-            <span className="muted">{L('Os agentes veem a imagem junto com a mensagem.', 'Agents see the image along with the message.')}</span>
+            <span className="muted">{L('Os agentes veem o conteúdo junto com a mensagem.', 'Agents see the content along with the message.')}</span>
           </div>
         </div>
       )}
@@ -2118,14 +2155,24 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">
-            {images.map((img, i) => (
+            {images.map((img, i) =>
+              isFile(img) ? (
+                <div key={i} className="composer__file" title={img.name}>
+                  <Icon name="clip" size={13} />
+                  <span className="composer__file-name">{img.name}</span>
+                  <button className="composer__file-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </div>
+              ) : (
               <div key={i} className="composer__image" title={img.name}>
                 <img src={img.url} alt={img.name} />
                 <button className="composer__image-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
                   <Icon name="x" size={11} />
                 </button>
               </div>
-            ))}
+              )
+            )}
           </div>
         )}
         <div className="composer__field">
@@ -2145,7 +2192,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               if (e.target.value.trim()) typing(conversationId, threadId)
             }}
             onPaste={(e) => {
-              const files = pastedFiles([...e.clipboardData.files], e.clipboardData.getData('text/plain'), !!window.tucano.upload)
+              const files = pastedFiles([...e.clipboardData.files], e.clipboardData.getData('text/plain'), true)
               if (!files.length) return
               e.preventDefault()
               void addFiles(files)
@@ -2172,13 +2219,12 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
         </div>
         <div className="composer__bar">
           <VoiceButton controls={voiceControls} state={voice} />
-          <button className="icon-btn" title={window.tucano.upload ? L('Anexar arquivo (ou arraste e solte, ou cole)', 'Attach a file (or drag and drop, or paste)') : L('Anexar imagem (ou arraste e solte, ou cole)', 'Attach an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
-            <Icon name="image" size={15} />
+          <button className="icon-btn" title={L('Anexar arquivo ou imagem (ou arraste e solte, ou cole)', 'Attach a file or an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
+            <Icon name="clip" size={15} />
           </button>
           <input
             ref={picker}
             type="file"
-            accept={window.tucano.upload ? undefined : 'image/*'}
             multiple
             hidden
             onChange={(e) => {

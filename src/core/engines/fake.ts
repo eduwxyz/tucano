@@ -15,6 +15,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
   const delay = opts.delayMs ?? 25
   return {
     id,
+    ...(id === 'codex' ? { planUsage: async () => ({ windows: [{ minutes: 300, utilization: 0.12, resetsAt: Date.now() + 3 * 3_600_000 }, { minutes: 10_080, utilization: 0.09, resetsAt: Date.now() + 5 * 86_400_000 }], plan: 'plus', at: Date.now() }) } : {}),
     ...(opts.sessions
       ? {
           sessions: true,
@@ -195,6 +196,12 @@ function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   const last = lastMessage(prompt)
   if (/^(bom dia|boa tarde|boa noite|obrigad|valeu|ok)\b/i.test(last.trim())) return { handles: [], reason: 'cumprimento, ninguém precisa responder' }
   const roster = [...prompt.matchAll(/^- ([a-z0-9_-]+): ([^·\n]*)/gim)].map((m) => ({ handle: m[1]!, about: m[2]! }))
+  // A short yes goes to the agent whose message above ended in a question (the router's rule).
+  if (/^(pode|sim|manda|yes|go ahead)\b/i.test(last.trim())) {
+    const asker = [...prompt.slice(0, prompt.lastIndexOf(last)).matchAll(/\[([^\]]+)\] [^\n]*\?(?= →|$)/gm)].map((m) => roster.find((r) => r.about.startsWith(`${m[1]!},`) || r.about.trim() === m[1]))
+    const who = asker.filter(Boolean).at(-1)
+    if (who) return { handles: [who.handle], reason: 'respondeu à pergunta dele' }
+  }
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
