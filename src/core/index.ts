@@ -48,6 +48,8 @@ import { ConnectorManager, notAuthorized } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
+import { classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
+import { checkClassifierKey, classifierSecret } from './classifiers'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
 import { usage } from './usage'
@@ -296,10 +298,27 @@ const enginesReady = pathReady.then(detect)
 // The window waits only for the database, open by now, and the gateway.
 const ready = gateway.start()
 
+// A classifier's key, as the page sees it: saved or not. An install from before Settings ›
+// Classifiers kept Jev's under the old name, and that one still counts.
+const classifierKeySaved = (c: ClassifierConfig): boolean =>
+  db.getSecret(classifierSecret(c.id)) !== undefined || (c.id === JEV_CLASSIFIER.id && db.getSecret(JEV_SECRET) !== undefined)
+const classifierKeyOf = async (c: ClassifierConfig): Promise<string | undefined> =>
+  (await secrets.get(classifierSecret(c.id))) ?? (c.id === JEV_CLASSIFIER.id ? await secrets.get(JEV_SECRET) : undefined)
+
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  const classifiers = classifierList(s)
+  return {
+    ...s,
+    classifiers,
+    classifierJobs: classifierJobsOf(s),
+    classifierKeys: Object.fromEntries(classifiers.map((c) => [c.id, classifierKeySaved(c)])),
+    engines: withChoice(engines, s.harnesses),
+    jevKey: classifiers.some((c) => c.provider === 'typesafe' && classifierKeySaved(c)),
+    telegram: telegram?.info(),
+    accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) }))
+  }
 }
 
 // More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
@@ -767,7 +786,11 @@ const browser = new Browser({
   dataDir,
   emit,
   me: () => settings().workspaceName,
-  jev: { key: () => secrets.get(JEV_SECRET), on: () => !!settings().browserJev && settings().jevKey === true },
+  jev: {
+    key: () => classifierKeyOf(classifierFor(settings(), 'browser') ?? JEV_CLASSIFIER),
+    on: () => !!classifierFor(settings(), 'browser'),
+    target: () => classifierFor(settings(), 'browser')
+  },
   onHandback: (agentId) => void runner.handedBack(agentId)
 })
 const connectors = new ConnectorManager({
@@ -963,7 +986,13 @@ const runner = new Runner({
     toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
     void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
-  jev: { key: () => secrets.get(JEV_SECRET) },
+  jev: {
+    key: (job) => {
+      const c = classifierFor(settings(), job ?? 'routing')
+      return c ? classifierKeyOf(c) : Promise.resolve(undefined)
+    },
+    target: (job) => classifierFor(settings(), job ?? 'routing')
+  },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
   onQuota: (quota) => {
     db.setSettings({ quota })
@@ -1762,12 +1791,26 @@ const api: Handlers = {
   },
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
-  // Checked with TypeSafe before it's saved; null removes it.
+  // Checked with TypeSafe before it's saved; null removes it. Jev's own row, for the pages that
+  // still ask for it; Settings › Classifiers uses setClassifierKey, which takes the id.
   setJevKey: async ({ key }) => {
     const k = key?.trim()
     if (k) await checkJevKey(k)
-    await secrets.set(JEV_SECRET, k || undefined)
+    await secrets.set(classifierSecret(JEV_CLASSIFIER.id), k || undefined)
+    await secrets.set(JEV_SECRET, undefined) // the old name is retired the first time the key is saved here
     if (!k && settings().routerModel === JEV_MODEL) db.setSettings({ routerModel: 'haiku' })
+    emit({ type: 'settings', settings: settings() })
+  },
+
+  // A classifier's key, checked with its own provider before it's saved; null removes it. Each
+  // classifier keeps its own key, so two accounts of one provider never share one.
+  setClassifierKey: async ({ id, key }) => {
+    const c = classifierList(db.getSettings(DEFAULTS)).find((x) => x.id === id)
+    if (!c) throw new Error(L('Esse classificador não existe mais.', 'That classifier no longer exists.'))
+    const k = key?.trim()
+    if (k) await checkClassifierKey(c, k)
+    await secrets.set(classifierSecret(c.id), k || undefined)
+    if (c.id === JEV_CLASSIFIER.id) await secrets.set(JEV_SECRET, undefined) // one home for the key
     emit({ type: 'settings', settings: settings() })
   },
 

@@ -93,6 +93,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   openExternal: { url: 's' },
   saveRoutine: { routine: 'o' },
   setJevKey: { key: 's|null' },
+  setClassifierKey: { id: 's', key: 's|null' },
   engineModels: { engine: 's' },
   testEngine: { model: 's' },
   saveSkill: { skill: 'o' },
