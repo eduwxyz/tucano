@@ -8,7 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { innerActions, isComposio, MULTI_EXECUTE, perCallTool, PROXY_EXECUTE } from '../src/shared/composio'
+import { innerActions, isComposio, MANAGE_CONNECTIONS, MULTI_EXECUTE, perCallTool, PROXY_EXECUTE } from '../src/shared/composio'
 import type { Agent, Connector, GrantLevel, Settings } from '../src/shared/types'
 import { callClass, classify, classifyAction, runnerAllowed, runnerRules } from '../src/core/policy'
 import { Db } from '../src/core/db'
@@ -183,7 +183,8 @@ beforeEach(async () => {
   db.syncTools(CID, [
     { name: MULTI_EXECUTE, description: 'Runs tools.', inputSchema: schema, cls: classify({ name: MULTI_EXECUTE, annotations: { destructiveHint: true } }) },
     { name: 'COMPOSIO_SEARCH_TOOLS', description: 'Finds tools.', inputSchema: schema, cls: classify({ name: 'COMPOSIO_SEARCH_TOOLS', annotations: { readOnlyHint: true } }) },
-    { name: 'COMPOSIO_REMOTE_BASH_TOOL', description: 'Runs bash.', inputSchema: schema, cls: classify({ name: 'COMPOSIO_REMOTE_BASH_TOOL' }) }
+    { name: 'COMPOSIO_REMOTE_BASH_TOOL', description: 'Runs bash.', inputSchema: schema, cls: classify({ name: 'COMPOSIO_REMOTE_BASH_TOOL' }) },
+    { name: MANAGE_CONNECTIONS, description: 'Links accounts.', inputSchema: schema, cls: 'sensitive' }
   ])
   db.saveConnector({ id: SID, name: 'Slack', kind: 'remote', url: 'https://mcp.slack.com/mcp', auth: 'oauth' })
   db.syncTools(SID, ['chat_post_message', 'conversations_history'].map((name) => ({ name, description: name, inputSchema: schema, cls: classify({ name }) })))
@@ -206,6 +207,30 @@ describe('a Composio call through the runner', () => {
     expect(calls).toEqual([{ name: MULTI_EXECUTE, args: batch('GMAIL_FETCH_EMAILS', 'GOOGLESHEETS_GET_SPREADSHEET_INFO') }])
     expect(db.approvals()).toHaveLength(0)
     expect(db.messages().find((m) => m.author.kind === 'agent')?.run?.steps.map((s) => s.label)).toContain('Consultou')
+  })
+
+  it('a read grant sees the account linking, which asks every time and runs once approved', async () => {
+    // Even with a rule for it and the agent let loose, a reader asks.
+    db.saveAgent({ ...agent('read', [`${CID}:${MANAGE_CONNECTIONS}`]), autonomy: 'free' })
+    const link = { toolkits: ['googlecalendar'] }
+    const r = runner((prompt, tools) => (prompt.includes('aprovou') ? null : { tool: tools.find((t) => t.endsWith(`__${MANAGE_CONNECTIONS}`))!, args: link }))
+    await r.send('d1', 'liga minha agenda')
+    await r.idle()
+    expect(seen.tools[0]).toContain(`composio__${MANAGE_CONNECTIONS}`)
+    expect(calls).toHaveLength(0)
+    const [ap] = db.approvals()
+    expect(ap).toMatchObject({ state: 'pending', tool: MANAGE_CONNECTIONS, args: link })
+    await r.decide(ap!.id, 'approved')
+    await r.idle()
+    expect(calls).toEqual([{ name: MANAGE_CONNECTIONS, args: link }])
+  })
+
+  it('a reader still sees no other sensitive Composio tool', async () => {
+    db.saveAgent(agent('read'))
+    const r = runner(() => null)
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(seen.tools[0]!.some((t) => t.includes('BASH'))).toBe(false)
   })
 
   it('a read grant is refused a write inside the batch, and nothing runs', async () => {

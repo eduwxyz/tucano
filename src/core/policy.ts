@@ -6,10 +6,10 @@ import type { ConnectorTool, GrantLevel } from '../shared/types'
 export { callClass, classify, classifyAction, legacyClassify, permits, runnerAllowed, runnerRules } from '../shared/classify'
 
 // `read` exposes read tools; `read_write` exposes everything (sensitive ones go through approval).
-// `perCall`: a runner judged on each call (Composio's), exposed to readers too, for its read-only calls.
-export function allowed(tool: ConnectorTool, grant: GrantLevel | undefined, perCall = false): boolean {
+// `forReaders`: a Composio tool exposed to readers too (shared/composio.ts).
+export function allowed(tool: ConnectorTool, grant: GrantLevel | undefined, forReaders = false): boolean {
   if (!tool.enabled) return false
-  if (grant === 'read') return tool.cls === 'read' || perCall
+  if (grant === 'read') return tool.cls === 'read' || forReaders
   return grant === 'read_write'
 }
 
