@@ -1124,11 +1124,12 @@ export interface Report {
 }
 
 // ---------- the wiki ----------
-export type WikiAccess = 'none' | 'read' | 'write' // 'write': reads it and writes pages too, through wiki_escrever
-// The three, so reading one back from the database can't quietly lose the last one added.
-export const WIKI_ACCESS: readonly WikiAccess[] = ['none', 'read', 'write']
-export const isWikiAccess = (v: unknown): v is WikiAccess => WIKI_ACCESS.includes(v as WikiAccess)
+// 'read' opens the pages and the search; 'read_write' adds wiki_escrever and wiki_editar, so the
+// agent keeps the wiki itself instead of waiting for the curator.
+export type WikiAccess = 'none' | 'read' | 'read_write'
 export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
+// Whether it may change pages, not only read them.
+export const wikiWrites = (a: Pick<Agent, 'wiki' | 'kind'>): boolean => wikiAccess(a) === 'read_write'
 export interface WikiPageInfo {
   title: string
   kind: string // the page's tipo, from its frontmatter
@@ -1249,4 +1250,21 @@ export interface WikiReview {
   running: boolean
   error?: string // the last review failed
   findings: WikiFinding[] // still open
+}
+
+// A whole Tucano in one .zip (Settings › General › Export everything), and what a server finds in
+// one before restoring it (src/core/restore.ts).
+export interface BackupSummary {
+  version: 1
+  madeAt: number
+  app: string
+  workspace: string
+  schema: number
+  agents: number
+  channels: number
+  messages: number
+  memories: number
+  wikiPages: number
+  files: number
+  filesLeftOut: number // the agents' files that didn't fit in one upload
 }

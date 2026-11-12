@@ -7,7 +7,6 @@ import { dirname, join } from 'node:path'
 import {
   CACHE_READ_WEIGHT,
   nextRun,
-  isWikiAccess,
   routineCap,
   type Agent,
   type AgentApp,
@@ -686,6 +685,51 @@ export class Db {
     }
   }
 
+  // A backup from another computer just became this database (restore.ts). What only worked there
+  // goes: its secrets (sealed with that computer's key), its devices and invites, its extra logins,
+  // the agents' use of that computer (its desktop, apps and folders), and routines run there until
+  // someone turns them on here. What this server had of its own stays, from `previous` (its
+  // database before the swap): the owner's devices (so whoever restored stays signed in), the
+  // secrets, the harnesses picked and Telegram. Returns how many routines were turned off.
+  adoptRestore(previous?: string): number {
+    const routines = Number((this.db.prepare('SELECT count(*) AS n FROM routines WHERE enabled = 1').get() as Row)['n'] ?? 0)
+    this.tx(() => {
+      this.db.exec(`
+        DELETE FROM secrets;
+        DELETE FROM person_keys;
+        DELETE FROM removed_keys;
+        DELETE FROM invites;
+        DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
+        UPDATE agents SET account = NULL, fallback_account = NULL, apps = '[]', folders = '[]', computer = CASE WHEN computer_kind = 'mac' THEN 0 ELSE computer END;
+        UPDATE routines SET enabled = 0;
+      `)
+    })
+    this.ownerCache = ''
+    if (previous) {
+      this.db.prepare('ATTACH DATABASE ? AS old').run(previous)
+      try {
+        this.tx(() => {
+          const owner = this.ownerId()
+          const was = (sql: string): void => {
+            try {
+              this.db.exec(sql)
+            } catch (e) {
+              console.warn('[restore] kept less of the server:', e instanceof Error ? e.message : e)
+            }
+          }
+          was('INSERT OR REPLACE INTO secrets (key, value) SELECT key, value FROM old.secrets')
+          this.db
+            .prepare("INSERT OR IGNORE INTO person_keys (hash, person_id, label, created_at, last_seen) SELECT hash, ?, label, created_at, last_seen FROM old.person_keys WHERE person_id = (SELECT id FROM old.people WHERE role = 'owner')")
+            .run(owner)
+          was("INSERT OR REPLACE INTO settings (key, value) SELECT key, value FROM old.settings WHERE key IN ('harnesses', 'telegram')")
+        })
+      } finally {
+        this.db.exec('DETACH DATABASE old')
+      }
+    }
+    return routines
+  }
+
   // ---------- the core's own notes ----------
 
   meta(key: string): string | undefined {
@@ -740,7 +784,7 @@ export class Db {
       ...(r['custom_color'] ? { customColor: str(r['custom_color']) } : {}),
       ...(r['picture'] ? { picture: str(r['picture']) } : {}),
       ...(r['avatar'] ? { avatar: JSON.parse(str(r['avatar'])) as Agent['avatar'] } : {}),
-      ...(isWikiAccess(r['wiki']) ? { wiki: r['wiki'] } : {}),
+      ...(r['wiki'] === 'none' || r['wiki'] === 'read' || r['wiki'] === 'read_write' ? { wiki: r['wiki'] } : {}),
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       ...(str(r['action_rules']) && str(r['action_rules']) !== '{}' ? { actionRules: cleanRules(JSON.parse(str(r['action_rules']))) } : {}),
       ...(isAutonomy(r['autonomy']) ? { autonomy: r['autonomy'] } : {}),
@@ -772,7 +816,7 @@ export class Db {
            limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
            computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, autonomy = excluded.autonomy, outside_guard = excluded.outside_guard, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki === 'none' || a.wiki === 'read' || a.wiki === 'read_write' ? a.wiki : null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
   }
@@ -998,9 +1042,10 @@ export class Db {
   }
 
   // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
-  recentMessages(conversationId: string, limit: number, threadId?: string | null): Message[] {
-    const where = threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?'
-    const args = typeof threadId === 'string' ? [conversationId, threadId, limit] : [conversationId, limit]
+  // `before`: only those from before that moment.
+  recentMessages(conversationId: string, limit: number, threadId?: string | null, before?: number): Message[] {
+    const where = (threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?') + (before === undefined ? '' : ' AND at < ?')
+    const args = [conversationId, ...(typeof threadId === 'string' ? [threadId] : []), ...(before === undefined ? [] : [before]), limit]
     const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ?${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
   }
@@ -1139,6 +1184,12 @@ export class Db {
       .prepare(`SELECT * FROM messages WHERE run IS NOT NULL AND json_extract(run, '$.status') IN (${statuses.map(() => '?').join(', ')}) ORDER BY at`)
       .all(...statuses) as Row[]
     return rows.map((r) => this.toMessage(r))
+  }
+
+  // The approval a reply is waiting on, newest first: one reply asks one thing at a time.
+  approvalForMessage(messageId: string): Approval | undefined {
+    const r = this.db.prepare('SELECT * FROM approvals WHERE message_id = ? ORDER BY created_at DESC LIMIT 1').get(messageId) as Row | undefined
+    return r ? this.toApproval(r) : undefined
   }
 
   // Runs that were working when the app closed can't continue: their CLI process is gone.

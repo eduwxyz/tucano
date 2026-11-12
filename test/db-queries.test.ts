@@ -123,21 +123,21 @@ describe('indexes for what runs often', () => {
 })
 
 describe('an agent kept and read back', () => {
-  // The wiki's third access, 'write', was in the save but not in the read: it came back as 'read' on
+  // The wiki's third access, 'read_write', was in the save but not in the read: it came back as 'read' on
   // the next launch, so the card fell to "no agent writes" and the picker emptied itself.
   it('gives back the wiki access it was saved with, write included, across a reopen', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'tucano-wiki-access-')), 'tucano.db')
     const db = new Db(file)
-    for (const [id, wiki] of [['a1', 'write'], ['a2', 'read'], ['a3', 'none'], ['a4', undefined]] as [string, WikiAccess | undefined][]) db.saveAgent({ ...agent(id), ...(wiki ? { wiki } : {}) })
-    expect(db.agent('a1')?.wiki).toBe('write')
+    for (const [id, wiki] of [['a1', 'read_write'], ['a2', 'read'], ['a3', 'none'], ['a4', undefined]] as [string, WikiAccess | undefined][]) db.saveAgent({ ...agent(id), ...(wiki ? { wiki } : {}) })
+    expect(db.agent('a1')?.wiki).toBe('read_write')
     db.close()
 
     const again = new Db(file)
-    expect(again.agent('a1')?.wiki).toBe('write')
+    expect(again.agent('a1')?.wiki).toBe('read_write')
     expect(again.agent('a2')?.wiki).toBe('read')
     expect(again.agent('a3')?.wiki).toBe('none')
     expect(again.agent('a4')?.wiki).toBeUndefined() // unset stays unset: it reads as 'read'
-    expect(wikiAccess(again.agent('a1')!)).toBe('write')
+    expect(wikiAccess(again.agent('a1')!)).toBe('read_write')
     expect(wikiAccess(again.agent('a4')!)).toBe('read')
     again.close()
   })

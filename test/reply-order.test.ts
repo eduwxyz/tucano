@@ -137,7 +137,9 @@ describe('replies that overlap', () => {
   })
 
   it('marks the end of a reply that never got to run', async () => {
-    db.saveAgent(agent('lia', 'lia', { limit: 0 }))
+    // Past the limit is a ceiling it really has and use it really made: a limit of 0 is no limit.
+    db.saveAgent(agent('lia', 'lia', { limit: 1_000 }))
+    db.addReceipt({ messageId: 'before', agentId: 'lia', engine: 'claude', model: 'sonnet', inputTokens: 1_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, at: Date.now() })
     const r = runner()
     await r.send('c', '@lia bom dia')
     await r.idle()

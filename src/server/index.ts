@@ -22,6 +22,7 @@ import { codeMinutes, PairCodes } from './pair-codes'
 import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
 import { Preview } from './preview'
 import { vault } from './vault'
+import { applyRestore } from '../core/restore'
 import { verifyLocal } from '../core/local-paths'
 import { pairingLink } from '../shared/servers'
 import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from './web-shim'
@@ -111,6 +112,14 @@ function fromCore(msg: CoreRequest): void {
   if (msg.type === 'oauth-result') {
     oauthWaits.get(id ?? '')?.((msg as unknown as { data: { ok: boolean; why?: string } }).data)
     oauthWaits.delete(id ?? '')
+    return
+  }
+  // A backup to restore: a start of its own puts it in (applyRestore, above the core's import).
+  // A non-zero code, so systemd's Restart=on-failure brings it back as Docker's restart policy does.
+  if (msg.type === 'restart') {
+    console.log('Restarting to restore a backup. If nothing starts this server again, start it by hand.')
+    server.close()
+    setTimeout(() => process.exit(75), 300)
     return
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
@@ -735,6 +744,9 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
   }
 })()
 `
+
+// A backup the owner confirmed: its files take the place of these before the core opens them.
+if (applyRestore(dataDir)) console.log('Restored a backup; what was here is in restore/before-…')
 
 process.env['TUCANO_DATA'] = dataDir
 process.env['TUCANO_LOCAL_KEY'] = localKey

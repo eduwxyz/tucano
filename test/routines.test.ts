@@ -167,7 +167,9 @@ describe('routines', () => {
   })
 
   it('an agent past its limit does not open the CLI, and the notification says so', async () => {
-    db.saveAgent(agent('a1', 'lia', { limit: 0 }))
+    // A real ceiling, and use past it: a limit of 0 now means no ceiling at all.
+    db.saveAgent(agent('a1', 'lia', { limit: 1_000 }))
+    db.addReceipt({ messageId: 'before', agentId: 'a1', engine: 'claude', model: 'sonnet', inputTokens: 1_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, at: Date.now() })
     const r = create()
     routines.runNow(r.id)
     await settle()

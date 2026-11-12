@@ -8,7 +8,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
-import { WIKI_TOOL_NAMES, wikiCall, wikiTools, type Wiki } from './wiki'
+import { WIKI_TOOL_NAMES, WIKI_WRITE_TOOL_NAMES, wikiCall, wikiToolsFor, wikiWrite, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
@@ -63,6 +63,19 @@ const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
+// An agent with no monthly ceiling (limit 0) still keeps a per-reply cap, or a
+// reply that keeps making progress would never be cut. The percentage then has
+// no month to apply to, so it is taken over this base instead.
+const NO_LIMIT_REPLY_BASE = 1_000_000
+
+// The month's ceiling for an agent: 0 (or anything that isn't a positive
+// number) is no ceiling, so every comparison against it is false.
+export const monthlyCeiling = (limit: number): number => (limit > 0 ? limit : Infinity)
+
+// How many tokens a single reply may spend. With a ceiling it is a share of it;
+// without one the share is taken over NO_LIMIT_REPLY_BASE, so a reply still has
+// a top even when the month doesn't.
+export const replyBudget = (limit: number, pct: number): number => Math.round(((limit > 0 ? limit : NO_LIMIT_REPLY_BASE) * pct) / 100)
 const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
 const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
 const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
@@ -228,7 +241,7 @@ export interface RunnerDeps {
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
-  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles' | 'addChange' | 'applyChange'> // without it, agents have no wiki
+  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles' | 'save' | 'readOnly'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
@@ -948,8 +961,11 @@ export class Runner {
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
+    // A limit of 0 is no ceiling at all: comparing against it would stop the
+    // agent on its first turn, so every check below goes through `ceiling`.
     const used = db.usedThisMonth(agent.id)
-    if (used >= agent.limit) {
+    const ceiling = monthlyCeiling(agent.limit)
+    if (used >= ceiling) {
       save({
         text: L('Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.', "I stopped: I've used all my tokens for this month. It can be raised on my page."),
         run: { status: 'limit_reached', endedAt: Date.now(), depth: opts.depth, steps: [], ...again }
@@ -1000,7 +1016,7 @@ export class Runner {
     const members = this.members(conv)
     const peers = members.filter((a) => a.id !== agent.id)
     const memory = this.deps.memory
-    const { summary, messages: windowAll } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
+    const { summary, messages: windowAll, before: beforeAll = [] } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // Whom this reply is for: the person every "ask", "tell" and "approve" in its prompt and tools
     // means. The owner reads by the workspace's name, so one person's prompts stay as they were.
     const requester = requesterOf(db, conv, windowAll)
@@ -1008,6 +1024,7 @@ export class Runner {
     // what a channel held before the Tucano had more people (the owner's: see People.visibleAt).
     const sees = new People(db)
     const windowed = windowAll.filter((m) => sees.visibleAt(requester, m))
+    const above = beforeAll.filter((m) => sees.visibleAt(requester, m)) // what was on screen when a person opened this thread
     // A routed reply answers its message, and its transcript ends there: what people wrote after it
     // is another reply's. Replies that came in since to what was before it (its own earlier one,
     // say) are what was already said: they go before it. Replies to it or to later ones, none.
@@ -1063,10 +1080,15 @@ export class Runner {
     const routines = this.deps.gateway ? this.deps.routines : undefined
     const skills = this.deps.gateway ? this.deps.skills : undefined
     const mySkills = skills?.forAgent(agent.id) ?? []
-    // The wiki: for agents that may read it, once it has a page.
-    // A page held for one person (see Wiki.inherit) is read only in their own DM: anywhere else the reply reaches others.
+    // The wiki: for agents that may read it, once it has a page (an agent that may write it gets the tools
+    // even with no page yet: the first one is theirs). A page held for one person (see Wiki.inherit) is read
+    // and written only in their own DM: anywhere else the reply reaches others.
+    const wikiLevel = wikiAccess(agent)
     const wikiShown = this.deps.wiki?.view(this.deps.wiki.heldTitles(dmOwner(conv, db.ownerId())))
-    const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
+    const wikiWritable = this.deps.gateway && wikiLevel === 'read_write' ? this.deps.wiki : undefined
+    const wiki = this.deps.gateway && wikiShown && wikiLevel !== 'none' && (wikiShown.count() > 0 || !!wikiWritable) ? wikiShown : undefined
+    // What this conversation may read, for a write that must not touch a page held from it.
+    const wikiSees = (title: string): boolean => !!wikiShown?.page(title)
 
     const control: Control = { ctl: new AbortController(), msg }
     this.controllers.set(msg.id, control)
@@ -1078,7 +1100,7 @@ export class Runner {
 
     // Guards (spec §3). Long work that keeps going somewhere is never cut: a loop
     // repeats itself, a stuck turn goes quiet, and a costly one pauses to ask.
-    const budget = Math.round((agent.limit * (settings.runBudgetPct ?? RUN_BUDGET_PCT)) / 100)
+    const budget = replyBudget(agent.limit, settings.runBudgetPct ?? RUN_BUDGET_PCT)
     const stallMs = (settings.runStallMinutes ?? RUN_STALL_MINUTES) * 60_000
     const seen = new Map<string, { result: string; n: number }>()
     let failing = 0 // tool calls failing in a row
@@ -1236,7 +1258,7 @@ ${note}`,
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
-      ...(wiki ? wikiTools(wikiAccess(agent)) : [])
+      ...(wiki ? wikiToolsFor(wikiLevel) : [])
     ]
     // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
     const byStep = new Map([...exposed].map(([name, { connector, tool }]) => [`${connector.name} · ${tool.name}`, name]))
@@ -1509,16 +1531,15 @@ ${note}`,
         }
 
         if (wiki && WIKI_TOOL_NAMES.has(name)) {
-          const writes = wikiAccess(agent) === 'write' ? this.deps.wiki : undefined
-          // A page held for someone else isn't in the view: writing to it isn't the agent's to do either.
-          const r = wikiCall(
-            wiki,
-            name,
-            args,
-            writes
-              ? { wiki: writes, by: agent.id, byName: agent.name, auto: settings.wikiEdits === 'auto', visible: (t: string) => !!wiki.page(t) || !writes.page(t) }
-              : undefined
-          )
+          const r = wikiCall(wiki, name, args)
+          addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: 'done' })
+          return textResult(r.text, r.error)
+        }
+
+        if (wikiWritable && WIKI_WRITE_TOOL_NAMES.has(name)) {
+          // Its level may have changed mid-turn: read again before a page is touched.
+          if (wikiAccess(db.agent(agent.id) ?? agent) !== 'read_write') return textResult(L('Você só lê a wiki agora.', 'You only read the wiki now.'), true)
+          const r = wikiWrite(wikiWritable, { id: agent.id, name: agent.name }, name, args, wikiSees, { conversationId: conv.id })
           addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: r.error ? 'error' : 'done', ...(r.error ? { error: r.text } : {}) })
           return textResult(r.text, r.error)
         }
@@ -2047,7 +2068,7 @@ ${note}`,
       web: agent.web !== false,
       routines: routines?.forAgent(agent.id).filter((r) => visible(r.conversationId)),
       skills: skills && mySkills,
-      wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds(), write: wikiAccess(agent) === 'write' } : undefined,
+      wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds(), ...(wikiWritable ? { write: true } : {}) } : undefined,
       connectors: exposed.size > 0,
       github,
       people,
@@ -2058,7 +2079,7 @@ ${note}`,
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
     const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -2121,7 +2142,7 @@ ${note}`,
             } else if (ev.type === 'progress') {
               progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
               const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
-              if (used + counted > agent.limit) halt('limit')
+              if (used + counted > ceiling) halt('limit')
               else if (counted > budget) {
                 if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
                 overBudget = true
@@ -2186,7 +2207,8 @@ ${note}`,
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
     const usedNow = db.usedThisMonth(agent.id)
-    if (used < agent.limit * USAGE_ALERT && usedNow >= agent.limit * USAGE_ALERT && usedNow < agent.limit) {
+    // Only an agent with a ceiling has a share of it to warn about.
+    if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {
       const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
       this.post(
         conv.id,
@@ -2291,6 +2313,13 @@ ${note}`,
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason, decider)) return
     // Everyone who sees the card learns it's decided (and by whom) now, not after the call it allowed.
     emit({ type: 'approval', approval: db.approval(id)! })
+    // The reply the decision was holding is over: it asked, and it got an answer. Closing it here
+    // rather than after the call means a quit in the middle of that call can't leave it saying
+    // "waiting for you" with nothing left to wake it. A live reply keeps its run, which ends itself.
+    if (!this.controllers.has(ap.messageId)) {
+      const waiting = db.message(ap.messageId)
+      if (waiting?.run?.status === 'waiting_approval') this.update(waiting, { run: { ...waiting.run, status: 'done' } })
+    }
     if (decider) db.addActivity({ personId: decider, kind: 'approval.decided', target: id, detail: { decision, agentId: ap.agentId, connector: ap.connectorName, tool: ap.tool } })
     const owner = db.agent(ap.agentId)
     // A runner (Composio's) is never allowed for good itself: "always" allows the inner tools that asked, each on its own.
@@ -2588,6 +2617,32 @@ ${note}`,
 
   async expireApprovals(): Promise<void> {
     for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
+  }
+
+  // A decision written while the app was quitting (or while the approved call was running) leaves
+  // the reply at waiting_approval for good: the approval is no longer pending, so decide() ignores
+  // it, expireApprovals() skips it and nothing else looks. Closing those at every start is the only
+  // way the "?" on the DM can come off again.
+  async settleDecidedRuns(): Promise<number> {
+    const { db } = this.deps
+    let n = 0
+    for (const m of db.messagesWithRun(['waiting_approval'])) {
+      if (m.run?.status !== 'waiting_approval' || this.controllers.has(m.id)) continue
+      const ap = db.approvalForMessage(m.id)
+      if (!ap || ap.state === 'pending') continue // still the person's to answer
+      const label = ap.state === 'approved' ? L('Aprovado', 'Approved') : ap.state === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
+      const detail = ap.outcome ?? L('A decisão ficou salva, mas a resposta nunca terminou de ser gravada.', 'The decision was saved, but the reply never finished saving.')
+      this.update(m, {
+        run: {
+          ...m.run,
+          status: 'done',
+          steps: [...m.run.steps, { id: randomUUID(), label, detail, status: ap.state === 'approved' ? 'done' : 'error' }]
+        }
+      })
+      n++
+      this.deps.emit({ type: 'approval', approval: db.approval(ap.id)! })
+    }
+    return n
   }
 
   // A question whose decisions `by` may answer on the card now: theirs (or one they may answer for

@@ -255,7 +255,7 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
     }
     if (args['limite'] !== undefined) {
       const n = Math.round(Number(args['limite']))
-      if (!Number.isFinite(n) || n < 1_000) return { error: L('O limite é em tokens, e no mínimo 1000.', 'The limit is in tokens, at least 1000.') }
+      if (!Number.isFinite(n) || n < 0) return { error: L('O limite é em tokens: no mínimo 1000, ou 0 para sem limite.', 'The limit is in tokens: at least 1000, or 0 for no limit.') }
       if (n !== agent.limit) changes.limit = n
     }
     if (!Object.keys(changes).length) return { error: L('Nada mudaria: mande só o que é diferente do que ele tem hoje.', 'Nothing would change: send only what differs from what it has now.') }

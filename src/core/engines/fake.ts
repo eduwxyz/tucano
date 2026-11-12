@@ -118,6 +118,11 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const [, nome, quando_usar, receita] = /proponha a skill `([^`]+)` \(quando: ([^)]+)\): (.+)/is.exec(last)!
         const r = await callTool(turn.mcpUrl, 'propor_skill', { nome, quando_usar, receita, motivo: 'Faço isso sempre do mesmo jeito.' })
         reply = textOf(r)
+      } else if (turn.mcpUrl && /(?:anote|escreva) na wiki:\s*(.+)/is.test(last)) {
+        // "anote na wiki: Página | o que entra nela": an agent set to read and write keeps the wiki itself.
+        const spec = /(?:anote|escreva) na wiki:\s*(.+?)\s*\|\s*(.+)/is.exec(last)
+        const r = spec ? await callTool(turn.mcpUrl, 'wiki_escrever', { pagina: spec[1]!.trim(), texto: spec[2]!.trim() }).catch((e: unknown) => `Erro: ${(e as Error).message}`) : 'Faltou a página e o texto.'
+        reply = typeof r === 'string' ? r : textOf(r).toLowerCase().includes('erro') || textOf(r).toLowerCase().includes('error') ? textOf(r) : L('Anotei na wiki.', 'I noted it in the wiki.')
       } else if (/gaste (\d+) tokens/i.test(last)) {
         spend = Number(/gaste (\d+) tokens/i.exec(last)![1])
         reply = 'Instalei o Swift e li o módulo de sorteio. Falta rodar os testes do Core e conferir o filtro de questões recentes.'
@@ -195,6 +200,12 @@ function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   const last = lastMessage(prompt)
   if (/^(bom dia|boa tarde|boa noite|obrigad|valeu|ok)\b/i.test(last.trim())) return { handles: [], reason: 'cumprimento, ninguém precisa responder' }
   const roster = [...prompt.matchAll(/^- ([a-z0-9_-]+): ([^·\n]*)/gim)].map((m) => ({ handle: m[1]!, about: m[2]! }))
+  // A short yes goes to the agent whose message above ended in a question (the router's rule).
+  if (/^(pode|sim|manda|yes|go ahead)\b/i.test(last.trim())) {
+    const asker = [...prompt.slice(0, prompt.lastIndexOf(last)).matchAll(/\[([^\]]+)\] [^\n]*\?(?= →|$)/gm)].map((m) => roster.find((r) => r.about.startsWith(`${m[1]!},`) || r.about.trim() === m[1]))
+    const who = asker.filter(Boolean).at(-1)
+    if (who) return { handles: [who.handle], reason: 'respondeu à pergunta dele' }
+  }
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }

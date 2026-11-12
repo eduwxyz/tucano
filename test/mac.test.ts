@@ -177,7 +177,9 @@ describe("the user's shell environment", () => {
     delete process.env['TUCANO_SEGREDO']
     // Windows spells it Path, with C:\… directories.
     const path = Object.entries(env).find(([k]) => k.toUpperCase() === 'PATH')?.[1]
-    expect(path).toContain(win ? 'C:\\Windows' : '/usr/bin')
+    // Windows doesn't care how a directory is spelled, and this machine's PATH says C:\WINDOWS
+    // while another says C:\Windows: compared without case, the check holds on both.
+    expect(win ? (path ?? '').toLowerCase() : path).toContain(win ? 'c:\\windows' : '/usr/bin')
     expect(env['HOME']).toBe(homedir())
     expect(env['TUCANO_SEGREDO']).toBeUndefined()
   }, 20_000)
