@@ -2,12 +2,13 @@
 // turns into a version with the agent as the author, and the same agent set back to read only is not
 // given the tool at all.
 import { beforeAll, describe, expect, it } from 'vitest'
-import type { Agent, Message, WikiVersion } from '../src/shared/types'
-import { bootCore, type Client } from './helpers/core'
+import type { Agent, Message, Person, WikiVersion } from '../src/shared/types'
+import { bootCore, type Client, type TestCore } from './helpers/core'
 
 let ana: Client
 let lia: Agent
 let dm: string
+let core: TestCore
 const crashes: unknown[] = []
 const onCrash = (e: unknown): void => void crashes.push(e)
 
@@ -33,7 +34,7 @@ const settled = async (since: number): Promise<Message> => {
 beforeAll(async () => {
   process.on('unhandledRejection', onCrash)
   process.on('uncaughtException', onCrash)
-  const core = await bootCore({ server: true })
+  core = await bootCore({ server: true })
   ana = core.connect()
   await ana.call('setMyName', { name: 'Ana' })
   const snap = await ana.call<{ agents: Agent[] }>('snapshot')
@@ -70,6 +71,18 @@ describe('an agent that keeps the wiki', () => {
     const page = await ana.call<{ body: string }>('wikiPage', { title: 'Viagem a Morretes' })
     expect(page.body).toContain('Trem pela Serra do Mar em fevereiro.')
     expect(page.body).toContain('Ficamos três dias.')
+  })
+
+  it('keeps her DM writes private when someone joins, and keeps new ones private too', async () => {
+    const { code } = await ana.call<{ code: string }>('createInvite', { role: 'member' })
+    const joined = await core.ask<{ data: { person: Person } }>({ type: 'join', code, name: 'Bia' }, 'join-result')
+    const bia = core.connect(joined.data.person.id)
+    expect(await bia.call('wikiPage', { title: 'Viagem a Morretes' })).toBeNull()
+    const at = Date.now()
+    await ask('anote na wiki: Outra viagem privada | Só para a Ana.')
+    expect((await settled(at)).run?.status).toBe('done')
+    expect(await bia.call('wikiPage', { title: 'Outra viagem privada' })).toBeNull()
+    expect(await ana.call('wikiPage', { title: 'Outra viagem privada' })).toMatchObject({ title: 'Outra viagem privada' })
   })
 
   it('is not given the tool once it is back to reading, and the run says so', async () => {
