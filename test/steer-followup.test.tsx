@@ -38,7 +38,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 })
 
 const { createRoot } = await import('react-dom/client')
-const { RunSteps, FollowUpPill } = await import('../src/renderer/src/components/Conversation')
+const { RunBlock, RunSteps, FollowUpPill } = await import('../src/renderer/src/components/Conversation')
 
 const step = (id: string, extra: Partial<Step> = {}): Step => ({ id, label: `read ${id}.ts`, status: 'done', ms: 120, ...extra })
 
@@ -82,9 +82,9 @@ const draw = async (message: Message): Promise<void> => {
 }
 // Where the pill's block sits in the reply, as an index among the body's children.
 const at = (el: Element | null): number => [...document.querySelector('.msg__body')!.children].indexOf(el as Element)
-const pill = (): HTMLElement | null => document.querySelector('.steps__ask-pill')
-const field = (): HTMLTextAreaElement | null => document.querySelector('.steps__ask-note textarea')
-const buttons = (): HTMLElement[] => [...document.querySelectorAll('.steps__ask-row button')] as HTMLElement[]
+const pill = (): HTMLElement | null => document.querySelector('.steps__steer-pill')
+const field = (): HTMLTextAreaElement | null => document.querySelector('.steps__steer-note textarea')
+const buttons = (): HTMLElement[] => [...document.querySelectorAll('.steps__steer-row button')] as HTMLElement[]
 // Typing as React sees it: the value set past React's own tracker, then the input event.
 const type = async (text: string): Promise<void> => {
   const ta = field()!
@@ -113,19 +113,22 @@ describe('the follow up pill', () => {
     expect(pill()?.textContent?.trim()).toBe('Seguir')
     expect(document.querySelector('.steps__list')).toBeNull() // done: the steps are folded, it is still there
     // Out of the chain: a reply that ended carries no pill up there any more.
-    expect(document.querySelector('.steps .steps__ask')).toBeNull()
+    expect(document.querySelector('.steps .steps__steer')).toBeNull()
     // In the footer: the reply's own line, after its text, first in that line and before the numbers.
-    const block = pill()!.closest('.steps__ask')!
-    expect(block.className).toBe('steps__ask steps__ask--down steps__ask--reply')
+    const block = pill()!.closest('.steps__steer')!
+    expect(block.className).toBe('steps__steer steps__steer--down steps__steer--reply')
     const footer = document.querySelector('.msg__meta')!
     expect(block.parentElement).toBe(footer)
     expect(footer.firstElementChild).toBe(block)
     expect(at(footer)).toBeGreaterThan(at(document.querySelector('.md')))
-    expect([...footer.children].map((el) => el.className.split(' ')[0])).toEqual(['steps__ask', 'receipt', 'wiki-keep'])
-    // A reply that's working has nothing to follow up yet: that pill says Steer, and it is in the chain.
-    await draw(reply('working'))
+    expect([...footer.children].map((el) => el.className.split(' ')[0])).toEqual(['steps__steer', 'receipt', 'wiki-keep'])
+    // A reply that's working has nothing to follow up yet: that pill says Steer, and it sits under
+    // the chain, outside its box (test/steer-pill.test.tsx).
+    await act(async () => root.render(<RunBlock message={reply('working')} />))
     expect(pill()?.textContent?.trim()).toBe('Orientar')
-    expect(document.querySelector('.steps .steps__ask')).not.toBeNull()
+    const chain = document.querySelector('.steps')!
+    expect(chain.querySelector('.steps__steer')).toBeNull()
+    expect(chain.nextElementSibling?.className).toBe('steps__steer steps__steer--pointer')
   })
 
   it('is not offered for a reply that failed or was stopped: that one is tried again', async () => {

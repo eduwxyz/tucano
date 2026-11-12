@@ -91,7 +91,7 @@ describe('the steer pill', () => {
     // Under the box, not inside it: everything the run says about itself stays above the pill.
     const block = document.querySelector('.steps')!
     expect(block.querySelector('.steps__steer')).toBeNull()
-    expect(block.nextElementSibling?.className).toBe('steps__steer')
+    expect(block.nextElementSibling?.className).toBe('steps__steer steps__steer--pointer')
     await draw(reply('done'))
     expect(pill()).toBeNull()
   })
