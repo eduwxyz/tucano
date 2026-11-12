@@ -1239,6 +1239,11 @@ export class Wiki {
 
   // A new review's findings take the place of the old ones; what was dismissed, or still waits, isn't said again.
   setFindings(list: (Omit<WikiFinding, 'id' | 'at' | 'change'> & { key: string; ops?: WikiOp[]; reason?: string })[]): void {
+    // A dismissed finding the review no longer finds is a problem fixed some other way (the page got
+    // written, the link repaired): its row goes, so the key isn't carried as a silence forever.
+    const produced = new Set(list.map((f) => f.key))
+    const stale = this.db.prepare("SELECT id, key FROM findings WHERE state = 'dismissed' AND change_id IS NULL AND kind IN ('broken', 'orphan', 'missing', 'log')").all() as { id: string; key: string }[]
+    for (const r of stale) if (!produced.has(r.key)) this.db.prepare('DELETE FROM findings WHERE id = ?').run(r.id)
     // a fix refused counts as "leave it"
     const keep = new Set((this.db.prepare("SELECT key FROM findings WHERE state = 'dismissed' OR change_id IN (SELECT id FROM changes WHERE state = 'refused')").all() as { key: string }[]).map((r) => r.key))
     for (const f of this.findings()) if (f.change) keep.add((this.db.prepare('SELECT key FROM findings WHERE id = ?').get(f.id) as { key: string }).key)
