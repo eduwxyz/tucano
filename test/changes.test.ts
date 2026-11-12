@@ -19,6 +19,9 @@ beforeEach(() => {
   repo = join(base, 'app')
   mkdirSync(join(repo, 'src'), { recursive: true })
   sh(repo, 'init', '-q', '-b', 'main')
+  // Files are written back as git would check them out here: line endings as this repository says,
+  // not as the machine's git does (Windows runners convert to CRLF).
+  sh(repo, 'config', 'core.autocrlf', 'false')
   writeFileSync(join(repo, 'src', 'checkout.ts'), 'export const total = 1\nexport const tax = 2\n')
   writeFileSync(join(repo, 'old.txt'), 'legacy\nlines\n')
   writeFileSync(join(repo, 'utils.ts'), 'export const id = (x: number) => x\n'.repeat(5))
