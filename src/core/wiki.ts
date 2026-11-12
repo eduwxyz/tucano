@@ -587,17 +587,24 @@ export class Wiki {
     this.db.prepare('DELETE FROM links WHERE src = ?').run(file)
     this.db.prepare('DELETE FROM fts WHERE file = ?').run(file)
   }
-  private version(title: string, by: string, action: WikiVersion['action'], before: string | null, after: string | null, reason?: string, sourceId?: string): void {
+  private version(title: string, by: string, action: WikiVersion['action'], before: string | null, after: string | null, reason?: string, sourceId?: string, conversationId?: string): void {
     const at = Date.now()
     this.db.prepare('INSERT INTO versions (title, key, at, by, action, before, after, reason, source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(title, pageKey(title), at, by, action, before, after, reason ?? null, sourceId ?? null)
     if (action === 'delete') return
-    const [origin, privateTo] = this.originOf(by, sourceId)
+    const [origin, privateTo] = this.originOf(by, sourceId, conversationId)
     this.db.prepare('INSERT INTO provenance (title, at, origin, private_to) VALUES (?, ?, ?, ?)').run(pageKey(title), at, origin, privateTo)
+    // Agent writes carry their conversation without making a second copy as a curator source.
+    // Hold a team's DM page before onWrite can queue it for git or onChange can announce it.
+    if (conversationId && privateTo && this.getMeta('logAtSwitch')) this.hold(pageKey(title), privateTo)
   }
 
   // Where a version came from: a DM (whose: only they read it), a channel, a file, a link or a note
   // brought in, a hand, another app. '?' is "may have come from a DM": not known any more.
-  private originOf(by: string, sourceId?: string): [string, string | null] {
+  private originOf(by: string, sourceId?: string, conversationId?: string): [string, string | null] {
+    if (conversationId) {
+      const dm = this.deps.dmOf?.(conversationId)
+      return dm ? ['dm', dm] : dm === null ? ['channel', null] : ['conversation', '?']
+    }
     if (sourceId) {
       const src = this.source(sourceId)
       if (!src) return ['source', '?']
@@ -876,7 +883,7 @@ export class Wiki {
   // ---------- writing ----------
 
   // Creates or changes a page. expectedHash: the copy the change was made on; a page that moved on since is refused.
-  save(p: { title: string; body: string; kind?: string; by: string; byName: string; expectedHash?: string; rename?: string; reason?: string; sourceId?: string }): WikiPage {
+  save(p: { title: string; body: string; kind?: string; by: string; byName: string; expectedHash?: string; rename?: string; reason?: string; sourceId?: string; conversationId?: string }): WikiPage {
     this.writable()
     const title = cleanTitle(p.title)
     if (!title) throw new Error(L('A página precisa de um título.', 'The page needs a title.'))
@@ -927,7 +934,7 @@ export class Wiki {
     writeFileSync(join(this.pagesDir, file), text)
     this.indexFile(file, text, Math.round(statSync(join(this.pagesDir, file)).mtimeMs), p.by)
     const before = existing !== undefined ? parsePage(existing).body : null
-    this.version(title, p.by, existing === undefined ? 'create' : 'edit', before, parsePage(text).body, p.reason, p.sourceId)
+    this.version(title, p.by, existing === undefined ? 'create' : 'edit', before, parsePage(text).body, p.reason, p.sourceId, p.conversationId)
     this.appendLog(existing === undefined ? L(`**${p.byName}** criou [[${title}]]`, `**${p.byName}** created [[${title}]]`) : p.rename && p.rename !== title ? L(`**${p.byName}** renomeou [[${p.rename}]] pra [[${title}]]`, `**${p.byName}** renamed [[${p.rename}]] to [[${title}]]`) : L(`**${p.byName}** editou [[${title}]]`, `**${p.byName}** edited [[${title}]]`))
     this.writeIndex()
     this.deps.onWrite?.({ title, byName: p.byName })
@@ -1555,7 +1562,8 @@ export function wikiWrite(
   author: { id: string; name: string },
   name: string,
   args: Record<string, unknown>,
-  canSee: (title: string) => boolean
+  canSee: (title: string) => boolean,
+  origin: { conversationId?: string } = {}
 ): { text: string; error?: boolean; step: { label: string; detail: string } } {
   const writes = name === WIKI_ESCREVER.name
   const raw = typeof args['pagina'] === 'string' ? args['pagina'].replace(/^\[\[|\]\]$/g, '') : ''
@@ -1575,7 +1583,7 @@ export function wikiWrite(
       if (!page) return { text: L(`Ainda não há página "${title}": escreva ela primeiro com wiki_escrever.`, `There's no page "${title}" yet: write it first with wiki_escrever.`), error: true, step }
       if (novo.trim().length > MAX_WRITE) return { text: L('O trecho novo é longo demais: mande até 12 mil caracteres por vez.', 'The new passage is too long: send up to 12,000 characters at a time.'), error: true, step }
       const body = applyOp(page.body, { op: 'replace', page: page.title, old: antigo, new: novo })
-      wiki.save({ title: page.title, body, expectedHash: page.hash, by: author.id, byName: author.name })
+      wiki.save({ title: page.title, body, expectedHash: page.hash, by: author.id, byName: author.name, ...origin })
       return { text: L(`Corrigiu [[${page.title}]].`, `Corrected [[${page.title}]].`), step }
     }
     const texto = typeof args['texto'] === 'string' ? args['texto'].trim() : ''
@@ -1584,11 +1592,11 @@ export function wikiWrite(
     if (!texto) return { text: L('Faltou o que escrever.', 'What to write is missing.'), error: true, step }
     if (texto.length > MAX_WRITE) return { text: L('O texto é longo demais: mande até 12 mil caracteres por vez.', 'The text is too long: send up to 12,000 characters at a time.'), error: true, step }
     if (!page) {
-      const made = wiki.save({ title, body: texto, by: author.id, byName: author.name, ...(tipo ? { kind: tipo } : {}) })
+      const made = wiki.save({ title, body: texto, by: author.id, byName: author.name, ...(tipo ? { kind: tipo } : {}), ...origin })
       return { text: L(`Criou [[${made.title}]] (${made.kind}).`, `Created [[${made.title}]] (${made.kind}).`), step: { label: L('Criou na wiki', 'Created in the wiki'), detail: made.title } }
     }
     const body = applyOp(page.body, { op: 'append', page: page.title, ...(secao ? { section: secao } : {}), text: texto })
-    wiki.save({ title: page.title, body, expectedHash: page.hash, by: author.id, byName: author.name })
+    wiki.save({ title: page.title, body, expectedHash: page.hash, by: author.id, byName: author.name, ...origin })
     return {
       text: secao ? L(`Escreveu em [[${page.title}]], na seção "${secao}".`, `Wrote in [[${page.title}]], in the section "${secao}".`) : L(`Escreveu no fim de [[${page.title}]].`, `Wrote at the end of [[${page.title}]].`),
       step
