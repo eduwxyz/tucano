@@ -10,7 +10,8 @@ const out = process.argv[2] ?? 'frames/wiki-write'
 mkdirSync(out, { recursive: true })
 const data = mkdtempSync(join(tmpdir(), 'tucano-'))
 const app = await electron.launch({
-  args: ['.'],
+  args: ['.', `--user-data-dir=${join(data, 'electron')}`],
+  ...(process.env.TUCANO_ELECTRON ? { executablePath: process.env.TUCANO_ELECTRON } : {}),
   env: { ...process.env, TUCANO_DATA: data, TUCANO_SEED: '1', TUCANO_FAKE_ENGINES: '1', TUCANO_LOCALE: process.env.TUCANO_LOCALE ?? 'pt-BR' }
 })
 const win = await app.firstWindow()
