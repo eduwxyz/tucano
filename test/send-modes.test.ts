@@ -249,6 +249,18 @@ describe('a queued prompt outlives a restart', () => {
     expect(db.queuedMessages()).toEqual([]) // the mark went with the reply, so it can't start twice
   })
 
+  it('a message handed into a reply is not started again when the app opens', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    // It says where it went, and keeps saying it: only a queued one is a reply waiting to happen.
+    db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'person', id: db.ownerId() }, text: 'mude de plano', at: Date.now(), sendMode: 'steer' })
+    expect(db.queuedMessages()).toEqual([])
+    const r = runnerWith(fakeEngine('claude', { delayMs: 1 }))
+    r.resumeQueued()
+    await r.idle()
+    expect(agentMessages()).toEqual([]) // nothing ran: that message already went into a reply
+  })
+
   it('takes its turn after what is already running there', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
