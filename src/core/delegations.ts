@@ -134,8 +134,8 @@ export function askMessage(to: Agent, ask: { text: string; done?: string; dueAt?
 export function askTask(from: Agent, me: string, done?: string, peer = false): string {
   const until = done ? ` ${L(`Conta como terminado: ${done.replace(/[.\s]+$/, '')}.`, `It counts as finished when: ${done.replace(/[.\s]+$/, '')}.`)}` : ''
   return L(
-    `A mensagem acima é um pedido de ${from.name}, ${peer ? 'seu colega de time' : 'a quem você responde'}. Faça o que ela pede. Quando terminar, sua resposta final nesta thread volta sozinha pra ${from.name}, que não leu o resto daqui: escreva nela o resultado inteiro, com o que fez, o que achou e o que falta. Não mencione ${from.name} pra avisar, nem deixe um recado à parte pra ele: a resposta é uma só, e ${me} também a lê. Se faltar uma informação pra continuar, use ask_user: a pergunta vai pra ${from.name}, não pra ${me}; se tiver uma recomendação, diga qual. O que pedir aprovação continua pedindo, como sempre.`,
-    `The message above is a request from ${from.name}, ${peer ? 'your teammate' : 'whom you answer to'}. Do what it asks. When you finish, your final reply in this thread goes back to ${from.name} by itself, and they did not read the rest of it: write the whole result there, with what you did, what you found and what is left. Do not mention ${from.name} to let them know, nor leave a separate note for them: there is one answer, and ${me} reads it too. If a piece of information is missing to go on, use ask_user: the question goes to ${from.name}, not to ${me}; if you have a recommendation, say which. What asks for approval still asks, as always.`
+    `A mensagem acima é um pedido de ${from.name}, ${peer ? 'seu colega de time' : 'a quem você responde'}. Faça o que ela pede. Quando terminar, sua resposta final nesta thread volta sozinha pra ${from.name}, que não leu o resto daqui: escreva nela o resultado inteiro, com o que fez, o que achou e o que falta. Não mencione ${from.name} pra avisar, nem deixe um recado à parte pra ele: a resposta é uma só, e ${me} também a lê. Se faltar uma informação pra continuar, use ask_user: a pergunta vai pra ${from.name}, não pra ${me}; escreva na resposta o que você já tem antes de perguntar, porque isso volta junto com a pergunta. Se tiver uma recomendação, diga qual. O que pedir aprovação continua pedindo, como sempre.`,
+    `The message above is a request from ${from.name}, ${peer ? 'your teammate' : 'whom you answer to'}. Do what it asks. When you finish, your final reply in this thread goes back to ${from.name} by itself, and they did not read the rest of it: write the whole result there, with what you did, what you found and what is left. Do not mention ${from.name} to let them know, nor leave a separate note for them: there is one answer, and ${me} reads it too. If a piece of information is missing to go on, use ask_user: the question goes to ${from.name}, not to ${me}; write what you already have in the reply before asking, because it goes back with the question. If you have a recommendation, say which. What asks for approval still asks, as always.`
   ) + until
 }
 
@@ -149,13 +149,16 @@ type Place = Pick<Conversation, 'kind' | 'name'> | undefined
 export const placeOf = (c: Place): string => (!c ? '?' : c.kind === 'dm' ? 'DM' : `#${c.name}`)
 export const inPlace = (c: Place): string => (c?.kind === 'dm' ? L('na DM dele', 'in their DM') : L(`em ${placeOf(c)}`, `in ${placeOf(c)}`))
 export const resultMessage = (where: Place, text: string): string => `${L(`Sobre o pedido ${inPlace(where)}`, `About the request ${inPlace(where)}`)}:\n\n${cut(text.trim())}`
+// A reply that didn't end: what it has written so far still comes back, so the asker isn't left with
+// only the question or only the news that it waits on an approval of theirs.
+export const soFarMessage = (where: Place, text: string): string => `${L(`Até agora, sobre o pedido ${inPlace(where)}`, `So far, on the request ${inPlace(where)}`)}:\n\n${cut(text.trim())}`
 export const questionMessage = (where: Place, question: string): string => `${L(`Uma pergunta sobre o pedido ${inPlace(where)}`, `A question about the request ${inPlace(where)}`)}:\n\n${question.trim()}`
 
 export interface Returned {
   d: Delegation
   to: string // the name of whoever was doing it
   channel: string // where it was delivered, as placeOf names it
-  what: 'done' | 'failed' | 'cancelled' | 'asking' | 'late'
+  what: 'done' | 'failed' | 'cancelled' | 'asking' | 'parked' | 'late'
   why?: string // a failure's reason
 }
 
@@ -167,15 +170,25 @@ export function returnTask(returned: Returned[], open: { d: Delegation; to: stri
     if (r.what === 'failed') return `${head}: ${L(`não terminou${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}. Diga isso a ${me}, e peça de novo se fizer sentido`, `did not finish${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}. Tell ${me} so, and ask again if it makes sense`)}.`
     if (r.what === 'cancelled') return `${head}: ${L('foi parado antes de terminar', 'was stopped before it finished')}.`
     if (r.what === 'late') return `${head}: ${L(`passou do prazo e ainda não terminou. Diga a ${me}; pra desistir, use cancelar_pedido`, `is past its deadline and has not finished. Tell ${me}; to give up, use cancelar_pedido`)}.`
+    if (r.what === 'parked')
+      return `${head}: ${L(
+        `parou numa aprovação que espera ${me}. O que ele já escreveu são as mensagens dele acima; quando ${me} decidir, ele segue, e a resposta final volta pra cá. Não refaça o que ele fez`,
+        `stopped at an approval that waits for ${me}. What it has written so far is in its messages above; when ${me} decides, it goes on, and the final answer comes back here. Do not redo what it did`
+      )}.`
     return `${head}: ${L(
-      `deixou uma pergunta (a mensagem dele acima) e espera. Se você sabe a resposta por esta conversa ou pela sua memória, responda com responder_pedido. Se é decisão de ${me}, pergunte a ${me} com ask_user, dizendo o que ${r.to} recomenda, e quando ${me} responder repasse com responder_pedido`,
-      `left a question (their message above) and waits. If you know the answer from this conversation or your memory, answer with responder_pedido. If it is ${me}'s decision, ask ${me} with ask_user, saying what ${r.to} recommends, and when ${me} answers pass it on with responder_pedido`
+      `deixou uma pergunta e espera: as duas mensagens dele acima são o que ele escreveu até agora e a pergunta. Se você sabe a resposta por esta conversa ou pela sua memória, responda com responder_pedido. Se é decisão de ${me}, pergunte a ${me} com ask_user, dizendo o que ${r.to} recomenda, e quando ${me} responder repasse com responder_pedido`,
+      `left a question and waits: its two messages above are what it has written so far and the question. If you know the answer from this conversation or your memory, answer with responder_pedido. If it is ${me}'s decision, ask ${me} with ask_user, saying what ${r.to} recommends, and when ${me} answers pass it on with responder_pedido`
     )}.`
   }
   const still = open.length ? `\n\n${L('Ainda em andamento', 'Still going')}: ${open.map((o) => `[${codeOf(o.d)}] ${o.to}, ${o.channel}${o.parked ? ` (${L(`parado numa aprovação que espera ${me}`, `held on an approval that waits for ${me}`)})` : ''}`).join('; ')}.` : ''
   const close = returned.some((r) => r.what === 'asking')
     ? ''
-    : `\n\n${L(
+    : returned.every((r) => r.what === 'parked')
+      ? `\n\n${L(
+          `Diga a ${me}, em poucas linhas, o que já veio disso e que o resto espera uma aprovação dele, na thread do pedido.`,
+          `Tell ${me}, in a few lines, what has come of it so far and that the rest waits for their approval in the request's thread.`
+        )}`
+      : `\n\n${L(
         `${open.length ? `Diga a ${me} o que já voltou, em poucas linhas, e o que ainda está andando${open.some((o) => o.parked) ? ` (e o que espera uma aprovação dele, na thread do pedido)` : ''}.` : `Feche o assunto com ${me}: diga o resultado em poucas linhas, com o que importa de cada resposta, e o que precisa de decisão. Não copie as respostas inteiras: ${me} abre cada uma pelo atalho. Não diga que elas não chegaram. Se falta ${me} escolher algo pra você seguir, pergunte com ask_user (com as opções), não no texto.`}`,
         `${open.length ? `Tell ${me} what has come back, in a few lines, and what is still going${open.some((o) => o.parked) ? ` (and what waits for their approval, in the request's thread)` : ''}.` : `Close the subject with ${me}: say the result in a few lines, with what matters from each answer, and what needs a decision. Do not copy the answers whole: ${me} opens each one by the shortcut. Do not say they did not arrive. If ${me} has to choose something for you to go on, ask with ask_user (with the options), not in the text.`}`
       )}`

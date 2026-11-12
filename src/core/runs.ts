@@ -37,7 +37,7 @@ import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellAct
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
-import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, questionMessage, RESPONDER_PEDIDO, resultMessage, returnTask, teamMember, teamSection, type Returned } from './delegations'
+import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, questionMessage, RESPONDER_PEDIDO, resultMessage, returnTask, soFarMessage, teamMember, teamSection, type Returned } from './delegations'
 import { channelsOf, MAX_CHAIN, peersOf, reachOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
 
@@ -59,6 +59,10 @@ export const MAX_CONCURRENT_URGENT = 6
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
+// A request whose thread has nothing after it at all: the one asked never got going. It's knocked on
+// once, and if that comes to nothing either it ends as failed, so whoever asked always hears (delegations).
+const FIRST_NUDGE_MS = 4 * 60_000
+const GIVE_UP_MS = 10 * 60_000
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 // Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
@@ -2432,7 +2436,8 @@ ${note}`,
       // The inbox shows a question's decisions from its message, which has them only now.
       if (question) emit({ type: 'inbox' })
       if (question && up) this.askedUp(up, agent, msg, question)
-      // Handed work that stopped at an approval: what else was asked from there may be told now.
+      // Handed work that stopped at an approval: what else was asked from there may be told now, and
+      // whoever asked hears that this one answered as far as it goes (tellAsker brings what it wrote).
       if (approval && handedNow) this.tellAsker(handedNow.from, handedNow.originConversationId, handedNow.originThreadId)
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (!question && !approval) {
@@ -2959,7 +2964,10 @@ ${note}`,
   private askedUp(d: Delegation, agent: Agent, msg: Message, question: string): void {
     const { db } = this.deps
     this.keep({ ...d, asking: msg.id, askingTold: false })
-    this.say(agent.id, d.originConversationId, d.originThreadId, questionMessage(db.conversation(d.conversationId), question), refOf(d))
+    const channel = db.conversation(d.conversationId)
+    // What it wrote before stopping goes back too: the asker is never left with the question alone.
+    if (msg.text.trim()) this.say(agent.id, d.originConversationId, d.originThreadId, soFarMessage(channel, msg.text), { ...refOf(d), back: 'result' })
+    this.say(agent.id, d.originConversationId, d.originThreadId, questionMessage(channel, question), refOf(d))
     this.tellAsker(d.from, d.originConversationId, d.originThreadId)
   }
 
@@ -2985,6 +2993,8 @@ ${note}`,
       const returned: Returned[] = all.flatMap((d): Returned[] => {
         if (d.state !== 'open') return d.told ? [] : [{ ...place(d), what: d.state, ...(d.state === 'failed' && d.result ? { why: db.message(d.result)?.run?.error } : {}) }]
         if (d.asking && !d.askingTold) return [{ ...place(d), what: 'asking' }]
+        // Held on an approval of mine: it answered as far as it goes, and that is mine to hear too.
+        if (!d.asking && !d.parkedTold && this.onApproval(d)) return [{ ...place(d), what: 'parked' }]
         if (d.dueAt && d.dueAt < now && !d.lateTold && !d.asking) return [{ ...place(d), what: 'late' }]
         return []
       })
@@ -2993,7 +3003,15 @@ ${note}`,
       // Answers alone wait for the rest, so the person hears it once. Not for one held on an approval:
       // that is the person's to give, whenever they do, and the others shouldn't sit behind it.
       if (open.some((o) => !o.asking && !this.onApproval(o)) && returned.every((r) => r.what === 'done' || r.what === 'cancelled')) return
-      for (const r of returned) this.keep(r.what === 'asking' ? { ...r.d, askingTold: true } : r.what === 'late' ? { ...r.d, lateTold: true } : { ...r.d, told: true })
+      for (const r of returned) {
+        // Held on an approval of mine: what it wrote before stopping goes back with the news, so waiting
+        // for my yes never takes its answer away from whoever asked.
+        if (r.what === 'parked') {
+          const last = db.recentMessages(r.d.conversationId, 1, r.d.rootId)[0]
+          if (last?.author.kind === 'agent' && last.text.trim()) this.say(last.author.id, r.d.originConversationId, r.d.originThreadId, soFarMessage(db.conversation(r.d.conversationId), last.text), { ...refOf(r.d), back: 'result' })
+        }
+        this.keep(r.what === 'asking' ? { ...r.d, askingTold: true } : r.what === 'late' ? { ...r.d, lateTold: true } : r.what === 'parked' ? { ...r.d, parkedTold: true } : { ...r.d, told: true })
+      }
       const requester = requesterOf(db, conv, [])
       const me = requester.id === db.ownerId() ? undefined : requester.name
       this.followups.reserve(key)
@@ -3045,12 +3063,42 @@ ${note}`,
     for (const d of db.openDelegations()) {
       if (d.asking) continue
       const last = db.recentMessages(d.conversationId, 1, d.rootId)[0]
-      if (last?.author.kind !== 'agent' || !last.run || !SHORT.includes(last.run.status) || this.controllers.has(last.id)) continue
+      // Nothing at all after the request: its turn never got going, so it's knocked on (see knockOn).
+      if (!last) {
+        this.knockOn(d, now)
+        continue
+      }
+      if (last.author.kind !== 'agent' || !last.run || !SHORT.includes(last.run.status) || this.controllers.has(last.id)) continue
       if (now - (last.run.endedAt ?? last.at) < 60_000) continue // its own reply settles it; this is for the ones that never got to
       this.settle(d, last.run.status === 'stopped' ? 'cancelled' : 'failed', last)
     }
     const places = new Map(db.untoldDelegations(now).map((d) => [replyKey(d.from, d.originConversationId, d.originThreadId), d]))
+    // A request that answered as far as it goes and now waits on an approval of mine: whoever asked
+    // hears of it, including what it has of the answer, and then again when it ends.
+    for (const d of db.openDelegations()) if (!d.asking && !d.parkedTold && this.onApproval(d)) places.set(replyKey(d.from, d.originConversationId, d.originThreadId), d)
     for (const d of places.values()) this.tellAsker(d.from, d.originConversationId, d.originThreadId, now)
+  }
+
+  // A request whose thread still has nothing after it: the one asked never even started (no text, no
+  // error, nothing). It's knocked on once with what it has to do, and if that comes to nothing either,
+  // the request ends as failed so whoever asked hears of it instead of waiting for good.
+  private knockOn(d: Delegation, now: number): void {
+    const { db } = this.deps
+    if (d.nudges) {
+      if (now - d.createdAt >= GIVE_UP_MS) this.settle(d, 'failed')
+      return
+    }
+    if (now - d.createdAt < FIRST_NUDGE_MS) return
+    const to = db.agent(d.to)
+    const conv = db.conversation(d.conversationId)
+    if (!to || !conv || to.archived) return
+    this.keep({ ...d, nudges: 1 })
+    const key = replyKey(to.id, conv.id, d.rootId)
+    this.followups.reserve(key)
+    this.enqueue(
+      () => this.execute(to, conv, { depth: 1, threadId: d.rootId, task: L('Seu turno anterior nesta thread não deixou nenhuma resposta: nenhum texto, nenhum erro, nada. Faça o pedido acima agora e escreva a resposta aqui, com o que fez, o que achou e o que falta.', 'Your previous turn in this thread left no reply at all: no text, no error, nothing. Do the request above now and write the answer here, with what you did, what you found and what is left.'), reserved: true }),
+      true
+    )
   }
 
   // An agent that mentions another agent of the conversation may hand it the turn,
