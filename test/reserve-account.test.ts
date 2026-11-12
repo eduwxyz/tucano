@@ -39,7 +39,7 @@ const personal: Account = { id: 'p1', engine: 'claude', name: 'Pessoal', loggedI
 function runner(claude: Engine): Runner {
   codexTurns = []
   const codex = fakeEngine('codex', { delayMs: 1 })
-  const engines: Record<EngineId, Engine> = { claude, codex: { id: 'codex', run: (t) => (codexTurns.push(t), codex.run(t)) }, opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  const engines: Record<EngineId, Engine> = { claude, codex: { id: 'codex', run: (t) => (codexTurns.push(t), codex.run(t)) }, opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
 }
 const reply = (): Message => db.messages().filter((m) => m.author.kind === 'agent').at(-1)!
@@ -47,7 +47,7 @@ const reply = (): Message => db.messages().filter((m) => m.author.kind === 'agen
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'ad-data-'))
   db = new Db(join(data, 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', accounts: [work, personal] }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', accounts: [work, personal] }
   db.saveAgent(agent())
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
 })

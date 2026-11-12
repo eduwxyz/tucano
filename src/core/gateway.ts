@@ -39,6 +39,9 @@ export class Gateway {
   private http: HttpServer | null = null
   private port = 0
   private sessions = new Map<string, Session>()
+  // The URL token of an agent whose engine keeps the connection between turns (Hermes): the
+  // CLI's own daemon caches the MCP transport, so a per-turn token would be revoked under it.
+  private agents = new Map<string, string>()
   private routes = new Map<string, (url: URL) => Promise<string>>()
 
   async start(): Promise<void> {
@@ -80,6 +83,26 @@ export class Gateway {
         }
       : () => this.sessions.delete(t)
     return { url: `http://127.0.0.1:${this.port}/mcp/${t}`, close }
+  }
+
+  // The token of an agent that keeps its connection from one turn to the next, made once and
+  // handed to `open` on every turn: the URL the CLI was given stays the same, and between turns
+  // the session is parked (its tools listed, every call refused).
+  agentToken(agentKey: string): string {
+    let t = this.agents.get(agentKey)
+    if (!t) {
+      t = randomBytes(24).toString('hex')
+      this.agents.set(agentKey, t)
+    }
+    return t
+  }
+
+  // The agent is gone (deleted, or its workspace closed): its URL stops answering.
+  agentForget(agentKey: string): void {
+    const t = this.agents.get(agentKey)
+    if (!t) return
+    this.agents.delete(agentKey)
+    this.sessions.delete(t)
   }
 
   release(token: string): void {

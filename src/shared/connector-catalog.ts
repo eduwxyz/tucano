@@ -211,6 +211,8 @@ export const CATALOG: CatalogEntry[] = [
   e('context7', 'Context7', 'https://mcp.context7.com/mcp', 'research', 'Documentação atual de bibliotecas', 'Up-to-date library docs', 'none'),
   e('huggingface', 'Hugging Face', 'https://huggingface.co/mcp', 'research', 'Modelos, datasets e Spaces', 'Models, datasets and Spaces', 'none'),
   e('exa', 'Exa', 'https://mcp.exa.ai/mcp', 'research', 'Busca na web', 'Web search', 'none'),
+  // The keyless address: /mcp serves the same tools but offers a sign-in first.
+  e('keenable', 'Keenable', 'https://api.keenable.ai/mcp-public?keenable_title=tucano', 'research', 'Busca na web e páginas em Markdown', 'Web search and pages as Markdown', 'none'),
 
   e('coinbase', 'Coinbase', 'https://agents.coinbase.com/mcp', 'finance', 'Carteira e cripto', 'Wallet and crypto'),
   e('robinhood', 'Robinhood', 'https://agent.robinhood.com/mcp/trading', 'finance', 'Ações e investimentos', 'Stocks and investments'),

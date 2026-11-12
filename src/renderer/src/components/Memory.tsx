@@ -35,7 +35,7 @@ export function MemoryPage(): ReactNode {
   const memories = useStore((s) => s.memories)
   const agents = useStore((s) => s.agents.filter(isTeam))
   const me = useStore((s) => s.me.name)
-  // "About you": this person's own memories (the core keeps them under their scope).
+  // "You": this person's own memories (the core keeps them under their scope).
   const mine = personScope(useStore((s) => s.you))
   const [tab, setTab] = useState<Tab>('all')
   const [q, setQ] = useState('')
@@ -65,7 +65,7 @@ export function MemoryPage(): ReactNode {
     <Sheet title={L('Memória', 'Memory')} lede={L('O que os agentes sabem sobre você e o seu trabalho.', 'What the agents know about you and your work.')}>
       <nav className="tabs-line">
         {tabBtn('all', L('Tudo', 'All'))}
-        {tabBtn('me', L('Sobre você', 'About you'))}
+        {tabBtn('me', L('Você', 'You'))}
         {withNotes.map((a) =>
           tabBtn(
             a.id,
@@ -156,7 +156,7 @@ export function MemoryPage(): ReactNode {
                       <AgentAvatar agent={g.agent} size={14} /> {L(`Notas de ${g.agent.name}`, `${g.agent.name}'s notes`)}
                     </button>
                   ) : (
-                    L('Sobre você', 'About you')
+                    L('Você', 'You')
                   )
                 }
                 lead={g.agent ? L(`Só ${g.agent.name} vê.`, `Only ${g.agent.name} sees these.`) : undefined}

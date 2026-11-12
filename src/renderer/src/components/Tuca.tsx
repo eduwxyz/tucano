@@ -31,7 +31,8 @@ import {
   proposalKey,
   proposalsOf
 } from '../store'
-import { AgentAvatar, Icon, tokens } from './ui'
+import { AgentAvatar, Icon, monthlyLimitText } from './ui'
+import { instructionLengthNote } from '../../../shared/instructions'
 import { describeRoutine } from './Routines'
 
 const EFFORT = (): Record<AgentDraft['effort'], string> => ({ low: L('esforço baixo', 'low effort'), medium: L('esforço médio', 'medium effort'), high: L('esforço alto', 'high effort'), xhigh: L('esforço máximo', 'max effort') })
@@ -84,6 +85,7 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
       <p className={`draft-card__instructions ${open ? 'is-open' : ''}`} onClick={() => setOpen(!open)} title={open ? undefined : L('Ver tudo', 'Show all')}>
         {d.instructions}
       </p>
+      {instructionLengthNote(d.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(d.instructions.length)}</p>}
       <div className="draft-card__facts small">
         {model && (
           <span>
@@ -196,7 +198,8 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
       if (c.effort !== undefined) rows.push([L('Esforço', 'Effort'), level(was.effort ?? agent.effort), level(c.effort)])
       if (c.web !== undefined) rows.push(['Web', was.web !== false ? L('ligada', 'on') : L('desligada', 'off'), c.web ? L('ligada', 'on') : L('desligada', 'off')])
       if (c.grants !== undefined) rows.push([L('Conectores', 'Connectors'), grantList(was.grants ?? {}), grantList(c.grants)])
-      if (c.limit !== undefined) rows.push([L('Limite do mês', "Month's limit"), tokens(was.limit ?? agent.limit), tokens(c.limit)])
+      // 0 is no limit, so the card says that instead of a figure that reads as "set it to zero".
+      if (c.limit !== undefined) rows.push([L('Limite do mês', "Month's limit"), monthlyLimitText(was.limit ?? agent.limit), monthlyLimitText(c.limit)])
     }
     head = (
       <>
@@ -227,6 +230,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
             <p className={`draft-card__instructions ${open ? 'is-open' : ''}`} onClick={() => setOpen(!open)} title={open ? undefined : L('Ver tudo', 'Show all')}>
               {c.instructions}
             </p>
+            {instructionLengthNote(c.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(c.instructions.length)}</p>}
           </>
         )}
       </>
@@ -294,6 +298,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
               <div className="grow">
                 <strong>{d.name}</strong> <span className="muted small">{d.role}</span>
                 <p className="muted small">{d.instructions.split('\n')[0]}</p>
+                {instructionLengthNote(d.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(d.instructions.length)}</p>}
               </div>
               <span className="muted small">{m ? m.label : d.modelId}</span>
             </div>
