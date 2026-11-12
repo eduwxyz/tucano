@@ -82,6 +82,7 @@ export interface Agent {
   memory: MemoryMode
   computer: boolean // has a computer (spec §13): see computerKind for which
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
+  sandbox?: SandboxConfig // selected boundary for locally executed agents; unset means explicit unsandboxed execution
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
@@ -112,6 +113,63 @@ export const PROJECTS_DIR = '/projetos'
 
 // Where an agent's computer runs: an isolated Linux container, or the user's own Mac (spec §23).
 export type ComputerKind = 'linux' | 'mac'
+
+// Execution boundary for agents running on the host computer. `none` is explicit and preserves
+// the historical behavior; a selected provider must be available or the run fails closed.
+export type SandboxProviderId = 'none' | 'ai-jail'
+export interface SandboxConfig {
+  provider: SandboxProviderId
+  configFile?: string
+  network?: boolean
+  allowHosts?: string[]
+  readOnlyPaths?: string[]
+  readWritePaths?: string[]
+  overlayPaths?: string[]
+  hideDotDirs?: string[]
+  maskPaths?: string[]
+  maskExceptPaths?: string[]
+  denyPaths?: string[]
+  denyExceptPaths?: string[]
+  environment?: string[]
+  envFromFiles?: string[]
+  privateHome?: boolean
+  lockdown?: boolean
+  landlock?: boolean
+  seccomp?: boolean
+  rlimits?: boolean
+  agentState?: boolean
+  inheritEnv?: boolean
+  github?: boolean
+  aws?: boolean
+  kube?: boolean
+  gcloud?: boolean
+  dockerConfig?: boolean
+  ssh?: boolean
+  pictures?: boolean
+  browser?: 'hard' | 'soft' | 'none'
+  docker?: boolean
+  tailscale?: boolean
+  terminalPassthrough?: boolean
+  systemdUser?: boolean
+  gpu?: boolean
+  display?: boolean
+  audio?: boolean
+  kvm?: boolean
+  macosHostIpc?: boolean
+  x11?: boolean
+  hostShm?: boolean
+  updateCheck?: boolean
+  worktree?: boolean
+  mise?: boolean
+  toolchains?: boolean
+  saveConfig?: boolean
+  hideConfig?: boolean
+  exec?: boolean
+  claudeDir?: string
+  auditLog?: boolean
+  statusBar?: boolean
+}
+
 export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a.computer && a.computerKind === 'mac'
 
 export interface Conversation {
@@ -216,7 +274,7 @@ export interface AgentDraft {
 }
 
 // What the Tuca may propose to change in an agent that exists.
-export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
+export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit' | 'sandbox'>>
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,

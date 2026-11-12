@@ -252,7 +252,7 @@ export function antigravityEngine(bin: () => string | undefined, appDir: string,
       // A key or proxy may live in the person's shell, which an app opened from Finder doesn't get.
       const env: NodeJS.ProcessEnv = { ...process.env, ...(await shellEnv()), ...antigravityHomeEnv(dirs.home) }
       try {
-        yield* runCli({ bin: path, args: antigravityArgs(antigravityModel(turn.model)), stdin: antigravityInput(antigravityPrompt(turn)), cwd: dirs.workspace, signal: turn.signal, parser: antigravityParser(), env })
+        yield* runCli({ bin: path, args: antigravityArgs(antigravityModel(turn.model)), stdin: antigravityInput(antigravityPrompt(turn)), cwd: dirs.workspace, signal: turn.signal, parser: antigravityParser(), env, sandbox: turn.sandbox })
       } finally {
         // The keychain is a link: only the link goes.
         try {

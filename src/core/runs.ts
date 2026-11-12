@@ -2093,7 +2093,9 @@ ${note}`,
     const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs.map(({ _meta: _m, ...t }) => t), gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
-    let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
+    // A persistent CLI process cannot be retrofitted into a selected sandbox. Use one-shot
+    // launches until every session engine supports sandbox-aware process creation.
+    let plan = engines[engineId].sessions && (!agent.sandbox || agent.sandbox.provider === 'none') && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
     let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
     const session = this.deps.gateway?.open(tools, plan?.token)
     const whole = { prompt: withFiles.join('\n\n'), blocks: withFiles, images }
@@ -2117,6 +2119,7 @@ ${note}`,
             ...input,
             session: plan && { id: plan.id, resume: plan.resume, keep: true },
             cwd,
+            sandbox: agent.computerKind === 'mac' ? agent.sandbox : undefined,
             signal: control.ctl.signal,
             mcpUrl: session?.url,
             web: agent.web !== false,

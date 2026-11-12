@@ -319,7 +319,8 @@ export function grokEngine(bin: () => string | undefined, shellEnv: () => Promis
           cwd: dirs.work,
           signal: turn.signal,
           parser: grokParser(sent),
-          env
+          env,
+          sandbox: turn.sandbox
         })
       } finally {
         grokCleanup(dirs)

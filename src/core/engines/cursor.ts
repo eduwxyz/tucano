@@ -313,7 +313,7 @@ export function cursorEngine(bin: () => string | undefined, appDir: string, shel
         }
         const sent = turn.system.length + turn.prompt.length
         const run = (images: Turn['images'], prompt: string): AsyncIterable<EngineEvent> =>
-          runCli({ bin: path, args: cursorArgs({ model, images }), stdin: prompt, cwd: dirs.workspace, signal: turn.signal, parser: cursorParser(sent), env })
+          runCli({ bin: path, args: cursorArgs({ model, images }), stdin: prompt, cwd: dirs.workspace, signal: turn.signal, parser: cursorParser(sent), env, sandbox: turn.sandbox })
         const withImages = (turn.images ?? []).some((i) => existsSync(i.path))
         if (!withImages) {
           yield* run(undefined, turn.prompt)

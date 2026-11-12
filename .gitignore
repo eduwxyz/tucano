@@ -6,3 +6,4 @@ dist
 .tucano
 .wrangler
 build/whisper
+.worktrees/

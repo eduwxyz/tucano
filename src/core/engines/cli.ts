@@ -3,6 +3,7 @@ import { closeSync, openSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { isWin, killTree, spawnable } from '../platform'
 import type { EngineEvent } from './types'
+import { sandboxProvider } from '../sandbox'
 import { OUT_OF_QUOTA } from '../../shared/errors'
 
 // A parser turns the CLI's JSONL stdout into engine events. It is pure so it
@@ -27,12 +28,16 @@ export async function* runCli(opts: {
   signal: AbortSignal
   parser: Parser
   env?: NodeJS.ProcessEnv
+  sandbox?: import('../../shared/types').SandboxConfig
 }): AsyncIterable<EngineEvent> {
-  const s = spawnable(opts.bin, opts.args)
+  const sandbox = opts.sandbox ?? { provider: 'none' as const }
+  const { provider: _provider, ...policy } = sandbox
+  const command = sandboxProvider(sandbox.provider).wrap({ command: opts.bin, args: opts.args, cwd: opts.cwd, policy })
+  const s = spawnable(command.command, command.args)
   const input = opts.stdinFile ? openSync(opts.stdinFile, 'r') : undefined
   let child: ChildProcess
   try {
-    child = spawn(s.file, s.args, { cwd: opts.cwd, stdio: [input ?? 'pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+    child = spawn(s.file, s.args, { cwd: command.cwd ?? opts.cwd, stdio: [input ?? 'pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
   } finally {
     if (input !== undefined) closeSync(input) // the child has its own copy
   }

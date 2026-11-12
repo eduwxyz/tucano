@@ -1,4 +1,5 @@
 import { L, locale, type Lang } from '../../../shared/lang'
+import type { SandboxConfig } from '../../../shared/types'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
@@ -634,16 +635,20 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             </Card>
           )}
 
-          {!isNew && pane('ferramentas') && (
+          {pane('ferramentas') && (
+            <>
             <ComputerCard
               agentId={draft.id}
               kind={draft.computer ? (draft.computerKind ?? 'linux') : 'none'}
+              sandbox={draft.sandbox}
+              onSandboxChange={(sandbox) => (isNew ? patch({ sandbox }) : (setDraft((d) => ({ ...d, sandbox })), patchAgent(draft.id, { sandbox })))}
               onChange={(k) => {
                 const patch = { computer: k !== 'none', computerKind: k === 'none' ? (draft.computerKind ?? 'linux') : k }
                 setDraft((d) => ({ ...d, ...patch }))
                 patchAgent(draft.id, patch)
               }}
             />
+            </>
           )}
 
           {pane('memoria') && (
@@ -829,7 +834,7 @@ const COMPUTER_CHOICES = (): { value: ComputerChoice; label: string }[] => [
   { value: 'mac', label: L('Este computador', 'This computer') }
 ]
 
-function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void }): ReactNode {
+function ComputerCard({ agentId, kind, sandbox, onSandboxChange, onChange }: { agentId: string; kind: ComputerChoice; sandbox?: SandboxConfig; onSandboxChange: (sandbox: SandboxConfig) => void; onChange: (k: ComputerChoice) => void }): ReactNode {
   const info = useStore((s) => computerOf(s, agentId))
   // Looking is anyone's; starting, stopping, erasing and opening its folder, the admins'.
   const admin = useStore(amAdmin)
@@ -911,6 +916,7 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
             </span>
           </div>
           <Services agentId={agentId} />
+          <SandboxCard sandbox={sandbox} enabled onChange={onSandboxChange} />
           {admin && (
             <div className="row computer__actions">
               <button className="btn btn--sm btn--ghost" onClick={() => computerAction(agentId, 'open_folder')}>
@@ -971,6 +977,124 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
           </div>}
         </>
       )}
+    </Card>
+  )
+}
+
+export function SandboxCard({ sandbox, enabled, onChange }: { sandbox?: SandboxConfig; enabled: boolean; onChange: (sandbox: SandboxConfig) => void }): ReactNode {
+  const provider = sandbox?.provider ?? 'none'
+  const update = (patch: Partial<SandboxConfig>): void => onChange({ ...sandbox, provider: 'ai-jail', ...patch })
+  const chooseFolder = async (key: 'readOnlyPaths' | 'readWritePaths' | 'overlayPaths' | 'maskPaths' | 'maskExceptPaths' | 'denyPaths' | 'denyExceptPaths'): Promise<void> => {
+    const path = await window.tucano.pickFolder()
+    if (path) update({ [key]: [...(sandbox?.[key] ?? []), path] })
+  }
+  const chooseFile = (key: 'envFromFiles', file?: File): void => {
+    const path = file && window.tucano.pathOf?.(file)
+    if (path) update({ [key]: [...(sandbox?.[key] ?? []), path] })
+  }
+  const chooseConfig = (file?: File): void => {
+    const path = file && window.tucano.pathOf?.(file)
+    if (path) update({ configFile: path })
+  }
+  return (
+    <Card
+      title={L('Sandbox do computador', 'Computer sandbox')}
+      lead={L(
+        'Limita o agente quando ele roda diretamente neste computador. Escolha um provider instalado; se ele não estiver disponível, a execução falha e não cai para acesso sem sandbox.',
+        'Limits the agent when it runs directly on this computer. Choose an installed provider; if it is unavailable, execution fails instead of falling back to unsandboxed access.'
+      )}
+    >
+      <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Sandbox', 'Sandbox')}>
+        <button type="button" role="radio" aria-checked={provider === 'none'} className={provider === 'none' ? 'is-active' : ''} disabled={!enabled} onClick={() => onChange({ provider: 'none' })}>
+          {L('Nenhum', 'None')}
+        </button>
+        <button type="button" role="radio" aria-checked={provider === 'ai-jail'} className={provider === 'ai-jail' ? 'is-active' : ''} disabled={!enabled} onClick={() => onChange({ ...sandbox, provider: 'ai-jail' })}>
+          ai-jail
+        </button>
+      </div>
+      {provider === 'ai-jail' && enabled && (
+        <>
+          <p className="muted small">
+            {L('A pasta de trabalho do agente é compartilhada automaticamente. Os caminhos abaixo são compartilhamentos adicionais; use um caminho por linha. A rede fica desligada por padrão.', 'The agent workspace is shared automatically. The paths below are additional mounts; use one path per line. Network is off by default.')}
+          </p>
+          <Field label={L('Rede', 'Network')} hint={L('Permite conexões de saída para o agente falar com o provedor.', 'Allows outbound connections so the agent can reach its provider.')} group>
+            <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Rede', 'Network')}>
+              {[false, true].map((value) => (
+                <button
+                  key={String(value)}
+                  type="button"
+                  role="radio"
+                  aria-checked={sandbox?.network === value}
+                  className={(sandbox?.network === value || (sandbox?.network === undefined && !value)) ? 'is-active' : ''}
+                  onClick={() => onChange({ ...sandbox, provider: 'ai-jail', network: value })}
+                >
+                  {value ? L('Ligada', 'On') : L('Desligada', 'Off')}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <Field label={L('Arquivo de configuração', 'Configuration file')} hint={L('Opcional: escolha um arquivo chamado .ai-jail. Ele substitui a configuração feita aqui.', 'Optional: choose a file named .ai-jail. It replaces the settings configured here.')}>
+            <div className="row">
+              <input className="grow mono" readOnly value={sandbox?.configFile ?? ''} placeholder={L('Nenhum arquivo selecionado', 'No file selected')} />
+              <label className="btn btn--sm btn--ghost">
+                {L('Escolher .ai-jail', 'Choose .ai-jail')}
+                <input type="file" accept=".ai-jail" hidden onChange={(event) => chooseConfig(event.target.files?.[0])} />
+              </label>
+              {sandbox?.configFile && <button type="button" className="btn btn--sm btn--ghost" onClick={() => update({ configFile: undefined })}>{L('Remover', 'Remove')}</button>}
+            </div>
+          </Field>
+          {([
+            ['readOnlyPaths', L('Caminhos somente leitura', 'Read-only paths')],
+            ['readWritePaths', L('Caminhos leitura e escrita', 'Read-write paths')],
+            ['overlayPaths', L('Caminhos copy-on-write', 'Copy-on-write paths')],
+            ['maskPaths', L('Caminhos mascarados', 'Masked paths')],
+            ['maskExceptPaths', L('Exceções de caminhos mascarados', 'Mask exceptions')],
+            ['denyPaths', L('Caminhos negados', 'Denied paths')],
+            ['denyExceptPaths', L('Exceções de caminhos negados', 'Deny exceptions')],
+            ['hideDotDirs', L('Pastas ocultas', 'Hidden dot-directories')],
+            ['allowHosts', L('Hosts permitidos', 'Allowed hosts')],
+            ['environment', L('Variáveis de ambiente', 'Environment variables')],
+            ['envFromFiles', L('Arquivos de ambiente', 'Environment files')]
+          ] as const).map(([key, label]) => (
+            <Field key={key} label={label} hint={L('Um item por linha.', 'One item per line.')}>
+              <div className="row">
+                <textarea
+                  rows={2}
+                  className="mono grow"
+                  value={(sandbox?.[key] ?? []).join('\\n')}
+                  onChange={(event) => update({ [key]: event.target.value.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean) })}
+                />
+                {['readOnlyPaths', 'readWritePaths', 'overlayPaths', 'maskPaths', 'maskExceptPaths', 'denyPaths', 'denyExceptPaths'].includes(key) && <button type="button" className="btn btn--sm btn--ghost" onClick={() => void chooseFolder(key as 'readOnlyPaths' | 'readWritePaths' | 'overlayPaths' | 'maskPaths' | 'maskExceptPaths' | 'denyPaths' | 'denyExceptPaths')}>{L('Abrir Finder', 'Open Finder')}</button>}
+                {key === 'envFromFiles' && <label className="btn btn--sm btn--ghost">{L('Escolher arquivo', 'Choose file')}<input type="file" hidden onChange={(event) => chooseFile(key, event.target.files?.[0])} /></label>}
+              </div>
+            </Field>
+          ))}
+          <Field label={L('Diretório do Claude', 'Claude directory')} hint={L('Opcional: usa este diretório de configuração do Claude dentro do sandbox.', 'Optional: use this Claude configuration directory inside the sandbox.')}>
+            <div className="row">
+              <input className="grow mono" value={sandbox?.claudeDir ?? ''} onChange={(event) => update({ claudeDir: event.target.value || undefined })} placeholder="~/.claude" />
+              <button type="button" className="btn btn--sm btn--ghost" onClick={() => void window.tucano.pickFolder().then((path) => path && update({ claudeDir: path }))}>{L('Abrir Finder', 'Open Finder')}</button>
+            </div>
+          </Field>
+          <div className="grid grid--2">
+            {([
+              ['privateHome', L('Home privado', 'Private home')], ['lockdown', L('Lockdown', 'Lockdown')], ['landlock', 'Landlock'], ['seccomp', 'Seccomp'], ['rlimits', L('Limites de recursos', 'Resource limits')], ['agentState', L('Estado do agente', 'Agent state')], ['inheritEnv', L('Herdar ambiente inteiro', 'Inherit full environment')], ['github', 'GitHub'], ['aws', 'AWS'], ['kube', 'Kubernetes'], ['gcloud', 'gcloud'], ['dockerConfig', L('Config do Docker', 'Docker config')], ['ssh', 'SSH'], ['pictures', L('Imagens', 'Pictures')], ['docker', 'Docker'], ['tailscale', 'Tailscale'], ['terminalPassthrough', L('Terminal do host', 'Host terminal')], ['systemdUser', L('systemd do usuário', 'User systemd')], ['gpu', 'GPU'], ['display', L('Display', 'Display')], ['audio', L('Áudio', 'Audio')], ['kvm', 'KVM'], ['macosHostIpc', L('IPC do macOS', 'macOS IPC')], ['x11', 'X11'], ['hostShm', L('Memória compartilhada', 'Host shared memory')], ['updateCheck', L('Verificação de atualização', 'Update check')], ['worktree', L('Metadados de worktree', 'Worktree metadata')], ['mise', 'mise'], ['toolchains', L('Toolchains', 'Toolchains')], ['saveConfig', L('Salvar .ai-jail', 'Save .ai-jail')], ['hideConfig', L('Ocultar .ai-jail', 'Hide .ai-jail')], ['exec', L('Execução direta', 'Direct execution')], ['auditLog', L('Log de auditoria', 'Audit log')], ['statusBar', L('Barra de status', 'Status bar')]
+            ] as const).map(([key, label]) => (
+              <label key={key} className="check">
+                <input type="checkbox" checked={sandbox?.[key] ?? false} onChange={(event) => update({ [key]: event.target.checked })} /> {label}
+              </label>
+            ))}
+          </div>
+          <Field label={L('Navegador isolado', 'Isolated browser')} hint={L('Perfil hard é o padrão mais protegido.', 'Hard is the more protected profile.') }>
+            <select value={sandbox?.browser ?? 'none'} onChange={(event) => update({ browser: event.target.value as SandboxConfig['browser'] })}>
+              <option value="none">{L('Desligado', 'Off')}</option><option value="hard">hard</option><option value="soft">soft</option>
+            </select>
+          </Field>
+          <p className="hint">
+            {L('Compartilhe somente o necessário: mounts e variáveis podem expor dados do host ao agente.', 'Share only what is necessary: mounts and variables can expose host data to the agent.')}
+          </p>
+        </>
+      )}
+      {!enabled && <p className="muted small">{L('Disponível quando “Este computador” estiver selecionado.', 'Available when “This computer” is selected.')}</p>}
     </Card>
   )
 }
