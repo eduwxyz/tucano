@@ -144,13 +144,14 @@ describe('the card an agent gets', () => {
     antigravity: fakeEngine('antigravity'),
     cursor: fakeEngine('cursor'),
     grok: fakeEngine('grok'),
-    cline: fakeEngine('cline')
+    cline: fakeEngine('cline'),
+    hermes: fakeEngine('hermes')
   })
   const asked = (): Message | undefined => db.messages().find((m) => m.author.kind === 'agent' && m.run?.status === 'waiting_input')
 
   beforeEach(async () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'steps-')), 'test.db'))
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(agent('a1', 'lia'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     gateway = new Gateway()
@@ -219,5 +220,19 @@ describe('the card an agent gets', () => {
     expect(mine?.text).toContain('Escrever o teste do card')
     expect(mine?.text).not.toContain('Traduzir os rótulos novos')
     expect(mine?.text).not.toContain('Publicar as capturas')
+  })
+
+  it('a step written by hand comes back as another step, not as something else', async () => {
+    const r = runner(typesafe(['do', 'later', 'do', 'later']), undefined)
+    await r.send('d1', '@lia me dá os próximos passos')
+    await r.idle()
+    const q = asked()!
+    r.answerDecision(q.id, 0, { chosen: [0], other: 'Escrever a nota de lançamento' }, db.owner())
+    await r.submitDecisions(q.id, db.owner())
+    await r.idle()
+    const mine = db.messages().filter((m) => m.author.kind === 'person').pop()
+    expect(mine?.text).toContain('Rodar a suíte inteira')
+    expect(mine?.text).toContain('Outro passo: Escrever a nota de lançamento')
+    expect(mine?.text).not.toContain('Outra coisa')
   })
 })
