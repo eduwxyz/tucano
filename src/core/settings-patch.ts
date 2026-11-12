@@ -37,6 +37,8 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   paused: { kind: 'boolean', max: 10, nullable: true },
   quietHours: { kind: 'object', max: 200, nullable: true },
   harnesses: { kind: 'array', max: 1_000, nullable: true },
+  classifiers: { kind: 'array', max: 20_000, nullable: true },
+  classifierJobs: { kind: 'object', max: 5_000, nullable: true },
   onboarding: { kind: 'object', max: 2_000, nullable: true },
   folded: { kind: 'array', max: 200_000, nullable: true },
   sounds: { kind: 'boolean', max: 10, nullable: true },
