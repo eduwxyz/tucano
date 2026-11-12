@@ -10,11 +10,13 @@ import { Gateway } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
 import { pageKey, Wiki } from '../src/core/wiki'
 
-const agent: Agent = { id: 'lia', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1000000, used: 0, grants: {}, memory: 'read', computer: false, archived: false, wiki: 'read' }
+const agent: Agent = { id: 'lia', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1000000, used: 0, grants: {}, memory: 'read', computer: false, archived: false, wiki: 'read_write' }
 const calls = [
   { name: 'wiki_ler', args: { pagina: 'Projeto' } },
   { name: 'wiki_buscar', args: { busca: 'Confidencial' } },
-  { name: 'wiki_indice', args: {} }
+  { name: 'wiki_indice', args: {} },
+  { name: 'wiki_escrever', args: { pagina: 'Projeto', texto: 'Agent change.' } },
+  { name: 'wiki_editar', args: { pagina: 'Projeto', antigo: 'detalhes novos', novo: 'Agent change' } }
 ]
 
 for (const change of ['unchanged', 'hold', 'revoke'] as const) for (const call of calls) {
@@ -52,10 +54,19 @@ for (const change of ['unchanged', 'hold', 'revoke'] as const) for (const call o
       await runner.idle()
       expect(invoked).toBe(true)
       expect(result).toBeDefined()
-      if (change === 'unchanged') expect(JSON.stringify(result)).toContain('detalhes novos')
+      const writing = call.name === 'wiki_escrever' || call.name === 'wiki_editar'
+      if (change === 'unchanged' && !writing) expect(JSON.stringify(result)).toContain('detalhes novos')
       else expect(JSON.stringify(result)).not.toContain('detalhes novos')
+      if (writing) {
+        if (change === 'unchanged') expect(wiki.page('Projeto')!.body).toContain('Agent change')
+        else {
+          expect(wiki.page('Projeto')!.body).toContain('detalhes novos')
+          expect(wiki.page('Projeto')!.body).not.toContain('Agent change')
+          expect(result).toMatchObject({ isError: true })
+        }
+      }
       if (change === 'revoke') expect(result).toMatchObject({ isError: true })
-      else if (change === 'hold' && call.name !== 'wiki_ler') expect(JSON.stringify(result)).not.toContain('Projeto')
+      else if (change === 'hold' && !writing && call.name !== 'wiki_ler') expect(JSON.stringify(result)).not.toContain('Projeto')
     } finally {
       await gateway.stop()
       wiki.close()
