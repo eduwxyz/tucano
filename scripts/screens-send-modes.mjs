@@ -79,5 +79,34 @@ await win.waitForTimeout(400)
 out_.chipAfterClick = await win.locator('.composer__mode').count()
 await shot('07-back-to-plain')
 
+// 7. Back on the plain one (the chip click above set it): a second Enter while a reply runs goes
+// beside it, a reply of its own, two on the floor at once: the way `parallel` is meant to read.
+await openChannel('engineering')
+out_.chipOnParallel = await win.locator('.composer__mode').count()
+await win.fill('.composer textarea', '@Lia conte uma história sobre um jardim, demore 8 s')
+await win.keyboard.press('Enter')
+await win.waitForTimeout(1200)
+await win.fill('.composer textarea', '@Lia e fale também do outono, demore 6 s')
+await win.keyboard.press('Enter')
+await win.waitForTimeout(1200)
+out_.atOnce = await win.locator('.msg--agent').evaluateAll((els) =>
+  els.map((el) => ({ working: !!el.querySelector('.steps.is-working, .shimmer'), text: (el.textContent ?? '').replace(/\s+/g, ' ').slice(0, 40) }))
+)
+out_.workingAtOnce = out_.atOnce.filter((m) => m.working).length
+out_.queuedMarks = await win.locator('.msg__queued').count()
+await shot('08-two-replies-at-once')
+
+// 8. And both end, each with an answer of its own.
+let done = 0
+const until = Date.now() + 90_000
+while (Date.now() < until && done < 4) {
+  await win.waitForTimeout(700)
+  done = (await win.locator('.msg--agent .shimmer, .msg--agent .steps.is-working').count()) === 0 ? done + 1 : 0
+}
+await win.waitForTimeout(800)
+out_.atOnceAfter = await win.locator('.msg--agent').count()
+out_.repliesText = await win.locator('.msg--agent .msg__body').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').slice(0, 60)))
+await shot('09-both-answered')
+
 console.log(JSON.stringify({ data, out: out_, errors }, null, 2))
 await app.close()
