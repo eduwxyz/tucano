@@ -1003,6 +1003,7 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 }
 
 export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
+export const revealArtifact = (id: string): void => void fire(L('Não consegui mostrar o arquivo.', "I couldn't show the file."), 'revealArtifact', { id })
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
