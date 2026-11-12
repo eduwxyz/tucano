@@ -1,7 +1,8 @@
-// A next-steps card: the work the agent proposes after its reply, in boxes that are all ticked.
-// With Jev on, only the steps it would do now keep their tick — and what stays ticked comes back
-// as the person's message. TypeSafe can't be reached from a seeded run, so that subset is written
-// onto the waiting message the way the core writes it, then the app reloads.
+// A next-steps card: the work the agent proposes after its reply, in boxes that all open clear —
+// like a question. With a classifier assigned to that job in Settings › Models › Classifiers, only the
+// steps it would do now open ticked, with the Recommended pill; what gets ticked comes back as the
+// person's message. No classifier can be reached from a seeded run, so that subset is written onto
+// the waiting message the way the core writes it, then the app reloads.
 import { _electron as electron } from 'playwright'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -45,10 +46,11 @@ await settle()
 await win.waitForSelector('.ask--steps', { timeout: 20_000 })
 await win.waitForTimeout(400)
 console.log('steps on the card:', await win.locator('.ask--steps .ask-option[role="checkbox"]').count())
-console.log('ticked with Jev off:', await ticked())
+console.log('ticked with no classifier on the job:', await ticked())
 console.log('pill in the head:', await win.locator('.ask--steps .ask__head .ask-option__pill').count())
 console.log('button:', await win.locator('.ask--steps .btn--primary').innerText())
-await shot('01-todas-marcadas')
+console.log('button disabled with nothing ticked:', await win.locator('.ask--steps .btn--primary').isDisabled())
+await shot('01-todas-desmarcadas')
 
 // Jev's subset, written where the core writes it: steps 1 and 3 are worth doing now, 2 and 4 wait.
 const db = new DatabaseSync(join(data, 'tucano.db'))
@@ -62,7 +64,8 @@ console.log('ticked on the message:', check?.t)
 await win.reload()
 await win.waitForSelector('.ask--steps', { timeout: 25_000 })
 await win.waitForTimeout(400)
-console.log('ticked with Jev on:', await ticked())
+console.log('ticked with a classifier on the job:', await ticked())
+console.log('pills on the picked steps:', await win.locator('.ask--steps .ask-option__pill').count())
 await shot('02-so-os-que-importam')
 
 // A narrow window: the steps still read as a to-do, nothing clipped.
@@ -91,28 +94,39 @@ const arts = await win.evaluate(() => [...document.querySelectorAll('.msg')].map
 console.log('messages:', JSON.stringify(arts, null, 1))
 await shot('04-de-volta-como-mensagem')
 
-// The setting, off by default, in the same card as the other thing Jev does on a question.
+// The job, in Settings › Models › Classifiers: add one classifier, then read the three jobs and set
+// the next-steps one to it.
 try {
   await win.locator('.sidebar__foot .nav-item').last().click()
   await win.waitForSelector('.tabs', { timeout: 8000 })
   await win.waitForTimeout(500)
-  // The Agents tab: the machine's own label, whichever language the seeded workspace is in.
   const tabs = win.locator('.tabs [role="tab"]')
   const names = await tabs.allInnerTexts()
-  const i = names.findIndex((n) => /^(Agentes|Agents)$/.test(n.trim()))
-  if (i < 0) throw new Error('no Agents tab in ' + JSON.stringify(names))
+  const i = names.findIndex((n) => /^(Modelos|Models)$/.test(n.trim()))
+  if (i < 0) throw new Error('no Models tab in ' + JSON.stringify(names))
   await tabs.nth(i).click()
   await win.waitForTimeout(900)
-  const rowLoc = win.locator('.key-row').filter({ hasText: /próximos passos que importam|next steps worth doing/ })
-  await rowLoc.first().scrollIntoViewIfNeeded({ timeout: 8000 })
+  const card = win.locator('.card').filter({ hasText: 'Classifiers' }).last()
+  await card.scrollIntoViewIfNeeded({ timeout: 8000 })
+  const add = card.locator('button').filter({ hasText: /Adicionar classificador|Add classifier/ })
+  await add.click()
   await win.waitForTimeout(400)
-  await shot('05-configuracao-desligada')
-  const onBefore = await rowLoc.first().locator('.toggle[aria-checked="true"]').count()
-  await rowLoc.first().locator('.toggle').click()
+  await card.locator('button').filter({ hasText: /^Adicionar$|^Add$/ }).click()
+  await win.waitForTimeout(500)
+  await card.locator('button').filter({ hasText: /^Cancelar$|^Cancel$/ }).first().click()
+  await win.waitForTimeout(500)
+  // The third job in the section: its own label, beside who replies and what an agent clicks.
+  const job = win.locator('.field').filter({ has: win.locator('.field__label', { hasText: /^(Quais próximos passos já vêm marcados|Which next steps start ticked)$/ }) })
+  await job.scrollIntoViewIfNeeded({ timeout: 8000 })
+  await win.waitForTimeout(400)
+  console.log('job before:', JSON.stringify((await job.innerText()).replace(/\n/g, ' | ').slice(0, 90)))
+  await shot('05-classificadores-desligado')
+  await job.locator('.select__trigger').click({ timeout: 8000 })
+  await win.waitForTimeout(400)
+  await win.locator('[role="option"]').filter({ hasText: /^Jev/ }).first().click()
   await win.waitForTimeout(700)
-  const onAfter = await rowLoc.first().locator('.toggle[aria-checked="true"]').count()
-  console.log('toggle before/after:', onBefore, onAfter)
-  await shot('06-configuracao-ligada')
+  console.log('job now:', (await job.innerText()).replace(/\n/g, ' | ').slice(0, 160))
+  await shot('06-classificadores-ligado')
 } catch (e) {
   console.log('settings frame skipped:', String(e).split(NL)[0])
 }
