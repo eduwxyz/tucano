@@ -29,6 +29,7 @@ import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } fro
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, startsTicked, type Answer, type Decision } from '../shared/questions'
+import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
 import { JEV_MODEL, listenJev, recommendOptions, routeJev, stepsWorthDoing } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
@@ -282,7 +283,10 @@ export interface RunnerDeps {
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
-  jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
+  // The classifier that picks who replies, when one is chosen in Settings › Classifiers. `key` and
+  // `target` are asked per job, so the same seam serves the jobs Apo's own branches add (listening,
+  // the recommended option, the next steps): a job with no classifier is off.
+  jev?: { key(job?: ClassifierJob): Promise<string | undefined>; target?(job?: ClassifierJob): ClassifierConfig | undefined; fetch?: typeof fetch }
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
@@ -517,7 +521,7 @@ export class Runner {
       const id = this.sessions.idOf(replyKey(lastAgent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
     }
-    if (opened || settings.routerModel === JEV_MODEL) return
+    if (opened || settings.routerModel === JEV_MODEL || classifierFor(settings, 'routing')) return
     const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
     if (!ready(model.engine)) return
     const cwd = join(this.deps.workDir, '_router')
@@ -847,13 +851,22 @@ export class Runner {
   private async heard(conv: Conversation, trigger: Message, members: Agent[], answering: Agent[]): Promise<{ agents: Agent[]; reason: string; problem: string }> {
     const listeners = this.listening(conv, members)
     if (listeners.length === 0) return { agents: [], reason: '', problem: '' }
-    const key = await this.deps.jev?.key()
-    if (!key) return { agents: [], reason: '', problem: L('os agentes que escutam ficaram de fora: falta a chave do TypeSafe', 'the listening agents stayed out: the TypeSafe key is missing') }
+    const settings = await this.deps.settings()
+    const who = classifierFor(settings, 'listen')
+    const stayed = (why: string): { agents: Agent[]; reason: string; problem: string } => ({
+      agents: [],
+      reason: '',
+      problem: L(`os agentes que escutam ficaram de fora: ${why}`, `the listening agents stayed out: ${why}`)
+    })
+    if (!who) return stayed(L('nenhum classificador escolhe quem escuta', 'no classifier picks who listens'))
+    const vendor = providerSpec(who.provider).label
+    const key = await this.deps.jev?.key('listen')
+    if (!key) return stayed(L(`falta a chave do ${vendor}`, `the ${vendor} key is missing`))
     try {
-      const settings = await this.deps.settings()
       const { messages } = contextWindow(this.deps.db, trigger, ROUTER_HISTORY)
       const j = await listenJev({
         key,
+        target: this.deps.jev?.target?.('listen') ?? who,
         messages,
         trigger,
         listeners,
@@ -863,11 +876,11 @@ export class Runner {
         connectors: this.deps.connectors?.list(),
         fetch: this.deps.jev?.fetch
       })
-      if ('error' in j) return { agents: [], reason: '', problem: L(`o Jev não conseguiu ouvir (${j.error})`, `Jev couldn't listen (${j.error})`) }
+      if ('error' in j) return { agents: [], reason: '', problem: L(`o ${who.name} não conseguiu ouvir (${j.error})`, `${who.name} couldn't listen (${j.error})`) }
       // `j.reason` is empty when it picked no one, and explains a no when the room could do without it.
       return { agents: j.agents, reason: j.agents.length ? j.reason : '', problem: j.agents.length ? '' : j.reason }
     } catch (e) {
-      return { agents: [], reason: '', problem: L(`o Jev não conseguiu ouvir (${e instanceof Error ? e.message : String(e)})`, `Jev couldn't listen (${e instanceof Error ? e.message : String(e)})`) }
+      return { agents: [], reason: '', problem: L(`o ${who.name} não conseguiu ouvir (${e instanceof Error ? e.message : String(e)})`, `${who.name} couldn't listen (${e instanceof Error ? e.message : String(e)})`) }
     }
   }
 
@@ -889,18 +902,19 @@ export class Runner {
     this.post(conversationId, threadId, hint)
   }
 
-
-  // Turned on in the settings: one cheap Jev question per decision with options, and the pick is
-  // written on the reply after the card is already on screen — so asking never waits on TypeSafe.
+  // Turned on in the settings: one cheap classifier question per decision with options, and the pick
+  // is written on the reply after the card is already on screen, so asking never waits on the provider.
   // A failure, or no pick at all, leaves the card exactly as it was: a suggestion is a nice-to-have.
   private async recommend(msg: Message, questions: Decision[], settings: Settings): Promise<void> {
     if (!settings.jevRecommend || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
-    const key = await this.deps.jev?.key()
+    const who = classifierFor(settings, 'recommend')
+    if (!who) return
+    const key = await this.deps.jev?.key('recommend')
     if (!key) return
     try {
-      const r = await recommendOptions({ key, questions, context: msg.text, fetch: this.deps.jev?.fetch })
+      const r = await recommendOptions({ key, target: this.deps.jev?.target?.('recommend') ?? who, questions, context: msg.text, fetch: this.deps.jev?.fetch })
       if ('error' in r || !r.picks.some((p) => p !== null)) return
-      // Answered while TypeSafe thought: the pill has nowhere to go, and the card is closed.
+      // Answered while the classifier thought: the pill has nowhere to go, and the card is closed.
       const now = this.deps.db.message(msg.id)
       if (!now || now.run?.status !== 'waiting_input' || now.run.answers) return
       this.update(now, { run: { ...now.run, recommended: r.picks } })
@@ -954,13 +968,16 @@ export class Runner {
         team: db.people().length > 1
       }
 
-      // Jev first when chosen; if it fails, Haiku decides, so the channel never goes quiet.
+      // A classifier first when one is chosen for this job; if it fails, Haiku decides, so the
+      // channel never goes quiet.
       let fellBack = ''
-      if (settings.routerModel === JEV_MODEL) {
-        const key = await this.deps.jev?.key()
-        const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
+      const routing = classifierFor(settings, 'routing')
+      if (routing) {
+        const key = await this.deps.jev?.key('routing')
+        const missing = routing.provider === 'typesafe' ? L('falta a chave do TypeSafe', 'the TypeSafe key is missing') : L(`falta a chave do ${providerSpec(routing.provider).label}`, `the ${providerSpec(routing.provider).label} key is missing`)
+        const j = key ? await routeJev({ ...input, key, target: this.deps.jev?.target?.('routing') ?? routing, fetch: this.deps.jev?.fetch }) : { error: missing }
         if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s${heardWhy}`)
-        fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
+        fellBack = L(` · o ${routing.name} falhou (${j.error}), o Haiku decidiu`, ` · ${routing.name} failed (${j.error}), Haiku decided`)
       }
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
@@ -1115,8 +1132,11 @@ export class Runner {
     const anchor = anchorId ? db.message(anchorId) : undefined
     const prompt = (asked.task ?? anchor?.text ?? '').trim()
     if (!prompt) return { trace: unavailableTrace(undefined, config, L('não havia pedido pra ler', 'there was no request to read'), baseline), blocked: false }
-    const key = await this.deps.jev?.key()
-    if (!key) return { trace: unavailableTrace(undefined, config, L('falta a chave do TypeSafe', 'the TypeSafe key is missing'), baseline), blocked: false }
+    const reader = classifierFor(settings, 'smart')
+    if (!reader) return { trace: unavailableTrace(undefined, config, L('nenhum classificador lê o pedido', 'no classifier reads the request'), baseline), blocked: false }
+    const vendor = providerSpec(reader.provider).label
+    const key = await this.deps.jev?.key('smart')
+    if (!key) return { trace: unavailableTrace(undefined, config, L(`falta a chave do ${vendor}`, `the ${vendor} key is missing`), baseline), blocked: false }
     // The last few messages, so a short follow-up ("e o teste?") is read in its context.
     const before = anchor ? contextWindow(db, anchor, 6).messages : []
     const who = (m: Message): string =>
@@ -1124,6 +1144,7 @@ export class Runner {
     const history = before.map((m) => `${who(m)}: ${m.text}`).join('\n')
     const read = await readPrompt({
       key,
+      target: this.deps.jev?.target?.('smart') ?? reader,
       prompt,
       ...(history ? { history } : {}),
       roles: config.roles,
@@ -1739,14 +1760,15 @@ ${note}`,
           if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
           let decision = parsed.decision
           const count = decision.options?.length ?? 0
-          // Turned on in the settings: Jev says which of these are worth doing now and only those
-          // start ticked. Unlike the pill on a question, this one waits: the ticks are the card, and
+          // Turned on in the settings: the classifier says which of these are worth doing now and
+          // only those start ticked. Unlike the pill on a question, this one waits: the ticks are the card, and
           // it's a couple of small calls, not a turn.
-          if (settings.jevNextSteps && count > 1) {
-            const key = await this.deps.jev?.key()
+          const stepClassifier = settings.jevNextSteps && count > 1 ? classifierFor(settings, 'nextSteps') : undefined
+          if (stepClassifier) {
+            const key = await this.deps.jev?.key('nextSteps')
             if (key) {
               try {
-                const r = await stepsWorthDoing({ key, decision, context: msg.text, fetch: this.deps.jev?.fetch })
+                const r = await stepsWorthDoing({ key, target: this.deps.jev?.target?.('nextSteps') ?? stepClassifier, decision, context: msg.text, fetch: this.deps.jev?.fetch })
                 // None worth doing is not a card with nothing ticked: that would throw the whole list away.
                 if (!('error' in r) && r.ticked.length > 0 && r.ticked.length < count) decision = { ...decision, ticked: r.ticked }
               } catch {

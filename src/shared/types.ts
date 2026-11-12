@@ -1,6 +1,7 @@
 // Domain types shared by the core (utility process) and the renderer.
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
+import type { ClassifierConfig, ClassifierJob } from './classifiers'
 import type { ChannelLayout } from './channel-layout'
 import type { RouteTrace, RoutingConfig } from './routing'
 import type { Answer, Decision } from './questions'
@@ -467,13 +468,16 @@ export interface Settings {
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
   engines: Record<EngineId, EngineStatus>
-  routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
+  routerModel: string // a model id, or 'jev' for the classifier chosen in Settings › Classifiers (falls back to Haiku)
   routing?: RoutingConfig // Settings › Routing: pools, role chains and the switch that turns routing on (src/shared/routing.ts)
-  jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core); kept for installs from before Settings › Classifiers
+  classifiers?: ClassifierConfig[] // Settings › Classifiers: the model pairs that answer typed questions, one key each
+  classifierJobs?: Partial<Record<ClassifierJob, string>> // which classifier serves each job; a job left out is off
+  classifierKeys?: Record<string, boolean> // computed: which classifiers have a key saved (never the key itself)
   voice?: VoiceSettings
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
-  browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
+  browserJev?: boolean // an install from before Settings › Classifiers: a classifier finds what agents click in their browsers
   jevRecommend?: boolean // Jev marks the best option on an agent's question (each such question goes to TypeSafe); off when unset
   jevNextSteps?: boolean // Jev says which of an agent's next steps are worth doing now, and only those start ticked (each step goes to TypeSafe); off when unset
   memoryModel: string // summarizes conversations and extracts memories

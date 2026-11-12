@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
 import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { Agent, Artifact, BrowserElement, BrowserOp, BrowserReply, BrowserView } from '../shared/types'
@@ -239,7 +240,7 @@ export interface BrowserDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   me: () => string
-  jev?: { key(): Promise<string | undefined>; on(): boolean; fetch?: typeof fetch } // finds what to click, when chosen
+  jev?: { key(): Promise<string | undefined>; on(): boolean; target?(): ClassifierConfig | undefined; fetch?: typeof fetch } // finds what to click, when chosen
   onHandback?: (agentId: string) => void // the user handed the browser back; the runner resumes a pending ask_user
 }
 
@@ -346,15 +347,16 @@ export class Browser {
     if (hit) return { ref: hit.ref, el: hit, via: 'texto' }
     if (/^#?\s*\d+$/.test(target.trim())) return { error: L(`Não existe o elemento ${target.trim()} na última lista. Leia a página de novo.`, `There's no element ${target.trim()} in the last list. Read the page again.`) }
 
-    const key = this.deps.jev?.on() ? await this.deps.jev.key() : undefined
+    const classifier = this.deps.jev?.on() ? (this.deps.jev.target?.() ?? JEV_CLASSIFIER) : undefined
+    const key = classifier ? await this.deps.jev!.key() : undefined
     let why = ''
-    if (key) {
+    if (key && classifier) {
       const ordered = [...els.filter((e) => e.inView), ...els.filter((e) => !e.inView)].slice(0, 300)
-      const j = await jevElement({ key, target, page, elements: ordered, fetch: this.deps.jev?.fetch })
+      const j = await jevElement({ key, target, classifier, page, elements: ordered, fetch: this.deps.jev?.fetch })
       if ('ref' in j && j.p >= 0.4) return { ref: j.ref, el: els.find((e) => e.ref === j.ref)!, via: 'jev' }
       why = 'error' in j ? j.error : L('sem certeza', 'not sure')
       if (page.frame && page.w && page.h) {
-        const b = await jevBox({ key, target, jpeg: page.frame, fetch: this.deps.jev?.fetch })
+        const b = await jevBox({ key, target, classifier, jpeg: page.frame, fetch: this.deps.jev?.fetch })
         if ('x' in b && b.confidence >= 0.5) return { x: b.x * page.w, y: b.y * page.h, via: 'jev-tela' }
       }
     }

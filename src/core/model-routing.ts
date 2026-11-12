@@ -7,8 +7,12 @@
 //
 // The shapes — pools, chains, roles, what may be saved, the trace — live in
 // src/shared/routing.ts, which the screen reads too. Everything here is pure except readPrompt,
-// the one thing that talks to TypeSafe.
+// the one thing that talks to a classifier: Jev, or whichever model pair serves this job in
+// Settings › Classifiers.
+import type { ClassifierConfig } from '../shared/classifiers'
+import { JEV_CLASSIFIER, providerSpec } from '../shared/classifiers'
 import { L } from '../shared/lang'
+import { ask, badFormat as seamBadFormat, type ClassifierAnswer, type ClassifierQuestion } from './classifiers'
 import {
   KIND_IMPORT,
   POOL_RANK,
@@ -48,20 +52,14 @@ export interface RouteJudgment {
 
 export type ReadResult = RouteJudgment | { error: string }
 
-const API = 'https://api.typesafe.ai/v1'
 const JEV = 'jev-latest'
 const DEFAULT_TIMEOUT_MS = 4_000
 /** A choice answer with more options than this is a broken payload, not a reading. */
 const MAX_PROBABILITIES = 40
 
-const noAnswer = (): string => L('o TypeSafe não respondeu', "TypeSafe didn't answer")
-const badFormat = (): string => L('resposta do TypeSafe fora do formato', "TypeSafe's answer wasn't in the format")
-
-function failure(status: number): string {
-  if (status === 401 || status === 403) return L('a chave do TypeSafe não vale mais', 'the TypeSafe key is no longer valid')
-  if (status === 429) return L('o TypeSafe pediu pra esperar (limite de uso)', 'TypeSafe asked to wait (usage limit)')
-  return L(`o TypeSafe respondeu ${status}`, `TypeSafe answered ${status}`)
-}
+// The vendor as it reads mid-sentence, for the messages that name who read the request.
+const inSentence = (t?: ClassifierConfig): { pt: string; en: string } =>
+  t && t.provider !== 'typesafe' ? { pt: providerSpec(t.provider).label, en: providerSpec(t.provider).label } : { pt: 'o TypeSafe', en: 'TypeSafe' }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
@@ -124,9 +122,10 @@ export function readingBody(opts: { prompt: string; history?: string; roles: Rec
 }
 
 /** A 0..3 score, or the reason it can't be one. Nothing is assumed when the answer leaves it out. */
-function score(where: Record<string, unknown>, what: string): { value: number } | { error: string } {
+function score(where: Record<string, unknown>, what: string, vendor?: ClassifierConfig): { value: number } | { error: string } {
+  const who = inSentence(vendor)
   const raw = num(where.score)
-  if (raw === undefined) return { error: L(`o TypeSafe não deu nota de ${what}`, `TypeSafe didn't score ${what}`) }
+  if (raw === undefined) return { error: L(`${who.pt} não deu nota de ${what}`, `${who.en} didn't score ${what}`) }
   if (raw < 0 || raw > 3) return { error: L(`nota de ${what} fora de 0..3 (${raw})`, `${what} score outside 0..3 (${raw})`) }
   return { value: raw }
 }
@@ -136,17 +135,18 @@ function score(where: Record<string, unknown>, what: string): { value: number } 
  * missing or impossible is an error: a made-up score would route real work on invented numbers,
  * and the fail-open path (`Routing unavailable · Using [model]`) is the honest answer instead.
  */
-export function readAnswer(payload: unknown, ms: number, roles: Record<string, RoleSetting>): ReadResult {
-  if (!isRecord(payload) || !isRecord(payload.answers)) return { error: badFormat() }
+export function readAnswer(payload: unknown, ms: number, roles: Record<string, RoleSetting>, vendor?: ClassifierConfig): ReadResult {
+  const who = inSentence(vendor)
+  if (!isRecord(payload) || !isRecord(payload.answers)) return { error: seamBadFormat(vendor?.provider ?? 'typesafe') }
   const answers = payload.answers
 
   // What kind of work.
   const acao = isRecord(answers.acao) ? answers.acao : {}
   const choice = typeof acao.choice === 'string' ? acao.choice.trim() : ''
-  if (!choice) return { error: L('o TypeSafe não disse que trabalho é', "TypeSafe didn't say what kind of work it is") }
+  if (!choice) return { error: L(`${who.pt} não disse que trabalho é`, `${who.en} didn't say what kind of work it is`) }
   const role = KIND_IMPORT[choice] ?? choice
   if (Object.keys(roles).length > 0 && !Object.hasOwn(roles, role)) {
-    return { error: L('o TypeSafe escolheu um papel que não existe', "TypeSafe picked a role that doesn't exist") }
+    return { error: L(`${who.pt} escolheu um papel que não existe`, `${who.en} picked a role that doesn't exist`) }
   }
 
   // How sure it is: absent is unknown, and unknown is not zero — it just can't unlock the dearest pools.
@@ -181,15 +181,17 @@ export function readAnswer(payload: unknown, ms: number, roles: Record<string, R
   }
 
   // The three judgments.
-  const complexity = score(isRecord(answers.complexidade) ? answers.complexidade : {}, L('complexidade', 'complexity'))
+  const complexity = score(isRecord(answers.complexidade) ? answers.complexidade : {}, L('complexidade', 'complexity'), vendor)
   if ('error' in complexity) return { error: complexity.error }
-  const capability = score(isRecord(answers.capacidade) ? answers.capacidade : {}, L('capacidade', 'capability'))
+  const capability = score(isRecord(answers.capacidade) ? answers.capacidade : {}, L('capacidade', 'capability'), vendor)
   if ('error' in capability) return { error: capability.error }
 
   const raciocinio = isRecord(answers.raciocinio) ? answers.raciocinio : {}
-  const rawDeep = raciocinio.noul ?? raciocinio.noul_score
+  // Three shapes for the same answer: the seam's own (a yes/no comes back as a probability), and
+  // the two a provider writes on the wire, kept so an answer read by hand still parses.
+  const rawDeep = raciocinio.probability ?? raciocinio.noul ?? raciocinio.noul_score
   let deep: number | undefined = typeof rawDeep === 'boolean' ? (rawDeep ? 1 : 0) : num(rawDeep)
-  if (deep === undefined) return { error: L('o TypeSafe não disse se precisa de raciocínio longo', "TypeSafe didn't say whether it needs extended reasoning") }
+  if (deep === undefined) return { error: L(`${who.pt} não disse se precisa de raciocínio longo`, `${who.en} didn't say whether it needs extended reasoning`) }
   if (deep < 0 || deep > 1) return { error: L(`raciocínio fora de 0..1 (${deep})`, `deep reasoning outside 0..1 (${deep})`) }
 
   return {
@@ -203,9 +205,13 @@ export function readAnswer(payload: unknown, ms: number, roles: Record<string, R
   }
 }
 
-/** One TypeSafe call: four questions, answered together. This is the only network hop here. */
+/**
+ * One reading: four questions, answered together, by whichever classifier serves the smart routing
+ * job (Jev when none is chosen). This is the only network hop here.
+ */
 export async function readPrompt(opts: {
   key: string
+  target?: ClassifierConfig
   prompt: string
   history?: string
   roles: Record<string, RoleSetting>
@@ -214,22 +220,28 @@ export async function readPrompt(opts: {
   signal?: AbortSignal
 }): Promise<ReadResult> {
   const started = Date.now()
-  const timeout = AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-  const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout
-  let res: Response
-  try {
-    res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(readingBody(opts)),
-      signal
-    })
-  } catch {
-    return { error: noAnswer() }
-  }
-  if (!res.ok) return { error: failure(res.status) }
-  const payload: unknown = await res.json().catch(() => null)
-  return readAnswer(payload, Date.now() - started, opts.roles)
+  const target = opts.target ?? JEV_CLASSIFIER
+  const body = readingBody(opts)
+  // The body is the shape the first provider of this seam has always taken; the questions inside it
+  // are the ones any classifier answers, so they travel as they are.
+  const questions = Object.entries(body['questions'] as Record<string, { type?: string; instructions?: string; criteria?: unknown }>).map(([name, q]): ClassifierQuestion => ({
+    name,
+    type: q.type === 'noul' ? 'yesno' : q.type === 'score' ? 'score' : 'choice',
+    instructions: q.instructions ?? '',
+    ...(q.criteria ? { criteria: q.criteria as Record<string, string> | string[] } : {})
+  }))
+  const answers = await ask({
+    target,
+    key: opts.key,
+    state: body['state'],
+    questions,
+    timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {})
+  })
+  if (typeof (answers as { error?: unknown }).error === 'string') return { error: (answers as { error: string }).error }
+  // Answered the way the seam reports it, which is the shape readAnswer already reads.
+  return readAnswer({ answers: answers as Record<string, ClassifierAnswer> }, Date.now() - started, opts.roles, target)
 }
 
 // ---------- what the person's setup makes of it ----------

@@ -6,7 +6,9 @@ export const workspaceLabel = (s: Pick<Settings, 'workspaceName' | 'workspaceLab
 
 // The general settings: how things work, not what the workspace holds (never its context, wiki
 // folder, accounts, keys or phone).
-export const GENERAL_SETTINGS = ['workspaceName', 'language', 'routerModel', 'memoryModel', 'memoryLearning', 'defaultLimit', 'approvalTtlHours', 'runBudgetPct', 'runStallMinutes', 'chainDepth', 'actionRules', 'autonomy', 'outsideGuard', 'quietHours', 'harnesses', 'sounds', 'stepsOpen', 'voice', 'browserJev', 'wikiCapture', 'wikiEdits', 'wikiReview'] as const satisfies readonly (keyof Settings)[]
+export const GENERAL_SETTINGS = ['workspaceName', 'language', 'routerModel', 'memoryModel', 'memoryLearning', 'defaultLimit', 'approvalTtlHours', 'runBudgetPct', 'runStallMinutes', 'chainDepth', 'actionRules', 'autonomy', 'outsideGuard', 'quietHours', 'harnesses', 'sounds', 'stepsOpen', 'voice', 'browserJev',
+  'classifiers',
+  'classifierJobs', 'wikiCapture', 'wikiEdits', 'wikiReview'] as const satisfies readonly (keyof Settings)[]
 // What a new workspace takes from another, each picked when creating it (a duplicate takes it all).
 // The wiki isn't copied: the new workspace uses the same one, and what one keeps the other reads.
 // Never messages, memories, approvals, usage, computers' files, browser sessions or extra logins.

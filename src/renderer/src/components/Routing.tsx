@@ -22,9 +22,10 @@ import {
   type RoutingConfig,
   type Tier
 } from '../../../shared/routing'
+import { classifierFor, providerSpec, type ClassifierConfig, type ClassifierSettings } from '../../../shared/classifiers'
 import { navigate, setTab, updateSettings, useStore } from '../store'
 import { Select } from './Select'
-import { Card, Field, JevKey, Toggle } from './Pages'
+import { Card, Field, Toggle } from './Pages'
 import { useEngineModels, usableEngines } from './Harness'
 import { Icon } from './ui'
 
@@ -92,12 +93,26 @@ const targetLabel = (t: RouteTarget): string => `${engineLabel(t.engine)} · ${m
 
 const count = (chain: RouteTarget[]): number => chain.length
 
+// Who reads the prompts for smart routing: the classifier serving that job in Settings › Classifiers.
+// Its key is what the reading needs, and each one keeps its own, so readiness is asked per row.
+const readerOf = (settings: ClassifierSettings): ClassifierConfig | undefined => classifierFor(settings, 'smart')
+const readerHasKey = (settings: { classifierKeys?: Record<string, boolean>; jevKey?: boolean }, reader: ClassifierConfig | undefined): boolean =>
+  !!reader && (settings.classifierKeys?.[reader.id] ?? false)
+const readerWarning = (reader: ClassifierConfig | undefined, hasKey: boolean): string =>
+  !reader
+    ? L('Nenhum classificador lê os pedidos: escolha um em Classifiers, no trabalho “Qual modelo responde”, ou o roteamento não escolhe modelo nenhum.', 'No classifier reads the prompts: pick one in Classifiers, under “Which model answers”, or routing picks no model at all.')
+    : hasKey
+      ? ''
+      : L(`Falta a chave do ${providerSpec(reader.provider).label} pra começar a rotear.`, `Add the ${providerSpec(reader.provider).label} key to start routing.`)
+
 // ---------- the switch, in the Jev block ----------
 
 // One switch turns the feature on and reveals the tab; it never opts an agent in by itself.
 export function SmartRoutingSwitch(): ReactNode {
   const settings = useStore((s) => s.settings)
   const routing = settings.routing?.enabled === true
+  const reader = readerOf(settings)
+  const readerReady = readerHasKey(settings, reader)
   // The switch is in two places: here for everyone, and on each agent's page (On · Off · Global).
   const onTheirOwn = useStore((s) => s.agents.filter((a) => a.smartRouting === true && !a.archived).length)
   const on = settings.routing ?? defaultRouting()
@@ -111,8 +126,8 @@ export function SmartRoutingSwitch(): ReactNode {
       <span className="hint">
         {routing
           ? L(
-              'O Jev lê cada pedido e escolhe o modelo nos seus pools, pra todo agente que não tiver a própria chave em Ligado ou Desligado. Um agente em Desligado na página dele usa o próprio modelo.',
-              'Jev reads each prompt and picks the model from your pools, for every agent that hasn’t set its own switch to On or Off. An agent set to Off on its page uses its own model.'
+              'Um classificador lê cada pedido e escolhe o modelo nos seus pools, pra todo agente que não tiver a própria chave em Ligado ou Desligado. Um agente em Desligado na página dele usa o próprio modelo. Quem lê é escolhido em Classifiers.',
+              'A classifier reads each prompt and picks the model from your pools, for every agent that hasn’t set its own switch to On or Off. An agent set to Off on its page uses its own model. Which one reads is chosen in Classifiers.'
             )
           : L(
               'Desligado: cada agente usa o próprio modelo, menos os que estiverem em Ligado na página deles.',
@@ -141,12 +156,7 @@ export function SmartRoutingSwitch(): ReactNode {
           </a>
         </p>
       )}
-      {routing && !settings.jevKey && (
-        <>
-          <p className="hint hint--warn">{L('Falta a chave do TypeSafe pra começar a rotear.', 'Add a TypeSafe key to start routing.')}</p>
-          <JevKey saved={false} />
-        </>
-      )}
+      {routing && !readerReady && <p className="hint hint--warn">{readerWarning(reader, readerReady)}</p>}
     </div>
   )
 }
@@ -165,6 +175,8 @@ export function RoutingPane(): ReactNode {
   const setPoolSetting = (p: Pool, patch: Partial<PoolSetting>): void => save({ ...config, pools: { ...config.pools, [p]: { ...config.pools[p]!, ...patch } } })
   const setRoleSetting = (r: string, patch: Partial<RoleSetting>): void => save({ ...config, roles: { ...config.roles, [r]: { ...config.roles[r]!, ...patch } } })
 
+  const reader = readerOf(settings)
+  const readerReady = readerHasKey(settings, reader)
   const enabled = config.enabled
   const active = enabled || onTheirOwn > 0
   const anyModel = POOLS.some((p) => config.pools[p].chain.length > 0) || Object.values(config.roles).some((r) => r.chain.length > 0)
@@ -180,7 +192,9 @@ export function RoutingPane(): ReactNode {
           <h2 className="routing__title">{L('Rotas', 'Routing')}</h2>
           <p className="muted small">
             {enabled
-              ? L('O Jev lê cada pedido e escolhe o modelo nos pools abaixo.', 'Jev reads each prompt and picks the model from the pools below.')
+              ? reader
+                ? L(`${reader.name} lê cada pedido e escolhe o modelo nos pools abaixo.`, `${reader.name} reads each prompt and picks the model from the pools below.`)
+                : L('Nenhum classificador lê os pedidos ainda, então cada resposta roda no modelo do próprio agente.', 'No classifier reads the prompts yet, so every reply runs on the agent’s own model.')
               : onTheirOwn === 1
                 ? L(
                     'Desligado no geral: 1 agente está ligado só pra si e roteia por estes pools. Os outros usam o próprio modelo.',
@@ -202,9 +216,9 @@ export function RoutingPane(): ReactNode {
         </span>
       </div>
 
-      {active && !settings.jevKey && (
-        <Card title={L('Chave do TypeSafe', 'TypeSafe key')} lead={L('O Jev é do TypeSafe e usa a mesma chave dos outros classificadores do app.', 'Jev is TypeSafe’s and uses the same key as the app’s other classifiers.')}>
-          <JevKey saved={!!settings.jevKey} />
+      {active && !readerReady && (
+        <Card title={L('Quem lê os pedidos', 'Who reads the requests')} lead={L('O roteamento inteligente é uma pergunta fechada por resposta, e quem a responde é o classificador escolhido em Classifiers, no trabalho “Qual modelo responde”.', 'Smart routing is one closed question per reply, and the classifier chosen in Classifiers, under “Which model answers”, is what answers it.')}>
+          <p className="hint hint--warn">{readerWarning(reader, readerReady)}</p>
         </Card>
       )}
       {active && !anyModel && (
