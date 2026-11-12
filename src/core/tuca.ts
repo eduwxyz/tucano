@@ -207,7 +207,7 @@ export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Re
   const plan = [...MODELS.filter((m) => m.engine !== 'codex' || !codex), ...(codex ?? []).map((m) => ({ ...m, id: codexValue(m.id) }))]
     .filter((m) => s.engines[m.engine].loggedIn && s.engines[m.engine].route !== 'gateway')
     .map((m) => ({ id: m.id, label: `${ENGINES[m.engine].label} · ${m.label}` }))
-  const own = (['opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline'] as const).flatMap((e) => (s.engines[e]?.loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
+  const own = (['opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline', 'hermes'] as const).flatMap((e) => (s.engines[e]?.loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
   return [...plan, ...own]
 }
 
@@ -246,8 +246,8 @@ export function builderSection(s: Pick<Settings, 'engines'>, ctx: { models: { id
 export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId: string) => boolean; fallbackModel: string; connectors: Connector[] }): { draft?: AgentDraft; error?: string } {
   const text = (k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
   const name = text('nome', 40)
-  const instructions = text('instrucoes', 4000)
-  if (!name || !instructions) return { error: L('Faltou nome ou instrucoes.', 'Missing nome or instrucoes.') }
+  const instructions = typeof args['instrucoes'] === 'string' ? (args['instrucoes'] as string) : ''
+  if (!name || !instructions.trim()) return { error: L('Faltou nome ou instrucoes.', 'Missing nome or instrucoes.') }
   const grants: Record<string, GrantLevel> = {}
   const unknown: string[] = []
   for (const c of Array.isArray(args['conectores']) ? (args['conectores'] as unknown[]) : []) {

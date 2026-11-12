@@ -29,7 +29,7 @@ let codex: ReturnType<typeof counted>
 function runner(): Runner {
   claude = counted(fakeEngine('claude', { delayMs: 1 }))
   codex = counted(fakeEngine('codex', { delayMs: 1 }))
-  const engines: Record<EngineId, Engine> = { claude, codex, opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  const engines: Record<EngineId, Engine> = { claude, codex, opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway })
 }
 
@@ -45,7 +45,7 @@ const until = async (ok: () => boolean, ms = 5000): Promise<void> => {
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   events = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memory: 'auto', chainDepth: 3 } as unknown as Settings
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memory: 'auto', chainDepth: 3 } as unknown as Settings
   db.saveAgent(agent('orion', { modelId: 'gpt-5.6-luna' }))
   db.saveAgent(agent('clara', { reportsTo: 'orion' }))
   db.saveAgent(agent('bento', { reportsTo: 'orion' }))

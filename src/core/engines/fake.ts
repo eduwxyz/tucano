@@ -15,6 +15,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
   const delay = opts.delayMs ?? 25
   return {
     id,
+    ...(id === 'codex' ? { planUsage: async () => ({ windows: [{ minutes: 300, utilization: 0.12, resetsAt: Date.now() + 3 * 3_600_000 }, { minutes: 10_080, utilization: 0.09, resetsAt: Date.now() + 5 * 86_400_000 }], plan: 'plus', at: Date.now() }) } : {}),
     ...(opts.sessions
       ? {
           sessions: true,

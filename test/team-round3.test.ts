@@ -219,7 +219,7 @@ function recordingMemory(db: Db): { memory: Memories; prompts: string[]; hold: (
     }
   }
   const ready = { installed: true, loggedIn: true }
-  const settings = { workspaceName: 'Ana', memoryModel: 'haiku', memoryLearning: 'approve', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready } } as unknown as Settings
+  const settings = { workspaceName: 'Ana', memoryModel: 'haiku', memoryLearning: 'approve', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready } } as unknown as Settings
   const memory = new Memories({ db, engines: { claude } as Record<EngineId, Engine>, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'tucano-r3-')) })
   return {
     memory,
@@ -386,7 +386,7 @@ describe('K. a purge leaves nothing of the DMs on disk', () => {
 
 describe("L. what someone says about another person isn't kept as a fact about anyone", () => {
   const ready = { installed: true, loggedIn: true }
-  const settings = { workspaceName: 'Ana', memoryModel: 'haiku', memoryLearning: 'auto', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready } } as unknown as Settings
+  const settings = { workspaceName: 'Ana', memoryModel: 'haiku', memoryLearning: 'auto', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready } } as unknown as Settings
   const answering = (json: unknown): Engine => ({
     id: 'claude',
     async *run() {

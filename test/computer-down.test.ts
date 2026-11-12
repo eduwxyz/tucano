@@ -25,7 +25,7 @@ function runner(): Runner {
   calls = []
   const fake = fakeEngine('claude', { delayMs: 1 })
   const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), fake.run(t)) }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   // Docker is off: every call fails the same way, and says so.
   const computers = {
     call: async (_a: Agent, name: string) => (calls.push(name), { result: textResult(`O Docker não está disponível neste computador: ${NO_DOCKER}`, true), down: NO_DOCKER }),
@@ -38,7 +38,7 @@ const reply = () => db.messages().filter((m) => m.author.kind === 'agent').at(-1
 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'cd-db-')), 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent({ id: 'lia', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: true, archived: false })
   db.createConversation({ id: 'dm', kind: 'dm', name: 'lia', members: ['lia'] })
   off = undefined
@@ -80,7 +80,7 @@ describe('a computer whose Docker is off', () => {
         if (!turn.signal.aborted) yield { type: 'done', text: 'Nenhum TODO, FIXME, XXX ou HACK no projeto.', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const engines: Record<EngineId, Engine> = { claude: tries, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+    const engines: Record<EngineId, Engine> = { claude: tries, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     const ran: string[] = []
     const computers = {
       call: async (_a: Agent, _n: string, args: Record<string, unknown>) => {

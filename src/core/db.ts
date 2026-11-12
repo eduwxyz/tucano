@@ -619,7 +619,7 @@ export class Db {
           DELETE FROM artifacts;
           DELETE FROM services;
           UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL;
-          DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts');
+          DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts');
           UPDATE agents SET account = NULL, fallback_account = NULL;
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
           DELETE FROM person_keys;
@@ -731,7 +731,7 @@ export class Db {
         DELETE FROM person_keys;
         DELETE FROM removed_keys;
         DELETE FROM invites;
-        DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
+        DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
         UPDATE agents SET account = NULL, fallback_account = NULL, apps = '[]', folders = '[]', computer = CASE WHEN computer_kind = 'mac' THEN 0 ELSE computer END;
         UPDATE routines SET enabled = 0;
       `)

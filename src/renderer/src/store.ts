@@ -60,6 +60,7 @@ import {
   type BackupSummary
 } from '../../shared/types'
 import { call, connect, disconnect } from './rpc'
+import { hashToView, viewToHash } from './address'
 
 export * from '../../shared/types'
 
@@ -170,7 +171,7 @@ let state: State = {
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -530,7 +531,20 @@ function apply(e: CoreEvent): void {
     switch (e.type) {
       case 'message': {
         const id = e.message.conversationId
-        return { ...s, messages: { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) } }
+        const messages = { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) }
+        // What I just wrote in a conversation that answers in threads opens its thread, where the
+        // answers go: it's what clicking the thread's link would do, without having to find it.
+        const m = e.message
+        const opens =
+          openNext?.conversationId === id &&
+          Date.now() < openNext.until &&
+          !m.threadId &&
+          isMine(s, m.author) &&
+          !messagesIn(s, id).some((x) => x.id === m.id)
+        if (!opens) return { ...s, messages }
+        openNext = null
+        const here = s.view?.kind === 'conversation' && s.view.id === id
+        return { ...s, messages, ...(here ? { panel: { kind: 'thread' as const, id: m.id } } : {}) }
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
@@ -599,6 +613,10 @@ function apply(e: CoreEvent): void {
   if (e.type === 'browser') showFrame(e.view.agentId, e.view.frame)
 }
 
+// A screen from the address, only if it's still there (a conversation that was removed, an agent gone).
+const stillThere = (view: View | undefined, s: Pick<State, 'conversations' | 'agents'>): View | undefined =>
+  !view || (view.kind === 'conversation' && !s.conversations.some((c) => c.id === view.id)) || (view.kind === 'agent' && !s.agents.some((a) => a.id === view.id)) ? undefined : view
+
 export async function start(): Promise<void> {
   window.tucano.onNavigate((id, thread) => {
     navigate({ kind: 'conversation', id })
@@ -617,12 +635,31 @@ export async function start(): Promise<void> {
       if (id && state.ready) void call('markRead', { conversationId: id })
     }
   })
+  // In a browser the screen rides in the address, so a reload (a phone bringing the tab back)
+  // opens where it was. The desktop keeps it in memory, as before.
+  const web = windowless()
+  if (web) {
+    const write = (): void => {
+      const hash = state.view && viewToHash(state.view)
+      if (hash && location.hash !== hash) history.replaceState(history.state, '', `${location.pathname}${location.search}${hash}`)
+    }
+    let last: View | null = null
+    subscribe(() => state.view !== last && ((last = state.view), write()))
+    // An address typed or pasted while the page is open: there, or back to where it is.
+    window.addEventListener('hashchange', () => {
+      if (!state.ready) return
+      const view = stillThere(hashToView(location.hash), state)
+      if (view && viewToHash(view) !== (state.view && viewToHash(state.view))) navigate(view)
+      else write()
+    })
+  }
   await connect(apply)
   const snap = await call('snapshot')
   for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
-    const view = s.view ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
+    const there = web ? stillThere(hashToView(location.hash), snap) : undefined
+    const view = s.view ?? there ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
     return {
       ...withSettings({ ...s, you: snap.you, people: snap.people }, snap.settings),
       ready: true,
@@ -912,9 +949,15 @@ export const setChannelMembers = (id: string, agentIds: string[]): Promise<void>
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
+// A message sent outside threads, in a conversation that answers in them: its thread opens when it
+// comes back from the core (a while at most, so one that never does doesn't open a later one).
+let openNext: { conversationId: string; until: number } | null = null
 // `threadId`: a reply in the thread that message started.
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
-  if (text.trim() || images.length || files.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  if (!(text.trim() || images.length || files.length)) return
+  const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
+  openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>

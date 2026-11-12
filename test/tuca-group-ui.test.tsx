@@ -41,7 +41,7 @@ const { Proposals } = await import('../src/renderer/src/components/Tuca')
 const { Onboarding } = await import('../src/renderer/src/components/Onboarding')
 
 const off = (): EngineStatus => ({ installed: false, loggedIn: false })
-const engines = (p: Partial<Record<EngineId, EngineStatus>> = {}): Settings['engines'] => ({ claude: off(), codex: off(), opencode: off(), pi: off(), antigravity: off(), cursor: off(), grok: off(), cline: off(), ...p })
+const engines = (p: Partial<Record<EngineId, EngineStatus>> = {}): Settings['engines'] => ({ claude: off(), codex: off(), opencode: off(), pi: off(), antigravity: off(), cursor: off(), grok: off(), cline: off(), hermes: off(), ...p })
 const base = (await vi.importActual<typeof import('../src/renderer/src/store')>('../src/renderer/src/store')).getState()
 const agent = (id: string, name: string, extra: Partial<Agent> = {}): Agent => ({ id, name, handle: name.toLowerCase(), role: '', color: 'sky', instructions: 'x', modelId: 'sonnet', effort: 'low', limit: 2_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra }) as Agent
 const tuca = agent('tuca', 'Tuca', { kind: 'tuca' })
@@ -87,6 +87,16 @@ const render = async (node: React.ReactNode): Promise<void> => {
 }
 
 describe('several proposals in one reply, on screen', () => {
+  it('shows the recommendation for long proposed instructions and keeps the full text on the card', async () => {
+    const instructions = `${'x'.repeat(32_000)} END`
+    const m = reply([{ kind: 'agent', agentId: 'lia', changes: { instructions }, before: { instructions: 'x' } }, migration()[2]!])
+    await render(<Proposals message={m} />)
+    await click(/^→$/)
+    expect(text()).toContain('Prompt longo')
+    expect(text()).toContain('32.004')
+    expect(text()).toContain(instructions)
+  })
+
   it('one group: "1 de 5", the new agent first, and each card with its own Aplicar', async () => {
     const m = reply(migration())
     fake = state({ messages: { t1: [m] } })
