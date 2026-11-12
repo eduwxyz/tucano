@@ -1,7 +1,9 @@
-// A new prompt in a conversation that is already answering can arrive four ways: as a reply always
-// does (the default: one at a time per agent and thread, the person's newer messages taking over),
-// after everything running there (queue), handed to it between two tool calls (steer), or in place
-// of it (interrupt). With nothing running, all four are the same thing: a prompt like any other.
+// A new prompt in a conversation that is already answering can arrive four ways: beside the reply
+// running there, the two at once (parallel, what the setting says by default), after everything
+// running there (queue), handed to it between two tool calls (steer), or in place of it (interrupt).
+// A prompt with no mode at all (the phone, an approval's outcome, a routine) keeps the way replies
+// have always gone: one at a time per agent and thread, the person's newer messages taking over.
+// With nothing running, all of them are the same thing: a prompt like any other.
 // See `send` in src/core/runs.ts.
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -105,7 +107,7 @@ afterEach(async () => {
 })
 
 describe('a prompt that arrives while a reply is running', () => {
-  it('parallel, the default: the reply goes as replies always go, one at a time there', async () => {
+  it('no mode: the reply goes as replies always go, one at a time there', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const rec: string[] = []
@@ -115,6 +117,55 @@ describe('a prompt that arrives while a reply is running', () => {
     await r.idle()
     expect(rec).toEqual(['start', 'end', 'start', 'end']) // never side by side: the agent answers one at a time there
     expect(agentMessages()).toHaveLength(2) // each prompt still gets its reply
+  })
+
+  it('parallel: it goes beside the reply running there, the two at once', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'comece, demore 1 s')
+    await r.send('d1', 'e isto também', [], undefined, undefined, { mode: 'parallel' })
+    expect(rec.slice(0, 2)).toEqual(['start', 'start']) // it didn't wait for the first one
+    await r.idle()
+    expect(rec.filter((x) => x === 'start')).toHaveLength(2)
+    expect(rec.filter((x) => x === 'end')).toHaveLength(2)
+    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done']) // both answered
+  })
+
+  it('parallel: only one of the two holds the kept session, the other reads the whole conversation', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const seen: string[] = []
+    const base = fakeEngine('claude', { delayMs: 1, sessions: true })
+    const engine: Engine = {
+      ...base,
+      async *run(turn) {
+        seen.push(turn.session ? `${turn.session.resume ? 'resume' : 'new'} ${turn.session.id}` : 'no session')
+        yield* base.run(turn)
+      }
+    }
+    const r = runnerWith(engine)
+    await r.send('d1', 'comece, demore 1 s')
+    await r.send('d1', 'e isto também', [], undefined, undefined, { mode: 'parallel' })
+    await r.idle()
+    // A session can only go on in one reply: the one already there keeps it, the second reads it all.
+    expect(seen.filter((s) => s !== 'no session')).toHaveLength(1)
+    expect(seen.filter((s) => s === 'no session')).toHaveLength(1)
+  })
+
+  it('queue behind two parallel replies: it waits for both to end', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'comece, demore 1 s')
+    await r.send('d1', 'e isto também', [], undefined, undefined, { mode: 'parallel' })
+    await r.send('d1', 'isto vem depois', [], undefined, undefined, { mode: 'queue' })
+    expect(rec.filter((x) => x === 'start')).toHaveLength(2) // still waiting: two are running there
+    await r.idle()
+    expect(rec.filter((x) => x === 'start')).toHaveLength(3)
+    expect(rec.at(-1)).toBe('end') // the queued one went last, after both
   })
 
   it('queue: it waits, and starts only when the reply above it ended', async () => {

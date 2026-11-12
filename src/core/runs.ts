@@ -543,7 +543,9 @@ export class Runner {
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // How it joins a reply already running here (the window says which): alongside it, after it,
     // handed to it between tool calls, or in place of it. With nothing running, all four are the same.
-    const mode = opts.mode ?? 'parallel'
+    // No mode at all (the phone, an approval's outcome, a routine, a retry) is the way replies have
+    // always gone here: one at a time per agent and thread, a person's newer message taking over.
+    const mode = opts.mode
     const queued = mode === 'queue' && this.busyIn(conv.id)
     if (queued) mine.sendMode = 'queue' // it says so in the conversation, and it outlives a restart
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
@@ -625,8 +627,9 @@ export class Runner {
         return
       }
     }
-    // The default goes as a reply always does (one at a time per agent and thread there, the person's
-    // newer messages taking over); a queued one waits here for everything running there to end.
+    // A parallel one goes beside the reply running there, two at once; no mode (or a steer that found
+    // nothing to go into) goes as a reply always does, one at a time per agent and thread there, the
+    // person's newer messages taking over; a queued one waits for everything running there to end.
     for (const agent of responders) {
       const start = (): Promise<unknown> =>
         this.startReply(
@@ -634,7 +637,7 @@ export class Runner {
           conv,
           { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) },
           // A queued prompt answers the message it was written for, never taking over an earlier one.
-          { urgent: true, merge: mode !== 'queue' }
+          { urgent: true, merge: mode !== 'queue', parallel: mode === 'parallel' }
         )
       this.runIn(conv.id, start, mode === 'queue', queued ? mine : undefined)
     }
@@ -1029,11 +1032,16 @@ export class Runner {
   // A reply not routed nor handed off (those wait in routed and handOff): one at a time per agent and
   // thread (replyKey), wherever it comes from. While the agent replies there it waits, off the queue,
   // and starts when that reply ends; a person's newer message there takes over theirs (`merge`).
+  // `parallel`: the person asked for this one beside that reply, not after it, so it goes now (two at
+  // once in the same place, which #358 otherwise rules out). The two share a key, so the second one
+  // gets no kept session (`sessions.begin` turns it down) and reads the whole conversation: a session
+  // can only go on in one reply, and the one already there keeps it.
   // Resolves with the reply, or undefined when it failed or was dropped.
-  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; merge?: boolean } = {}): Promise<Message | undefined> {
+  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; merge?: boolean; parallel?: boolean } = {}): Promise<Message | undefined> {
     const key = replyKey(agent.id, conv.id, opts.existing ? opts.existing.threadId : opts.threadId)
     return new Promise((resolve) => {
       const p: Parked = { agent, conv, opts, urgent: !!how.urgent, merge: !!how.merge, done: [resolve] }
+      if (how.parallel) return this.launch(key, p)
       const line = this.parked.get(key)
       if (!line && !this.followups.busy(key)) return this.launch(key, p)
       const same = p.merge ? line?.find((x) => x.merge) : undefined
