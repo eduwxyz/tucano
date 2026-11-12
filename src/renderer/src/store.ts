@@ -2,6 +2,7 @@
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
+import { setClock } from '../../shared/clock'
 import type { Answer } from '../../shared/questions'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
@@ -520,6 +521,7 @@ function withMe(s: State): State {
 
 function withSettings(s: State, settings: Settings): State {
   setLang(settings.language)
+  setClock(settings.clock)
   return withMe({ ...s, settings })
 }
 

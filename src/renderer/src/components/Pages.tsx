@@ -1,4 +1,4 @@
-import { L, locale, type Lang } from '../../../shared/lang'
+import { L, lang, locale, type Lang } from '../../../shared/lang'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
@@ -2014,6 +2014,15 @@ export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) =
 
 // ---------- Settings ----------
 
+// The two clocks, with the one in force marked: unset follows the language, which is what the app
+// did before there was a choice, so a person who never chose still sees the right one lit.
+const CLOCK_CHOICES = (chosen: '24' | '12' | undefined): { value: '24' | '12'; label: string; hint: string; on: boolean }[] => {
+  const inForce = chosen ?? (lang() === 'en' ? '12' : '24')
+  return [
+    { value: '24', label: '24 h', hint: L('15:05, do jeito que sempre foi.', '15:05, the way it always was.'), on: inForce === '24' },
+    { value: '12', label: '12 h', hint: L('3:05 PM, com AM e PM.', '3:05 PM, with am and pm.'), on: inForce === '12' }
+  ]
+}
 // Português or English: the app's, and the language agents answer in. Labeled in both, so anyone finds it.
 export function LanguagePicker({ className = '' }: { className?: string }): ReactNode {
   const language = useStore((s) => s.settings.language)
@@ -2548,6 +2557,17 @@ export function SettingsPage(): ReactNode {
               <span className="field__label">Idioma · Language</span>
               <LanguagePicker />
               <span className="hint">{L('O idioma do app pra você. Os agentes respondem no idioma do Tucano.', 'The app’s language for you. The agents reply in the Tucano’s language.')}</span>
+            </div>
+            <div className="field">
+              <span className="field__label">{L('Relógio', 'Clock')}</span>
+              <div className="segmented" role="radiogroup" aria-label={L('Relógio', 'Clock')}>
+                {CLOCK_CHOICES(settings.clock).map((c) => (
+                  <button key={c.value} type="button" role="radio" aria-checked={c.on} className={c.on ? 'is-active' : ''} title={c.hint} onClick={() => updateSettings({ clock: c.value })}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+              <span className="hint">{L('Como os horários aparecem: 15:05 no relógio de 24 horas, ou 3:05 PM no de 12. Vale pra conversa, pras rotinas e pro que os agentes leem.', 'How times read: 15:05 on a 24-hour clock, or 3:05 PM on a 12-hour one. It covers the conversation, the routines, and what agents read.')}</span>
             </div>
             <div className="field">
               <span className="field__label">{L('Tema', 'Theme')}</span>
