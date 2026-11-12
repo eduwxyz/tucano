@@ -36,7 +36,7 @@ describe("the model's thinking on screen", () => {
     expect(drawn()).toBe('')
     fake = { ...fake, settings: { ...fake.settings, showThinking: true } }
     const html = drawn()
-    expect(html).toContain('class="thought"')
+    expect(html).toContain('class="thought is-open is-working"')
     expect(html).toContain('Pensando')
     expect(html).toContain('o pedido tem duas partes')
   })
