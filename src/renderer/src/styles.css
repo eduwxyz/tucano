@@ -11863,29 +11863,89 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
-/* What the model is thinking, apart from what it said: dim, small, and scrolling itself as it
-   arrives, so a long reply can be studied while it is being written. */
+/* What the model is thinking, apart from what it said: dim, small, under the steps it belongs to
+   and above anything the reply offers at its bottom. Open and scrolling itself while it arrives, so
+   a long reply can be studied while it is being written; folded to the line it is on once it is over,
+   and, opened again, read in full in the page instead of a box inside a box. */
 .thought {
-  margin: 6px 0 0;
-  max-height: 9.5em;
-  overflow-y: auto;
-  padding: 8px 10px;
+  margin: 4px 0 0;
+  padding-left: 8px;
   border-left: 2px solid var(--border);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 6px 6px 0;
   color: var(--text-3);
   font-size: 12px;
   line-height: 1.55;
-  white-space: pre-wrap;
-  scrollbar-width: thin;
+}
+.thought__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 1px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.thought__head:hover {
+  color: var(--text-2);
+}
+.thought__head svg {
+  flex-shrink: 0;
+  opacity: 0.55;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.thought__head[aria-expanded='true'] svg {
+  transform: rotate(90deg);
 }
 .thought__label {
+  flex-shrink: 0;
   font: 600 10px/1.4 var(--mono, ui-monospace, monospace);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-3);
   opacity: 0.7;
-  margin-bottom: 3px;
+}
+.thought__last {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.8;
 }
 .thought__text {
+  max-height: 9.5em;
+  overflow-y: auto;
+  padding: 1px 0 2px;
+  white-space: pre-wrap;
   opacity: 0.85;
+  scrollbar-width: thin;
+  /* The newest line never sits against the edge of the box: it fades in from the bottom. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 10px), transparent 100%);
+}
+.thought:not(.is-working) .thought__text {
+  max-height: none;
+  overflow: visible;
+  mask-image: none;
+}
+/* A cursor on the line it is writing: it is arriving now, not read back later. */
+.thought__caret {
+  display: inline-block;
+  width: 5px;
+  height: 11px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: thought-caret 1.1s steps(1, end) infinite;
+}
+@keyframes thought-caret {
+  0%,
+  49% {
+    opacity: 0.55;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
 }

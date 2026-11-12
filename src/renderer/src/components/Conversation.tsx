@@ -1343,21 +1343,44 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   )
 }
 
-// What the model is thinking, dim and small, as it arrives: not what it said, and not a step.
-// It stays after the reply ends (the window keeps it in memory) so it can be read back. Off unless
-// the person turned it on in Settings: a reply's reasoning is its own, and most people want the answer.
+// What the model is thinking, dim and small, as it arrives: not what it said, and not a step. It
+// sits under the steps of the run it belongs to, and above whatever the reply offers at its bottom.
+// It follows the reply: open and scrolling while it works, and once that is over, folded to the last
+// line it thought — the whole of it one click away. The window keeps it in memory so it can be read
+// back. Off unless the person turned it on in Settings: a reply's reasoning is its own, and most
+// people want the answer.
 export function Thought({ message, working }: { message: Message; working: boolean }): ReactNode {
   const on = useStore((s) => s.settings.showThinking === true)
   const thought = useLiveThought(message.id, STREAM_MS)
+  // null: follow the reply — open while it thinks, folded once it's done. A click says otherwise.
+  const [asked, setAsked] = useState<boolean | null>(null)
+  const open = asked ?? working
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (working) box.current?.scrollTo({ top: box.current.scrollHeight })
-  }, [thought, working])
+    if (open && working) box.current?.scrollTo({ top: box.current.scrollHeight })
+  }, [thought, open, working])
   if (!on || !thought) return null
+  // Folded, it carries the line it is on now: what it is thinking, cut to the width of the block.
+  const last = thought.trimEnd().split(/\r?\n/).filter((l) => l.trim() !== '').pop() ?? ''
   return (
-    <div ref={box} className="thought" aria-label={L('O que o agente está pensando', "What the agent is thinking")}>
-      <div className="thought__label">{working ? L('Pensando', 'Thinking') : L('Pensou', 'Thought')}</div>
-      <div className="thought__text">{thought}</div>
+    <div className={`thought${open ? ' is-open' : ''}${working ? ' is-working' : ''}`} aria-label={L('O que o agente está pensando', 'What the agent is thinking')}>
+      <button
+        type="button"
+        className="thought__head"
+        aria-expanded={open}
+        title={open ? L('Recolher o que ele pensou', 'Fold what it thought') : L('Ler o que ele pensou', 'Read what it thought')}
+        onClick={() => setAsked(!open)}
+      >
+        <Icon name="chevron" size={11} />
+        <span className="thought__label">{working ? L('Pensando', 'Thinking') : L('Pensou', 'Thought')}</span>
+        {!open && <span className="thought__last">{last}</span>}
+      </button>
+      {open && (
+        <div ref={box} className="thought__text">
+          {thought}
+          {working && <span className="thought__caret" aria-hidden="true" />}
+        </div>
+      )}
     </div>
   )
 }
