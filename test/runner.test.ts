@@ -409,6 +409,17 @@ describe('one reply at a time per agent and thread', () => {
     expect(t.max()).toBe(1)
   })
 
+  it('a routine reply points at the request its own routine posted, also when the runs queue', async () => {
+    const t = slowTheo(200)
+    const r = runner(t.engine)
+    const routine = (id: string) => ({ id, name: id, agentId: 'a2', conversationId: 'c3', prompt: 'rotina', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 1 })
+    const runs = await Promise.all([r.runRoutine(routine('r1'), { scheduledAt: 1, late: false }), r.runRoutine(routine('r2'), { scheduledAt: 1, late: false })])
+    const askOf = (routineId: string) => db.messages().filter((m) => m.conversationId === 'c3').find((m) => m.author.kind === 'routine' && m.author.id === routineId)!
+    expect(runs.map((m) => m?.run?.routineMessage)).toEqual([askOf('r1').id, askOf('r2').id])
+    expect(db.message(runs[1]!.id)?.run?.routineMessage).toBe(askOf('r2').id)
+    expect(db.message(runs[1]!.id)?.run?.replyTo).toBeUndefined()
+  })
+
   it('drops the follow-up when the reply it waited for was stopped', async () => {
     const t = slowTheo(2000)
     const r = runner(t.engine)

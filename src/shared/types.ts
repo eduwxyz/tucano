@@ -181,6 +181,7 @@ export interface Run {
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   replyTo?: string // the message (a person's) it answers, when one did
   handed?: string // the request (Delegation) this reply works on: what it ends with goes back to whoever asked
+  routineMessage?: string // the request a routine posted that this reply runs, when a routine started it
   answeredBy?: string // who answered its question (another person than the one asked, maybe)
   question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
   questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
