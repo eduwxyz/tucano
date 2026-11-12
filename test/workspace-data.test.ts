@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it } from 'vitest'
-import { Db } from '../src/core/db'
+import { Db, MIGRATIONS } from '../src/core/db'
 import { workspacePorts } from '../src/core/ports'
 import { Memories } from '../src/core/memory'
 import { fakeEngine } from '../src/core/engines/fake'
@@ -89,7 +89,7 @@ it('keeps unread counts and memory data in the owning database with identical ID
   expect(a.memories().map((m) => m.text)).toEqual(['Only in A'])
   expect(b.memories()).toEqual([])
   const agent: Agent = { id: 'same-agent', name: 'Agent', handle: 'agent', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
-  const memory = (db: Db): Memories => new Memories({ db, engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }, settings: async () => { throw new Error('Prompt lookup must not invoke a model') }, emit: () => {}, workDir: '' })
+  const memory = (db: Db): Memories => new Memories({ db, engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => { throw new Error('Prompt lookup must not invoke a model') }, emit: () => {}, workDir: '' })
   expect(memory(a).forPrompt(agent).aboutMe.map((m) => m.text)).toEqual(['Only in A'])
   expect(memory(b).forPrompt(agent).aboutMe).toEqual([])
   a.deleteConversation('same-channel')
@@ -100,12 +100,11 @@ it('migrates every opened workspace and backs up older schemas before changing t
   const dir = mkdtempSync(join(tmpdir(), 'tucano-migrations-'))
   dirs.push(dir)
   const file = join(dir, 'tucano.db')
-  const first = new Db(file)
-  first.createConversation({ id: 'kept', name: 'kept', kind: 'channel', members: [] })
-  first.close()
+  // A database from before the unread table (two migrations back: people came after it).
+  const version = MIGRATIONS.length - 1
   const raw = new DatabaseSync(file)
-  const version = (raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-  raw.exec(`DROP TABLE message_notifications; PRAGMA user_version = ${version - 1}`)
+  for (const m of MIGRATIONS.slice(0, version - 1)) raw.exec(m)
+  raw.exec(`INSERT INTO conversations (id, kind, name, created_at) VALUES ('kept', 'channel', 'kept', 1); PRAGMA user_version = ${version - 1}`)
   raw.close()
   const migrated = open(file)
   expect(migrated.conversation('kept')?.unread).toBe(0)

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and help
+    url: https://discord.gg/uQp4x7wUgT
+    about: Ask how to set something up, share your team or talk ideas on Discord. Use issues for bugs and feature requests.

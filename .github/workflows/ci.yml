@@ -1,11 +1,16 @@
 # Every pull request and every push to main: typecheck, tests and the app's
 # build, on macOS, Linux and Windows, so a change can't break one of them unnoticed.
+# Windows runs the same tests several times slower, so they're split across four
+# runners there. A pull request runs the heaviest randomized tests with fewer rounds
+# (TUCANO_QUICK_TESTS); main runs them all.
 name: CI
 
 on:
   pull_request:
+    paths-ignore: ['site/**', 'docs/**', '**/*.md']
   push:
     branches: [main]
+    paths-ignore: ['site/**', 'docs/**', '**/*.md']
 
 permissions:
   contents: read
@@ -16,22 +21,36 @@ concurrency:
 
 jobs:
   test:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }}${{ matrix.shard != '1/1' && format(' ({0})', matrix.shard) || '' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - { os: macos-latest, shard: 1/1 }
+          - { os: ubuntu-latest, shard: 1/1 }
+          - { os: windows-latest, shard: 1/4 }
+          - { os: windows-latest, shard: 2/4 }
+          - { os: windows-latest, shard: 3/4 }
+          - { os: windows-latest, shard: 4/4 }
     runs-on: ${{ matrix.os }}
     env:
       # The tests and the build don't run Electron itself.
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      TUCANO_QUICK_TESTS: ${{ github.event_name == 'pull_request' && '1' || '' }}
     steps:
+      # Defender scans every file the tests write (databases, temp folders), which is
+      # most of Windows' extra time. The runner is thrown away after the job.
+      - if: runner.os == 'Windows'
+        run: Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, "$env:USERPROFILE\AppData\Local\npm-cache"
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      - if: matrix.shard == '1/1' || matrix.shard == '1/4'
+        run: npm run typecheck
+      - run: npx vitest run --shard=${{ matrix.shard }}
+      - if: matrix.shard == '1/1' || matrix.shard == '1/4'
+        run: npm run build
+

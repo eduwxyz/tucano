@@ -15,7 +15,12 @@ export interface ToolDef {
   name: string
   description: string
   inputSchema: { type: 'object'; properties?: Record<string, unknown>; required?: string[] }
+  _meta?: Record<string, unknown> // goes out as is in tools/list
 }
+
+// Claude Code keeps an MCP server's tools behind tool search (by name only, loaded when the model
+// looks one up). A tool listed with this stays in the prompt: the app's own, few and used often.
+export const ALWAYS_LOAD = { 'anthropic/alwaysLoad': true } as const
 
 export interface Session {
   tools: ToolDef[]
@@ -81,8 +86,8 @@ export class Gateway {
   }
 
   // The token of an agent that keeps its connection from one turn to the next, made once and
-  // handed to `open` on every turn: the URL the CLI was given stays the same, and between
-  // turns the session is parked (its tools listed, every call refused).
+  // handed to `open` on every turn: the URL the CLI was given stays the same, and between turns
+  // the session is parked (its tools listed, every call refused).
   agentToken(agentKey: string): string {
     let t = this.agents.get(agentKey)
     if (!t) {

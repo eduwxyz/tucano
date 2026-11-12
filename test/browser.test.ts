@@ -157,6 +157,8 @@ describe("an agent's browser", () => {
     expect(browser.frame('lia-0001', Buffer.from('novo').toString('base64'))).toBe(true) // just worked: live
     await new Promise((r) => setTimeout(r, 150))
     expect(browser.view('lia-0001')!.frame).toBe(`data:image/jpeg;base64,${Buffer.from('novo').toString('base64')}`)
+    // Only the picture goes out, not the whole view with its log.
+    expect(events.at(-1)).toEqual({ type: 'browser_frame', agentId: 'lia-0001', frame: `data:image/jpeg;base64,${Buffer.from('novo').toString('base64')}`, conversationId: ctx.conversationId })
   })
 
   it('clicks and types by text, without any model', async () => {
@@ -311,7 +313,7 @@ describe('the runner with a browser', () => {
     const fake = fakeHost()
     const browser = new Browser({ host: fake.host, db, dataDir, emit: () => {}, me: () => 'Edu' })
     const ready = { installed: true, loggedIn: true }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     const gateway = new Gateway()
     await gateway.start()
     const results: unknown[] = []
@@ -325,7 +327,7 @@ describe('the runner with a browser', () => {
         yield { type: 'done', text: 'ok', usage: { inputTokens: 1000, cacheReadTokens: 0, outputTokens: 10 } }
       }
     }
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
 
     await r.send('c1', '@theo abre o studio')
     await r.idle()
@@ -358,7 +360,7 @@ describe('the runner with a browser', () => {
     db.createConversation({ id: 'c1', kind: 'channel', name: 'conteudo', members: ['lia-0001'] })
     const browser = new Browser({ host: fakeHost().host, db, dataDir, emit: () => {}, me: () => 'Edu' })
     const ready = { installed: true, loggedIn: true }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     const gateway = new Gateway()
     await gateway.start()
     const claude: Engine = {
@@ -376,7 +378,7 @@ describe('the runner with a browser', () => {
         yield { type: 'done', text: 'O CTR foi 1,6%.', usage: { inputTokens: 1000, cacheReadTokens: 0, outputTokens: 10 } }
       }
     }
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
     const reply = async (text: string) => {
       await r.send('c1', text)
       await r.idle()

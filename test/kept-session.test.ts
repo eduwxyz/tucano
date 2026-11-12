@@ -45,7 +45,17 @@ describe('Sessions', () => {
     const first = started(s)
     expect(first).toMatchObject({ resume: false, send: ['m1', 'm2'] })
     const next = s.begin('k', { config: cfg, shown: [...msgs('m1', 'm2'), { id: 'r1', block: '[Lia]\nresposta' }, ...msgs('m3', 'm4')] })
-    expect(next).toEqual({ id: first.id, token: first.token, resume: true, send: ['m3', 'm4'] })
+    expect(next).toEqual({ id: first.id, token: first.token, resume: true, send: ['m3', 'm4'], live: false })
+  })
+
+  it('goes on when only the live context changed, and sends it again only then', () => {
+    const s = store()
+    const p = s.begin('k', { config: cfg, shown: msgs('m1'), live: 'memórias: A' })!
+    s.end('k', p, { ok: true, config: cfg, shown: msgs('m1'), live: 'memórias: A', reply: 'r1', context: 1_000 })
+    expect(s.begin('k', { config: cfg, shown: [...msgs('m1'), { id: 'r1', block: 'x' }, ...msgs('m2')], live: 'memórias: A' })).toMatchObject({ id: p.id, resume: true, live: false })
+    s.end('k', p, { ok: true, config: cfg, shown: msgs('m1', 'm2'), live: 'memórias: A', reply: 'r2', context: 1_000 })
+    expect(s.begin('k', { config: cfg, shown: [...msgs('m1'), { id: 'r1', block: 'x' }, ...msgs('m2'), { id: 'r2', block: 'x' }, ...msgs('m3')], live: 'memórias: A, B' })).toMatchObject({ id: p.id, resume: true, send: ['m3'], live: true })
+    expect(forgot).toEqual([])
   })
 
   it('goes on after older messages leave the window', () => {
@@ -145,7 +155,7 @@ describe('a reply with a kept session', () => {
   const recorded = (e: Engine): Engine => ({ ...e, run: (t) => (turns.push(t), e.run(t)) })
   function runner(opts: { delayMs?: number; reply?: (t: Turn) => string; sessions?: boolean } = {}): Runner {
     const claude = recorded(fakeEngine('claude', { delayMs: opts.delayMs ?? 1, reply: opts.reply, sessions: opts.sessions ?? true, released }))
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ks-work-')) })
   }
   const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
@@ -154,7 +164,7 @@ describe('a reply with a kept session', () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ks-db-')), 'test.db'))
     turns = []
     released = []
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(agent('a1', 'lia'))
     db.saveAgent(agent('a2', 'theo'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -209,7 +219,7 @@ describe('a reply with a kept session', () => {
     const r = runner()
     await r.send('d1', 'oi')
     await r.idle()
-    const mine = db.messages().find((m) => m.author.kind === 'me')!
+    const mine = db.messages().find((m) => m.author.kind === 'person')!
     db.saveMessage({ ...mine, text: 'olá' })
     await r.send('d1', 'de novo')
     await r.idle()
@@ -261,7 +271,7 @@ describe('a reply with a kept session', () => {
   it('finishes the reply when letting a session go fails', async () => {
     const claude = recorded(fakeEngine('claude', { delayMs: 1, sessions: true, released }))
     const failing: Engine = { ...claude, release: () => { throw new Error('EBUSY: resource busy or locked') } }
-    const engines: Record<EngineId, Engine> = { claude: failing, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
+    const engines: Record<EngineId, Engine> = { claude: failing, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     const r = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ks-work-')) })
     await r.send('d1', 'oi')
     await r.idle()

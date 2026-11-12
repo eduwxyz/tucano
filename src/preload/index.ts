@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('tucano', {
   onCoreDown: (cb: () => void): void => {
     ipcRenderer.on('core:down', () => cb())
   },
+  // Settings › General › Notifications: one now, to see that they come.
+  testNotify: (): Promise<unknown> => ipcRenderer.invoke('notify:test'),
   // The conversation on screen: the Mac doesn't notify about the one you're reading.
   viewing: (conversationId: string | null): void => ipcRenderer.send('viewing', conversationId),
   // The app's own updates.
@@ -46,6 +48,17 @@ contextBridge.exposeInMainWorld('tucano', {
   },
   checkUpdates: (): void => ipcRenderer.send('update:check'),
   installUpdate: (): void => ipcRenderer.send('update:install'),
+  // Seu iPhone: the app on the phone, over the home Wi-Fi (src/main/home-phone.ts).
+  phone: {
+    state: (): Promise<unknown> => ipcRenderer.invoke('home-phone:state'),
+    set: (on: boolean): Promise<unknown> => ipcRenderer.invoke('home-phone:set', on),
+    code: (): Promise<unknown> => ipcRenderer.invoke('home-phone:code'),
+    onChanged: (cb: (state: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('home-phone', listener)
+      return () => ipcRenderer.removeListener('home-phone', listener)
+    }
+  },
   // Tucanos on servers, shown in this window over the app (Settings › Servers, the workspace list).
   servers: {
     list: (): Promise<unknown> => ipcRenderer.invoke('servers:list'),
@@ -53,8 +66,11 @@ contextBridge.exposeInMainWorld('tucano', {
     open: (id: string): void => ipcRenderer.send('servers:open', id),
     local: (): void => ipcRenderer.send('servers:local'),
     forget: (id: string): Promise<unknown> => ipcRenderer.invoke('servers:forget', id),
-    onChanged: (cb: () => void): void => {
-      ipcRenderer.on('servers', () => cb())
+    // Returns how to stop listening: each screen showing the list listens while it's open.
+    onChanged: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('servers', listener)
+      return () => ipcRenderer.removeListener('servers', listener)
     }
   }
 })

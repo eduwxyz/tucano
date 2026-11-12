@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, Author, EngineId, Message, Settings } from '../src/shared/types'
-import { Db } from '../src/core/db'
+import { Db, MIGRATIONS } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
@@ -35,7 +35,7 @@ function runner(opts: { reply?: (t: Turn) => string; memory?: boolean; onTurn?: 
       yield* base.run(t)
     }
   }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
   memory = new Memories({ db, engines, settings: async () => settings, emit: () => {}, workDir })
   return new Runner({
@@ -59,13 +59,13 @@ function put(conversationId: string, author: Author, text: string, threadId?: st
 
 const agentTurns = (): Turn[] => turns.filter((t) => t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== memorySystem())
 const replies = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
-const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'me')
+const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'person')
 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   turns = []
   notes = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia', { role: 'Engenharia' }))
   db.saveAgent(agent('a2', 'theo', { role: 'Dados' }))
   // Both answer in threads; a conversation that answers in it is made where it's tested.
@@ -81,7 +81,7 @@ afterEach(async () => {
 
 describe('sending into a thread', () => {
   it('my message and the reply it sets off carry the thread; a reply to a reply goes in the same thread', async () => {
-    const root = put('d1', { kind: 'me' }, 'Vamos lançar sexta?')
+    const root = put('d1', { kind: 'person', id: db.ownerId() }, 'Vamos lançar sexta?')
     const r = runner()
     await r.send('d1', 'e o texto do post?', [], root.id)
     await r.idle()
@@ -105,7 +105,7 @@ describe('sending into a thread', () => {
   })
 
   it('a root from another conversation does not make a thread: the message opens its own', async () => {
-    const elsewhere = put('c1', { kind: 'me' }, 'outro canal')
+    const elsewhere = put('c1', { kind: 'person', id: db.ownerId() }, 'outro canal')
     const r = runner()
     await r.send('d1', 'oi', [], elsewhere.id)
     await r.idle()
@@ -124,13 +124,13 @@ describe('a conversation that answers in it', () => {
     await r.send('p1', 'qual a média de retenção da semana?')
     await r.idle()
     const here = db.messages().filter((m) => m.conversationId === 'p1')
-    expect(here.map((m) => m.author.kind)).toEqual(['me', 'system', 'agent'])
+    expect(here.map((m) => m.author.kind)).toEqual(['person', 'system', 'agent'])
     expect(here.every((m) => m.threadId === undefined)).toBe(true)
     expect(notes.at(-1)).toEqual({ conversationId: 'p1', kind: 'done', threadId: undefined })
   })
 
   it('a thread opened by hand still takes its answers; switched to threads, every message opens one', async () => {
-    const root = put('p1', { kind: 'me' }, 'um assunto à parte')
+    const root = put('p1', { kind: 'person', id: db.ownerId() }, 'um assunto à parte')
     const r = runner()
     await r.send('p1', '@lia e esse?', [], root.id)
     await r.idle()
@@ -145,8 +145,8 @@ describe('a conversation that answers in it', () => {
   })
 
   it('an answer there reads the conversation and the message that opened each thread, not what was said inside: that is looked up', async () => {
-    put('p1', { kind: 'me' }, 'CANAL: bom dia')
-    const root = put('p1', { kind: 'me' }, 'RAIZ: o plano do post')
+    put('p1', { kind: 'person', id: db.ownerId() }, 'CANAL: bom dia')
+    const root = put('p1', { kind: 'person', id: db.ownerId() }, 'RAIZ: o plano do post')
     put('p1', { kind: 'agent', id: 'a2' }, 'DENTRO DA THREAD: o plano inteiro', root.id)
     const found: string[] = []
     const r = runner({
@@ -167,7 +167,7 @@ describe('a conversation that answers in it', () => {
   })
 
   it('with no thread in it, an answer there is given no thread tools nor the note about them', async () => {
-    put('p1', { kind: 'me' }, 'CANAL: bom dia')
+    put('p1', { kind: 'person', id: db.ownerId() }, 'CANAL: bom dia')
     const r = runner()
     await r.send('p1', '@lia tudo certo?')
     await r.idle()
@@ -178,11 +178,11 @@ describe('a conversation that answers in it', () => {
 
 describe("what the agent sees", () => {
   it("in a thread: only that thread, however old; not the channel's summary nor the other threads", async () => {
-    const root = put('c1', { kind: 'me' }, 'RAIZ: o plano de lançamento')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'RAIZ: o plano de lançamento')
     put('c1', { kind: 'agent', id: 'a1' }, 'RESPOSTA ANTIGA na thread', root.id)
     db.setSummary('c1', 'RESUMO DO CANAL', root.at + 5)
     clock += 10
-    put('c1', { kind: 'me' }, 'OUTRO ASSUNTO depois')
+    put('c1', { kind: 'person', id: db.ownerId() }, 'OUTRO ASSUNTO depois')
     const r = runner({ memory: true })
     await r.send('c1', '@lia e a data?', [], root.id)
     await r.idle()
@@ -200,9 +200,9 @@ describe("what the agent sees", () => {
 
   it('two threads at once: a reply that goes on in its thread never sees the other, newer one', async () => {
     // The PR review goes on (after an approval, a pause) once I've asked something else meanwhile.
-    const pr = put('c1', { kind: 'me' }, 'THREAD A: revisa o ENG-105')
+    const pr = put('c1', { kind: 'person', id: db.ownerId() }, 'THREAD A: revisa o ENG-105')
     const paused = put('c1', { kind: 'agent', id: 'a1' }, 'metade da revisão', pr.id)
-    const other = put('c1', { kind: 'me' }, 'THREAD B: implementa o ENG-200')
+    const other = put('c1', { kind: 'person', id: db.ownerId() }, 'THREAD B: implementa o ENG-200')
     put('c1', { kind: 'agent', id: 'a2' }, 'RESPOSTA DA B', other.id)
     for (const withMemory of [false, true]) {
       turns = []
@@ -221,7 +221,7 @@ describe("what the agent sees", () => {
   })
 
   it("a new message is a conversation of its own: the earlier threads aren't given, they're looked up", async () => {
-    const root = put('d1', { kind: 'me' }, 'as 3 notícias de IA?')
+    const root = put('d1', { kind: 'person', id: db.ownerId() }, 'as 3 notícias de IA?')
     put('d1', { kind: 'agent', id: 'a1' }, 'NOTÍCIAS: IPO, buyouts, busca', root.id)
     for (const withMemory of [false, true]) {
       turns = []
@@ -235,12 +235,12 @@ describe("what the agent sees", () => {
   })
 
   it("buscar_threads finds threads of the conversations the agent is in and ler_thread reads them; not where it isn't, nor its own", async () => {
-    const other = put('c1', { kind: 'me' }, 'THREAD B: o plano do post')
+    const other = put('c1', { kind: 'person', id: db.ownerId() }, 'THREAD B: o plano do post')
     put('c1', { kind: 'agent', id: 'a2' }, 'RESPOSTA COMPLETA DA B, com o plano inteiro', other.id)
-    put('d1', { kind: 'me' }, 'DM: o plano da viagem')
+    put('d1', { kind: 'person', id: db.ownerId() }, 'DM: o plano da viagem')
     db.createConversation({ id: 'c2', kind: 'channel', name: 'dados', members: ['a2'] }) // Lia isn't in it
-    const theirs = put('c2', { kind: 'me' }, 'PLANO de outro canal')
-    const root = put('c1', { kind: 'me' }, 'THREAD A: o plano?')
+    const theirs = put('c2', { kind: 'person', id: db.ownerId() }, 'PLANO de outro canal')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'THREAD A: o plano?')
     const results: string[] = []
     const r = runner({
       onTurn: async (t) => {
@@ -269,7 +269,7 @@ describe("what the agent sees", () => {
 
 describe('who answers in a thread', () => {
   it('in a DM, the DM agent, with no mention', async () => {
-    const root = put('d1', { kind: 'me' }, 'pergunta solta')
+    const root = put('d1', { kind: 'person', id: db.ownerId() }, 'pergunta solta')
     const r = runner()
     await r.send('d1', 'e aí?', [], root.id)
     await r.idle()
@@ -277,8 +277,8 @@ describe('who answers in a thread', () => {
   })
 
   it('in a channel, the router reads the conversation and the thread, and its note and the reply stay in it', async () => {
-    put('c1', { kind: 'me' }, 'CANAL: bom dia pra todos')
-    const root = put('c1', { kind: 'me' }, 'RAIZ: precisamos da métrica de retenção')
+    put('c1', { kind: 'person', id: db.ownerId() }, 'CANAL: bom dia pra todos')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'RAIZ: precisamos da métrica de retenção')
     const r = runner()
     await r.send('c1', 'qual a média da semana?', [], root.id)
     await r.idle()
@@ -292,8 +292,8 @@ describe('who answers in a thread', () => {
   })
 
   it('the router reads the thread, and the other threads a line each with who answered them', async () => {
-    const root = put('c1', { kind: 'me' }, 'RAIZ: precisamos da métrica de retenção')
-    const other = put('c1', { kind: 'me' }, 'OUTRA THREAD: e o post?')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'RAIZ: precisamos da métrica de retenção')
+    const other = put('c1', { kind: 'person', id: db.ownerId() }, 'OUTRA THREAD: e o post?')
     put('c1', { kind: 'agent', id: 'a1' }, 'RESPOSTA NA OUTRA', other.id)
     const r = runner()
     await r.send('c1', 'qual a média da semana?', [], root.id)
@@ -301,18 +301,75 @@ describe('who answers in a thread', () => {
 
     const routed = turns.find((t) => t.system === routerSystem())!.prompt
     const thread = routed.slice(routed.indexOf('Thread (a primeira mensagem'))
-    expect(routed).toContain('- [Edu] OUTRA THREAD: e o post? → Lia')
-    expect(routed).not.toContain('RESPOSTA NA OUTRA')
-    expect(routed.indexOf('Outras threads recentes')).toBeLessThan(routed.indexOf('Thread (a primeira mensagem'))
+    expect(routed).toContain('- [Edu] OUTRA THREAD: e o post? → Lia · por último [Lia] RESPOSTA NA OUTRA')
+    expect(routed.indexOf('Antes, no canal')).toBeLessThan(routed.indexOf('Thread (a primeira mensagem'))
     expect(thread).not.toContain('OUTRA')
     expect(thread.split('\n').slice(1, 3)).toEqual(['[Edu] RAIZ: precisamos da métrica de retenção', '[Edu] qual a média da semana?'])
   })
 })
 
+// A routine's agent posts a long report in the channel that ends "posso disparar agora?", and
+// the person answers by writing in the channel: their message opens a thread of its own. The
+// router saw only the opening of the other messages and called someone else, who couldn't see
+// the question either ("não achei nada pra disparar aqui").
+describe('an answer written in the channel to a question at the end of an agent’s message', () => {
+  const report = `Relatório da rotina de pré-render. ${'O build travou no passo do prerender e o lint não confirmou. '.repeat(30)}Posso disparar agora?`
+  const said = (id: string, author: Author, text: string, at: number): Message => {
+    const m: Message = { id, conversationId: 'c1', author, text, at }
+    db.saveMessage(m)
+    return m
+  }
+
+  it('goes to the agent that asked, which reads its question above the thread the answer opened', async () => {
+    said('q0', { kind: 'agent', id: 'a1' }, 'Deploy da landing feito.', Date.now() - 120_000)
+    said('q1', { kind: 'agent', id: 'a2' }, report, Date.now() - 60_000)
+    const r = runner()
+    await r.send('c1', 'pode disparar agora')
+    await r.idle()
+
+    const routed = turns.find((t) => t.system === routerSystem())!.prompt
+    expect(routed).toContain('Posso disparar agora?')
+    const answer = mine().at(-1)!
+    expect(replies().filter((m) => !['q0', 'q1'].includes(m.id)).map((m) => [(m.author as { id: string }).id, m.threadId])).toEqual([['a2', answer.id]])
+    const prompt = agentTurns().at(-1)!.prompt
+    expect(prompt).toContain('Antes desta thread, as últimas mensagens de #lancamento fora de threads')
+    expect(prompt).toContain('Deploy da landing feito.')
+    expect(prompt.indexOf('Posso disparar agora?')).toBeLessThan(prompt.indexOf('pode disparar agora'))
+  })
+
+  it('reads the same blocks on its next reply in that thread, so a kept session goes on', async () => {
+    said('q1', { kind: 'agent', id: 'a2' }, report, Date.now() - 60_000)
+    const r = runner()
+    await r.send('c1', '@theo pode disparar agora')
+    await r.idle()
+    const thread = mine().at(-1)!.id
+    await r.send('c1', '@theo e aí, rodou?', [], thread)
+    await r.idle()
+    const [first, second] = agentTurns()
+    const above = first!.blocks!.filter((b) => b.includes('Posso disparar agora?') || b.startsWith('Antes desta thread'))
+    expect(above).toHaveLength(2)
+    expect(second!.blocks).toEqual(expect.arrayContaining(above))
+  })
+
+  it('reads nothing from before a thread opened on another message, or from more than 12 hours before', async () => {
+    const old = said('q1', { kind: 'agent', id: 'a2' }, `ANTIGA ${report}`, Date.now() - 13 * 60 * 60 * 1000)
+    const r = runner()
+    await r.send('c1', '@theo pode disparar agora')
+    await r.idle()
+    await r.send('c1', '@theo e essa?', [], old.id)
+    await r.idle()
+    const [fresh, onIt] = agentTurns()
+    expect(fresh!.prompt).not.toContain('Antes desta thread')
+    expect(fresh!.prompt).not.toContain('ANTIGA')
+    expect(onIt!.prompt).not.toContain('Antes desta thread')
+    expect(onIt!.prompt).toContain('ANTIGA') // it's the message that opened the thread
+  })
+})
+
 describe('questions in threads', () => {
   it("a question waits in its thread: my next message there answers it; another thread or outside threads doesn't", async () => {
-    const root = put('c1', { kind: 'me' }, 'RAIZ')
-    const other = put('c1', { kind: 'me' }, 'OUTRA RAIZ')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'RAIZ')
+    const other = put('c1', { kind: 'person', id: db.ownerId() }, 'OUTRA RAIZ')
     const r = runner()
     await r.send('c1', '@lia me pergunte o que faltar', [], root.id)
     await r.idle()
@@ -354,7 +411,7 @@ describe('questions in threads', () => {
 
 describe('what a thread message sets off stays in the thread', () => {
   it('chained mentions between agents, and the note that stops them', async () => {
-    const root = put('c1', { kind: 'me' }, 'RAIZ')
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'RAIZ')
     const r = runner({ reply: (t) => (t.system.startsWith('Você é Lia') ? '@theo, sua vez' : '@lia, sua vez') })
     await r.send('c1', '@lia começa', [], root.id)
     await r.idle()
@@ -368,19 +425,19 @@ describe('what a thread message sets off stays in the thread', () => {
 
   it('the notes for an empty channel and for paused agents', async () => {
     db.createConversation({ id: 'c2', kind: 'channel', name: 'vazio', members: [] })
-    const empty = put('c2', { kind: 'me' }, 'RAIZ')
+    const empty = put('c2', { kind: 'person', id: db.ownerId() }, 'RAIZ')
     const r = runner()
     await r.send('c2', 'alguém?', [], empty.id)
     expect(db.messages().at(-1)).toMatchObject({ author: { kind: 'system' }, threadId: empty.id, text: expect.stringContaining('Ninguém está neste canal') as string })
 
-    const root = put('d1', { kind: 'me' }, 'RAIZ')
+    const root = put('d1', { kind: 'person', id: db.ownerId() }, 'RAIZ')
     r.setPaused(true)
     await r.send('d1', 'oi', [], root.id)
     expect(db.messages().at(-1)).toMatchObject({ author: { kind: 'system' }, threadId: root.id, text: expect.stringContaining('pausados') as string })
   })
 
   it('trying again, continuing a paused reply and a handed-back browser', async () => {
-    const root = put('d1', { kind: 'me' }, 'RAIZ')
+    const root = put('d1', { kind: 'person', id: db.ownerId() }, 'RAIZ')
     const run = (status: 'failed' | 'paused' | 'waiting_input'): Message['run'] => ({ status, depth: 1, steps: [] })
     const failed = put('d1', { kind: 'agent', id: 'a1' }, '', root.id)
     db.saveMessage({ ...failed, run: run('failed') })
@@ -408,18 +465,17 @@ describe('what a thread message sets off stays in the thread', () => {
 describe('the database', () => {
   it('an existing database gains thread_id, thread_summary and threads, and round-trips them', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'old.db')
-    // A database from before threads: the schema four migrations back (the unread one came after), with a message in it.
-    new Db(file).close()
+    // A database from before threads: the schema six migrations back (unread, people and the indexes came after), with a message in it.
     const raw = new DatabaseSync(file)
-    const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
-    raw.exec(`ALTER TABLE conversations DROP COLUMN threads; ALTER TABLE messages DROP COLUMN thread_summary; DROP INDEX messages_by_thread; ALTER TABLE messages DROP COLUMN thread_id; PRAGMA user_version = ${user_version - 4};`)
+    for (const m of MIGRATIONS.slice(0, MIGRATIONS.length - 6)) raw.exec(m)
+    raw.exec(`PRAGMA user_version = ${MIGRATIONS.length - 6};`)
     raw.exec("INSERT INTO conversations (id, kind, name, created_at) VALUES ('c1', 'channel', 'geral', 1)")
     raw.exec("INSERT INTO messages (id, conversation_id, author_kind, text, at) VALUES ('old', 'c1', 'me', 'antes das threads', 1)")
     raw.close()
 
     const reopened = new Db(file)
     expect(reopened.message('old')).toMatchObject({ text: 'antes das threads', threadId: undefined })
-    reopened.saveMessage({ id: 'r1', conversationId: 'c1', author: { kind: 'me' }, text: 'na thread', at: 2, threadId: 'old' })
+    reopened.saveMessage({ id: 'r1', conversationId: 'c1', author: { kind: 'person', id: reopened.ownerId() }, text: 'na thread', at: 2, threadId: 'old' })
     expect(reopened.message('r1')?.threadId).toBe('old')
     expect(reopened.recentMessages('c1', 10, 'old').map((m) => m.id)).toEqual(['r1'])
     expect(reopened.recentMessages('c1', 10, null).map((m) => m.id)).toEqual(['old'])
@@ -440,9 +496,9 @@ describe('the database', () => {
 
 describe('memory keeps what was said in threads', () => {
   it('consolidation folds thread replies into the summary, marked', async () => {
-    const root = put('c1', { kind: 'me' }, 'RAIZ da thread')
-    put('c1', { kind: 'me' }, 'ZEBRA é o cupom', root.id)
-    for (let i = 1; i < MAX_AFTER + 10; i++) put('c1', i % 2 ? { kind: 'agent', id: 'a1' } : { kind: 'me' }, `mensagem ${i}`)
+    const root = put('c1', { kind: 'person', id: db.ownerId() }, 'RAIZ da thread')
+    put('c1', { kind: 'person', id: db.ownerId() }, 'ZEBRA é o cupom', root.id)
+    for (let i = 1; i < MAX_AFTER + 10; i++) put('c1', i % 2 ? { kind: 'agent', id: 'a1' } : { kind: 'person', id: db.ownerId() }, `mensagem ${i}`)
     runner({ memory: true })
     await memory.consolidate('c1')
     expect(db.conversation('c1')!.summary).toContain('ZEBRA')

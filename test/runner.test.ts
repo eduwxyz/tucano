@@ -8,6 +8,7 @@ import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
+import type { Answer } from '../src/shared/questions'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -29,7 +30,7 @@ let settings: Settings
 
 function runner(engine: Engine = fakeEngine('claude', { delayMs: 1 })): Runner {
   claude = counted(engine)
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')) })
 }
 
@@ -38,7 +39,7 @@ const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind
 beforeEach(() => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   events = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia'))
   db.saveAgent(agent('a2', 'theo', { modelId: 'gpt-5.6-luna' }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -66,7 +67,7 @@ describe('Runner', () => {
   it('keeps the images I attach and shows them to the agent with my message', async () => {
     const data = mkdtempSync(join(tmpdir(), 'ad-data-'))
     claude = counted(fakeEngine('claude', { delayMs: 1 }))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
     const png = Buffer.from('fake-png').toString('base64')
     await r.send('d1', '', [{ name: 'Tela do checkout.png', mime: 'image/png', data: png }, { name: 'virus.exe', mime: 'application/x-msdownload', data: png }])
     await r.idle()
@@ -157,6 +158,43 @@ describe('Runner', () => {
       ['a1', 3]
     ])
     expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
+    expect(db.messages().at(-1)?.text).toContain('foram 3 respostas seguidas')
+  })
+
+  it('the chain goes as far as the limit set in Settings', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 5
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5])
+    expect(db.messages().at(-1)?.text).toContain('foram 5 respostas seguidas')
+  })
+
+  it('a limit below 1 is raised to 1', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 0
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1])
+    expect(db.messages().at(-1)?.text).toContain('foi 1 resposta seguida')
+  })
+
+  it('a limit above 10 is brought down to 10', async () => {
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    settings.chainDepth = 50
+    db.saveAgent(agent('a2', 'theo'))
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(db.messages().at(-1)?.text).toContain('foram 10 respostas seguidas')
   })
 
   describe('screening a hand-off', () => {
@@ -372,7 +410,7 @@ describe('ask_user through the gateway', () => {
     claude = counted(fakeEngine('claude', { delayMs: 1 }))
     const r = new Runner({
       db,
-      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') },
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
@@ -381,7 +419,7 @@ describe('ask_user through the gateway', () => {
     await r.send('c1', '@lia me pergunta o que faltar')
     await r.idle()
     const [asked] = agentMessages()
-    expect(asked?.run).toMatchObject({ status: 'waiting_input', question: 'Pra quando você precisa disso?' })
+    expect(asked?.run).toMatchObject({ status: 'waiting_input', questions: [{ question: 'Pra quando você precisa disso?', kind: 'text' }] })
     expect(asked?.run?.steps.map((s) => s.label)).toEqual(['Pensou', 'Perguntou a você', 'Respondeu'])
     expect(claude.turns[0]?.mcpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[a-f0-9]{48}$/)
 
@@ -394,6 +432,140 @@ describe('ask_user through the gateway', () => {
     expect((replies[1]!.author as { id: string }).id).toBe('a1')
     expect(claude.turns[1]?.prompt).toContain('pergunta enviada a Edu pela ferramenta ask_user: Pra quando você precisa disso?')
     expect(db.messages().some((m) => m.text.startsWith('Chamei'))).toBe(false)
+  })
+  const askingRunner = (): Runner =>
+    new Runner({
+      db,
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
+      settings: async () => settings,
+      emit: (e) => events.push(e),
+      workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
+      gateway
+    })
+
+  it('asks a list of decisions', async () => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia me ajuda a decidir')
+    await r.idle()
+    const [asked] = agentMessages()
+    expect(asked?.run).toMatchObject({
+      status: 'waiting_input',
+      questions: [
+        { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota' }, { label: 'Scroll infinito' }] },
+        { question: 'Pra quando?', kind: 'text' }
+      ]
+    })
+    // The same decisions as text, for what reads text only (a team's inbox, the phone, a notification).
+    expect(asked?.run?.question).toBe('1. Paginação no menu? (Busca remota | Scroll infinito)\n2. Pra quando?')
+    expect(asked?.run?.steps.find((s) => s.label === 'Perguntou a você')?.detail).toBe('Paginação no menu? (+1)')
+  })
+
+  it('gives the agent the error when the decisions are invalid', async () => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia decisões demais')
+    await r.idle()
+    const [asked] = agentMessages()
+    expect(asked?.run?.status).not.toBe('waiting_input')
+    expect(asked?.run?.questions).toBeUndefined()
+  })
+
+  const askDecisions = async (): Promise<{ r: Runner; asked: Message }> => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = askingRunner()
+    await r.send('c1', '@lia me ajuda a decidir')
+    await r.idle()
+    return { r, asked: agentMessages()[0]! }
+  }
+  const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'person')
+
+  it('sends the answers of a question older than the last 50 messages', async () => {
+    const { r, asked } = await askDecisions()
+    for (let i = 0; i < 60; i++) db.saveMessage({ id: `routine-${i}`, conversationId: asked.conversationId, author: { kind: 'system' }, text: `Rotina ${i}`, at: asked.at + 1000 + i, ...(asked.threadId ? { threadId: asked.threadId } : {}) })
+    r.answerDecision(asked.id, 0, { chosen: [1] }, db.owner())
+    r.answerDecision(asked.id, 1, { text: 'até sexta' }, db.owner())
+    await r.submitDecisions(asked.id, db.owner())
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(mine().at(-1)?.text).toContain('Scroll infinito')
+  })
+
+  it('answers the question on the card, not a newer one waiting in the same place', async () => {
+    const { r, asked } = await askDecisions()
+    const newer: Message = { ...asked, id: 'newer', author: { kind: 'agent', id: 'a2' }, at: asked.at + 1000, run: { status: 'waiting_input', steps: [], questions: [{ question: 'Outra?', kind: 'text' }] } }
+    db.saveMessage(newer)
+    r.answerDecision(asked.id, 0, { skipped: true }, db.owner())
+    r.answerDecision(asked.id, 1, { text: 'até sexta' }, db.owner())
+    await r.submitDecisions(asked.id, db.owner())
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(db.message('newer')?.run?.status).toBe('waiting_input')
+  })
+
+  it('keeps partial answers on the question and sends them as my message', async () => {
+    const { r, asked } = await askDecisions()
+    r.answerDecision(asked.id, 0, { chosen: [1] }, db.owner())
+    expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [1] }, null])
+    r.answerDecision(asked.id, 1, { text: 'sexta' }, db.owner())
+    await r.submitDecisions(asked.id, db.owner())
+    await r.idle()
+    expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(db.message(asked.id)?.run?.answeredInText).toBeUndefined()
+    // The card knows which message carried its answers: the conversation shows them once, on the card.
+    expect(db.message(asked.id)?.run).toMatchObject({ answerMessage: mine().at(-1)?.id })
+    expect(db.message(asked.id)?.run?.answerTyped).toBeUndefined()
+    expect(claude.turns[1]?.prompt).toContain('- Paginação no menu? → Scroll infinito\n- Pra quando? → sexta')
+  })
+
+  it('sends the partial answers along with a free reply', async () => {
+    const { r, asked } = await askDecisions()
+    r.answerDecision(asked.id, 0, { chosen: [0] }, db.owner())
+    await r.send('c1', 'o resto eu explico: depois do deploy', [], asked.threadId)
+    await r.idle()
+    expect(mine().at(-1)?.text).toBe('- Paginação no menu? → Busca remota\n\no resto eu explico: depois do deploy')
+    expect(db.message(asked.id)?.run).toMatchObject({ status: 'done', answeredInText: true, answerMessage: mine().at(-1)?.id, answerTyped: 'o resto eu explico: depois do deploy' })
+  })
+
+  it('an answer typed with nothing picked on the card is not linked to it: it shows as the message it is', async () => {
+    const { r, asked } = await askDecisions()
+    await r.send('c1', 'busca remota, até sexta', [], asked.threadId)
+    await r.idle()
+    expect(db.message(asked.id)?.run?.status).toBe('done')
+    expect(db.message(asked.id)?.run?.answerMessage).toBeUndefined()
+  })
+
+  it('ignores answers to a question already sent, out of range, or to an unknown option', async () => {
+    const { r, asked } = await askDecisions()
+    r.answerDecision(asked.id, 9, { text: 'x' }, db.owner())
+    r.answerDecision(asked.id, 0, { chosen: [7] }, db.owner())
+    r.answerDecision(asked.id, 0, { chosen: [0, 1] }, db.owner()) // a single choice takes one
+    r.answerDecision(asked.id, 1, { chosen: [0] }, db.owner()) // a text decision takes text
+    r.answerDecision(asked.id, -1, { text: 'x' }, db.owner())
+    expect(() => r.answerDecision('nope', 0, { chosen: [0] }, db.owner())).toThrow()
+    expect(db.message(asked.id)?.run?.answers).toBeUndefined()
+    r.answerDecision(asked.id, 0, { chosen: [0], text: 'ignored', extra: 1 } as Answer, db.owner())
+    expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [0] }, null])
+    await r.submitDecisions(asked.id, db.owner())
+    await r.idle()
+    expect(() => r.answerDecision(asked.id, 0, { chosen: [1] }, db.owner())).toThrow()
+    expect(db.message(asked.id)?.run?.answers).toEqual([{ chosen: [0] }, null])
+  })
+
+  it('sends only once', async () => {
+    const { r, asked } = await askDecisions()
+    r.answerDecision(asked.id, 0, { skipped: true }, db.owner())
+    const sent = await Promise.allSettled([r.submitDecisions(asked.id, db.owner()), r.submitDecisions(asked.id, db.owner())])
+    expect(sent.map((x) => x.status)).toEqual(['fulfilled', 'rejected'])
+    await r.idle()
+    expect(mine()).toHaveLength(2)
+  })
+
+  it('clears an answer with null', async () => {
+    const { r, asked } = await askDecisions()
+    r.answerDecision(asked.id, 0, { chosen: [0] }, db.owner())
+    r.answerDecision(asked.id, 1, { text: 'sexta' }, db.owner())
+    r.answerDecision(asked.id, 0, null, db.owner())
+    expect(db.message(asked.id)?.run?.answers).toEqual([null, { text: 'sexta' }])
   })
 })
 
@@ -410,7 +582,7 @@ describe('browser handback', () => {
     claude = counted(fakeEngine('claude', { delayMs: 1 }))
     return new Runner({
       db,
-      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') },
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
@@ -460,15 +632,15 @@ describe('browser handback', () => {
   })
 })
 
-describe('an agent on Gemini', () => {
-  it('runs on Gemini, not on Claude', async () => {
-    db.saveAgent(agent('a9', 'gi', { modelId: customModel('gemini', 'gemini/gemini-2.5-flash') }))
+describe('an agent on Antigravity', () => {
+  it('runs on Antigravity, not on Claude', async () => {
+    db.saveAgent(agent('a9', 'gi', { modelId: customModel('antigravity', 'antigravity/gemini-2.5-flash') }))
     db.createConversation({ id: 'd9', kind: 'dm', name: 'a9', members: ['a9'] })
-    const gemini = counted(fakeEngine('gemini'))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini, cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-gemini-')) })
+    const antigravity = counted(fakeEngine('antigravity'))
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity, cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-gemini-')) })
     await r.send('d9', 'oi')
     await r.idle()
-    expect(gemini.turns.map((t) => t.model)).toEqual(['gemini/gemini-2.5-flash'])
+    expect(antigravity.turns.map((t) => t.model)).toEqual(['antigravity/gemini-2.5-flash'])
     expect(claude.turns).toHaveLength(0)
   })
 })
@@ -478,7 +650,7 @@ describe('an agent on Cursor', () => {
     db.saveAgent(agent('a10', 'cu', { modelId: customModel('cursor', 'auto') }))
     db.createConversation({ id: 'd10', kind: 'dm', name: 'a10', members: ['a10'] })
     const cursor = counted(fakeEngine('cursor'))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor, grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-cursor-')) })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor, grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-cursor-')) })
     await r.send('d10', 'oi')
     await r.idle()
     expect(cursor.turns.map((t) => t.model)).toEqual(['auto'])
@@ -491,10 +663,23 @@ describe('an agent on Grok', () => {
     db.saveAgent(agent('a11', 'gk', { modelId: customModel('grok', 'grok-4.7') }))
     db.createConversation({ id: 'd11', kind: 'dm', name: 'a11', members: ['a11'] })
     const grok = counted(fakeEngine('grok'))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok, hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-grok-')) })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok, cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-grok-')) })
     await r.send('d11', 'oi')
     await r.idle()
     expect(grok.turns.map((t) => t.model)).toEqual(['grok-4.7'])
+    expect(claude.turns).toHaveLength(0)
+  })
+})
+
+describe('an agent on Cline', () => {
+  it('runs on Cline with the provider and model it was given, not on Claude', async () => {
+    db.saveAgent(agent('a12', 'cl', { modelId: customModel('cline', 'cline/anthropic/claude-sonnet-4.5') }))
+    db.createConversation({ id: 'd12', kind: 'dm', name: 'a12', members: ['a12'] })
+    const cline = counted(fakeEngine('cline'))
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline, hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-cline-')) })
+    await r.send('d12', 'oi')
+    await r.idle()
+    expect(cline.turns.map((t) => t.model)).toEqual(['cline/anthropic/claude-sonnet-4.5'])
     expect(claude.turns).toHaveLength(0)
   })
 })

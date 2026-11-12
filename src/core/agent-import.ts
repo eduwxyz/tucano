@@ -13,10 +13,11 @@
 // format "tucano-agent-import", version 1), read by `readTucanoImport`.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { channelName, codexValue, customModel, MAX_AGENT_ROUTINES, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
+import { channelName, codexValue, customModel, dateAt, MAX_AGENT_ROUTINES, validDate, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
 import { frontmatter } from './local-skills'
+import { overlongSkillNote } from '../shared/skills'
 import { skillName } from './skills'
 import type { Zip } from './zip'
 
@@ -55,7 +56,6 @@ const MAX_TEXT = 1_000_000
 const MAX_INSTRUCTIONS = 32_000
 const MAX_PICTURE_BYTES = 145_000 // as a data URL it stays under cleanLook's cap
 const MAX_MEMORY = 300
-const MAX_SKILL_BODY = 20_000
 // What one file brings at most; the rest is counted in the summary.
 export const IMPORT_CAPS = { agents: 40, channels: 30, skills: 20, routines: 20, memories: 40 }
 const SUMMARY_LINES = 40
@@ -119,10 +119,6 @@ function readSkills(zip: Zip, paths: unknown, prefix: string, notes: string[]): 
     const nm = skillName(fm.name || folder.split('/').pop()!)
     const body = fm.body.trim()
     if (!nm || !body) return []
-    if (body.length > MAX_SKILL_BODY) {
-      notes.push(L(`a skill ${nm} (receita longa demais)`, `the ${nm} skill (recipe too long)`))
-      return []
-    }
     const extraFiles = [...zip.entries.keys()].filter((f) => f.startsWith(`${folder}/`) && f !== `${folder}/SKILL.md`).length
     return [{ name: nm, description: str(fm.description, 1_000) || nm, body, extraFiles }]
   })
@@ -234,7 +230,7 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
 
 // The same CLI keeps the model; a provider Tucano doesn't run leaves the agent on the default.
 function openBotModel(provider: string, model: string): { modelId?: string; note?: string } {
-  const engines: Record<string, EngineId> = { claude: 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', gemini: 'gemini', cursor: 'cursor' }
+  const engines: Record<string, EngineId> = { claude: 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', antigravity: 'antigravity', cursor: 'cursor' }
   const engine = engines[provider]
   if (engine === 'claude') return { modelId: /opus/i.test(model) ? 'opus' : /haiku/i.test(model) ? 'haiku' : 'sonnet' }
   if (engine === 'codex') return model ? { modelId: codexValue(model) } : {}
@@ -249,7 +245,7 @@ function openBotEffort(v: unknown): Effort {
   return v === 'none' || v === 'minimal' || v === 'low' ? 'low' : 'medium'
 }
 
-// Tucano runs a routine at a time on some weekdays; the rest (hourly, monthly, intervals, cron) has no match.
+// Tucano runs a routine at a time on some weekdays, on a date or on a day of the month; the rest (hourly, intervals, cron) has no match.
 export function openBotSchedule(s: Record<string, unknown>): Schedule | undefined {
   const t = time(s['time'])
   switch (s['kind']) {
@@ -261,11 +257,14 @@ export function openBotSchedule(s: Record<string, unknown>): Schedule | undefine
       const d = s['weekday']
       return t && typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6 ? { days: [d], time: t } : undefined
     }
+    case 'monthly': {
+      const d = s['day']
+      return t && typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= 31 ? { days: [0, 1, 2, 3, 4, 5, 6], time: t, monthDay: d } : undefined
+    }
     case 'once': {
-      // Tucano's "once" runs at the next matching weekday: right only within the coming week.
-      const date = typeof s['date'] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s['date']) ? new Date(`${s['date']}T${t ?? '00:00'}:00`) : undefined
-      const ahead = date ? date.getTime() - Date.now() : -1
-      return t && date && ahead > 0 && ahead < 7 * 86_400_000 ? { days: [date.getDay()], time: t, once: true } : undefined
+      // On that date, once; one already past isn't brought.
+      const date = typeof s['date'] === 'string' && validDate(s['date']) ? s['date'] : undefined
+      return t && date && dateAt(date, t) > Date.now() ? { days: [new Date(dateAt(date, t)).getDay()], time: t, once: true, date } : undefined
     }
     case 'advanced': {
       const months = arr(s['months'])
@@ -376,9 +375,12 @@ function tucanoAgent(zip: Zip, a: Record<string, unknown>, source: string): Fore
   }
 }
 
-// { days: ["mon", "wed"], time: "08:30", once?: true }: what a routine here already is, with day names.
+// { days: ["mon", "wed"], time: "08:30", once?: true, date?: "2026-11-17", monthDay?: 5 }: what a routine here already is, with day names.
 export function tucanoSchedule(r: Record<string, unknown>): Schedule | undefined {
   const t = time(r['time'])
+  if (t && typeof r['date'] === 'string' && validDate(r['date'])) return { days: [new Date(dateAt(r['date'], t)).getDay()], time: t, once: true, date: r['date'] }
+  const md = r['monthDay']
+  if (t && typeof md === 'number' && Number.isInteger(md) && md >= 1 && md <= 31) return { days: [0, 1, 2, 3, 4, 5, 6], time: t, monthDay: md }
   const days = arr(r['days']).map((d) => (typeof d === 'string' ? DAYS.indexOf(d.toLowerCase().slice(0, 3)) : -1))
   if (!t || !days.length || days.some((d) => d < 0)) return undefined
   return { days: [...new Set(days)].sort(), time: t, ...(r['once'] === true ? { once: true } : {}) }
@@ -467,6 +469,8 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
         left.push(L(`@${handle}: a skill ${k.name} (já existe uma com esse nome)`, `@${handle}: the ${k.name} skill (one with that name already exists)`))
         continue
       }
+      const note = overlongSkillNote(k.name, k.body.length)
+      if (note) left.push(`@${handle}: ${note}`)
       const at = Date.now()
       const id = randomUUID()
       db.saveSkill({ id, name: nm, description: k.description, body: k.body, agents: [agent.id], state: 'active', createdAt: at, updatedAt: at })

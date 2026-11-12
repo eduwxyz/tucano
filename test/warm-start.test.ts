@@ -26,7 +26,7 @@ describe('while the person types', () => {
   function runner(): Runner {
     const fake = fakeEngine('claude', { delayMs: 1, sessions: true, warmed })
     const claude: Engine = { ...fake, run: (t) => (turns.push(t), fake.run(t)) }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ws-work-')) })
   }
 
@@ -34,7 +34,7 @@ describe('while the person types', () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ws-db-')), 'test.db'))
     warmed = []
     turns = []
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(agent('a1', 'lia'))
     db.saveAgent(agent('a2', 'theo'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -56,6 +56,26 @@ describe('while the person types', () => {
     const r = runner()
     await r.typing('c1')
     expect(warmed).toEqual(['warm haiku'])
+  })
+
+  it('in a channel, also starts the session of whoever answered last there', async () => {
+    const r = runner()
+    await r.send('c1', '@theo oi')
+    await r.idle()
+    warmed.length = 0
+    await r.typing('c1')
+    expect(warmed).toEqual([`rewarm ${turns[0]!.session!.id}`, 'warm haiku'])
+  })
+
+  it('opened without typing, starts the kept sessions but not the router', async () => {
+    const r = runner()
+    await r.typing('c1', undefined, true)
+    expect(warmed).toEqual([])
+    await r.send('c1', '@theo oi')
+    await r.idle()
+    warmed.length = 0
+    await r.typing('c1', undefined, true)
+    expect(warmed).toEqual([`rewarm ${turns[0]!.session!.id}`])
   })
 
   it('starts nothing for a new thread, when paused, or with the router’s harness signed out', async () => {
@@ -102,7 +122,7 @@ describe('a Claude Code process started ahead', () => {
     const engine = claudeEngine(() => bin, async () => ({ env: {} }))
     const turn = (): Turn => ({ ...routerTurn('haiku', dir), prompt: 'quem responde?', signal: new AbortController().signal })
     engine.warm!(routerTurn('haiku', dir))
-    await wait(1500)
+    await wait(2500) // a busy machine (the whole suite at once) takes over a second to boot node
     const warm = await reply(engine.run(turn()))
     expect(upOf(warm)).toBeGreaterThanOrEqual(1000)
     const cold = await reply(engine.run(turn())) // the spare is used up: a new process, as before
@@ -117,7 +137,7 @@ describe('a Claude Code process started ahead', () => {
     await reply(engine.run(turn(false)))
     engine.dispose!() // as if it had closed after its five minutes
     engine.rewarm!('s1')
-    await wait(1500)
+    await wait(2500) // a busy machine (the whole suite at once) takes over a second to boot node
     const next = await reply(engine.run(turn(true)))
     expect(next).toMatch(/turn=1 resume=true/)
     expect(upOf(next)).toBeGreaterThanOrEqual(1000)

@@ -10,14 +10,25 @@ import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
+import { serverNote } from '../shared/servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
+import { homePhone } from './home-phone'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
-import { autostartEntry, autostartFile, onPath } from '../core/platform'
+import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
+import { proxyFromPac } from '../core/network'
 
 const NAME = 'Tucano'
 app.setName(NAME)
+// Set here and not in the menu entry, so it holds when an update restarts the app. Someone who
+// chose a store with --password-store keeps it.
+const passwordStore = electronPasswordStore()
+if (passwordStore && !app.commandLine.hasSwitch('password-store')) app.commandLine.appendSwitch('password-store', passwordStore)
+// The AppImage's runtime sets ARGV0 for the app alone, but everything the app starts would inherit
+// it. In a login shell with mise, that made `mise activate zsh` open the AppImage again, and the
+// shell never came back.
+delete process.env['ARGV0']
 // Windows shows notifications only for an app with an id, the same as the installer's.
 if (process.platform === 'win32') app.setAppUserModelId('dev.tucano.app')
 
@@ -56,6 +67,8 @@ const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
 const localKey = randomBytes(32).toString('hex')
+// The iPhone on the home Wi-Fi (Settings › Celular › Seu iPhone), once the app is ready.
+let phone: ReturnType<typeof homePhone> | undefined
 
 function startCore(workspace: Workspace): Runtime {
   const existing = cores.get(workspace.id)
@@ -67,7 +80,7 @@ function startCore(workspace: Workspace): Runtime {
   }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: `tucano-core-${workspace.id}`,
-    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '' }
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
   })
   let resolve!: () => void
   let reject!: (e: Error) => void
@@ -82,7 +95,9 @@ function startCore(workspace: Workspace): Runtime {
     publishWorkspaces()
     child.kill()
   }, 90_000)
+  phone?.coreStarted(workspace.id, child)
   child.on('message', (msg: CoreRequest) => {
+    if (phone?.fromCore(msg as { type?: string; id?: string })) return
     if (msg.type === 'ready') {
       clearTimeout(timer)
       const theme = registry.theme()
@@ -110,6 +125,34 @@ function startCore(workspace: Workspace): Runtime {
     if (!quitting && registry.selected().id === workspace.id && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('core:down')
   })
   return runtime
+}
+
+// The proxy in the system's network settings (or its PAC), which Node in the core never asks about:
+// Chromium resolves it here, once, and each core gets it (src/core/network.ts). A slow PAC doesn't
+// hold the launch up for more than a moment.
+let systemProxy = ''
+let systemProxyRead: Promise<void> = Promise.resolve()
+async function readSystemProxy(): Promise<void> {
+  try {
+    const answer = await Promise.race([session.defaultSession.resolveProxy('https://api.github.com/'), new Promise<string>((r) => setTimeout(() => r('DIRECT'), 1500))])
+    systemProxy = proxyFromPac(answer) ?? ''
+  } catch (e) {
+    console.error('[main] system proxy', e)
+  }
+}
+
+// The workspace on screen starts first; the others follow it one at a time, a few seconds
+// apart, so they don't all run their login shell and check every harness at once.
+function startWorkspaces(): void {
+  const first = registry.selected()
+  const rest = registry.list().filter((w) => w.id !== first.id)
+  void startCore(first).ready.catch(() => {}).then(async () => {
+    for (const w of rest) {
+      await new Promise((r) => setTimeout(r, 5_000))
+      if (quitting) return
+      if (registry.list().some((x) => x.id === w.id)) startCore(w) // not deleted meanwhile
+    }
+  })
 }
 
 type CoreRequest =
@@ -277,7 +320,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
         } catch (e) {
           // Saved under another key (the system's changed, or the data came from another computer).
           console.error('[main] decrypt', e)
-          throw new Error(L('Não consegui abrir as credenciais salvas (a chave do sistema mudou). Conecte de novo.', "I couldn't open the saved credentials (the system's key changed). Connect again."))
+          throw new Error(L('Não consegui abrir as credenciais salvas: a chave do sistema mudou ou não foi liberada. Elas continuam guardadas.', "I couldn't open the saved credentials: the system's key changed or wasn't released. They're still saved."))
         }
       }
       child.postMessage({ type: 'secret-result', id: msg.id, data })
@@ -298,6 +341,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     const wikiFolder = runtime.wikiFolder
     if (path.startsWith(join(workspace.dataDir, 'computers') + sep) || path === join(workspace.dataDir, 'backups') || (!!wikiFolder && (path === wikiFolder || path.startsWith(join(wikiFolder, 'fontes', 'arquivos') + sep)))) void shell.openPath(path)
   } else if (msg.type === 'notify') {
+    phone?.notify(workspace.id, msg)
     // Already looking at that conversation: nothing to tell.
     if (registry.selected().id === workspace.id && msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
     const sound = chirpOf(msg.kind, msg.sound)
@@ -393,6 +437,7 @@ function serveArtifact(req: Request): Promise<Response> | Response {
 // Each page load asks for a port; one end goes to the core, the other to the page.
 ipcMain.on('core:connect', async (event) => {
   if (!fromApp(event)) return
+  await systemProxyRead
   const workspace = registry.selected()
   const runtime = startCore(workspace)
   try { await runtime.ready } catch { return }
@@ -436,6 +481,10 @@ function requestWorkspace(runtime: Runtime, request: object, response: 'workspac
     runtime.child.postMessage(request)
   })
 }
+// Seu iPhone (home-phone.ts): on or off, and a one-time code for the QR.
+ipcMain.handle('home-phone:state', (event) => (fromApp(event) ? phone?.state() : undefined))
+ipcMain.handle('home-phone:set', (event, on: unknown) => (fromApp(event) && typeof on === 'boolean' ? phone?.set(on) : undefined))
+ipcMain.handle('home-phone:code', (event) => (fromApp(event) ? phone?.code() : undefined))
 ipcMain.handle('workspaces:list', (event) => { trustedWorkspaceRequest(event); return workspaceList() })
 ipcMain.handle('workspaces:pause', async (event, paused: unknown, id?: unknown) => {
   trustedWorkspaceRequest(event)
@@ -702,6 +751,32 @@ ipcMain.handle('servers:pair', (e, link: unknown) => (fromApp(e) && typeof link 
 ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.show(id))
 ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
 ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
+// A server's page in this window hands its notifications here (src/preload/server.ts): the app
+// shows them as its own, and a click puts that server, and what it's about, on screen. The page
+// already left out the conversation being read there; a server can't send more than a few a minute.
+const serverNotes = new Map<string, number[]>()
+ipcMain.on('server:notify', (e, raw: unknown) => {
+  const frame = e.senderFrame
+  const id = frame && frame === e.sender.mainFrame ? servers.serverOf(e.sender, frame.url) : undefined
+  const note = id ? serverNote(raw) : null
+  if (!id || !note || !Notification.isSupported()) return
+  const now = Date.now()
+  const recent = (serverNotes.get(id) ?? []).filter((t) => now - t < 60_000)
+  if (recent.length >= 20) return
+  serverNotes.set(id, [...recent, now])
+  const sound = chirpOf(note.kind, note.sound)
+  if (sound) chirp(sound)
+  const n = new Notification({ title: note.title, body: note.body, silent: true, ...noteIcon() })
+  n.on('click', () => void servers.openNote(id, note).catch(console.error))
+  n.show()
+})
+// Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
+// under Notifications only after its first one), and the person sees whether they come.
+ipcMain.handle('notify:test', (e) => {
+  if (!fromApp(e) || !Notification.isSupported()) return 'unsupported'
+  new Notification({ title: NAME, body: L('As notificações estão chegando.', 'Notifications are coming through.'), silent: true, ...noteIcon() }).show()
+  return 'shown'
+})
 // A tucano://connect link: on a Mac the system hands it over by open-url; on Windows and Linux it
 // comes as an argument, to this instance or (the app already open) to second-instance.
 const linkIn = (argv: string[]): string | undefined => argv.find((a) => a.startsWith('tucano://'))
@@ -776,7 +851,23 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   protocol.handle('tucano', serveArtifact)
   registry = new Workspaces(dataDir())
   nativeTheme.themeSource = registry.theme() ?? 'system'
-  for (const workspace of registry.list()) startCore(workspace)
+  systemProxyRead = readSystemProxy()
+  void systemProxyRead.then(startWorkspaces)
+  phone = homePhone({
+    dir: dataDir(),
+    selected: () => registry.selected(),
+    workspace: (id) => registry.list().find((w) => w.id === id),
+    child: async (id) => {
+      const w = registry.list().find((x) => x.id === id)
+      if (!w) return undefined
+      await systemProxyRead
+      const r = startCore(w)
+      await r.ready
+      return r.child
+    },
+    publish: (state) => mainWindow?.webContents.send('home-phone', state)
+  })
+  void phone.restore()
   // The Mac wakes for a few seconds at a time while asleep (maintenance, "DarkWake"):
   // routines wait for a real wake, so a run doesn't start and freeze mid-way.
   powerMonitor.on('suspend', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: false }) })
@@ -801,6 +892,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true
+  void phone?.quit()
   servers.quit()
   for (const r of cores.values()) r.browsers.quit()
 })

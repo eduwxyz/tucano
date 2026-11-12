@@ -43,7 +43,7 @@ describe('memories past the prompt budget', () => {
 
 describe('buscar_memorias', () => {
   const ready = { installed: true, loggedIn: true }
-  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
   let db: Db
   let gateway: Gateway
@@ -67,7 +67,7 @@ describe('buscar_memorias', () => {
         yield { type: 'done', text: 'ok', usage: { inputTokens: 10, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
     const memory = new Memories({ db, engines, settings: async () => settings, emit: () => {}, workDir })
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir, gateway, memory })
@@ -81,8 +81,8 @@ describe('buscar_memorias', () => {
     db.saveMemory(mem('z', 'O cupom da campanha é ZEBRA', 5))
     await runner.send('d1', 'qual o cupom?')
     await runner.idle()
-    expect(turns[0]!.system).toContain('ZEBRA')
-    expect(turns[0]!.system).not.toContain('buscar_memorias')
+    expect(turns[0]!.prompt).toContain('ZEBRA')
+    expect(turns[0]!.prompt).not.toContain('buscar_memorias')
     expect(JSON.stringify(results[0])).not.toContain('ZEBRA') // no such tool
   })
 
@@ -91,7 +91,7 @@ describe('buscar_memorias', () => {
     for (let i = 0; i < 60; i++) db.saveMemory(filler(i))
     await runner.send('d1', 'qual o cupom?')
     await runner.idle()
-    const system = turns[0]!.system
+    const system = turns[0]!.prompt
     expect(system).not.toContain('ZEBRA')
     expect(system).toContain('procure com buscar_memorias')
     expect(JSON.stringify(results[0])).toContain('ZEBRA')

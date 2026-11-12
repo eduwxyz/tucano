@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { closeSync, openSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { isWin, killTree, spawnable } from '../platform'
 import type { EngineEvent } from './types'
@@ -9,19 +10,32 @@ import { OUT_OF_QUOTA } from '../../shared/errors'
 export interface Parser {
   line(line: string): EngineEvent[]
   end(exitCode: number | null, stderr: string): EngineEvent[]
+  // A line of stderr that ends the turn, for a CLI that logs an error and then hangs without
+  // exiting (OpenCode): the error, and how long to wait for output anyway (a retry that works)
+  // before stopping it.
+  stderr?(line: string): { message: string; waitMs: number } | undefined
 }
 
+// `stdinFile`: stdin is that file instead of `stdin`, for a CLI that reads stdin only when it's a
+// file or a FIFO (Cline): a pipe from here is a socket on macOS and Linux.
 export async function* runCli(opts: {
   bin: string
   args: string[]
   stdin: string
+  stdinFile?: string
   cwd: string
   signal: AbortSignal
   parser: Parser
   env?: NodeJS.ProcessEnv
 }): AsyncIterable<EngineEvent> {
   const s = spawnable(opts.bin, opts.args)
-  const child = spawn(s.file, s.args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+  const input = opts.stdinFile ? openSync(opts.stdinFile, 'r') : undefined
+  let child: ChildProcess
+  try {
+    child = spawn(s.file, s.args, { cwd: opts.cwd, stdio: [input ?? 'pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+  } finally {
+    if (input !== undefined) closeSync(input) // the child has its own copy
+  }
   // A CLI that ignores SIGTERM (stuck on the network, say) gets SIGKILL, so a stop always ends the turn.
   // On Windows the CLI may sit behind cmd.exe (an npm shim): only killing the tree reaches it.
   const kill = (): void => {
@@ -31,10 +45,30 @@ export async function* runCli(opts: {
   }
   opts.signal.addEventListener('abort', kill, { once: true })
 
+  const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity })
   let stderr = ''
-  child.stderr.setEncoding('utf8')
-  child.stderr.on('data', (chunk: string) => {
+  let partial = ''
+  let fatal: string | undefined // the error that stopped it
+  let failing: NodeJS.Timeout | undefined // an error logged: it stops unless output goes on
+  child.stderr!.setEncoding('utf8')
+  child.stderr!.on('data', (chunk: string) => {
     stderr = (stderr + chunk).slice(-8000)
+    if (!opts.parser.stderr || fatal !== undefined || failing) return
+    const lines = (partial + chunk).split('\n')
+    partial = lines.pop()!.slice(-8000)
+    for (const line of lines) {
+      const f = opts.parser.stderr(line)
+      if (!f) continue
+      failing = setTimeout(() => {
+        fatal = f.message
+        kill()
+        // What it started may still hold its output open: the turn ends now.
+        rl.close()
+        child.stdout!.destroy()
+        child.stderr!.destroy()
+      }, f.waitMs)
+      return
+    }
   })
   const exited = new Promise<number | null>((resolve) => {
     child.on('close', (code) => resolve(code))
@@ -44,18 +78,23 @@ export async function* runCli(opts: {
     })
   })
 
-  child.stdin.on('error', () => {}) // the CLI may exit before reading stdin
-  child.stdin.end(opts.stdin)
+  child.stdin?.on('error', () => {}) // the CLI may exit before reading stdin
+  child.stdin?.end(opts.stdin)
 
   try {
-    const rl = createInterface({ input: child.stdout, crlfDelay: Infinity })
     for await (const line of rl) {
       if (!line.trim()) continue
+      if (failing && fatal === undefined) {
+        clearTimeout(failing) // it went on: the error wasn't the end
+        failing = undefined
+      }
       yield* opts.parser.line(line)
     }
     const code = await exited
-    if (!opts.signal.aborted) yield* opts.parser.end(code, stderr)
+    if (fatal !== undefined && !opts.signal.aborted) yield { type: 'error', message: fatal }
+    else if (!opts.signal.aborted) yield* opts.parser.end(code, stderr)
   } finally {
+    clearTimeout(failing)
     opts.signal.removeEventListener('abort', kill)
     if (child.exitCode === null) {
       if (isWin && child.pid) killTree(child.pid)

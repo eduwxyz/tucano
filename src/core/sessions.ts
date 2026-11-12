@@ -5,7 +5,8 @@
 // What the session saw is what decides whether it can go on. It starts over when anything it saw
 // changed: the system prompt or the tools (Claude Code keeps the first system prompt on resume, so a
 // new one needs a new session), a message it saw was edited or deleted, a message turns up in
-// between, its last reply didn't end well, or it grew past what a fresh start would cost.
+// between, its last reply didn't end well, or it grew past what a fresh start would cost. The live
+// context (memories, the wiki, routines…) is the exception: changed, it goes again with what's new.
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 export const SESSION_TTL_MS = 55 * 60_000 // the prompt cache lasts an hour: past it, resuming costs what starting over does
@@ -23,6 +24,7 @@ export interface SessionPlan {
   token: string // the gateway's, for as long as the session lives: a process kept open keeps its URL
   resume: boolean
   send: string[] // the messages to send, of those shown: all of them when it starts, the new ones when it resumes
+  live: boolean // resuming: the live context changed since, so it goes again before the new messages
 }
 
 interface Entry {
@@ -32,6 +34,7 @@ interface Entry {
   seen: Map<string, string> // message id → its block's hash; '*' for its own replies, whose text it wrote
   usedAt: number
   context: number
+  live: string // the hash of the live context it last got
 }
 
 const OWN = '*'
@@ -61,21 +64,22 @@ export class Sessions {
   // Undefined when a reply for the same key is already running: that one goes without a session.
   // `restart`: start over regardless ("try again" redoes a reply the session already holds).
   // `task`: the turn ends with a task block, so it has something to send even with no new message.
-  begin(key: string, input: { config: string; shown: Shown[]; restart?: boolean; task?: boolean }): SessionPlan | undefined {
+  // `live`: the live context this reply would show.
+  begin(key: string, input: { config: string; shown: Shown[]; live?: string; restart?: boolean; task?: boolean }): SessionPlan | undefined {
     if (this.busy.has(key)) return undefined
     this.busy.add(key)
     const e = this.entries.get(key)
     if (e && !input.restart) {
       const send = this.since(e, input)
-      if (send && (send.length || input.task)) return { id: e.id, token: e.token, resume: true, send }
+      if (send && (send.length || input.task)) return { id: e.id, token: e.token, resume: true, send, live: e.live !== hash(input.live ?? '') }
     }
     if (e) this.drop(key)
-    return { id: randomUUID(), token: randomBytes(24).toString('hex'), resume: false, send: input.shown.map((s) => s.id) }
+    return { id: randomUUID(), token: randomBytes(24).toString('hex'), resume: false, send: input.shown.map((s) => s.id), live: false }
   }
 
   // The reply ended. `ok`: it finished on its own (not stopped, cut or failed), so the session holds
   // a whole turn and can go on; `reply`: the agent's own message; `context`: its size now, in tokens.
-  end(key: string, plan: SessionPlan, out: { ok: boolean; config: string; shown: Shown[]; reply?: string; context?: number }): void {
+  end(key: string, plan: SessionPlan, out: { ok: boolean; config: string; shown: Shown[]; live?: string; reply?: string; context?: number }): void {
     this.busy.delete(key)
     const e = this.entries.get(key)
     if (!out.ok || this.doomed.delete(key)) {
@@ -83,10 +87,11 @@ export class Sessions {
       else this.opts.forget(plan)
       return
     }
-    const entry: Entry = e?.id === plan.id ? e : { id: plan.id, token: plan.token, config: out.config, seen: new Map(), usedAt: 0, context: 0 }
+    const entry: Entry = e?.id === plan.id ? e : { id: plan.id, token: plan.token, config: out.config, seen: new Map(), usedAt: 0, context: 0, live: '' }
     for (const s of out.shown) entry.seen.set(s.id, hash(s.block))
     if (out.reply) entry.seen.set(out.reply, OWN)
     entry.config = out.config
+    entry.live = hash(out.live ?? '')
     entry.usedAt = this.now()
     entry.context = out.context ?? entry.context
     this.entries.set(key, entry)

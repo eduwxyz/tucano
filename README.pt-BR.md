@@ -7,14 +7,15 @@
 **Seu time de agentes de IA, no seu computador. Suas regras.**
 
 Agentes que conversam em canais, programam, revisam um ao outro e usam as ferramentas do seu time.<br>
-Eles fazem o trabalho. O que mexe no mundo espera o seu sim.
+Eles fazem o trabalho. O que mexe no mundo espera o seu sim.<br>
+Uma alternativa grátis e open source ao Grok Bot: [veja a comparação](https://tucano.sh/alternativa-grok-bot/).
 
 [![Release](https://img.shields.io/github/v/release/eduwxyz/tucano?color=FF8A1F&label=release)](https://github.com/eduwxyz/tucano/releases/latest)
-[![Licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-141210)](LICENSE)
+[![Licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-141210)](LICENSE) [![Discord](https://img.shields.io/badge/Discord-entrar-5865F2?logo=discord&logoColor=white)](https://discord.gg/uQp4x7wUgT)
 [![macOS](https://img.shields.io/badge/macOS-chip%20Apple%20%7C%20Intel-141210?logo=apple)](#instalar) [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64-141210?logo=linux&logoColor=white)](#instalar) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-141210)](#instalar)
-[![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Hermes%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
+[![Roda no](https://img.shields.io/badge/roda%20no-Claude%20Code%20·%20Codex%20·%20Cursor%20·%20Grok%20·%20Cline%20·%20OpenCode%20·%20Pi-E2541B)](#roda-no-que-você-já-tem)
 
-[English](README.md) · **Português** · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Novidades](CHANGELOG.md)
+[English](README.md) · **Português** · [tucano.sh](https://tucano.sh) · [@tucanosh](https://x.com/tucanosh) · [Discord](https://discord.gg/uQp4x7wUgT) · [Novidades](CHANGELOG.md)
 
 https://github.com/user-attachments/assets/0451d858-2f65-4d72-8913-f11a5d88fbad
 
@@ -28,7 +29,7 @@ Os agentes de código ficaram bons. Trabalhar com *vários* deles ainda é uma b
 
 - **Um time, não uma caixa de prompt.** Agentes com nome, papel, ferramentas e memória. Eles conversam em canais, se chamam com `@menção` e passam o trabalho adiante: um acha o erro, outro corrige, um terceiro revisa, e o resultado chega pra você.
 - **Suas regras.** Cada agente só enxerga as ferramentas que você deu, com *sem acesso*, *ler* ou *ler e escrever* em cada uma. Merge, compra, post, e-mail e exclusão viram um pedido de aprovação amarrado à ação exata, no computador ou no celular.
-- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o Grok, o Hermes, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
+- **Roda no que você já tem.** Os agentes pensam com o Claude Code, o Codex, o Cursor CLI, o Grok, o Cline, o OpenCode ou o Pi do seu computador, do jeito que você configurou: na sua assinatura, no gateway de IA da sua empresa ou nos seus provedores. Sem chave de API pra colar, sem cobrança por token da nossa parte, e o Tucano nunca vê a sua senha.
 - **Tudo fica no seu computador.** Conversas, memória, logins, arquivos. Não existe servidor do Tucano.
 
 ## O que ele faz
@@ -89,9 +90,10 @@ Dê a um agente os apps do seu computador, como Notas, Calendário ou Spotify, c
 | [Codex](https://github.com/openai/codex) | ChatGPT Plus, Pro ou Business | Roda com um home próprio, pra não carregar suas skills, `AGENTS.md` e plugins; você entra uma vez dentro do Tucano |
 | [Cursor CLI](https://cursor.com/cli) | Sua conta do Cursor (`cursor-agent login`) | Roda com um home próprio, pra não carregar seus hooks, plugins, skills e os servidores do `~/.cursor/mcp.json`; a leitura, a escrita e o shell do próprio Cursor ficam desligados; cada resposta soma uns 10 mil tokens do prompt do próprio Cursor |
 | [OpenCode](https://opencode.ai) | Os provedores que você configurou | Usa os modelos em que você tem login |
-| [Hermes](https://hermes-agent.nousresearch.com) | Os provedores no seu `~/.hermes/config.yaml` | Roda com um home próprio do Hermes, pra não carregar suas skills, MCP servers e memórias; usa os logins dos seus provedores; precisa da 0.22 ou mais nova |
 | [Pi](https://pi.dev) | Os provedores que você configurou | Usa os modelos em que você tem login |
 | [Grok](https://x.ai/cli) | grok.com (`grok login`) | Roda com uma pasta pessoal própria, pra não carregar os seus servidores MCP, skills, hooks e plugins (do Grok e os instalados pro Claude Code ou Cursor); o shell e os arquivos do próprio Grok ficam desligados; só o gateway do Tucano; uma `XAI_API_KEY` no ambiente é retirada quando o grok.com está logado, pra a assinatura não ser cobrada como API. O instalador oficial é macOS e Linux |
+| [Cline CLI](https://docs.cline.bot/cli/cli-reference) | Sua conta da Cline, ou os provedores que você adicionar com a sua chave (`cline auth`) | Você entra uma vez dentro do Tucano, num login só dele, pra não mexer no seu `~/.cline`; cada resposta roda com uma pasta pessoal própria, pra não carregar suas rules, skills, workflows, hooks, plugins e servidores MCP; as ferramentas de arquivo, shell, editor, subagentes e times do próprio Cline ficam desligadas; só o gateway do Tucano; a telemetria do Cline fica desligada. O modelo vai como `<provedor>/<modelo>` (por exemplo `cline/anthropic/claude-sonnet-4.5`); imagens não vão. Instala com `npm install -g cline` (macOS, Linux e Windows) |
+| [Hermes](https://hermes-agent.nousresearch.com) | Os provedores do seu `~/.hermes/config.yaml` | Roda com uma pasta do Hermes só dela, pra suas skills, servidores MCP e memórias não entrarem; usa os seus logins de provedor; precisa da 0.22 ou mais nova |
 
 Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra corrigir, GPT pra revisar, Haiku pra rotear.
 
@@ -155,7 +157,7 @@ No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o
 - **Conectar uma ferramenta:** **Conectores → Adicionar**, cole o endereço do servidor MCP. Os com OAuth abrem o navegador; os outros pedem um token. Depois, na página de cada agente, escolha o acesso dele a cada conector.
 - **Agentes arquivados** saem da barra lateral e param de responder, mas o histórico e os recibos ficam. Eles aparecem em **Arquivados**, pra reativar.
 - **Aprovar pelo celular:** conecte o bot do Telegram em **Configurações → Celular**; aprovações e perguntas chegam com os botões.
-- **Primeiros passos**, na barra lateral, leva você pelo resto: montar um time, conectar uma ferramenta, ensinar a memória, agendar uma rotina, emprestar um projeto.
+- **Missões**, na barra lateral, levam você pelo resto fazendo: falar com o seu agente, aprovar algo, conectar uma conta, montar um segundo agente, deixar algo no automático, guardar algo que importa.
 
 ## Como funciona
 
@@ -163,7 +165,7 @@ No Linux e no Windows, use **Ctrl** no lugar do **⌘**. Fechar a janela deixa o
 flowchart LR
   subgraph Mac["Seu computador"]
     UI["Janela<br/>(React)"] <-->|MessagePort| Core["Núcleo<br/>SQLite · respostas · memória · rotinas"]
-    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · cursor · grok · hermes · opencode · pi"]
+    Core -->|"um turno, isolado"| CLI["CLI do harness<br/>claude · codex · cursor · grok · cline · opencode · pi"]
     CLI -->|"URL secreta por turno<br/>só as ferramentas do agente"| GW["Gateway MCP do Tucano"]
     GW --> Tools["Conectores (MCP)<br/>computador · navegador · memória"]
     GW -.->|"ação de escrita"| OK{{"Sua aprovação"}}
@@ -217,7 +219,7 @@ Entre no grupo `docker` com `sudo usermod -aG docker $USER`, saia e entre de nov
 Clique em **Autorizar no navegador**, na página do agente ou em Conectores, e entre na ferramenta.
 
 **"Este Linux não tem um chaveiro aberto" ao salvar uma senha.**
-O Tucano guarda senhas só no chaveiro do sistema. Instale o `gnome-keyring` (ou ative o KWallet, no KDE), saia e entre de novo na sessão e tente outra vez.
+O Tucano guarda senhas só no chaveiro do sistema. Instale o `gnome-keyring` ou outro Secret Service (ou ative o KWallet, no KDE), saia e entre de novo na sessão e tente outra vez. Funciona em qualquer desktop ou compositor, desde que o chaveiro esteja destravado.
 
 **O AppImage não abre no Ubuntu 24.04 em diante.**
 O Ubuntu restringe o isolamento que apps Electron usam. Instale o .deb: ele traz o perfil do AppArmor que libera isso.
@@ -254,6 +256,10 @@ Precisa do Node 24+ e de um harness logado. O `npm run dev` guarda os dados em `
 **No Windows?** O desenvolvimento também funciona lá, com o Git for Windows. O [docs/windows.md](docs/windows.md) (em inglês) diz o que precisa, o que muda em relação ao Mac e todas as mudanças feitas pra isso.
 
 Leia o [CONTRIBUTING.md](CONTRIBUTING.md) antes de abrir um pull request (o código, os comentários e os commits são em inglês). O documento de design original está em [docs/spec-mvp.md](docs/spec-mvp.md).
+
+## Comunidade
+
+Dúvidas, ideias e setups: entre no nosso [Discord](https://discord.gg/uQp4x7wUgT). Bugs e pedidos de funcionalidade vão para as [Issues do GitHub](https://github.com/eduwxyz/tucano/issues).
 
 ## Licença
 

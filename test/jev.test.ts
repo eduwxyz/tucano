@@ -15,7 +15,7 @@ const agent = (id: string, handle: string, role: string): Agent => ({
 const lia = agent('a1', 'lia', 'Engenharia')
 const nina = agent('a2', 'nina', 'Conteúdo')
 const theo = agent('a3', 'theo', 'Dados')
-const messages = [{ id: 'm1', conversationId: 'c1', author: { kind: 'me' as const }, text: 'o build quebrou', at: 1 }]
+const messages = [{ id: 'm1', conversationId: 'c1', author: { kind: 'person' as const, id: 'me' }, text: 'o build quebrou', at: 1 }]
 
 // A stand-in for TypeSafe's API: records requests, answers with the given probabilities.
 function typesafe(probabilities: Record<string, number> | number) {
@@ -68,7 +68,7 @@ describe('in a channel', () => {
   let settings: Settings
   const engines = (): Record<EngineId, Engine> => {
     const base = fakeEngine('claude', { delayMs: 1 })
-    return { claude: { id: 'claude', run: (t) => (t.model === 'haiku' && routerTurns++, base.run(t)) }, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), hermes: fakeEngine('hermes') }
+    return { claude: { id: 'claude', run: (t) => (t.model === 'haiku' && routerTurns++, base.run(t)) }, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   }
   const runner = (f: typeof fetch, key: string | undefined): Runner =>
     new Runner({ db, engines: engines(), settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), jev: { key: async () => key, fetch: f } })
@@ -77,7 +77,7 @@ describe('in a channel', () => {
   beforeEach(() => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-jev-')), 'test.db'))
     routerTurns = 0
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready, hermes: ready }, routerModel: 'jev', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'jev', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(lia)
     db.saveAgent(nina)
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })

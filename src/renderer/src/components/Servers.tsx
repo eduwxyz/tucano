@@ -2,6 +2,7 @@
 // window over the app. Desktop only; the pairing link comes from the server (`server.js link`).
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
+import { pairProblem } from '../../../shared/servers'
 import { confirmDialog } from './Dialogs'
 import { Card } from './Pages'
 import { Icon } from './ui'
@@ -20,9 +21,10 @@ export function ServersCard(): ReactNode {
     let alive = true
     const load = (): void => void api.list().then((l) => alive && setList(l))
     load()
-    api.onChanged(load)
+    const off = api.onChanged(load)
     return () => {
       alive = false
+      off()
     }
   }, [api])
 
@@ -31,7 +33,10 @@ export function ServersCard(): ReactNode {
     setBusy(true)
     const r = await api.pair(link).finally(() => setBusy(false))
     if (r === 'paired') return setLink('')
-    if (r === 'invalid') setError(L('Esse não é um link de conexão. Ele começa com tucano://connect e sai do servidor.', "That's not a connection link. It starts with tucano://connect and comes from the server."))
+    if (r === 'invalid' || r === 'used' || r === 'unreachable') {
+      const p = pairProblem(r)
+      setError(`${p.title}. ${p.detail}`)
+    }
   }
   const forget = async (s: Server): Promise<void> => {
     const ok = await confirmDialog({
@@ -80,8 +85,8 @@ export function ServersCard(): ReactNode {
       <Card
         title={L('Conectar a um servidor', 'Connect to a server')}
         lead={L(
-          'Cole o link de conexão que o servidor deu (tucano://connect…). Quem tem o link controla os agentes de lá: cole só links seus ou de quem você confia.',
-          'Paste the connection link the server gave you (tucano://connect…). Whoever has the link controls the agents there: paste only links of your own or from someone you trust.'
+          'Cole o link de conexão que o servidor deu (tucano://connect…, ou o link de entrada do navegador, com ?code=). Quem tem o link controla os agentes de lá: cole só links seus ou de quem você confia.',
+          'Paste the connection link the server gave you (tucano://connect…, or the browser sign-in link, with ?code=). Whoever has the link controls the agents there: paste only links of your own or from someone you trust.'
         )}
       >
         <form
@@ -111,9 +116,10 @@ export function useServers(): Server[] {
     let alive = true
     const load = (): void => void api.list().then((l) => alive && setList(l))
     load()
-    api.onChanged(load)
+    const off = api.onChanged(load)
     return () => {
       alive = false
+      off()
     }
   }, [api])
   return list
