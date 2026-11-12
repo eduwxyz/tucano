@@ -2817,7 +2817,7 @@ export function SettingsPage(): ReactNode {
                   value={settings.sendMode ?? 'parallel'}
                   onChange={(v) => { if (v) updateSettings({ sendMode: v as SendMode }) }}
                   options={[
-                    { value: 'parallel', label: L('O de sempre: uma resposta própria, assim que der', 'The usual: a reply of its own, as soon as it can') },
+                    { value: 'parallel', label: L('Ao lado dela, em paralelo', 'Alongside it, in parallel') },
                     { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queued, after the reply ends') },
                     { value: 'steer', label: L('Entregue à resposta em curso', 'Handed to the running reply') },
                     { value: 'interrupt', label: L('Interrompe e começa com esta', 'Interrupts and starts with this one') }
