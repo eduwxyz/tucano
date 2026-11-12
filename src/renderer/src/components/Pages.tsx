@@ -1,4 +1,6 @@
 import { L, locale, type Lang } from '../../../shared/lang'
+import { hasMonthlyLimit } from '../../../shared/limits'
+import { instructionLengthNote } from '../../../shared/instructions'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
@@ -418,6 +420,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 onChange={(e) => patch({ instructions: e.target.value })}
               />
               <p className="hint">{L('O contexto do workspace já entra em toda conversa. Aqui vai só o que é deste agente.', 'The workspace context already goes into every conversation. Here goes only what’s specific to this agent.')}</p>
+              {instructionLengthNote(draft.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(draft.instructions.length)}</p>}
             </Card>
           )}
 
@@ -800,7 +803,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <div className="profile-card__budget">
                 <span className="muted small">{L('Uso em', 'Usage in')} {new Date().toLocaleDateString(locale(), { month: 'long' })}</span>
                 <span>
-                  <strong>{tokens(draft.used)}</strong> <span className="muted">{L(`de ${tokens(draft.limit)} tokens`, `of ${tokens(draft.limit)} tokens`)}</span>
+                  <strong>{tokens(draft.used)}</strong>{' '}
+                  <span className="muted">
+                    {/* No limit set: "of 0 tokens" would read as a cap spent, so say there isn't one. */}
+                    {hasMonthlyLimit(draft.limit) ? L(`de ${tokens(draft.limit)} tokens`, `of ${tokens(draft.limit)} tokens`) : L('sem limite no mês', 'no monthly limit')}
+                  </span>
                 </span>
                 <UsageBar used={draft.used} limit={draft.limit} />
               </div>

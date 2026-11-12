@@ -134,8 +134,8 @@ describe('E. the router out of quota (e2e5 F: the plan hit its limit mid-run)', 
     const base = fakeEngine('claude', { delayMs: 1 })
     const claude: Engine = { id: 'claude', run: (t) => (t.system === routerSystem() ? (async function* () { yield { type: 'error' as const, message: "You've hit your 5-hour limit · resets 1:20am (America/Bahia)" } })() : base.run(t)) }
     const ready = { installed: true, loggedIn: true }
-    const s = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
-    const r = new Runner({ db, engines: { claude, codex: base, opencode: base, pi: base, antigravity: base, cursor: base, grok: base, cline: base } as Record<EngineId, Engine>, settings: async () => s, emit: () => {}, workDir: tmp() })
+    const s = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
+    const r = new Runner({ db, engines: { claude, codex: base, opencode: base, pi: base, antigravity: base, cursor: base, grok: base, cline: base, hermes: base } as Record<EngineId, Engine>, settings: async () => s, emit: () => {}, workDir: tmp() })
     await r.send('c1', 'bom dia, quem me ajuda com o orçamento?')
     await r.idle()
     const msgs = db.messages()

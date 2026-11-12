@@ -1,4 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
@@ -85,6 +86,7 @@ import { canEditChannel,
   type Person
 } from '../store'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
@@ -244,6 +246,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 }
 
 const NO_REPLIES: Message[] = []
+// A phone or a tablet: focusing the message field there raises the keyboard over the
+// conversation, so it only takes the focus when the person taps it.
+const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
@@ -547,13 +552,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             </button>
           </>
         )}
-        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
+        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
+            With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
+        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             {L('Tentar de novo', 'Try again')}
           </button>
         )}
-        {message.run?.status === 'limit_reached' && agent && agent.used >= agent.limit && (
+        {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
           <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
@@ -765,6 +771,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   )
   return (
     <aside className="side-panel side-panel--thread">
+      <PanelResize />
       <header className="side-panel__head">
         <Icon name="thread" size={14} />
         <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
@@ -1912,7 +1919,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     setText(draft?.text ?? '')
     setImages(draft?.images ?? [])
     setNote('')
-    ref.current?.focus()
+    if (!touchScreen()) ref.current?.focus()
     return () => {
       const { text, images } = live.current
       if (text.trim() || images.length) drafts.set(key, { text, images })
@@ -1934,7 +1941,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       if (paths.length) setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${paths.map((p) => L(`Arquivo enviado: \`${p}\``, `File sent: \`${p}\``)).join('\n')}`)
       const failed = sent.find((r): r is PromiseRejectedResult => r.status === 'rejected')
       setNote(failed ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason) : '')
-      if (!files.length) return void ref.current?.focus()
+      if (!files.length) return void (touchScreen() || ref.current?.focus())
     }
     if (!files.length) return
     // In the app, a file that isn't an image goes with the message, and its text to the agents.
@@ -1950,7 +1957,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       return [...pics.slice(0, MAX_IMAGES_PER_MESSAGE), ...docs.slice(0, MAX_FILES_PER_MESSAGE)]
     })
     setNote([...errors, over].filter(Boolean).join(' '))
-    ref.current?.focus()
+    if (!touchScreen()) ref.current?.focus()
   }
 
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
@@ -2086,7 +2093,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       const glue = before && !/\s$/.test(before) ? ' ' : ''
       return `${before}${glue}${said}${cur.slice(end)}`
     })
-    el?.focus()
+    if (!touchScreen()) el?.focus()
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 

@@ -25,7 +25,7 @@ const work: Account = { id: 'w1', engine: 'claude', name: 'Trabalho', loggedIn: 
 
 function runner(): Runner {
   claude = counted(fakeEngine('claude', { delayMs: 1 }))
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
 }
 const reply = (): Message => db.messages().find((m) => m.author.kind === 'agent')!
@@ -33,7 +33,7 @@ const reply = (): Message => db.messages().find((m) => m.author.kind === 'agent'
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'ad-data-'))
   db = new Db(join(data, 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', accounts: [work] }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', accounts: [work] }
   db.saveAgent(agent({ accountId: 'w1' }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
 })

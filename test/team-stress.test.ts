@@ -26,7 +26,7 @@ import { WikiCurator } from '../src/core/wiki-curator'
 const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-stress-'))
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const ready = { installed: true, loggedIn: true }
-const settings = (name = 'Ana'): Settings => ({ workspaceName: name, context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' })
+const settings = (name = 'Ana'): Settings => ({ workspaceName: name, context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' })
 
 class FakePort implements PortLike {
   got: CoreEvent[] = []
@@ -98,7 +98,7 @@ describe("an agent's thread tools, for the person a reply is for (2)", () => {
         yield* base.run(t)
       }
     }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
     const routines = new Routines({ db, runner: { runRoutine: async () => undefined }, emit: () => {} })
     const runner = new Runner({ db, engines, settings: async () => settings(), emit: () => {}, workDir: dir(), gateway, routines })
     void team1
@@ -605,7 +605,7 @@ describe('a busy channel (20)', () => {
         yield* base.run(t)
       }
     }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
     const runner = new Runner({ db, engines, settings: async () => settings(), emit: () => {}, workDir: dir() })
     const wait = async (ok: () => boolean): Promise<void> => {
       for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 5))
@@ -649,7 +649,7 @@ describe('a busy channel (20)', () => {
         yield* base.run(t)
       }
     }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
     const runner = new Runner({ db, engines, settings: async () => settings(), emit: () => {}, workDir: dir() })
     await runner.send('ch', 'ANTIGA pergunta', [])
     await new Promise((r) => setTimeout(r, 20))
@@ -668,7 +668,7 @@ describe('a question two people answer (21)', () => {
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1'] })
     const asked = say(db, 'ch', { kind: 'agent', id: 'a1' }, 'Qual o prazo?', { run: { status: 'waiting_input', steps: [], question: 'Qual o prazo?', askedTo: bia.id } })
     db.saveQuestion({ id: asked.id, conversationId: 'ch', agentId: 'a1', text: 'Qual o prazo?', askedTo: bia.id, requestedBy: ana.id, state: 'open', deadlineAt: Date.now() + 3_600_000, createdAt: 1 })
-    const runner = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }, settings: async () => settings(), emit: () => {}, workDir: dir() })
+    const runner = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings(), emit: () => {}, workDir: dir() })
     await runner.answer(asked.id, 'sexta', bia)
     await runner.idle()
     const before = db.messages().length

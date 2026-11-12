@@ -1,6 +1,7 @@
 // What an agent's profile card says about it right now, and where the card goes on the
 // screen. Kept apart from React so both can be tested without a browser.
 import type { Agent, Conversation, Message } from '../../shared/types'
+import { overMonthlyLimit } from '../../shared/limits'
 
 export type AgentNow =
   | { kind: 'working'; conversationId: string; doing?: string; since: number }
@@ -25,7 +26,8 @@ export function agentNow(agent: Pick<Agent, 'id' | 'archived' | 'used' | 'limit'
     const on = waiting.run!.status === 'waiting_input' ? 'input' : 'approval'
     return { kind: 'waiting', conversationId: waiting.conversationId, on, ...(on === 'input' && waiting.run!.askedTo ? { askedTo: waiting.run!.askedTo } : {}) }
   }
-  if (agent.limit > 0 && agent.used >= agent.limit) return { kind: 'limit' }
+  // 0 is no limit, so there is nothing to have hit (shared/limits.ts).
+  if (overMonthlyLimit(agent.used, agent.limit)) return { kind: 'limit' }
   return { kind: 'idle', lastAt: own.at(-1)?.at }
 }
 
