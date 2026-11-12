@@ -10,6 +10,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A monthly limit of 0 reads as no limit on every screen.** The runner already treated 0 as no ceiling, but the screens didn't: every agent without a limit had a red *Hit the monthly limit* dot in the sidebar, a reply stopped at the limit offered to raise a limit that doesn't exist instead of *Try again*, the agent page said "of 0 tokens", and the Tuca's change card and workspace summary printed 0 and 0%. They now say there is no monthly limit, and the dots and *Raise the limit* only come for an agent with a real one. Thanks, apoapostolov! (#351)
+
 - **Long agent instructions are kept whole.** An agent's instructions were cut without a word when the Tuca proposed a new agent (at 4,000 characters), proposed a change to one (at 8,000, so proposing any change could shorten a long prompt that was already there), or when a team was imported (at 32,000). They now come through whole, and a prompt over 32,000 characters gets a warning instead. Thanks, GianCdM! (#364)
 
 - **An agent answers one message at a time in a conversation or thread, whatever started it.** Only routed messages and hand-offs waited for the agent's reply in progress in the same place; an @mention, a DM, a routine, a retry or an approval's outcome started a second reply next to it, so the same agent could answer twice at once and the two replies stepped on each other. Every reply now waits its turn in that place. Thanks, eialanjones! (#358)
