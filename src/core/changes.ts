@@ -12,7 +12,7 @@
 // The message keeps only the counts and the first files; a file's diff is asked for when it's opened.
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs'
+import { copyFileSync, existsSync, readdirSync, realpathSync, rmSync, statSync, utimesSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { ChangeSet, FileChange } from '../shared/types'
@@ -197,7 +197,8 @@ function cutPatch(patch: string): string {
 
 interface Watched {
   id: string
-  root: string
+  root: string // its real path, as git names it
+  named: string // the same folder as the agent's folders name it (for what's shown)
   before: string
   branch?: string // where the repository was when the turn started
 }
@@ -207,12 +208,18 @@ export class ChangeTurn {
   private refused = new Set<string>() // folders already looked at that hold no repository to watch
   private looked = false // the person's folders looked at for repositories, once per turn
   private queue: Promise<void> = Promise.resolve()
+  // The agent's folders by their real paths too: git names a repository by its real path, which
+  // isn't how the folder may be named here (/var and /private/var on macOS, a short C:\Users\RUNNER~1
+  // and the long name on Windows, a symlink).
+  private bases: { named: string; real: string }[]
 
   constructor(
     private bin: string,
     private scope: ChangeScope,
     private deps: ChangesDeps
-  ) {}
+  ) {
+    this.bases = scope.bases.map((b) => ({ named: b, real: real(b) }))
+  }
 
   // Before a call that may change files: snapshots of the repositories it may write in, not yet seen this turn.
   prepare(name: string, args: Record<string, unknown>): Promise<void> {
@@ -239,18 +246,19 @@ export class ChangeTurn {
     } catch {
       return
     }
+    dir = real(dir)
     // Already watched (a folder inside a repository seen this turn), or known to hold none.
     if (this.refused.has(dir) || [...this.watched.keys()].some((r) => inside(dir, r))) return
     const top = await git(this.bin, dir, ['rev-parse', '--show-toplevel'])
-    const root = top.code === 0 ? resolve(top.out.trim()) : undefined
+    const root = top.code === 0 ? real(resolve(top.out.trim())) : undefined
     if (!root || this.watched.has(root) || this.refused.has(root)) {
       if (!root) this.refused.add(dir)
       return
     }
     // Only a repository of the person's own work: inside the folder it was found in (not the one a
     // data folder happens to sit in), and never the whole home folder or more.
-    const base = this.scope.bases.find((b) => inside(dir, b))
-    if ((base && !inside(root, base)) || inside(homedir(), root)) {
+    const base = this.bases.find((b) => inside(dir, b.real))
+    if ((base && !inside(root, base.real)) || inside(real(homedir()), root)) {
       this.refused.add(root)
       return
     }
@@ -261,7 +269,8 @@ export class ChangeTurn {
       this.refused.add(root)
       return
     }
-    this.watched.set(root, { id, root, before, branch: await branchOf(this.bin, root) })
+    const named = base ? join(base.named, relative(base.real, root)) : root
+    this.watched.set(root, { id, root, named, before, branch: await branchOf(this.bin, root) })
   }
 
   // When the turn ends: what each repository it wrote in has changed, kept for the message.
@@ -276,7 +285,7 @@ export class ChangeTurn {
         if (after) await git(this.bin, w.root, ['update-ref', '-d', `${REFS}/${w.id}/after`])
         continue
       }
-      const shown = this.scope.shown(w.root)
+      const shown = this.scope.shown(w.named)
       const branch = await branchOf(this.bin, w.root)
       try {
         this.deps.saveChangeSet({ id: w.id, messageId, agentId, root: w.root, shown, before: w.before, after, files, createdAt: Date.now() })
@@ -298,6 +307,15 @@ export class ChangeTurn {
     }
     this.watched.clear()
     return sets
+  }
+}
+
+// A path with its links and short names resolved; as it is when it can't be.
+function real(p: string): string {
+  try {
+    return realpathSync.native(p)
+  } catch {
+    return p
   }
 }
 

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Changes, CHANGE_FILES_SHOWN, homePath, lineChange, parseChanges, touched, type ChangeScope, type ChangeSetRow } from '../src/core/changes'
 
@@ -29,7 +29,7 @@ beforeEach(() => {
   changes = new Changes({ saveChangeSet: (r) => rows.set(r.id, r), changeSet: (id) => rows.get(id) })
 })
 
-afterEach(() => rmSync(base, { recursive: true, force: true }))
+afterEach(() => rmSync(base, { recursive: true, force: true, maxRetries: 5 }))
 
 describe('a reply’s changes', () => {
   it('shows what a turn created, changed, renamed and deleted, whatever did it', async () => {
@@ -71,6 +71,18 @@ describe('a reply’s changes', () => {
     writeFileSync(join(repo, 'old.txt'), 'changed\n')
     const [set] = await turn.finish('m1', 'a1')
     expect(set).toMatchObject({ branch: 'feat/refunds', fromBranch: 'main' })
+  })
+
+  it('finds a repository when the agent’s folder is named another way than git names it', async () => {
+    // A link to the folder stands for /var and /private/var on macOS, or C:\Users\RUNNER~1 on Windows.
+    const named = join(mkdtempSync(join(tmpdir(), 'tucano-link-')), 'work')
+    symlinkSync(base, named, 'junction')
+    const turn = changes.turn({ bases: [named], toHost: (p) => join(named, p), shown: (h) => h.replace(named, '/work') })
+    await turn.prepare('edit_file', { path: 'app/old.txt' })
+    writeFileSync(join(repo, 'old.txt'), 'changed\n')
+    const [set] = await turn.finish('m1', 'a1')
+    expect(set).toMatchObject({ root: join('/work', 'app'), total: 1 })
+    rmSync(dirname(named), { recursive: true, force: true })
   })
 
   it('finds the repositories in the agent’s folders before the first write', async () => {
@@ -196,7 +208,8 @@ describe('a reply on this computer', () => {
       expect('patch' in diff && diff.patch).toContain('+const fee = 4')
     } finally {
       await gateway.stop()
-      rmSync(dataDir, { recursive: true, force: true })
+      db.close() // Windows won't delete an open database
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 5 })
     }
   }, 30_000)
 })
