@@ -89,6 +89,21 @@ describe('the recommended option', () => {
     expect(api.requests).toHaveLength(0)
   })
 
+  it('marks nothing on a next-steps card, which answers itself with its ticks', async () => {
+    const api = typesafe({ pick: 'o1' })
+    const steps: Decision = {
+      question: 'O que vem agora?',
+      kind: 'multiple',
+      nextSteps: true,
+      options: [{ label: 'Rodar a suíte' }, { label: 'Traduzir os rótulos' }]
+    }
+    const r = await recommendOptions({ key: 'ts-key', questions: [steps, ...decisions()], context: 'Arquivei a issue #255.', fetch: api.f })
+    // The pick stays aligned with the card's decisions: null where the steps are.
+    expect('picks' in r && r.picks).toEqual([null, 1, null])
+    expect(api.bodies()).toHaveLength(1)
+    expect(api.bodies()[0]!.state).toContain('Paginação no menu?')
+  })
+
   it('reports a failure instead of guessing, when TypeSafe refuses or answers something unknown', async () => {
     expect(await ask(typesafe({ status: 429 }))).toMatchObject({ error: expect.stringContaining('esperar') })
     expect(await ask(typesafe({ body: { answers: {} } }))).toMatchObject({ error: expect.any(String) })
@@ -177,6 +192,44 @@ describe('the pill on the card', () => {
     await new Promise((res) => setTimeout(res, 50))
     expect(db.message(q!.id)?.run?.recommended).toBeUndefined()
     expect(api.requests).toHaveLength(0)
+  })
+
+  it('sends nothing at all for a next-steps card, which has its own toggles', async () => {
+    settings = { ...settings, jevRecommend: true }
+    const api = typesafe({ pick: 'o1' })
+    const r = runner(api, 'ts-key')
+    await r.send('d1', '@lia me dá os próximos passos')
+    await r.idle()
+    const q = asked()
+    expect(q?.run?.questions?.[0]).toMatchObject({ nextSteps: true })
+    await new Promise((res) => setTimeout(res, 50))
+    expect(db.message(q!.id)?.run?.recommended).toBeUndefined()
+    expect(api.requests).toHaveLength(0)
+  })
+
+  it('with the steps question on too, the card is answered once: by its ticks', async () => {
+    settings = { ...settings, jevRecommend: true, jevNextSteps: true }
+    const seen: { instructions: string; state: string }[] = []
+    // A step is answered do/later by where it sits in the list; a decision, with its second option.
+    const f = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as { state: string; questions: { pick: { instructions: string } } }
+      seen.push({ instructions: body.questions.pick.instructions, state: body.state })
+      if (/próximo passo/.test(body.questions.pick.instructions)) {
+        const i = Number([...body.state.matchAll(/^(\d+)\. /gm)].pop()?.[1] ?? 1) - 1
+        return Response.json({ answers: { pick: { type: 'choice', choice: i % 2 === 0 ? 'do' : 'later', probabilities: {} } } })
+      }
+      return Response.json({ answers: { pick: { type: 'choice', choice: 'o1', probabilities: {} } } })
+    }) as unknown as typeof fetch
+    const r = runner({ ...typesafe(), f } as ReturnType<typeof typesafe>, 'ts-key')
+    await r.send('d1', '@lia me dá os próximos passos')
+    await r.idle()
+    const q = asked()
+    expect(q?.run?.questions?.[0]?.ticked).toEqual([0, 2])
+    await new Promise((res) => setTimeout(res, 50))
+    // No second answer to the same list, and no call spent on one: all four were about a step.
+    expect(db.message(q!.id)?.run?.recommended).toBeUndefined()
+    expect(seen).toHaveLength(4)
+    expect(seen.every((b) => /próximo passo/.test(b.instructions))).toBe(true)
   })
 
   it('is not written onto a question that was answered while TypeSafe thought', async () => {

@@ -26,7 +26,7 @@ import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
-import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, startsTicked, type Answer, type Decision } from '../shared/questions'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, startsTicked, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, recommendOptions, routeJev, stepsWorthDoing } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
@@ -813,7 +813,10 @@ export class Runner {
   // written on the reply after the card is already on screen — so asking never waits on TypeSafe.
   // A failure, or no pick at all, leaves the card exactly as it was: a suggestion is a nice-to-have.
   private async recommend(msg: Message, questions: Decision[], settings: Settings): Promise<void> {
-    if (!settings.jevRecommend || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
+    // A next-steps card is answered by its own toggles: a pick there would be a second answer to the
+    // same list, and a disagreeing one. Only questions are recommended on.
+    const askable = (q: Decision): boolean => !isNextSteps(q) && (q.options?.length ?? 0) >= 2
+    if (!settings.jevRecommend || !questions.some(askable)) return
     const key = await this.deps.jev?.key()
     if (!key) return
     try {
