@@ -4,6 +4,15 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Novo:** a tela **Time**, com o organograma dos seus agentes. Um agente pode **responder a** outro: você fala com um só, ele divide o pedido entre quem está abaixo dele e junta as respostas. Cada pedido vira uma thread no canal de quem faz (ou na DM dele, quando o assunto não é de canal nenhum), e a resposta volta pra conversa onde você pediu, em nome de quem fez. Quem responde ao mesmo agente também pode pedir um ao outro. A tela **Time**, na barra lateral, é um quadro: puxe uma linha de um cartão a outro pra ligar, arraste pra arrumar, e veja a linha acender enquanto um pedido anda. Uma linha tem no máximo três agentes, e toda mudança tem **Desfazer**. O guia tem a página "Time".
+
+### Added
+
+- **An org chart: agents that answer to other agents.** Agents only talked to each other inside a channel they shared, so a person with several agents had to carry each piece of a job to the right one and bring the answers together. Now an agent can **answer to** another. The one above hands work to anyone below it: each request becomes a thread in the channel of whoever does it, in the asker's name, and when that thread ends the answer goes back to the conversation where it was asked, in the name of whoever did it; the asker then replies once, when everything has come back. Agents that answer to the same agent can ask each other too; nobody asks upward, across branches, or back to whoever is waiting on the same work. A request goes to the channel whose topic covers the subject, or to the agent's DM with you when it belongs to no channel (or the agent is in none). Questions from whoever does the work go to the asker, not to you; approvals stay each agent's own, and a request held on one of yours does not hold the others back. Requests can be cancelled, have deadlines, and report failures to whoever asked. Limits: a line holds three agents, a reply makes five requests, an agent keeps twelve open, and one piece of work stacks three.
+- **The Time screen** (Team, in English), in the sidebar with two or more agents: a board that pans and zooms, one card per agent. Pull a line from one card to another to say who answers to whom, click a line to remove it, drag cards where you want them (**Organizar** tidies them again), and ask an agent from the box at the bottom. Open requests are listed under **Agora** and light the line they travel. Every change shows **Desfazer** (⌘Z). The same setting is on each agent's page, under **Responde a**, and travels in a team file.
+
+
 ## [0.2.27] - 2026-11-10
 
 > **Em português:**
