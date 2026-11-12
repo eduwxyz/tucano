@@ -8,6 +8,7 @@ import { RECOMMENDED_INSTRUCTION_LENGTH } from '../shared/instructions'
 import { channelName, dateAt, ENGINES, modelInfo, nextRun, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { dateArg } from './routines'
+import { bossArg, organizeOnly } from './tuca'
 
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh']
 const DAY = 24 * 3_600_000
@@ -84,7 +85,9 @@ export function workspaceState(area: unknown, x: StateInput): string {
       const share = usedShare(a.used, a.limit)
       const pct = share === undefined ? undefined : Math.round(share * 100)
       const pending = x.approvals.filter((p) => p.agentId === a.id && p.state === 'pending').length
-      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
+      const boss = a.reportsTo ? x.agents.find((b) => b.id === a.reportsTo) : undefined
+      const org = `${boss ? L(` · responde a @${boss.handle}`, ` · answers to @${boss.handle}`) : ''}${a.manager ? L(' · organiza o time', ' · organizes the team') : ''}`
+      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ?`${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}${org}`
     })
     out.push(`## ${L('Agentes', 'Agents')}\n${lines.join('\n') || L('nenhum ainda', 'none yet')}`)
   }
@@ -136,6 +139,7 @@ export const PROPOR_AJUSTE: ToolDef = {
           items: { type: 'object', properties: { conector: { type: 'string' }, nivel: { type: 'string', enum: ['leitura', 'escrita'] } }, required: ['conector'] }
         },
         limite: { type: 'number', description: L('O limite do mês, em tokens.', "The month's limit, in tokens.") },
+        responde_a: { type: 'string', description: L('A quem ele passa a responder no organograma: o @handle de outro agente, ou "ninguém" pra responder só à pessoa. Só o Tuca e um agente que organiza o time.', 'Whom it answers to in the org chart: another agent\'s @handle, or "ninguém" to answer to the person only. Only the Tuca and an agent that organizes the team.') },
         ...reasonProp()
       },
       required: ['agente']
@@ -197,6 +201,7 @@ export interface ProposalCtx {
   connectors: Connector[]
   usable: (modelId: string) => boolean
   pending?: string[] // names of the agents proposed earlier in this same reply (a new-agent card, a team): not made yet
+  organizes?: boolean // the Tuca, or an agent that organizes the team: it may propose whom an agent answers to
 }
 
 const text = (args: Record<string, unknown>, k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
@@ -263,8 +268,15 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
       if (!Number.isFinite(n) || n < 0) return { error: L('O limite é em tokens: no mínimo 1000, ou 0 para sem limite.', 'The limit is in tokens: at least 1000, or 0 for no limit.') }
       if (n !== agent.limit) changes.limit = n
     }
+    if (args['responde_a'] !== undefined) {
+      if (!ctx.organizes) return { error: organizeOnly() }
+      const b = bossArg(args['responde_a'], ctx.agents, agent.id)
+      if (b.error) return { error: b.error }
+      if (b.id !== (agent.reportsTo ?? '')) changes.reportsTo = b.id
+    }
     if (!Object.keys(changes).length) return { error: L('Nada mudaria: mande só o que é diferente do que ele tem hoje.', 'Nothing would change: send only what differs from what it has now.') }
-    const before = Object.fromEntries(Object.keys(changes).map((k) => [k, agent[k as keyof AgentChanges]])) as AgentChanges
+    // No boss reads as '' (as the change does), so the card shows who it answered to before.
+    const before = Object.fromEntries(Object.keys(changes).map((k) => [k, k === 'reportsTo' ? (agent.reportsTo ?? '') : agent[k as keyof AgentChanges]])) as AgentChanges
     return { proposal: { kind: 'agent', agentId: agent.id, changes, before, ...(reason ? { reason } : {}) } }
   }
   if (tool === PROPOR_ROTINA.name) {

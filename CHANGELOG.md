@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **An agent can organize the team, with your yes.** On an agent's page, **Channels and skills › Organizes the team** lets it propose whom each agent answers to, itself included: each change is a card in the conversation, with Apply and Discard, and nothing changes until you apply it. It reads the org chart as it is now, and the rules hold as on the Time screen (three agents to a line, no one under someone below it); a card whose chart changed since it was proposed says so instead of applying. The Tuca proposes the chart too, also when creating: a new agent can come answering to one that exists, and in a team card one agent can answer to another of the same team.
+
 ## [0.2.28] - 2026-11-12
 
 > **Em português:**

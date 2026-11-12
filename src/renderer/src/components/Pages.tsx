@@ -1858,6 +1858,19 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) 
           {draft.name || L('este agente', 'this agent')}: {below.map((a) => a.name).join(', ')}.
         </p>
       )}
+      <div className="key-row">
+        <Icon name="layers" />
+        <div className="grow">
+          <strong>{L('Organiza o time', 'Organizes the team')}</strong>
+          <p className="muted small">
+            {L(
+              `${draft.name || 'Este agente'} pode propor a quem cada agente responde, e onde ele mesmo fica. Cada mudança vira um cartão na conversa, e nada muda até você aplicar.`,
+              `${draft.name || 'This agent'} can propose whom each agent answers to, and where it sits itself. Each change becomes a card in the conversation, and nothing changes until you apply it.`
+            )}
+          </p>
+        </div>
+        <Toggle on={!!draft.manager} onChange={(v) => patch({ manager: v || undefined })} />
+      </div>
     </Card>
   )
 }

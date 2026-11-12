@@ -41,11 +41,13 @@ const EFFORT = (): Record<AgentDraft['effort'], string> => ({ low: L('esforço b
 export const UseDraft = createContext<((draft: AgentDraft, messageId: string) => void) | null>(null)
 
 export function draftAgent(d: AgentDraft): Agent {
-  return { ...newAgentDraft(), name: d.name, handle: slug(d.name), role: d.role, color: d.color, instructions: d.instructions, modelId: d.modelId, effort: d.effort, web: d.web, grants: d.grants }
+  return { ...newAgentDraft(), name: d.name, handle: slug(d.name), role: d.role, color: d.color, instructions: d.instructions, modelId: d.modelId, effort: d.effort, web: d.web, grants: d.grants, ...(d.reportsTo ? { reportsTo: d.reportsTo } : {}) }
 }
 
 export function AgentProposal({ message }: { message: Message }): ReactNode {
   const d = message.run!.agentDraft!
+  // Whom it will answer to in the org chart, when it was proposed with someone.
+  const bossName = useStore((s) => (d.reportsTo ? s.agents.find((a) => a.id === d.reportsTo)?.name : undefined))
   const use = useContext(UseDraft)
   const connectors = useStore((s) => s.connectors)
   const created = useStore((s) => (d.agentId ? s.agents.find((a) => a.id === d.agentId) : undefined))
@@ -90,6 +92,11 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
         {model && (
           <span>
             <Icon name="spark" size={12} /> {ENGINES[model.engine].label} · {model.label} · {EFFORT()[d.effort]}
+          </span>
+        )}
+        {bossName && (
+          <span>
+            <Icon name="layers" size={12} /> {L(`Responde a ${bossName}`, `Answers to ${bossName}`)}
           </span>
         )}
         <span>
@@ -200,6 +207,9 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
       if (c.grants !== undefined) rows.push([L('Conectores', 'Connectors'), grantList(was.grants ?? {}), grantList(c.grants)])
       // 0 is no limit, so the card says that instead of a figure that reads as "set it to zero".
       if (c.limit !== undefined) rows.push([L('Limite do mês', "Month's limit"), monthlyLimitText(was.limit ?? agent.limit), monthlyLimitText(c.limit)])
+      // In the org chart: '' answers to the person only.
+      const boss = (id?: string): string => (id ? (agentOf(id)?.name ?? '?') : L('ninguém (só a você)', 'no one (only you)'))
+      if (c.reportsTo !== undefined) rows.push([L('Responde a', 'Answers to'), boss(was.reportsTo), boss(c.reportsTo)])
     }
     head = (
       <>
@@ -297,6 +307,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
               <AgentAvatar agent={{ name: d.name, color: d.color }} size={28} />
               <div className="grow">
                 <strong>{d.name}</strong> <span className="muted small">{d.role}</span>
+                {(d.reportsToName || d.reportsTo) && <p className="muted small">{L(`Responde a ${d.reportsToName ?? agentOf(d.reportsTo!)?.name ?? '?'}`, `Answers to ${d.reportsToName ?? agentOf(d.reportsTo!)?.name ?? '?'}`)}</p>}
                 <p className="muted small">{d.instructions.split('\n')[0]}</p>
                 {instructionLengthNote(d.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(d.instructions.length)}</p>}
               </div>
