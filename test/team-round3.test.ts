@@ -148,6 +148,7 @@ describe('G. every event reaches only who may see what it is about', () => {
       browser_frame: { event: { type: 'browser_frame', agentId: 'a1', frame: 'data:segredo', conversationId: 'dm-ana' }, is: 'hidden' },
       artifact: { event: { type: 'artifact', artifact: { id: 'f1', conversationId: 'dm-ana', messageId: 'm-dm', agentId: 'a1', name: 'segredo.txt', mime: 'text/plain', size: 1, at: 1 } as unknown as Artifact }, is: 'hidden' },
       routine: { event: { type: 'routine', routine }, is: 'hidden' },
+      job_watch: { event: { type: 'job_watch', watch: { id: 'w1', agentId: 'a1', conversationId: 'dm-ana', messageId: 'm-dm', runId: '1', status: 'watching', reading: { name: 'segredo', state: 'running', tasks: [] }, firedAlerts: [], heldEvents: [], wakes: 0, createdAt: 1 } }, is: 'hidden' },
       routine_removed: { event: { type: 'routine_removed', id: 'r1', for: ana.id }, is: 'hidden' },
       conversation_removed: { event: { type: 'conversation_removed', id: 'dm-ana', for: ana.id }, is: 'hidden' },
       skill: { event: { type: 'skill', skill: { id: 's1', name: 'x' } as unknown as Skill }, is: 'shown' },

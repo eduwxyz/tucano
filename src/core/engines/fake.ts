@@ -83,11 +83,17 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /(?:acompanhe o run|follow run) (\d+)/i.test(last)) {
+        // Following a Databricks run: the card, then the app takes it from here.
+        await callTool(turn.mcpUrl, 'acompanhar_job', { run_id: /(?:acompanhe o run|follow run) (\d+)/i.exec(last)![1]! })
+        reply = L('Acompanhando.', 'Following it.')
       } else if (turn.mcpUrl && /(?:consulte|run the sql) `([^`]+)`/i.test(last)) {
         // A SQL connector's tool (Databricks' execute_sql_read_only), to see its steps and errors.
         const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'execute_sql_read_only'), { statement })
-        reply = textOf(r)
+        // Rows that show in a table under the reply are summed up, as a real agent is told to; anything else is said back.
+        const said = textOf(r)
+        reply = /\[(?:Essas linhas|These rows)/.test(said) ? L('Aqui está o que a consulta trouxe.', "Here's what the query brought back.") : said
       } else if (turn.mcpUrl && /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.test(last)) {
         // A skill that runs a CLI (a databricks-query skill and the databricks command): read it, then run.
         const [, skill, first, then] = /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.exec(last)!

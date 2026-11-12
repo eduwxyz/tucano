@@ -316,6 +316,8 @@ export class People {
         return conversation(event.artifact.conversationId) && this.artifactVisible(person, event.artifact) ? event : undefined
       case 'routine':
         return conversation(event.routine.conversationId) ? event : undefined
+      case 'job_watch':
+        return conversation(event.watch.conversationId) ? event : undefined
       case 'approval':
         return this.canSeeApproval(person, event.approval) ? event : undefined
       case 'memory':
@@ -501,6 +503,7 @@ export class People {
       connectors: base.connectors.map((c) => this.connectorFor(person, c)),
       artifacts: base.artifacts.filter((a) => seen.has(a.conversationId) && this.artifactVisible(person, a)),
       routines: base.routines.filter((r) => seen.has(r.conversationId)),
+      ...(base.jobWatches ? { jobWatches: base.jobWatches.filter((w) => seen.has(w.conversationId)) } : {}),
       approvals: base.approvals.filter((a) => this.canSeeApproval(person, a)),
       memories: base.memories.filter((m) => this.canSeeMemory(person, m)),
       browsers: base.browsers.map((v) => this.browserFor(person, v)),

@@ -2,6 +2,7 @@
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
+import type { JobSkillState, JobWatchSettings } from './job-watch'
 import type { Answer, Decision } from './questions'
 import { L, lang, locale, type Lang } from './lang'
 
@@ -84,6 +85,7 @@ export interface Agent {
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
+  jobWatch?: boolean // follows Databricks runs through the app's own tools; off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   actionRules?: ActionRules // what it does about a commit, a push, a PR…: over settings.actionRules, kind by kind; unset kinds follow them
@@ -142,6 +144,15 @@ export const channelName = (s: string): string =>
     .slice(0, 60)
 
 export type StepStatus = 'running' | 'done' | 'error'
+// What a query brought back, for the card under the reply: a preview, never the whole result.
+export interface ResultTable {
+  columns: string[]
+  numeric: boolean[] // per column: every value a number, so it lines up on the right
+  rows: (string | null)[][] // null: SQL's NULL
+  total: number // rows in the result, beyond the ones kept
+  cut?: boolean // the result itself came cut, so there may be more than total says
+}
+
 export interface Step {
   id: string
   label: string
@@ -150,6 +161,7 @@ export interface Step {
   error?: string // why it failed, in the tool's own words
   input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
   output?: string // what came back, in a few words ("120 rows")
+  table?: ResultTable // what a query brought back, as a table
   status: StepStatus
   ms?: number
 }
@@ -189,6 +201,7 @@ export interface Run {
   artifactIds?: string[] // files and screenshots shown in this reply
   services?: string[] // services started in this reply, by name, on the author's computer
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
+  jobWatchIds?: string[] // runs it started following in this reply: each shows a live card
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
@@ -464,6 +477,8 @@ export interface Settings {
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+  jobWatch?: Partial<JobWatchSettings> // following Databricks runs: the CLI, what it may run, the limits
+  jobSkill?: JobSkillState // the analysis skill that comes with it
 }
 
 // Which chirp a notification plays: a knock when an agent needs me, two notes when the work

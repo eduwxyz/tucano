@@ -124,6 +124,9 @@ export const NEEDS: Record<Method, Need> = {
   saveRoutine: 'target',
   removeRoutine: 'target',
   runRoutine: 'target',
+  stopJobWatch: 'anyone', // the call checks the person sees its conversation
+  cancelJobRun: 'admin',
+  checkDatabricks: 'admin',
   watchRoutine: 'anyone',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
   browserAction: 'target', // a browser working for a conversation one sees; otherwise admins

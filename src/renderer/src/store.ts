@@ -5,6 +5,7 @@ import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
+import type { DatabricksStatus, JobWatch } from '../../shared/job-watch'
 import {
   asSaid,
   type Account,
@@ -105,6 +106,7 @@ export interface State {
   computers: ComputerInfo[]
   browsers: BrowserView[]
   routines: Routine[]
+  jobWatches: JobWatch[]
   skills: Skill[]
   wikiRev: number // goes up when a wiki page changes: the wiki screens read again
   voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
@@ -188,6 +190,7 @@ let state: State = {
   computers: [],
   browsers: [],
   routines: [],
+  jobWatches: [],
   skills: [],
   platform: 'mac',
   packaged: false,
@@ -566,6 +569,8 @@ function apply(e: CoreEvent): void {
           panel: here ? null : s.panel
         }
       }
+      case 'job_watch':
+        return { ...s, jobWatches: upsert(s.jobWatches, e.watch) }
       case 'routine_removed':
         return { ...s, routines: s.routines.filter((r) => r.id !== e.id) }
       case 'skill':
@@ -629,6 +634,7 @@ export async function start(): Promise<void> {
       computers: snap.computers,
       browsers: snap.browsers,
       routines: snap.routines,
+      jobWatches: snap.jobWatches ?? [],
       skills: snap.skills,
       platform: snap.platform,
       packaged: snap.packaged,
@@ -1010,6 +1016,9 @@ export const openBackups = (): void => void fire(L('Não consegui abrir a pasta 
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })
 export const loadUsage = (): Promise<UsageReport> => call('usage')
 export const removeRoutine = (id: string): void => void fire(L('Não consegui remover a rotina.', "I couldn't remove the routine."), 'removeRoutine', { id })
+export const stopJobWatch = (id: string): void => void fire(L('Não consegui parar de acompanhar.', "I couldn't stop following it."), 'stopJobWatch', { id })
+export const cancelJobRun = (id: string): Promise<void> => call('cancelJobRun', { id })
+export const checkDatabricks = (): Promise<DatabricksStatus> => call('checkDatabricks')
 // People: who I am, who comes in (admins), who covers for me.
 export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })
 export const doneNaming = (): void => set((s) => ({ ...s, needsName: false }))

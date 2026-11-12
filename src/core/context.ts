@@ -35,6 +35,7 @@ export type PromptOpts = {
   wiki?: { pages: number; kinds: string[] } // the wiki it may read
   connectors?: boolean // it has connector tools (Slack, Databricks…)
   people?: Person[] // the Tucano's people; with more than one, the agent is told who they are
+  jobs?: 'on' | 'off' // following Databricks runs: it has the tools, or it doesn't but the app is set up for it
   github?: GitHubAccess // a GitHub connector it has access to: how it publishes, and what waits for the person
 }
 
@@ -54,7 +55,7 @@ export interface GitHubAccess {
 // session (Claude Code keeps the first system prompt on resume), so whatever changes on its own
 // goes in liveContext instead.
 export function systemPrompt(opts: PromptOpts): string {
-  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, macFolder, web, browser, apps, routines, skills, connectors, builderGuide, people } = opts
+  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, macFolder, web, browser, apps, routines, skills, connectors, builderGuide, people, jobs } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -108,6 +109,16 @@ export function systemPrompt(opts: PromptOpts): string {
     browser && browserSection(me),
     apps?.length && appsSection(me, apps),
     builderGuide,
+    jobs === 'on' &&
+      L(
+        `## Jobs do Databricks\nQuando ${me} falar de um job ou run (acompanhar, dizer sobre ele, ver como está, checar, analisar), sua primeira ação é chamar acompanhar_job, com o id, o nome ou o link, mesmo que o run já tenha terminado: é isso que mostra o cartão na conversa e traz os dados na hora. Nunca rode a CLI do Databricks no seu computador para isso, nem instale nada. Para detalhes, use ver_job depois.`,
+        `## Databricks jobs\nWhen ${me} brings up a job or run (follow, tell about it, see how it's doing, check, analyze), your first action is calling acompanhar_job, with its id, name or link, even if the run has ended: that's what shows the card in the conversation and brings the data right away. Never run the Databricks CLI on your computer for this, or install anything. For details, use ver_job after.`
+      ),
+    jobs === 'off' &&
+      L(
+        `## Jobs do Databricks\nSe ${me} falar de um job ou run do Databricks, diga logo, em uma frase e antes de rodar qualquer comando, que você não tem acesso a isso e que é preciso ligar Acompanhar jobs na sua página, em Ferramentas. Não tente instalar nem rodar a CLI por conta própria.`,
+        `## Databricks jobs\nIf ${me} brings up a Databricks job or run, say right away, in one sentence and before running any command, that you don't have access to it and that it takes turning on Follow jobs on your page, under Tools. Don't try to install or run the CLI on your own.`
+      ),
     [
       L('## Como responder', '## How to reply'),
       `- ${where} ${L(
@@ -453,6 +464,24 @@ export const snip = (text: string, max: number): string => {
 }
 
 // The blocks, and which block each message became (where its images go).
+// The queries whose rows showed as a table under a reply: the rows themselves aren't in the conversation,
+// so a question about them ("the average of this by state") is answered with a query of its own.
+const QUERY_MAX = 600
+function queriesOf(m: Message): string[] {
+  return (m.run?.steps ?? []).flatMap((s) => {
+    if (!s.table) return []
+    const sql = (s.input ?? '').replace(/\s+/g, ' ').trim()
+    const query = sql.length > QUERY_MAX ? `${sql.slice(0, QUERY_MAX)}…` : sql
+    const columns = s.table.columns.join(', ')
+    return [
+      L(
+        `[Consulta cujo resultado apareceu em tabela: ${query || 'sem SQL'} → colunas ${columns}; ${s.table.total} linhas. Para outra conta sobre esses dados (uma média, um agrupamento, um filtro), rode uma consulta nova a partir dessa, em vez de calcular pelas linhas.]`,
+        `[Query whose result showed as a table: ${query || 'no SQL'} → columns ${columns}; ${s.table.total} rows. For another calculation on this data (an average, a grouping, a filter), run a new query built from this one, instead of working it out from the rows.]`
+      )
+    ]
+  })
+}
+
 export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; blockOf: Map<string, number> } {
   const { agent, conversation, messages, agents, me, task, summary, images, files, thread, before = [], searchable, unix, people, live } = opts
   const scheduler = (id: string): string | undefined => (typeof opts.routineOwner === 'function' ? opts.routineOwner(id) : (opts.routineOwner ?? me))
@@ -475,7 +504,8 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
       ...(files?.get(m.id) ?? []).map((n) => L(`[arquivo anexado: ${n}]`, `[attached file: ${n}]`)),
-      questionsOf(m.run).length > 0 && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`)
+      questionsOf(m.run).length > 0 && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`),
+      ...queriesOf(m)
     ]
       .filter(Boolean)
       .join('\n\n')
