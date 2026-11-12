@@ -3084,6 +3084,9 @@ ${note}`,
   // the request ends as failed so whoever asked hears of it instead of waiting for good.
   private knockOn(d: Delegation, now: number): void {
     const { db } = this.deps
+    const key = replyKey(d.to, d.conversationId, d.rootId)
+    // No message yet can mean a real reply is queued behind occupied execution slots.
+    if (this.followups.busy(key)) return
     if (d.nudges) {
       if (now - d.createdAt >= GIVE_UP_MS) this.settle(d, 'failed')
       return
@@ -3093,12 +3096,7 @@ ${note}`,
     const conv = db.conversation(d.conversationId)
     if (!to || !conv || to.archived) return
     this.keep({ ...d, nudges: 1 })
-    const key = replyKey(to.id, conv.id, d.rootId)
-    this.followups.reserve(key)
-    this.enqueue(
-      () => this.execute(to, conv, { depth: 1, threadId: d.rootId, task: L('Seu turno anterior nesta thread não deixou nenhuma resposta: nenhum texto, nenhum erro, nada. Faça o pedido acima agora e escreva a resposta aqui, com o que fez, o que achou e o que falta.', 'Your previous turn in this thread left no reply at all: no text, no error, nothing. Do the request above now and write the answer here, with what you did, what you found and what is left.'), reserved: true }),
-      true
-    )
+    void this.startReply(to, conv, { depth: 1, threadId: d.rootId, task: L('Seu turno anterior nesta thread não deixou nenhuma resposta: nenhum texto, nenhum erro, nada. Faça o pedido acima agora e escreva a resposta aqui, com o que fez, o que achou e o que falta.', 'Your previous turn in this thread left no reply at all: no text, no error, nothing. Do the request above now and write the answer here, with what you did, what you found and what is left.') }, { urgent: true })
   }
 
   // An agent that mentions another agent of the conversation may hand it the turn,
