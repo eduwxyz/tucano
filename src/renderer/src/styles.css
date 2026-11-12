@@ -10998,3 +10998,800 @@ button.agent-card__now:hover {
 
 /* The intro of a Tucano on a server: a computer's backup brought in from the first screen. */
 .intro-restore { margin-top: 18px; max-width: 520px; }
+
+/* ---------- organogram ---------- */
+/* Who answers to whom, and what is under way, as a board: cards go where they are put, lines are
+   pulled from one to another, the whole thing pans and zooms (src/shared/org-layout.ts has the
+   geometry). A line an open request travels lights up, and a dot runs the way the work goes. */
+.org-now .cal-watch__chip .icon {
+  flex: none;
+  color: var(--text-3);
+  transform: scaleX(-1);
+}
+.org-now__when {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.cal-watch__chip > i.is-asking,
+.org-pop__ask i.is-asking {
+  background: var(--warn);
+}
+.org-error {
+  margin: 0 32px 10px;
+}
+.orgb {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  background-color: var(--bg);
+  background-image: radial-gradient(var(--border-strong) 1px, transparent 1px);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.orgb:active {
+  cursor: grabbing;
+}
+.orgb.is-linking {
+  cursor: crosshair;
+}
+.orgb__stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.orgb__lines {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.orgb__line {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  transition: stroke var(--dur-base) var(--ease-out), d 320ms var(--ease-out);
+}
+.orgb.is-moving .orgb__line {
+  transition: stroke var(--dur-base) var(--ease-out);
+}
+.orgb__lines .is-me .orgb__line {
+  stroke-dasharray: 1 6;
+}
+.orgb__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 18;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.orgb__lines g:hover .orgb__line,
+.orgb__lines .is-picked .orgb__line {
+  stroke: var(--text);
+  stroke-width: 2.25;
+}
+.orgb__lines .is-flow .orgb__line {
+  stroke: var(--accent);
+  stroke-width: 2.25;
+  stroke-dasharray: 2 8;
+  animation: org-flow 0.9s linear infinite;
+}
+.orgb__lines .is-up .orgb__line {
+  stroke: var(--warn);
+  animation-direction: reverse;
+}
+.orgb__dot {
+  fill: var(--accent);
+  filter: drop-shadow(0 0 5px var(--accent));
+}
+.orgb__lines .is-up .orgb__dot {
+  fill: var(--warn);
+  filter: drop-shadow(0 0 5px var(--warn));
+}
+.orgb__line.is-new {
+  stroke: var(--accent);
+  stroke-width: 2.25;
+  stroke-dasharray: 5 6;
+  transition: none;
+}
+@keyframes org-flow {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+.org-edge-x {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 0 0 1.5px var(--text), var(--shadow);
+  color: var(--text);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  animation: pop var(--dur-fast) var(--ease-out);
+}
+.org-edge-x:hover {
+  background: var(--danger, #c0392b);
+  box-shadow: 0 0 0 1.5px var(--danger, #c0392b), var(--shadow);
+  color: #fff;
+}
+.org-card {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  text-align: left;
+  background: var(--panel);
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(60, 40, 20, 0.05), 0 6px 16px -8px rgba(60, 40, 20, 0.12);
+  cursor: grab;
+  transition: left 320ms var(--ease-out), top 320ms var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+  animation: org-in var(--dur-enter) var(--ease-out) backwards;
+}
+@keyframes org-in {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+.org-card:hover {
+  z-index: 2;
+  box-shadow: 0 0 0 1px var(--text-3), var(--shadow);
+}
+.org-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.org-card.is-picked {
+  z-index: 2;
+  box-shadow: 0 0 0 2px var(--text), var(--shadow);
+}
+.org-card.is-working {
+  box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 6px var(--accent-soft), var(--shadow);
+  animation: org-in var(--dur-enter) var(--ease-out) backwards, org-breathe 2.4s var(--ease-in-out) infinite;
+}
+@keyframes org-breathe {
+  50% {
+    box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 10px transparent, var(--shadow);
+  }
+}
+.org-card.is-moving {
+  z-index: 4;
+  cursor: grabbing;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+  box-shadow: 0 0 0 1.5px var(--text), var(--shadow-lg);
+}
+.org-card.is-dim {
+  opacity: 0.4;
+}
+.org-card.is-target {
+  box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 5px var(--accent-soft);
+}
+.org-card.is-over {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2.5px var(--accent), var(--shadow);
+}
+.org-card--me {
+  background: var(--primary);
+  color: var(--primary-text);
+  box-shadow: var(--shadow);
+}
+.org-card--me > :first-child {
+  border-radius: 10px;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--primary-text) 28%, transparent);
+}
+.org-card--me:hover {
+  box-shadow: var(--shadow);
+}
+.org-card--me.is-target {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+.org-card--me.is-over {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.org-card__who {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.34;
+}
+.org-card__who > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.org-card__who strong {
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.org-card__who span {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.org-card--me .org-card__who span {
+  color: inherit;
+  opacity: 0.7;
+}
+.org-card__who .org-card__state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.org-card__state i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.org-card__state.is-live {
+  color: var(--accent);
+  font-weight: 500;
+}
+.org-card__state.is-live i {
+  background: var(--accent);
+  animation: org-blink 1.2s var(--ease-in-out) infinite;
+}
+@keyframes org-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+.org-card__state.is-warn {
+  color: var(--warn);
+  font-weight: 500;
+}
+.org-card__state.is-warn i {
+  background: var(--warn);
+}
+.org-card__team {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--hover);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.org-card__bar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.org-card__bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: org-run 1.3s var(--ease-in-out) infinite;
+}
+@keyframes org-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+/* The dots a line is pulled from: above, to whoever it answers to; below, to whoever answers to it. */
+.org-port {
+  position: absolute;
+  left: 50%;
+  z-index: 3;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 0 0 2px var(--text-3);
+  opacity: 0;
+  scale: 0.6;
+  cursor: crosshair;
+  transition: opacity var(--dur-fast) var(--ease-out), scale var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.org-port::after {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+.org-port--in {
+  top: -7px;
+}
+.org-port--out {
+  bottom: -7px;
+}
+.org-card:hover .org-port,
+.org-card.is-picked .org-port,
+.org-card.is-linking .org-port {
+  opacity: 1;
+  scale: 1;
+}
+.org-port:hover,
+.org-card.is-linking .org-port {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px var(--accent-soft);
+  scale: 1.15;
+}
+.orgb.is-linking .org-card:not(.is-linking) .org-port,
+.orgb.is-moving .org-port {
+  opacity: 0;
+}
+/* Around the board: zoom, a word on how it works, the box that asks, the agent picked. */
+.org-tools {
+  position: absolute;
+  left: 20px;
+  bottom: 20px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 4px;
+  border-radius: 11px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border-strong), var(--shadow);
+  cursor: default;
+}
+.org-tools .icon-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  line-height: 1;
+}
+.org-tools > i {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.org-tools__k {
+  min-width: 48px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.org-tools__k:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.org-hint {
+  position: absolute;
+  left: 20px;
+  top: 14px;
+  z-index: 0;
+  font-size: 12px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.org-coach + .org-tools + .org-hint {
+  display: none;
+}
+.org-ask {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(540px, calc(100% - 420px));
+  min-width: 280px;
+  height: 48px;
+  padding: 0 8px 0 12px;
+  border-radius: 15px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-lg);
+  transform: translateX(-50%);
+  cursor: default;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.orgb.has-side .org-ask {
+  left: calc((100% - 352px) / 2 + 76px);
+  width: min(540px, calc(100% - 352px - 270px));
+}
+.org-ask:focus-within {
+  box-shadow: 0 0 0 1.5px var(--text), var(--shadow-lg);
+}
+.org-ask input,
+.org-ask input:focus {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14.5px;
+  color: var(--text);
+  user-select: text;
+}
+.org-ask .btn {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 10px;
+}
+.org-side {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  padding: 18px 18px 16px;
+  overflow-y: auto;
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-lg);
+  cursor: default;
+  user-select: text;
+  animation: org-side var(--dur-base) var(--ease-out);
+}
+@keyframes org-side {
+  from {
+    opacity: 0;
+    translate: 16px 0;
+  }
+}
+.org-side__top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.org-side__who {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.org-side__who h3 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+.org-side__live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+}
+.org-side__live i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: org-blink 1.2s var(--ease-in-out) infinite;
+}
+.org-side__live span {
+  flex: 1;
+  min-width: 0;
+}
+.org-side__live b {
+  flex: none;
+  font-weight: 600;
+}
+.org-side__acts {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+.org-coach {
+  position: absolute;
+  left: 20px;
+  top: 20px;
+  z-index: 5;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  width: 340px;
+  max-height: calc(100% - 40px);
+  padding: 20px;
+  overflow-y: auto;
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-lg);
+  cursor: default;
+  animation: pop var(--dur-base) var(--ease-out);
+}
+.org-coach h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.org-coach p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.org-undo {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--primary);
+  color: var(--primary-text);
+  font-size: 13px;
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%);
+  cursor: default;
+  animation: pop var(--dur-base) var(--ease-out);
+}
+.org-undo .link {
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.org-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px 0 6px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  transition: var(--transition-ui);
+}
+.org-chip--pick {
+  height: auto;
+  gap: 10px;
+  padding: 8px 13px 8px 9px;
+  border-radius: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.org-chip--pick span {
+  display: grid;
+  line-height: 1.3;
+}
+.org-chip--pick small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.org-chip--pick:hover {
+  box-shadow: 0 0 0 1.5px var(--text);
+}
+.org-start__ask {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.org-start__picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.org-pop__boss {
+  margin: 0 0 14px;
+}
+.org-pop__facts {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 6px 10px;
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+.org-pop__facts dt {
+  color: var(--text-3);
+}
+.org-pop__facts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+}
+.org-pop__facts dd.is-warn {
+  color: var(--warn);
+}
+.org-pop__asks {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.org-pop__ask {
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--hover);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.org-pop__ask:hover {
+  background: var(--active);
+}
+.org-pop__ask-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.org-pop__ask-top i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.org-pop__ask-text {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+@media (prefers-reduced-motion: reduce) {
+  .orgb__lines .is-flow .orgb__line,
+  .org-card,
+  .org-card.is-working,
+  .org-card__bar::after,
+  .org-card__state.is-live i,
+  .org-side__live i {
+    animation: none;
+  }
+  .orgb__dot {
+    display: none;
+  }
+  .org-card,
+  .orgb__line {
+    transition: none;
+  }
+}
+
+/* An answer back from handed work, where it was asked: a line until it's opened. */
+/* What came back from handed work, where it was asked: a line, with the whole of it folded under. */
+.returned-line {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  /* In line with what the messages say: their column, past the face. */
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 6px 28px 6px 74px;
+}
+.returned-line p strong {
+  font-weight: 600;
+  color: var(--text);
+}
+.returned-line .link {
+  font-size: 12.5px;
+}
+.returned-line__body {
+  flex: 0 0 100%;
+  margin: 4px 0 6px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border);
+  color: var(--text);
+  font-size: 14px;
+}
+
+/* Under a request, where it was delivered: how it stands and where its answer goes. */
+.request-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.request-note > span:first-of-type {
+  font-weight: 600;
+  color: var(--text-2);
+}
+.request-note__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--hover);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.request-note__state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.request-note__state.is-live {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.request-note__state.is-live i {
+  background: var(--accent);
+}
+.request-note__state.is-done i {
+  background: var(--ok);
+}
+.request-note__state.is-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.request-note__state.is-warn i {
+  background: var(--warn);
+}
+.request-note__where::before {
+  content: '·';
+  margin-right: 6px;
+}
+.orgb:has(.org-undo) .org-hint {
+  visibility: hidden;
+}

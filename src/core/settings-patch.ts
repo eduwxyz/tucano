@@ -13,6 +13,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   memoryModel: { kind: 'string', max: 200 },
   voice: { kind: 'object', max: 10_000, nullable: true },
   channelLayout: { kind: 'object', max: 500_000, nullable: true },
+  orgLayout: { kind: 'object', max: 100_000, nullable: true },
   browserJev: { kind: 'boolean', max: 10, nullable: true },
   memoryLearning: { kind: ['approve', 'auto', 'off'], max: 20 },
   wikiCapture: { kind: 'boolean', max: 10, nullable: true },

@@ -31,6 +31,7 @@ import {
   type Message,
   type Model,
   type Person,
+  type Delegation,
   type Inbox,
   type Device,
   type Invite,
@@ -76,6 +77,7 @@ export type View =
   | { kind: 'routines' }
   | { kind: 'skills' }
   | { kind: 'report' }
+  | { kind: 'org' } // who answers to whom (src/shared/org.ts)
   | { kind: 'settings' }
   | { kind: 'missions' } // what to try next, each bringing a part of the sidebar on a new install
 
@@ -91,6 +93,7 @@ export interface State {
   people: Person[]
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
   inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
+  delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
   needsName: boolean // a server's first access: the owner says what the agents call them
   settings: Settings
   models: Model[]
@@ -163,6 +166,7 @@ let state: State = {
   people: [],
   former: [],
   inbox: { approvals: [], questions: [] },
+  delegations: [],
   needsName: false,
   settings: {
     workspaceName: '',
@@ -363,6 +367,7 @@ export const lastBrowserIn = (s: State, conversationId: string, agentId: string)
 // Across conversations, once per change.
 interface Everywhere {
   workingAgents: Set<string>
+  workingOn: Map<string, Message> // an agent → the reply it is on (the latest, with several)
   receipts: Message[]
   agentDone: boolean
 }
@@ -370,10 +375,14 @@ const everywhere = new WeakMap<Record<string, Message[]>, Everywhere>()
 function across(s: State): Everywhere {
   const had = everywhere.get(s.messages)
   if (had) return had
-  const all: Everywhere = { workingAgents: new Set(), receipts: [], agentDone: false }
+  const all: Everywhere = { workingAgents: new Set(), workingOn: new Map(), receipts: [], agentDone: false }
   for (const list of Object.values(s.messages)) {
     const ix = indexOf(list)
-    for (const m of ix.working) if (m.author.kind === 'agent') all.workingAgents.add(m.author.id)
+    for (const m of ix.working)
+      if (m.author.kind === 'agent') {
+        all.workingAgents.add(m.author.id)
+        if ((all.workingOn.get(m.author.id)?.at ?? 0) <= m.at) all.workingOn.set(m.author.id, m)
+      }
     all.receipts.push(...ix.receipts)
     all.agentDone ||= ix.agentDone
   }
@@ -381,6 +390,7 @@ function across(s: State): Everywhere {
   return all
 }
 export const workingAgents = (s: State): Set<string> => across(s).workingAgents
+export const workingOn = (s: State): Map<string, Message> => across(s).workingOn
 export const receipts = (s: State): Message[] => across(s).receipts
 export const anyReplyDone = (s: State): boolean => across(s).agentDone
 
@@ -594,6 +604,8 @@ function apply(e: CoreEvent): void {
         return withMe({ ...s, people: e.people, ...(e.former ? { former: e.former } : {}) })
       case 'inbox':
         return { ...s, inbox: e.inbox ?? s.inbox }
+      case 'delegations':
+        return { ...s, delegations: e.delegations ?? s.delegations }
     }
   })
   // A full message carries all its text so far: what streamed before it is in there.
@@ -673,6 +685,7 @@ export async function start(): Promise<void> {
       demoServer: snap.demoServer,
       you: snap.you,
       inbox: snap.inbox ?? { approvals: [], questions: [] },
+      delegations: snap.delegations ?? [],
       people: snap.people,
       former: snap.former ?? []
     }
@@ -894,6 +907,13 @@ export const settleDraft = (messageId: string, agentId?: string): void => void f
 export async function openDm(agentId: string): Promise<void> {
   const id = await call('openDm', { agentId })
   navigate({ kind: 'conversation', id })
+}
+
+// Asks an agent something from somewhere else (the organogram): it goes to its DM, and I stay where I am.
+export async function askAgent(agentId: string, text: string): Promise<string> {
+  const id = await call('openDm', { agentId })
+  sendMessage(id, text)
+  return id
 }
 
 export function setGrant(agentId: string, connectorId: string, level: GrantLevel): void {

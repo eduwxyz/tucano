@@ -344,6 +344,7 @@ export function Sidebar(): ReactNode {
         {parts.shows('wiki') && <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} />}
         {parts.shows('routines') && <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} fresh={fresh('routines')} />}
         {(parts.shows('skills') || proposals > 0) && <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} fresh={fresh('skills')} />}
+        {agents.filter(isTeam).length > 1 && <NavItem view={{ kind: 'org' }} icon="users" label={L('Time', 'Team')} />}
         {admin && parts.shows('report') && <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} fresh={fresh('report')} />}
 
         <Section

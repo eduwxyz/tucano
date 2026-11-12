@@ -18,10 +18,10 @@ it('moves what ran on Gemini over to Antigravity, and leaves the rest alone', ()
   db0.setSettings({ harnesses: { gemini: true, claude: true } } as never)
   db0.addReceipt({ messageId: 'm1', agentId: 'g1', engine: 'gemini', model: 'gemini:gemini/gemini-2.5-pro', inputTokens: 1, cacheReadTokens: 0, outputTokens: 1, ms: 1, at: 1 } as never)
   db0.close()
-  // As a database from before the rename: the last migration not run yet.
+  // As a database from before the rename: that migration not run yet (nor the one after it, which is safe to run again).
   const raw = new DatabaseSync(file)
   const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
-  raw.exec(`PRAGMA user_version = ${user_version - 1}`)
+  raw.exec(`PRAGMA user_version = ${user_version - 2}`)
   raw.close()
 
   const db = new Db(file)

@@ -87,6 +87,7 @@ import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
+import { directReports, possibleBosses } from '../../../shared/org'
 import { perCallTool } from '../../../shared/composio'
 import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
@@ -444,6 +445,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <p className="hint">{L(`Fora desses canais, chame com @${draft.handle || 'handle'} ou mande DM.`, `Outside these channels, call it with @${draft.handle || 'handle'} or send a DM.`)}</p>
             </Card>
           )}
+
+          {pane('canais') && draft.kind !== 'tuca' && <ReportsTo draft={draft} patch={patch} />}
 
           {!isNew && pane('canais') && <AgentSkills agentId={draft.id} name={draft.name} />}
 
@@ -1813,6 +1816,49 @@ function Tabs({ page, tabs }: { page: string; tabs: TabList }): ReactNode {
         </button>
       ))}
     </div>
+  )
+}
+
+// Whom the agent answers to (src/shared/org.ts). With that set, the one above hands it work in its own
+// channel and gets the answer back; with no one answering to anyone, nothing changes.
+function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const bosses = possibleBosses(agents, draft.id)
+  const below = directReports(agents, draft.id)
+  const boss = bosses.find((a) => a.id === draft.reportsTo)
+  const none = L('Ninguém', 'No one')
+  return (
+    <Card
+      title={L('Time', 'Team')}
+      lead={L(
+        'Quem está acima passa trabalho a quem está abaixo, no canal de cada um, e recebe a resposta de volta. Sem ninguém marcado, tudo funciona como sempre.',
+        'Whoever is above hands work to those below, in each one’s channel, and gets the answer back. With no one set, everything works as it always did.'
+      )}
+    >
+      <label className="field">
+        <span className="field__label">{L('Responde a', 'Answers to')}</span>
+        <Select
+          value={boss?.id ?? null}
+          onChange={(v) => patch({ reportsTo: v || undefined })}
+          options={[{ value: '', label: none }, ...bosses.map((a) => ({ value: a.id, label: a.role ? `${a.name} · ${a.role}` : a.name }))]}
+          placeholder={none}
+        />
+        {boss && (
+          <span className="hint">
+            {L(
+              `${boss.name} pode pedir trabalho a ${draft.name || 'este agente'}. O pedido vira uma thread no primeiro canal marcado acima, e a resposta volta pra ${boss.name}.`,
+              `${boss.name} can ask ${draft.name || 'this agent'} for work. The request becomes a thread in the first channel checked above, and the answer goes back to ${boss.name}.`
+            )}
+          </span>
+        )}
+      </label>
+      {below.length > 0 && (
+        <p className="hint">
+          {L('Respondem a ', 'Answering to ')}
+          {draft.name || L('este agente', 'this agent')}: {below.map((a) => a.name).join(', ')}.
+        </p>
+      )}
+    </Card>
   )
 }
 
