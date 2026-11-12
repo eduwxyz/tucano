@@ -1,5 +1,5 @@
 // Frames for a reply's steps (#314 / this PR): every step (as always), the latest 20 in a window
-// that fades the oldest out, or one line with the count — chosen in Settings › General right under
+// that fades the oldest out, or one line of current activity — chosen in Settings › General right under
 // the thinking switch, and per agent on the agent's own page.
 // The 25-step reply is seeded: no fake turn makes 25 tool calls, and the window only shows itself
 // past 20. Everything else is a real turn of the app.
@@ -261,7 +261,7 @@ console.log('at 420 px:', JSON.stringify({ ...narrow, ...sideways }))
 await win.screenshot({ path: `${out}/07-window-at-420.png` })
 await win.setViewportSize({ width: 1280, height: 880 })
 
-// 6. One line: the count climbing, no list at all, the stop and the time still there.
+// 6. One line: current activity, folded by default, the stop and the time still there.
 const card4 = await settingsCard(win)
 await card4.locator('.steps-pick button', { hasText: 'One line' }).click()
 await win.waitForTimeout(300)

@@ -1750,17 +1750,17 @@ function useNow(on: boolean): number {
 }
 
 // One quiet line: what the agent is doing now (and for how long), or how many
-// steps it took. The steps themselves open on a click — unless the person asked for
-// one line only, or for just the latest few (Settings › General, or one agent's own).
+// steps it took. Every mode lets the person open the steps on a click.
 export function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
-  // Every step (what the app has always done), the latest few, or one line with the count: the
+  // Every step (what the app has always done), the latest few, or one line of current activity: the
   // agent's own setting over the workspace's (src/shared/steps.ts).
   const mode = useStore((s) => stepsModeFor(s.settings, message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const keep = useStore((s) => s.settings.stepsLatest)
   // Open while the agent works, so its steps read as they go, unless the person closes it or turned
   // that off in Settings (several agents at once would fill the screen); closed after.
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
+  // A manual choice lasts through completion: finishing must not close what someone is reading.
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
   // The steer is a pill in the row under this chain: it opens a field under the box, still held by
@@ -1792,6 +1792,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
   const failed = run.steps.filter((st) => st.status === 'error').length
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
+  const currentTarget = working && !open ? (current?.detail || current?.input)?.split(/\r?\n/)[0]?.slice(0, 200) : undefined
   const count = `${run.steps.length} ${L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}`
 
   return (
@@ -1900,8 +1901,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
             </div>
           </div>
         </div>
-      )}
-    </>
+      )}    </>
   )
 }
 
@@ -1968,8 +1968,7 @@ export function Thought({ message, working }: { message: Message; working: boole
         <Icon name="chevron" size={11} />
         <span className="thought__label">{working ? L('Pensando', 'Thinking') : L('Pensou', 'Thought')}</span>
         {!open && <span className="thought__last">{last}</span>}
-      </button>
-      {open && (
+      </button>      {open && (
         <div ref={box} className="thought__text" onScroll={(e) => {
           const el = e.currentTarget
           if (written.current !== null && Math.abs(el.scrollTop - written.current) < 0.5) return
