@@ -218,11 +218,10 @@ describe('work handed down the tree', () => {
     await r.send('dm', 'delegue a clara em #engenharia: qualquer coisa')
     await r.idle()
     expect(by('orion', 'dm')[1]?.text).toContain('Clara não está em "engenharia". Os canais dele: #clientes, #vendas.')
-    // Nothing is handed into a channel: no message lands in #clientes or #engenharia. The handles in the
-    // refusal ("who you reach: @clara, @bento, @nico") do open a team-up of their own, which is the mention
-    // rule and not a delegation.
-    const handed = db.messages().filter((m) => m.conversationId !== 'dm' && !db.conversation(m.conversationId)?.teamUp)
-    expect(handed).toEqual([])
+    // Nothing is handed into a channel, and the refusal opens no room either: it lists the three agents
+    // Orion already reaches ("who you reach: @clara, @bento, @nico"), and those are asked with `pedir`.
+    expect(db.conversations().filter((c) => c.teamUp)).toEqual([])
+    expect(db.messages().filter((m) => m.conversationId !== 'dm')).toEqual([])
   })
 
   it('lets those who answer to the same agent ask each other, and brings the answer back', async () => {

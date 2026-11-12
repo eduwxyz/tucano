@@ -3163,11 +3163,16 @@ ${note}`,
   }
 
   // The agents a reply calls that aren't in this conversation: no turn to hand them here, so they get a
-  // team-up. Never the agent talking, the Tuca, an archived one, or one the person can't have.
+  // team-up. Never the agent talking, the Tuca, an archived one, one the person can't have, or one the reply
+  // can already reach down the tree (org.ts): those are asked with `pedir`, in their own thread, with the
+  // answer coming back where it was asked — a mention that reads like a call is no way round the tree.
+  // A refusal lists them with @ ("Quem você alcança: @clara, @bento"), so it opens no room of its own.
   private guests(agent: Agent, conv: Conversation, msg: Message): Agent[] {
     if (this.paused) return []
     const here = new Set(conv.members)
-    const elsewhere = this.deps.db.agents().filter((a) => a.id !== agent.id && isTeam(a) && !here.has(a.id))
+    const all = this.deps.db.agents()
+    const reach = new Set(reachOf(all, agent.id).map((a) => a.id))
+    const elsewhere = all.filter((a) => a.id !== agent.id && isTeam(a) && !here.has(a.id) && !reach.has(a.id))
     return mentioned(msg.text, elsewhere).slice(0, TEAM_UP_GUESTS)
   }
 
