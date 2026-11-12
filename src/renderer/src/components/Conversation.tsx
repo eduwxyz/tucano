@@ -2345,18 +2345,13 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
                 if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
                 if (e.key === 'Escape') return setMention(null)
               }
-              // Enter as the setting says; the modifiers pick a mode whatever the setting says. Ctrl+Enter
-              // keeps the line break, which Shift+Enter used to be before these four modes took it.
+              // Enter does what the setting says; a modifier picks a mode whatever the setting says. Shift+Enter
+              // alone is the line break it has always been, so the queue sits on Ctrl+Enter (Cmd+Enter on a Mac).
               if (e.key === 'Enter' && e.nativeEvent.isComposing) return
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault()
-                insert('\n')
-                return
-              }
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                submit(e.altKey && e.shiftKey ? 'interrupt' : e.altKey ? 'steer' : e.shiftKey ? 'queue' : undefined)
-              }
+              if (e.key !== 'Enter') return
+              if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return // a new line, as it always was
+              e.preventDefault()
+              submit(e.altKey ? (e.shiftKey ? 'interrupt' : 'steer') : e.ctrlKey || e.metaKey ? 'queue' : undefined)
             }}
           />
         </div>
@@ -2383,8 +2378,8 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               className="btn btn--sm btn--ghost composer__mode"
               onClick={() => updateSettings({ sendMode: 'parallel' })}
               title={L(
-                'Enquanto uma resposta corre aqui, o Enter manda assim. Clique para voltar ao normal; os atalhos continuam valendo uma vez cada (Shift+Enter fila, Alt+Enter entrega, Shift+Alt+Enter interrompe).',
-                'While a reply runs here, Enter sends like this. Click to go back to the plain one; the keys still work once each (Shift+Enter queues, Alt+Enter hands it over, Shift+Alt+Enter interrupts).'
+                'Enquanto uma resposta corre aqui, o Enter manda assim. Clique para voltar ao normal; os atalhos continuam valendo uma vez cada (Ctrl+Enter põe na fila, Alt+Enter entrega, Shift+Alt+Enter interrompe, Shift+Enter quebra a linha).',
+                'While a reply runs here, Enter sends like this. Click to go back to the plain one; the keys still work once each (Ctrl+Enter queues, Alt+Enter hands it over, Shift+Alt+Enter interrupts, Shift+Enter breaks the line).'
               )}
             >
               {sendMode === 'queue' ? L('Enter: na fila', 'Enter: queued') : sendMode === 'steer' ? L('Enter: entregue à resposta', 'Enter: into the reply') : L('Enter: interrompe', 'Enter: interrupts')}
