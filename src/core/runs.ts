@@ -335,6 +335,7 @@ export class Runner {
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
+  private held = new Map<string, Promise<void>>() // by agent: its replies on an engine that keeps the MCP connection
   private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
   private sessions: Sessions
@@ -402,6 +403,24 @@ export class Runner {
       const [agent, conversation] = key.split(':')
       return (of.agentId !== undefined && agent === of.agentId) || (of.conversationId !== undefined && conversation === of.conversationId)
     })
+    // An agent that goes: the URL its engine's daemon kept (Hermes) stops answering.
+    if (of.agentId !== undefined) this.deps.gateway?.agentForget(of.agentId)
+  }
+
+  // An engine whose daemon keeps the MCP connection (Hermes) has one URL and one home per agent, so
+  // that agent's replies on it go one at a time: two at once would share a session and rewrite each
+  // other's instructions. Resolves when it's this reply's turn, with what lets the next one go.
+  private async holdAgent(agentId: string): Promise<() => void> {
+    const before = this.held.get(agentId) ?? Promise.resolve()
+    let release!: () => void
+    const mine = new Promise<void>((resolve) => (release = resolve))
+    const chain = before.then(() => mine)
+    this.held.set(agentId, chain)
+    await before
+    return () => {
+      release()
+      if (this.held.get(agentId) === chain) this.held.delete(agentId)
+    }
   }
 
   setPaused(paused: boolean): void {
@@ -2095,7 +2114,16 @@ ${note}`,
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
     let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
     let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
-    const session = this.deps.gateway?.open(tools, plan?.token)
+    // An engine whose daemon holds the MCP connection between turns keeps the URL it was given
+    // (Hermes): its token is the agent's, not the turn's. Every other engine gets a fresh one, or
+    // the token of the session it keeps.
+    // Waiting for the agent's other reply isn't going quiet.
+    inFlight++
+    const unhold = engines[engineId].keepsMcp ? await this.holdAgent(agent.id) : undefined
+    inFlight--
+    sign()
+    const token = plan?.token ?? (engines[engineId].keepsMcp ? this.deps.gateway?.agentToken(agent.id) : undefined)
+    const session = this.deps.gateway?.open(tools, token)
     const whole = { prompt: withFiles.join('\n\n'), blocks: withFiles, images }
     // Resumed: the live context if it changed, the new messages' blocks, then the task's, with their images.
     const since = (p: SessionPlan): typeof whole => {
@@ -2120,6 +2148,7 @@ ${note}`,
             signal: control.ctl.signal,
             mcpUrl: session?.url,
             web: agent.web !== false,
+            agentKey: agent.id,
             account: account && this.deps.dataDir ? accountDir(this.deps.dataDir, account.id) : undefined
           })
           for await (const ev of events) {
@@ -2182,6 +2211,7 @@ ${note}`,
       clearInterval(stall)
       flush()
       session?.close()
+      unhold?.()
       if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown, live })
       if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, live, reply: msg.id, context: result?.context })
       this.controllers.delete(msg.id)

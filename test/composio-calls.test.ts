@@ -154,7 +154,7 @@ function scripted(plan: (prompt: string, tools: string[]) => Plan): Engine {
 function runner(plan: (prompt: string, tools: string[]) => Plan): Runner {
   return new Runner({
     db,
-    engines: { claude: scripted(plan), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') },
+    engines: { claude: scripted(plan), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
     settings: async () => settings,
     emit: () => {},
     workDir: join(dir, 'work'),
@@ -175,7 +175,7 @@ beforeEach(async () => {
   db = new Db(join(dir, 'test.db'))
   calls = []
   seen = { prompts: [], tools: [], results: [] }
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   gateway = new Gateway()
   await gateway.start()
   db.saveConnector({ id: CID, name: 'Composio', kind: 'remote', url: URL_, auth: 'oauth' })

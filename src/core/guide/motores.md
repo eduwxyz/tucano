@@ -4,7 +4,7 @@
 Os agentes não têm modelo próprio: cada resposta roda num programa que você já tem no computador, chamado harness. O Tucano só lê a configuração de cada um; nunca vê nem guarda suas senhas e chaves.
 
 ## Os harnesses
-Claude Code, Codex, OpenCode, Pi, Antigravity CLI, Cursor CLI, Grok e Cline CLI. Cada um aparece em **Configurações › Modelos** (Settings › Models), no card **Harnesses**, com o estado: **Pronto**, **Falta entrar** ou **Não instalado**.
+Claude Code, Codex, OpenCode, Pi, Antigravity CLI, Cursor CLI, Grok, Cline CLI e Hermes. Cada um aparece em **Configurações › Modelos** (Settings › Models), no card **Harnesses**, com o estado: **Pronto**, **Falta entrar** ou **Não instalado**.
 
 - **Instalar**: abre um terminal que instala pra você. Alguns precisam do Node.js antes.
 - **Entrar**: abre um terminal com o comando de login (por exemplo `claude auth login`, `codex login`, `grok login`). Quando o login termina, o app percebe sozinho.
