@@ -1,4 +1,4 @@
-// The steer pill, at the bottom of a reply's steps while the agent works: it opens a field, what the
+// The steer pill, under the box of a reply's steps while the agent works: it opens a field, what the
 // person writes goes to the reply that's running (send mode `steer`) instead of becoming a message of
 // its own, and the chain then says so in their words — as what it is, not as a tool call.
 import { parseHTML } from 'linkedom'
@@ -35,7 +35,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 })
 
 const { createRoot } = await import('react-dom/client')
-const { RunSteps } = await import('../src/renderer/src/components/Conversation')
+const { RunBlock } = await import('../src/renderer/src/components/Conversation')
 
 const step = (id: string, extra: Partial<Step> = {}): Step => ({ id, label: `read ${id}.ts`, status: 'done', ms: 120, ...extra })
 
@@ -56,7 +56,7 @@ beforeEach(() => {
 afterEach(() => act(() => root.unmount()))
 
 const draw = async (message: Message): Promise<void> => {
-  await act(async () => root.render(<RunSteps message={message} />))
+  await act(async () => root.render(<RunBlock message={message} />))
 }
 const pill = (): HTMLElement | null => document.querySelector('.steps__steer-pill')
 const field = (): HTMLTextAreaElement | null => document.querySelector('.steps__steer-note textarea')
@@ -84,13 +84,14 @@ const key = async (k: string, extra: { ctrlKey?: boolean } = {}): Promise<void> 
 }
 
 describe('the steer pill', () => {
-  it('sits at the bottom of the chain while the agent works, and is gone once it is done', async () => {
+  it('sits under the steps of a reply at work, and is gone once it is done', async () => {
     await draw(reply('working'))
     expect(pill()?.textContent?.trim()).toBe('Orientar')
     expect(document.querySelector('.steps__list')).not.toBeNull()
-    // Under the steps, not above them: it is the last thing in the block.
+    // Under the box, not inside it: everything the run says about itself stays above the pill.
     const block = document.querySelector('.steps')!
-    expect(block.lastElementChild?.className).toBe('steps__steer')
+    expect(block.querySelector('.steps__steer')).toBeNull()
+    expect(block.nextElementSibling?.className).toBe('steps__steer')
     await draw(reply('done'))
     expect(pill()).toBeNull()
   })
