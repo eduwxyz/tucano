@@ -58,7 +58,7 @@ describe("a finding's card", () => {
   })
 
   it('asks for the links, not a page, when nothing links to it', () => {
-    fake = { ...fake, agents: [agent('a1', 'herald', 'write')] }
+    fake = { ...fake, agents: [agent('a1', 'herald', 'read_write')] }
     const html = card(finding({ kind: 'orphan', pages: ['Scratch files', 'OpenLibExtended'] }))
     expect(html).toContain(L('Ligar as páginas', 'Link the pages'))
     expect(html).not.toContain(L('Escrever a página', 'Write the page'))
