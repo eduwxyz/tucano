@@ -4,9 +4,14 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Your Codex subscription's limits on Usage and limits.** The page showed the Claude subscription's 5-hour and weekly windows, and said Codex doesn't report its own. Codex's app-server does (`account/rateLimits/read`): when Codex is signed in with a ChatGPT plan, the page now asks it, at most once a minute, while it's open and after each reply, and shows each window the plan has (Plus has only the week) with how much is used and when it resets, plus the plan's name.
+
 ### Fixed
 
-- **The wiki map holds together as the wiki grows.** The map settles its pages by a little physics: pages push each other away, links pull. The pull of a link grows with how far its pages are, with no ceiling, and two pages that come too close keep swinging through each other — so past a hundred pages or so the forces fed on themselves, positions ran past any number and turned into NaN, and the SVG drew every page on the same spot: the map came up empty with one page stuck in the corner, no matter how many pages and links it said it had. A step of the physics now caps how fast a page may move, and a wiki of any size settles spread out. (A wiki of 358 pages was the one that showed it; the same change tested from 10 to 358 pages.)
+- **The wiki map holds together as the wiki grows.** The map settles its pages by a little physics: pages push each other away, links pull. The pull of a link grows with how far its pages are, with no ceiling, and two pages that come too close keep swinging through each other — so past a hundred pages or so the forces fed on themselves, positions ran past any number and turned into NaN, and the SVG drew every page on the same spot: the map came up empty with one page stuck in the corner, no matter how many pages and links it said it had. A step of the physics now caps how fast a page may move, and a wiki of any size settles spread out. (A wiki of 358 pages was the one that showed it; the same change tested from 10 to 358 pages.) Thanks, brunolellis! (#357)
+- **An agent that only reads through Composio can link an account.** The first time an agent needs an app on Composio (Google Calendar, Gmail…), it calls `COMPOSIO_MANAGE_CONNECTIONS` for the sign-in link. That tool is sensitive, so an agent with read access never saw it: it found the app's actions, then failed because no account was linked, though reading was all it wanted. A read grant now sees that tool too, and every call to it asks for approval, at every level and whatever the rules; read-and-write is unchanged.
 
 ## [0.2.27] - 2026-11-10
 

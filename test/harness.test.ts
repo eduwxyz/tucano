@@ -5,7 +5,7 @@ import { startsPicked } from '../src/shared/types'
 import type { EngineId, EngineStatus } from '../src/shared/types'
 
 const ready: EngineStatus = { installed: true, loggedIn: true, route: 'plan' }
-const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' }, antigravity: { ...ready, route: 'providers' }, cursor: { ...ready, route: 'providers' }, grok: { ...ready, route: 'providers' }, cline: { ...ready, route: 'providers' } }
+const engines: Record<EngineId, EngineStatus> = { claude: ready, codex: ready, opencode: { ...ready, route: 'providers' }, pi: { ...ready, route: 'providers' }, antigravity: { ...ready, route: 'providers' }, cursor: { ...ready, route: 'providers' }, grok: { ...ready, route: 'providers' }, cline: { ...ready, route: 'providers' }, hermes: { ...ready, route: 'providers' } }
 
 describe('harnesses', () => {
   it('defaults the pick to the harnesses that can actually run', () => {
