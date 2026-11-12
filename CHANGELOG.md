@@ -4,8 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Your Codex subscription's limits on Usage and limits.** The page showed the Claude subscription's 5-hour and weekly windows, and said Codex doesn't report its own. Codex's app-server does (`account/rateLimits/read`): when Codex is signed in with a ChatGPT plan, the page now asks it, at most once a minute, while it's open and after each reply, and shows each window the plan has (Plus has only the week) with how much is used and when it resets, plus the plan's name.
+
 ### Fixed
 
+- **An agent that only reads through Composio can link an account.** The first time an agent needs an app on Composio (Google Calendar, Gmail…), it calls `COMPOSIO_MANAGE_CONNECTIONS` for the sign-in link. That tool is sensitive, so an agent with read access never saw it: it found the app's actions, then failed because no account was linked, though reading was all it wanted. A read grant now sees that tool too, and every call to it asks for approval, at every level and whatever the rules; read-and-write is unchanged.
 - **On Linux, an agent given Chrome in Apps can read and use it.** Chrome only joins the accessibility bus when started with `ACCESSIBILITY_ENABLED=1` (GNOME keeps `org.a11y.Status IsEnabled` off without a screen reader), so its window was invisible; Chromium apps are now started with it. A launcher script under another name (Arch's `google-chrome-stable` starts `chrome`) is followed to the program it runs, so the app is found and an open one is brought forward instead of opened again. The agents' own headless Chrome, which sits on the bus under the same name, is left out, so reads, keys and focus go to the person's window.
 - **Big web pages in Apps read whole on Linux.** A snapshot gets 15 seconds instead of agent-desktop's 3, so a page with a thousand elements is read before its elements are judged unique; a list longer than one screen has pages (`pagina`) with the same numbers; an area is numbered after the list it came from, which stays good; and an area that repeats in the window (a table row) is read from the last whole read instead of failing.
 - **Keys on Wayland say what to do.** No program can bring a window forward there: a key now goes only when the app's window is in front, and otherwise the agent is told to ask the person to click it.

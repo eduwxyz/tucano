@@ -24,7 +24,7 @@ A Composio não mostra uma ferramenta por ação. Ela dá umas poucas que acham 
 - **COMPOSIO_MULTI_EXECUTE_TOOL** roda as ações que vão nos argumentos (GMAIL_FETCH_EMAILS, GMAIL_SEND_EMAIL…). Sua classe é **por chamada**: vale pela ação mais forte. Só leituras (buscar, listar, ler) rodam na hora, inclusive pra quem só tem **Ler**. Escritas (criar um rascunho) precisam de **Ler e escrever**. Sensíveis (enviar, responder, postar, apagar, rodar código) pedem aprovação, e o card mostra cada ação. Uma chamada fora do formato documentado também pede aprovação (quem só lê recebe uma recusa).
 - **COMPOSIO_PROXY_EXECUTE** manda uma requisição direta à API de um app: GET e HEAD leem (a não ser que o caminho diga uma mudança, como chat.postMessage); POST, PUT e PATCH escrevem; DELETE pede aprovação.
 - **COMPOSIO_REMOTE_WORKBENCH** e **COMPOSIO_REMOTE_BASH_TOOL** rodam código nos servidores dela: sempre pedem aprovação, e quem só lê nem vê.
-- **COMPOSIO_MANAGE_CONNECTIONS** liga contas: pede aprovação também.
+- **COMPOSIO_MANAGE_CONNECTIONS** liga contas: pede aprovação. Até quem só tem **Ler** a vê, e pra esse ela pede sempre.
 
 **Aprovar e sempre permitir** num pedido do MULTI_EXECUTE vale pra cada ação sensível do pedido, sozinha (**Aprovar e sempre permitir GMAIL_REPLY_TO_THREAD**), pra aquele agente; nunca pro executor inteiro. Um pedido só roda sem perguntar quando todas as ações que pediriam estão permitidas. Requisições do PROXY_EXECUTE, código e chamadas fora do formato nunca ficam permitidas. Pra desfazer: na página do agente, **Sempre permitido, sem pedir:**. **Alto risco** no executor exige segurar o botão e desliga o sempre permitir.
 
