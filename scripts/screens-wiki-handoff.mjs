@@ -29,7 +29,7 @@ const launch = async () => {
 // 2. give two agents write access, and put the finding in the wiki
 {
   const db = new DatabaseSync(join(data, 'tucano.db'))
-  db.prepare("UPDATE agents SET wiki = 'write' WHERE handle IN ('lia', 'theo')").run()
+  db.prepare("UPDATE agents SET wiki = 'read_write' WHERE handle IN ('lia', 'theo')").run()
   db.close()
 }
 

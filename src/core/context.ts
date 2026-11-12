@@ -32,7 +32,7 @@ export type PromptOpts = {
   skills?: Skill[] // the active ones it follows, when it has skill tools
   builder?: string // the Tuca's view of the workspace: models, connectors, the team (live)
   builderGuide?: string // how to propose agents, teams, routines and channels, and the Tuca's guide (stable)
-  wiki?: { pages: number; kinds: string[]; write?: boolean } // the wiki it may read, and write when `write`
+  wiki?: { pages: number; kinds: string[]; write?: boolean } // the wiki it may read, and whether it may write it
   connectors?: boolean // it has connector tools (Slack, Databricks…)
   people?: Person[] // the Tucano's people; with more than one, the agent is told who they are
   github?: GitHubAccess // a GitHub connector it has access to: how it publishes, and what waits for the person
@@ -165,29 +165,24 @@ export function systemPrompt(opts: PromptOpts): string {
 // What changes on its own between replies: it goes at the top of the transcript, and a kept session
 // gets it again (whole, after what it already has) only when it changed, so a new memory or a page
 // in the wiki doesn't end every agent's session. '' when there's nothing.
-// The last stretch of the wiki section: what an agent may do there, by the access it has.
-const wikiHint = (write: boolean): { pt: string; en: string } =>
-  write
-    ? {
-        pt: 'Você também escreve nela, com wiki_escrever: uma página nova entra na hora e mexer numa que existe espera a aprovação da pessoa. Escreva só o que as fontes dizem e ligue as páginas com [[Título]]; não invente.',
-        en: "You also write on it, with wiki_escrever: a new page goes in right away, and changing one that exists waits for the person to approve it. Write only what the sources say and link the pages with [[Title]]; don't make it up."
-      }
-    : {
-        pt: 'Você só lê a wiki: o curador a atualiza sozinho depois da conversa, com o que ficar decidido; não diga que ela vai ficar desatualizada nem peça pra alguém editar.',
-        en: "You only read the wiki: the curator updates it on its own after the conversation, with what was settled; don't say it will be out of date or ask anyone to edit it."
-      }
-
 export function liveContext(opts: Pick<PromptOpts, 'settings' | 'memories' | 'offline' | 'routines' | 'skills' | 'builder' | 'wiki' | 'people'>): string {
   const { settings, memories, offline, routines, skills, builder, wiki, people } = opts
-  const hint = wikiHint(!!wiki?.write)
   const me = settings.workspaceName || L('o usuário', 'the user')
   const parts = [
     builder,
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0 || !!memories.searchable) && memorySection(me, memories, people),
     wiki &&
       L(
-        `## A wiki\n${me} tem uma wiki com ${wiki.pages === 1 ? '1 página' : `${wiki.pages} páginas`} (${wiki.kinds.join(', ')}): o que ${me} e o time sabem, escrito. Quando a pergunta puder estar lá (uma pessoa, um cliente, um projeto, uma decisão, um assunto), consulte antes de responder ou de perguntar: wiki_indice pra ver o que existe, wiki_buscar pra achar, wiki_ler pra abrir. Ao usar uma página, cite com [[Título]]. Se a wiki não disser, diga que não está lá; não invente. ${hint.pt}`,
-        `## The wiki\n${me} has a wiki with ${wiki.pages === 1 ? '1 page' : `${wiki.pages} pages`} (${wiki.kinds.join(', ')}): what ${me} and the team know, written down. When the answer could be there (a person, a client, a project, a decision, a topic), look before replying or asking: wiki_indice to see what exists, wiki_buscar to find, wiki_ler to open. When you use a page, cite it as [[Title]]. If the wiki doesn't say, say it isn't there; don't make it up. ${hint.en}`
+        `## A wiki\n${me} tem uma wiki ${pagesPhrase(wiki.pages)}${wiki.pages ? ` (${wiki.kinds.join(', ')})` : ''}: o que ${me} e o time sabem, escrito. Quando a pergunta puder estar lá (uma pessoa, um cliente, um projeto, uma decisão, um assunto), consulte antes de responder ou de perguntar: wiki_indice pra ver o que existe, wiki_buscar pra achar, wiki_ler pra abrir. Ao usar uma página, cite com [[Título]]. Se a wiki não disser, diga que não está lá; não invente.${
+          wiki.write
+            ? ' Você também escreve nela: wiki_escrever cria a página, ou acrescenta no fim dela ou numa seção, e wiki_editar troca um trecho que ficou errado ou velho. Escreva o que é fato, com a data, e ligue as páginas com [[Título]]; não repita o que já está lá.'
+            : ' Você só lê a wiki: o curador a atualiza sozinho depois da conversa, com o que ficar decidido; não diga que ela vai ficar desatualizada nem peça pra alguém editar.'
+        }`,
+        `## The wiki\n${me} has a wiki ${pagesPhrase(wiki.pages)}${wiki.pages ? ` (${wiki.kinds.join(', ')})` : ''}: what ${me} and the team know, written down. When the answer could be there (a person, a client, a project, a decision, a topic), look before replying or asking: wiki_indice to see what exists, wiki_buscar to find, wiki_ler to open. When you use a page, cite it as [[Title]]. If the wiki doesn't say, say it isn't there; don't make it up.${
+          wiki.write
+            ? ' You also write in it: wiki_escrever creates the page, or adds to its end or under a section, and wiki_editar swaps a passage that is wrong or stale. Write what is settled, with the date, and link pages with [[Title]]; do not repeat what is already there.'
+            : ' You only read the wiki: the curator updates it on its own after the conversation, with what was settled; do not say it will be out of date or ask anyone to edit it.'
+        }`
       ),
     skills &&
       skills.length > 0 &&
@@ -210,6 +205,9 @@ export function liveContext(opts: Pick<PromptOpts, 'settings' | 'memories' | 'of
   if (!parts.length) return ''
   return [LIVE_HEAD(), ...parts].join('\n\n')
 }
+
+const pagesPhrase = (n: number): string =>
+  n === 0 ? L('ainda sem páginas', 'with no pages yet') : n === 1 ? L('com 1 página', 'with 1 page') : L(`com ${n} páginas`, `with ${n} pages`)
 
 const LIVE_HEAD = (): string =>
   L(

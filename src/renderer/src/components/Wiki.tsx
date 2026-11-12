@@ -1598,12 +1598,12 @@ export function HandOff({ finding: f }: { finding: WikiFinding }): ReactNode {
   const [pick, setPick] = useState<string | null>(lastAsked ?? null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const writers = agents.filter((a) => isTeam(a) && wikiAccess(a) === 'write')
+  const writers = agents.filter((a) => isTeam(a) && wikiAccess(a) === 'read_write')
   const chosen = writers.find((a) => a.id === pick) ?? writers[0]
   if (!writers.length)
     return (
       <span className="muted small">
-        {L('Nenhum agente escreve na wiki ainda: ligue "Escreve na wiki" nas configurações de um, em Wiki.', 'No agent writes on the wiki yet: turn on "Writes the wiki" in one of their settings, under Wiki.')}
+        {L('Nenhum agente escreve na wiki ainda: escolha "Lê e escreve" em Ferramentas nas configurações de um.', 'No agent writes on the wiki yet: choose "Read and write" under Tools in one of their settings.')}
       </span>
     )
   const ask = (): void => {

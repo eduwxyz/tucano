@@ -2135,9 +2135,9 @@ const api: Handlers = {
     if (!f || !canHandOff(f.kind) || f.change || f.pages.some((t) => heldFrom(ctx, t))) throw new Error(L('Esse aviso não existe mais.', 'That finding is gone.'))
     const agent = db.agent(agentId)
     if (!agent || agent.archived || agent.kind === 'tuca') throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
-    if (wikiAccess(agent) !== 'write')
+    if (wikiAccess(agent) !== 'read_write')
       throw new Error(
-        L(`@${agent.handle} ainda não escreve na wiki: ligue "Escreve na wiki" nas configurações dele.`, `@${agent.handle} doesn't write on the wiki yet: turn on "Writes the wiki" in its settings.`)
+        L(`@${agent.handle} ainda não escreve na wiki: escolha "Lê e escreve" em Ferramentas nas configurações dele.`, `@${agent.handle} doesn't write on the wiki yet: choose "Read and write" under Tools in its settings.`)
       )
     const conversationId = api.openDm({ agentId: agent.id }, ctx)
     bg(runner.send(conversationId, handOffText(f, (t) => wiki.page(t)), [], undefined, ctx.person.id), 'wikiAsk')
