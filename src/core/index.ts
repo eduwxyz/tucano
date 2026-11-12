@@ -331,6 +331,20 @@ function watchAccount(id: string): void {
 }
 
 
+// The Codex subscription's windows, read again when the usage page asks (it does when it opens and
+// after each reply), at most once a minute, and only for a login on a ChatGPT plan.
+let codexQuotaAt = 0
+function refreshCodexQuota(): void {
+  const s = engines.codex
+  if (!s.loggedIn || s.route !== 'plan' || Date.now() - codexQuotaAt < 60_000) return
+  codexQuotaAt = Date.now()
+  void engineImpls.codex.planUsage?.().then((codexQuota) => {
+    if (!codexQuota) return
+    db.setSettings({ codexQuota })
+    emit({ type: 'settings', settings: settings() })
+  }, () => {})
+}
+
 // A harness that moved since it was found (an update to another folder) is looked for again.
 function moved(id: EngineId): Parameters<typeof relocating>[1] {
   return { path: () => engines[id].path, label: ENGINES[id].label, redetect: () => detect().then(() => undefined) }
@@ -1735,7 +1749,10 @@ const api: Handlers = {
     toMain({ type: 'open_path', path: backups })
   },
   report: ({ week }) => report(db, Date.now(), week),
-  usage: () => usage(db),
+  usage: () => {
+    refreshCodexQuota()
+    return usage(db)
+  },
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
   // Checked with TypeSafe before it's saved; null removes it.

@@ -1,4 +1,4 @@
-import type { Effort, EngineId, Quota } from '../../shared/types'
+import type { CodexQuota, Effort, EngineId, Quota } from '../../shared/types'
 
 export interface Turn {
   model: string
@@ -54,6 +54,7 @@ export interface Engine {
   release?(sessionId: string): void // a session that won't be resumed: its process and its file go
   clean?(workDir: string, accountDirs?: string[]): void // sessions left from an earlier run of the app, by agents under workDir
   dispose?(): void // the app is quitting: processes kept open close
+  planUsage?(): Promise<CodexQuota | undefined> // the usual login's subscription windows, when the CLI tells
   settle?(): Promise<void> // the files of sessions let go are gone (their processes write on their way out)
   // Starting the CLI takes about a second before any model call; these do it ahead of time.
   warm?(turn: TurnShape): void // a process ready for the next turn with these settings and no session (the router's)
