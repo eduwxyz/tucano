@@ -107,7 +107,7 @@ import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
-import { RoutingPane, SmartRoutingSwitch } from './Routing'
+import { RoutingPane, SmartRoutingRow } from './Routing'
 
 export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
   return (
@@ -2732,6 +2732,22 @@ export function ClassifiersCard(): ReactNode {
           })}
         </>
       )}
+      {/* The router that picks who replies keeps its fallback here, under the job it serves: with no
+          classifier on that job, a small model reads each message instead. */}
+      {!jobs.routing && (
+        <Field
+          label={L('Modelo do roteador', 'Router model')}
+          hint={L('Sem classificador em “Quem responde no canal”, é este modelo pequeno que lê cada mensagem e decide quem responde. Prefira um rápido: ele roda antes de cada resposta num canal.', 'With no classifier on “Who replies in a channel”, this small model reads each message and decides who replies. Go for a fast one: it runs before every reply in a channel.')}
+        >
+          <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} />
+        </Field>
+      )}
+      {/* The last line of the card: smart routing is a classifier feature like the others above, and
+          the tab it opens is offered only while it is on. */}
+      <SmartRoutingRow />
+      {settings.routing?.enabled === true && work && (
+        <OutsideGateway what={L('o pedido de cada resposta vai pro classificador do roteamento escolher o modelo.', 'each reply’s request goes to the routing classifier to pick the model.')} />
+      )}
       {error && <p className="note note--error">{error}</p>}
       <p className="hint">
         <Icon name="shield" size={13} /> {L('Um classificador não escreve texto: devolve uma escolha, um sim/não ou uma nota, com a probabilidade de cada opção. A chave fica no cofre do sistema e nunca volta pra tela.', 'A classifier writes no text: it returns a choice, a yes/no or a score, with each option’s probability. The key stays in the system’s vault and never comes back to the screen.')}
@@ -2952,31 +2968,6 @@ export function SettingsPage(): ReactNode {
             )}
           >
             <AccountsCard />
-          </Card>
-        )}
-
-        {pane('modelos') && (
-          <Card title={L('Roteador', 'Router')} lead={L('O que lê a conversa e decide quem responde nos canais: um modelo pequeno, ou um classificador. Não concede permissão nenhuma.', 'What reads the conversation and decides who replies in channels: a small model, or a classifier. It grants no permissions at all.')}>
-            {routingClassifier ? (
-              <div className="key-row">
-                <Icon name="spark" />
-                <div className="grow">
-                  <strong>{classifierLabel(routingClassifier)}</strong>
-                  <p className="muted small">
-                    {L('Um classificador escolhe quem responde neste workspace. Troque ou desligue em Classifiers.', 'A classifier picks who replies in this workspace. Change or turn it off in Classifiers.')}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', 'Go for a fast model: it runs before every reply in a channel.')}>
-                <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} />
-              </Field>
-            )}
-            <SmartRoutingSwitch />
-            {routingOn && work && (
-              <OutsideGateway what={L('o pedido de cada resposta vai pro classificador do roteamento escolher o modelo.', 'each reply’s request goes to the routing classifier to pick the model.')} />
-            )}
-            {routingClassifier && work && <OutsideGateway what={L('cada mensagem sem @menção vai pro classificador escolhido pra decidir quem responde.', 'every message without an @mention goes to the chosen classifier to pick who replies.')} />}
           </Card>
         )}
 

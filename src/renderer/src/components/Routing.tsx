@@ -105,10 +105,12 @@ const readerWarning = (reader: ClassifierConfig | undefined, hasKey: boolean): s
       ? ''
       : L(`Falta a chave do ${providerSpec(reader.provider).label} pra começar a rotear.`, `Add the ${providerSpec(reader.provider).label} key to start routing.`)
 
-// ---------- the switch, in the Jev block ----------
+// ---------- the switch, one more row of the Classifiers card ----------
 
-// One switch turns the feature on and reveals the tab; it never opts an agent in by itself.
-export function SmartRoutingSwitch(): ReactNode {
+// One switch turns the feature on and reveals the tab; it never opts an agent in by itself. It reads
+// as the last line of Settings › Classifiers, where the job it serves ("Which model answers") is
+// chosen: the routing it opens is a couple of clicks away, and only offered while it is on.
+export function SmartRoutingRow(): ReactNode {
   const settings = useStore((s) => s.settings)
   const routing = settings.routing?.enabled === true
   const reader = readerOf(settings)
@@ -118,22 +120,35 @@ export function SmartRoutingSwitch(): ReactNode {
   const on = settings.routing ?? defaultRouting()
   const set = (enabled: boolean, rest: Partial<RoutingConfig> = {}): void => updateSettings({ routing: normalizeRouting({ ...on, ...rest, enabled }) })
   return (
-    <div className="field">
-      <div className="row row--between">
-        <span className="field__label">{L('Roteamento inteligente', 'Smart model routing')}</span>
-        <Toggle on={routing} onChange={(v) => set(v)} />
-      </div>
-      <span className="hint">
-        {routing
+    <Field
+      group
+      label={L('Roteamento inteligente', 'Smart model routing')}
+      hint={
+        routing
           ? L(
-              'Um classificador lê cada pedido e escolhe o modelo nos seus pools, pra todo agente que não tiver a própria chave em Ligado ou Desligado. Um agente em Desligado na página dele usa o próprio modelo. Quem lê é escolhido em Classifiers.',
-              'A classifier reads each prompt and picks the model from your pools, for every agent that hasn’t set its own switch to On or Off. An agent set to Off on its page uses its own model. Which one reads is chosen in Classifiers.'
+              'Um classificador lê cada pedido e escolhe o modelo nos seus pools, pra todo agente que não tiver a própria chave em Ligado ou Desligado. Um agente em Desligado na página dele usa o próprio modelo. Quem lê é o classificador de “Qual modelo responde”, aqui em cima.',
+              'A classifier reads each prompt and picks the model from your pools, for every agent that hasn’t set its own switch to On or Off. An agent set to Off on its page uses its own model. Who reads is the classifier set on “Which model answers”, above.'
             )
           : L(
               'Desligado: cada agente usa o próprio modelo, menos os que estiverem em Ligado na página deles.',
               'Off: every agent uses its own model, except the ones set to On on their own page.'
-            )}
-      </span>
+            )
+      }
+    >
+      <div className="row row--end">
+        {routing && (
+          <button
+            className="btn btn--primary btn--sm"
+            onClick={() => {
+              navigate({ kind: 'settings' })
+              setTab('settings', 'roteamento')
+            }}
+          >
+            <Icon name="sliders" size={13} /> {L('Configurar as rotas', 'Configure routing')}
+          </button>
+        )}
+        <Toggle on={routing} onChange={(v) => set(v)} />
+      </div>
       {routing && onTheirOwn > 0 && (
         <span className="hint">
           {onTheirOwn === 1
@@ -141,23 +156,8 @@ export function SmartRoutingSwitch(): ReactNode {
             : L(`${onTheirOwn} agentes estão ligados só pra si e continuam roteando com isto desligado.`, `${onTheirOwn} agents are set to on by themselves and keep routing with this off.`)}
         </span>
       )}
-      {(routing || onTheirOwn > 0) && (
-        <p className="small">
-          <a
-            className="link"
-            href="#routing"
-            onClick={(ev) => {
-              ev.preventDefault()
-              navigate({ kind: 'settings' })
-              setTab('settings', 'roteamento')
-            }}
-          >
-            {L('Configurar as rotas', 'Configure routing')}
-          </a>
-        </p>
-      )}
       {routing && !readerReady && <p className="hint hint--warn">{readerWarning(reader, readerReady)}</p>}
-    </div>
+    </Field>
   )
 }
 
