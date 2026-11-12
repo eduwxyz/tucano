@@ -20,6 +20,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **An agent that only reads through Composio can link an account.** The first time an agent needs an app on Composio (Google Calendar, Gmail…), it calls `COMPOSIO_MANAGE_CONNECTIONS` for the sign-in link. That tool is sensitive, so an agent with read access never saw it: it found the app's actions, then failed because no account was linked, though reading was all it wanted. A read grant now sees that tool too, and every call to it asks for approval, at every level and whatever the rules; read-and-write is unchanged.
 
+- **The keyboard stays down when you open a conversation on a phone.** Opening a conversation or a thread, attaching a file or dictating put the focus in the message field, and on a touch screen that raised the keyboard over the messages you came to read. On a phone or tablet the field now takes the focus only when you tap it. On a computer it still does, as before.
+
 ## [0.2.27] - 2026-11-10
 
 > **Em português:**
