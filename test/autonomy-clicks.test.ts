@@ -14,7 +14,7 @@ import { Gateway } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
-const base: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as unknown as Settings
+const base: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as unknown as Settings
 
 const lia = (extra: Partial<Agent> = {}): Agent => ({ id: 'lia-0001', name: 'Lia', handle: 'lia', role: 'Vídeos', color: 'rose', instructions: '', modelId: 'opus', effort: 'high', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false, ...extra })
 
@@ -66,7 +66,7 @@ const scripted = (calls: [string, Record<string, unknown>][]): Engine => ({
     yield { type: 'done', text: 'ok', usage: { inputTokens: 10, cacheReadTokens: 0, outputTokens: 2 } }
   }
 })
-const others = { codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+const others = { codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
 
 beforeEach(async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ad-auto-'))

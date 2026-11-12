@@ -89,7 +89,7 @@ const agent: () => Agent = () => ({
 async function ask(statement: string, tool?: string): Promise<{ step: NonNullable<Message['run']>['steps'][number]; result: { text: string; isError?: boolean } }> {
   const runner = new Runner({
     db,
-    engines: { claude: sqlModel(tool), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') },
+    engines: { claude: sqlModel(tool), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
     settings: async () => settings,
     emit: (e) => events.push(e),
     workDir: join(dir, 'work'),
@@ -109,7 +109,7 @@ beforeEach(async () => {
   db = new Db(join(dir, 'test.db'))
   results = []
   events = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
   gateway = new Gateway()
   await gateway.start()
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: () => {}, openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback'), callTimeoutMs: 1000 })
