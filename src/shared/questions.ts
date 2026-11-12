@@ -171,7 +171,8 @@ export function answerLabel(question: Decision, answer: Answer): string {
   if (answer.skipped) return L('(pulou)', '(skipped)')
   if (question.kind === 'text') return answer.text ?? ''
   const chosen = [...(answer.chosen ?? [])].sort((a, b) => a - b).map((i) => question.options?.[i]?.label).filter(Boolean)
-  if (answer.other) chosen.push(`${L('Outra coisa', 'Something else')}: ${answer.other}`)
+  // A step written by hand is one more step, not the "Something else" of a menu.
+  if (answer.other) chosen.push(`${isNextSteps(question) ? L('Outro passo', 'Another step') : L('Outra coisa', 'Something else')}: ${answer.other}`)
   return chosen.join(', ')
 }
 
