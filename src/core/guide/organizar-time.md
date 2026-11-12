@@ -4,7 +4,7 @@
 Montar o organograma à mão é em **Time** (veja organograma). Dá também pra deixar um agente propor, e você só aprova.
 
 ## Ligar
-Na página do agente, em **Canais e skills**, ligue **Organiza o time** e salve. Só admins mudam isso.
+Na página do agente, em **Canais e skills**, ligue **Organiza o time** e salve. Só admins mudam isso. Sem isso, o agente diz que não tem permissão e como ligar, e faz o resto do pedido.
 
 ## O que ele faz
 - Vê o organograma como está agora: quem responde a quem e quem responde só a você.

@@ -5,7 +5,8 @@ import type { Agent } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { setLang } from '../src/shared/lang'
 import { proposalFrom } from '../src/core/tuca-help'
-import { agentFromDraft, bossArg, builderSection, draftFrom, orgLines, teamFrom } from '../src/core/tuca'
+import { agentFromDraft, bossArg, builderSection, draftFrom, notOrganizerGuide, orgLines, PROPOR_TIME, teamFrom, withoutBoss } from '../src/core/tuca'
+import { PROPOR_AJUSTE } from '../src/core/tuca-help'
 
 setLang('pt')
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: 'x', modelId: 'sonnet', effort: 'medium', limit: 1000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
@@ -19,7 +20,13 @@ const one = (nome: string, extra: Record<string, unknown> = {}): Record<string, 
 
 describe('propor_ajuste with responde_a', () => {
   it('is only for the Tuca and an agent that organizes the team', () => {
-    expect(proposalFrom('propor_ajuste', { agente: 'nina', responde_a: 'lia' }, ctx).error).toContain('Só o Tuca e um agente que organiza o time')
+    // A refusal it passes on (the person hears how to allow it), not a failure to retry.
+    const r = proposalFrom('propor_ajuste', { agente: 'nina', responde_a: 'lia' }, { ...ctx, me: 'Edu' })
+    expect(r).toMatchObject({ denied: true })
+    expect(r.error).toContain('Você não tem permissão pra mudar o organograma')
+    expect(r.error).toContain('Não tente de novo')
+    expect(r.error).toContain('Diga a Edu')
+    expect(r.error).toContain('**Organiza o time**')
   })
 
   it('becomes a change of boss, with who it answered to before', () => {
@@ -46,7 +53,8 @@ describe('proposing new agents in the chart', () => {
     const r = draftFrom(one('Duda', { responde_a: 'lia' }), { ...base, agents: team, organizes: true })
     expect(r.draft?.reportsTo).toBe('a1')
     expect(agentFromDraft(r.draft!, [], 1000).reportsTo).toBe('a1')
-    expect(draftFrom(one('Duda', { responde_a: 'lia' }), { ...base, agents: team }).error).toContain('Só o Tuca')
+    expect(draftFrom(one('Duda', { responde_a: 'lia' }), { ...base, agents: team })).toMatchObject({ denied: true })
+    expect(teamFrom({ agentes: [one('Duda', { responde_a: 'lia' }), one('Caio')] }, { ...base, agents: team, channels: [] })).toMatchObject({ denied: true })
   })
 
   it('a team may put one of its own agents over another, and the tree is checked', () => {
@@ -82,5 +90,17 @@ describe('the flag is kept', () => {
     db.saveAgent({ ...db.agent('a1')!, manager: undefined })
     expect(db.agent('a1')?.manager).toBeUndefined()
     db.close()
+  })
+})
+
+describe('an agent that does not organize the team', () => {
+  it("isn't offered responde_a, in a change or in a team's agents, and is told to say how to allow it", () => {
+    expect(Object.keys(PROPOR_AJUSTE.inputSchema.properties!)).toContain('responde_a')
+    expect(Object.keys(withoutBoss(PROPOR_AJUSTE).inputSchema.properties!)).not.toContain('responde_a')
+    const each = (t: typeof PROPOR_TIME): string[] => Object.keys((t.inputSchema.properties!['agentes'] as { items: { properties: Record<string, unknown> } }).items.properties)
+    expect(each(PROPOR_TIME)).toContain('responde_a')
+    expect(each(withoutBoss(PROPOR_TIME))).not.toContain('responde_a')
+    expect(withoutBoss(PROPOR_AJUSTE).name).toBe('propor_ajuste')
+    expect(notOrganizerGuide('Edu')).toContain('não tente')
   })
 })

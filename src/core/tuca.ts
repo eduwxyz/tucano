@@ -17,11 +17,41 @@ const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green
 const NOBODY = /^(ningu[eé]m|nenhum|nobody|no one|none|-)$/i
 
 // Only the Tuca and an agent that organizes the team (Agent.manager) propose whom an agent answers to.
-export const organizeOnly = (): string =>
+// Said to an agent without it: a refusal it passes on, not a failure to retry (it counted toward
+// ERRORS_STOP, and an agent asked to organize the team tried eight ways before the reply stopped).
+export const organizeOnly = (me = L('a pessoa', 'the person')): string =>
   L(
-    'Só o Tuca e um agente que organiza o time propõem a quem um agente responde. Deixe responde_a de fora.',
-    'Only the Tuca and an agent that organizes the team propose whom an agent answers to. Leave responde_a out.'
+    `Você não tem permissão pra mudar o organograma (a quem cada agente responde). Não tente de novo nem por outro caminho. Diga a ${me}, em uma frase, que pra isso é só ligar **Organiza o time** na sua página, em Canais e skills, ou montar na tela Time; o resto do pedido você pode fazer.`,
+    `You don't have permission to change the org chart (whom each agent answers to). Don't try again or another way. Tell ${me}, in one sentence, that for that they turn on **Organizes the team** on your page, under Channels and skills, or set it up on the Time screen; the rest of the request you can do.`
   )
+
+// What an agent that doesn't organize the team is told, so it says so instead of looking for a way.
+export const notOrganizerGuide = (me: string): string =>
+  L(
+    `Você não organiza o organograma (a quem cada agente responde). Se ${me} pedir pra montar ou mudar quem responde a quem, não tente: diga que é só ligar **Organiza o time** na sua página, em Canais e skills, ou montar na tela Time.`,
+    `You don't organize the org chart (whom each agent answers to). If ${me} asks to set up or change who answers to whom, don't try: say they can turn on **Organizes the team** on your page, under Channels and skills, or set it up on the Time screen.`
+  )
+
+// A proposal tool as an agent that doesn't organize the team sees it: without responde_a, so it
+// isn't offered what it may not use.
+export function withoutBoss(t: ToolDef): ToolDef {
+  const strip = (props: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+    if (!props) return props
+    const { responde_a: _boss, ...rest } = props
+    const agentes = rest['agentes'] as { items?: { properties?: Record<string, unknown> } } | undefined
+    return agentes?.items ? { ...rest, agentes: { ...agentes, items: { ...agentes.items, properties: strip(agentes.items.properties) } } } : rest
+  }
+  return {
+    name: t.name,
+    get description() {
+      return t.description
+    },
+    get inputSchema() {
+      const s = t.inputSchema
+      return { ...s, properties: strip(s.properties) }
+    }
+  }
+}
 
 // `responde_a`: the agent `id` will answer to ('' for no one), by @handle or name, checked against the
 // org chart's rules (src/shared/org.ts). `id` may be one not made yet ('' for a new agent).
@@ -241,12 +271,13 @@ export const PROPOR_TIME: ToolDef = {
   }
 }
 
-export function teamFrom(args: Record<string, unknown>, ctx: Parameters<typeof draftFrom>[1] & { channels: string[] }): { proposal?: Proposal; error?: string } {
+export function teamFrom(args: Record<string, unknown>, ctx: Parameters<typeof draftFrom>[1] & { channels: string[] }): { proposal?: Proposal; error?: string; denied?: boolean } {
   const list = Array.isArray(args['agentes']) ? (args['agentes'] as unknown[]) : []
   if (list.length < 2 || list.length > 8) return { error: L('Um time tem de 2 a 8 agentes. Pra um só, use propor_agente.', 'A team has 2 to 8 agents. For one, use propor_agente.') }
   const agents: AgentDraft[] = []
   for (const [i, raw] of list.entries()) {
     const r = draftFrom((raw ?? {}) as Record<string, unknown>, { ...ctx, team: true })
+    if (r.denied) return r
     if (!r.draft) return { error: L(`Agente ${i + 1}: ${r.error}`, `Agent ${i + 1}: ${r.error}`) }
     if (agents.some((a) => a.name.toLowerCase() === r.draft!.name.toLowerCase())) return { error: L(`Dois agentes com o nome ${r.draft.name}.`, `Two agents named ${r.draft.name}.`) }
     const { task: _task, reason: _reason, ...draft } = r.draft
@@ -314,7 +345,7 @@ export function builderSection(s: Pick<Settings, 'engines'>, ctx: { models: { id
 // A propor_agente call as a draft, or what to fix.
 // `agents`: the team as it is (for responde_a); `organizes`: whoever proposes may set it; `team`: a team's
 // card, where responde_a may also name another agent of the same card (checked by teamFrom).
-export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId: string) => boolean; fallbackModel: string; connectors: Connector[]; agents?: Agent[]; organizes?: boolean; team?: boolean }): { draft?: AgentDraft; error?: string } {
+export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId: string) => boolean; fallbackModel: string; connectors: Connector[]; agents?: Agent[]; organizes?: boolean; team?: boolean; me?: string }): { draft?: AgentDraft; error?: string; denied?: boolean } {
   const text = (k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
   const name = text('nome', 40)
   const instructions = typeof args['instrucoes'] === 'string' ? (args['instrucoes'] as string) : ''
@@ -322,7 +353,7 @@ export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId
   let boss: Pick<AgentDraft, 'reportsTo' | 'reportsToName'> = {}
   const bossRaw = text('responde_a', 60)
   if (bossRaw && !NOBODY.test(bossRaw)) {
-    if (!ctx.organizes) return { error: organizeOnly() }
+    if (!ctx.organizes) return { error: organizeOnly(ctx.me), denied: true }
     const b = bossArg(bossRaw, ctx.agents ?? [], '')
     if (b.id) boss = { reportsTo: b.id }
     else if (ctx.team && !(ctx.agents ?? []).some((a) => a.handle.toLowerCase() === bossRaw.replace(/^@/, '').toLowerCase())) boss = { reportsToName: bossRaw.replace(/^@/, '') }

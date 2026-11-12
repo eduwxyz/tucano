@@ -202,6 +202,7 @@ export interface ProposalCtx {
   usable: (modelId: string) => boolean
   pending?: string[] // names of the agents proposed earlier in this same reply (a new-agent card, a team): not made yet
   organizes?: boolean // the Tuca, or an agent that organizes the team: it may propose whom an agent answers to
+  me?: string // the person, as the refusal names them
 }
 
 const text = (args: Record<string, unknown>, k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
@@ -237,7 +238,8 @@ export function pendingAgents(run: { agentDraft?: AgentDraft; proposal?: Proposa
   return [...(run?.agentDraft && !run.agentDraft.state ? [run.agentDraft.name] : []), ...teams]
 }
 
-export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: Proposal; error?: string } {
+// `denied`: it asked for what this agent may not do (the org chart): a refusal to pass on, not a failure.
+export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: Proposal; error?: string; denied?: boolean } {
   const reason = text(args, 'motivo', 300) || undefined
   if (tool === PROPOR_AJUSTE.name) {
     const agent = findAgent(ctx, args['agente'])
@@ -269,7 +271,7 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
       if (n !== agent.limit) changes.limit = n
     }
     if (args['responde_a'] !== undefined) {
-      if (!ctx.organizes) return { error: organizeOnly() }
+      if (!ctx.organizes) return { error: organizeOnly(ctx.me), denied: true }
       const b = bossArg(args['responde_a'], ctx.agents, agent.id)
       if (b.error) return { error: b.error }
       if (b.id !== (agent.reportsTo ?? '')) changes.reportsTo = b.id
