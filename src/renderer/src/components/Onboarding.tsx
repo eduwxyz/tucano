@@ -2,6 +2,7 @@
 // the person sets what it can use and its first task; and the introduction's "Prefiro configurar do
 // zero" (Intro.tsx), the same form from a template, which hands the agent back to the introduction.
 import { L } from '../../../shared/lang'
+import { instructionLengthNote } from '../../../shared/instructions'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ENGINES,
@@ -506,6 +507,7 @@ function MakeAgent(p: {
         <label className="onb__field">
           <span>{L(`O que ${agent.name.trim() || 'o agente'} faz`, `What ${agent.name.trim() || 'the agent'} does`)}</span>
           <textarea rows={4} value={agent.instructions} placeholder={L('Escreva como explicaria pra um colega novo: o que fazer, o que evitar, quando perguntar.', 'Write it as you’d explain it to a new colleague: what to do, what to avoid, when to ask.')} onChange={(e) => patch({ instructions: e.target.value })} />
+          {instructionLengthNote(agent.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(agent.instructions.length)}</p>}
         </label>
         <Nav onBack={p.onBack} onNext={p.onNext} disabled={!agent.name.trim() || !usable(modelInfo(agent.modelId))} />
       </section>

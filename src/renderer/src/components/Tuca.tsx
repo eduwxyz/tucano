@@ -32,6 +32,7 @@ import {
   proposalsOf
 } from '../store'
 import { AgentAvatar, Icon, tokens } from './ui'
+import { instructionLengthNote } from '../../../shared/instructions'
 import { describeRoutine } from './Routines'
 
 const EFFORT = (): Record<AgentDraft['effort'], string> => ({ low: L('esforço baixo', 'low effort'), medium: L('esforço médio', 'medium effort'), high: L('esforço alto', 'high effort'), xhigh: L('esforço máximo', 'max effort') })
@@ -84,6 +85,7 @@ export function AgentProposal({ message }: { message: Message }): ReactNode {
       <p className={`draft-card__instructions ${open ? 'is-open' : ''}`} onClick={() => setOpen(!open)} title={open ? undefined : L('Ver tudo', 'Show all')}>
         {d.instructions}
       </p>
+      {instructionLengthNote(d.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(d.instructions.length)}</p>}
       <div className="draft-card__facts small">
         {model && (
           <span>
@@ -227,6 +229,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
             <p className={`draft-card__instructions ${open ? 'is-open' : ''}`} onClick={() => setOpen(!open)} title={open ? undefined : L('Ver tudo', 'Show all')}>
               {c.instructions}
             </p>
+            {instructionLengthNote(c.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(c.instructions.length)}</p>}
           </>
         )}
       </>
@@ -294,6 +297,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
               <div className="grow">
                 <strong>{d.name}</strong> <span className="muted small">{d.role}</span>
                 <p className="muted small">{d.instructions.split('\n')[0]}</p>
+                {instructionLengthNote(d.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(d.instructions.length)}</p>}
               </div>
               <span className="muted small">{m ? m.label : d.modelId}</span>
             </div>

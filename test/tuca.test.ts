@@ -20,6 +20,13 @@ describe('the Tuca proposals', () => {
     expect(draftFrom({ nome: 'R', funcao: 'x', instrucoes: 'y', conectores: [{ conector: 'Linear', nivel: 'escrita' }] }, ctx).draft?.grants).toEqual({ 'c-lin': 'read_write' })
   })
 
+  it('keeps new agent instructions over the recommendation exactly as provided', () => {
+    const instructions = ` ${'x'.repeat(32_000)} END\n`
+    const actual = draftFrom({ nome: 'Rafa', instrucoes: instructions }, ctx).draft?.instructions
+    expect(actual).toHaveLength(instructions.length)
+    expect(actual).toMatch(/ END\n$/)
+  })
+
   it('says what to fix', () => {
     expect(draftFrom({ nome: 'Rafa' }, ctx).error).toContain('instrucoes')
     expect(draftFrom({ nome: 'Rafa', instrucoes: 'x', conectores: [{ conector: 'Jira' }] }, ctx).error).toContain('"Jira"')
