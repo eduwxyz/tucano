@@ -63,6 +63,19 @@ const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
+// An agent with no monthly ceiling (limit 0) still keeps a per-reply cap, or a
+// reply that keeps making progress would never be cut. The percentage then has
+// no month to apply to, so it is taken over this base instead.
+const NO_LIMIT_REPLY_BASE = 1_000_000
+
+// The month's ceiling for an agent: 0 (or anything that isn't a positive
+// number) is no ceiling, so every comparison against it is false.
+export const monthlyCeiling = (limit: number): number => (limit > 0 ? limit : Infinity)
+
+// How many tokens a single reply may spend. With a ceiling it is a share of it;
+// without one the share is taken over NO_LIMIT_REPLY_BASE, so a reply still has
+// a top even when the month doesn't.
+export const replyBudget = (limit: number, pct: number): number => Math.round(((limit > 0 ? limit : NO_LIMIT_REPLY_BASE) * pct) / 100)
 const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
 const STEP_ERROR_MAX = 2_000 // the reason a step failed, as kept on the step
 const SUMMED_COMPUTER_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'start_service', 'stop_service']) // a result line when done
@@ -948,8 +961,11 @@ export class Runner {
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
+    // A limit of 0 is no ceiling at all: comparing against it would stop the
+    // agent on its first turn, so every check below goes through `ceiling`.
     const used = db.usedThisMonth(agent.id)
-    if (used >= agent.limit) {
+    const ceiling = monthlyCeiling(agent.limit)
+    if (used >= ceiling) {
       save({
         text: L('Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.', "I stopped: I've used all my tokens for this month. It can be raised on my page."),
         run: { status: 'limit_reached', endedAt: Date.now(), depth: opts.depth, steps: [], ...again }
@@ -1000,7 +1016,7 @@ export class Runner {
     const members = this.members(conv)
     const peers = members.filter((a) => a.id !== agent.id)
     const memory = this.deps.memory
-    const { summary, messages: windowAll } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
+    const { summary, messages: windowAll, before: beforeAll = [] } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // Whom this reply is for: the person every "ask", "tell" and "approve" in its prompt and tools
     // means. The owner reads by the workspace's name, so one person's prompts stay as they were.
     const requester = requesterOf(db, conv, windowAll)
@@ -1008,6 +1024,7 @@ export class Runner {
     // what a channel held before the Tucano had more people (the owner's: see People.visibleAt).
     const sees = new People(db)
     const windowed = windowAll.filter((m) => sees.visibleAt(requester, m))
+    const above = beforeAll.filter((m) => sees.visibleAt(requester, m)) // what was on screen when a person opened this thread
     // A routed reply answers its message, and its transcript ends there: what people wrote after it
     // is another reply's. Replies that came in since to what was before it (its own earlier one,
     // say) are what was already said: they go before it. Replies to it or to later ones, none.
@@ -1078,7 +1095,7 @@ export class Runner {
 
     // Guards (spec §3). Long work that keeps going somewhere is never cut: a loop
     // repeats itself, a stuck turn goes quiet, and a costly one pauses to ask.
-    const budget = Math.round((agent.limit * (settings.runBudgetPct ?? RUN_BUDGET_PCT)) / 100)
+    const budget = replyBudget(agent.limit, settings.runBudgetPct ?? RUN_BUDGET_PCT)
     const stallMs = (settings.runStallMinutes ?? RUN_STALL_MINUTES) * 60_000
     const seen = new Map<string, { result: string; n: number }>()
     let failing = 0 // tool calls failing in a row
@@ -2058,7 +2075,7 @@ ${note}`,
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
     const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -2121,7 +2138,7 @@ ${note}`,
             } else if (ev.type === 'progress') {
               progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
               const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
-              if (used + counted > agent.limit) halt('limit')
+              if (used + counted > ceiling) halt('limit')
               else if (counted > budget) {
                 if (!overBudget) addSteps({ id: randomUUID(), label: L('Chegou no teto da resposta', 'Reached the reply cap'), detail: `${tokenCount(budget)} tokens`, status: 'error' })
                 overBudget = true
@@ -2186,7 +2203,8 @@ ${note}`,
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
     const usedNow = db.usedThisMonth(agent.id)
-    if (used < agent.limit * USAGE_ALERT && usedNow >= agent.limit * USAGE_ALERT && usedNow < agent.limit) {
+    // Only an agent with a ceiling has a share of it to warn about.
+    if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {
       const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
       this.post(
         conv.id,
@@ -2291,6 +2309,13 @@ ${note}`,
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason, decider)) return
     // Everyone who sees the card learns it's decided (and by whom) now, not after the call it allowed.
     emit({ type: 'approval', approval: db.approval(id)! })
+    // The reply the decision was holding is over: it asked, and it got an answer. Closing it here
+    // rather than after the call means a quit in the middle of that call can't leave it saying
+    // "waiting for you" with nothing left to wake it. A live reply keeps its run, which ends itself.
+    if (!this.controllers.has(ap.messageId)) {
+      const waiting = db.message(ap.messageId)
+      if (waiting?.run?.status === 'waiting_approval') this.update(waiting, { run: { ...waiting.run, status: 'done' } })
+    }
     if (decider) db.addActivity({ personId: decider, kind: 'approval.decided', target: id, detail: { decision, agentId: ap.agentId, connector: ap.connectorName, tool: ap.tool } })
     const owner = db.agent(ap.agentId)
     // A runner (Composio's) is never allowed for good itself: "always" allows the inner tools that asked, each on its own.
@@ -2588,6 +2613,32 @@ ${note}`,
 
   async expireApprovals(): Promise<void> {
     for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
+  }
+
+  // A decision written while the app was quitting (or while the approved call was running) leaves
+  // the reply at waiting_approval for good: the approval is no longer pending, so decide() ignores
+  // it, expireApprovals() skips it and nothing else looks. Closing those at every start is the only
+  // way the "?" on the DM can come off again.
+  async settleDecidedRuns(): Promise<number> {
+    const { db } = this.deps
+    let n = 0
+    for (const m of db.messagesWithRun(['waiting_approval'])) {
+      if (m.run?.status !== 'waiting_approval' || this.controllers.has(m.id)) continue
+      const ap = db.approvalForMessage(m.id)
+      if (!ap || ap.state === 'pending') continue // still the person's to answer
+      const label = ap.state === 'approved' ? L('Aprovado', 'Approved') : ap.state === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
+      const detail = ap.outcome ?? L('A decisão ficou salva, mas a resposta nunca terminou de ser gravada.', 'The decision was saved, but the reply never finished saving.')
+      this.update(m, {
+        run: {
+          ...m.run,
+          status: 'done',
+          steps: [...m.run.steps, { id: randomUUID(), label, detail, status: ap.state === 'approved' ? 'done' : 'error' }]
+        }
+      })
+      n++
+      this.deps.emit({ type: 'approval', approval: db.approval(ap.id)! })
+    }
+    return n
   }
 
   // A question whose decisions `by` may answer on the card now: theirs (or one they may answer for

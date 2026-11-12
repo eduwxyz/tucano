@@ -85,6 +85,7 @@ import { canEditChannel,
   type Person
 } from '../store'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
@@ -765,6 +766,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   )
   return (
     <aside className="side-panel side-panel--thread">
+      <PanelResize />
       <header className="side-panel__head">
         <Icon name="thread" size={14} />
         <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
@@ -1305,17 +1307,20 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const actions = runner ? innerActions(approval.tool, approval.args) : undefined
   // What "always allow" covers there: each inner tool that asked, on its own (none for a raw request or code).
   const forGood = runner ? runnerRules(approval.connectorId, approval.tool, approval.args)?.map((r) => r.slice(r.indexOf(':') + 1)) : undefined
-  // Hold to approve: CSS fills the button in 1.5s (.is-holding); the approval goes when
-  // that fill ends while still held. Letting go drains it back. Space or Enter hold too.
+  // Hold to approve: CSS fills the button in 1.5s (.is-holding) and this timer approves, so the
+  // approval no longer depends on a transitionend that a re-render or a throttled window can drop.
+  // Letting go drains the fill back and clears the timer. Space or Enter hold too.
   const [holding, setHolding] = useState(false)
   const startHold = (): void => setHolding(true)
   const cancelHold = (): void => setHolding(false)
-  const holdFilled = (e: React.TransitionEvent<HTMLButtonElement>): void => {
-    if (holding && e.propertyName === 'transform' && e.pseudoElement === '::before') {
+  useEffect(() => {
+    if (!holding) return
+    const t = setTimeout(() => {
       setHolding(false)
       decideApproval(approval.id, 'approved')
-    }
-  }
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [holding, approval.id])
 
   const decided = approval.state !== 'pending'
   // A command on the agent's computer: what it does, in words, and the command itself.
@@ -1461,17 +1466,24 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
       ) : (
         <div className="row">
           {approval.highRisk ? (
+            // The hold can't depend on the pointer staying inside the button: taking capture makes
+            // the browser fire pointerout/pointerleave on the button at once, and a cursor that drifts
+            // off fires them too. Capture keeps the release, and pointercancel is the real interruption.
             <button
               className={`btn btn--primary btn--hold ${holding ? 'is-holding' : ''}`}
-              onPointerDown={startHold}
+              onPointerDown={(e) => {
+                e.currentTarget.setPointerCapture(e.pointerId)
+                startHold()
+              }}
               onPointerUp={cancelHold}
-              onPointerLeave={cancelHold}
+              onPointerCancel={cancelHold}
               onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && !e.repeat && (e.preventDefault(), startHold())}
               onKeyUp={(e) => (e.key === ' ' || e.key === 'Enter') && cancelHold()}
               onBlur={cancelHold}
-              onTransitionEnd={holdFilled}
             >
-              <span>{holding ? L('Segure…', 'Hold…') : L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
+              {/* One label for both states: swapping it to "Hold…" shrank the button under the
+                  cursor, and the fill from ::before is the feedback anyway. */}
+              <span>{L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
             </button>
           ) : (
             <>
@@ -2104,7 +2116,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           <div className="drop-overlay__card">
             <Icon name="image" size={28} />
             <strong>{L('Solte pra anexar', 'Drop to attach')}</strong>
-            <span className="muted">{L('Os agentes veem a imagem junto com a mensagem.', 'Agents see the image along with the message.')}</span>
+            <span className="muted">{L('Os agentes veem o conteúdo junto com a mensagem.', 'Agents see the content along with the message.')}</span>
           </div>
         </div>
       )}

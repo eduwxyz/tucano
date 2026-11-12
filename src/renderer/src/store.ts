@@ -55,7 +55,8 @@ import {
   type LocalInfo,
   type VoiceModelId,
   type VoiceStatus,
-  type ProposalsResult
+  type ProposalsResult,
+  type BackupSummary
 } from '../../shared/types'
 import { call, connect, disconnect } from './rpc'
 
@@ -998,6 +999,11 @@ export const setTelegramToken = (token: string | null): Promise<void> => call('s
 export const unpairTelegram = (): void => void fire(L('Não consegui desconectar o Telegram.', "I couldn't disconnect Telegram."), 'unpairTelegram')
 export const exportTeam = (): Promise<string> => call('exportTeam')
 export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
+export const exportBackup = (): Promise<{ path: string } & BackupSummary> => call('exportBackup')
+export const restoreCheck = (path: string): Promise<BackupSummary> => call('restoreCheck', { path })
+export const restoreApply = (): Promise<void> => call('restoreApply')
+export const restoreCancel = (): Promise<void> => call('restoreCancel')
+export const restoreInfo = (): Promise<{ at: number; routines: number } | null> => call('restoreInfo')
 export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)
 export const backupNow = (): Promise<string> => call('backupNow')
 export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')

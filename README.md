@@ -218,7 +218,7 @@ Add yourself to the `docker` group with `sudo usermod -aG docker $USER`, then lo
 Click **Authorize in the browser**, on the agent's page or in Connectors, and sign in to the tool.
 
 **"This Linux has no keyring open" when saving a password.**
-Tucano keeps passwords only in the system keyring. Install `gnome-keyring` (or turn on KWallet, on KDE), log out and back in, and try again.
+Tucano keeps passwords only in the system keyring. Install `gnome-keyring` or another Secret Service (or turn on KWallet, on KDE), log out and back in, and try again. It works on any desktop or compositor, as long as the keyring is unlocked.
 
 **The AppImage doesn't open on Ubuntu 24.04 or later.**
 Ubuntu restricts the sandbox Electron apps use. Install the .deb instead: it brings the AppArmor profile that allows it.

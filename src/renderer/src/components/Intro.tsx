@@ -50,7 +50,7 @@ import {
   type SetupState
 } from '../store'
 import { HarnessList } from './Harness'
-import { STATUS, Toggle } from './Pages'
+import { BackupCard, STATUS, Toggle } from './Pages'
 import { Select } from './Select'
 import { useEngineModels } from './Harness'
 import { Splash } from './Splash'
@@ -287,6 +287,9 @@ function LangToggle(): ReactNode {
 function Welcome({ name, setName, onNext }: { name: string; setName: (v: string) => void; onNext: () => void }): ReactNode {
   const servers = !!window.tucano?.servers
   const [joining, setJoining] = useState(false)
+  // A Tucano on a server, new: whoever used Tucano on their computer brings it all here instead.
+  const web = windowless()
+  const [restoring, setRestoring] = useState(false)
   return (
     <div className="intro__split">
       <div className="intro-art intro-art--peach" aria-hidden>
@@ -332,8 +335,18 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
                 {L('Tenho um convite ou um servidor', 'I have an invite or a server')}
               </button>
             )}
+            {web && (
+              <button className="intro-link" aria-expanded={restoring} onClick={() => setRestoring(!restoring)}>
+                {L('Já uso o Tucano no computador', 'I already use Tucano on my computer')}
+              </button>
+            )}
           </div>
           {joining && <JoinLink />}
+          {restoring && (
+            <div className="intro-restore">
+              <BackupCard />
+            </div>
+          )}
         </div>
         <span className="intro-foot">{L('Conversas, memória e logins ficam no seu computador.', 'Conversations, memory and logins stay on your computer.')}</span>
       </section>

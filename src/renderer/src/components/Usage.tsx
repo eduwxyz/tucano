@@ -295,16 +295,17 @@ function Agents({ u }: { u: UsageReport }): ReactNode {
 
 function AgentRow({ agent: a, stats, elapsed, daysInMonth, monthStart }: { agent: Agent; stats?: UsageReport['who'][number]; elapsed: number; daysInMonth: number; monthStart: number }): ReactNode {
   const model = modelInfo(a.modelId)
-  const pct = a.limit > 0 ? a.used / a.limit : 1
+  const unlimited = !(a.limit > 0)
+  const pct = unlimited ? 0 : a.used / a.limit
   // The pace only means something after a couple of days.
   const pace = elapsed >= 2 ? a.used / elapsed : undefined
   const projected = pace !== undefined ? pace * daysInMonth : undefined
   const projPct = projected !== undefined && a.limit > 0 ? projected / a.limit : undefined
-  const hitsOn = pace && a.limit > a.used ? new Date(monthStart + (a.limit / pace) * DAY) : undefined
+  const hitsOn = !unlimited && pace && a.limit > a.used ? new Date(monthStart + (a.limit / pace) * DAY) : undefined
 
   let status: ReactNode
   let tone = ''
-  if (a.used >= a.limit) {
+  if (!unlimited && a.used >= a.limit) {
     status = L('Bateu o limite: parado até o mês virar ou você subir o limite', 'Hit the limit: stopped until the month turns or you raise the limit')
     tone = 'is-danger'
   } else if (projPct !== undefined && projPct >= 1 && hitsOn) {
@@ -335,7 +336,9 @@ function AgentRow({ agent: a, stats, elapsed, daysInMonth, monthStart }: { agent
       </span>
       <span className="usage-agent__nums">
         <strong>{tokens(a.used)}</strong>
-        <span className="muted small">{L('de', 'of')} {tokens(a.limit)} · {percent(pct)}</span>
+        <span className="muted small">
+          {unlimited ? L('sem limite', 'no limit') : `${L('de', 'of')} ${tokens(a.limit)} · ${percent(pct)}`}
+        </span>
       </span>
       <Icon name="chevron" size={14} />
     </button>

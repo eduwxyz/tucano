@@ -1359,6 +1359,30 @@ export class Wiki {
     return this.addChange({ ops, by: c.by, ...(c.source ? { sourceId: c.source.id } : {}), ...(c.reason ? { reason: c.reason } : {}) })
   }
 
+  // Everything waiting goes in at once, oldest first (the review's fixes stay in Cuidados). One that
+  // ran into a newer page, often the one before it in the list, is made again on it and goes in too;
+  // one whose passage is gone stays, to redo by hand. Says how many went in and how many stayed.
+  applyWaiting(byName: string, sees: (c: WikiChange) => boolean = () => true): { applied: number; left: number } {
+    this.writable()
+    const waiting = [...this.changes('pending'), ...this.changes('conflict')].filter((c) => c.by !== 'review' && sees(c)).sort((a, b) => a.at - b.at)
+    let applied = 0
+    let left = 0
+    for (const c of waiting) {
+      try {
+        let r = c.state === 'pending' ? this.applyChange(c.id, byName) : c
+        if (r.state === 'conflict') {
+          const again = this.rebaseChange(r.id)
+          r = again ? this.applyChange(again.id, byName) : r
+        }
+        if (r.state === 'applied') applied++
+        else left++
+      } catch {
+        left++ // its source went: nothing of it is written
+      }
+    }
+    return { applied, left }
+  }
+
   refuseChange(id: string): void {
     this.db.prepare("UPDATE changes SET state = 'refused', decided_at = ? WHERE id = ? AND state IN ('pending', 'conflict')").run(Date.now(), id)
     this.onChange()

@@ -1,6 +1,6 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
-import type { WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
+import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
 
@@ -137,6 +137,13 @@ export interface Api {
   importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
   backupNow(): string // where the copy went
+  // Everything in one .zip, to take this Tucano to a server (desktop): where it went, and what's in it.
+  exportBackup(): { path: string } & BackupSummary
+  // On a server, the owner: a backup sent up (/upload) checked and set apart; nothing changes yet.
+  restoreCheck(p: { path: string }): BackupSummary
+  restoreApply(): void // the checked backup replaces everything: the server restarts with it
+  restoreCancel(): void
+  restoreInfo(): { at: number; routines: number } | null // the last restore, for what to redo after it
   openBackups(): void
   report(p: { week?: number }): Report // the calendar week starting at `week` (a Monday); this one by default
   usage(): UsageReport
@@ -159,6 +166,7 @@ export interface Api {
   wikiChange(p: { id: string }): WikiChange | null
   wikiApplyChange(p: { id: string }): WikiChange // a pending one; a conflict comes back as such
   wikiRefuseChange(p: { id: string }): void
+  wikiApplyWaiting(): { applied: number; left: number } // all that waits, at once
   wikiUndoChange(p: { id: string }): void
   wikiSources(): WikiSource[]
   wikiSource(p: { id: string }): (WikiSource & { text: string }) | null

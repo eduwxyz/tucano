@@ -325,10 +325,19 @@ export function time(at: number): string {
 }
 
 export function UsageBar({ used, limit }: { used: number; limit: number }): ReactNode {
-  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 100
-  const tone = pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
+  // No limit draws an empty bar: a full red one reads as "already spent it all".
+  const unlimited = !(limit > 0)
+  const pct = unlimited ? 0 : Math.min(100, (used / limit) * 100)
+  const tone = unlimited ? 'ok' : pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
   return (
-    <span className={`budget budget--${tone}`} role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+    <span
+      className={`budget budget--${tone}`}
+      role="meter"
+      aria-valuenow={Math.round(pct)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      {...(unlimited ? { 'aria-valuetext': L('sem limite', 'no limit') } : {})}
+    >
       <span className="budget__fill" style={{ transform: `scaleX(${pct / 100})` }} />
     </span>
   )
