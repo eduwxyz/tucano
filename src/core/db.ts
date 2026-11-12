@@ -1216,8 +1216,10 @@ export class Db {
   }
 
   // My prompts that were still waiting their turn when the app closed, oldest first (runs.ts, `resumeQueued`).
+  // Only 'queue': a message handed into a running reply keeps its 'steer' mark after that reply answered
+  // it, and an app that opened again must not answer it a second time.
   queuedMessages(): Message[] {
-    return (this.db.prepare(`SELECT * FROM messages WHERE send_mode IS NOT NULL ORDER BY at`).all() as Row[]).map((r) => this.toMessage(r))
+    return (this.db.prepare(`SELECT * FROM messages WHERE send_mode = 'queue' ORDER BY at`).all() as Row[]).map((r) => this.toMessage(r))
   }
 
   // The replies whose run is in one of these states, oldest first. Found in SQL: the rest of
