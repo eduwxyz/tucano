@@ -100,15 +100,16 @@ type Repeat = 'week' | 'once' | 'date' | 'month'
 type Draft = RoutineInput & { conversationId: string } // '' while the agent's DM doesn't exist yet: created on save
 
 // A fresh copy to open in the form: same content, but no id (saves as new) and no owner (it's yours).
-function duplicateDraft(r: Routine): Draft {
+// It starts off, so it doesn't run next to the original until it's turned on; a webhook gets its own address on save.
+export function duplicateDraft(r: Routine): Draft {
   return {
     name: `${r.name} ${L('(cópia)', '(copy)')}`,
     prompt: r.prompt,
     agentId: r.agentId,
     conversationId: r.conversationId,
     schedule: { ...r.schedule, days: [...r.schedule.days] },
-    enabled: r.enabled,
-    trigger: r.trigger ? { ...r.trigger } : undefined
+    enabled: false,
+    trigger: r.trigger?.kind === 'webhook' ? { kind: 'webhook', token: '' } : r.trigger ? { ...r.trigger } : undefined
   }
 }
 
