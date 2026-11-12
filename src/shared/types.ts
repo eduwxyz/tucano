@@ -502,6 +502,7 @@ export interface Settings {
   }
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
+  routinePrompts?: RoutinePromptsMode // how the request a routine posts in a conversation shows; unset: full
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
 }
@@ -967,6 +968,8 @@ export interface Routine {
 }
 
 export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled' | 'trigger'> & { id?: string; createdBy?: string; scope?: Routine['scope'] }
+
+export type RoutinePromptsMode = 'full' | 'compact' | 'hidden'
 
 // What the routine's message in the conversation remembers about that run.
 export interface RoutineRun {

@@ -96,9 +96,17 @@ describe('display preferences per person', () => {
     expect(people.settingsFor(bia, base)).toMatchObject({ theme: 'system', language: 'en' })
   })
 
+  it("a member's routine prompts choice stays theirs, and the owner's never reaches them", () => {
+    const { people, bia } = team()
+    expect(people.settingsFor(bia, { ...base, routinePrompts: 'hidden' }).routinePrompts).toBeUndefined()
+    const rest = people.takePrefs(bia, { routinePrompts: 'compact', context: 'x' })
+    expect(rest).toEqual({ context: 'x' })
+    expect(people.settingsFor(bia, { ...base, routinePrompts: 'hidden' }).routinePrompts).toBe('compact')
+  })
+
   it('members may change only their own display preferences', () => {
     const { bia } = team()
-    for (const k of ['theme', 'sounds', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(true)
+    for (const k of ['theme', 'sounds', 'routinePrompts', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(true)
     for (const k of ['workspaceName', 'context', 'paused', 'routerModel', 'approvalTtlHours']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(false)
   })
 
