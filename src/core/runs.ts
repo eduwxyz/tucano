@@ -1432,7 +1432,7 @@ ${note}`,
         if (wikiWritable && WIKI_WRITE_TOOL_NAMES.has(name)) {
           // Its level may have changed mid-turn: read again before a page is touched.
           if (wikiAccess(db.agent(agent.id) ?? agent) !== 'read_write') return textResult(L('Você só lê a wiki agora.', 'You only read the wiki now.'), true)
-          const r = wikiWrite(wikiWritable, { id: agent.id, name: agent.name }, name, args, wikiSees)
+          const r = wikiWrite(wikiWritable, { id: agent.id, name: agent.name }, name, args, wikiSees, { conversationId: conv.id })
           addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: r.error ? 'error' : 'done', ...(r.error ? { error: r.text } : {}) })
           return textResult(r.text, r.error)
         }
