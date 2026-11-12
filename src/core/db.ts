@@ -562,9 +562,6 @@ const COLUMNS: [string, string, string][] = [
   ['agents', 'outside_guard', 'INTEGER'],
   // A phone's push handle (src/core/push.ts), on its device key: {"handle", "tag"} as JSON.
   ['person_keys', 'push', 'TEXT'],
-  // A folder without git's changesets, and the ones past the days they're kept (src/core/changes.ts).
-  ['changesets', 'git_dir', 'TEXT'],
-  ['changesets', 'expired', 'INTEGER NOT NULL DEFAULT 0'],
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
