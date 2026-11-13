@@ -152,7 +152,7 @@ The first time Tucano saves a connector password, macOS asks whether it may use 
 | **⌘,** | Settings |
 | **Right-click** | On a channel: agents, rename, delete. On an agent: message, edit, archive |
 
-Use the **Reply** icon below a message to reply on desktop or mobile. To reply to an excerpt, select the text and choose **Reply to selection** below that message. Replies stay in the same channel or DM, with a quote that links to the original.
+Use the **Reply** icon below a message to reply on desktop or mobile. To reply to an excerpt, select the text and press **⌘L** (**Ctrl+L** off a Mac), or choose **Reply to selection** below that message. Settings › General turns that key off. Replies stay in the same channel or DM, with a quote that links to the original.
 
 On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps Tucano running in the tray, by the clock (routines and triggers go on); quit it from the tray icon.
 

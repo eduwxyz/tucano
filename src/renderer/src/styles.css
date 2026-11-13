@@ -1192,7 +1192,7 @@ h3 {
   display: flex;
   margin-top: 4px;
 }
-.msg__reply {
+.msg__replyto {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1202,18 +1202,18 @@ h3 {
   border-radius: var(--radius);
   color: var(--text-3);
 }
-.msg__reply:hover,
-.msg__reply:focus-visible,
-.msg__reply--excerpt {
+.msg__replyto:hover,
+.msg__replyto:focus-visible,
+.msg__replyto--excerpt {
   background: var(--bubble);
   color: var(--text);
 }
-.msg__reply--excerpt {
+.msg__replyto--excerpt {
   padding: 0 8px;
   font-size: 12px;
 }
 @media (pointer: coarse) {
-  .msg__reply {
+  .msg__replyto {
     min-width: 44px;
     min-height: 44px;
   }

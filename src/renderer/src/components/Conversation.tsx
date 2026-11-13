@@ -1,4 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { isReplyShortcut } from '../../../shared/reply-shortcut'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { runnerRules } from '../../../shared/classify'
@@ -276,10 +277,8 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
 
   useEffect(() => {
     const changed = (): void => {
-      const anchor = window.getSelection()?.anchorNode
-      const element = anchor instanceof Element ? anchor : anchor?.parentElement
-      const row = element?.closest<HTMLElement>('[data-message-id]')
-      const quote = row && ref.current?.contains(row) ? selectedQuote(row) : undefined
+      const row = selectionRow(ref.current)
+      const quote = row ? selectedQuote(row) : undefined
       setSelection((current) => {
         if (!quote || !row?.dataset.messageId) return current === null ? current : null
         return current?.messageId === row.dataset.messageId && current.quote === quote ? current : { messageId: row.dataset.messageId, quote }
@@ -288,6 +287,26 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     document.addEventListener('selectionchange', changed)
     return () => document.removeEventListener('selectionchange', changed)
   }, [])
+
+  // ⌘L (Ctrl+L off a Mac) on a selection replies to that excerpt, so it takes one keystroke instead
+  // of hunting for the button on the message. The setting only decides whether the key is heard:
+  // off, it does nothing, and the reply button stays the way to answer an excerpt.
+  const mac = useStore((s) => s.platform === 'mac')
+  const shortcut = useStore((s) => s.settings.replyShortcut !== false)
+  useEffect(() => {
+    if (!shortcut) return
+    const keys = (e: KeyboardEvent): void => {
+      if (!isReplyShortcut(e, mac)) return
+      const row = selectionRow(ref.current)
+      const message = row?.dataset.messageId ? messages.find((m) => m.id === row.dataset.messageId) : undefined
+      const quote = row ? selectedQuote(row) : undefined
+      if (!message || !quote || message.run?.status === 'working') return
+      e.preventDefault()
+      startReply(message, quote)
+    }
+    window.addEventListener('keydown', keys)
+    return () => window.removeEventListener('keydown', keys)
+  }, [mac, messages, shortcut])
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once. It may come a moment
   // later, from further back.
@@ -605,7 +624,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, quote }
         {canReply && (
           <div className="msg__actions">
             <button
-              className={`msg__reply ${quote ? 'msg__reply--excerpt' : ''}`}
+              className={`msg__replyto ${quote ? 'msg__replyto--excerpt' : ''}`}
               title={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
               aria-label={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
               onPointerDown={(e) => e.preventDefault()}
@@ -627,6 +646,15 @@ function selectedQuote(message: HTMLElement | null): string | undefined {
   if (!selection || selection.isCollapsed || !text || !selection.anchorNode || !selection.focusNode) return
   if (!text.contains(selection.anchorNode) || !text.contains(selection.focusNode)) return
   return selection.toString().trim() || undefined
+}
+
+// The message the page's selection starts in, when it sits in this list: the button and the
+// shortcut both read the row from here, so neither can act on a selection outside the conversation.
+function selectionRow(container: HTMLElement | null): HTMLElement | undefined {
+  const anchor = window.getSelection()?.anchorNode
+  const element = anchor instanceof Element ? anchor : anchor?.parentElement
+  const row = element?.closest<HTMLElement>('[data-message-id]')
+  return row && container?.contains(row) ? row : undefined
 }
 
 function startReply(message: Message, quote?: string): void {
