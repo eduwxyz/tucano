@@ -6,6 +6,7 @@ import { agentById, amAdmin, countedTokens, ENGINES, isTeam, loadUsage, messageB
 import { Sheet } from './Pages'
 import { AdminOnly } from './People'
 import { AgentAvatar, duration, Icon, tokens, usd } from './ui'
+import { AccountsQuota, useManyLogins } from './UsageAccounts'
 
 const DAY = 86_400_000
 const APP = 'app' // the chart's one color for the app's own turns: router, memory, the Tuca
@@ -58,6 +59,8 @@ export function UsagePage(): ReactNode {
   const admin = useStore(amAdmin)
   useEffect(() => void (admin && loadUsage().then(setU)), [count, admin])
   const billing = useBilling(u)
+  const manyClaude = useManyLogins('claude')
+  const manyCodex = useManyLogins('codex')
   const allPlan = billing.length > 0 && billing.every((b) => b.status.route === 'plan')
 
   const subtitle = (
@@ -89,8 +92,8 @@ export function UsagePage(): ReactNode {
       ) : (
         <>
           <Month u={u} claude={billing.find((b) => b.id === 'claude')?.status} />
-          {billing.find((b) => b.id === 'claude')?.status.route === 'plan' && <Quota />}
-          {billing.find((b) => b.id === 'codex')?.status.route === 'plan' && <CodexQuota />}
+          {manyClaude ? <AccountsQuota engine="claude" /> : billing.find((b) => b.id === 'claude')?.status.route === 'plan' && <Quota />}
+          {manyCodex ? <AccountsQuota engine="codex" /> : billing.find((b) => b.id === 'codex')?.status.route === 'plan' && <CodexQuota />}
           <Agents u={u} />
           <div className="usage-grid">
             <Models u={u} />
@@ -275,7 +278,7 @@ function CodexQuota(): ReactNode {
   )
 }
 
-const windowLabel = (minutes: number): string =>
+export const windowLabel = (minutes: number): string =>
   minutes === 10_080
     ? L('Semana', 'Week')
     : minutes === 1440
@@ -286,7 +289,7 @@ const windowLabel = (minutes: number): string =>
         ? L(`Janela de ${minutes / 60} horas`, `${minutes / 60}-hour window`)
         : L(`Janela de ${minutes} min`, `${minutes}-minute window`)
 
-function Ring({ label, w }: { label: string; w: { utilization: number; resetsAt: number } }): ReactNode {
+export function Ring({ label, w }: { label: string; w: { utilization: number; resetsAt: number } }): ReactNode {
   const pct = Math.min(1, Math.max(0, w.utilization))
   const r = 22
   const c = 2 * Math.PI * r

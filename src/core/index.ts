@@ -76,6 +76,7 @@ import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
+import { spentQuota } from '../shared/accounts'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 import { isNewQuestion } from '../shared/questions'
 import { companyNetwork } from './network'
@@ -965,8 +966,15 @@ const runner = new Runner({
   },
   jev: { key: () => secrets.get(JEV_SECRET) },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
-  onQuota: (quota) => {
-    db.setSettings({ quota })
+  onQuota: (quota, accountId) => {
+    if (!accountId) db.setSettings({ quota })
+    else if (savedAccounts().some((a) => a.id === accountId)) db.setSettings({ accountQuota: { ...(settings().accountQuota ?? {}), [accountId]: quota } })
+    emit({ type: 'settings', settings: settings() })
+  },
+  onSpent: (accountId) => {
+    const now = Date.now()
+    if (!accountId) db.setSettings({ quota: spentQuota(settings().quota, now) })
+    else if (savedAccounts().some((a) => a.id === accountId)) db.setSettings({ accountQuota: { ...(settings().accountQuota ?? {}), [accountId]: spentQuota(settings().accountQuota?.[accountId], now) } })
     emit({ type: 'settings', settings: settings() })
   }
 })
@@ -2375,7 +2383,9 @@ const api: Handlers = {
   },
   // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
   removeAccount: ({ id }) => {
-    db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id) })
+    const quotas = { ...(settings().accountQuota ?? {}) }
+    delete quotas[id]
+    db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id), accountQuota: quotas })
     accountLogins.delete(id)
     for (const agent of db.agents().filter((x) => x.accountId === id || x.fallbackAccountId === id)) {
       const rest = { ...agent }

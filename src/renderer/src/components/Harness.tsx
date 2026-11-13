@@ -26,6 +26,7 @@ import {
   rememberModels,
   setTab,
   testEngine,
+  amAdmin,
   updateSettings,
   useStore,
   type Account,
@@ -408,6 +409,8 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
 export function AccountsCard(): ReactNode {
   const accounts = useStore((s) => s.settings.accounts ?? [])
   const engines = useStore((s) => s.settings.engines)
+  const use = useStore((s) => s.settings.accountUse) ?? 'order'
+  const admin = useStore(amAdmin)
   const [engine, setEngine] = useState<AccountEngine>('claude')
   const [name, setName] = useState('')
   const [manual, setManual] = useState<Record<string, string>>({})
@@ -420,6 +423,24 @@ export function AccountsCard(): ReactNode {
   }
   return (
     <div className="accounts">
+      {accounts.length > 0 && (
+        <div className="field">
+          <span className="field__label">{L('Como usar as contas', 'How to use the accounts')}</span>
+          <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Como usar as contas', 'How to use the accounts')}>
+            {(['order', 'balance'] as const).map((o) => (
+              <button key={o} role="radio" aria-checked={use === o} className={use === o ? 'is-active' : ''} disabled={!admin} onClick={() => use !== o && updateSettings({ accountUse: o })}>
+                {o === 'order' ? L('Cada agente na conta dele', 'Each agent on its own account') : L('Equilibrar entre as contas', 'Balance between the accounts')}
+              </button>
+            ))}
+          </div>
+          <span className="hint">
+            {use === 'balance'
+              ? L('Cada resposta vai pra conta com mais sobrando, pra nenhuma acabar antes das outras.', 'Each reply goes to the account with the most left, so none runs out before the others.')
+              : L('Se a conta do agente acabar, entra o Modelo reserva dele.', "If the agent's account runs out, its Reserve model takes over.")}
+          </span>
+          {!admin && <span className="hint">{L('Só quem administra muda isto.', 'Only an admin changes this.')}</span>}
+        </div>
+      )}
       {accounts.map((a: Account) => (
         <div key={a.id} className="key-row">
           <Icon name="user" />
@@ -479,6 +500,7 @@ export function AccountsCard(): ReactNode {
 export function AccountPicker({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
   const engine = modelInfo(draft.modelId)?.engine
   const accounts = useStore((s) => (s.settings.accounts ?? []).filter((a) => a.engine === engine))
+  const balancing = useStore((s) => s.settings.accountUse === 'balance')
   if (!accounts.length || !engine) return null
   const value = accounts.some((a) => a.id === draft.accountId) ? draft.accountId! : ''
   const chosen = accounts.find((a) => a.id === value)
@@ -495,6 +517,7 @@ export function AccountPicker({ draft, patch }: { draft: Agent; patch: (p: Parti
         ]}
         placeholder={usualLabel}
       />
+      {balancing && <span className="hint">{L('As contas estão em "Equilibrar entre as contas": o Tucano escolhe a que tem mais sobrando a cada resposta. Esta é a preferida quando estão iguais.', 'Accounts are set to "Balance between the accounts": Tucano picks the one with the most left for each reply. This one is preferred when they are even.')}</span>}
       {chosen && !chosen.loggedIn && <span className="hint hint--warn">{L('Essa conta ainda não entrou: o agente não responde até você entrar nela em Configurações › Modelos.', 'This account isn’t signed in yet: the agent won’t reply until you sign in under Settings › Models.')}</span>}
     </label>
   )

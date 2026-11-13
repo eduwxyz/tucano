@@ -5839,6 +5839,55 @@ kbd {
   stroke: var(--danger);
 }
 
+.usage-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.usage-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 6px 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.usage-account__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 14px;
+  min-width: 0;
+}
+.usage-account__rings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.usage-account > p {
+  padding: 8px 14px;
+}
+.usage-account__chip {
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-3);
+}
+.usage-account__chip.is-next {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.usage-account__chip.is-out {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .usage-agents {
   padding: 4px;
 }
