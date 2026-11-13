@@ -823,7 +823,7 @@ export class Db {
       ...(r['outside_guard'] === 0 || r['outside_guard'] === 1 ? { outsideGuard: r['outside_guard'] === 1 } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
-      ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
+      ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : str(r['kind']) === 'removed' ? { kind: 'removed' as const } : {}),
       // One with no owner (put there by another tool, after the people came) is the Tucano owner's.
       owner: r['owner'] ? str(r['owner']) : this.ownerId(),
       ...(r['reports_to'] ? { reportsTo: str(r['reports_to']) } : {})

@@ -91,7 +91,7 @@ export interface Agent {
   outsideGuard?: boolean // false: what goes out (a send, a post, a payment) runs on its rules even after reading something from outside; unset: Settings'
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
-  kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
+  kind?: 'tuca' | 'removed' // 'tuca': the agent that builds the others, it proposes and the person creates; 'removed': deleted, only its name and look stay, for its old messages (always archived too)
   owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
   reportsTo?: string // the agent it answers to (src/shared/org.ts): that one, and whoever is above it, may hand it work in its own channel; unset: no one
 }

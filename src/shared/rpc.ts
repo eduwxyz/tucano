@@ -48,6 +48,7 @@ export interface Api {
   createChannel(p: { name: string; threads?: boolean }): string
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
   archiveAgent(p: { id: string; archived: boolean }): void // out of the sidebar, its replies stopped and routines off; back with archived: false
+  deleteAgent(p: { id: string }): void // for good: settings, DMs, routines, memories, computer and browser logins; messages in channels and receipts stay. Throws for the Tuca
   setTopic(p: { id: string; topic: string }): void
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines

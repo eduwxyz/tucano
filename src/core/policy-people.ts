@@ -181,6 +181,7 @@ export const NEEDS: Record<Method, Need> = {
   setAgentModels: 'admin',
   saveAgent: 'admin',
   archiveAgent: 'admin',
+  deleteAgent: 'admin',
   createFromDraft: 'admin',
   computerAction: 'target', // looking again at its state, anyone who sees the agent; the rest, admins (admitComputer)
   stopService: 'admin',
