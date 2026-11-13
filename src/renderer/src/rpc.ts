@@ -32,6 +32,8 @@ declare global {
         ) => Promise<{ result: 'saved'; path: string; folder: string } | { result: 'missing_folder'; folder: string } | { result: 'cancelled' | 'failed' }>
         copy: (url: string) => Promise<boolean>
         read: (url: string) => Promise<{ mime: string; data: string } | null>
+        // The folder a one-click save lands in before anything has been saved: the system's own.
+        folder?: () => Promise<{ folder: string } | null>
       }
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
       upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)

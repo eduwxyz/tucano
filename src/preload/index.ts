@@ -34,7 +34,9 @@ contextBridge.exposeInMainWorld('tucano', {
         { result: 'saved'; path: string; folder: string } | { result: 'missing_folder'; folder: string } | { result: 'cancelled' | 'failed' }
       >,
     copy: (url: string): Promise<boolean> => ipcRenderer.invoke('image:clipboard', { url }) as Promise<boolean>,
-    read: (url: string): Promise<{ mime: string; data: string } | null> => ipcRenderer.invoke('image:read', { url }) as Promise<{ mime: string; data: string } | null>
+    read: (url: string): Promise<{ mime: string; data: string } | null> => ipcRenderer.invoke('image:read', { url }) as Promise<{ mime: string; data: string } | null>,
+    // Where a picture goes in one click before the person has saved one themselves.
+    folder: (): Promise<{ folder: string } | null> => ipcRenderer.invoke('image:folder') as Promise<{ folder: string } | null>
   },
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
   pathOf: (file: File): string => webUtils.getPathForFile(file),
