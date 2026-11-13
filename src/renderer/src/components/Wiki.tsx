@@ -1132,25 +1132,25 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
         </section>
 
         <section>
-          <h4>{L('O resolvedor', 'The resolver')}</h4>
+          <h4>{L('O resolvedor', 'Resolver')}</h4>
           <div className="wk-setting">
             <span>
-              <b>{L('Resolver o que a revisão só aponta', 'Settle what the review can only point at')}</b>
-              <small>{L('Um bot de dentro do app, sem conversa: no botão Resolver de um achado, ele lê as páginas inteiras com as fontes de onde vieram e propõe a mudança — ou faz a pergunta que só você pode responder. Nada muda sem você.', "A bot inside the app, with no conversation: on a finding's Resolve button, it reads the whole pages with the sources they came from and proposes the change — or asks the one question only you can answer. Nothing changes without you.")}</small>
+              <b>{L('Resolver o que a revisão só aponta', 'Resolve review findings')}</b>
+              <small>{L('Um bot de dentro do app, sem conversa: no botão Resolver de um achado, ele lê as páginas inteiras com as fontes de onde vieram e propõe a mudança — ou faz a pergunta que só você pode responder. Nada muda sem você.', 'Review full pages and sources to suggest a fix or ask you a question. Changes require your approval.')}</small>
             </span>
             <Toggle on={resolve} onChange={(v) => updateSettings({ wikiResolve: v })} />
           </div>
           {resolve && (
             <div className="wk-setting">
               <span>
-                <b>{L('O modelo dele', 'Its model')}</b>
-                <small>{L('Vazio: o modelo da memória, e depois o Haiku.', 'Empty: the memory model, and then Haiku.')}</small>
+                <b>{L('O modelo dele', 'Resolver model')}</b>
+                <small>{L('Vazio: o modelo da memória, e depois o Haiku.', 'Default: memory model, then Haiku.')}</small>
               </span>
               <div className="wk-row">
                 <ModelSelect value={s.wikiResolveModel ?? ''} onChange={(v) => updateSettings({ wikiResolveModel: v })} />
                 {s.wikiResolveModel ? (
                   <button className="btn btn--ghost btn--sm" onClick={() => updateSettings({ wikiResolveModel: '' })}>
-                    {L('Usar o da memória', "Use the memory's")}
+                    {L('Usar o da memória', 'Use memory model')}
                   </button>
                 ) : null}
               </div>
@@ -1742,7 +1742,7 @@ export function WikiReviewPane(): ReactNode {
           {!f.change && !f.note && f.kind !== 'git' && !resolveOn && (
             <small className="wk-finding__note">
               {L('Pra ela resolver sozinha o que a revisão só aponta, ligue ', 'For it to settle on its own what the review can only point at, turn on ')}
-              <b>{L('O resolvedor', 'The resolver')}</b>
+              <b>{L('O resolvedor', 'Resolver')}</b>
               {L(' em Ajustes da wiki.', ' in Wiki settings.')}
             </small>
           )}
