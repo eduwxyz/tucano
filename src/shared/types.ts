@@ -132,6 +132,7 @@ export interface TeamUp {
   title: string // that conversation's name at the time: "#ops", or the agent of a DM
   by: string // the agent that called the others in
   at: number
+  privateTo?: string // a room derived from a private conversation keeps that person's audience
 }
 
 export interface Conversation {
