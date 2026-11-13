@@ -1780,16 +1780,22 @@ function SteerPill({ message }: { message: Message }): ReactNode {
 function StepRow({ step }: { step: Step }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
-  // A steer in the chain isn't a tool call: it's what the person wrote while the reply ran, and it
-  // reads as their words under the step it was handed over with.
+  // A steer is not a prompt and not a tool: it is the person's direction for this reply, handed over
+  // between two calls. In the chain it reads as a call of its own — the row a call gets — and what it
+  // carries is their words, whole, two lines at a time and all of it on a click (runs.ts, `steerIn`).
   if (step.kind === 'steer')
     return (
-      <li className="step step--steer">
+      <li className={`step step--steer step--why step--${step.status}`}>
         <span className="step__icon">
-          <Icon name="pointer" size={12} />
+          {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'error' ? 'x' : 'pointer'} size={12} />}
         </span>
         <span className="step__label">{step.label}</span>
-        {step.detail && <span className="step__steer">{step.detail}</span>}
+        {step.input && (
+          <code className={`step__input${allInput ? ' is-whole' : ''}`} title={allInput ? undefined : L('Ver tudo', 'See all')} onClick={() => setAllInput(!allInput)}>
+            <span className="step__clamp">{step.input}</span>
+          </code>
+        )}
+        {step.error && <span className="step__output">{step.error}</span>}
       </li>
     )
   return (

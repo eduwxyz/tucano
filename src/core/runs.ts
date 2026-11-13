@@ -384,7 +384,7 @@ type Control = {
   msg: Message
   reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping'
   steer?: SteerNote[] // what the person wrote while this reply ran, handed over at the next tool call
-  flush?: () => void // the reply's streamed text, sent before a full message of it: the window's order
+  flush?: () => void // the reply's streamed text, sent before a full message of it: the window's order (`execute`)
 }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
@@ -597,7 +597,17 @@ export class Runner {
     const body = [fromCard, typed].filter(Boolean).join('\n\n')
     if (!body && pictures.length === 0 && docs.length === 0) return
 
-    const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
+    // A steer is not a prompt. It is the person's direction for the reply running in this very place
+    // (its own thread, never another one's), and only that reply carries it: handed over at its next
+    // tool call, and drawn in its own chain, in their words (Conversation.tsx). So it is taken here,
+    // before any message of mine exists: nothing of a steer ever shows up in the channel or the DM as
+    // something to answer. With no reply running there — or with a picture or a file, which a tool
+    // result can't carry — there is nothing to steer, and the text goes on as a prompt like any other.
+    if (opts.mode === 'steer' && typed && !asked && pictures.length === 0 && docs.length === 0 && this.steerIn(conv.id, { who: writer.name, text: typed }, opts.steerTo))
+      return
+
+
+const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
@@ -663,11 +673,6 @@ export class Runner {
       this.post(conv.id, replyIn, names ? L(`Avisei ${names}.`, `Let ${names} know.`) : L('Ninguém foi avisado: não tem ninguém com esse nome aqui pra chamar (escreva o nome inteiro se duas pessoas têm o mesmo).', 'No one was told: there is no one by that name here to call (write the whole name if two people share it).'))
       return
     }
-    // Handed to the reply that is running in this very place, before the router picks anyone: a steer
-    // is not a prompt of its own, and what it carries is words (an image or a file on its own has
-    // nothing to hand over, so it gets a reply like any other). With none running there, it goes on
-    // as a prompt below (src/core/runs.ts, `steerIn`).
-    if (opts.mode === 'steer' && typed && pictures.length === 0 && docs.length === 0 && this.steerIn(conv.id, { who: writer.name, text: typed }, opts.steerTo)) return
     // In a request's thread, what a person writes is for whoever is doing it: the router doesn't pick
     // someone else there, and what they say becomes part of the work that goes back to whoever asked.
     const doing = responders.length === 0 && thread ? db.delegationAt(thread) : undefined
@@ -1276,7 +1281,9 @@ export class Runner {
       // The reply ending (replied, stopped, failed) closes whatever still runs.
       const thought = label === THOUGHT()
       const note = thought ? said() : undefined
-      return msg.run!.steps.map((s) => (s.status === 'running' && (!thought || thoughts.has(s.id)) ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
+      // A steer's row is the person's, not the reply's thinking: it keeps its own label and only the
+      // reply's work closes it (runs.ts, `steerIn`).
+      return msg.run!.steps.map((s) => (s.status === 'running' && s.kind !== 'steer' && (!thought || thoughts.has(s.id)) ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
@@ -1479,6 +1486,7 @@ export class Runner {
       emit({ type: 'delta', id: msg.id, text: pending })
       pending = ''
     }
+    control.flush = flush // a steer's row is added to this reply from outside it (see `steerIn`)
 
     // Tools for this turn, served by the gateway under a URL only this turn knows:
     // ask_user plus the connector tools this agent's grants allow.
