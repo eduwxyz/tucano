@@ -317,7 +317,7 @@ describe('Runner', () => {
   })
 })
 
-describe('hand-offs wait their turn; a person\'s messages, routines and retries do not', () => {
+describe('hand-offs wait their turn; a person\'s messages, routines, retries and continuations do not', () => {
   const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((res) => { const t = setTimeout(res, ms); signal.addEventListener('abort', () => (clearTimeout(t), res()), { once: true }) })
   // Lia and Bia ask Theo for something; Theo takes `ms` and records how many of his turns overlap.
   const slowTheo = (ms: number): { engine: Engine; active: () => number; max: () => number } => {
@@ -430,6 +430,23 @@ describe('hand-offs wait their turn; a person\'s messages, routines and retries 
     await r.idle()
     expect(db.message(failed.id)?.run?.status).toBe('done')
     expect(by('a2')).toHaveLength(2)
+    expect(slow.max()).toBeGreaterThan(1)
+  })
+
+  it('a reply going on past its budget goes beside the reply running there, not after it', async () => {
+    const slow = slowTheo(400)
+    const r = runner(slow.engine)
+    await r.send('c3', '@theo um')
+    await r.idle()
+    const paused = by('a2')[0]!
+    db.saveMessage({ ...paused, run: { ...paused.run!, status: 'paused' } }) // as the budget leaves it, with Continuar on it
+    await r.send('c3', '@theo dois')
+    // Theo is answering the second one: pressing Continuar on the first doesn't wait for that reply to end.
+    for (let i = 0; i < 200 && by('a2')[1]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
+    await r.continue(paused.id)
+    await r.idle()
+    expect(db.message(paused.id)?.run?.status).toBe('done')
+    expect(by('a2')).toHaveLength(3)
     expect(slow.max()).toBeGreaterThan(1)
   })
 

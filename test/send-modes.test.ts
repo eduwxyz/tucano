@@ -1,9 +1,10 @@
 // A new prompt in a conversation that is already answering can arrive four ways: beside the reply
 // running there, the two at once (parallel, what the setting says by default), after everything
 // running there (queue), handed to it between two tool calls (steer), or in place of it (interrupt).
-// A prompt with no mode at all (the phone, an approval's outcome, a routine) is a message of the
-// person's own: it starts its own reply beside whatever runs there, and what holds one back is the
-// limit of sessions running at once. Only a send marked queued waits.
+// A prompt with no mode at all (the phone, a routine) is a message of the person's own: it starts its
+// own reply beside whatever runs there, and what holds one back is the limit of sessions running at
+// once. Only a send marked queued waits, and an approval's outcome, a question's refusal and a
+// browser hand-back, which go on with a reply the person is already reading there.
 // With nothing running, all of them are the same thing: a prompt like any other.
 // See `send` in src/core/runs.ts.
 import { mkdtempSync, readFileSync } from 'node:fs'

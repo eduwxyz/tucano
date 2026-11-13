@@ -1178,8 +1178,8 @@ export interface Report {
 }
 
 // How a new prompt arrives in a conversation that is already answering (src/core/runs.ts): beside
-// what's running, after it, handed to it between tool calls, or in place of it. No mode at all (the
-// phone, an approval's outcome, a routine) is the way replies have always gone: one at a time there.
+// what's running, after it, handed to it between tool calls, or in place of it. No mode at all is
+// beside what's running, like a message of the person's own: it starts its own reply.
 export type SendMode = 'parallel' | 'queue' | 'steer' | 'interrupt'
 
 // ---------- the wiki ----------

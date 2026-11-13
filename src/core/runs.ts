@@ -330,9 +330,9 @@ type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: stri
 // as a prompt of its own (see `steerLeftovers`), so nothing written to an agent is ever swallowed.
 type SteerNote = { messageId: string; who: string; text: string; threadId?: string }
 // A reply waiting for its agent to finish there. Only a send the person marked as queued waits, and
-// what isn't a prompt typed into the conversation (an approval's outcome, a question's refusal, a
-// browser hand-back): a message of theirs, a routine and a retry start their own reply, beside
-// whatever runs there.
+// what goes on with a reply the person is already reading (an approval's outcome, a question's
+// refusal, a browser hand-back): a message of theirs, a routine, a retry and a reply going on past
+// its budget start their own reply, beside whatever runs there.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = {
   ctl: AbortController
@@ -369,8 +369,9 @@ export class Runner {
   private waiting = new Map<string, { trigger: string; queued: boolean; start: () => void }>()
   // What came back from an agent's team while it was replying where it asked: told when that reply ends.
   private tells = new Map<string, () => void>()
-  // What waits for the agent to finish there: a prompt the person marked as queued, an approval's
-  // outcome, a question's refusal, a browser hand-back. In the order they came, off the queue (startReply).
+  // What waits for the agent to finish there: a prompt the person marked as queued, and what goes on
+  // with a reply the person is already reading there (an approval's outcome, a question's refusal, a
+  // browser hand-back). In the order they came, off the queue (startReply).
   private parked = new Map<string, Parked[]>()
   // Replies running in each conversation, and the prompts a person marked as queued behind them: one of
   // those starts when nothing runs there any more (see `runIn`, `settleIn`).
@@ -838,7 +839,9 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }, { urgent: true })
+    // Beside whatever replies there, like a retry: it answers what the person just did, and a reply that
+    // arrives only after the one already on screen reads as an answer to that one.
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId }, { urgent: true, parallel: true })
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
