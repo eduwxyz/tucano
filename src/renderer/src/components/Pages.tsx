@@ -2545,6 +2545,19 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
+        {pane('geral') && (
+          <Card title={L('Conversas', 'Conversations')}>
+            <div className="key-row">
+              <Icon name="layers" />
+              <div className="grow">
+                <strong>{L('Mostrar os passos enquanto o agente trabalha', 'Show the steps while the agent works')}</strong>
+                <p className="muted small">{L('Abre a lista do que o agente está fazendo embaixo da resposta. Desligado, fica só a linha com o que ele faz agora; um clique nela abre os passos. Muda só pra você.', 'Opens the list of what the agent is doing under its reply. Off, only the line with what it’s doing now stays; a click on it opens the steps. It changes only for you.')}</p>
+              </div>
+              <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
+            </div>
+          </Card>
+        )}
+
         {pane('geral') && admin && (
           <Card title={L('Atualizações', 'Updates')}>
             <UpdateSettings />

@@ -24,6 +24,7 @@ const base: Settings = {
   theme: 'dark',
   language: 'pt',
   sounds: false,
+  stepsOpen: false,
   folded: ['section:dms'],
   channelLayout: { loose: ['c1'], groups: [] },
   seenVersion: '0.2.10',
@@ -73,6 +74,7 @@ describe('display preferences per person', () => {
     expect(people.settingsFor(bia, base).onboarding).toEqual({ done: true })
     expect(s.seenVersion).toBe('0.2.10')
     expect(s.sounds).toBeUndefined()
+    expect(s.stepsOpen).toBeUndefined()
     expect(s.folded).toBeUndefined()
     expect(s.channelLayout).toBeUndefined()
     expect(s.workspaceName).toBe('Ana') // the rest is the Tucano's
@@ -98,7 +100,7 @@ describe('display preferences per person', () => {
 
   it('members may change only their own display preferences', () => {
     const { bia } = team()
-    for (const k of ['theme', 'sounds', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(true)
+    for (const k of ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(true)
     for (const k of ['workspaceName', 'context', 'paused', 'routerModel', 'approvalTtlHours']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(false)
   })
 
