@@ -3773,6 +3773,43 @@ table.csv th {
 .msg--routine .md {
   color: var(--text-2);
 }
+.msg--routine-compact .md--one-line {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+}
+.msg--routine-compact .md--one-line > * {
+  margin-bottom: 0;
+}
+.routine-prompt-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  padding: 2px 4px;
+  border-radius: 5px;
+  color: var(--text-3);
+}
+.routine-prompt-toggle:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.routine-prompt-toggle svg {
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.routine-prompt-toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+.routine-via {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.routine-via--link:hover {
+  background: var(--border);
+  color: var(--text);
+}
 .routine-examples {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

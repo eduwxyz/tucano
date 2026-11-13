@@ -3,12 +3,13 @@ import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { saidAt } from '../../../shared/types'
+import { hideRoutinePrompts, type RoutineVia } from '../routine-prompts'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -256,7 +257,9 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
-  const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
+  const shown = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
+  const hideRoutines = useStore((s) => s.settings.routinePrompts === 'hidden')
+  const { messages, via, repliesOf } = useMemo(() => (hideRoutines ? hideRoutinePrompts(shown, everything, replies) : { messages: shown, via: NO_VIA, repliesOf: NO_VIA_REPLIES }), [hideRoutines, shown, everything, replies])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
@@ -274,9 +277,10 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once. It may come a moment
   // later, from further back.
-  const focusAt = focus ? messages.findIndex((m) => m.id === focus) : -1
+  const focusTarget = focus ? (repliesOf.get(focus) ?? focus) : undefined
+  const focusAt = focusTarget ? messages.findIndex((m) => m.id === focusTarget) : -1
   useEffect(() => {
-    const el = focus && focusAt >= 0 ? ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(focus)}"]`) : null
+    const el = focusTarget && focusAt >= 0 ? ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(focusTarget)}"]`) : null
     if (!el) return
     stick.current = false
     el.scrollIntoView({ block: 'center' })
@@ -284,7 +288,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     const t = setTimeout(() => el.classList.remove('is-flash'), 1800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, conversationId, focusAt >= 0])
+  }, [focusTarget, conversationId, focusAt >= 0])
 
   useEffect(() => {
     if (!lead) stick.current = true
@@ -404,7 +408,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
           !m.run &&
           m.author.kind !== 'system' &&
           m.author.kind !== 'routine'
-        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
+        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} via={via.get(m.id)} />
       })}
       {farFromBottom && (
         <div className="messages__jump">
@@ -424,10 +428,12 @@ const PLAIN_PLUGINS = [remarkGfm, remarkMentions]
 const MessageMarkdown = memo(Markdown)
 const STREAM_MS = 140 // a streaming reply's Markdown, about 7 times a second
 const NO_ATTACHED: Artifact[] = []
+const NO_VIA = new Map<never, never>()
+const NO_VIA_REPLIES = new Map<never, never>()
 
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
-const MessageRow = memo(function MessageRow({ message, grouped, replies }: { message: Message; grouped: boolean; replies?: Message[] }): ReactNode {
+const MessageRow = memo(function MessageRow({ message, grouped, replies, via }: { message: Message; grouped: boolean; replies?: Message[]; via?: RoutineVia }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
@@ -501,6 +507,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
               </span>
             )}
             <span className="msg__time">{time(saidAt(message))}</span>
+            {via && <RoutineViaTag via={via} />}
           </div>
         )}
         {message.run && <RunSteps message={message} />}
@@ -589,11 +596,17 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
 })
 
 // What a routine asked, posted at its time; the agent's reply comes next.
+// Compact: the request folds to a line; hidden mode leaves one here only as a thread's root.
 function RoutineMessage({ message, replies }: { message: Message; replies?: Message[] }): ReactNode {
   const exists = useStore((s) => s.routines.some((r) => message.author.kind === 'routine' && r.id === message.author.id))
+  const compact = useStore((s) => s.settings.routinePrompts === 'compact' || s.settings.routinePrompts === 'hidden')
+  const focused = useStore((s) => s.view?.kind === 'conversation' && s.view.message === message.id)
+  const [open, setOpen] = useState(focused)
+  const promptId = useId()
   const info = message.routine
+  const folded = compact && !open
   return (
-    <article className="msg msg--routine" data-id={message.id}>
+    <article className={`msg msg--routine ${compact ? 'msg--routine-compact' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
         <span className="avatar avatar--routine" style={{ width: 34, height: 34 }}>
           <Icon name="clock" size={17} />
@@ -611,18 +624,45 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
           <span className="tag">{L('rotina', 'routine')}</span>
           {info?.late && <span className="tag tag--warn">{L('atrasada · era', 'late · was due')} {time(info.scheduledAt)}</span>}
           <span className="msg__time">{time(message.at)}</span>
+          {compact && (
+            <button className="routine-prompt-toggle" aria-expanded={open} aria-controls={promptId} aria-label={open ? L('Recolher pedido', 'Hide prompt') : L('Ver pedido', 'Show prompt')} onClick={() => setOpen(!open)}>
+              <Icon name="chevron" size={12} />
+            </button>
+          )}
         </div>
         {info?.event && (
           <div className="note routine-event">
             <Icon name="zap" size={12} /> {info.event.source}: <strong>{info.event.title}</strong>
           </div>
         )}
-        <div className="md">
+        <div id={promptId} className={`md ${folded ? 'md--one-line' : ''}`}>
           <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
         </div>
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
+  )
+}
+
+// On a reply whose routine's request is hidden: which routine asked for it (and the event, when one did).
+function RoutineViaTag({ via }: { via: RoutineVia }): ReactNode {
+  const exists = useStore((s) => s.routines.some((r) => r.id === via.routineId))
+  const name = via.run.name || L('Rotina', 'Routine')
+  const label = (
+    <>
+      {via.run.event && <Icon name="zap" size={11} />}
+      {L('via', 'via')} {name}
+    </>
+  )
+  const title = via.run.event ? `${via.run.event.source}: ${via.run.event.title}` : undefined
+  return exists ? (
+    <button className="tag routine-via routine-via--link" title={title} onClick={() => navigate({ kind: 'routines' })}>
+      {label}
+    </button>
+  ) : (
+    <span className="tag routine-via" title={title}>
+      {label}
+    </span>
   )
 }
 

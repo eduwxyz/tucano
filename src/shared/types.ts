@@ -177,6 +177,7 @@ export interface Run {
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   replyTo?: string // the message (a person's) it answers, when one did
+  routineMessage?: string // the request a routine posted that this reply runs, when a routine started it
   answeredBy?: string // who answered its question (another person than the one asked, maybe)
   question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
   questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
@@ -502,6 +503,7 @@ export interface Settings {
   }
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
+  routinePrompts?: RoutinePromptsMode // how the request a routine posts in a conversation shows; unset: full
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
 }
@@ -967,6 +969,8 @@ export interface Routine {
 }
 
 export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled' | 'trigger'> & { id?: string; createdBy?: string; scope?: Routine['scope'] }
+
+export type RoutinePromptsMode = 'full' | 'compact' | 'hidden'
 
 // What the routine's message in the conversation remembers about that run.
 export interface RoutineRun {
