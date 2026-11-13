@@ -281,9 +281,11 @@ export function RoutingPane(): ReactNode {
               pool={pool}
               setting={config.pools[pool]}
               policy={config.free.policy}
+              allowTier4={config.allowTier4}
               allowTier5={config.allowTier5}
               onDescriptor={(descriptor) => setPoolSetting(pool, { descriptor })}
               onPolicy={(policy) => save({ ...config, free: { policy } })}
+              onAllowTier4={(allowTier4) => save({ ...config, allowTier4 })}
               onAllowTier5={(allowTier5) => save({ ...config, allowTier5 })}
             />
           )}
@@ -309,17 +311,21 @@ function PoolEditor({
   pool,
   setting,
   policy,
+  allowTier4,
   allowTier5,
   onDescriptor,
   onPolicy,
+  onAllowTier4,
   onAllowTier5
 }: {
   pool: Pool
   setting: PoolSetting
   policy: FreePolicy
+  allowTier4: boolean
   allowTier5: boolean
   onDescriptor: (v: string) => void
   onPolicy: (v: FreePolicy) => void
+  onAllowTier4: (v: boolean) => void
   onAllowTier5: (v: boolean) => void
 }): ReactNode {
   const [draft, setDraft] = useState<string | null>(null)
@@ -355,6 +361,20 @@ function PoolEditor({
           />
         </Field>
       )}
+      {pool === 't4' && (
+        <div className="field">
+          <div className="row row--between">
+            <span className="field__label">{L('Deixar o Jev chegar ao tier 4 sozinho', 'Let Jev reach tier 4 on its own')}</span>
+            <Toggle on={allowTier4} onChange={onAllowTier4} />
+          </div>
+          <span className="hint">
+            {L(
+              'Ligado, um pedido que o Jev julgar caro o bastante pode rodar aqui sem perguntar, e é também o que deixa a leitura chegar ao tier 5. Desligado, a leitura para no tier 3; o piso de um papel ainda pode trazer a resposta para cá.',
+              'On, a prompt Jev judges expensive enough may run here without asking, and it is what lets the reading reach tier 5 at all. Off, the reading stops at tier 3; a role’s floor can still bring the reply here.'
+            )}
+          </span>
+        </div>
+      )}
       {pool === 't5' && (
         <div className="field">
           <div className="row row--between">
@@ -363,8 +383,8 @@ function PoolEditor({
           </div>
           <span className="hint">
             {L(
-              'Desligado, o tier 5 só existe se você escolher. Ligado, um pedido que o Jev julgar no máximo e sobre o qual ele estiver seguro pode rodar aqui sem perguntar.',
-              'Off, tier 5 is only ever your own pick. On, a prompt Jev judges maximal, and is sure about, may run here without asking.'
+              'Desligado, o tier 5 só existe se você escolher. Ligado, um pedido que o Jev julgar no máximo e sobre o qual ele estiver seguro pode rodar aqui sem perguntar. Precisa do tier 4 ligado.',
+              'Off, tier 5 is only ever your own pick. On, a prompt Jev judges maximal, and is sure about, may run here without asking. It needs tier 4 switched on.'
             )}
           </span>
         </div>
@@ -432,7 +452,9 @@ function ChainEditor({
   const set = (at: number, target: RoleCandidate): void => onChange(chain.map((t, i) => (i === at ? target : t)))
   return (
     <div className="routing__chain">
-      <div className="row row--between">
+      {/* The title and what the chain does are two lines of their own, each as wide as the column: side
+          by side, the note was cut to a narrow strip beside the title. */}
+      <div className="routing__chain-head">
         <strong>{label}</strong>
         <span className="muted small">{note}</span>
       </div>
@@ -458,7 +480,7 @@ function ChainEditor({
           />
         ))}
       </ol>
-      <AddTarget onAdd={(t) => onChange([...chain, t])} />
+      <AddTarget onAdd={(t) => onChange([...chain, t])} taken={chain} />
     </div>
   )
 }
@@ -555,7 +577,7 @@ function TargetRow({
   )
 }
 
-function AddTarget({ onAdd }: { onAdd: (t: RouteTarget) => void }): ReactNode {
+function AddTarget({ onAdd, taken }: { onAdd: (t: RouteTarget) => void; taken: RouteTarget[] }): ReactNode {
   const usable = useStore((s) => usableEngines(s.settings))
   const engines = usable.length ? usable : (Object.keys(ENGINES) as EngineId[])
   const [engine, setEngine] = useState<EngineId>(engines[0]!)
@@ -564,16 +586,25 @@ function AddTarget({ onAdd }: { onAdd: (t: RouteTarget) => void }): ReactNode {
   const [effort, setEffort] = useState<Effort>('medium')
   const chosen = model || options[0]?.value || ''
   const models = options.length ? options.map((o) => ({ value: o.value, label: o.hint ? `${o.label} · ${o.hint}` : o.label })) : [{ value: chosen, label: chosen || L('Sem lista de modelos', 'No model list') }]
+  // The pick stays after an add, so a second model means changing the field rather than picking again
+  // from a form that quietly went back to the first model of the harness. A target already in the
+  // chain says so instead of taking the click and adding nothing.
+  const dupe = !!chosen && taken.some((t) => t.engine === engine && t.model === chosen && t.effort === effort)
   return (
     <div className="route-add">
       <div className="route-add__fields">
       <Select value={engine} aria-label={L('Harness', 'Harness')} options={engines.map((e) => ({ value: e, label: engineLabel(e) }))} onChange={(v) => { if (v) { setEngine(v as EngineId); setModel('') } }} />
-      <Select className="grow" value={chosen || null} searchable aria-label={L('Modelo', 'Model')} options={models} placeholder={L('Escolha o modelo', 'Pick the model')} onChange={(v) => setModel(v ?? '')} />
+      <Select value={chosen || null} searchable aria-label={L('Modelo', 'Model')} options={models} placeholder={L('Escolha o modelo', 'Pick the model')} onChange={(v) => setModel(v ?? '')} />
       <Select value={effort} aria-label={L('Raciocínio', 'Thinking')} options={thinkingOptions()} onChange={(v) => v && setEffort(v as Effort)} />
       </div>
-      <button type="button" className="btn btn--sm" disabled={!chosen} onClick={() => { onAdd(withIdentity({ id: '', engine, model: chosen, effort })); setModel('') }}>
+      <button type="button" className="btn btn--sm" disabled={!chosen || dupe} onClick={() => onAdd(withIdentity({ id: '', engine, model: chosen, effort }))}>
         {L('Acrescentar', 'Add')}
       </button>
+      {dupe && (
+        <span className="hint">
+          {L('Já está na lista: mude o modelo ou o raciocínio.', 'Already in the chain: change the model or the thinking.')}
+        </span>
+      )}
     </div>
   )
 }

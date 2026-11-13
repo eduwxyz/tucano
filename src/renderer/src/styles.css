@@ -12100,8 +12100,9 @@ button.agent-card__now:hover {
   gap: 6px;
   min-width: 0;
 }
-/* The model field carries `.grow` from when the row was horizontal; in a column that would stretch it
-   down the card, so every field keeps its own height and the card is as tall as its three lines. */
+/* `.grow` belonged to the horizontal row: in a column it stretched the model field down the card and
+   left the thinking line a hundred pixels below it, so every field keeps its own height and the card is
+   as tall as its three lines. */
 .route-row__fields > .select,
 .route-add__fields > .select {
   flex: 0 0 auto;
@@ -12125,6 +12126,16 @@ button.agent-card__now:hover {
 .route-row__actions .icon-btn:disabled {
   opacity: 0.35;
   cursor: default;
+}
+.routing__chain-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Each line takes the column: the note ran beside the title as a narrow strip that read as a label. */
+.routing__chain-head > strong,
+.routing__chain-head > span {
+  width: 100%;
 }
 .route-add {
   display: flex;

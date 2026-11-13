@@ -274,20 +274,32 @@ export function poolFor(j: RouteJudgment, config: RoutingConfig): PoolDecision {
   const known = confidence !== undefined
   const unsure = known && config.confidenceFloor > 0 && confidence! < config.confidenceFloor
 
-  // Tier 5 is only ever unlocked by the reading itself, and only when it is a real install.
+  // Tier 5 is only ever unlocked by the reading itself, and only when it is a real install. Tier 4 is
+  // open to the reading unless the person closed it, and tier 5 sits above it: no tier 5 without it.
   const wantsTop = Math.round(raw) >= 3
-  const t5Ready = config.allowTier5 && config.pools.t5.chain.length > 0
+  const t5Ready = config.allowTier4 && config.allowTier5 && config.pools.t5.chain.length > 0
   let requested = tierOfDemand(raw)
+  let saidTier4 = false
   if (wantsTop) {
     // Known, positive, sure confidence is part of qualifying for the dearest pool.
     const sure = known && !unsure && confidence! > 0
     if (t5Ready && sure) requested = 't5'
     else {
       requested = 't4'
-      if (!config.allowTier5) notes.push(L('o tier 5 está desligado', 'tier 5 is switched off'))
+      if (!config.allowTier4) {
+        notes.push(L('o tier 4 está desligado', 'tier 4 is switched off'))
+        saidTier4 = true
+      } else if (!config.allowTier5) notes.push(L('o tier 5 está desligado', 'tier 5 is switched off'))
       else if (!config.pools.t5.chain.length) notes.push(L('o tier 5 não tem modelos', 'tier 5 has no models'))
       else notes.push(L('papel incerto não chega ao tier 5', 'an unsure read never reaches tier 5'))
     }
+  }
+
+  // The switch on tier 4 stops the reading there, whatever brought it up: the demand itself, or the
+  // top of the scale landing one step below tier 5. A role's floor still lifts the reply, below.
+  if (!config.allowTier4 && POOL_RANK[requested] > POOL_RANK.t3) {
+    if (!saidTier4) notes.push(L('o tier 4 está desligado', 'tier 4 is switched off'))
+    requested = 't3'
   }
 
   // The role's floor lifts the tier; it never lowers it.
