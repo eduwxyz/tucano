@@ -412,11 +412,22 @@ export function AccountsCard(): ReactNode {
   const [name, setName] = useState('')
   const [manual, setManual] = useState<Record<string, string>>({})
   const [removing, setRemoving] = useState<string | null>(null)
+  const [leftBehind, setLeftBehind] = useState(false)
   const add = async (): Promise<void> => {
     const a = await addAccount(engine, name)
     setName('')
     const r = await loginAccount(a.id)
     if (!r.opened) setManual((m) => ({ ...m, [a.id]: r.command }))
+  }
+  // Removing takes the account out of the list whatever happens next; the folder with its login can
+  // still be held by a CLI someone left open, and then it goes at the next launch instead.
+  const drop = async (id: string): Promise<void> => {
+    try {
+      const r = await removeAccount(id)
+      setLeftBehind(!r.folder)
+    } finally {
+      setRemoving(null)
+    }
   }
   return (
     <div className="accounts">
@@ -441,8 +452,8 @@ export function AccountsCard(): ReactNode {
             </button>
           )}
           {removing === a.id ? (
-            <button className="btn btn--sm btn--danger" onClick={() => void removeAccount(a.id).then(() => setRemoving(null))}>
-              {L('Remover mesmo', 'Remove it')}
+            <button className="btn btn--sm btn--danger" onClick={() => void drop(a.id)}>
+              {L('Remover', 'Remove')}
             </button>
           ) : (
             <button className="btn btn--ghost btn--sm" onClick={() => setRemoving(a.id)}>
@@ -468,6 +479,14 @@ export function AccountsCard(): ReactNode {
           {L(
             `Os agentes dessa conta voltam pro login de sempre do ${ENGINES[accounts.find((a) => a.id === removing)?.engine ?? 'claude'].label}, e o login dela sai deste computador.`,
             `Its agents go back to ${ENGINES[accounts.find((a) => a.id === removing)?.engine ?? 'claude'].label}’s usual login, and its sign-in leaves this computer.`
+          )}
+        </p>
+      )}
+      {leftBehind && (
+        <p className="hint hint--warn">
+          {L(
+            'O login dessa conta não saiu agora porque o CLI dela ainda estava aberto: feche a janela dele. Ele sai na próxima vez que o Tucano abrir.',
+            'That account’s sign-in did not leave now because its CLI was still open: close its window. It goes the next time Tucano opens.'
           )}
         </p>
       )}

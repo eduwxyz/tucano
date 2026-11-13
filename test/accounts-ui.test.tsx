@@ -6,6 +6,7 @@ import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Account, EngineId, EngineStatus } from '../src/shared/types'
+import { setLang } from '../src/shared/lang'
 const { window, document } = parseHTML('<!doctype html><html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Element: window.Element, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
 // What linkedom doesn't lay out: a size for the trigger, frames and resizes that do nothing.
@@ -84,4 +85,37 @@ it('shows a Grok account on its plan', async () => {
   fake = { settings: { accounts: [{ id: 'g1', engine: 'grok', name: 'Pessoal', loggedIn: true, detail: 'Plano Grok' }], engines: engines() } }
   await render()
   expect(document.body.textContent).toContain('Grok · Plano Grok')
+})
+
+// Removing an account that was never signed in: two presses of the same word, and the second one
+// takes it. A folder left behind is the card's business afterwards, not a reason to keep the row.
+const press = async (label: string): Promise<void> => {
+  const button = [...document.querySelectorAll('button')].find((b) => b.textContent === label)
+  expect(button, `a button reading “${label}”`).toBeTruthy()
+  await click(button!)
+}
+
+it('removes a Grok login that was never signed in', async () => {
+  setLang('en')
+  const store = await import('../src/renderer/src/store')
+  vi.mocked(store.removeAccount).mockResolvedValue({ folder: true })
+  fake = { settings: { accounts: [{ id: 'g1', engine: 'grok', name: 'Trabalho', loggedIn: false }], engines: engines() } }
+  await render()
+  expect(document.body.textContent).toContain('Not signed in')
+  await press('Remove')
+  expect(document.body.textContent).not.toContain('Remove it') // the second press says the same word
+  await press('Remove')
+  expect(store.removeAccount).toHaveBeenCalledWith('g1')
+  expect(document.body.textContent).not.toContain('did not leave')
+})
+
+it('says the sign-in goes at the next launch when its folder stayed', async () => {
+  setLang('en')
+  const store = await import('../src/renderer/src/store')
+  vi.mocked(store.removeAccount).mockResolvedValue({ folder: false })
+  fake = { settings: { accounts: [{ id: 'g1', engine: 'grok', name: 'Trabalho', loggedIn: false }], engines: engines() } }
+  await render()
+  await press('Remove')
+  await press('Remove')
+  expect(document.body.textContent).toContain('It goes the next time Tucano opens')
 })
