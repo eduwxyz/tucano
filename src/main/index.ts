@@ -717,7 +717,7 @@ function isFolder(path: string): boolean {
   }
 }
 
-// "Copy to prompt": the picture goes back into the field as an attachment, so the page needs its bytes.
+// "Send to prompt": the picture goes back into the field as an attachment, so the page needs its bytes.
 ipcMain.handle('image:read', async (event, arg: unknown) => {
   if (!fromApp(event)) return null
   const { url } = (arg ?? {}) as { url?: unknown }
