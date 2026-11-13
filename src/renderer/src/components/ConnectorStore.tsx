@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { catalogInput, CATEGORIES, entryOf, ownAppGuide, searchCatalog, type AppProvider, type CatalogEntry } from '../../../shared/connector-catalog'
 import { LOGOS } from '../connector-logos'
-import { iconFromFile } from '../connector-icon'
+import { iconFromFile, imageFromClipboard } from '../connector-icon'
 import { addConnector, authorizeConnector, openExternal, ownApp, setConnectorIcon, setOwnApp, toast, useStore, type Connector } from '../store'
 import { Modal } from './Modal'
 import { Icon } from './ui'
@@ -73,8 +73,24 @@ export function ConnectorIconPicker({ c }: { c: Connector }): ReactNode {
       setBusy(false)
     }
   }
+  // A picture copied anywhere else and pasted here: the same shrink-and-keep path as a picked file,
+  // so the clipboard is only another way in, never another kind of icon.
+  const paste = async (file: File | null): Promise<void> => {
+    if (!file) return toast(L('Não há imagem na área de transferência.', 'There is no image on the clipboard.'))
+    await save(iconFromFile(file))
+  }
   return (
-    <div className="row connector-modal__icon">
+    <div
+      className="row connector-modal__icon"
+      onPaste={(e) => {
+        const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'))
+        const file = item?.getAsFile()
+        if (file) {
+          e.preventDefault()
+          void paste(file)
+        }
+      }}
+    >
       <ConnectorTile c={c} size={30} />
       <input
         ref={file}
@@ -90,12 +106,20 @@ export function ConnectorIconPicker({ c }: { c: Connector }): ReactNode {
       <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => file.current?.click()}>
         {L('Escolher imagem', 'Choose image')}
       </button>
+      <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void imageFromClipboard().then(paste)}>
+        {L('Colar imagem', 'Paste image')}
+      </button>
       {c.icon && (
         <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void save('')}>
           {L('Usar o padrão', 'Use the default')}
         </button>
       )}
-      <span className="muted small grow">{L('PNG, JPEG, WebP, GIF ou SVG. O ícone aparece na lista de conectores.', 'PNG, JPEG, WebP, GIF or SVG. The icon shows in the connector list.')}</span>
+      <span className="muted small grow">
+        {L(
+          'PNG, JPEG, WebP, GIF ou SVG, escolhido ou colado da área de transferência. O ícone aparece na lista de conectores.',
+          'PNG, JPEG, WebP, GIF or SVG, picked or pasted from the clipboard. The icon shows in the connector list.'
+        )}
+      </span>
     </div>
   )
 }

@@ -24,6 +24,36 @@ export async function iconFromFile(file: File): Promise<string> {
   return data
 }
 
+// Base64 (what the main process hands over) as the file the picker already knows how to shrink.
+export function fileFromBase64(name: string, mime: string, data: string): File {
+  const binary = atob(data)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new File([bytes], name, { type: mime })
+}
+
+// The picture on the clipboard, as a file: the app's own clipboard when it is the app, the browser's
+// otherwise (Tucano as a server). Null when there is no picture there, which the button says.
+export async function imageFromClipboard(): Promise<File | null> {
+  const desktop = window.tucano?.image
+  if (desktop?.paste) {
+    const got = await desktop.paste().catch(() => null)
+    return got?.data ? fileFromBase64('clipboard.png', got.mime, got.data) : null
+  }
+  try {
+    const items = await navigator.clipboard.read()
+    for (const item of items) {
+      const mime = item.types.find((t) => t.startsWith('image/'))
+      if (!mime) continue
+      const blob = await item.getType(mime)
+      return new File([blob], 'clipboard.' + (mime.split('/')[1] ?? 'png'), { type: mime })
+    }
+  } catch {
+    // no permission, or nothing readable in this browser
+  }
+  return null
+}
+
 // An SVG is already as small as it gets and keeps its edges at any size: kept as it came, minus the
 // parts that have no business in a picture. (An <img> never runs a script inside an SVG; this refuses
 // them anyway, so what the database keeps is a picture and nothing else.)
