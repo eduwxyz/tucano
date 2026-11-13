@@ -1,4 +1,4 @@
-// The one place the composer's pictures are added to from outside it: "copy to prompt" on a picture
+// The one place the composer's pictures are added to from outside it: "send to prompt" on a picture
 // in a reply puts it in the field below, exactly as if it had been dropped there. The composer keeps
 // the draft; this only says when something arrived.
 export interface PromptImage {

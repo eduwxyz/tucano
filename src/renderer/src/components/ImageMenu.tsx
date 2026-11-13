@@ -12,10 +12,10 @@ const LABEL = (folder: string): Record<ImageAction, string> => ({
   'save-here': folder ? L(`Salvar em ${folder}`, `Save to ${folder}`) : L('Salvar', 'Save'),
   save: L('Salvar em…', 'Save to…'),
   clipboard: L('Copiar para a área de transferência', 'Copy to clipboard'),
-  prompt: L('Copiar para o campo de mensagem', 'Copy to prompt')
+  prompt: L('Enviar para o campo de mensagem', 'Send to prompt')
 })
 
-const ICON: Record<ImageAction, IconName> = { 'save-here': 'folder', save: 'down', clipboard: 'copy', prompt: 'edit' }
+const ICON: Record<ImageAction, IconName> = { 'save-here': 'folder', save: 'down', clipboard: 'copy', prompt: 'send' }
 
 const SAVED = (path: string): string => L(`Salvo em ${path}`, `Saved to ${path}`)
 const SAVED_HERE = (folder: string): string => L(`Salvo em ${folder}`, `Saved to ${folder}`)
