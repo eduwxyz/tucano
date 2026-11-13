@@ -99,6 +99,7 @@ export const NEEDS: Record<Method, Need> = {
   setTopic: 'anyone',
   setChannelMembers: 'anyone',
   deleteConversation: 'target', // one's DM; a channel, admins
+  wipeHistory: 'admin', // it reaches conversations the admin isn't in, and nothing comes back
   openDm: 'anyone',
   // one's own to-dos on the board: each handler checks it's theirs
   tasks: 'anyone',
