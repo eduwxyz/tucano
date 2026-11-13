@@ -54,6 +54,7 @@ export interface Api {
   setTopic(p: { id: string; topic: string }): void
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
+  wipeHistory(p: { agentId?: string }): number // a bot's history — what it wrote anywhere and every word of its own DMs — or the whole workspace's when there's no agentId; answers how many messages went
   openDm(p: { agentId: string }): string
   tasks(): Task[] // my to-dos on the board (Quadro), in order
   saveTask(p: { task: TaskInput }): Task // new (no id) at the top, or changed; throws why not (an agent I don't see, an empty title)
@@ -277,6 +278,7 @@ export type CoreEvent =
   | { type: 'routine'; routine: Routine }
   | { type: 'routine_removed'; id: string; for?: string } // for: a DM's person, the only one who saw it
   | { type: 'conversation_removed'; id: string; for?: string }
+  | { type: 'history_wiped'; conversationIds: string[] } // history went: read these conversations again (src/core/retention.ts)
   | { type: 'skill'; skill: Skill }
   | { type: 'skill_removed'; id: string }
   | { type: 'wiki' } // a page changed: here, by an agent or in another app
@@ -285,7 +287,7 @@ export type CoreEvent =
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'history_wiped', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true
