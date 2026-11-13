@@ -21,7 +21,7 @@ it('moves what ran on Gemini over to Antigravity, and leaves the rest alone', ()
   // As a database from before the rename: that migration not run yet (nor the one after it, which is safe to run again).
   const raw = new DatabaseSync(file)
   const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
-  raw.exec(`PRAGMA user_version = ${user_version - 2}`)
+  raw.exec(`ALTER TABLE messages DROP COLUMN reply; PRAGMA user_version = ${user_version - 3}`)
   raw.close()
 
   const db = new Db(file)

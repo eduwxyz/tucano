@@ -44,6 +44,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   send: <path d="M4 12 20 4l-6 16-3-7-7-1Z" />,
+  reply: <path d="m9 4-7 6 7 6v-4h5a6 6 0 0 1 6 6v2-7a5 5 0 0 0-5-5H9V4Z" />,
   stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
   spark: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6" />,
   clock: (

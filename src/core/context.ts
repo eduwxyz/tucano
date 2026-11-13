@@ -474,6 +474,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
   // A question asked with ask_user is part of what the agent said.
   const body = (m: Message): string =>
     [
+      m.reply && `${L(`[Em resposta a ${m.reply.author}:]`, `[In reply to ${m.reply.author}:]`)}\n${(m.reply.text || L('[anexo]', '[attachment]')).split('\n').map((line) => `> ${line}`).join('\n')}`,
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
       ...(files?.get(m.id) ?? []).map((n) => L(`[arquivo anexado: ${n}]`, `[attached file: ${n}]`)),

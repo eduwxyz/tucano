@@ -396,6 +396,9 @@ export interface Invite {
 export const personScope = (personId: string): string => `person:${personId}`
 export const scopePerson = (scope: string): string | undefined => (scope.startsWith('person:') ? scope.slice('person:'.length) : undefined)
 
+// What a message answers: the message, and the excerpt it quoted when the person selected one.
+export type ReplyTarget = { messageId: string; quote?: string }
+
 export interface Message {
   id: string
   conversationId: string
@@ -406,6 +409,9 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+  // The message this one answers, kept with the quote it showed: the agent still reads it when the
+  // original has left the history it sees.
+  reply?: { messageId: string; author: string; agentId?: string; text: string; at: number; excerpt?: boolean }
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
@@ -502,6 +508,7 @@ export interface Settings {
   }
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
+  replyShortcut?: boolean // ⌘L (Ctrl+L off a Mac) replies to the text I selected in a message; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
 }
