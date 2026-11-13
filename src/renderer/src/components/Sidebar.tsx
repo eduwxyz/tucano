@@ -1,7 +1,7 @@
 import { L } from '../../../shared/lang'
 import { usedShare } from '../../../shared/limits'
 import { isWaiting, mineIn, waitingIn, waitingTitle, type Waiting } from './waiting'
-import { memo, useCallback, useId, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { memo, useCallback, useId, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
   archiveAgent,
@@ -53,6 +53,10 @@ const moves = (up: () => void, down: () => void): MenuItem[] => [
   { label: L('Mover para cima', 'Move up'), icon: 'up', onClick: up },
   { label: L('Mover para baixo', 'Move down'), icon: 'down', onClick: down }
 ]
+
+// The line under the screens: a screen dropped on it, or under it, leaves the sidebar (the id keeps it
+// out of reach of the lists below, which have their own groups).
+const NAV_HIDE = 'end:hide'
 
 // `fresh`: a mission just brought it (a new install's short sidebar): tagged until it's opened.
 function NavItem({ view, icon, label, badge, fresh }: { view: View; icon: IconName; label: string; badge?: number; fresh?: () => void }): ReactNode {
@@ -209,14 +213,37 @@ export function Sidebar(): ReactNode {
     ...(admin && parts.shows('report') ? [{ id: 'report', item: <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} fresh={fresh('report')} /> }] : [])
   ]
   const navs = ordered(navRows, settings.navOrder)
-  const saveNavOrder = (next: string[]): void => updateSettings({ navOrder: next })
-  const navSort = useHoldReorder({ group: 'nav', onDrop: (id, before) => saveNavOrder(moveBefore(navs, settings.navOrder, id, before)), onNudge: (id, by) => saveNavOrder(nudge(navs, settings.navOrder, id, by)) })
-  // A screen's own menu: the two steps the keyboard has, for a pointer.
-  const navMenu = (id: string): MenuItem[] =>
-    moves(
-      () => saveNavOrder(nudge(navs, settings.navOrder, id, -1)),
-      () => saveNavOrder(nudge(navs, settings.navOrder, id, 1))
-    )
+  // What sits under the line has left the sidebar without losing its place in the order, so showing
+  // one again puts it back where it was rather than at the end.
+  const parked = settings.navHidden ?? []
+  const shownNav = navs.filter((r) => !parked.includes(r.id))
+  const hiddenNav = navs.filter((r) => parked.includes(r.id))
+  const withoutParked = (id: string): string[] => parked.filter((x) => x !== id)
+  // The last screen still shown never goes under the line: with nothing above it there is no way back.
+  const hideNav = (id: string): void => {
+    if (shownNav.length <= 1) return
+    updateSettings({ navHidden: [...withoutParked(id), id] })
+  }
+  const showNav = (id: string): void => updateSettings({ navHidden: withoutParked(id) })
+  const nudgeNav = (id: string, by: -1 | 1): void => updateSettings({ navOrder: nudge(navs, settings.navOrder, id, by), navHidden: withoutParked(id) })
+  const navSort = useHoldReorder({
+    group: 'nav',
+    onDrop: (id, at) => {
+      // Onto the line, or onto a screen already under it: it leaves the sidebar.
+      if (at === NAV_HIDE || parked.includes(at)) hideNav(id)
+      else updateSettings({ navOrder: moveBefore(navs, settings.navOrder, id, at), navHidden: withoutParked(id) })
+    },
+    onNudge: nudgeNav
+  })
+  // A screen's own menu: the steps the keyboard has, and a way over the line for a pointer.
+  const navMenu = (id: string): MenuItem[] => [
+    ...(parked.includes(id) ? [{ label: L('Mostrar', 'Show'), icon: 'eye' as const, onClick: () => showNav(id) }] : []),
+    ...moves(
+      () => nudgeNav(id, -1),
+      () => nudgeNav(id, 1)
+    ),
+    ...(parked.includes(id) || shownNav.length <= 1 ? [] : [{ label: L('Ocultar', 'Hide'), icon: 'eyeOff' as const, onClick: () => hideNav(id) }])
+  ]
   // Channels sort the same way the DMs and the agents do: a hold picks the row up and the row under
   // the pointer draws the line it will land on. What it was let go on says where it goes, so a
   // channel dropped on another joins that one's group.
@@ -232,6 +259,10 @@ export function Sidebar(): ReactNode {
   // A place that only takes a drop (the end of a list) says so the same way a row does.
   const zoneClass = (sort: typeof dmsSort, id: string): string => `channel-drop${sort.over === id && sort.picked ? ' is-over' : ''}`
   const [naming, setNaming] = useState<string | null>(null)
+  // The screens under the line are only drawn while a screen is being carried, or when the line is
+  // opened: the point of putting them there is that they stop taking room in the sidebar.
+  const [openLine, setOpenLine] = useState(false)
+  const linePressed = useRef(false)
   const newGroup = (channelId: string): void => {
     const id = crypto.randomUUID()
     saveLayout(moveChannel(channels, addGroup(layout, { id, name: L('Novo grupo', 'New group') }), channelId, { group: id }))
@@ -373,11 +404,41 @@ export function Sidebar(): ReactNode {
       )}
       <nav className="sidebar__scroll">
         <TucaItem />
-        {navs.map((r) => (
+        {shownNav.map((r) => (
           <div key={r.id} className={rowClass(navSort, r.id)} {...navSort.rowProps(r.id)} onContextMenu={(e) => open(e, navMenu(r.id))}>
             {r.item}
           </div>
         ))}
+        {/* The line: what goes under it leaves the sidebar. It appears while a screen is carried, and
+            stays once something is under it, where it is also the way back. */}
+        {(navSort.picked || hiddenNav.length > 0) && (
+          <button
+            type="button"
+            className={`nav-hide${navSort.over === NAV_HIDE && navSort.picked ? ' is-over' : ''}${navSort.picked ? ' is-carried' : ''}${openLine ? ' is-open' : ''}`}
+            {...navSort.zoneProps(NAV_HIDE)}
+            onPointerDown={() => (linePressed.current = true)}
+            onClick={() => {
+              // A pointer that went down on a row and came up here is a drop, not a press on the line.
+              if (!linePressed.current) return
+              linePressed.current = false
+              if (hiddenNav.length) setOpenLine((v) => !v)
+            }}
+            title={hiddenNav.length ? L('Mostrar as seções ocultas', 'Show the hidden sections') : undefined}
+          >
+            <i />
+            <span className="nav-hide__label">
+              {navSort.picked ? L('Ocultar as seções abaixo', 'Hide sections below') : L(`${hiddenNav.length} oculta${hiddenNav.length > 1 ? 's' : ''}`, `${hiddenNav.length} hidden`)}
+            </span>
+            {!!hiddenNav.length && <Icon name="caret" size={10} />}
+            <i />
+          </button>
+        )}
+        {(navSort.picked || openLine) &&
+          hiddenNav.map((r) => (
+            <div key={r.id} className={`${rowClass(navSort, r.id)} is-parked`} {...navSort.rowProps(r.id)} onContextMenu={(e) => open(e, navMenu(r.id))}>
+              {r.item}
+            </div>
+          ))}
 
         <Section
           id="channels"

@@ -95,6 +95,12 @@ const PATHS: Record<string, ReactNode> = {
       <circle cx="12" cy="12" r="3" />
     </>
   ),
+  eyeOff: (
+    <>
+      <path d="M2 12s3.5-7 10-7c2.2 0 4 .7 5.6 1.7M22 12s-3.5 7-10 7c-2.3 0-4.2-.7-5.7-1.8" />
+      <path d="M4 4l16 16" />
+    </>
+  ),
   keyboard: <path d="M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" />,
   down: <path d="M12 5v14M6 13l6 6 6-6" />,
   up: <path d="M12 19V5M6 11l6-6 6 6" />,

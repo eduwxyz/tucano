@@ -464,6 +464,7 @@ export interface Settings {
   dmOrder?: string[] // the person's order for the direct messages, by conversation id
   agentOrder?: string[] // the person's order for the agents, by agent id
   navOrder?: string[] // the person's order for the sidebar's own screens (Approvals, Wiki…), by row id
+  navHidden?: string[] // the screens this person put under the sidebar's line, by row id: out of the way, not forgotten
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
