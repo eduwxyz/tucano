@@ -36,6 +36,7 @@ import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engine
 import { hermesAppDir, hermesEngine } from './engines/hermes'
 import { endpointEngine, type EndpointTarget } from './engines/endpoint'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
+import { dropAccountDir, sweepAccountDirs } from './account-folders'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
 import { asdfEnv, codexEnv } from './engines/codex'
@@ -321,6 +322,9 @@ const settings = (): Settings => {
 // status when the harnesses are, and every few seconds after a sign-in.
 const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>(Object.entries(engineCheck.current.accounts ?? {}))
 const savedAccounts = (): Account[] => (db.getSettings(DEFAULTS).accounts ?? []).map(({ id, engine, name }) => ({ id, engine, name }))
+// Whatever a removal could not delete while its CLI was open: an account the settings no longer
+// know, so nobody's login. It goes here, at the next launch, before anything reads these folders.
+sweepAccountDirs(join(dataDir, 'accounts'), savedAccounts().map((a) => a.id))
 // `only`: that account; `engine`: that harness's accounts.
 async function checkAccounts(only?: string, engine?: EngineId): Promise<void> {
   await Promise.all(
@@ -2709,7 +2713,11 @@ const api: Handlers = {
     )
   },
   // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
+  // The settings change first, so an account the person removed never comes back because its folder
+  // was busy: a CLI left open on that login holds the folder on Windows, and that is reported rather
+  // than thrown, with the folder swept at the next launch.
   removeAccount: ({ id }) => {
+    const dir = accountDir(dataDir, id)
     db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id) })
     accountLogins.delete(id)
     for (const agent of db.agents().filter((x) => x.accountId === id || x.fallbackAccountId === id)) {
@@ -2719,8 +2727,10 @@ const api: Handlers = {
       db.saveAgent(rest)
       emit({ type: 'agent', agent: db.agent(agent.id)! })
     }
-    rmSync(accountDir(dataDir, id), { recursive: true, force: true })
+    // A sign-in screen still showing this account has nothing left to sign into.
+    if (loginTerminal.current()?.account === id) loginTerminal.stop()
     emit({ type: 'settings', settings: settings() })
+    return { folder: dropAccountDir(dir) }
   },
 
   // The harness's own installer, in a terminal the person sees: its progress, its
