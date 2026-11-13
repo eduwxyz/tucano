@@ -3302,7 +3302,13 @@ body.is-resizing webview {
    reply-in-thread button that holds the first place there. */
 .msg__delete--post {
   top: 28px;
-  right: 4px;
+  right: -24px;
+}
+/* A routine's post keeps its way into the thread on that same outer rail: beside the words, not over
+   them, in the column the rest of the row's glyphs use. */
+.msg--routine .msg__reply {
+  top: 4px;
+  right: -24px;
 }
 .msg:hover .msg__delete,
 .msg__delete:focus-visible {
