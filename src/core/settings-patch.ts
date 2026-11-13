@@ -21,6 +21,8 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   wikiReview: { kind: ['weekly', 'off'], max: 20, nullable: true },
   wikiDir: { kind: 'string', max: 4_096, nullable: true },
   defaultLimit: { kind: 'number', max: 30 },
+  // How long what was said is kept (src/shared/retention.ts): whole days, 0 for good.
+  retentionDays: { kind: 'number', max: 30, nullable: true },
   approvalTtlHours: { kind: 'number', max: 30 },
   questionDeadlineHours: { kind: 'number', max: 30, nullable: true },
   theme: { kind: ['system', 'light', 'dark'], max: 20 },

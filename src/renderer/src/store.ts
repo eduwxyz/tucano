@@ -412,6 +412,20 @@ export function attachedTo(s: State, messageId: string): Artifact[] {
   return byMessage.get(messageId) ?? NO_ARTIFACTS
 }
 
+// A conversation's latest page again, after history went (a wipe, or a sweep): what's left is exactly
+// what the core has, and the scroll asks for older ones from where that page starts.
+async function refreshHistory(conversationId: string): Promise<void> {
+  try {
+    const { messages, since } = await call('olderMessages', { conversationId, before: Date.now() })
+    set((s) => {
+      const { [conversationId]: _was, ...history } = s.history
+      return { ...s, messages: { ...s.messages, [conversationId]: messages }, history: since ? { ...history, [conversationId]: since } : history }
+    })
+  } catch {
+    // Gone already, or not this person's to read: the screen keeps what it has and the core is the truth.
+  }
+}
+
 // Older messages, a page at a time as the scroll gets there, or back to `through` (a message to show).
 const loadingOlder = new Map<string, Promise<void>>()
 export function loadOlder(conversationId: string, through?: string): Promise<void> {
@@ -527,6 +541,8 @@ function apply(e: CoreEvent): void {
   // Streamed words and the browser's screen come many times a second: they wake only what shows them.
   if (e.type === 'delta') return stream(e.id, e.text)
   if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
+  // History went in these conversations: each is read again, so what's on screen is what's left.
+  if (e.type === 'history_wiped') return void e.conversationIds.forEach((id) => void refreshHistory(id))
   set((s) => {
     switch (e.type) {
       case 'message': {
@@ -947,6 +963,8 @@ export const setTopic = (id: string, topic: string): Promise<void> => call('setT
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
+// Settings › History: every bot's history goes, or one bot's. Answers how many messages went.
+export const wipeHistory = (agentId?: string): Promise<number> => call('wipeHistory', agentId ? { agentId } : {})
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
 // A message sent outside threads, in a conversation that answers in them: its thread opens when it

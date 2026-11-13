@@ -3,6 +3,7 @@ import { cleanRules, isAutonomy } from '../shared/actions'
 import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { cleanRetentionDays } from '../shared/retention'
 import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
 import { dirname, join } from 'node:path'
 import {
@@ -545,7 +546,10 @@ const COLUMNS: [string, string, string][] = [
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
-  ['agents', 'reports_to', 'TEXT']
+  ['agents', 'reports_to', 'TEXT'],
+  // How long an agent's history is kept (src/shared/retention.ts), in days: its replies and its own DMs.
+  // NULL: the Tucano's period. 0: everything, for good, whatever that period says.
+  ['agents', 'retention_days', 'INTEGER']
 ]
 
 
@@ -554,6 +558,21 @@ type Row = Record<string, unknown>
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
 const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
+// A message a period no longer keeps, or a wipe takes: the row and where it was said.
+export type Said = { id: string; conversationId: string }
+const said = (r: Row): Said => ({ id: str(r['id']), conversationId: str(r['conversation_id']) })
+
+// Still a run writing into it, or one waiting on the person: never taken away from under either.
+const AT_WORK = `(run IS NULL OR json_extract(run, '$.status') NOT IN ('working', 'waiting_approval'))`
+// node:sqlite takes a bounded number of parameters, so a bulk delete goes a chunk at a time.
+const CHUNK = 400
+const marks = (chunk: readonly unknown[]): string => chunk.map(() => '?').join(', ')
+const inChunks = (all: readonly string[]): string[][] => {
+  const out: string[][] = []
+  for (let i = 0; i < all.length; i += CHUNK) out.push(all.slice(i, i + CHUNK))
+  return out
+}
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
 
@@ -827,6 +846,7 @@ export class Db {
       ...(isAutonomy(r['autonomy']) ? { autonomy: r['autonomy'] } : {}),
       ...(r['outside_guard'] === 0 || r['outside_guard'] === 1 ? { outsideGuard: r['outside_guard'] === 1 } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
+      ...(r['retention_days'] === 0 || r['retention_days'] ? { retentionDays: Number(r['retention_days']) } : {}),
       archived: r['archived'] === 1,
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
       // One with no owner (put there by another tool, after the people came) is the Tucano owner's.
@@ -847,14 +867,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, action_rules, autonomy, outside_guard, archived, kind, custom_color, picture, avatar, wiki, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, action_rules, autonomy, outside_guard, retention_days, archived, kind, custom_color, picture, avatar, wiki, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
            limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, autonomy = excluded.autonomy, outside_guard = excluded.outside_guard, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, autonomy = excluded.autonomy, outside_guard = excluded.outside_guard, retention_days = excluded.retention_days, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, cleanRetentionDays(a.retentionDays) ?? null, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
     this.db.prepare('UPDATE agents SET reports_to = ? WHERE id = ?').run(a.reportsTo || null, a.id)
@@ -1171,6 +1191,80 @@ export class Db {
       .prepare('SELECT * FROM messages WHERE conversation_id = ? AND (id IN (SELECT value FROM json_each(?)) OR thread_id IN (SELECT value FROM json_each(?))) ORDER BY at')
       .all(conversationId, ids, ids) as Row[]
     return { messages: rows.map((r) => this.toMessage(r)), since }
+  }
+
+  // ---------- history: what a period no longer keeps, and what a wipe takes away ----------
+
+  // Everything said before `cutoff`, with its conversation: what the Tucano's period takes away. A reply
+  // still at work or waiting on an approval stays — its run would write into a row that's gone — and so
+  // does every word of a bot that has a period of its own (`own`), which decides for its DMs too.
+  oldMessages(cutoff: number, own: string[]): Said[] {
+    const others = own.map(() => '?').join(', ')
+    const skip = own.length ? ` AND NOT (author_kind = 'agent' AND author_id IN (${others})) AND conversation_id NOT IN (SELECT id FROM conversations WHERE kind = 'dm' AND name IN (${others}))` : ''
+    const rows = this.db
+      .prepare(`SELECT id, conversation_id FROM messages WHERE at < ? AND ${AT_WORK}${skip}`)
+      .all(cutoff, ...own, ...own) as Row[]
+    return rows.map(said)
+  }
+
+  // One bot's history before `cutoff`: what it wrote, wherever it was, and every word of its own DMs —
+  // the words there are its conversation, the person's prompts included. Its period, not the Tucano's.
+  botMessagesBefore(botId: string, cutoff: number): Said[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, conversation_id FROM messages WHERE at < ? AND ${AT_WORK}
+           AND ((author_kind = 'agent' AND author_id = ?) OR conversation_id IN (SELECT id FROM conversations WHERE kind = 'dm' AND name = ?))`
+      )
+      .all(cutoff, botId, botId) as Row[]
+    return rows.map(said)
+  }
+
+  // Every word of a bot's history — what it wrote anywhere, and all of its own DMs — or of the whole
+  // workspace's when there's no bot: what the two wipe buttons take, whatever the period says.
+  historyOf(botId?: string): Said[] {
+    const rows = (
+      botId
+        ? this.db
+            .prepare(
+              `SELECT id, conversation_id FROM messages
+                WHERE (author_kind = 'agent' AND author_id = ?) OR conversation_id IN (SELECT id FROM conversations WHERE kind = 'dm' AND name = ?)`
+            )
+            .all(botId, botId)
+        : this.db.prepare('SELECT id, conversation_id FROM messages').all()
+    ) as Row[]
+    return rows.map(said)
+  }
+
+  // They go, with the replies in the threads they started and the approvals that pointed at them; unread
+  // notifications follow by foreign key. What a reply spent stays in the receipts, which is what Usage
+  // and the monthly limit count, and the artifacts stay too (their files are on disk). A question waiting
+  // in a thread whose first message went is closed: there's nothing left to show it under.
+  forget(ids: string[]): { conversations: string[]; gone: number } {
+    if (!ids.length) return { conversations: [], gone: 0 }
+    return this.tx(() => {
+      // id → the conversation it was said in, grown until no reply is left hanging under a thread.
+      const gone = new Map<string, string>()
+      for (const chunk of inChunks(ids)) {
+        for (const r of this.db.prepare(`SELECT id, conversation_id FROM messages WHERE id IN (${marks(chunk)})`).all(...chunk) as Row[]) gone.set(str(r['id']), str(r['conversation_id']))
+      }
+      for (let roots = [...gone.keys()]; roots.length; ) {
+        const replies = new Map<string, string>()
+        for (const chunk of inChunks(roots)) {
+          for (const r of this.db.prepare(`SELECT id, conversation_id FROM messages WHERE thread_id IN (${marks(chunk)})`).all(...chunk) as Row[]) {
+            const id = str(r['id'])
+            if (!gone.has(id)) replies.set(id, str(r['conversation_id']))
+          }
+        }
+        for (const [id, conversationId] of replies) gone.set(id, conversationId)
+        roots = [...replies.keys()]
+      }
+      for (const chunk of inChunks([...gone.keys()])) {
+        this.db.prepare(`DELETE FROM approvals WHERE message_id IN (${marks(chunk)})`).run(...chunk)
+        this.db.prepare(`DELETE FROM messages WHERE id IN (${marks(chunk)})`).run(...chunk)
+      }
+      this.db.prepare(`UPDATE questions SET state = 'closed' WHERE state = 'open' AND thread_id IS NOT NULL AND thread_id NOT IN (SELECT id FROM messages)`).run()
+      return { conversations: [...new Set(gone.values())], gone: gone.size }
+    })
   }
 
   // The connector tools an agent called in its replies since `since`, most used first, as each step
