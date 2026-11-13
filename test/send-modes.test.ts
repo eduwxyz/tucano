@@ -1,8 +1,9 @@
 // A new prompt in a conversation that is already answering can arrive four ways: beside the reply
 // running there, the two at once (parallel, what the setting says by default), after everything
 // running there (queue), handed to it between two tool calls (steer), or in place of it (interrupt).
-// A prompt with no mode at all (the phone, an approval's outcome, a routine) keeps the way replies
-// have always gone: one at a time per agent and thread, the person's newer messages taking over.
+// A prompt with no mode at all (the phone, an approval's outcome, a routine) is a message of the
+// person's own: it starts its own reply beside whatever runs there, and what holds one back is the
+// limit of sessions running at once. Only a send marked queued waits.
 // With nothing running, all of them are the same thing: a prompt like any other.
 // See `send` in src/core/runs.ts.
 import { mkdtempSync, readFileSync } from 'node:fs'
@@ -19,7 +20,7 @@ import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { routerSystem } from '../src/core/router'
-import { Runner } from '../src/core/runs'
+import { MAX_CONCURRENT_URGENT, Runner } from '../src/core/runs'
 import { plainCipher, Secrets } from '../src/core/secrets'
 
 const DEMO = join(import.meta.dirname, '..', 'scripts', 'demo-mcp-server.mjs')
@@ -58,8 +59,8 @@ const textOf = (r: unknown): string => ((r as { content: { text: string }[] }).c
 const allText = (r: unknown): string => ((r as { content: { text: string }[] }).content.map((c) => c.text ?? '').join('\n'))
 
 // An engine that records when each reply starts and ends, so a test can say "these never overlapped".
-function recorded(rec: string[]): Engine {
-  const base = fakeEngine('claude', { delayMs: 1 })
+function recorded(rec: string[], delayMs = 1): Engine {
+  const base = fakeEngine('claude', { delayMs })
   return {
     id: 'claude',
     async *run(turn: Turn) {
@@ -108,7 +109,7 @@ afterEach(async () => {
 })
 
 describe('a prompt that arrives while a reply is running', () => {
-  it('no mode: the reply goes as replies always go, one at a time there', async () => {
+  it('no mode: it starts its own reply, beside the one running there', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const rec: string[] = []
@@ -116,8 +117,10 @@ describe('a prompt that arrives while a reply is running', () => {
     await r.send('d1', 'comece, demore 1 s')
     await r.send('d1', 'e isto também')
     await r.idle()
-    expect(rec).toEqual(['start', 'end', 'start', 'end']) // never side by side: the agent answers one at a time there
-    expect(agentMessages()).toHaveLength(2) // each prompt still gets its reply
+    // A message of the person's is a reply of its own: the second one didn't wait for the first.
+    expect(rec).toEqual(['start', 'start', 'end', 'end'])
+    expect(agentMessages()).toHaveLength(2)
+    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
   })
 
   it('parallel: it goes beside the reply running there, the two at once', async () => {
@@ -274,16 +277,15 @@ describe('a channel prompt the router picks for', () => {
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
   })
 
-  it('no mode: it waits for the reply running there to end, as any other reply', async () => {
+  it('no mode: the picked reply goes beside the one running there too', async () => {
     channel()
     const rec: string[] = []
     const r = runnerWith(recording(rec))
     await r.send('c1', '@lia comece, demore 1 s')
     await r.send('c1', 'e isto também') // nobody named: the router picks Lia again
-    await new Promise((res) => setTimeout(res, 400)) // the router thought, and the reply waited
-    expect(rec).toEqual(['start'])
+    await expect.poll(() => rec.filter((x) => x === 'start').length, { timeout: 5000 }).toBe(2)
     await r.idle()
-    expect(rec).toEqual(['start', 'end', 'start', 'end']) // never side by side
+    expect(rec).toEqual(['start', 'start', 'end', 'end'])
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
   })
 
@@ -297,6 +299,68 @@ describe('a channel prompt the router picks for', () => {
     await r.idle()
     expect(rec.filter((x) => x === 'start')).toHaveLength(3)
     expect(rec.at(-1)).toBe('end') // the queued one went last, after both
+  })
+})
+
+describe('the limit of sessions running at once', () => {
+  it('queues what is past the limit, and runs every message once the slots free', async () => {
+    db.saveAgent(agent())
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec, 120))
+    const ids = Array.from({ length: MAX_CONCURRENT_URGENT + 2 }, (_, i) => `d${i}`)
+    for (const id of ids) db.createConversation({ id, kind: 'dm', name: 'a1', members: ['a1'] })
+    for (const id of ids) await r.send(id, 'oi')
+    await r.idle()
+    let active = 0
+    let most = 0
+    for (const e of rec) {
+      active += e === 'start' ? 1 : -1
+      most = Math.max(most, active)
+    }
+    // No engine past the urgent ceiling, and never one at a time either: the messages run side by side
+    // while slots are free, and what is past the ceiling waits in the scheduler's queue. Nothing else
+    // waits here: a message with a slot free is a session of its own.
+    expect(most).toBeLessThanOrEqual(MAX_CONCURRENT_URGENT)
+    expect(most).toBeGreaterThan(1)
+    expect(agentMessages().map((m) => m.run?.status)).toHaveLength(ids.length)
+    expect(agentMessages().every((m) => m.run?.status === 'done')).toBe(true)
+  })
+})
+
+describe('two replies of one agent in the same DM', () => {
+  it("a steer from one reply's pill reaches that reply alone", async () => {
+    const results: { reply: number; text: string }[] = []
+    let turns = 0
+    const engine: Engine = {
+      id: 'claude',
+      async *run(turn: Turn) {
+        const me = ++turns
+        if (turn.mcpUrl) {
+          const client = new Client({ name: 'scripted', version: '0' })
+          await client.connect(new StreamableHTTPClientTransport(new URL(turn.mcpUrl)))
+          const list = (await client.listTools()).tools.map((t) => t.name).find((n) => n.endsWith('__list_tasks'))!
+          results.push({ reply: me, text: allText(await client.callTool({ name: list, arguments: {} })) })
+          await new Promise((res) => setTimeout(res, 500))
+          results.push({ reply: me, text: allText(await client.callTool({ name: list, arguments: {} })) })
+          await client.close()
+        }
+        const said = `ok ${me}`
+        yield { type: 'text', delta: said }
+        yield { type: 'done', text: said, usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+      }
+    }
+    db.saveAgent(agent('read_write'))
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const r = runnerWith(engine)
+    await r.send('d1', 'quais tarefas?')
+    await r.send('d1', 'e as de ontem?')
+    // Two sessions of the same agent, running side by side in one DM.
+    await expect.poll(() => agentMessages().filter((m) => m.run?.status === 'working').length, { timeout: 8000 }).toBe(2)
+    const first = agentMessages().find((m) => m.run?.status === 'working')!
+    await r.send('d1', 'mude de plano: só as abertas', [], undefined, undefined, { mode: 'steer', steerTo: first.id })
+    await r.idle()
+    const told = results.filter((x) => x.text.includes('mude de plano'))
+    expect(told).toHaveLength(1) // handed to the reply the pill belongs to, and not to the other one
   })
 })
 

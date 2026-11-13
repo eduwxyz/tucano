@@ -10,7 +10,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   markRead: { conversationId: 's' },
   snapshot: {},
   artifactText: { id: 's' },
-  sendMessage: { conversationId: 's', text: 's', images: 'a?', files: 'a?', threadId: 's?', mode: 's?' },
+  sendMessage: { conversationId: 's', text: 's', images: 'a?', files: 'a?', threadId: 's?', mode: 's?', steerTo: 's?' },
   typing: { conversationId: 's', threadId: 's?', opened: 'b?' },
   olderMessages: { conversationId: 's', before: 'n', through: 's?' },
   threadMessages: { rootId: 's' },

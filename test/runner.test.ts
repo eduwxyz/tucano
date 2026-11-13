@@ -317,7 +317,7 @@ describe('Runner', () => {
   })
 })
 
-describe('one reply at a time per agent and thread', () => {
+describe('hand-offs and routines wait their turn; a person\'s messages do not', () => {
   const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((res) => { const t = setTimeout(res, ms); signal.addEventListener('abort', () => (clearTimeout(t), res()), { once: true }) })
   // Lia and Bia ask Theo for something; Theo takes `ms` and records how many of his turns overlap.
   const slowTheo = (ms: number): { engine: Engine; active: () => number; max: () => number } => {
@@ -376,7 +376,7 @@ describe('one reply at a time per agent and thread', () => {
     for (let i = 0; i < 200 && by('a2')[0]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
   }
 
-  it("a person's mention while the agent replies waits for it, and the ones that pile up are one reply", async () => {
+  it("a person's mentions while the agent replies each get a reply of their own, side by side", async () => {
     const t = slowTheo(400)
     const r = runner(t.engine)
     await r.send('c3', '@theo um')
@@ -384,8 +384,9 @@ describe('one reply at a time per agent and thread', () => {
     await r.send('c3', '@theo dois')
     await r.send('c3', '@theo três')
     await r.idle()
-    expect(by('a2').map((m) => m.run?.status)).toEqual(['done', 'done'])
-    expect(t.max()).toBe(1)
+    // A mention is a message like any other: three messages, three sessions, none folded into another.
+    expect(by('a2').map((m) => m.run?.status)).toEqual(['done', 'done', 'done'])
+    expect(t.max()).toBeGreaterThan(1)
   })
 
   it('a routine in the same chat waits for the reply running there', async () => {

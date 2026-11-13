@@ -1425,12 +1425,12 @@ const api: Handlers = {
     return people.pageFor(ctx.person, [root, ...db.recentMessages(root.conversationId, 100_000, rootId)])
   },
 
-  sendMessage: ({ conversationId, text, images, files, threadId, mode }, ctx) => {
+  sendMessage: ({ conversationId, text, images, files, threadId, mode, steerTo }, ctx) => {
     reach(ctx, conversationId)
     // `mode`: how this one joins a reply already running here (the window sends what Enter or the
-    // modifier keys said); without it, as replies have always gone, one at a time there.
-    const how = mode === 'parallel' || mode === 'queue' || mode === 'steer' || mode === 'interrupt' ? mode : undefined
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(how ? { mode: how } : {}) }), 'sendMessage')
+    // modifier keys said); without it, alongside it, as it always was.
+    const how = mode === 'queue' || mode === 'steer' || mode === 'interrupt' ? mode : undefined
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(how ? { mode: how } : {}), ...(steerTo ? { steerTo } : {}) }), 'sendMessage')
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {

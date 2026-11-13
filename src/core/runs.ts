@@ -329,8 +329,9 @@ type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: stri
 // reads it with its next tool result. A reply that ends before taking one leaves it here, and it goes
 // as a prompt of its own (see `steerLeftovers`), so nothing written to an agent is ever swallowed.
 type SteerNote = { messageId: string; who: string; text: string; threadId?: string }
-// A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
-type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
+// A reply waiting for its agent to finish there. Only a send the person marked as queued waits: a
+// message of theirs starts its own reply, side by side with whatever runs there.
+type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = {
   ctl: AbortController
   msg: Message
@@ -509,7 +510,7 @@ export class Runner {
   // `by`: the person writing (the Tucano's owner when left out: the phone, older callers).
   // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
   // wherever the person writes from). The caller checked that they may answer it.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; mode?: SendMode } = {}): Promise<void> {
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; mode?: SendMode; steerTo?: string } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const typed = text.trim()
@@ -547,7 +548,9 @@ export class Runner {
     // handed to it between tool calls, or in place of it. With nothing running, all four are the same.
     // No mode at all (the phone, an approval's outcome, a routine, a retry) is the way replies have
     // always gone here: one at a time per agent and thread, a person's newer message taking over.
-    const mode = opts.mode
+    // No mode means a message of the person's own: it starts its own reply beside whatever runs
+    // there. Only `queue` waits, and a steer or an interrupt acts on the reply already running.
+    const mode = opts.mode ?? 'parallel'
     const queued = mode === 'queue' && this.busyIn(conv.id)
     if (queued) mine.sendMode = 'queue' // it says so in the conversation, and it outlives a restart
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
@@ -618,7 +621,7 @@ export class Runner {
     if (
       mode === 'steer' &&
       typed &&
-      this.steerIn(conv.id, thread, { messageId: mine.id, who: writer.name, text: typed, ...(replyIn ? { threadId: replyIn } : {}) })
+      this.steerIn(conv.id, thread, { messageId: mine.id, who: writer.name, text: typed, ...(replyIn ? { threadId: replyIn } : {}) }, opts.steerTo)
     )
       return this.update(mine, { sendMode: 'steer' })
     if (mode === 'interrupt') this.interruptIn(conv.id)
@@ -629,9 +632,9 @@ export class Runner {
         return
       }
     }
-    // A parallel one goes beside the reply running there, two at once; no mode (or a steer that found
-    // nothing to go into) goes as a reply always does, one at a time per agent and thread there, the
-    // person's newer messages taking over; a queued one waits for everything running there to end.
+    // Every one of these goes beside the reply running there, two at once: a message of the person's owns
+    // starts its own reply, and a steer that found nothing to go into is a message like any other. A queued
+    // one is the only one that waits, and it waits for everything running there to end.
     for (const agent of responders) {
       const start = (): Promise<unknown> =>
         this.startReply(
@@ -639,10 +642,11 @@ export class Runner {
           conv,
           { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) },
           // A queued prompt answers the message it was written for, never taking over an earlier one.
-          { urgent: true, merge: mode !== 'queue', parallel: mode === 'parallel' }
+          { urgent: true, parallel: mode !== 'queue' }
         )
       this.runIn(conv.id, start, mode === 'queue', queued ? mine : undefined)
     }
+
   }
 
   // A prompt I queued before the app closed: its message is here, its reply never started (db.ts,
@@ -705,10 +709,13 @@ export class Runner {
   // A steer goes to the reply running in that place (the same thread of that conversation, never
   // another one's: what I write in the channel isn't meant for a reply inside a thread), which reads
   // it at its next tool call. With none running there, the message is a prompt like any other.
-  private steerIn(conversationId: string, threadId: string | undefined, note: SteerNote): boolean {
+  private steerIn(conversationId: string, threadId: string | undefined, note: SteerNote, only?: string): boolean {
     let taken = false
     for (const c of this.controllers.values()) {
       if (c.msg.conversationId !== conversationId || c.reason || (c.msg.threadId ?? undefined) !== (threadId ?? undefined)) continue
+      // Two replies of one agent can run in the same place (two messages, each its own session), so a
+      // steer from a reply's own pill must reach that reply alone.
+      if (only && c.msg.id !== only) continue
       ;(c.steer ??= []).push(note)
       taken = true
     }
@@ -1054,31 +1061,25 @@ export class Runner {
     else this.tells.get(key)?.()
   }
 
-  // A reply not routed nor handed off (those wait in routed and handOff): one at a time per agent and
-  // thread (replyKey), wherever it comes from. While the agent replies there it waits, off the queue,
-  // and starts when that reply ends; a person's newer message there takes over theirs (`merge`).
-  // `parallel`: the person asked for this one beside that reply, not after it, so it goes now (two at
-  // once in the same place, which #358 otherwise rules out). The two share a key, so the second one
-  // gets no kept session (`sessions.begin` turns it down) and reads the whole conversation: a session
-  // can only go on in one reply, and the one already there keeps it.
+  // A reply not routed nor handed off (those wait in routed and handOff). A message of the person's own
+  // starts its own reply even while another runs there: every message gets a session, and what holds one
+  // back is the scheduler's limit, which serves them in the order they came. A reply parked behind
+  // another for the same agent is what made a second message in a direct message look unanswered.
+  // `parallel`: this one goes beside that reply, not after it (two at once in the same place, which #358
+  // otherwise rules out). The two share a key, so the second one gets no kept session
+  // (`sessions.begin` turns it down) and reads the whole conversation: a session can only go on in one
+  // reply, and the one already there keeps it. A send marked as queued is the only one that waits.
   // Resolves with the reply, or undefined when it failed or was dropped.
-  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; merge?: boolean; parallel?: boolean } = {}): Promise<Message | undefined> {
+  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; parallel?: boolean } = {}): Promise<Message | undefined> {
     const key = replyKey(agent.id, conv.id, opts.existing ? opts.existing.threadId : opts.threadId)
     return new Promise((resolve) => {
-      const p: Parked = { agent, conv, opts, urgent: !!how.urgent, merge: !!how.merge, done: [resolve] }
+      const p: Parked = { agent, conv, opts, urgent: !!how.urgent, done: [resolve] }
       if (how.parallel) return this.launch(key, p)
       const line = this.parked.get(key)
       if (!line && !this.followups.busy(key)) return this.launch(key, p)
       // It waits for the reply running there: it says so in the conversation, and a restart picks it up.
       this.waitingMark(opts.replyTo)
-      const same = p.merge ? line?.find((x) => x.merge) : undefined
-      if (same) {
-        // One reply answers both: the mark of the message it takes over goes, so nothing starts twice.
-        this.clearWaiting(same.opts.replyTo)
-        // The newer message, keeping what an earlier one asked of the agent (an answer given for someone).
-        same.opts = { ...opts, task: opts.task ?? same.opts.task }
-        same.done.push(resolve)
-      } else if (line) line.push(p)
+      if (line) line.push(p)
       else this.parked.set(key, [p])
     })
   }

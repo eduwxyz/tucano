@@ -38,7 +38,7 @@ export interface Api {
   olderMessages(p: { conversationId: string; before: number; through?: string }): { messages: Message[]; since: number } // a page from before `before` (or back to `through`, a message to show), with their threads; since: from when it's whole now, 0 once all of it is
   threadMessages(p: { rootId: string }): Message[] // a thread whole: the message that started it and its replies
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
-  sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; files?: FileUpload[]; threadId?: string; mode?: SendMode }): void // threadId: a reply in the thread that message started; mode: how it joins a reply already running there
+  sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; files?: FileUpload[]; threadId?: string; mode?: SendMode; steerTo?: string }): void // threadId: a reply in the thread that message started; mode: how it joins a reply already running there; steerTo: the running reply a steer is for, when more than one runs there
   typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
