@@ -354,6 +354,22 @@ describe('a Composio call through the runner', () => {
     expect(db.approvals().filter((a) => a.state === 'pending')).toHaveLength(1)
   })
 
+  it('a code tool called directly is never allowed for good, even with a rule saved for it', async () => {
+    const rule = `${CID}:COMPOSIO_REMOTE_BASH_TOOL`
+    db.saveAgent(agent('read_write', [rule]))
+    const bash = (prompt: string, tools: string[]): Plan => (prompt.includes('aprovou') ? null : { tool: tools.find((t) => t.endsWith('__COMPOSIO_REMOTE_BASH_TOOL'))!, args: { command: 'ls' } })
+    const r = runner(bash)
+    await r.send('d1', 'roda')
+    await r.idle()
+    expect(calls).toHaveLength(0) // the saved rule isn't honoured
+    const ap = db.approvals()[0]!
+    expect(ap.state).toBe('pending')
+    await r.decide(ap.id, 'approved', undefined, true)
+    await r.idle()
+    expect(calls).toHaveLength(1)
+    expect(db.agent('a1')?.autoApprove).toEqual([rule]) // and "always" adds nothing
+  })
+
   it('a raw request, a call not understood, code and a high-risk runner are never allowed for good', async () => {
     const rules = [`${CID}:GMAIL_SEND_EMAIL`, `${CID}:COMPOSIO_REMOTE_BASH_TOOL`, `${CID}:${PROXY_EXECUTE}`]
     expect(runnerRules(CID, PROXY_EXECUTE, proxy('DELETE'))).toBeUndefined()

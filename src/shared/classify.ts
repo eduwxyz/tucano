@@ -84,6 +84,10 @@ const CHANGE_WORDS = new Set(['post', 'create', 'update', 'set', 'add', 'edit', 
 // Query keys whose value is the operation itself (?action=create).
 const OPERATION_KEYS = new Set(['action', 'method', '_method', 'op', 'operation', 'do', 'cmd', 'command', 'mode', 'verb'])
 
+// Remote code tools called directly: they run anything, so a call to them is never allowed for good.
+const RUNS_CODE_DIRECTLY = new Set(['composio_remote_workbench', 'composio_remote_bash_tool'])
+export const neverAllowedForGood = (toolName: string): boolean => RUNS_CODE_DIRECTLY.has(toolName.toLowerCase())
+
 // A Composio tool inside a call that can't be allowed for good: Composio's own (a runner inside a
 // runner) or one that runs code.
 const neverForGood = (slug: string): boolean => {

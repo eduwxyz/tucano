@@ -29,7 +29,7 @@ import { sessionConfig, Sessions, type SessionPlan, type Shown } from './session
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
-import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
+import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
@@ -2015,7 +2015,7 @@ ${note}`,
         // "Sempre permitir": a sensitive tool approved for good runs like a write one (never a high-risk one).
         // A runner's call, only when every inner tool that would ask is allowed for good on its own.
         const rules = db.agent(agent.id)?.autoApprove ?? []
-        const always = cls === 'sensitive' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : rules.includes(`${hit.connector.id}:${current.name}`))
+        const always = cls === 'sensitive' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : !neverAllowedForGood(current.name) && rules.includes(`${hit.connector.id}:${current.name}`))
         // A runner's call counts as the actions it runs; one that can't be placed (raw requests, code) asks at every level.
         const inner = perCall ? innerActions(current.name, callArgs) : undefined
         const kinds = inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : kindsOf({ cls, name: current.name })
@@ -2481,7 +2481,7 @@ ${note}`,
     const owner = db.agent(ap.agentId)
     // A runner (Composio's) is never allowed for good itself: "always" allows the inner tools that asked, each on its own.
     const runner = perCallTool(this.deps.connectors?.list().find((c) => c.id === ap.connectorId)?.url, ap.tool)
-    const rules = runner ? (runnerRules(ap.connectorId, ap.tool, ap.args) ?? []) : [`${ap.connectorId}:${ap.tool}`]
+    const rules = runner ? (runnerRules(ap.connectorId, ap.tool, ap.args) ?? []) : neverAllowedForGood(ap.tool) ? [] : [`${ap.connectorId}:${ap.tool}`]
     const fresh = rules.filter((r) => !owner?.autoApprove?.includes(r))
     // For a command or a PR, "sempre permitir" turns that kind of action to "does it alone" on the agent's page.
     const kinds: ActionKind[] = ap.connectorId === COMPUTADOR ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []

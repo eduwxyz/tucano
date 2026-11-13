@@ -26,7 +26,7 @@ A Composio não mostra uma ferramenta por ação. Ela dá umas poucas que acham 
 - **COMPOSIO_REMOTE_WORKBENCH** e **COMPOSIO_REMOTE_BASH_TOOL** rodam código nos servidores dela: sempre pedem aprovação, e quem só lê nem vê.
 - **COMPOSIO_MANAGE_CONNECTIONS** liga contas: pede aprovação. Até quem só tem **Ler** a vê, e pra esse ela pede sempre.
 
-**Aprovar e sempre permitir** num pedido do MULTI_EXECUTE vale pra cada ação sensível do pedido, sozinha (**Aprovar e sempre permitir GMAIL_REPLY_TO_THREAD**), pra aquele agente, e numa ação com **account**, só pra essa conta; nunca pro executor inteiro. Um pedido só roda sem perguntar quando todas as ações que pediriam estão permitidas. Requisições do PROXY_EXECUTE, código e chamadas fora do formato nunca ficam permitidas. Pra desfazer: na página do agente, **Sempre permitido, sem pedir:**. **Alto risco** no executor exige segurar o botão e desliga o sempre permitir.
+**Aprovar e sempre permitir** num pedido do MULTI_EXECUTE vale pra cada ação sensível do pedido, sozinha (**Aprovar e sempre permitir GMAIL_REPLY_TO_THREAD**), pra aquele agente, e numa ação com **account**, só pra essa conta; nunca pro executor inteiro. Um pedido só roda sem perguntar quando todas as ações que pediriam estão permitidas. Requisições do PROXY_EXECUTE, código (mesmo chamado direto) e chamadas fora do formato nunca ficam permitidas. Pra desfazer: na página do agente, **Sempre permitido, sem pedir:**. **Alto risco** no executor exige segurar o botão e desliga o sempre permitir.
 
 ## Quando dá errado
 - **precisa autorizar**: **Autorizar no navegador** e entre na Composio de novo.
