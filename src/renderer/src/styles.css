@@ -11411,18 +11411,36 @@ button.agent-card__now:hover {
   bottom: 20px;
   z-index: 5;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 0;
   width: min(540px, calc(100% - 420px));
   min-width: 280px;
-  height: 48px;
-  padding: 0 8px 0 12px;
+  min-height: 48px;
+  padding: 8px 8px 8px 12px;
   border-radius: 15px;
   background: var(--panel);
   box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-lg);
   transform: translateX(-50%);
   cursor: default;
   transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.org-ask__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+/* What's attached sits above the field, as it does in a conversation's composer. */
+.org-ask .composer__images {
+  padding: 0 0 8px;
+}
+.org-ask .icon-btn {
+  flex: none;
+}
+.org-ask__note {
+  padding: 6px 0 0;
+  color: var(--warn);
+  font-size: 12px;
 }
 .orgb.has-side .org-ask {
   left: calc((100% - 352px) / 2 + 76px);

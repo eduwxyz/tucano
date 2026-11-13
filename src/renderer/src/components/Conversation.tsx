@@ -64,15 +64,10 @@ import { canEditChannel,
   type Approval,
   type Artifact,
   type Conversation,
-  type ImageUpload,
   type Author,
   type DelegationRef,
   type Message,
   type Step,
-  IMAGE_MIMES,
-  MAX_IMAGES_PER_MESSAGE,
-  MAX_FILE_BYTES,
-  MAX_FILES_PER_MESSAGE,
   isTeam,
   cancelTranscribe,
   transcribe,
@@ -97,6 +92,7 @@ import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
+import { AttachButton, AttachedList, DropOverlay, docsOf, pasteHandler, picturesOf, touchScreen, useAttachments, useFileDrop, type Attached } from '../attach'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -247,9 +243,6 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 }
 
 const NO_REPLIES: Message[] = []
-// A phone or a tablet: focusing the message field there raises the keyboard over the
-// conversation, so it only takes the focus when the person taps it.
-const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
@@ -1651,61 +1644,6 @@ function ApprovalRoute({ approval, agent, requester, decider, you }: { approval:
   )
 }
 
-// Images go to the models as they are when small; big ones are scaled down
-// (longest side MAX_SIDE) and re-encoded, so any screenshot or photo fits.
-const MAX_SIDE = 2000
-const MAX_RAW = 3_700_000 // base64 under the models' 5 MB
-
-// An image (with what shows it) or, in the app, any other file: `url` empty, its text goes to the agents.
-type Attached = ImageUpload & { url: string; size?: number }
-const isFile = (a: Attached): boolean => !a.url
-
-const dataUrlOf = (blob: Blob): Promise<string> =>
-  new Promise((ok, fail) => {
-    const r = new FileReader()
-    r.onload = () => ok(String(r.result))
-    r.onerror = () => fail(r.error)
-    r.readAsDataURL(blob)
-  })
-
-async function prepareFile(file: File): Promise<Attached | string> {
-  if (file.size === 0) return L(`${file.name} está vazio.`, `${file.name} is empty.`)
-  if (file.size > MAX_FILE_BYTES) return L(`${file.name} passa de ${MAX_FILE_BYTES / 1024 / 1024} MB.`, `${file.name} is over ${MAX_FILE_BYTES / 1024 / 1024} MB.`)
-  try {
-    const url = await dataUrlOf(file)
-    return { name: file.name || L('arquivo', 'file'), mime: file.type || 'application/octet-stream', data: url.slice(url.indexOf(',') + 1), url: '', size: file.size }
-  } catch {
-    return L(`Não deu pra abrir ${file.name}.`, `${file.name} couldn't be opened.`)
-  }
-}
-
-async function prepareImage(file: File): Promise<Attached | string> {
-  if (!file.type.startsWith('image/')) return L(`${file.name} não é imagem.`, `${file.name} isn't an image.`)
-  try {
-    const src = await dataUrlOf(file) // the page's CSP takes data: images, not blob:
-    const img = new Image()
-    img.src = src
-    await img.decode()
-    const side = Math.max(img.naturalWidth, img.naturalHeight)
-    let blob: Blob = file
-    if (!IMAGE_MIMES.includes(file.type) || side > MAX_SIDE || file.size > MAX_RAW) {
-      const k = Math.min(1, MAX_SIDE / side)
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(img.naturalWidth * k)
-      canvas.height = Math.round(img.naturalHeight * k)
-      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-      const encode = (type: string, q?: number): Promise<Blob | null> => new Promise((ok) => canvas.toBlob(ok, type, q))
-      blob = (file.type === 'image/png' && (await encode('image/png'))) || file
-      if (blob === file || blob.size > MAX_RAW) blob = (await encode('image/jpeg', 0.88)) ?? file
-    }
-    if (blob.size > MAX_RAW) return L(`${file.name} é grande demais.`, `${file.name} is too big.`)
-    const url = blob === file ? src : await dataUrlOf(blob)
-    return { name: file.name || L('imagem', 'image'), mime: blob.type, data: url.slice(url.indexOf(',') + 1), url }
-  } catch {
-    return L(`Não deu pra abrir ${file.name}. Tente salvar de novo ou mandar outra imagem.`, `${file.name} couldn't be opened. Try saving it again or send another image.`)
-  }
-}
-
 // One draft per conversation (and per thread), kept while the app runs: leaving a
 // channel doesn't lose the message you were typing.
 const drafts = new Map<string, { text: string; images: Attached[] }>()
@@ -1965,27 +1903,20 @@ function RecordingClock({ since }: { since: number }): ReactNode {
 const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')
 const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'word-spacing', 'tab-size', 'text-transform', 'text-indent', 'padding']
 
-// What a paste attaches. Copying text from a spreadsheet, a page or a document often brings a
-// picture of it too: that pastes as the text, not as an image the person never meant to send.
-// A file copied in Finder or Explorer comes with its name as the text, and still attaches.
-export function pastedFiles(files: File[], text: string, server: boolean): File[] {
-  const usable = files.filter((f) => server || f.type.startsWith('image/'))
-  const typed = text.trim()
-  if (!usable.length || !typed) return usable
-  const names = new Set(files.map((f) => f.name))
-  return typed.split(/\r?\n/).every((line) => names.has(line.trim().split('/').pop() ?? '')) ? usable : []
-}
-
 // `threadId`: it answers in the thread that message started, not in the conversation.
 export function Composer({ conversationId, threadId, members, placeholder }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string }): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
   const [text, setText] = useState(() => drafts.get(key)?.text ?? '')
-  const [images, setImages] = useState<Attached[]>(() => drafts.get(key)?.images ?? [])
-  const [note, setNote] = useState('')
-  const [dragging, setDragging] = useState(false)
-  const picker = useRef<HTMLInputElement>(null)
+  const attach = useAttachments({
+    append: (more) => setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${more}`),
+    focus: () => ref.current?.focus(),
+    initial: drafts.get(key)?.images ?? []
+  })
+  const images = attach.attached
+  const note = attach.note
+  const setNote = attach.setNote
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
   const [active, setActive] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -2021,7 +1952,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   useEffect(() => {
     const draft = drafts.get(key)
     setText(draft?.text ?? '')
-    setImages(draft?.images ?? [])
+    attach.setAttached(draft?.images ?? [])
     setNote('')
     if (!touchScreen()) ref.current?.focus()
     return () => {
@@ -2031,75 +1962,12 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     }
   }, [key])
 
-  const addFiles = async (all: File[]): Promise<void> => {
-    if (!all.length) return
-    // On a server, a file that isn't an image goes up to it (~/Enviados) and the message says where:
-    // an agent on that computer opens it there, and the link brings it back down.
-    const upload = window.tucano.upload
-    const files = upload ? all.filter((f) => IMAGE_MIMES.includes(f.type)) : all
-    const others = upload ? all.filter((f) => !IMAGE_MIMES.includes(f.type)) : []
-    if (others.length && upload) {
-      setNote(L(`Enviando ${others.length === 1 ? others[0]!.name : `${others.length} arquivos`}…`, `Sending ${others.length === 1 ? others[0]!.name : `${others.length} files`}…`))
-      const sent = await Promise.allSettled(others.map((f) => upload(f, 'message')))
-      const paths = sent.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
-      if (paths.length) setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${paths.map((p) => L(`Arquivo enviado: \`${p}\``, `File sent: \`${p}\``)).join('\n')}`)
-      const failed = sent.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-      setNote(failed ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason) : '')
-      if (!files.length) return void (touchScreen() || ref.current?.focus())
-    }
-    if (!files.length) return
-    // In the app, a file that isn't an image goes with the message, and its text to the agents.
-    const done = await Promise.all(files.map((f) => (f.type.startsWith('image/') ? prepareImage(f) : prepareFile(f))))
-    const ok = done.filter((d): d is Attached => typeof d !== 'string')
-    const errors = done.filter((d): d is string => typeof d === 'string')
-    let over = ''
-    setImages((cur) => {
-      const all = [...cur, ...ok]
-      const pics = all.filter((a) => !isFile(a))
-      const docs = all.filter(isFile)
-      over = pics.length > MAX_IMAGES_PER_MESSAGE ? L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`) : docs.length > MAX_FILES_PER_MESSAGE ? L(`Até ${MAX_FILES_PER_MESSAGE} arquivos por mensagem.`, `Up to ${MAX_FILES_PER_MESSAGE} files per message.`) : ''
-      return [...pics.slice(0, MAX_IMAGES_PER_MESSAGE), ...docs.slice(0, MAX_FILES_PER_MESSAGE)]
-    })
-    setNote([...errors, over].filter(Boolean).join(' '))
-    if (!touchScreen()) ref.current?.focus()
-  }
+  const addFiles = (all: File[]): void => void attach.add(all)
 
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
   // With a thread open there are two fields: a drop on the thread goes to its own.
   const inThread = !!threadId
-  useEffect(() => {
-    let depth = 0
-    const files = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
-    const mine = (e: DragEvent): boolean => !!(e.target instanceof Element && e.target.closest('.side-panel--thread')) === inThread
-    const enter = (e: DragEvent): void => {
-      if (!files(e)) return
-      depth++
-      setDragging(true)
-    }
-    const over = (e: DragEvent): void => {
-      if (files(e)) e.preventDefault()
-    }
-    const leave = (e: DragEvent): void => {
-      if (files(e) && --depth <= 0) (depth = 0), setDragging(false)
-    }
-    const drop = (e: DragEvent): void => {
-      if (!files(e)) return
-      e.preventDefault()
-      depth = 0
-      setDragging(false)
-      if (mine(e)) void addFiles([...(e.dataTransfer?.files ?? [])])
-    }
-    window.addEventListener('dragenter', enter)
-    window.addEventListener('dragover', over)
-    window.addEventListener('dragleave', leave)
-    window.addEventListener('drop', drop)
-    return () => {
-      window.removeEventListener('dragenter', enter)
-      window.removeEventListener('dragover', over)
-      window.removeEventListener('dragleave', leave)
-      window.removeEventListener('drop', drop)
-    }
-  }, [inThread])
+  const dragging = useFileDrop((e) => !!(e.target instanceof Element && e.target.closest('.side-panel--thread')) === inThread, addFiles)
 
   // The field grows with its text, up to a point. With CSS field-sizing (Electron has it) that takes no
   // measuring on each key; elsewhere (a browser, on a server) the height is set from the text.
@@ -2203,32 +2071,17 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
 
   const submit = (): void => {
     if (!text.trim() && images.length === 0) return
-    sendMessage(
-      conversationId,
-      text,
-      images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
-      threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data }))
-    )
+    sendMessage(conversationId, text, picturesOf(images), threadId, docsOf(images))
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
     setText('')
-    setImages([])
-    setNote('')
+    attach.clear()
     setMention(null)
   }
 
   return (
     <div className="composer-wrap">
-      {dragging && !inThread && (
-        <div className="drop-overlay">
-          <div className="drop-overlay__card">
-            <Icon name="image" size={28} />
-            <strong>{L('Solte pra anexar', 'Drop to attach')}</strong>
-            <span className="muted">{L('Os agentes veem o conteúdo junto com a mensagem.', 'Agents see the content along with the message.')}</span>
-          </div>
-        </div>
-      )}
+      {dragging && !inThread && <DropOverlay />}
       {mention && (options.length > 0 || outsiders.length > 0) && (
         <div className="mention-menu" role="listbox">
           {options.map((o, i) => (
@@ -2257,28 +2110,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
         </div>
       )}
       <div className="composer">
-        {images.length > 0 && (
-          <div className="composer__images">
-            {images.map((img, i) =>
-              isFile(img) ? (
-                <div key={i} className="composer__file" title={img.name}>
-                  <Icon name="clip" size={13} />
-                  <span className="composer__file-name">{img.name}</span>
-                  <button className="composer__file-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
-                    <Icon name="x" size={11} />
-                  </button>
-                </div>
-              ) : (
-              <div key={i} className="composer__image" title={img.name}>
-                <img src={img.url} alt={img.name} />
-                <button className="composer__image-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
-                  <Icon name="x" size={11} />
-                </button>
-              </div>
-              )
-            )}
-          </div>
-        )}
+        <AttachedList attached={images} onRemove={attach.remove} />
         <div className="composer__field">
           <div ref={mirror} className="composer__mirror" aria-hidden>
             {painted}
@@ -2295,12 +2127,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               updateMention(e.target.value, e.target.selectionStart)
               if (e.target.value.trim()) typing(conversationId, threadId)
             }}
-            onPaste={(e) => {
-              const files = pastedFiles([...e.clipboardData.files], e.clipboardData.getData('text/plain'), true)
-              if (!files.length) return
-              e.preventDefault()
-              void addFiles(files)
-            }}
+            onPaste={pasteHandler(addFiles)}
             onKeyDown={(e) => {
               if (e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
                 e.preventDefault()
@@ -2323,19 +2150,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
         </div>
         <div className="composer__bar">
           <VoiceButton controls={voiceControls} state={voice} />
-          <button className="icon-btn" title={L('Anexar arquivo ou imagem (ou arraste e solte, ou cole)', 'Attach a file or an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
-            <Icon name="clip" size={15} />
-          </button>
-          <input
-            ref={picker}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              void addFiles([...(e.target.files ?? [])])
-              e.target.value = ''
-            }}
-          />
+          <AttachButton add={addFiles} />
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
             {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>

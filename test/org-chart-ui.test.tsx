@@ -6,12 +6,34 @@ import type { State } from '../src/renderer/src/store'
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
 Object.assign(document, { oninput: null }) // so React takes the input event for typing, as a browser's document has it
+// What a file and a picture become (src/renderer/src/attach.tsx): a browser's FileReader and Image, small
+// enough for a test. A small PNG needs no canvas, so prepareImage keeps the data URL it read.
+class Reader {
+  result: string | null = null
+  onload: (() => void) | null = null
+  onerror: ((e: unknown) => void) | null = null
+  readAsDataURL(blob: Blob): void {
+    void blob.arrayBuffer().then((bytes) => {
+      this.result = `data:${blob.type || 'application/octet-stream'};base64,${Buffer.from(bytes).toString('base64')}`
+      this.onload?.()
+    })
+  }
+}
+class Picture {
+  src = ''
+  naturalWidth = 8
+  naturalHeight = 8
+  decode(): Promise<void> {
+    return Promise.resolve()
+  }
+}
+Object.assign(globalThis, { FileReader: Reader, Image: Picture })
 let fake: Pick<State, 'agents' | 'conversations' | 'me' | 'delegations'> & { settings: { orgLayout?: Record<string, { x: number; y: number }> } }
 let busy = new Map<string, Message>()
 let admin = true
 const save = vi.fn(async (_agent: Agent, _channels: string[]) => {})
 const settings = vi.fn((_patch: { orgLayout?: Record<string, { x: number; y: number }> | null }) => {})
-const asked = vi.fn(async (_agent: string, _text: string) => 'dm')
+const asked = vi.fn(async (_agent: string, _text: string, _images?: unknown[], _files?: unknown[]) => 'dm')
 const go = vi.fn()
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select(fake),
@@ -19,7 +41,7 @@ vi.mock('../src/renderer/src/store', () => ({
   isTeam: (a: Agent) => !a.archived && a.kind !== 'tuca',
   saveAgent: (a: Agent, c: string[]) => save(a, c),
   updateSettings: (p: never) => settings(p),
-  askAgent: (id: string, text: string) => asked(id, text),
+  askAgent: (id: string, text: string, images?: unknown[], files?: unknown[]) => asked(id, text, images, files),
   navigate: (v: unknown) => go(v),
   setTab: () => {},
   openDm: (id: string) => go({ dm: id }),
@@ -59,6 +81,16 @@ const ptr = async (el: Element | Document, type: string, x = 0, y = 0, extra: Re
 const click = async (el: Element) => act(async () => { el.dispatchEvent(new window.Event('click', { bubbles: true })) })
 // A press and a release in the same place: a click on a card.
 const pick = async (name: string) => (await ptr(card(name), 'pointerdown', 10, 10), await ptr(document, 'pointerup', 10, 10))
+// What the picker behind the clip button hands the field, as a drop or a paste does.
+const pickFiles = async (files: File[]): Promise<void> => {
+  const picker = document.querySelector('.org-ask input[type="file"]') as HTMLInputElement
+  Object.defineProperty(picker, 'files', { configurable: true, value: files })
+  await act(async () => {
+    picker.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+  })
+}
 // A line pulled from a card's dot (under it, or above it) and let go over another card.
 const pull = async (from: string, side: 'out' | 'in', onto: string) => {
   await ptr(card(from).querySelector(`.org-port--${side}`)!, 'pointerdown', 5, 5)
@@ -267,13 +299,43 @@ it('asks whoever is at the top, or the agent picked, without leaving the board',
   expect(box().getAttribute('placeholder')).toBe('Pedir algo a orion…')
   await type(box(), '  veja por que a conversão caiu  ')
   await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) })
-  expect(asked).toHaveBeenCalledWith('orion', 'veja por que a conversão caiu')
+  expect(asked).toHaveBeenCalledWith('orion', 'veja por que a conversão caiu', [], [])
   expect(box().getAttribute('placeholder')).toContain('Enviado a orion')
   await pick('clara')
   expect(box().getAttribute('placeholder')).toContain('clara')
   await type(box(), 'responda o Fulano')
   await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) })
-  expect(asked).toHaveBeenLastCalledWith('clara', 'responda o Fulano')
+  expect(asked).toHaveBeenLastCalledWith('clara', 'responda o Fulano', [], [])
+})
+
+it('carries a picture and a file with the request from the board, and shows them before it goes', async () => {
+  const png = new File([new Uint8Array([1, 2, 3])], 'conversao.png', { type: 'image/png' })
+  const pdf = new File([new Uint8Array([4, 5])], 'briefing.pdf', { type: 'application/pdf' })
+  await pickFiles([png, pdf])
+  // What's attached shows above the field, each with a way to take it off, as in a conversation.
+  const shown = document.querySelector('.org-ask .composer__images')!
+  expect(shown.querySelector('.composer__image img')?.getAttribute('alt')).toBe('conversao.png')
+  expect(shown.querySelector('.composer__file-name')?.textContent).toBe('briefing.pdf')
+  expect(shown.querySelectorAll('.composer__image-x, .composer__file-x')).toHaveLength(2)
+  // A picture and a file with no words at all can be sent.
+  const send = document.querySelector('.org-ask .btn--primary') as HTMLButtonElement
+  expect(send.disabled).toBe(false)
+  await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) })
+  const [id, words, pictures, docs] = asked.mock.calls.at(-1) as [string, string, { name: string }[], { name: string }[]]
+  expect(id).toBe('orion')
+  expect(words).toBe('')
+  expect(pictures.map((p) => p.name)).toEqual(['conversao.png'])
+  expect(docs.map((d) => d.name)).toEqual(['briefing.pdf'])
+  // Sent: the box empties, what was attached with it.
+  expect(document.querySelector('.org-ask .composer__images')).toBeNull()
+})
+
+it('takes one off with its own button, which asks nothing', async () => {
+  await pickFiles([new File([new Uint8Array([1])], 'conversao.png', { type: 'image/png' }), new File([new Uint8Array([2])], 'briefing.pdf', { type: 'application/pdf' })])
+  await click(document.querySelector('.org-ask .composer__file-x')!)
+  expect(document.querySelector('.org-ask .composer__file')).toBeNull()
+  expect(document.querySelector('.org-ask .composer__image img')?.getAttribute('alt')).toBe('conversao.png')
+  expect(asked).not.toHaveBeenCalled()
 })
 
 it('shows what is under way: the request, the line it travels and what each one is doing', async () => {

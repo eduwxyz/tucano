@@ -12,6 +12,7 @@ import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, openTuca, save
 import { Sheet } from './Pages'
 import { Select } from './Select'
 import { ago, AgentAvatar, Icon, MeAvatar } from './ui'
+import { AttachButton, AttachedList, DropOverlay, docsOf, pasteHandler, picturesOf, useAttachments, useFileDrop } from '../attach'
 
 const UNDO_MS = 9000 // how long a change to who answers to whom can be taken back from the board
 const SLOP = 4 // px a pointer moves before a press becomes a drag
@@ -62,6 +63,14 @@ export function OrgPage(): ReactNode {
   const [edge, setEdge] = useState<string | null>(null) // the one below, of the line picked
   const [error, setError] = useState<string | null>(null)
   const [text, setText] = useState('')
+  // What the box at the bottom carries with the request: the same pictures and files, and the same
+  // limits and warnings, as the field in a conversation.
+  const ask = useRef<HTMLInputElement>(null)
+  const attach = useAttachments({
+    append: (more) => setText((t) => [t.trim(), more].filter(Boolean).join(' ')),
+    focus: () => ask.current?.focus()
+  })
+  const dragging = useFileDrop(() => true, (files) => void attach.add(files))
   // The last change to who answers to whom: what it was, in words, and how each one stood before it.
   const [undo, setUndo] = useState<{ text: string; was: [string, string | null][] } | null>(null)
   const view = stored ?? NO_VIEW
@@ -297,11 +306,15 @@ export function OrgPage(): ReactNode {
   const asked = chosen ?? roots[0]?.agent
   const send = (): void => {
     const what = text.trim()
-    if (!asked || !what) return
+    if (!asked || (!what && !attach.attached.length)) return
+    const pictures = picturesOf(attach.attached)
+    const docs = docsOf(attach.attached)
+    const keeping = attach.attached
     setText('')
-    askAgent(asked.id, what).then(
+    attach.clear()
+    askAgent(asked.id, what, pictures, docs).then(
       () => setSent(asked.name),
-      (e: unknown) => (setText(what), setError(e instanceof Error ? e.message : String(e)))
+      (e: unknown) => (setText(what), attach.setAttached(keeping), setError(e instanceof Error ? e.message : String(e)))
     )
   }
   const zoom = (f: number): void => ((mine.current = true), setView(zoomAt(view, { x: room.w / 2, y: room.h / 2 }, view.k * f)))
@@ -467,14 +480,29 @@ export function OrgPage(): ReactNode {
         )}
 
         {asked && (
-          <form className="org-ask" onSubmit={(e) => (e.preventDefault(), send())}>
-            <AgentAvatar agent={asked} size={24} busy={on.has(asked.id)} />
-            <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={sent === asked.name ? L(`Enviado a ${sent}. Acompanhe pelas linhas.`, `Sent to ${sent}. Follow it on the lines.`) : L(`Pedir algo a ${asked.name}…`, `Ask ${asked.name} something…`)} aria-label={L(`Pedir algo a ${asked.name}`, `Ask ${asked.name} something`)} />
-            <button className="btn btn--primary btn--sm" disabled={!text.trim()} title={L('Enviar na DM dele (Enter)', 'Send in their DM (Enter)')}>
-              <Icon name="send" size={14} />
-            </button>
+          <form className={`org-ask ${attach.attached.length ? 'is-attached' : ''}`} onSubmit={(e) => (e.preventDefault(), send())}>
+            <AttachedList attached={attach.attached} onRemove={attach.remove} />
+            <div className="org-ask__row">
+              <AgentAvatar agent={asked} size={24} busy={on.has(asked.id)} />
+              <input
+                ref={ask}
+                type="text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onPaste={pasteHandler((files) => void attach.add(files))}
+                placeholder={sent === asked.name ? L(`Enviado a ${sent}. Acompanhe pelas linhas.`, `Sent to ${sent}. Follow it on the lines.`) : L(`Pedir algo a ${asked.name}…`, `Ask ${asked.name} something…`)}
+                aria-label={L(`Pedir algo a ${asked.name}`, `Ask ${asked.name} something`)}
+              />
+              <AttachButton add={(files) => void attach.add(files)} />
+              <button className="btn btn--primary btn--sm" disabled={!text.trim() && !attach.attached.length} title={L('Enviar na DM dele (Enter)', 'Send in their DM (Enter)')}>
+                <Icon name="send" size={14} />
+              </button>
+            </div>
+            {attach.note && <span className="org-ask__note">{attach.note}</span>}
           </form>
         )}
+
+        {dragging && <DropOverlay />}
 
         {chosen && (
           <Details

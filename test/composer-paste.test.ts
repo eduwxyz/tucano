@@ -2,7 +2,7 @@
 // from a spreadsheet or a page, which brings a picture of itself along, pastes as text.
 import { describe, expect, it } from 'vitest'
 
-const { pastedFiles } = await import('../src/renderer/src/components/Conversation')
+const { pastedFiles } = await import('../src/renderer/src/attach')
 const png = (name: string): File => new File([new Uint8Array([1, 2, 3])], name, { type: 'image/png' })
 const pdf = new File([new Uint8Array([1])], 'nota.pdf', { type: 'application/pdf' })
 

@@ -909,10 +909,11 @@ export async function openDm(agentId: string): Promise<void> {
   navigate({ kind: 'conversation', id })
 }
 
-// Asks an agent something from somewhere else (the organogram): it goes to its DM, and I stay where I am.
-export async function askAgent(agentId: string, text: string): Promise<string> {
+// Asks an agent something from somewhere else (the organogram): it goes to its DM, and I stay where I
+// am. What's attached goes with it, as it would from the DM's own field.
+export async function askAgent(agentId: string, text: string, images: ImageUpload[] = [], files: FileUpload[] = []): Promise<string> {
   const id = await call('openDm', { agentId })
-  sendMessage(id, text)
+  sendMessage(id, text, images, undefined, files)
   return id
 }
 
