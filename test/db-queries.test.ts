@@ -86,7 +86,7 @@ describe('indexes for what runs often', () => {
     db0.close()
     const raw = new DatabaseSync(file)
     const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
-    raw.exec(`DROP INDEX messages_by_thread_id; DROP INDEX messages_by_author; DROP INDEX receipts_by_message; ALTER TABLE connector_tools DROP COLUMN cls_auto; PRAGMA user_version = ${user_version - 4}`)
+    raw.exec(`DROP INDEX messages_by_thread_id; DROP INDEX messages_by_author; DROP INDEX receipts_by_message; ALTER TABLE connector_tools DROP COLUMN cls_auto; ALTER TABLE messages DROP COLUMN reply; PRAGMA user_version = ${user_version - 5}`)
     expect(plan(raw, "SELECT conversation_id FROM messages WHERE author_kind = 'agent' AND author_id = 'a1' ORDER BY at DESC LIMIT 1")).toContain('SCAN messages')
     raw.close()
 

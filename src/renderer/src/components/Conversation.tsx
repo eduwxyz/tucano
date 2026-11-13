@@ -54,6 +54,7 @@ import { canEditChannel,
   sendMessage,
   typing,
   setTab,
+  setReplyTo,
   stopRun,
   summarizeNow,
   summarizeThreadNow,
@@ -271,6 +272,22 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     const c = s.conversations.find((x) => x.id === conversationId)
     return c?.kind === 'dm' && c.members[0] ? agentById(s, c.members[0])?.name : undefined
   })
+  const [selection, setSelection] = useState<{ messageId: string; quote: string } | null>(null)
+
+  useEffect(() => {
+    const changed = (): void => {
+      const anchor = window.getSelection()?.anchorNode
+      const element = anchor instanceof Element ? anchor : anchor?.parentElement
+      const row = element?.closest<HTMLElement>('[data-message-id]')
+      const quote = row && ref.current?.contains(row) ? selectedQuote(row) : undefined
+      setSelection((current) => {
+        if (!quote || !row?.dataset.messageId) return current === null ? current : null
+        return current?.messageId === row.dataset.messageId && current.quote === quote ? current : { messageId: row.dataset.messageId, quote }
+      })
+    }
+    document.addEventListener('selectionchange', changed)
+    return () => document.removeEventListener('selectionchange', changed)
+  }, [])
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once. It may come a moment
   // later, from further back.
@@ -404,7 +421,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
           !m.run &&
           m.author.kind !== 'system' &&
           m.author.kind !== 'routine'
-        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
+        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} quote={selection?.messageId === m.id ? selection.quote : undefined} />
       })}
       {farFromBottom && (
         <div className="messages__jump">
@@ -427,7 +444,7 @@ const NO_ATTACHED: Artifact[] = []
 
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
-const MessageRow = memo(function MessageRow({ message, grouped, replies }: { message: Message; grouped: boolean; replies?: Message[] }): ReactNode {
+const MessageRow = memo(function MessageRow({ message, grouped, replies, quote }: { message: Message; grouped: boolean; replies?: Message[]; quote?: string }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
@@ -472,9 +489,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   if (agent && from && from.to === agent.id && message.conversationId !== from.conversationId) return <ReturnedLine message={message} at={from} agent={agent} text={text} components={agentMarkdown} />
 
   const name = agent ? agent.name : (other ?? me.name)
+  const canReply = message.run?.status !== 'working' && Boolean(message.text.trim() || attached.length > 0 || message.run?.artifactIds?.length)
   return (
     // Someone else's message reads like any other voice in the conversation: on the left, with their name.
-    <article className={`msg ${agent ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
+    <article className={`msg ${agent ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id} data-message-id={message.id}>
       <div className="msg__gutter">
         {!grouped &&
           (agent ? (
@@ -504,8 +522,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </div>
         )}
         {message.run && <RunSteps message={message} />}
+        {message.reply && <ReplyQuote reply={message.reply} conversationId={message.conversationId} />}
         {text ? (
-          <div className="md">
+          <div className="md msg__text">
             {agent && message.run?.status !== 'working' ? (
               <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={agentMarkdown}>{wikiLinks(text)}</MessageMarkdown>
             ) : (
@@ -583,10 +602,47 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </div>
         )}
         {replies && <ThreadLink message={message} replies={replies} />}
+        {canReply && (
+          <div className="msg__actions">
+            <button
+              className={`msg__reply ${quote ? 'msg__reply--excerpt' : ''}`}
+              title={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
+              aria-label={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => startReply(message, quote)}
+            >
+              <Icon name="reply" size={16} />
+              {quote && <span>{L('Responder ao trecho', 'Reply to selection')}</span>}
+            </button>
+          </div>
+        )}
       </div>
     </article>
   )
 })
+
+function selectedQuote(message: HTMLElement | null): string | undefined {
+  const selection = window.getSelection()
+  const text = message?.querySelector('.msg__text')
+  if (!selection || selection.isCollapsed || !text || !selection.anchorNode || !selection.focusNode) return
+  if (!text.contains(selection.anchorNode) || !text.contains(selection.focusNode)) return
+  return selection.toString().trim() || undefined
+}
+
+function startReply(message: Message, quote?: string): void {
+  setReplyTo(message.conversationId, { messageId: message.id, quote })
+  window.getSelection()?.removeAllRanges()
+}
+
+function ReplyQuote({ reply, conversationId }: { reply: NonNullable<Message['reply']>; conversationId: string }): ReactNode {
+  const exists = useStore((s) => messagesIn(s, conversationId).some((m) => m.id === reply.messageId))
+  return (
+    <button className="reply-quote" disabled={!exists} onClick={() => navigate({ kind: 'conversation', id: conversationId, message: reply.messageId })}>
+      <strong>{reply.excerpt ? L(`Trecho de ${reply.author}`, `Excerpt from ${reply.author}`) : L(`Em resposta a ${reply.author}`, `In reply to ${reply.author}`)}</strong>
+      <span>{reply.text || L('Anexo', 'Attachment')}</span>
+    </button>
+  )
+}
 
 // What a routine asked, posted at its time; the agent's reply comes next.
 function RoutineMessage({ message, replies }: { message: Message; replies?: Message[] }): ReactNode {
@@ -1984,6 +2040,14 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const [text, setText] = useState(() => drafts.get(key)?.text ?? '')
   const [images, setImages] = useState<Attached[]>(() => drafts.get(key)?.images ?? [])
   const [note, setNote] = useState('')
+  const [sending, setSending] = useState(false)
+  const replyTarget = useStore((s) => s.replyTo[conversationId])
+  const replyId = replyTarget?.messageId
+  const reply = useStore((s) => messagesIn(s, conversationId).find((m) => m.id === replyId))
+  const replyAuthor = useStore((s) => reply?.author.kind === 'agent' ? agentById(s, reply.author.id)?.name ?? L('Agente removido', 'Removed agent') : s.me.name)
+  const replyLabel = !reply ? L('Mensagem removida', 'Removed message') : replyTarget?.quote
+    ? L(`Respondendo ao trecho de ${replyAuthor}`, `Replying to an excerpt from ${replyAuthor}`)
+    : L(`Respondendo a ${replyAuthor}`, `Replying to ${replyAuthor}`)
   const [dragging, setDragging] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
@@ -1992,6 +2056,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const mirror = useRef<HTMLDivElement>(null)
   const platform = useStore((s) => s.platform)
   const agents = useStore((s) => s.agents)
+  useEffect(() => { if (replyId) ref.current?.focus() }, [replyId, replyTarget?.quote])
   const allAgents = useStore((s) => s.agents.filter(isTeam))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
   const team = useStore(teamMode)
@@ -2011,6 +2076,8 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
   const live = useRef({ text, images })
   live.current = { text, images }
+  const currentConversation = useRef(conversationId)
+  currentConversation.current = conversationId
   useEffect(() => {
     const save = (): void => keepForReload({ key, text: live.current.text })
     window.addEventListener('tucano:reloading', save)
@@ -2208,8 +2275,10 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       text,
       images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
       threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data }))
+      images.filter(isFile).map(({ name, data }) => ({ name, data })),
+      replyTarget
     )
+    setReplyTo(conversationId)
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
     setText('')
@@ -2257,6 +2326,15 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
         </div>
       )}
       <div className="composer">
+        {replyId && (
+          <div className="composer__reply">
+            <div className="reply-quote">
+              <strong>{replyLabel}</strong>
+              <span>{replyTarget?.quote ?? (reply?.text || L('Anexo', 'Attachment'))}</span>
+            </div>
+            <button className="icon-btn icon-btn--sm" title={L('Cancelar resposta', 'Cancel reply')} aria-label={L('Cancelar resposta', 'Cancel reply')} disabled={sending} onClick={() => setReplyTo(conversationId)}><Icon name="x" size={14} /></button>
+          </div>
+        )}
         {images.length > 0 && (
           <div className="composer__images">
             {images.map((img, i) =>
@@ -2289,7 +2367,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
             rows={1}
             onScroll={followField}
             value={text}
-            placeholder={asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
+            placeholder={reply ? L(`Responder a ${replyAuthor}`, `Reply to ${replyAuthor}`) : asker ? L(`Responder a ${asker}`, `Reply to ${asker}`) : placeholder}
             onChange={(e) => {
               setText(e.target.value)
               updateMention(e.target.value, e.target.selectionStart)
@@ -2344,7 +2422,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
             </button>
           ) : null}
-          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={submit} title={L('Enviar (Enter)', 'Send (Enter)')}>
+          <button className="btn btn--primary btn--sm btn--icon" disabled={sending || (!text.trim() && images.length === 0)} onClick={() => void submit()} title={L('Enviar (Enter)', 'Send (Enter)')}>
             <Icon name="send" size={14} />
           </button>
         </div>
