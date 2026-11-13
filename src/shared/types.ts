@@ -118,6 +118,9 @@ export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a
 export interface Conversation {
   id: string
   kind: 'channel' | 'dm'
+  visibility?: 'private' | 'workspace' // explicit on newly created rooms; absent preserves legacy sharing
+  agentReadAccess?: 'members' | 'selected' | 'all'
+  agentReaders?: string[] // additional agents allowed read-only retrieval when access is selected
   name: string // channel name, or agent id for a DM
   topic?: string
   members: string[] // agent ids
