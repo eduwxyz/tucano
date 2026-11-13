@@ -445,6 +445,7 @@ export class Memories {
     // Made while the Tucano had one person, a summary may hold what only they could read: one that
     // ends after the Tucano got its second person isn't kept (it's made again without it).
     const epoch = db.meta('heritageAt')
+    const history = db.historyRevision(conv.id)
 
     const settings = await this.deps.settings()
     const model = usable(modelInfo(settings.memoryModel)) ?? modelInfo('haiku')!
@@ -474,7 +475,7 @@ export class Memories {
     }
     const parsed = error ? null : parseConsolidation(text)
     if (!parsed) return (console.log(`[memory] consolidation failed: ${error ?? 'resposta fora do formato'}`), false)
-    if (db.meta('heritageAt') !== epoch) return false
+    if (db.meta('heritageAt') !== epoch || db.historyRevision(conv.id) !== history) return false
 
     db.setSummary(conv.id, parsed.summary, chunk.at(-1)!.at)
     emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
@@ -531,6 +532,7 @@ export class Memories {
     const stretch = all.slice(0, opts.batch ?? MAX_CHUNK)
     if (stretch.length === 0) return false
     const epoch = db.meta('heritageAt')
+    const history = db.historyRevision(root.conversationId)
 
     const settings = await this.deps.settings()
     const model = usable(modelInfo(settings.memoryModel)) ?? modelInfo('haiku')!
@@ -561,7 +563,7 @@ export class Memories {
     }
     const parsed = error ? null : parseConsolidation(text)
     if (!parsed) return (console.log(`[memory] thread consolidation failed: ${error ?? 'resposta fora do formato'}`), false)
-    if (db.meta('heritageAt') !== epoch || !db.message(rootId)) return false
+    if (db.meta('heritageAt') !== epoch || db.historyRevision(root.conversationId) !== history || !db.message(rootId)) return false
 
     db.setThreadSummary(rootId, parsed.summary, stretch.at(-1)!.at)
     emit({ type: 'message', message: db.message(rootId)! })
