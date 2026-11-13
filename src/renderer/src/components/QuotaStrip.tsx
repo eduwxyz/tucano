@@ -40,18 +40,17 @@ export const forgetQuotaStrip = (): void => {
 
 // `admin` gates the read, and is named as such: what only an admin may ask is only asked by one.
 function useQuotas(admin: boolean): ProviderQuota[] {
-  const [list, setList] = useState<ProviderQuota[]>(cache && Date.now() - cache.at < FRESH ? cache.list : [])
+  // The last read the core holds, drawn at once: a fresh one is the strip's whole answer, and an older
+  // one is followed by a read the core may serve from its own cache.
+  const fresh = cache !== null && Date.now() - cache.at < FRESH
+  const [list, setList] = useState<ProviderQuota[]>(fresh && cache ? cache.list : [])
   useEffect(() => {
-    if (!admin) return
-    if (cache && Date.now() - cache.at < FRESH) {
-      setList(cache.list)
-      return
-    }
+    if (!admin || fresh) return
     let live = true
     loadQuotas()
-      .then((l) => {
-        cache = { list: l, at: Date.now() }
-        if (live) setList(l)
+      .then((snap) => {
+        cache = snap
+        if (live) setList(snap.list)
       })
       // A failed read is not a strip of zeros: it draws nothing and the Usage page says why.
       .catch(() => undefined)

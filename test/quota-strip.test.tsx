@@ -14,7 +14,7 @@ const { window, document } = parseHTML('<html><body><div id="root"></div></body>
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
 
 let reply: ProviderQuota[] = []
-const loadQuotas = vi.fn(async () => reply)
+const loadQuotas = vi.fn(async () => ({ list: reply, at: Date.now() }))
 const navigate = vi.fn()
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select({ settings: {} }),

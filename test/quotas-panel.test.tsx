@@ -11,11 +11,14 @@ Object.assign(document, { oninput: null })
 
 let reply: ProviderQuota[] = []
 let reported: { fiveHour?: { utilization: number; resetsAt: number }; sevenDay?: { utilization: number; resetsAt: number }; at: number } | undefined
-const loadQuotas = vi.fn(async () => reply)
+const snapshot = () => ({ list: reply, at: Date.now() })
+const loadQuotas = vi.fn(async () => snapshot())
+const refreshQuotas = vi.fn(async () => snapshot())
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select({ settings: { quota: reported } }),
   amAdmin: () => true,
   loadQuotas: () => loadQuotas(),
+  refreshQuotas: () => refreshQuotas(),
   agentById: () => undefined,
   countedTokens: () => 0,
   ENGINES: {},
@@ -50,6 +53,7 @@ beforeEach(async () => {
   reply = []
   reported = undefined
   loadQuotas.mockClear()
+  refreshQuotas.mockClear()
   root = createRoot(document.getElementById('root')!)
 })
 afterEach(async () => await act(async () => root.unmount()))
@@ -125,5 +129,5 @@ it('reads again on demand', async () => {
   const button = [...document.querySelectorAll('button')].find((b) => /Ler de novo|Read again/.test(b.textContent ?? ''))!
   await act(async () => button.dispatchEvent(new window.Event('click', { bubbles: true })))
   await flush()
-  expect(loadQuotas).toHaveBeenCalledTimes(2)
+  expect(refreshQuotas).toHaveBeenCalledTimes(1)
 })
