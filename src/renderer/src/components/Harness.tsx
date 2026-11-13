@@ -292,7 +292,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
           <code className="harness__cmd">{manual}</code>
         </div>
       )}
-      {!st.installed && install === 'started' && <p className="hint harness__body">{L('Instalando no terminal que abriu. Quando terminar, ele aparece aqui sozinho.', 'Installing in the terminal that opened. Once it finishes, it shows up here on its own.')}</p>}
+      {!st.installed && install === 'started' && <p className="hint harness__body">{L('Instalando no terminal que abriu. Quando terminar, ele aparece aqui sozinho.', "Complete installation in the terminal. Tucano detects it automatically.")}</p>}
       {!st.installed && install === 'node' && (
         <p className="hint hint--warn harness__body">
           {L(`O ${ENGINES[engine].label} precisa do Node.js. Instale o Node.js e depois clique em Instalar de novo.`, `${ENGINES[engine].label} needs Node.js. Install Node.js, then click Install again.`)}{' '}
